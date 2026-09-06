@@ -12,6 +12,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "line": 556,
         "reader": "__normalize_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 360,
+        "reader": "__tool_surface_narrowing_post_turn"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -35,6 +40,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
         "line": 281,
         "reader": "__tool_surface_removed"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 376,
+        "reader": "__tool_surface_narrowing_post_turn"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -58,6 +68,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
         "line": 265,
         "reader": "__tool_surface_entry_prunable"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 397,
+        "reader": "__tool_surface_narrowing_post_turn"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -81,6 +96,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
         "line": 273,
         "reader": "__tool_surface_entry_prunable"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 395,
+        "reader": "__tool_surface_narrowing_post_turn"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -122,6 +142,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
         "line": 277,
         "reader": "__tool_surface_entry_prunable"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 396,
+        "reader": "__tool_surface_narrowing_post_turn"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -145,6 +170,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
         "line": 270,
         "reader": "__tool_surface_entry_prunable"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 398,
+        "reader": "__tool_surface_narrowing_post_turn"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -163,6 +193,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "line": 560,
         "reader": "__normalize_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 363,
+        "reader": "__tool_surface_narrowing_post_turn"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

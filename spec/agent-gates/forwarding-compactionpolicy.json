@@ -30,13 +30,6 @@
   {
     "scope": "CompactionPolicy",
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-    "expression": "const policy = __compaction_policy_from_options(compact_opts)\n    ?? __compaction_policy_from_options({policy: opts?.compaction_policy})\n    ?? __compaction_policy_from_options({policy: opts?.compaction?.policy})",
-    "owner": "__compact_options",
-    "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."
-  },
-  {
-    "scope": "CompactionPolicy",
-    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "let fields = {\n    instruction_mode: __compaction_instruction_mode(policy),\n    compaction_policy: policy\n      + {instruction_mode: __compaction_instruction_mode(policy)},\n  }",
     "owner": "__compaction_policy_event_fields",
     "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."

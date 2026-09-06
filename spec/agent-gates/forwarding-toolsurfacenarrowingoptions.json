@@ -9,8 +9,29 @@
   {
     "scope": "ToolSurfaceNarrowingOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_current_entries(opts)",
+    "owner": "__tool_surface_current_entries",
+    "evidence": "Consumer __tool_surface_current_entries.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner."
+  },
+  {
+    "scope": "ToolSurfaceNarrowingOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_current_names(opts)",
+    "owner": "__tool_surface_current_names",
+    "evidence": "Consumer __tool_surface_current_names.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner."
+  },
+  {
+    "scope": "ToolSurfaceNarrowingOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "__tool_surface_entry_prunable(entry, config)",
     "owner": "__tool_surface_entry_prunable",
     "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "ToolSurfaceNarrowingOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_removed(candidate_entries, used, config)",
+    "owner": "__tool_surface_removed",
+    "evidence": "Consumer __tool_surface_removed.config in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner."
   }
 ]

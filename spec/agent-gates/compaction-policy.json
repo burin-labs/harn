@@ -1,7 +1,7 @@
 [
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent",
+    "evidence": "autocompact.__compaction_policy_merge_fields copies only explicitly supplied attribution. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -43,8 +43,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "empty list",
+    "evidence": "autocompact.__compaction_policy_list normalizes absent exclusion content to an empty list. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -81,8 +81,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "true in compaction_policy; absent when no policy is configured",
+    "evidence": "autocompact.compaction_policy defaults a nonempty policy to extending the standard instructions. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
@@ -119,8 +119,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent; use default compaction instructions",
+    "evidence": "autocompact.compaction_policy adds instructions only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -152,8 +152,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent",
+    "evidence": "autocompact.__compaction_policy_merge_fields copies only an explicitly supplied mode. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -180,8 +180,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "empty list",
+    "evidence": "autocompact.__compaction_policy_list normalizes absent preservation content to an empty list. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -218,8 +218,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent",
+    "evidence": "autocompact.__compaction_policy_merge_fields copies only an explicitly supplied scope. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",

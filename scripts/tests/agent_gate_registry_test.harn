@@ -202,6 +202,58 @@ pipeline test_audit_regenerates_reader_locations_and_refuses_drift(
 }
 
 @test
+pipeline test_binding_source_files_are_required_and_audited(harness: Harness, task: unknown) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-binding-source")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "source.harn")
+  const scope_file = path_join(dir, "bindings.json")
+  harness.fs.write_text(path, "fn example(options: dict) { return options.enabled }")
+  harness.fs.write_text(
+    scope_file,
+    json_stringify(
+      {
+        glob: path,
+        config: {
+          id: "options",
+          prefix: "options.",
+          types: [],
+          parameters: [{function: "example", name: "options"}],
+          normalizers: [],
+        },
+      },
+    ),
+  )
+  let config = registry(path)
+  config.scopes = []
+  config.binding_scope_files = [scope_file]
+  const capabilities = {ast: harness.ast, fs: harness.fs, process: harness.process}
+  assert_eq(
+    agent_gate_reads(capabilities, config).map(fn(read) { return read.name }),
+    ["options.enabled"],
+  )
+  let missing_extra = json_parse(harness.fs.read_text(scope_file))
+  missing_extra.extra_globs = [path_join(dir, "missing.harn")]
+  harness.fs.write_text(scope_file, json_stringify(missing_extra))
+  assert(
+    is_err(
+      try {
+        agent_gate_reads(capabilities, config)
+      },
+    ),
+  )
+  harness.fs.delete(scope_file)
+  assert(
+    is_err(
+      try {
+        agent_gate_reads(capabilities, config)
+      },
+    ),
+  )
+}
+
+@test
 pipeline test_stale_parameter_mapping_cannot_hide_configuration_reads(
   harness: Harness,
   task: unknown,
@@ -240,21 +292,32 @@ pipeline test_stale_parameter_mapping_cannot_hide_configuration_reads(
 }
 
 @test
-pipeline test_repository_environment_selectors_reject_new_keys(harness: Harness, task: unknown) {
+pipeline test_repository_selectors_reject_new_keys(harness: Harness, task: unknown) {
   const manifest = path_join(harness.fs.source_dir(), "../../spec/agent-gates/registry.json")
   const config = schema_expect(
     json_parse(harness.fs.read_text(manifest)),
     schema_of(AgentGateRegistry),
   )
   const fixtures = {
-    "runner-model-environment": "fn example() { let _value = std::env::var(\"KEY\"); }",
-    "runner-native-environment": "fn example() { let _value = std::env::var(\"KEY\"); }",
-    "runner-stdlib-environment": "fn example(env: HarnessEnv) { return env.get_or(\"KEY\", \"\") }",
+    "retry-destructured-options": "fn with_retry() { const {__TEST_KEY__ = 3} = cfg }",
+    "native-runner-option-helpers":
+      "fn example() { let value = opt_str(options, \"__TEST_KEY__\"); }",
+    "native-daemon-options": "fn example() { let value = options.get(\"__TEST_KEY__\"); }",
+    "native-reminder-options": "fn example() { let value = options.get(\"__TEST_KEY__\"); }",
+    "native-reminder-policy": "fn example() { let value = reminders.get(\"__TEST_KEY__\"); }",
+    "runner-model-environment": "fn example() { let _value = std::env::var(\"__TEST_KEY__\"); }",
+    "runner-native-environment": "fn example() { let _value = std::env::var(\"__TEST_KEY__\"); }",
+    "runner-stdlib-environment":
+      "fn example(env: HarnessEnv) { return env.get_or(\"__TEST_KEY__\", \"\") }",
     "native-stage-environment":
-      "fn example() { let _value = serde_json::json!({\"value\": non_empty_env(\"KEY\")}); }",
+      "fn example() { let _value = serde_json::json!({\"value\": non_empty_env(\"__TEST_KEY__\")}); }",
     "cli-runner-environment":
-      "fn example(harness: Harness) { return __trimmed_env(harness.env, \"KEY\") }",
-    "runner-environment-constants": "const EXAMPLE_ENV: &str = \"KEY\";",
+      "fn example(harness: Harness) { return __trimmed_env(harness.env, \"__TEST_KEY__\") }",
+    "runner-environment-constants": "const EXAMPLE_ENV: &str = \"__TEST_KEY__\";",
+    "judge-override-key-domain": "const __JUDGE_LLM_OVERRIDE_KEYS = [\"__TEST_KEY__\"]",
+    "judge-model-key-domain": "const __JUDGE_MODEL_SETTING = \"__TEST_KEY__\"",
+    "missing-tool-recovery-key-domain":
+      "fn example() { for key in [\"__TEST_KEY__\"] { let value = key } }",
   }
   assert_eq(len(config.scopes), len(fixtures))
   const dir = harness.fs.mkdtemp_in_workspace("gate-environment-selectors")
@@ -274,15 +337,18 @@ pipeline test_repository_environment_selectors_reject_new_keys(harness: Harness,
     )
     let selected = registry(path)
     selected.scopes = [declared + {glob: path}]
-    const allowed = entry() + {name: "HARN_LLM_MODEL"}
-    harness.fs.write_text(path, replace(fixtures[declared.id], "KEY", "HARN_LLM_MODEL"))
+    const allowed = entry() + {name: declared.prefix + "HARN_LLM_MODEL"}
+    harness.fs.write_text(path, replace(fixtures[declared.id], "__TEST_KEY__", "HARN_LLM_MODEL"))
     const baseline = agent_gate_reads(
       {ast: harness.ast, fs: harness.fs, process: harness.process},
       selected,
     )
     assert_eq(len(baseline), 1)
     assert_eq(agent_gate_findings([allowed], baseline, []).failures, [])
-    harness.fs.write_text(path, replace(fixtures[declared.id], "KEY", "HARN_UNREGISTERED_CENSUS"))
+    harness.fs.write_text(
+      path,
+      replace(fixtures[declared.id], "__TEST_KEY__", "HARN_UNREGISTERED_CENSUS"),
+    )
     const changed = agent_gate_reads(
       {ast: harness.ast, fs: harness.fs, process: harness.process},
       selected,

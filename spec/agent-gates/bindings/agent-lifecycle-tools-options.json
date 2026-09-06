@@ -1,0 +1,22 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "AgentLifecycleToolsOptions",
+    "prefix": "AgentLifecycleToolsOptions.",
+    "types": [
+      "AgentLifecycleToolsOptions"
+    ],
+    "parameters": [
+      {
+        "function": "__agent_lifecycle_await_enabled",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_lifecycle_has_subagent_capability",
+        "name": "opts"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

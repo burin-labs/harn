@@ -55,7 +55,13 @@
     "layer": "runner",
     "name": "AgentSpec.mcp_servers",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+        "line": 9,
+        "reader": "agent_mcp_bootstrap_if_needed"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -120,6 +126,16 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
+        "line": 99,
+        "reader": "__judge_tool_descriptor"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
+        "line": 100,
+        "reader": "__judge_tool_descriptor"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "line": 100,
         "reader": "__tool_batch_call_classification"
@@ -153,6 +169,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
         "line": 353,
         "reader": "__run_structural_validator"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+        "line": 168,
+        "reader": "__with_mcp_tool_ceiling"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
@@ -226,7 +247,13 @@
     "layer": "runner",
     "name": "AgentSpec.subagent_tools",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 254,
+        "reader": "__agent_lifecycle_has_subagent_capability"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -238,7 +265,13 @@
     "layer": "runner",
     "name": "AgentSpec.subagents",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 251,
+        "reader": "__agent_lifecycle_has_subagent_capability"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   }

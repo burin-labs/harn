@@ -1,79 +1,115 @@
 [
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "exponential",
+    "evidence": "llm.resilience.with_retry destructures its retry configuration with this fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
     "name": "AgentLoopRetryOptions.backoff",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+        "line": 199,
+        "reader": "with_retry"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "250",
+    "evidence": "llm.resilience.with_retry destructures its retry configuration with this fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
     "name": "AgentLoopRetryOptions.base_ms",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+        "line": 199,
+        "reader": "with_retry"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "true",
+    "evidence": "llm.resilience.with_retry destructures its retry configuration with this fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
     "name": "AgentLoopRetryOptions.honor_retry_after",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+        "line": 199,
+        "reader": "with_retry"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "full",
+    "evidence": "llm.resilience.with_retry destructures its retry configuration with this fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
     "name": "AgentLoopRetryOptions.jitter",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+        "line": 199,
+        "reader": "with_retry"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "3",
+    "evidence": "agent.retry supplies three attempts and llm.resilience.with_retry uses the same fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
     "name": "AgentLoopRetryOptions.max_attempts",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+        "line": 199,
+        "reader": "with_retry"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "8000",
+    "evidence": "llm.resilience.with_retry destructures its retry configuration with this fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
     "name": "AgentLoopRetryOptions.max_ms",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+        "line": 199,
+        "reader": "with_retry"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "agent_loop_default_retry_predicate",
+    "evidence": "agent.retry.__agent_loop_retry_with_default_predicate fills only an absent predicate. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -84,6 +120,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
         "line": 182,
         "reader": "__agent_loop_retry_with_default_predicate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+        "line": 202,
+        "reader": "with_retry"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

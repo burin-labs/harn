@@ -69,9 +69,19 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_review.harn",
+        "line": 19,
+        "reader": "__agent_completion_review"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
         "line": 225,
         "reader": "__judge_provider_family"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_provider_failure.harn",
+        "line": 98,
+        "reader": "agent_loop_provider_failure"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
@@ -82,6 +92,16 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
         "line": 376,
         "reader": "__run_structural_validator"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "line": 1276,
+        "reader": "agent_loop_demote_empty_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "line": 933,
+        "reader": "__agent_loop_emit_provider_error"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
@@ -122,6 +142,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
         "line": 423,
         "reader": "__missing_tool_call_recovery_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/state.harn",
+        "line": 290,
+        "reader": "agent_session_record_usage"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -183,6 +208,11 @@
         "reader": "__judge_run_checkpoint"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_provider_failure.harn",
+        "line": 97,
+        "reader": "agent_loop_provider_failure"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
         "line": 241,
         "reader": "__tool_envelope"
@@ -191,6 +221,16 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
         "line": 377,
         "reader": "__run_structural_validator"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "line": 1275,
+        "reader": "agent_loop_demote_empty_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "line": 932,
+        "reader": "__agent_loop_emit_provider_error"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
@@ -231,6 +271,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
         "line": 438,
         "reader": "__missing_tool_call_recovery_classifier"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/state.harn",
+        "line": 289,
+        "reader": "agent_session_record_usage"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -244,7 +289,13 @@
     "layer": "runner",
     "name": "AgentSpec.rate_limit_consumer_id",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 175,
+        "reader": "opt_str"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },

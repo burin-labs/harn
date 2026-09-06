@@ -79,7 +79,18 @@
     "layer": "runner",
     "name": "AgentSpec.prompt_overrides",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+        "line": 185,
+        "reader": "__agent_prompt_overrides"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+        "line": 186,
+        "reader": "__agent_prompt_overrides"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -91,7 +102,18 @@
     "layer": "runner",
     "name": "AgentSpec.prompts",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+        "line": 182,
+        "reader": "__agent_prompt_overrides"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+        "line": 183,
+        "reader": "__agent_prompt_overrides"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -104,6 +126,11 @@
     "name": "AgentSpec.reminders",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/reminder_providers.rs",
+        "line": 1455,
+        "reader": "get"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "line": 1271,
@@ -177,6 +204,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "line": 764,
         "reader": "__validate_agent_loop_callback_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 65,
+        "reader": "agent_scratchpad_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

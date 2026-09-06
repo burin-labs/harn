@@ -12,8 +12,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "16",
+    "evidence": "workflow.options.__workflow_agent_loop_options sets the workflow stage iteration bound. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -30,8 +30,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "3",
+    "evidence": "workflow.options.__workflow_agent_loop_options sets the workflow stage nudge bound. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -84,8 +84,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "reject",
+    "evidence": "workflow.options.__workflow_native_tool_fallback resolves an absent policy. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -186,8 +186,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "host environment format, then host default format, then text",
+    "evidence": "workflow.options.__workflow_stage_tool_format resolves this precedence. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",

@@ -7,7 +7,13 @@
     "layer": "runner",
     "name": "AgentSpec.llm_transcript_dir",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+        "line": 157,
+        "reader": "opt_str"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },

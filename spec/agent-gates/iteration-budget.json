@@ -7,7 +7,13 @@
     "layer": "runner",
     "name": "IterationBudget.consecutive_failures",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 169,
+        "reader": "__normalize_iteration_budget"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -19,7 +25,28 @@
     "layer": "runner",
     "name": "IterationBudget.expose_decisions",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 143,
+        "reader": "__normalize_iteration_budget"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 148,
+        "reader": "__normalize_iteration_budget"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 144,
+        "reader": "__normalize_iteration_budget"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 146,
+        "reader": "__normalize_iteration_budget"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -31,7 +58,13 @@
     "layer": "runner",
     "name": "IterationBudget.extend_by",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 127,
+        "reader": "__normalize_iteration_budget"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -43,7 +76,23 @@
     "layer": "runner",
     "name": "IterationBudget.initial",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+        "line": 61,
+        "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 90,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 116,
+        "reader": "__normalize_iteration_budget"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -55,7 +104,13 @@
     "layer": "runner",
     "name": "IterationBudget.max",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 103,
+        "reader": "__normalize_iteration_budget"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -67,7 +122,13 @@
     "layer": "runner",
     "name": "IterationBudget.mode",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 86,
+        "reader": "__normalize_iteration_budget"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -79,7 +140,13 @@
     "layer": "runner",
     "name": "IterationBudget.progress_window",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 136,
+        "reader": "__normalize_iteration_budget"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -91,7 +158,13 @@
     "layer": "runner",
     "name": "IterationBudget.total_cost_usd",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 165,
+        "reader": "__normalize_iteration_budget"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -103,7 +176,13 @@
     "layer": "runner",
     "name": "IterationBudget.wall_clock_ms",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 160,
+        "reader": "__normalize_iteration_budget"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   }

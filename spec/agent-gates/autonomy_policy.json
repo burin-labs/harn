@@ -7,7 +7,13 @@
     "layer": "runner",
     "name": "autonomy_policy.action_tiers",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 193,
+        "reader": "autonomy_policy"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -19,7 +25,13 @@
     "layer": "runner",
     "name": "autonomy_policy.agent",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 191,
+        "reader": "autonomy_policy"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -31,7 +43,13 @@
     "layer": "runner",
     "name": "autonomy_policy.agent_action_tiers",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 195,
+        "reader": "autonomy_policy"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -43,7 +61,13 @@
     "layer": "runner",
     "name": "autonomy_policy.agent_id",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 191,
+        "reader": "autonomy_policy"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -55,7 +79,13 @@
     "layer": "runner",
     "name": "autonomy_policy.agent_tiers",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 194,
+        "reader": "autonomy_policy"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -67,7 +97,13 @@
     "layer": "runner",
     "name": "autonomy_policy.reviewers",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 196,
+        "reader": "autonomy_policy"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   }

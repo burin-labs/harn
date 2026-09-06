@@ -7,7 +7,13 @@
     "layer": "runner",
     "name": "AgentSpec.auto_compact",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+        "line": 14,
+        "reader": "__daemon_compaction_summary"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -19,7 +25,13 @@
     "layer": "runner",
     "name": "AgentSpec.compact_callback",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+        "line": 17,
+        "reader": "__daemon_compaction_summary"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -91,7 +103,18 @@
     "layer": "runner",
     "name": "AgentSpec.consolidate_on_idle",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 129,
+        "reader": "get"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+        "line": 11,
+        "reader": "__daemon_compaction_summary"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -131,7 +154,13 @@
     "layer": "runner",
     "name": "AgentSpec.idle_watchdog_attempts",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 132,
+        "reader": "get"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -143,7 +172,13 @@
     "layer": "runner",
     "name": "AgentSpec.persist_path",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 115,
+        "reader": "get"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -155,7 +190,13 @@
     "layer": "runner",
     "name": "AgentSpec.resume_path",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 119,
+        "reader": "get"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -167,7 +208,13 @@
     "layer": "runner",
     "name": "AgentSpec.stall_checkpoint",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 75,
+        "reader": "__agent_loop_run"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -184,6 +231,21 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
         "line": 48,
         "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 98,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 324,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 345,
+        "reader": "__agent_loop_run"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -197,7 +259,13 @@
     "layer": "runner",
     "name": "AgentSpec.wake_interval_ms",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 123,
+        "reader": "get"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -209,7 +277,13 @@
     "layer": "runner",
     "name": "AgentSpec.watch_paths",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 96,
+        "reader": "get"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   }

@@ -33,6 +33,17 @@ boundaries. Binding scopes follow typed values, declared function parameters,
 aliases, and named normalization results. A parameter or normalization result
 can locate the configuration inside a surrounding state object with `path`.
 Sibling state fields remain outside that configuration owner.
+`binding_scope_files` keeps each owner's binding metadata in a separate typed
+file; a missing or malformed file fails the audit. Normalization results can
+declare `additional_paths` for distinct views of the same configuration.
+Overlapping paths are rejected.
+A shared normalizer that preserves an input uses `{function, argument}` with a
+zero-based argument index. It carries only an already identified configuration
+origin, so unrelated callers of the same helper do not acquire that identity.
+Each binding source can add `extra_globs` for consumers outside its primary
+`glob`. Every pattern must resolve to source files; overlapping matches are
+audited once. Dynamic judge keys have separate literal-domain scopes so a
+new key or a missing domain cannot disappear behind a forwarding classification.
 
 Unresolved dynamic keys, opaque calls, and configuration embedded in containers
 require explicit ownership evidence. Forwarding and non-behavior classifications

@@ -7,7 +7,13 @@
     "layer": "runner",
     "name": "AgentSpec.completion_tool",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 141,
+        "reader": "agent_completion_claim_apply_options"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -20,6 +26,16 @@
     "name": "AgentSpec.done_sentinel",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 925,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 926,
+        "reader": "opt_str"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
         "line": 681,
@@ -135,9 +151,19 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+        "line": 137,
+        "reader": "opt_int"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
         "line": 59,
         "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 88,
+        "reader": "__agent_loop_run"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -186,6 +212,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
         "line": 305,
         "reader": "__required_tools_text_completion"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
+        "line": 48,
+        "reader": "__agent_required_tools_from_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -199,7 +230,18 @@
     "layer": "runner",
     "name": "AgentSpec.step_judge",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 741,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 238,
+        "reader": "agent_step_judge"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -268,6 +310,11 @@
     "name": "AgentSpec.turn_end_condition",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 194,
+        "reader": "__completion_claim_requirement_ids"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
         "line": 924,
@@ -404,6 +451,11 @@
     "name": "AgentSpec.verify_completion_judge",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 187,
+        "reader": "__completion_claim_requirement_ids"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
         "line": 911,

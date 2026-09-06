@@ -89,6 +89,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
         "line": 65,
         "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 107,
+        "reader": "__agent_loop_run"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -296,6 +301,11 @@
         "reader": "agent_loop_run_settings"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 89,
+        "reader": "__agent_loop_run"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
         "line": 48,
         "reader": "__normalize_iteration_budget"
@@ -327,6 +337,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
         "line": 441,
         "reader": "__missing_tool_call_recovery_classifier"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
+        "line": 214,
+        "reader": "agent_apply_default_retry"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -362,6 +377,21 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
         "line": 148,
         "reader": "__agent_loop_llm_overrides"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+        "line": 39,
+        "reader": "agent_take_one_shot_prefill"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+        "line": 49,
+        "reader": "agent_take_one_shot_prefill"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+        "line": 38,
+        "reader": "agent_take_one_shot_prefill"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -375,7 +405,28 @@
     "layer": "runner",
     "name": "AgentSpec.llm_retry",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
+        "line": 125,
+        "reader": "__agent_loop_retry_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
+        "line": 107,
+        "reader": "__validate_agent_loop_retry"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
+        "line": 108,
+        "reader": "__validate_agent_loop_retry"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
+        "line": 110,
+        "reader": "__validate_agent_loop_retry"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -412,6 +463,16 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+        "line": 472,
+        "reader": "agent_primitive_option_int"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+        "line": 473,
+        "reader": "agent_primitive_option_int"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "line": 7,
         "reader": "__resolve_max_concurrent_tools"
@@ -444,6 +505,11 @@
     "name": "AgentSpec.max_iterations",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+        "line": 136,
+        "reader": "opt_int"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
         "line": 39,
@@ -681,7 +747,13 @@
     "layer": "runner",
     "name": "AgentSpec.profile",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 237,
+        "reader": "agent_loop_options"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -729,7 +801,18 @@
     "layer": "runner",
     "name": "AgentSpec.retry",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
+        "line": 98,
+        "reader": "__validate_agent_loop_retry"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
+        "line": 116,
+        "reader": "__agent_loop_retry_config"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -802,6 +885,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 350,
+        "reader": "__agent_loop_run"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "line": 740,
         "reader": "__validate_agent_loop_callback_options"
@@ -823,7 +911,13 @@
     "layer": "runner",
     "name": "AgentSpec.tool_backoff_ms",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+        "line": 813,
+        "reader": "agent_primitive_option_int"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -840,6 +934,16 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "line": 1273,
         "reader": "__dispatch_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 883,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 535,
+        "reader": "__invoke_tool"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
@@ -881,7 +985,18 @@
     "layer": "runner",
     "name": "AgentSpec.tool_format_override_reason",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 496,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "line": 530,
+        "reader": "agent_tool_format_resolution"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -893,7 +1008,13 @@
     "layer": "runner",
     "name": "AgentSpec.tool_retries",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+        "line": 810,
+        "reader": "agent_primitive_option_int"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },

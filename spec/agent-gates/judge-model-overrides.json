@@ -1,0 +1,92 @@
+[
+  {
+    "default": "absent; inherit llm_options.temperature, then provider default",
+    "evidence": "__judge_apply_llm_overrides copies this non-null key from the independently scanned override domain onto the checkpoint request.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "JudgeConfig.temperature",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+        "line": 16,
+        "reader": "judge-override-key-domain"
+      }
+    ],
+    "reason": "Per-judge model request policy belongs in the typed stop-decision configuration.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherit llm_options.max_tokens, then provider default",
+    "evidence": "__judge_apply_llm_overrides copies this non-null key from the independently scanned override domain onto the checkpoint request.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "JudgeConfig.max_tokens",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+        "line": 16,
+        "reader": "judge-override-key-domain"
+      }
+    ],
+    "reason": "Per-judge resource limits belong in the typed stop-decision configuration.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherit llm_options.top_p, then provider default",
+    "evidence": "__judge_apply_llm_overrides copies this non-null key from the independently scanned override domain onto the checkpoint request.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "JudgeConfig.top_p",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+        "line": 16,
+        "reader": "judge-override-key-domain"
+      }
+    ],
+    "reason": "Per-judge model request policy belongs in the typed stop-decision configuration.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherit llm_options.tool_format, then normal model request resolution",
+    "evidence": "__judge_apply_llm_overrides copies this non-null key from the independently scanned override domain onto the checkpoint request.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "JudgeConfig.tool_format",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+        "line": 16,
+        "reader": "judge-override-key-domain"
+      }
+    ],
+    "reason": "Preserve model format selection until the typed stop-decision request subsumes this override map.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherit llm_options.effort, then model catalog resolution",
+    "evidence": "__judge_apply_llm_overrides copies this non-null key from the independently scanned override domain onto the checkpoint request.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "JudgeConfig.effort",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+        "line": 16,
+        "reader": "judge-override-key-domain"
+      }
+    ],
+    "reason": "Per-judge model request policy belongs in the typed stop-decision configuration.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

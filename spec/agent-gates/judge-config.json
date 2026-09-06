@@ -118,7 +118,13 @@
     "layer": "stop decision",
     "name": "JudgeConfig.model",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+        "line": 194,
+        "reader": "judge-model-key-domain"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -182,6 +188,26 @@
     "name": "JudgeConfig.requirement_contract",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 188,
+        "reader": "__completion_claim_requirement_ids"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 195,
+        "reader": "__completion_claim_requirement_ids"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 189,
+        "reader": "__completion_claim_requirement_ids"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 196,
+        "reader": "__completion_claim_requirement_ids"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
         "line": 995,

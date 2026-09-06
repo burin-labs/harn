@@ -1,6 +1,13 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
+    "expression": "registry?.tools",
+    "owner": "__judge_tool_entries",
+    "evidence": "Extracts the tool entries from the dictionary form of AgentSpec.tools; the alternative list form is returned directly. This is the registry payload, not another caller setting."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "opts?._turn_end_judge_due",
     "owner": "__completion_policy_plan",
@@ -33,6 +40,13 @@
     "expression": "opts?._verify_completion_judge_trigger",
     "owner": "__completion_policy_plan",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+    "expression": "opts?._deadline_at_ms",
+    "owner": "__judge_run_checkpoint",
+    "evidence": "Computed from the resolved deadline contract in loop_foundation; not an independently selected deadline."
   },
   {
     "scope": "AgentSpec",
@@ -120,6 +134,13 @@
   },
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "opts?._next_tool_claim_applied",
+    "owner": "__agent_loop_next_tool_claim_receipt",
+    "evidence": "Receipt set by loop_support after projecting the next-tool claim into provider request options."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
     "expression": "options?._iteration",
     "owner": "__tool_envelope",
@@ -180,6 +201,48 @@
     "expression": "payload?.turn",
     "owner": "__agent_loop_fire_resume_continuity",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "ceiling.contains",
+    "owner": "__with_mcp_tool_ceiling",
+    "evidence": "Collection membership intrinsic on the configured tool ceiling, not a separate policy setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "existing?._type",
+    "owner": "__mcp_admit_tools",
+    "evidence": "Runtime tool-registry discriminator inspected during MCP tool admission."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "existing?.tools",
+    "owner": "__mcp_admit_tools",
+    "evidence": "Tool-registry payload projected during MCP tool admission; the tools setting owns this data."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "opts?._mcp_server_info",
+    "owner": "__mcp_bootstrap_and_admit",
+    "evidence": "Accumulated server metadata from MCP bootstrap results in mcp; not a capability-policy input."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+    "expression": "opts?._tool_format_source",
+    "owner": "agent_refresh_tool_format_for_route",
+    "evidence": "Tool-format resolution provenance written by options_public and options_validation."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+    "expression": "opts.removing",
+    "owner": "__clear_tool_format_resolution",
+    "evidence": "Dictionary removal intrinsic, not an option named removing."
   },
   {
     "scope": "AgentSpec",
@@ -246,6 +309,13 @@
   },
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+    "expression": "base.removing",
+    "owner": "agent_take_one_shot_prefill",
+    "evidence": "Dictionary removal intrinsic, not an option named removing."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "opts._primary_system",
     "owner": "__agent_primary_system_text",
@@ -278,6 +348,48 @@
     "expression": "registry?.tools",
     "owner": "agent_has_tools",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+    "expression": "options.keys",
+    "owner": "__agent_options_are_direct_prompt_catalog",
+    "evidence": "Dictionary key iteration intrinsic, not an option named keys."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+    "expression": "overrides.keys",
+    "owner": "__agent_validate_prompt_overrides",
+    "evidence": "Dictionary key iteration intrinsic, not an option named keys."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
+    "expression": "opts.persona",
+    "owner": "__agent_required_tools_friction_event",
+    "evidence": "Actor label copied into required-tool friction evidence and recurrence hints; this reader makes no persona-dependent policy decision."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
+    "expression": "opts?._preset_kind",
+    "owner": "__agent_required_tools_friction_event",
+    "evidence": "Resolved preset identity recorded by agent_preset_options; the preset selector owns the configuration."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
+    "expression": "opts?.persona",
+    "owner": "__agent_required_tools_friction_event",
+    "evidence": "Actor label copied into required-tool friction evidence and recurrence hints; this reader makes no persona-dependent policy decision."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
+    "expression": "opts.keys",
+    "owner": "__retry_has_key",
+    "evidence": "Dictionary key iteration intrinsic, not an option named keys."
   },
   {
     "scope": "AgentSpec",
@@ -355,5 +467,40 @@
     "expression": "registry?.tools",
     "owner": "__tool_surface_current_entries",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "opts?._turn_end_judge_invocations",
+    "owner": "__turn_end_judge_under_cap",
+    "evidence": "Measured invocation count projected from loop state; JudgeConfig owns the configured cap."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "opts?._turn_end_judge_loop_state",
+    "owner": "__turn_end_judge_loop_state",
+    "evidence": "Loop evidence projected by loop_post_turn for cadence evaluation; not caller-selected policy."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "opts?._turn_end_judge_trigger",
+    "owner": "__turn_end_judge_when_due",
+    "evidence": "Derived stalled trigger written by loop_turn_options, not a caller-selected cadence."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "base.removing",
+    "owner": "llm_clear_one_shot_prefill",
+    "evidence": "Dictionary removal intrinsic, not an option named removing."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "base?._harn_one_shot_prefill",
+    "owner": "llm_clear_one_shot_prefill",
+    "evidence": "Internal lifecycle marker armed by llm_arm_one_shot_prefill and consumed by llm_clear_one_shot_prefill."
   }
 ]

@@ -1,0 +1,27 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/workflow/**/*.harn",
+  "config": {
+    "id": "ModelPolicySpec",
+    "prefix": "ModelPolicySpec.",
+    "types": [
+      "ModelPolicySpec",
+      "WorkflowModelPolicy"
+    ],
+    "parameters": [
+      {
+        "function": "__workflow_agent_loop_options",
+        "name": "model_policy"
+      },
+      {
+        "function": "__workflow_llm_options",
+        "name": "model_policy"
+      },
+      {
+        "function": "__workflow_stage_tool_format",
+        "name": "model_policy"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

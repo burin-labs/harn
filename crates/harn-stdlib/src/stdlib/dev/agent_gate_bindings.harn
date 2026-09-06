@@ -5,7 +5,8 @@ pub type AgentGateBindingScope = {
   types: list<string>,
   parameters: list<{function: string, name: string, path?: list<string>}>,
   normalizers: list<string \
-    | {function: string, path: list<string>, additional_paths?: list<list<string>>}>,
+    | {function: string, path: list<string>, additional_paths?: list<list<string>>} \
+    | {function: string, argument: int}>,
   /** Nested object paths; scalar leaves never forward configuration authority. */
   containers?: list<string>,
 }
@@ -159,14 +160,24 @@ fn is_container(tree: dict, value: BindingOrigin) -> bool {
     || contains(tree.config.containers ?? [], value.path.join("."))
 }
 
-fn normalized_origin(config: AgentGateBindingScope, callee: string) -> BindingOrigin? {
-  for normalizer in config.normalizers {
+fn normalized_origin(tree: dict, node: dict, depth: int) -> BindingOrigin? {
+  const parts = children(tree, node)
+  const callee = text(tree, parts[0])
+  for normalizer in tree.config.normalizers {
     const name = if type_of(normalizer) == "string" {
       normalizer
     } else {
       normalizer.function
     }
     if name == callee {
+      if type_of(normalizer) != "string" && normalizer?.argument != nil {
+        const args = children(tree, parts[len(parts) - 1])
+        return if normalizer.argument < len(args) {
+          origin(tree, args[normalizer.argument], depth + 1)
+        } else {
+          nil
+        }
+      }
       return {
         pending: if type_of(normalizer) == "string" {
           []
@@ -222,7 +233,7 @@ fn origin(tree: dict, node: dict, depth: int = 0) -> BindingOrigin? {
     }
   }
   if node.kind == "call_expression" && len(parts) > 0 {
-    return normalized_origin(tree.config, text(tree, parts[0])) ?? lookup_origin(tree, node, depth)
+    return normalized_origin(tree, node, depth) ?? lookup_origin(tree, node, depth)
   }
   if node.kind == "property_access" && len(parts) == 2 {
     const base = origin(tree, parts[0], depth + 1)
@@ -293,6 +304,11 @@ fn read_record(tree: dict, node: dict, path: list<string>?) -> AgentGateBindingR
 }
 
 fn contains_root(tree: dict, node: dict) -> bool {
+  if node.kind == "dict_entry" {
+    const parts = children(tree, node)
+    // Literal field names do not refer to bindings with the same spelling.
+    return len(parts) > 1 && contains_root(tree, parts[len(parts) - 1])
+  }
   const path = origin(tree, node)
   if path != nil {
     return is_container(tree, path)
@@ -371,6 +387,13 @@ fn parse_tree(harness: {ast: HarnessAst, fs: HarnessFs}, file: string) -> dict {
 fn binding_reads(source: dict, config: AgentGateBindingScope) -> AgentGateBindingResult {
   for normalizer in config.normalizers {
     if type_of(normalizer) == "string" {
+      continue
+    }
+    if normalizer?.argument != nil {
+      if normalizer.argument < 0 || normalizer?.path != nil
+        || normalizer?.additional_paths != nil {
+        throw "agent gate bindings: invalid input-preserving normalizer ${normalizer.function}"
+      }
       continue
     }
     const paths = [normalizer.path] + (normalizer.additional_paths ?? [])

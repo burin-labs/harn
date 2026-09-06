@@ -22,6 +22,37 @@ fn scope() -> AgentGateBindingScope {
 }
 
 @test
+pipeline test_shared_normalizer_preserves_only_the_input_origin(harness: Harness, task: unknown) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-shared-normalizer")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "fixture.harn")
+  harness.fs.write_text(
+    path,
+    [
+      "fn shared(value: dict) { return value }",
+      "fn explicit_root(raw: dict) { const opts = shared(raw); return opts.enabled }",
+      "fn unrelated(raw: dict) { const opts = shared(raw); return opts.unrelated }",
+      "fn keys(raw: TestOptions) { const unrelated = {raw: {}}; return unrelated }",
+    ]
+      .join("\n"),
+  )
+  let selected = scope()
+  selected.normalizers = [{function: "shared", argument: 0}]
+  const found = agent_gate_binding_reads({ast: harness.ast, fs: harness.fs}, path, selected)
+  assert_eq(found.reads.map(fn(read) { return read.name }), ["TestOptions.enabled"])
+  assert_eq(len(found.unresolved), 1)
+  assert_eq(found.unresolved[0].expression, "shared(raw)")
+  harness.fs.write_text(
+    path,
+    replace(harness.fs.read_text(path), "opts.enabled", "opts.new_setting"),
+  )
+  const changed = agent_gate_binding_reads({ast: harness.ast, fs: harness.fs}, path, selected)
+  assert_eq(changed.reads.map(fn(read) { return read.name }), ["TestOptions.new_setting"])
+}
+
+@test
 pipeline test_config_aliases_preserve_reads_and_expose_forwarding(harness: Harness, task: unknown) {
   const dir = harness.fs.mkdtemp_in_workspace("gate-bindings")
   defer {

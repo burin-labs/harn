@@ -104,6 +104,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+        "line": 172,
+        "reader": "__with_mcp_tool_ceiling"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
         "line": 79,
         "reader": "__stance_policy_patch"

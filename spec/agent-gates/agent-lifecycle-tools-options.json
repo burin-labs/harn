@@ -1,7 +1,7 @@
 [
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "true",
+    "evidence": "workers.__agent_lifecycle_await_enabled enables the structural await control when the setting is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
@@ -18,8 +18,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "dynamic: observed local fallback false; normalization may override",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "false; existing sub_agent_run or spawn_agent tool entries also establish capability",
+    "evidence": "workers.__agent_lifecycle_has_subagent_capability checks both explicit settings and the tool registry. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
@@ -36,8 +36,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "dynamic: observed local fallback false; normalization may override",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "false; existing sub_agent_run or spawn_agent tool entries also establish capability",
+    "evidence": "workers.__agent_lifecycle_has_subagent_capability checks both explicit settings and the tool registry. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",

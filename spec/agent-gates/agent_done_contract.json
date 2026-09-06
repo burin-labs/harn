@@ -7,7 +7,13 @@
     "layer": "runner",
     "name": "agent_done_contract.feedback_fallback",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 756,
+        "reader": "agent_done_contract"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -19,7 +25,18 @@
     "layer": "runner",
     "name": "agent_done_contract.judge",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 748,
+        "reader": "agent_done_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 747,
+        "reader": "agent_done_contract"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -31,7 +48,13 @@
     "layer": "runner",
     "name": "agent_done_contract.loop_until_done",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 764,
+        "reader": "agent_done_contract"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -43,7 +66,13 @@
     "layer": "runner",
     "name": "agent_done_contract.max_invocations",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 752,
+        "reader": "agent_done_contract"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -55,7 +84,13 @@
     "layer": "runner",
     "name": "agent_done_contract.model",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 760,
+        "reader": "agent_done_contract"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -67,7 +102,13 @@
     "layer": "runner",
     "name": "agent_done_contract.provider",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 761,
+        "reader": "agent_done_contract"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -102,7 +143,13 @@
     "layer": "runner",
     "name": "agent_done_contract.system",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 762,
+        "reader": "agent_done_contract"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   }

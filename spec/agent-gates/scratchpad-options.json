@@ -1,15 +1,230 @@
 [
-  {"name":"AgentSpec.scratchpad.enabled","kind":"option","layer":"runner","default":"true when a scratchpad object is supplied; false when scratchpad is absent","readers":[],"reachability":"unknown","evidence":"Read by agent_scratchpad_options; no canonical headless activation trace collected.","verdict":"KEEP-with-expiry","reason":"Controls whether the caller supplies persistent working notes.","expiry":"2026-09-13"},
-  {"name":"AgentSpec.scratchpad.initial","kind":"option","layer":"runner","default":"nil","readers":[],"reachability":"unknown","evidence":"Read by agent_scratchpad_options; no canonical headless activation trace collected.","verdict":"KEEP-with-expiry","reason":"Caller-provided initial notes are policy data.","expiry":"2026-09-13"},
-  {"name":"AgentSpec.scratchpad.recite","kind":"option","layer":"runner","default":"true when scratchpad is enabled","readers":[],"reachability":"unknown","evidence":"Read by agent_scratchpad_options; no canonical headless activation trace collected.","verdict":"KEEP-with-expiry","reason":"Controls the projection of working notes into the transcript.","expiry":"2026-09-13"},
-  {"name":"AgentSpec.scratchpad.recitation","kind":"option","layer":"runner","default":"fallback alias for recite; true when both are absent","readers":[],"reachability":"unknown","evidence":"Fallback alias in agent_scratchpad_options.","verdict":"DELETE","reason":"Use the canonical recite field; remove the duplicate spelling."},
-  {"name":"AgentSpec.scratchpad.reorganize_every","kind":"option","layer":"runner","default":"3","readers":[],"reachability":"unknown","evidence":"Read by agent_scratchpad_options; no canonical headless activation trace collected.","verdict":"KEEP-with-expiry","reason":"Caller-selected cadence for reorganizing working notes.","expiry":"2026-09-13"},
-  {"name":"AgentSpec.scratchpad.reorg_every","kind":"option","layer":"runner","default":"fallback alias for reorganize_every; 3 when all cadence fields are absent","readers":[],"reachability":"unknown","evidence":"Fallback alias in agent_scratchpad_options.","verdict":"DELETE","reason":"Use the canonical reorganize_every field; remove the duplicate spelling."},
-  {"name":"AgentSpec.scratchpad.periodic_reorg_every","kind":"option","layer":"runner","default":"fallback alias for reorganize_every; 3 when all cadence fields are absent","readers":[],"reachability":"unknown","evidence":"Fallback alias in agent_scratchpad_options.","verdict":"DELETE","reason":"Use the canonical reorganize_every field; remove the duplicate spelling."},
-  {"name":"AgentSpec.scratchpad.max_recent_messages","kind":"option","layer":"runner","default":"8","readers":[],"reachability":"unknown","evidence":"Read by agent_scratchpad_options; no canonical headless activation trace collected.","verdict":"KEEP-with-expiry","reason":"Bounds the transcript context used to reorganize working notes.","expiry":"2026-09-13"},
-  {"name":"AgentSpec.scratchpad.schema_retries","kind":"option","layer":"runner","default":"1","readers":[],"reachability":"unknown","evidence":"Read by agent_scratchpad_options; no canonical headless activation trace collected.","verdict":"KEEP-with-expiry","reason":"Bounds recovery from malformed note output.","expiry":"2026-09-13"},
-  {"name":"AgentSpec.scratchpad.retries","kind":"option","layer":"runner","default":"fallback alias for schema_retries; 1 when both are absent","readers":[],"reachability":"unknown","evidence":"Fallback alias in agent_scratchpad_options.","verdict":"DELETE","reason":"Use the canonical schema_retries field; remove the ambiguous spelling."},
-  {"name":"AgentSpec.scratchpad.reorganizer","kind":"option","layer":"runner","default":"{}","readers":[],"reachability":"unknown","evidence":"Read by agent_scratchpad_options; no canonical headless activation trace collected.","verdict":"KEEP-with-expiry","reason":"Caller-supplied model policy for reorganizing working notes.","expiry":"2026-09-13"},
-  {"name":"AgentSpec.scratchpad.reorganizer_options","kind":"option","layer":"runner","default":"fallback alias for reorganizer; {} when all model-policy fields are absent","readers":[],"reachability":"unknown","evidence":"Fallback alias in agent_scratchpad_options.","verdict":"DELETE","reason":"Use the canonical reorganizer field; remove the duplicate spelling."},
-  {"name":"AgentSpec.scratchpad.llm_options","kind":"option","layer":"runner","default":"fallback alias for reorganizer; {} when all model-policy fields are absent","readers":[],"reachability":"unknown","evidence":"Fallback alias in agent_scratchpad_options.","verdict":"DELETE","reason":"Use the canonical reorganizer field; remove the duplicate spelling."}
+  {
+    "default": "true when a scratchpad object is supplied; false when scratchpad is absent",
+    "evidence": "Read by agent_scratchpad_options; no canonical headless activation trace collected.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 78,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Controls whether the caller supplies persistent working notes.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "nil",
+    "evidence": "Read by agent_scratchpad_options; no canonical headless activation trace collected.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.initial",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 97,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Caller-provided initial notes are policy data.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true when scratchpad is enabled",
+    "evidence": "Read by agent_scratchpad_options; no canonical headless activation trace collected.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.recite",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 81,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Controls the projection of working notes into the transcript.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "fallback alias for recite; true when both are absent",
+    "evidence": "Fallback alias in agent_scratchpad_options.",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.recitation",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 81,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Use the canonical recite field; remove the duplicate spelling.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "3",
+    "evidence": "Read by agent_scratchpad_options; no canonical headless activation trace collected.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.reorganize_every",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 84,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Caller-selected cadence for reorganizing working notes.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "fallback alias for reorganize_every; 3 when all cadence fields are absent",
+    "evidence": "Fallback alias in agent_scratchpad_options.",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.reorg_every",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 84,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Use the canonical reorganize_every field; remove the duplicate spelling.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "fallback alias for reorganize_every; 3 when all cadence fields are absent",
+    "evidence": "Fallback alias in agent_scratchpad_options.",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.periodic_reorg_every",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 84,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Use the canonical reorganize_every field; remove the duplicate spelling.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "8",
+    "evidence": "Read by agent_scratchpad_options; no canonical headless activation trace collected.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.max_recent_messages",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 89,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Bounds the transcript context used to reorganize working notes.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "1",
+    "evidence": "Read by agent_scratchpad_options; no canonical headless activation trace collected.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.schema_retries",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 94,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Bounds recovery from malformed note output.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "fallback alias for schema_retries; 1 when both are absent",
+    "evidence": "Fallback alias in agent_scratchpad_options.",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.retries",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 94,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Use the canonical schema_retries field; remove the ambiguous spelling.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "{}",
+    "evidence": "Read by agent_scratchpad_options; no canonical headless activation trace collected.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.reorganizer",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 100,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Caller-supplied model policy for reorganizing working notes.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "fallback alias for reorganizer; {} when all model-policy fields are absent",
+    "evidence": "Fallback alias in agent_scratchpad_options.",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.reorganizer_options",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 100,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Use the canonical reorganizer field; remove the duplicate spelling.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "fallback alias for reorganizer; {} when all model-policy fields are absent",
+    "evidence": "Fallback alias in agent_scratchpad_options.",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad.llm_options",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 100,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Use the canonical reorganizer field; remove the duplicate spelling.",
+    "verdict": "DELETE"
+  }
 ]

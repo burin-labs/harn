@@ -1,6 +1,10 @@
 {
   "schema_version": 1,
   "name_aliases": {
+    "AgentSpec._done_sentinel": "AgentSpec.done_sentinel",
+    "AgentSpec.max_retries": "RateLimitOptions.max_retries",
+    "AgentSpec.backoff_ms": "RateLimitOptions.backoff_ms",
+    "AgentSpec._structural_validator": "AgentSpec.structural_validator",
     "AgentSpec.agent_await_resumption_enabled": "AgentLifecycleToolsOptions.agent_await_resumption_enabled",
     "AgentSpec._tool_caller": "AgentSpec.tool_caller",
     "AgentSpec._llm_caller": "AgentSpec.llm_caller",
@@ -11,6 +15,8 @@
     "AgentSpec._stop_after_successful_tools": "AgentSpec.stop_after_successful_tools"
   },
   "name_prefixes": [
+    {"from": "AgentSpec.step_judge.", "to": "StepJudgeOptions."},
+    {"from": "AgentSpec.budget.", "to": "AgentBudget."},
     {
       "from": "AgentSpec.iteration_budget.consecutive_failures.",
       "to": "ConsecutiveFailureBudget."
@@ -94,9 +100,86 @@
     "spec/agent-gates/nested-policy-options.json",
     "spec/agent-gates/runtime-environment.json",
     "spec/agent-gates/scratchpad-options.json",
-    "spec/agent-gates/completion-prompt-options.json"
+    "spec/agent-gates/completion-prompt-options.json",
+    "spec/agent-gates/step-judge-options.json",
+    "spec/agent-gates/agent-budget.json",
+    "spec/agent-gates/recovery-resource-options.json",
+    "spec/agent-gates/native-consumer-options.json",
+    "spec/agent-gates/judge-model-overrides.json"
   ],
   "scopes": [
+    {
+      "id": "retry-destructured-options",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+      "language": "harn",
+      "query": "((fn_declaration name: (identifier) @owner (block (const_binding name: (dict_pattern (dict_pattern_field . (identifier) @key))))) (#eq? @owner \"with_retry\"))",
+      "prefix": "AgentLoopRetryOptions.",
+      "key_form": "field"
+    },
+    {
+      "id": "native-runner-option-helpers",
+      "kind": "option",
+      "glob": "crates/harn-vm/src/llm/**/*.rs",
+      "language": "rust",
+      "query": "((call_expression function: (_) @callee arguments: (arguments . (_) . (_) @key)) (#match? @callee \"(^|::)(opt_str|opt_int|opt_float|opt_bool|opt_json|opt_str_list|agent_primitive_option_str|agent_primitive_option_int|agent_primitive_option_bool)$\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
+    {
+      "id": "native-daemon-options",
+      "kind": "option",
+      "glob": "crates/harn-vm/src/llm/daemon.rs",
+      "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments . (_) @key)) (#eq? @receiver \"options\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
+    {
+      "id": "native-reminder-options",
+      "kind": "option",
+      "glob": "crates/harn-vm/src/llm/reminder_providers.rs",
+      "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments . (_) @key)) (#eq? @receiver \"options\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
+    {
+      "id": "native-reminder-policy",
+      "kind": "option",
+      "glob": "crates/harn-vm/src/llm/reminder_providers.rs",
+      "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments . (_) @key)) (#eq? @receiver \"reminders\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.reminders.",
+      "key_form": "literal"
+    },
+    {
+      "id": "missing-tool-recovery-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+      "language": "harn",
+      "query": "((for_statement variable: (identifier) @variable iterable: (list_literal (string_literal) @key)) (#eq? @variable \"key\"))",
+      "prefix": "MissingToolCallRecoveryOptions.",
+      "key_form": "literal"
+    },
+    {
+      "id": "judge-override-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+      "language": "harn",
+      "query": "((const_binding name: (identifier) @domain value: (list_literal (string_literal) @key)) (#eq? @domain \"__JUDGE_LLM_OVERRIDE_KEYS\"))",
+      "prefix": "JudgeConfig.",
+      "key_form": "literal"
+    },
+    {
+      "id": "judge-model-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+      "language": "harn",
+      "query": "((const_binding name: (identifier) @domain value: (string_literal) @key) (#eq? @domain \"__JUDGE_MODEL_SETTING\"))",
+      "prefix": "JudgeConfig.",
+      "key_form": "literal"
+    },
     {
       "id": "runner-model-environment",
       "kind": "environment",
@@ -152,1289 +235,11 @@
       "key_form": "literal"
     }
   ],
-  "binding_scopes": [
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "AgentLifecycleToolsOptions",
-        "prefix": "AgentLifecycleToolsOptions.",
-        "types": [
-          "AgentLifecycleToolsOptions"
-        ],
-        "parameters": [
-          {
-            "function": "__agent_lifecycle_await_enabled",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_lifecycle_has_subagent_capability",
-            "name": "opts"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "AgentLoopRetryOptions",
-        "prefix": "AgentLoopRetryOptions.",
-        "types": [
-          "AgentLoopRetryOptions"
-        ],
-        "parameters": [
-          {
-            "function": "__agent_loop_retry_with_default_predicate",
-            "name": "retry_cfg"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "AgentSpec",
-        "prefix": "AgentSpec.",
-        "types": [
-          "AgentSpec",
-          "AgentPresetOptions",
-          "AgentCapabilitySpec",
-          "AgentContextSpec",
-          "AgentExecutionSpec",
-          "AgentLifecycleSpec",
-          "AgentModelSpec",
-          "AgentObservabilitySpec"
-        ],
-        "parameters": [
-          {"function": "__agent_lifecycle_await_enabled", "name": "opts"},
-          {"function": "__agent_lifecycle_has_subagent_capability", "name": "opts"},
-          {"function": "__agent_loop_has_terminal_output_contract", "name": "opts"},
-          {"function": "__agent_loop_with_llm_render_context", "name": "opts"},
-          {"function": "__agent_projection_with_scratchpad_barrier", "name": "opts"},
-          {"function": "__agent_required_tools_from_options", "name": "opts"},
-          {"function": "__clear_tool_format_resolution", "name": "opts"},
-          {"function": "__completion_claim_requirement_ids", "name": "opts"},
-          {"function": "__invoke_tool", "name": "options"},
-          {"function": "__judge_resolve_model", "name": "opts"},
-          {"function": "__merge_hook_dict", "name": "base"},
-          {"function": "__next_tool_claim", "name": "opts"},
-          {"function": "__post_turn_stop_needs_verify", "name": "opts"},
-          {"function": "__stack_dict", "name": "value"},
-          {"function": "__turn_end_judge_cadence", "name": "opts"},
-          {"function": "__turn_end_judge_loop_state", "name": "opts"},
-          {"function": "__turn_end_judge_under_cap", "name": "opts"},
-          {"function": "__turn_end_judge_when_due", "name": "opts"},
-          {"function": "__validate_removed_agent_loop_options", "name": "opts"},
-          {"function": "__with_resolved_tool_format", "name": "opts"},
-          {"function": "__zero_tool_completion_context", "name": "opts"},
-          {"function": "agent_apply_default_retry", "name": "options"},
-          {"function": "agent_budget_pre_call_blocked", "name": "opts"},
-          {"function": "agent_completion_review", "name": "opts"},
-          {"function": "agent_daemon_snapshot", "name": "opts"},
-          {"function": "agent_mcp_bootstrap_if_needed", "name": "opts"},
-          {"function": "agent_merge_llm_options", "name": "base"},
-          {"function": "agent_prompt_catalog", "name": "options"},
-          {"function": "agent_reminder_providers_fire", "name": "opts"},
-          {"function": "agent_required_tools_enforce", "name": "opts"},
-          {"function": "agent_tool_format", "name": "options"},
-          {
-            "function": "agent_loop",
-            "name": "options"
-          },
-          {
-            "function": "agent_loop_options",
-            "name": "options"
-          },
-          {
-            "function": "__agent_apply_projection",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_completion_prompt_bindings",
-            "name": "options"
-          },
-          {
-            "function": "__agent_loop_build_turn_prompt",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_effective_llm_options",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_fire_resume_continuity",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_native_tool_contract_prompt",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_tool_format",
-            "name": "opts"
-          },
-          {
-            "function": "__emit_synthetic_tool_lifecycle_finish",
-            "name": "options"
-          },
-          {
-            "function": "__interpret_verdict",
-            "name": "opts"
-          },
-          {
-            "function": "__intra_turn_dependent_suffix_count",
-            "name": "options"
-          },
-          {
-            "function": "__intra_turn_has_keyed_mutating_calls",
-            "name": "options"
-          },
-          {
-            "function": "__invoke_tool_with_index",
-            "name": "options"
-          },
-          {
-            "function": "__maybe_inject_completion_confirmation",
-            "name": "opts"
-          },
-          {
-            "function": "__native_tool_text_completion",
-            "name": "opts"
-          },
-          {
-            "function": "__post_turn_verdict_result",
-            "name": "_opts"
-          },
-          {
-            "function": "__tool_surface_claimable_names",
-            "name": "opts"
-          },
-          {
-            "function": "__tool_surface_current_names",
-            "name": "opts"
-          },
-          {
-            "function": "__turn_end_judge_due",
-            "name": "opts"
-          },
-          {
-            "function": "agent_collapse_duplicate_read_calls",
-            "name": "options"
-          },
-          {
-            "function": "agent_completion_claim_apply_options",
-            "name": "options"
-          },
-          {
-            "function": "agent_lifecycle_tools",
-            "name": "options"
-          },
-          {
-            "function": "agent_render_tool_call_exemplar",
-            "name": "options"
-          },
-          {
-            "function": "agent_required_tools_missing_from_session",
-            "name": "opts"
-          },
-          {
-            "function": "agent_scratchpad_init",
-            "name": "opts"
-          },
-          {
-            "function": "agent_scratchpad_options",
-            "name": "opts"
-          },
-          {
-            "function": "agent_scratchpad_recitation_fragment",
-            "name": "opts"
-          },
-          {
-            "function": "agent_session_init",
-            "name": "opts"
-          },
-          {
-            "function": "agent_take_one_shot_prefill",
-            "name": "options"
-          },
-          {
-            "function": "agent_tool_call_paradigm",
-            "name": "options"
-          },
-          {
-            "function": "agent_tool_search_emit_queries",
-            "name": "opts"
-          },
-          {
-            "function": "agent_tool_search_record_results",
-            "name": "opts"
-          },
-          {
-            "function": "loop_until_done_system_prompt",
-            "name": "options"
-          },
-          {
-            "function": "render_agent_prompt_id",
-            "name": "options"
-          },
-          {
-            "function": "__agent_context_profile_fragments",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_decorate_turn_message",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_done_sentinel",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_has_system_prompt_options",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_json_tool_contract_prompt",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_apply_deadline",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_call_budget_new",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_contract_prompt",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_effective_wrapup_context",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_final_wrapup",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_finalize",
-            "name": "state",
-            "path": ["opts"]
-          },
-          {
-            "function": "__agent_loop_has_host_wrapup_directive",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_llm_overrides",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_next_tool_output_contract",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_output_contract",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_prepare_output_contract",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_project_terminal_result",
-            "name": "state",
-            "path": ["opts"]
-          },
-          {
-            "function": "__agent_loop_run",
-            "name": "initial_opts"
-          },
-          {
-            "function": "__agent_loop_turn_setup",
-            "name": "state",
-            "path": ["opts"]
-          },
-          {
-            "function": "__agent_loop_verify_closure_exists",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__agent_loop_wrapup_directive",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_loop_wrapup_response_protocol_tail",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_mcp_initialize_advisory_prompt",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_primary_system_text",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_projection_options",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_route_identity",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_text_tool_contract_prompt",
-            "name": "opts"
-          },
-          {
-            "function": "__agent_turn_end_judge_stall_cadence",
-            "name": "opts"
-          },
-          {
-            "function": "__apply_post_turn_options",
-            "name": "opts"
-          },
-          {
-            "function": "__arbitrate_stalled_toolless_turn",
-            "name": "opts"
-          },
-          {
-            "function": "__autocontinue_should_continue",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__capability_gap_event",
-            "name": "opts"
-          },
-          {
-            "function": "__classify_missing_tool_call",
-            "name": "opts"
-          },
-          {
-            "function": "__completion_boundary_ledger",
-            "name": "opts"
-          },
-          {
-            "function": "__completion_policy_plan",
-            "name": "opts"
-          },
-          {
-            "function": "__completion_result",
-            "name": "opts"
-          },
-          {
-            "function": "__context_profile_disabled",
-            "name": "opts"
-          },
-          {
-            "function": "__context_profile_options",
-            "name": "opts"
-          },
-          {
-            "function": "__context_profile_root",
-            "name": "opts"
-          },
-          {
-            "function": "__default_done_sentinel",
-            "name": "opts"
-          },
-          {
-            "function": "__detect_native_fallback",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__dispatch_tool_calls",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__dispatch_tool_calls_with_middleware",
-            "name": "options"
-          },
-          {
-            "function": "__done_contract_primary_prompt",
-            "name": "opts"
-          },
-          {
-            "function": "__explicit_provider",
-            "name": "opts"
-          },
-          {
-            "function": "__explicit_tool_format",
-            "name": "opts"
-          },
-          {
-            "function": "__intra_turn_resource_guard",
-            "name": "options"
-          },
-          {
-            "function": "__intra_turn_resource_keys",
-            "name": "options"
-          },
-          {
-            "function": "__judge_provider_family",
-            "name": "opts"
-          },
-          {
-            "function": "__judge_run_checkpoint",
-            "name": "request",
-            "path": ["opts"]
-          },
-          {
-            "function": "__maybe_inject_action_nudge",
-            "name": "opts"
-          },
-          {
-            "function": "__missing_tool_call_recovery_classifier",
-            "name": "opts"
-          },
-          {
-            "function": "__missing_tool_call_recovery_config",
-            "name": "opts"
-          },
-          {
-            "function": "__native_completion_context",
-            "name": "opts"
-          },
-          {
-            "function": "__native_tools_complete_naturally",
-            "name": "opts"
-          },
-          {
-            "function": "__normalize_iteration_budget",
-            "name": "opts"
-          },
-          {
-            "function": "__normalize_reminder_provider_options",
-            "name": "opts"
-          },
-          {
-            "function": "__parse_feedback_has_non_structural_tools",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__post_turn_callback_verdict",
-            "name": "opts"
-          },
-          {
-            "function": "__purpose_label_arm",
-            "name": "opts"
-          },
-          {
-            "function": "__required_tools_text_completion",
-            "name": "opts"
-          },
-          {
-            "function": "__resolve_intra_turn_failure_fanout_cap",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__resolve_intra_turn_resource_fail_fast",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__resolve_max_concurrent_tools",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__run_input_guardrail",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__run_pre_turn_scope_classifier",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__run_structural_validator",
-            "name": "turn_opts"
-          },
-          {
-            "function": "__stack_pack_options",
-            "name": "base"
-          },
-          {
-            "function": "__stance_config",
-            "name": "opts"
-          },
-          {
-            "function": "__stance_policy_patch",
-            "name": "opts"
-          },
-          {
-            "function": "__stance_register_escape_tool",
-            "name": "opts"
-          },
-          {
-            "function": "__stop_after_successful_tools",
-            "name": "opts"
-          },
-          {
-            "function": "__task_ledger_from_shorthand",
-            "name": "opts"
-          },
-          {
-            "function": "__terminal_callback_verdict",
-            "name": "opts"
-          },
-          {
-            "function": "__text_family_toolless_turn",
-            "name": "opts"
-          },
-          {
-            "function": "__tool_batch_call_classification",
-            "name": "options"
-          },
-          {
-            "function": "__tool_batch_emit_receipt",
-            "name": "options"
-          },
-          {
-            "function": "__tool_batch_plan",
-            "name": "options"
-          },
-          {
-            "function": "__tool_envelope",
-            "name": "options"
-          },
-          {
-            "function": "__tool_format_route",
-            "name": "opts"
-          },
-          {
-            "function": "__tool_surface_claim_authority",
-            "name": "opts"
-          },
-          {
-            "function": "__tool_surface_current_entries",
-            "name": "opts"
-          },
-          {
-            "function": "__tool_surface_narrowing_post_turn",
-            "name": "opts"
-          },
-          {
-            "function": "__turn_end_condition_config",
-            "name": "opts"
-          },
-          {
-            "function": "__validate_agent_loop_callback_options",
-            "name": "opts"
-          },
-          {
-            "function": "__validate_agent_loop_completion_options",
-            "name": "opts"
-          },
-          {
-            "function": "__with_prompt_fragment",
-            "name": "agent_options"
-          },
-          {
-            "function": "agent_apply_tool_surface_narrowing",
-            "name": "opts"
-          },
-          {
-            "function": "agent_build_turn_messages",
-            "name": "opts"
-          },
-          {
-            "function": "agent_build_turn_system_fragments",
-            "name": "opts"
-          },
-          {
-            "function": "agent_compute_post_turn",
-            "name": "opts"
-          },
-          {
-            "function": "agent_extract_tool_calls",
-            "name": "opts"
-          },
-          {
-            "function": "agent_has_tools",
-            "name": "opts"
-          },
-          {
-            "function": "agent_loop_run_settings",
-            "name": "opts"
-          },
-          {
-            "function": "agent_loop_turn_projection",
-            "name": "turn_opts"
-          },
-          {
-            "function": "agent_refresh_tool_format_for_route",
-            "name": "options"
-          },
-          {
-            "function": "agent_stance_prepare",
-            "name": "opts"
-          },
-          {
-            "function": "agent_tool_format_resolution",
-            "name": "options"
-          }
-        ],
-        "normalizers": [
-          "agent_options",
-          "agent_loop_options",
-          "agent_preset_options",
-          "agent_mcp_bootstrap_if_needed",
-          "__agent_loop_apply_deadline",
-          {"function": "__agent_loop_turn_setup", "path": ["opts"], "additional_paths": [["turn_opts"], ["turn_llm_opts"], ["llm_opts"]]},
-          {"function": "__agent_loop_terminal_boundary", "path": ["opts"]},
-          {"function": "agent_loop_post_turn_transition", "path": ["state", "opts"]},
-          {"function": "agent_loop_provider_failure", "path": ["opts"]},
-          "__sync_tool_search_state"
-        ],
-        "containers": [
-          "iteration_budget",
-          "stall_diagnostics",
-          "judge",
-          "turn_policy",
-          "compaction",
-          "model_policy"
-        ]
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "AgentStallConfig",
-        "prefix": "AgentStallConfig.",
-        "types": [
-          "AgentStallConfig",
-          "RepairDiagnostics",
-          "StallDiagnostics"
-        ],
-        "parameters": [
-          {"function": "__agent_loop_effective_llm_options", "name": "opts", "path": ["stall_diagnostics"]},
-          {
-            "function": "__agent_stall_apply_action_signal",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_apply_repair",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_classify_trip",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_config",
-            "name": "value"
-          },
-          {
-            "function": "__agent_loop_call_budget_new",
-            "name": "reserve_cfg"
-          },
-          {
-            "function": "__agent_loop_post_edit_reverify_mandated",
-            "name": "repair_cfg"
-          },
-          {
-            "function": "__agent_stall_emit_diagnostic_trip",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_maybe_emit",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_observation",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_process_call",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_repair_value",
-            "name": "flat"
-          },
-          {
-            "function": "__agent_stall_repair_value",
-            "name": "nested"
-          },
-          {
-            "function": "__agent_stall_fold_verify_state",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_observe_core",
-            "name": "raw_config"
-          },
-          {
-            "function": "__agent_stall_observe_no_progress",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_observe_parse_rejection",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_register_trip",
-            "name": "config"
-          },
-          {
-            "function": "__agent_stall_warning_record",
-            "name": "config"
-          },
-          {
-            "function": "agent_loop_run_settings",
-            "name": "opts",
-            "path": ["stall_diagnostics"]
-          },
-          {
-            "function": "agent_stall_inject_feedback",
-            "name": "config"
-          },
-          {
-            "function": "agent_stall_no_net_progress",
-            "name": "raw_config"
-          },
-          {
-            "function": "agent_stall_observe_completed_dispatch",
-            "name": "raw_config"
-          },
-          {
-            "function": "agent_stall_repair_config",
-            "name": "raw_config"
-          },
-          {
-            "function": "agent_stall_verified_write_satisfied",
-            "name": "raw_config"
-          }
-        ],
-        "normalizers": [
-          "__agent_stall_config",
-          "__agent_stall_default_config",
-          "agent_stall_repair_config"
-        ],
-        "containers": [
-          "repair_diagnostics",
-          "monologue_actuation",
-          "no_net_progress_predicates"
-        ]
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "AgentStopOptions",
-        "prefix": "AgentStopOptions.",
-        "types": [
-          "AgentStopOptions"
-        ],
-        "parameters": [
-          {"function": "__agent_stop_options", "name": "options"},
-          {
-            "function": "__worker_options",
-            "name": "value"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "CommandWaitOptions",
-        "prefix": "CommandWaitOptions.",
-        "types": [
-          "CommandWaitOptions"
-        ],
-        "parameters": [
-          {"function": "__cl_apply_one", "name": "cw"},
-          {
-            "function": "__cl_advance_schedule_row",
-            "name": "cw"
-          },
-          {
-            "function": "command_ledger_apply_updates",
-            "name": "cw"
-          },
-          {
-            "function": "command_ledger_build_digest",
-            "name": "cw"
-          },
-          {
-            "function": "command_ledger_decide",
-            "name": "cw"
-          },
-          {
-            "function": "__cl_ceiling_breaches",
-            "name": "cw"
-          },
-          {
-            "function": "__cl_decision_wording",
-            "name": "cw"
-          },
-          {
-            "function": "__cl_earliest_deadline",
-            "name": "cw"
-          },
-          {
-            "function": "__cl_new_row",
-            "name": "cw"
-          },
-          {
-            "function": "__cl_row_fires",
-            "name": "cw"
-          },
-          {
-            "function": "command_ledger_after_digest",
-            "name": "cw"
-          },
-          {
-            "function": "command_ledger_apply_ceiling",
-            "name": "cw"
-          },
-          {
-            "function": "command_ledger_hold",
-            "name": "cw"
-          },
-          {
-            "function": "command_wait_normalize",
-            "name": "raw"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "CompactionPolicy",
-        "prefix": "CompactionPolicy.",
-        "types": [
-          "CompactionPolicy"
-        ],
-        "parameters": [
-          {
-            "function": "__has_compaction_policy",
-            "name": "policy"
-          },
-          {
-            "function": "__compaction_policy_merge_fields",
-            "name": "fields"
-          },
-          {
-            "function": "__compaction_policy_merge_fields",
-            "name": "policy"
-          },
-          {
-            "function": "__compaction_instruction_mode",
-            "name": "policy"
-          },
-          {
-            "function": "__compaction_policy_event_fields",
-            "name": "policy"
-          }
-        ],
-        "normalizers": [
-          "compaction_policy",
-          "__compaction_policy_from_options",
-          "__compaction_policy_merge_fields"
-        ],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "CompletionGateOptions",
-        "prefix": "CompletionGateOptions.",
-        "types": [
-          "CompletionGateOptions"
-        ],
-        "parameters": [
-          {
-            "function": "__completion_gate_evaluate",
-            "name": "opts"
-          },
-          {
-            "function": "__completion_gate_validate_options",
-            "name": "opts"
-          },
-          {
-            "function": "agent_completion_gate",
-            "name": "options"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "ConsecutiveFailureBudget",
-        "prefix": "ConsecutiveFailureBudget.",
-        "types": [
-          "ConsecutiveFailureBudget"
-        ],
-        "parameters": [
-          {
-            "function": "__normalize_consecutive_failure_budget",
-            "name": "value"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "DetectorSpec",
-        "prefix": "DetectorSpec.",
-        "types": [
-          "DetectorSpec"
-        ],
-        "parameters": [
-          {
-            "function": "detector_spec_to_stall",
-            "name": "spec"
-          },
-          {
-            "function": "detector_spec_token_runaway",
-            "name": "spec"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "IterationBudget",
-        "prefix": "IterationBudget.",
-        "types": [
-          "IterationBudget"
-        ],
-        "parameters": [
-          {"function": "agent_mcp_bootstrap_if_needed", "name": "opts", "path": ["iteration_budget"]},
-          {
-            "function": "__agent_loop_run",
-            "name": "initial_opts",
-            "path": ["iteration_budget"]
-          },
-          {
-            "function": "__normalize_iteration_budget",
-            "name": "opts",
-            "path": ["iteration_budget"]
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "JudgeConfig",
-        "prefix": "JudgeConfig.",
-        "types": [
-          "JudgeConfig"
-        ],
-        "parameters": [
-          {"function": "__judge_apply_llm_overrides", "name": "judge_cfg"},
-          {"function": "__judge_resolve_model", "name": "judge_cfg"},
-          {
-            "function": "__judge_invoke_structured",
-            "name": "judge_cfg"
-          },
-          {
-            "function": "__normalize_judge_config",
-            "name": "value"
-          },
-          {
-            "function": "__judge_provider_family",
-            "name": "judge_cfg"
-          },
-          {
-            "function": "__judge_run_checkpoint",
-            "name": "request",
-            "path": ["judge_cfg"]
-          },
-          {
-            "function": "__judge_stable_prefix",
-            "name": "judge_cfg"
-          },
-          {
-            "function": "agent_turn_end_judge_cap",
-            "name": "judge_cfg"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "MissingToolCallRecoveryOptions",
-        "prefix": "MissingToolCallRecoveryOptions.",
-        "types": [
-          "MissingToolCallRecoveryOptions"
-        ],
-        "parameters": [
-          {"function": "__missing_tool_call_recovery_config", "name": "opts", "path": ["missing_tool_call_recovery"]},
-          {
-            "function": "__missing_tool_call_recovery_classifier",
-            "name": "opts",
-            "path": ["missing_tool_call_recovery"]
-          },
-          {
-            "function": "__validate_missing_tool_call_recovery",
-            "name": "value"
-          }
-        ],
-        "normalizers": [
-          {"function": "__missing_tool_call_recovery_config", "path": ["options"]}
-        ],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/workflow/**/*.harn",
-      "config": {
-        "id": "ModelPolicySpec",
-        "prefix": "ModelPolicySpec.",
-        "types": [
-          "ModelPolicySpec",
-          "WorkflowModelPolicy"
-        ],
-        "parameters": [
-          {"function": "__workflow_agent_loop_options", "name": "model_policy"},
-          {"function": "__workflow_llm_options", "name": "model_policy"},
-          {"function": "__workflow_stage_tool_format", "name": "model_policy"}
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "MonologueActuationConfig",
-        "prefix": "MonologueActuationConfig.",
-        "types": [
-          "MonologueActuationConfig",
-          "MonologueActuationOptions"
-        ],
-        "parameters": [
-          {"function": "agent_has_tools", "name": "opts", "path": ["stall_diagnostics", "monologue_actuation"]},
-          {
-            "function": "agent_monologue_actuation_config",
-            "name": "value"
-          },
-          {
-            "function": "agent_monologue_actuation_observe",
-            "name": "config"
-          },
-          {
-            "function": "agent_monologue_actuation_observe_completed_dispatch",
-            "name": "config"
-          },
-          {
-            "function": "agent_monologue_actuation_take",
-            "name": "config"
-          },
-          {
-            "function": "agent_monologue_actuation_take_for_turn",
-            "name": "turn_options",
-            "path": ["stall_diagnostics", "monologue_actuation"]
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "PurposeLabelConfig",
-        "prefix": "PurposeLabelConfig.",
-        "types": [
-          "PurposeLabelConfig",
-          "PurposeLabelOptions"
-        ],
-        "parameters": [
-          {
-            "function": "__purpose_label_instruction",
-            "name": "config"
-          },
-          {
-            "function": "agent_purpose_label_extract",
-            "name": "config"
-          },
-          {
-            "function": "agent_purpose_label_prefill",
-            "name": "config"
-          },
-          {
-            "function": "agent_purpose_label_prompt_fragment",
-            "name": "config"
-          },
-          {
-            "function": "agent_purpose_label_turn_nudge",
-            "name": "config"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "ReadOnlyStanceOptions",
-        "prefix": "ReadOnlyStanceOptions.",
-        "types": [
-          "ReadOnlyStanceOptions"
-        ],
-        "parameters": [
-          {"function": "__stance_config", "name": "opts", "path": ["read_only_stance"]},
-          {"function": "__stance_policy_patch", "name": "opts", "path": ["read_only_stance"]},
-          {"function": "__stance_register_escape_tool", "name": "opts", "path": ["read_only_stance"]},
-          {
-            "function": "__normalize_read_only_stance",
-            "name": "value"
-          },
-          {
-            "function": "__stance_register_escape_tool",
-            "name": "cfg"
-          },
-          {
-            "function": "agent_stance_prepare",
-            "name": "opts",
-            "path": ["read_only_stance"]
-          }
-        ],
-        "normalizers": ["__stance_config"],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/workflow/**/*.harn",
-      "config": {
-        "id": "StageSpec",
-        "prefix": "StageSpec.",
-        "types": [
-          "StageSpec"
-        ],
-        "parameters": [
-          {
-            "function": "__stage_compaction_options",
-            "name": "node"
-          },
-          {
-            "function": "__stage_max_attempts",
-            "name": "node"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "ToolSurfaceNarrowingOptions",
-        "prefix": "ToolSurfaceNarrowingOptions.",
-        "types": [
-          "ToolSurfaceNarrowingOptions"
-        ],
-        "parameters": [
-          {"function": "__tool_surface_current_entries", "name": "opts", "path": ["tool_surface_narrowing"]},
-          {"function": "__tool_surface_current_names", "name": "opts", "path": ["tool_surface_narrowing"]},
-          {
-            "function": "__normalize_tool_surface_narrowing",
-            "name": "value"
-          },
-          {
-            "function": "__tool_surface_entry_prunable",
-            "name": "config"
-          },
-          {
-            "function": "__tool_surface_narrowing_post_turn",
-            "name": "opts",
-            "path": ["tool_surface_narrowing"]
-          },
-          {
-            "function": "__tool_surface_removed",
-            "name": "config"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "TurnPolicy",
-        "prefix": "TurnPolicy.",
-        "types": [
-          "TurnPolicy",
-          "WorkflowTurnPolicy"
-        ],
-        "parameters": [],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "agent_done_contract",
-        "prefix": "agent_done_contract.",
-        "types": [],
-        "parameters": [
-          {"function": "__done_contract_primary_prompt", "name": "opts"},
-          {
-            "function": "__done_contract_judge_system",
-            "name": "opts"
-          },
-          {
-            "function": "__judge_stable_prefix",
-            "name": "opts"
-          },
-          {
-            "function": "agent_done_contract",
-            "name": "options"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    },
-    {
-      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
-      "config": {
-        "id": "autonomy_policy",
-        "prefix": "autonomy_policy.",
-        "types": [],
-        "parameters": [
-          {
-            "function": "autonomy_policy",
-            "name": "options"
-          }
-        ],
-        "normalizers": [],
-        "containers": []
-      }
-    }
-  ],
+  "binding_scopes": [],
   "forwarder_files": [
+    "spec/agent-gates/forwarding-agentspec-runner.json",
+    "spec/agent-gates/native-provider-forwarding.json",
+    "spec/agent-gates/reviewed-consumer-boundaries.json",
     "spec/agent-gates/forwarding-agentlifecycletoolsoptions.json",
     "spec/agent-gates/forwarding-agentspec.json",
     "spec/agent-gates/forwarding-agentstallconfig.json",
@@ -1454,6 +259,7 @@
     "spec/agent-gates/environment-forwarding.json"
   ],
   "non_behavior_files": [
+    "spec/agent-gates/native-runtime-facts.json",
     "spec/agent-gates/runtime-facts-agentspec.json",
     "spec/agent-gates/environment-facts.json"
   ],
@@ -1470,5 +276,31 @@
       "layer": "stall handler",
       "file": "docs/src/dev/agent-gates/stall-handler.md"
     }
+  ],
+  "binding_scope_files": [
+    "spec/agent-gates/bindings/agent-lifecycle-tools-options.json",
+    "spec/agent-gates/bindings/agent-loop-retry-options.json",
+    "spec/agent-gates/bindings/agent-spec.json",
+    "spec/agent-gates/bindings/agent-stall-config.json",
+    "spec/agent-gates/bindings/agent-stop-options.json",
+    "spec/agent-gates/bindings/command-wait-options.json",
+    "spec/agent-gates/bindings/compaction-policy.json",
+    "spec/agent-gates/bindings/completion-gate-options.json",
+    "spec/agent-gates/bindings/consecutive-failure-budget.json",
+    "spec/agent-gates/bindings/detector-spec.json",
+    "spec/agent-gates/bindings/iteration-budget.json",
+    "spec/agent-gates/bindings/judge-config.json",
+    "spec/agent-gates/bindings/missing-tool-call-recovery-options.json",
+    "spec/agent-gates/bindings/model-policy-spec.json",
+    "spec/agent-gates/bindings/monologue-actuation-config.json",
+    "spec/agent-gates/bindings/purpose-label-config.json",
+    "spec/agent-gates/bindings/read-only-stance-options.json",
+    "spec/agent-gates/bindings/stage-spec.json",
+    "spec/agent-gates/bindings/tool-surface-narrowing-options.json",
+    "spec/agent-gates/bindings/turn-policy.json",
+    "spec/agent-gates/bindings/agent-done-contract.json",
+    "spec/agent-gates/bindings/autonomy-policy.json",
+    "spec/agent-gates/bindings/step-judge-options.json",
+    "spec/agent-gates/bindings/agent-budget.json"
   ]
 }

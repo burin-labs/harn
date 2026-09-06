@@ -1,0 +1,13 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+  "config": {
+    "id": "AgentBudget",
+    "prefix": "AgentBudget.",
+    "types": [],
+    "parameters": [
+      {"function": "__budget_envelope", "name": "opts", "path": ["budget"]}
+    ],
+    "normalizers": ["__budget_envelope"],
+    "containers": []
+  }
+}

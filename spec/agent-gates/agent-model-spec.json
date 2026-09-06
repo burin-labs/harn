@@ -55,7 +55,13 @@
     "layer": "runner",
     "name": "AgentSpec.budget",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+        "line": 2,
+        "reader": "__budget_envelope"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -79,7 +85,13 @@
     "layer": "runner",
     "name": "AgentSpec.call_role",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 181,
+        "reader": "opt_str"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -132,6 +144,16 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
         "line": 657,
         "reader": "__agent_context_profile_fragments"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 643,
+        "reader": "__with_prompt_fragment"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 642,
+        "reader": "__with_prompt_fragment"
       }
     ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
@@ -181,7 +203,18 @@
     "layer": "runner",
     "name": "AgentSpec.frequency_penalty",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 269,
+        "reader": "super::helpers::opt_float"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 243,
+        "reader": "opt_float"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -205,7 +238,13 @@
     "layer": "runner",
     "name": "AgentSpec.idle_timeout_ms",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 308,
+        "reader": "opt_int"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -217,7 +256,13 @@
     "layer": "runner",
     "name": "AgentSpec.include",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 807,
+        "reader": "opt_str_list"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -315,6 +360,21 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 262,
+        "reader": "super::helpers::opt_int"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 227,
+        "reader": "opt_int"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 225,
+        "reader": "__invoke_llm_with_autocontinue"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
         "line": 361,
         "reader": "__run_structural_validator"
@@ -331,7 +391,13 @@
     "layer": "runner",
     "name": "AgentSpec.max_tool_calls",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 808,
+        "reader": "opt_int"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -367,7 +433,13 @@
     "layer": "runner",
     "name": "AgentSpec.min_p",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 235,
+        "reader": "opt_float"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -391,7 +463,13 @@
     "layer": "runner",
     "name": "AgentSpec.mock_scope",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 182,
+        "reader": "opt_str"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -517,7 +595,18 @@
     "layer": "runner",
     "name": "AgentSpec.presence_penalty",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 271,
+        "reader": "super::helpers::opt_float"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 245,
+        "reader": "opt_float"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -529,7 +618,13 @@
     "layer": "runner",
     "name": "AgentSpec.previous_response_id",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 801,
+        "reader": "opt_str"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -625,7 +720,13 @@
     "layer": "runner",
     "name": "AgentSpec.repetition_penalty",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 236,
+        "reader": "opt_float"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -661,7 +762,18 @@
     "layer": "runner",
     "name": "AgentSpec.schema_retries",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/call.rs",
+        "line": 579,
+        "reader": "helpers::opt_int"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/call.rs",
+        "line": 749,
+        "reader": "helpers::opt_int"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -685,7 +797,13 @@
     "layer": "runner",
     "name": "AgentSpec.seed",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 241,
+        "reader": "opt_int"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -698,6 +816,21 @@
     "name": "AgentSpec.session_id",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+        "line": 807,
+        "reader": "agent_primitive_option_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+        "line": 52,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 171,
+        "reader": "opt_str"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "line": 280,
@@ -725,7 +858,13 @@
     "layer": "runner",
     "name": "AgentSpec.speed",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 867,
+        "reader": "opt_str"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -737,7 +876,13 @@
     "layer": "runner",
     "name": "AgentSpec.stop",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 240,
+        "reader": "opt_str_list"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -749,7 +894,13 @@
     "layer": "runner",
     "name": "AgentSpec.stop_at_tool_call",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 1098,
+        "reader": "opt_bool"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -825,7 +976,18 @@
     "layer": "runner",
     "name": "AgentSpec.temperature",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 266,
+        "reader": "super::helpers::opt_float"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 230,
+        "reader": "opt_float"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -849,7 +1011,13 @@
     "layer": "runner",
     "name": "AgentSpec.timeout_ms",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 307,
+        "reader": "opt_int"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -874,6 +1042,26 @@
     "name": "AgentSpec.tool_format",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_config.rs",
+        "line": 510,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+        "line": 151,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/call.rs",
+        "line": 754,
+        "reader": "helpers::opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 488,
+        "reader": "opt_str"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
         "line": 183,
@@ -923,6 +1111,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
         "line": 110,
         "reader": "__explicit_tool_format"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 37,
+        "reader": "agent_refresh_tool_format_for_route"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
@@ -985,6 +1178,16 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 149,
+        "reader": "agent_completion_claim_apply_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
+        "line": 48,
+        "reader": "__judge_tool_entries"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
         "line": 54,
         "reader": "agent_loop"
@@ -998,6 +1201,16 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "line": 1251,
         "reader": "__dispatch_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 259,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 913,
+        "reader": "__agent_loop_run"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
@@ -1028,6 +1241,16 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
         "line": 930,
         "reader": "__agent_loop_final_wrapup"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+        "line": 89,
+        "reader": "__mcp_admit_tools"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 37,
+        "reader": "agent_refresh_tool_format_for_route"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
@@ -1131,7 +1354,18 @@
     "layer": "runner",
     "name": "AgentSpec.top_k",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 268,
+        "reader": "super::helpers::opt_int"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 232,
+        "reader": "opt_int"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -1143,7 +1377,18 @@
     "layer": "runner",
     "name": "AgentSpec.top_p",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 267,
+        "reader": "super::helpers::opt_float"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 231,
+        "reader": "opt_float"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -1167,7 +1412,13 @@
     "layer": "runner",
     "name": "AgentSpec.truncation",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 805,
+        "reader": "opt_str"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -1203,7 +1454,13 @@
     "layer": "runner",
     "name": "AgentSpec.vision",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 422,
+        "reader": "opt_bool"
+      }
+    ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   }

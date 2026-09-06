@@ -1,0 +1,114 @@
+[
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+    "expression": "\"_iteration\"",
+    "owner": "agent_primitive_option_int",
+    "evidence": "The current iteration number is supplied by the runner for event and tool-dispatch evidence."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+    "expression": "\"_stop_reason\"",
+    "owner": "agent_primitive_option_str",
+    "evidence": "The runner supplies the terminal reason as dispatch metadata."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/daemon_bridge.rs",
+    "expression": "\"daemon_state\"",
+    "owner": "opt_str",
+    "evidence": "The daemon snapshot call supplies current lifecycle state."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/daemon_bridge.rs",
+    "expression": "\"total_iterations\"",
+    "owner": "opt_int",
+    "evidence": "The daemon snapshot call supplies measured iteration count."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/daemon_bridge.rs",
+    "expression": "\"transcript_summary\"",
+    "owner": "opt_str",
+    "evidence": "The daemon snapshot receives a derived compaction summary, not a separate policy setting."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"error\"",
+    "owner": "opt_json",
+    "evidence": "Terminal error is supplied by the runner result."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"final_status\"",
+    "owner": "opt_str",
+    "evidence": "Finalization status is the runner result projected to the native session owner."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"iterations\"",
+    "owner": "opt_int",
+    "evidence": "Measured iteration count is supplied by the runner result."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"retry_run_id\"",
+    "owner": "opt_str",
+    "evidence": "Finalization retry identity locates an existing pending run; it is lifecycle state."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"stop_reason\"",
+    "owner": "opt_str",
+    "evidence": "Terminal reason is supplied by the runner result, not selected as run policy."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"suspension\"",
+    "owner": "opt_json",
+    "evidence": "The typed suspension record explains why the runner yielded; it is terminal evidence."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"tool_mode\"",
+    "owner": "opt_str",
+    "evidence": "Finalization records the session tool mode from the terminal status."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+    "expression": "\"_call_stage\"",
+    "owner": "opt_str",
+    "evidence": "Internal call-role provenance is assigned by the runner and checkpoint machinery."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+    "expression": "\"_directives_rendered\"",
+    "owner": "opt_bool",
+    "evidence": "Internal rendering receipt prevents adding already-rendered reminders twice."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+    "expression": "\"_done_sentinel_form\"",
+    "owner": "opt_str",
+    "evidence": "The completion projection supplies the resolved marker form; the public completion settings own that decision."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+    "expression": "\"_iteration\"",
+    "owner": "opt_int",
+    "evidence": "The current iteration number is supplied by the runner for event and tool-dispatch evidence."
+  }
+]

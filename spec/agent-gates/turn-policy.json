@@ -31,7 +31,13 @@
     "layer": "runner",
     "name": "TurnPolicy.require_action_or_yield",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 411,
+        "reader": "__agent_text_tool_contract_prompt"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   }

@@ -13,7 +13,7 @@ pub type AgentGateEntry = {
   evidence: string,
   verdict: "DELETE" | "PROMOTE-TO-DEFAULT" | "KEEP-with-expiry",
   reason: string,
-  expiry: string?,
+  expiry?: string?,
 }
 
 type AgentGateEntries = list<AgentGateEntry>
@@ -38,13 +38,21 @@ pub type AgentGateForwarder = {
   evidence: string,
 }
 
+/** Source boundary for one configuration owner. */
+pub type AgentGateBindingSource = {
+  glob: string,
+  extra_globs?: list<string>,
+  config: AgentGateBindingScope,
+}
+
 /** Per-repository policy data consumed by the shared structural audit. */
 pub type AgentGateRegistry = {
   schema_version: int,
   repo: string,
   entry_files: list<string>,
   scopes: list<AgentGateScope>,
-  binding_scopes: list<{glob: string, config: AgentGateBindingScope}>,
+  binding_scopes: list<AgentGateBindingSource>,
+  binding_scope_files?: list<string>,
   forwarder_files: list<string>,
   non_behavior_files: list<string>,
   name_prefixes: list<{from: string, to: string}>,
@@ -155,11 +163,26 @@ fn source_files(
   return files
 }
 
-/** Scan every declared source scope; empty, partial, or invalid parsing fails closed. */
+fn resolve_binding_sources(fs: HarnessFs, registry: AgentGateRegistry) -> AgentGateRegistry {
+  let sources = registry.binding_scopes
+  for file in registry.binding_scope_files ?? [] {
+    const source = schema_expect(json_parse(fs.read_text(file)), schema_of(AgentGateBindingSource))
+    sources = sources + [source]
+  }
+  return registry + {binding_scopes: sources, binding_scope_files: []}
+}
+
+/**
+ * Scan every declared source scope; empty, partial, or invalid parsing fails closed.
+ * @effects: [host]
+ * @errors: [validation, backend]
+ * @api_stability: experimental
+ */
 pub fn agent_gate_reads(
   harness: {ast: HarnessAst, fs: HarnessFs, process: HarnessProcess},
-  registry: AgentGateRegistry,
+  registry_input: AgentGateRegistry,
 ) -> list<AgentGateRead> {
+  const registry = resolve_binding_sources(harness.fs, registry_input)
   let reads: list<AgentGateRead> = []
   for scope in registry.scopes {
     const files = source_files({fs: harness.fs, process: harness.process}, scope.glob)
@@ -211,7 +234,11 @@ pub fn agent_gate_reads(
   let observed_owners: list<string> = []
   let observed_parameters: list<{scope: string, function: string, name: string}> = []
   for scope in registry.binding_scopes {
-    for file in source_files({fs: harness.fs, process: harness.process}, scope.glob) {
+    let files: list<string> = []
+    for pattern in [scope.glob] + (scope.extra_globs ?? []) {
+      files = files + source_files({fs: harness.fs, process: harness.process}, pattern)
+    }
+    for file in files.unique() {
       owners_by_file[file] = (owners_by_file[file] ?? []) + [scope.config]
     }
   }
@@ -281,7 +308,12 @@ fn cell(text: string) -> string {
   return replace(replace(text, "|", "\\|"), "\n", " ")
 }
 
-/** Generate the reviewable projection from the same typed entries the checker reads. */
+/**
+ * Generate the reviewable projection from the same typed entries the checker reads.
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
 pub fn agent_gate_markdown(repo: string, layer: string, entries: list<AgentGateEntry>) -> string {
   let lines = [
     "# " + layer + " configuration",
@@ -465,9 +497,9 @@ pub fn agent_gate_audit(
   registry_path: string,
   write: bool = false,
 ) -> AgentGateAudit {
-  const registry = schema_expect(
-    json_parse(harness.fs.read_text(registry_path)),
-    schema_of(AgentGateRegistry),
+  const registry = resolve_binding_sources(
+    harness.fs,
+    schema_expect(json_parse(harness.fs.read_text(registry_path)), schema_of(AgentGateRegistry)),
   )
   if registry.schema_version != 1 || len(registry.scopes) + len(registry.binding_scopes) == 0 {
     throw "agent gate registry: unsupported schema or empty scopes"

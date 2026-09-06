@@ -5,5 +5,26 @@
     "expression": "type_of(value)",
     "owner": "type_of",
     "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "ReadOnlyStanceOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+    "expression": "__stance_config(opts)",
+    "owner": "__stance_config",
+    "evidence": "Consumer __stance_config.opts in crates/harn-stdlib/src/stdlib/agent/stance.harn is an independently required binding origin for ReadOnlyStanceOptions; its literal reads are audited under that owner."
+  },
+  {
+    "scope": "ReadOnlyStanceOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+    "expression": "__stance_policy_patch(opts, escape_tool)",
+    "owner": "__stance_policy_patch",
+    "evidence": "Consumer __stance_policy_patch.opts in crates/harn-stdlib/src/stdlib/agent/stance.harn is an independently required binding origin for ReadOnlyStanceOptions; its literal reads are audited under that owner."
+  },
+  {
+    "scope": "ReadOnlyStanceOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+    "expression": "__stance_register_escape_tool(harness, opts, cfg, session.session_id, grant_flag)",
+    "owner": "__stance_register_escape_tool",
+    "evidence": "Consumer __stance_register_escape_tool.cfg in crates/harn-stdlib/src/stdlib/agent/stance.harn is an independently required binding origin for ReadOnlyStanceOptions; its literal reads are audited under that owner."
   }
 ]

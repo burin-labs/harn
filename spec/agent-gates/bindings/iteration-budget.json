@@ -1,0 +1,50 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "IterationBudget",
+    "prefix": "IterationBudget.",
+    "types": [
+      "IterationBudget"
+    ],
+    "parameters": [
+      {"function": "__with_mcp_tool_ceiling", "name": "opts", "path": ["iteration_budget"]},
+      {
+        "function": "agent_mcp_bootstrap_if_needed",
+        "name": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      },
+      {
+        "function": "__agent_loop_run",
+        "name": "initial_opts",
+        "path": [
+          "iteration_budget"
+        ]
+      },
+      {
+        "function": "__normalize_iteration_budget",
+        "name": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      },
+      {
+        "function": "__mcp_bootstrap_and_admit",
+        "name": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      },
+      {
+        "function": "__mcp_admit_tools",
+        "name": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

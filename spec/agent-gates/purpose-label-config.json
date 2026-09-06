@@ -1,7 +1,7 @@
 [
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "system",
+    "evidence": "purpose_labels.agent_purpose_label_config selects the default delivery channel. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -38,8 +38,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "false when omitted; true for a supplied configuration object",
+    "evidence": "purpose_labels.agent_purpose_label_config distinguishes an absent configuration from an explicit object. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
@@ -71,8 +71,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "64",
+    "evidence": "purpose_labels.agent_purpose_label_config uses PURPOSE_LABEL_DEFAULT_MAX_CHARS. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",

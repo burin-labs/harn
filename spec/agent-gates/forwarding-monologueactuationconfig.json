@@ -2,6 +2,20 @@
   {
     "scope": "MonologueActuationConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+    "expression": "agent_has_tools(turn_options)",
+    "owner": "agent_has_tools",
+    "evidence": "Consumer agent_has_tools.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for MonologueActuationConfig; its literal reads are audited under that owner."
+  },
+  {
+    "scope": "MonologueActuationConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+    "expression": "agent_monologue_actuation_config(\n    turn_options?.stall_diagnostics?.monologue_actuation,\n  )",
+    "owner": "agent_monologue_actuation_config",
+    "evidence": "Consumer agent_monologue_actuation_config.value in crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn is an independently required binding origin for MonologueActuationConfig; its literal reads are audited under that owner."
+  },
+  {
+    "scope": "MonologueActuationConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
     "expression": "type_of(value)",
     "owner": "type_of",
     "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
