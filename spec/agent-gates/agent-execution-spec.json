@@ -1,7 +1,7 @@
 [
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "empty list; no active-skill prompt fragment",
+    "evidence": "preflight.__agent_active_skill_prompt returns empty text for an absent or empty active list. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -36,8 +36,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; context_profile_options signals remain unchanged",
+    "evidence": "options_validation.__context_profile_options overlays context_signals and then code_librarian_signals only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -124,8 +124,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; context_profile_options signals remain unchanged",
+    "evidence": "options_validation.__context_profile_options overlays context_signals and then code_librarian_signals only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -165,8 +165,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no independent deadline, though iteration_budget.wall_clock_ms can impose one",
+    "evidence": "loop_foundation.__agent_loop_deadline_contract selects the earliest positive configured duration. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -183,8 +183,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no decorator; message_decorator takes precedence",
+    "evidence": "preflight.__agent_decorate_turn_message returns the message when both callback spellings are absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -206,8 +206,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "forwards_assistant_prefill false",
+    "evidence": "caller_transport.__normalize_llm_caller_transport resolves an omitted transport declaration to this capability. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "callback",
     "layer": "runner",
@@ -287,14 +287,19 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "fixed at the selected profile max_iterations (50 for default tool_using)",
+    "evidence": "options_public.__normalize_iteration_budget uses the profile max_iterations inserted by agent_loop_options and disables budget extension. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
     "name": "AgentSpec.iteration_budget",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 344,
+        "reader": "workflow-loop-key-domain"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
         "line": 36,
@@ -315,8 +320,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "forwards_assistant_prefill false",
+    "evidence": "caller_transport.__normalize_llm_caller_transport resolves an omitted transport declaration to this capability. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "callback",
     "layer": "runner",
@@ -348,8 +353,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "forwards_assistant_prefill false",
+    "evidence": "caller_transport.__normalize_llm_caller_transport resolves an omitted transport declaration to this capability. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "callback",
     "layer": "runner",
@@ -398,8 +403,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "three attempts unless retry overrides it; explicit nil disables retries",
+    "evidence": "retry.__agent_loop_retry_config resolves retry, then llm_retry, then max_attempts 3. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -566,8 +571,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; legacy decorate_message fallback, otherwise no decorator",
+    "evidence": "preflight.__agent_decorate_turn_message resolves the canonical callback before the compatibility input. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -661,13 +666,19 @@
     "layer": "runner",
     "name": "AgentSpec.nudge",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 339,
+        "reader": "workflow-loop-key-domain"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no callback verdict",
+    "evidence": "postturn.__post_turn_callback_verdict returns kind none when the callback is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "callback",
     "layer": "runner",
@@ -794,8 +805,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "enabled with three attempts",
+    "evidence": "retry.__agent_loop_retry_config disables retries only for false or an explicit nil llm_retry fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
@@ -817,8 +828,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "internal _run_id fallback; otherwise absent",
+    "evidence": "loop_tool_calls.__tool_envelope and __run_structural_validator project this precedence. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -904,8 +915,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "1000; clamp to at least 1",
+    "evidence": "agent_host_primitives uses the integer option or 1000 before clamping the tool retry delay. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -969,6 +980,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 340,
+        "reader": "workflow-loop-key-domain"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
         "line": 415,
         "reader": "__agent_text_tool_contract_prompt"
@@ -978,14 +994,19 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no explicit format override authority",
+    "evidence": "options_formats.agent_tool_format_resolution and native extract require a nonempty reason to authorize the override. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
     "name": "AgentSpec.tool_format_override_reason",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 153,
+        "reader": "model-registry-key-domain"
+      },
       {
         "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
         "line": 496,
@@ -1055,6 +1076,11 @@
     "name": "AgentSpec.turn_policy",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 341,
+        "reader": "workflow-loop-key-domain"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
         "line": 402,

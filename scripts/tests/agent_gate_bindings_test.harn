@@ -43,7 +43,7 @@ pipeline test_shared_normalizer_preserves_only_the_input_origin(harness: Harness
   const found = agent_gate_binding_reads({ast: harness.ast, fs: harness.fs}, path, selected)
   assert_eq(found.reads.map(fn(read) { return read.name }), ["TestOptions.enabled"])
   assert_eq(len(found.unresolved), 1)
-  assert_eq(found.unresolved[0].expression, "shared(raw)")
+  assert_eq(found.unresolved[0]?.expression, "shared(raw)")
   harness.fs.write_text(
     path,
     replace(harness.fs.read_text(path), "opts.enabled", "opts.new_setting"),
@@ -189,10 +189,10 @@ pipeline test_nested_parameter_origin_excludes_siblings_and_preserves_forwarding
     ["TestOptions.enabled", "TestOptions.threshold"],
   )
   assert_eq(len(result.unresolved), 4)
-  assert_eq(result.unresolved[0].target.pending, ["context", "options"])
-  assert_eq(result.unresolved[1].target.pending, ["options"])
-  assert_eq(result.unresolved[2].target.pending, [])
-  assert_eq(result.unresolved[3].reason, "dynamic configuration index")
+  assert_eq(result.unresolved[0]?.target?.pending, ["context", "options"])
+  assert_eq(result.unresolved[1]?.target?.pending, ["options"])
+  assert_eq(result.unresolved[2]?.target?.pending, [])
+  assert_eq(result.unresolved[3]?.reason, "dynamic configuration index")
 }
 
 @test

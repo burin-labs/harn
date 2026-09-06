@@ -18,26 +18,43 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "0.0; no token ceiling without positive history or fallback",
+    "evidence": "stall_detectors.token_runaway_decision supplies zero and returns no_cap when the resolved ceiling is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
     "name": "DetectorSpec.token_runaway.fallback",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 83,
+        "reader": "token_runaway_resolve_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 116,
+        "reader": "token_runaway_decision"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "3.0",
+    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_HARD_OVERSHOOT_MULTIPLE. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
     "name": "DetectorSpec.token_runaway.hard_multiple",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 129,
+        "reader": "token_runaway_decision"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -83,20 +100,31 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "0.0; no median history",
+    "evidence": "stall_detectors.token_runaway_decision supplies zero to token_runaway_resolve_cap when no history is supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
     "name": "DetectorSpec.token_runaway.median",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 80,
+        "reader": "token_runaway_resolve_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 119,
+        "reader": "token_runaway_decision"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "2.0",
+    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_DEFAULT_SIGMA. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -136,8 +164,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "0.0; use the thin-history margin",
+    "evidence": "stall_detectors.token_runaway_resolve_cap uses a 0.6 relative margin when standard deviation is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -159,8 +187,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "2.0",
+    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_DEFAULT_SIGMA. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -182,8 +210,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "0.0; use the thin-history margin",
+    "evidence": "stall_detectors.token_runaway_resolve_cap uses a 0.6 relative margin when standard deviation is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -205,8 +233,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "2.0",
+    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_DEFAULT_SIGMA. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -228,14 +256,25 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "0.0; use the thin-history margin",
+    "evidence": "stall_detectors.token_runaway_resolve_cap uses a 0.6 relative margin when standard deviation is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
     "name": "DetectorSpec.token_runaway.sigma",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 82,
+        "reader": "token_runaway_resolve_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 115,
+        "reader": "token_runaway_decision"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -247,7 +286,18 @@
     "layer": "runner",
     "name": "DetectorSpec.token_runaway.stddev",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 81,
+        "reader": "token_runaway_resolve_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 120,
+        "reader": "token_runaway_decision"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },

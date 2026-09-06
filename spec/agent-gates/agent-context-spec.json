@@ -1,7 +1,7 @@
 [
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "enabled unless explicitly false",
+    "evidence": "options_validation.__context_profile_disabled disables only a false boolean. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
@@ -36,8 +36,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "project_root, then root, then cwd, then current directory",
+    "evidence": "options_validation.__context_profile_root resolves the context-root precedence. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -54,8 +54,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "empty list",
+    "evidence": "options_validation.__task_ledger_from_shorthand filters nonempty deliverable text from the supplied list. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -72,8 +72,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent; built-in prompt catalog; prompts takes precedence",
+    "evidence": "prompts.__agent_prompt_overrides checks prompts before this compatibility input. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -95,8 +95,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent; built-in prompt catalog",
+    "evidence": "prompts.__agent_prompt_overrides checks prompts, then prompt_overrides, then a direct prompt catalog, otherwise an empty override map. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -118,14 +118,19 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "empty policy object; native default reminder providers apply",
+    "evidence": "options_validation.__normalize_reminder_provider_options inserts an empty dictionary when omitted. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
     "name": "AgentSpec.reminders",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 176,
+        "reader": "model-registry-key-domain"
+      },
       {
         "file": "crates/harn-vm/src/llm/reminder_providers.rs",
         "line": 1455,
@@ -192,8 +197,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "disabled",
+    "evidence": "scratchpad.agent_scratchpad_options returns disabled default options when scratchpad is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
@@ -239,8 +244,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "derived from root_task and deliverables when present; otherwise absent",
+    "evidence": "options_validation.__with_task_ledger_shorthand retains explicit task_ledger and constructs only a nonempty shorthand ledger. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -257,8 +262,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "false; legacy message_timestamps is consulted when absent",
+    "evidence": "preflight.__agent_decorate_turn_message resolves the timestamp switches before applying the decorator. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
@@ -280,8 +285,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no explicit projection override",
+    "evidence": "preflight.__agent_projection_options returns nil when omitted. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",

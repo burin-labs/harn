@@ -101,6 +101,7 @@ check = "check-agent-gates"
 outputs = ["docs/src/dev/agent-gates/runner.md", "docs/src/dev/agent-gates/stop-decision.md", "docs/src/dev/agent-gates/stall-handler.md"]
 sources = [
   "spec/agent-gates/",
+  "crates/harn-builtin-meta/src/llm_options.rs",
   "scripts/agent_gate_registry.harn",
   "crates/harn-stdlib/src/stdlib/dev/",
   "crates/harn-stdlib/src/stdlib/agent/",

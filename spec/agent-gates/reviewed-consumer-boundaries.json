@@ -1,5 +1,54 @@
 [
   {
+    "scope": "CallerTransport",
+    "file": "crates/harn-stdlib/src/stdlib/agent/caller_transport.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Language type inspection cannot read configuration fields."
+  },
+  {
+    "scope": "TokenRunaway",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+    "expression": "token_runaway_decision(config, obs)",
+    "owner": "token_runaway_decision",
+    "evidence": "The first parameter has an explicit TokenRunaway origin; its thresholds are audited independently."
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Language type inspection cannot read configuration fields."
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "__turn_end_judge_when_due(opts, cadence, state)",
+    "owner": "__turn_end_judge_when_due",
+    "evidence": "The cadence argument has a declared JudgeCadence origin; its when read is audited independently."
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "__turn_end_judge_every_due(cadence, turn_number)",
+    "owner": "__turn_end_judge_every_due",
+    "evidence": "The cadence argument has a declared JudgeCadence origin; its every read is audited independently."
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "__turn_end_judge_under_cap(opts, cadence)",
+    "owner": "__turn_end_judge_under_cap",
+    "evidence": "The cadence argument has a declared JudgeCadence origin; its max_invocations read is audited independently."
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "__turn_end_judge_past_warmup(cadence, turn_number)",
+    "owner": "__turn_end_judge_past_warmup",
+    "evidence": "The cadence argument has a declared JudgeCadence origin; its min_iterations_before_first read is audited independently."
+  },
+  {
     "scope": "AgentLoopRetryOptions",
     "file": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
     "expression": "__opts_dict(opts)",

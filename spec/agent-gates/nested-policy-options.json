@@ -118,14 +118,24 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "absent; no stall-specific cadence",
-    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/turn_end.harn:189; canonical host binding has not been observed.",
+    "default": "always",
+    "evidence": "turn_end.__turn_end_judge_when_due supplies always when the condition is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "cadence",
     "layer": "stop decision",
     "name": "JudgeConfig.cadence.when",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 194,
+        "reader": "__validate_judge_cadence"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 81,
+        "reader": "__turn_end_judge_when_due"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
         "line": 189,

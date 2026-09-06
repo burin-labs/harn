@@ -60,6 +60,7 @@
   ],
   "repo": "harn",
   "entry_files": [
+    "spec/agent-gates/caller-transport-options.json",
     "spec/agent-gates/agent-capability-spec.json",
     "spec/agent-gates/agent-context-spec.json",
     "spec/agent-gates/agent-execution-spec.json",
@@ -108,6 +109,24 @@
     "spec/agent-gates/judge-model-overrides.json"
   ],
   "scopes": [
+    {
+      "id": "workflow-loop-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+      "language": "harn",
+      "query": "((const_binding name: (identifier) @domain value: (list_literal (string_literal) @key)) (#eq? @domain \"loop_option_keys\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
+    {
+      "id": "model-registry-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-builtin-meta/src/llm_options.rs",
+      "language": "rust",
+      "query": "((const_item name: (identifier) @domain value: (reference_expression (array_expression (call_expression function: (scoped_identifier) @constructor arguments: (arguments . (string_literal) @key))))) (#eq? @domain \"LLM_CALL_OPTION_FIELDS\") (#eq? @constructor \"ShapeFieldDescriptor::optional\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
     {
       "id": "retry-destructured-options",
       "kind": "option",
@@ -278,6 +297,9 @@
     }
   ],
   "binding_scope_files": [
+    "spec/agent-gates/bindings/caller-transport.json",
+    "spec/agent-gates/bindings/token-runaway.json",
+    "spec/agent-gates/bindings/judge-cadence.json",
     "spec/agent-gates/bindings/agent-lifecycle-tools-options.json",
     "spec/agent-gates/bindings/agent-loop-retry-options.json",
     "spec/agent-gates/bindings/agent-spec.json",

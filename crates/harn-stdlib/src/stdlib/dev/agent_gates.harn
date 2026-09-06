@@ -305,7 +305,7 @@ pub fn agent_gate_reads(
 }
 
 fn cell(text: string) -> string {
-  return replace(replace(text, "|", "\\|"), "\n", " ")
+  return replace(replace(replace(text, "|", "\\|"), "_", "\\_"), "\n", " ")
 }
 
 /**

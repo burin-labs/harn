@@ -1,7 +1,7 @@
 [
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; use the supplied write facts without a custom classifier",
+    "evidence": "completion_gate.__completion_gate_evaluate passes the optional classifier to the write-count reducer. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
@@ -23,8 +23,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no explicit escalation destination",
+    "evidence": "completion_gate.__completion_gate_evaluate forwards the optional destination to the gate ladder. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
@@ -99,8 +99,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no host fact provider; absent facts and verify_command produce facts_unavailable",
+    "evidence": "completion_gate.agent_completion_gate determines facts availability from these two inputs and does not claim a measured pass when both are absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
@@ -127,8 +127,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; retain gate feedback",
+    "evidence": "completion_gate.__completion_gate_decorate_feedback returns the original verdict when no decorator is supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
@@ -145,8 +145,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; built-in feedback templates",
+    "evidence": "completion_gate.__completion_gate_evaluate supplies the optional templates to the gate ladder. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
@@ -168,8 +168,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no additional model judge",
+    "evidence": "completion_gate.agent_completion_gate installs a judge only when configured and truthy. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "stop decision",
@@ -270,8 +270,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "facts.requires_write, then require_source_write, then true",
+    "evidence": "completion_gate.__completion_gate_evaluate resolves the explicit setting before the fact and legacy setting. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "stop decision",
@@ -293,8 +293,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; use raw.verify when supplied by facts, otherwise no verifier observation",
+    "evidence": "completion_gate.__completion_gate_evaluate prioritizes fact-provided verification before the optional verifier callback. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
@@ -316,8 +316,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "all verifier results must be ok; empty input is unmeasured",
+    "evidence": "judge_internals.__completion_gate_combine_verify reduces every verdict and returns nil for absent or empty input. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",

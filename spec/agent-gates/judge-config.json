@@ -1,7 +1,7 @@
 [
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "empty object; evaluate every turn when a turn-end condition exists",
+    "evidence": "turn_end.__turn_end_judge_cadence normalizes an absent cadence to an empty dictionary. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "stop decision",
@@ -18,8 +18,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "5000 for completion checkpoints; absent for other checkpoints",
+    "evidence": "judge_internals.__judge_run_checkpoint clamps the completion deadline reserve to at least zero. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "stop decision",
@@ -46,14 +46,30 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent; evaluate every turn",
+    "evidence": "turn_end.__turn_end_judge_every_due returns true when every is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "stop decision",
-    "name": "JudgeConfig.every",
+    "name": "JudgeConfig.cadence.every",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 187,
+        "reader": "__validate_judge_cadence"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 97,
+        "reader": "__turn_end_judge_every_due"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 216,
+        "reader": "agent_stall_turn_end_judge_due"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -76,8 +92,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "completion judge: catalog completion_review.max_judge_calls, then 5; turn-end judge: absent (unbounded); nonpositive disables the cap",
+    "evidence": "completion_review.__verify_completion_judge_cap and turn_end.agent_turn_end_judge_cap own the two caller defaults. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "stop decision",
@@ -99,20 +115,36 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent; no warmup delay",
+    "evidence": "turn_end.__turn_end_judge_past_warmup returns true when the minimum is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "stop decision",
-    "name": "JudgeConfig.min_iterations_before_first",
+    "name": "JudgeConfig.cadence.min_iterations_before_first",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 192,
+        "reader": "__validate_judge_cadence"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 105,
+        "reader": "__turn_end_judge_past_warmup"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 212,
+        "reader": "agent_stall_turn_end_judge_due"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "provider catalog judge role; refuse if neither explicit nor catalog model resolves",
+    "evidence": "judge_internals.__judge_resolve_model returns no model when both sources are absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
@@ -129,8 +161,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "60000 for completion checkpoints; absent for other checkpoints",
+    "evidence": "judge_internals.__judge_run_checkpoint clamps the completion operation budget to at least 1 ms. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "stop decision",
@@ -157,8 +189,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "runner provider, then provider inferred from the actor model; otherwise absent",
+    "evidence": "judge_internals.__judge_provider_family resolves the provider family. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
@@ -279,8 +311,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "inherit runner LLM timeout; completion checkpoints fall back to and cap at the operation budget",
+    "evidence": "judge_internals.__judge_run_checkpoint resolves provider timeout separately from the operation deadline. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "stop decision",
@@ -312,14 +344,30 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent; no cadence invocation cap",
+    "evidence": "turn_end.__turn_end_judge_under_cap returns true when the cap is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
-    "name": "JudgeConfig.when",
+    "name": "JudgeConfig.cadence.max_invocations",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 188,
+        "reader": "__validate_judge_cadence"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 113,
+        "reader": "__turn_end_judge_under_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 208,
+        "reader": "agent_stall_turn_end_judge_due"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   }

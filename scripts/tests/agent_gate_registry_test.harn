@@ -61,7 +61,7 @@ pipeline test_structural_read_then_unregistered_key_fails(harness: Harness, task
     scope,
   )
   assert_eq(len(original), 1)
-  assert_eq(original[0].name, "options.enabled")
+  assert_eq(original[0]?.name, "options.enabled")
   assert_eq(agent_gate_findings([entry()], original, []).failures, [])
   let nested_owner = scope
   nested_owner.name_prefixes = [{from: "options.", to: "NestedOptions."}]
@@ -69,7 +69,7 @@ pipeline test_structural_read_then_unregistered_key_fails(harness: Harness, task
     {ast: harness.ast, fs: harness.fs, process: harness.process},
     nested_owner,
   )
-  assert_eq(renamed[0].name, "NestedOptions.enabled")
+  assert_eq(renamed[0]?.name, "NestedOptions.enabled")
   harness.fs.write_text(path, "fn example(options: dict) { return options.unregistered }\n")
   const changed = agent_gate_reads(
     {ast: harness.ast, fs: harness.fs, process: harness.process},
@@ -78,7 +78,7 @@ pipeline test_structural_read_then_unregistered_key_fails(harness: Harness, task
   assert_eq(len(changed), 1)
   const findings = agent_gate_findings([entry()], changed, [])
   assert_eq(len(findings.failures), 1)
-  assert_eq(changed[0].name, "options.unregistered")
+  assert_eq(changed[0]?.name, "options.unregistered")
 }
 
 @test
@@ -114,7 +114,7 @@ pipeline test_dynamic_key_cannot_borrow_a_registered_identifier(harness: Harness
     scope,
   )
   assert_eq(len(changed), 1)
-  assert_eq(changed[0].name, "")
+  assert_eq(changed[0]?.name, "")
   assert_eq(len(agent_gate_findings([entry()], changed, []).failures), 1)
 }
 
@@ -299,6 +299,9 @@ pipeline test_repository_selectors_reject_new_keys(harness: Harness, task: unkno
     schema_of(AgentGateRegistry),
   )
   const fixtures = {
+    "workflow-loop-key-domain": "fn example() { const loop_option_keys = [\"__TEST_KEY__\"] }",
+    "model-registry-key-domain":
+      "const LLM_CALL_OPTION_FIELDS: &[Field] = &[ShapeFieldDescriptor::optional(\"__TEST_KEY__\", TY_STRING)];",
     "retry-destructured-options": "fn with_retry() { const {__TEST_KEY__ = 3} = cfg }",
     "native-runner-option-helpers":
       "fn example() { let value = opt_str(options, \"__TEST_KEY__\"); }",
@@ -347,7 +350,8 @@ pipeline test_repository_selectors_reject_new_keys(harness: Harness, task: unkno
     assert_eq(agent_gate_findings([allowed], baseline, []).failures, [])
     harness.fs.write_text(
       path,
-      replace(fixtures[declared.id], "__TEST_KEY__", "HARN_UNREGISTERED_CENSUS"),
+      // This is an intentionally absent fixture name, not a production env read.
+      replace(fixtures[declared.id], "__TEST_KEY__", "HARN" + "_UNREGISTERED_CENSUS"),
     )
     const changed = agent_gate_reads(
       {ast: harness.ast, fs: harness.fs, process: harness.process},

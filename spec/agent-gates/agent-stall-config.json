@@ -23,8 +23,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "empty list; exempt_tools takes precedence",
+    "evidence": "stall_config.__agent_stall_config normalizes the legacy list only when exempt_tools is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stall handler",
@@ -581,8 +581,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; owning top-level repair defaults apply",
+    "evidence": "stall_config.__agent_stall_config accepts an optional nested policy and resolves each repair field through __agent_stall_repair_value. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stall handler",
