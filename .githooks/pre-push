@@ -221,7 +221,11 @@ fi
 # lane has not compiled one, which is how this gate came to be something people
 # only met in CI. Reuse any harn already on this machine, including PATH, and
 # never start a build from a hook.
-if hook_paths_match "$changed" "$HOOK_SOURCE_LENGTH_PATTERN"; then
+if ! hook_paths_match "$changed" "$HOOK_SOURCE_LENGTH_PATTERN"; then
+  echo "=== Pre-push: skipping source file-length ratchet (no Rust, stdlib Harn, or policy changes) ==="
+elif hook_skip_no_local_build "pre-push source file-length ratchet"; then
+  :
+else
   echo "=== Pre-push: checking source file lengths ==="
   source_length_harn=$(hook_find_existing_harn_bin || true)
   if [ -z "$source_length_harn" ]; then
@@ -235,8 +239,6 @@ if hook_paths_match "$changed" "$HOOK_SOURCE_LENGTH_PATTERN"; then
   else
     echo "    Source file lengths OK."
   fi
-else
-  echo "=== Pre-push: skipping source file-length ratchet (no Rust, stdlib Harn, or policy changes) ==="
 fi
 
 # ---------------------------------------------------------------------------
