@@ -114,11 +114,33 @@ fn has_git_repository_marker(root: &Path) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
     use tempfile::tempdir;
+
+    fn tempdir_outside_ambient_repo() -> tempfile::TempDir {
+        let ambient = std::env::current_dir().expect("cwd");
+        let temp_root = std::env::temp_dir();
+        let ambient_repo = ambient
+            .ancestors()
+            .find(|path| path.join(".git").exists())
+            .unwrap_or(ambient.as_path());
+        if !temp_root.starts_with(ambient_repo) {
+            return tempdir().unwrap();
+        }
+        let parent = ambient_repo
+            .parent()
+            .unwrap_or_else(|| Path::new("/"))
+            .join(".harn-hostlib-test-tmp");
+        fs::create_dir_all(&parent).unwrap();
+        tempfile::Builder::new()
+            .prefix("harn-hostlib-git-")
+            .tempdir_in(parent)
+            .unwrap()
+    }
 
     #[test]
     fn marker_detection_handles_plain_and_worktree_git_markers() {
-        let tmp = tempdir().unwrap();
+        let tmp = tempdir_outside_ambient_repo();
         let root = tmp.path();
 
         assert!(!has_git_repository_marker(root));

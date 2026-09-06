@@ -1964,6 +1964,7 @@ fn entry_confidence(
 }
 
 fn detect_vcs(dir: &Path) -> Option<String> {
+    let temp_root = std::env::temp_dir().canonicalize().ok();
     let mut cursor = Some(dir);
     while let Some(path) = cursor {
         if path.join(".git").exists() {
@@ -1971,6 +1972,9 @@ fn detect_vcs(dir: &Path) -> Option<String> {
         }
         if path.join(".hg").exists() {
             return Some("hg".to_string());
+        }
+        if temp_root.as_deref().is_some_and(|root| path == root) {
+            return None;
         }
         cursor = path.parent();
     }

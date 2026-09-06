@@ -38,7 +38,28 @@ vm_version="$(
     <<<"$metadata"
 )"
 
-tmp="$(mktemp -d)"
+scratch_parent="${HARN_PACKAGE_VERIFY_SCRATCH_DIR:-}"
+if [[ -z "$scratch_parent" ]]; then
+  scratch_parent="$(
+    python3 - "$ROOT_DIR" <<'PY'
+import os
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+tmp = pathlib.Path(os.environ.get("TMPDIR", "/tmp")).resolve()
+if tmp == root or root in tmp.parents:
+    parent = root.parent / ".harn-package-verify-tmp"
+else:
+    parent = tmp
+parent.mkdir(parents=True, exist_ok=True)
+print(parent)
+PY
+  )"
+else
+  mkdir -p "$scratch_parent"
+fi
+tmp="$(mktemp -d "$scratch_parent/package-verify.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 metadata_file="$tmp/cargo-metadata.json"
 printf '%s\n' "$metadata" >"$metadata_file"

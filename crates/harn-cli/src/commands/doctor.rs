@@ -1876,6 +1876,32 @@ mod tests {
     };
     use crate::json_envelope::JsonOutput;
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
+    use std::path::Path;
+
+    fn tempdir_outside_ambient_repo() -> tempfile::TempDir {
+        let ambient = std::env::current_dir().expect("cwd");
+        let temp_root = std::env::temp_dir();
+        let ambient_repo = find_harn_repo_root(&ambient)
+            .or_else(|| {
+                ambient
+                    .ancestors()
+                    .find(|path| path.join(".git").exists())
+                    .map(Path::to_path_buf)
+            })
+            .unwrap_or_else(|| ambient.clone());
+        if !temp_root.starts_with(&ambient_repo) {
+            return tempfile::tempdir().expect("tempdir");
+        }
+        let parent = ambient_repo
+            .parent()
+            .unwrap_or_else(|| Path::new("/"))
+            .join(".harn-cli-test-tmp");
+        std::fs::create_dir_all(&parent).expect("test temp parent");
+        tempfile::Builder::new()
+            .prefix("harn-cli-doctor-")
+            .tempdir_in(parent)
+            .expect("tempdir")
+    }
 
     #[test]
     fn build_healthcheck_url_uses_base_and_path() {
@@ -2285,14 +2311,14 @@ pub fn on_new_issue(event: TriggerEvent) {
         let found = find_harn_repo_root(&nested).expect("repo root");
         assert_eq!(found, root.path());
 
-        let unrelated = tempfile::tempdir().expect("tempdir");
+        let unrelated = tempdir_outside_ambient_repo();
         assert!(find_harn_repo_root(unrelated.path()).is_none());
     }
 
     #[test]
     fn protocol_artifacts_check_skipped_outside_repo() {
         let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd();
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = tempdir_outside_ambient_repo();
         let prev = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(dir.path()).expect("set cwd");
         let checks = check_protocol_artifacts();

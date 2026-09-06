@@ -117,6 +117,40 @@ fn context_profile_resolves_github_remote_with_credentials() {
 }
 
 #[test]
+fn context_profile_resolves_git_remote_from_subdirectory() {
+    let dir = temp_dir("context-github-subdir");
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    std::fs::create_dir_all(dir.path().join("crates/app/src")).unwrap();
+    std::fs::write(
+        dir.path().join(".git/config"),
+        "[remote \"origin\"]\n\turl = https://github.com/burin-labs/harn.git\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("crates/app/Cargo.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let mut options = context_options_without_env();
+    options.credentials = BTreeSet::from(["github".to_string()]);
+    let resolution = resolve_context_profile(&dir.path().join("crates/app"), options);
+
+    let profile_ids = context_profile_ids(&resolution);
+    assert!(profile_ids.contains(&"git".to_string()));
+    assert!(profile_ids.contains(&"github".to_string()));
+    assert!(profile_ids.contains(&"rust".to_string()));
+    assert_eq!(
+        resolution
+            .signals
+            .remote
+            .as_ref()
+            .and_then(|remote| remote.slug.as_ref()),
+        Some(&"burin-labs/harn".to_string())
+    );
+}
+
+#[test]
 fn context_profile_marks_github_preset_as_needing_credentials() {
     let dir = temp_dir("context-github-no-credentials");
     std::fs::create_dir_all(dir.path().join(".git")).unwrap();
@@ -489,6 +523,22 @@ fn project_fingerprint_detects_rust_nextest_profile() {
     assert_eq!(fingerprint.package_manager.as_deref(), Some("cargo"));
     assert_eq!(fingerprint.test_runner.as_deref(), Some("nextest"));
     assert_eq!(fingerprint.build_tool.as_deref(), Some("cargo"));
+    assert_eq!(fingerprint.vcs.as_deref(), Some("git"));
+}
+
+#[test]
+fn project_fingerprint_detects_parent_vcs_from_subdirectory() {
+    let dir = temp_dir("fingerprint-subdir-vcs");
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    std::fs::create_dir_all(dir.path().join("crates/app/src")).unwrap();
+    std::fs::write(
+        dir.path().join("crates/app/Cargo.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let fingerprint = detect_project_fingerprint(&dir.path().join("crates/app"));
+    assert_eq!(fingerprint.primary_language, "rust");
     assert_eq!(fingerprint.vcs.as_deref(), Some("git"));
 }
 
