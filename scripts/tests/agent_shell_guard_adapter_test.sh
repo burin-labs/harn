@@ -87,10 +87,22 @@ if [[ "$discarded_blocked" != *'"permissionDecision":"deny"'* ]] \
   exit 1
 fi
 
+# The worktree rule answers differently depending on whether the repository the
+# guard is vendored in owns an admission command. The wrapper measures its own
+# tree, so both directions need their own fixture root rather than a different
+# payload, and both are exercised end to end through the adapter.
+worktree_payload='{"tool_name":"Bash","tool_input":{"command":"bash -lc '\''git -C /workspace worktree add ../unowned origin/main'\''"}}'
+
+admitted_root="$(mktemp -d)"
+trap 'rm -rf "$admitted_root"' EXIT
+mkdir -p "$admitted_root/scripts"
+cp "$repo_root/scripts/agent-shell-guard.sh" "$admitted_root/scripts/"
+cp "$repo_root/scripts/agent_shell_guard.harn" "$admitted_root/scripts/"
+cp "$repo_root/scripts/agent_shell_guard_policy.harn" "$admitted_root/scripts/"
+printf '// admission\n' >"$admitted_root/scripts/fleet-worktree-admit.ts"
 worktree_blocked="$(
-  printf '%s' \
-    '{"tool_name":"Bash","tool_input":{"command":"bash -lc '\''git -C /workspace worktree add ../unowned origin/main'\''"}}' \
-    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+  printf '%s' "$worktree_payload" \
+    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
 )"
 if [[ "$worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
   || [[ "$worktree_blocked" != *'fleet-worktree-admit'* ]]; then
@@ -99,10 +111,23 @@ if [[ "$worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
   exit 1
 fi
 
+# The same command where the guard's own repository owns no admission command
+# must be allowed. Naming a command the operator cannot run is the failure this
+# direction guards, and an empty verdict is how the adapter says "allowed".
+worktree_allowed="$(
+  printf '%s' "$worktree_payload" \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$worktree_allowed" ]]; then
+  echo "adapter refused raw worktree creation where the repository owns no admission command" >&2
+  printf '%s\n' "$worktree_allowed" >&2
+  exit 1
+fi
+
 wrapped_worktree_blocked="$(
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/env -u GIT_DIR command git --no-pager worktree add ../unowned origin/main"}}' \
-    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
 )"
 if [[ "$wrapped_worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
   || [[ "$wrapped_worktree_blocked" != *'fleet-worktree-admit'* ]]; then

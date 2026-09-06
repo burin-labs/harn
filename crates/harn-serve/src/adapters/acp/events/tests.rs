@@ -27,6 +27,7 @@ mod plan_document;
 mod registration_fixtures;
 mod repair_claim;
 mod schema_contract;
+mod step_judge_skips;
 mod subagent_stop;
 mod tool_data;
 use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
@@ -494,6 +495,11 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             converted_from: Some("cosmetic_only".to_string()),
             escalation_recommended: Some(true),
             escalation_target: Some("frontier".to_string()),
+            judge_verdict: None,
+            judge_override: None,
+            gap_class: None,
+            judge_outcome: None,
+            terminal_evidence_preserved: None,
         },
         AgentEvent::StructuralValidatorDecision {
             session_id: "session-1".to_string(),
@@ -707,74 +713,6 @@ async fn loop_checkpoint_surfaces_typed_host_injection_delivery_count() {
     assert_eq!(params["inboxDelivered"], 2);
     assert_eq!(params["typedDelivered"], 4);
     assert_eq!(params["dispatchSkipped"], true);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn step_judge_decision_agent_event_marks_skipped_reason() {
-    let actual = collect_notifications(vec![AgentEvent::StepJudgeDecision {
-        session_id: "session-1".to_string(),
-        iteration: 1,
-        verdict: "pass".to_string(),
-        reasoning: String::new(),
-        critique: String::new(),
-        confidence: 1.0,
-        judge_duration_ms: 0,
-        vetoed: false,
-        skipped: true,
-        reason: Some("low_iteration_budget".to_string()),
-        judge_error: false,
-        on_veto: "replace".to_string(),
-        input_tokens: 0,
-        output_tokens: 0,
-        cost_usd: 0.0,
-        provider: String::new(),
-        model: String::new(),
-    }])
-    .await;
-
-    let notification = &actual[0];
-    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
-    let params = &notification["params"];
-    assert_eq!(params["kind"], "step_judge_decision");
-    assert_eq!(params["sessionId"], "session-1");
-    assert_eq!(params["skipped"], true);
-    assert_eq!(params["reason"], "low_iteration_budget");
-    assert_eq!(params["vetoed"], false);
-    // A genuine budget skip is NOT a swallowed judge error.
-    assert_eq!(params["judgeError"], false);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn step_judge_decision_agent_event_surfaces_judge_unavailable() {
-    // When the step-judge model errors and fail-open lets the turn through,
-    // the decision must carry the distinct `judgeError` marker so a
-    // fail-open swallow is observable, not indistinguishable from a real pass.
-    let actual = collect_notifications(vec![AgentEvent::StepJudgeDecision {
-        session_id: "session-1".to_string(),
-        iteration: 1,
-        verdict: "pass".to_string(),
-        reasoning: "judge backend 503".to_string(),
-        critique: String::new(),
-        confidence: 0.0,
-        judge_duration_ms: 0,
-        vetoed: false,
-        skipped: true,
-        reason: Some("judge_unavailable".to_string()),
-        judge_error: true,
-        on_veto: "replace".to_string(),
-        input_tokens: 0,
-        output_tokens: 0,
-        cost_usd: 0.0,
-        provider: String::new(),
-        model: String::new(),
-    }])
-    .await;
-
-    let params = &actual[0]["params"];
-    assert_eq!(params["kind"], "step_judge_decision");
-    assert_eq!(params["verdict"], "pass");
-    assert_eq!(params["reason"], "judge_unavailable");
-    assert_eq!(params["judgeError"], true);
 }
 
 #[tokio::test(flavor = "current_thread")]

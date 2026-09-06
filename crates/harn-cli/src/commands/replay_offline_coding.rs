@@ -1394,6 +1394,7 @@ fn main(harness: Harness) {
                 result_blake3: super::canonical_blake3(&serde_json::json!({
                     "byte_count": 14,
                     "cwd": "$WORKSPACE/repo",
+                    "denial": null,
                     "exit_code": 0,
                     "line_count": 1,
                     "output_sha256": "sha256:edd98eba7f0634541ba7a5062faec83ab42e51572fdb534054df86a64d55bf15",

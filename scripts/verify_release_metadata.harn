@@ -339,10 +339,64 @@ fn verify_release_notes(fs: HarnessFs, stdio: HarnessStdio, version: string) {
 }
 
 /**
+ * The subject line of one commit, or the empty string when git cannot read it.
+ * An unreadable subject fails the caller's check rather than satisfying it.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn commit_subject(process: HarnessProcess, commit: string) -> string {
+  const shown = process.run({program: "git", args: ["log", "--format=%s", "-n", "1", commit]})
+  if !shown.success {
+    return ""
+  }
+  return shown.stdout.trim()
+}
+
+/**
+ * True when what follows a matched subject prefix ends the version rather than
+ * extending it, so `Release v0.10.13` never matches `Release v0.10.131`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn subject_prefix_terminates(subject: string, prefix: string) -> bool {
+  if !subject.starts_with(prefix) {
+    return false
+  }
+  const rest = subject.substring(prefix.len(), subject.len())
+  return rest == "" || rest.starts_with(" ") || rest.starts_with("(")
+}
+
+/**
+ * True when a commit subject is this version's release lineage record.
+ *
+ * Two subjects are equivalent records. The release commit itself is one. The
+ * fold that carries its content back onto main is the other, and on this
+ * repository it is the only one main can ever hold: history is linear by
+ * ruleset, the release is cut off main, and a linear main cannot take the
+ * release commit as an ancestor. Requiring ancestry there would fail every
+ * release rather than catch a bad one.
+ *
+ * Matching is literal rather than a built regex so a version's dots cannot act
+ * as wildcards.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_release_lineage_subject(subject: string, version: string) -> bool {
+  return subject_prefix_terminates(subject, "Release v" + version)
+    || subject_prefix_terminates(subject, "[Release] Fold v" + version + " into main")
+}
+
+/**
  * Reject git tag states that would silently re-release or rewrite history.
  * Passes when the tag is absent, HEAD is at/descends from the tagged
- * commit, HEAD carries an equivalent `Release vX.Y.Z` commit, or the closed
+ * commit, HEAD carries this version's release lineage record, or the closed
  * withdrawal registry binds the immutable tag to this version exactly.
+ *
+ * Git narrows the log to plausible subjects; `is_release_lineage_subject` owns
+ * the decision, so the accepted forms have one definition and one test.
  */
 fn head_contains_release_commit(process: HarnessProcess, version: string) -> bool {
   const release = process.run(
@@ -350,16 +404,22 @@ fn head_contains_release_commit(process: HarnessProcess, version: string) -> boo
       program: "git",
       args: [
         "log",
-        "--format=%H",
-        "--grep=^Release v" + version + "( |$|\\()",
+        "--format=%s",
+        "--grep=^(Release|\\[Release\\] Fold) v",
         "--extended-regexp",
-        "-n",
-        "1",
         "HEAD",
       ],
     },
   )
-  return release.success && release.stdout.trim() != ""
+  if !release.success {
+    return false
+  }
+  for subject in release.stdout.split("\n") {
+    if is_release_lineage_subject(subject.trim(), version) {
+      return true
+    }
+  }
+  return false
 }
 
 fn verify_tag_state(
@@ -403,6 +463,18 @@ fn verify_tag_state(
     return
   }
   if head_contains_release_commit(process, version) {
+    // A lineage record on main is only as good as the tag it stands in for.
+    // Confirm the tag names this version's release commit before accepting a
+    // record in place of ancestry, so a fold subject cannot launder a tag that
+    // points somewhere else.
+    const tag_subject = commit_subject(process, tag_commit)
+    if !is_release_lineage_subject(tag_subject, version) {
+      throw "error: " + tag + " points at " + tag_commit
+        + ", whose subject is not this version's release commit ("
+        + tag_subject
+        + "); the release lineage record on HEAD cannot stand in for a tag that "
+        + "names something else"
+    }
     return
   }
   const withdrawal = release_withdrawal_for_tag(withdrawals, version, tag_commit)

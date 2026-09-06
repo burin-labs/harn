@@ -1,6 +1,6 @@
 name: Publish release
 
-# Fires on three triggers:
+# Fires on two triggers:
 #
 #   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path. The
 #      bump-fleet watcher creates the tag only after the exact Release PR
@@ -10,22 +10,7 @@ name: Publish release
 #      The tag push (under the harn-release-bot App identity) also
 #      cascades to build-release-binaries.yml for tarballs + container.
 #
-#   2. push to main — no-op/self-heal only. A release whose Cargo.toml
-#      version is ahead of the latest `vX.Y.Z` tag must already have a
-#      matching `vX.Y.Z` tag at the bumping commit. The one EXPECTED
-#      exception is the release-commit transient: the `Release vX.Y.Z`
-#      commit lands on main a few seconds before the signed `vX.Y.Z` tag
-#      is pushed at that same commit, so for that brief window the version
-#      is ahead with no matching tag yet. When HEAD is the genuine
-#      `Release vX.Y.Z` commit for the current version, this run is a
-#      clean no-op (drift=false, exit 0) and waits for the tag push to
-#      publish — it does NOT turn main red. If the version is ahead with
-#      no matching tag and HEAD is NOT that release commit, the workflow
-#      still fails loudly instead of tagging main HEAD. That keeps
-#      main-anchored publishing mandatory, while a stray version bump without
-#      a tag is still caught.
-#
-#   3. workflow_dispatch — manual recovery for the partial-failure case
+#   2. workflow_dispatch — manual recovery for the partial-failure case
 #      (tag pushed but crates.io publish was incomplete). With no
 #      drift, dispatch checks out the existing release tag so crates.io,
 #      release notes, and the git tag stay tied to the same commit.
@@ -44,7 +29,6 @@ name: Publish release
 # `reaudit: true`) to opt back in for paranoid local runs.
 on:
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:

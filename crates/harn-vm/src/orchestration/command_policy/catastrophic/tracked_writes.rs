@@ -43,8 +43,48 @@ pub(super) fn truncate_catastrophe(
             .iter()
             .any(|target| is_protected_project_file(target, active_cwd, workspace_roots)))
     .then(|| {
-        "`truncate -s 0` of a tracked project file is blocked: it would erase the file's contents. Use the edit tool to rewrite it.".to_string()
+        let named = targets
+            .iter()
+            .find_map(|target| {
+                protected_project_file_reason(target, active_cwd, workspace_roots)
+                    .map(|reason| reason.describe(target))
+            })
+            .unwrap_or_else(|| "the target".to_string());
+        format!("`truncate -s 0` is blocked: it would erase {named}")
     })
+}
+
+/// Why a write target is protected by the never-approvable floor.
+///
+/// The floor blocks all three, but they are not the same finding and a reader
+/// acts on them differently. Naming only the first sent readers hunting a Git
+/// tracking problem in workspaces that have no Git at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProtectedTargetReason {
+    /// Git tracks the file: overwriting it replaces reviewed project state.
+    GitTracked,
+    /// No Git tracking is available and the file already exists. The floor
+    /// cannot tell reviewed state from scratch output, so it refuses.
+    ExistsWithoutGit,
+    /// No execution root is known, so the target cannot be resolved at all.
+    Unresolvable,
+}
+
+impl ProtectedTargetReason {
+    /// Why this specific target is refused, in the reader's terms.
+    fn describe(self, target: &str) -> String {
+        match self {
+            Self::GitTracked => format!(
+                "`{target}` is tracked by Git, so writing it would replace reviewed project state. Use the edit tool to change it."
+            ),
+            Self::ExistsWithoutGit => format!(
+                "`{target}` already exists and this workspace has no Git tracking to consult, so the floor cannot tell reviewed project state from scratch output. Use the edit tool to change it, or write to a path that does not exist yet."
+            ),
+            Self::Unresolvable => format!(
+                "`{target}` cannot be resolved because no execution root is known, so whether it is project state cannot be established."
+            ),
+        }
+    }
 }
 
 pub(super) fn redirect_target_over_tracked_reason(
@@ -52,35 +92,46 @@ pub(super) fn redirect_target_over_tracked_reason(
     active_cwd: Option<&Path>,
     workspace_roots: &[String],
 ) -> Option<String> {
-    if is_protected_project_file(target, active_cwd, workspace_roots) {
-        return Some(format!(
-            "shell redirection onto the tracked project file `{target}` is blocked: it would replace or append to reviewed project state. Use the edit tool to change it."
-        ));
-    }
-    None
+    let reason = protected_project_file_reason(target, active_cwd, workspace_roots)?;
+    Some(format!(
+        "shell redirection onto {} is blocked.",
+        reason.describe(target)
+    ))
 }
 
-fn is_protected_project_file(
+fn protected_project_file_reason(
     target: &str,
     active_cwd: Option<&Path>,
     _workspace_roots: &[String],
-) -> bool {
+) -> Option<ProtectedTargetReason> {
     if target.contains(['$', '*', '?', '[', ']', '{', '}', '~']) {
         // This floor is never approvable, so unresolved shell expansion must
         // not turn a possible tracked path into a hard denial. Literal targets
         // still use Git state below; the sandbox and approval layer own dynamic
         // targets after the shell resolves them.
-        return false;
+        return None;
     }
     let Some(cwd) = active_cwd else {
-        return true;
+        return Some(ProtectedTargetReason::Unresolvable);
     };
     let target = resolved_target(cwd, target);
     match git_tracks_file(cwd, &target) {
-        Some(tracked) => tracked,
-        None if target.is_absolute() && !target.starts_with(cwd) => false,
-        None => target.symlink_metadata().is_ok(),
+        Some(true) => Some(ProtectedTargetReason::GitTracked),
+        Some(false) => None,
+        None if target.is_absolute() && !target.starts_with(cwd) => None,
+        None => target
+            .symlink_metadata()
+            .is_ok()
+            .then_some(ProtectedTargetReason::ExistsWithoutGit),
     }
+}
+
+fn is_protected_project_file(
+    target: &str,
+    active_cwd: Option<&Path>,
+    workspace_roots: &[String],
+) -> bool {
+    protected_project_file_reason(target, active_cwd, workspace_roots).is_some()
 }
 
 fn resolved_target(cwd: &Path, target: &str) -> PathBuf {
@@ -256,6 +307,75 @@ mod tests {
         git(cwd, &["add", "tracked file"]);
 
         assert!(redirect_target_over_tracked_reason("tracked file", Some(cwd), &[]).is_some());
+    }
+
+    /// THE MISDIAGNOSIS THIS CLOSES.
+    ///
+    /// Outside a Git repository the floor has no tracking to consult and treats
+    /// every existing file as protected. That is the conservative choice, but
+    /// the refusal used to say the target was a "tracked project file" in a
+    /// workspace with no tracking at all, sending readers to hunt a Git problem
+    /// that does not exist. The block is unchanged; only the reason is now true.
+    #[test]
+    fn an_existing_file_without_git_is_refused_by_existence_not_by_tracking() {
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path();
+        // Deliberately NOT a Git repository.
+        assert!(redirect_target_over_tracked_reason("proof.txt", Some(cwd), &[]).is_none());
+        std::fs::write(cwd.join("proof.txt"), "first").unwrap();
+
+        let reason = redirect_target_over_tracked_reason("proof.txt", Some(cwd), &[])
+            .expect("a second write to an existing file is still refused");
+        assert!(
+            reason.contains("already exists") && reason.contains("no Git tracking"),
+            "the refusal must name existence, not tracking: {reason}"
+        );
+        assert!(
+            !reason.contains("tracked by Git"),
+            "a workspace with no Git must not be told its file is tracked by Git: {reason}"
+        );
+
+        let truncate_args = ["-s".to_string(), "0".to_string(), "proof.txt".to_string()];
+        let truncate_reason = truncate_catastrophe(&truncate_args, Some(cwd), &[])
+            .expect("truncation of an existing file is still refused");
+        assert!(
+            truncate_reason.contains("already exists"),
+            "truncation names the same reason as redirection: {truncate_reason}"
+        );
+    }
+
+    /// DIRECTION CONTROL. A genuinely tracked file keeps the tracking reason,
+    /// so the new wording cannot swallow the case it was written for.
+    #[test]
+    fn a_git_tracked_file_is_still_refused_for_being_tracked() {
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path();
+        init_git(cwd);
+        std::fs::write(cwd.join("reviewed.rs"), "old").unwrap();
+        git(cwd, &["add", "reviewed.rs"]);
+
+        let reason = redirect_target_over_tracked_reason("reviewed.rs", Some(cwd), &[])
+            .expect("a tracked file is refused");
+        assert!(
+            reason.contains("tracked by Git"),
+            "a tracked file keeps its own reason: {reason}"
+        );
+        assert!(
+            !reason.contains("already exists"),
+            "the existence wording must not displace the tracking finding: {reason}"
+        );
+    }
+
+    /// DIRECTION CONTROL. With no execution root nothing can be resolved, and
+    /// that is its own finding rather than either of the other two.
+    #[test]
+    fn an_unresolvable_target_says_so_rather_than_claiming_tracking() {
+        let reason = redirect_target_over_tracked_reason("anything.txt", None, &[])
+            .expect("an unresolvable target is still refused");
+        assert!(
+            reason.contains("no execution root"),
+            "the refusal names the missing root: {reason}"
+        );
     }
 
     fn init_git(root: &Path) {

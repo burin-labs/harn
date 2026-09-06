@@ -386,6 +386,31 @@ pub enum AgentEvent {
         escalation_recommended: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         escalation_target: Option<String>,
+        /// The judge's OWN answer, beside `verdict`, which is the answer of
+        /// record and may be an override's. A reader with only `verdict` and
+        /// `source` cannot tell the two apart, which is how a record came to
+        /// report `done` for a run whose every judge decision was `continue`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        judge_verdict: Option<String>,
+        /// Present only when `verdict` is not the judge's own answer. Carries
+        /// the overriding party and the rule it applied, so a consumer reads
+        /// the conversion as data instead of inferring it from prose.
+        #[serde(default, rename = "override", skip_serializing_if = "Option::is_none")]
+        judge_override: Option<serde_json::Value>,
+        /// What a refusal is refusing on. Emitted by the stdlib since the
+        /// itemization work and dropped here until now, so a consumer asking
+        /// which class blocked a run got nothing back.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gap_class: Option<String>,
+        /// Admission-level outcome (`admission_refused`, `error`, and so on),
+        /// distinct from the verdict. Also emitted and previously dropped.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        judge_outcome: Option<String>,
+        /// Whether terminal evidence survived this decision. Emitted with a
+        /// `?? false` default at the call site, so dropping it here erased
+        /// both the value and the fact that it had been recorded.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_evidence_preserved: Option<bool>,
     },
     /// Per-step critique decision emitted by `agent_step_judge`.
     /// Sibling of [`JudgeDecision`] but fired BEFORE tool dispatch on
