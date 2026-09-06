@@ -1479,7 +1479,8 @@ pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
   let errors: list<string> = []
   for field in [job?.["runs-on"], job?.env?.HARN_E2E_JOBS] {
     if !contains(to_string(field ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
-      errors = errors + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
+      errors = errors
+        + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
     }
   }
   if !contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_8CPU_RUNNER) {
