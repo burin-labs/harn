@@ -35,6 +35,134 @@ where
     }
 }
 
+#[cfg(unix)]
+fn run_command(mut command: Command) -> ! {
+    use std::os::unix::process::CommandExt;
+
+    let error = command.exec();
+    eprintln!("harn-sccache-wrapper: failed to replace wrapper with compiler: {error}");
+    process::exit(1);
+}
+
+#[cfg(windows)]
+fn run_command(mut command: Command) -> ! {
+    if let Err(error) = windows_lifetime::bind_descendants_to_wrapper() {
+        eprintln!("harn-sccache-wrapper: failed to bind compiler lifetime: {error}");
+        process::exit(1);
+    }
+
+    match command.status() {
+        Ok(status) => process::exit(status.code().unwrap_or(1)),
+        Err(error) => {
+            eprintln!("harn-sccache-wrapper: failed to start compiler: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn run_command(mut command: Command) -> ! {
+    match command.status() {
+        Ok(status) => process::exit(status.code().unwrap_or(1)),
+        Err(error) => {
+            eprintln!("harn-sccache-wrapper: failed to start compiler: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+#[cfg(windows)]
+mod windows_lifetime {
+    use std::ffi::c_void;
+    use std::io;
+
+    type Handle = *mut c_void;
+
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct BasicLimitInformation {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct IoCounters {
+        read_operation_count: u64,
+        write_operation_count: u64,
+        other_operation_count: u64,
+        read_transfer_count: u64,
+        write_transfer_count: u64,
+        other_transfer_count: u64,
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct ExtendedLimitInformation {
+        basic_limit_information: BasicLimitInformation,
+        io_info: IoCounters,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
+        fn CloseHandle(object: Handle) -> i32;
+        fn CreateJobObjectW(attributes: *const c_void, name: *const u16) -> Handle;
+        fn GetCurrentProcess() -> Handle;
+        fn SetInformationJobObject(
+            job: Handle,
+            information_class: i32,
+            information: *const c_void,
+            information_length: u32,
+        ) -> i32;
+    }
+
+    pub(super) fn bind_descendants_to_wrapper() -> io::Result<()> {
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if job.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut limits = ExtendedLimitInformation::default();
+        limits.basic_limit_information.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                std::ptr::from_ref(&limits).cast(),
+                std::mem::size_of_val(&limits) as u32,
+            )
+        };
+        let assigned =
+            configured != 0 && unsafe { AssignProcessToJobObject(job, GetCurrentProcess()) } != 0;
+        if !assigned {
+            let error = io::Error::last_os_error();
+            unsafe {
+                CloseHandle(job);
+            }
+            return Err(error);
+        }
+
+        // Keep the only job handle open until process teardown. Windows then
+        // kills any compiler descendant if this wrapper is terminated early.
+        Ok(())
+    }
+}
+
 fn main() {
     let mut arguments = env::args_os();
     let _wrapper = arguments.next();
@@ -63,13 +191,7 @@ fn main() {
         eprintln!("harn-sccache-wrapper: route={label}");
     }
 
-    match command.status() {
-        Ok(status) => process::exit(status.code().unwrap_or(1)),
-        Err(error) => {
-            eprintln!("harn-sccache-wrapper: failed to start compiler: {error}");
-            process::exit(1);
-        }
-    }
+    run_command(command);
 }
 
 #[cfg(test)]

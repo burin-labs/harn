@@ -19,6 +19,52 @@ rustc --edition=2021 --test "$wrapper_source" -o "$wrapper_tests"
 "$wrapper_tests"
 rustc --edition=2021 "$wrapper_source" -o "$wrapper_binary"
 
+if [[ "${OS:-$(uname -s)}" != Windows_NT \
+  && "${OS:-$(uname -s)}" != MINGW* \
+  && "${OS:-$(uname -s)}" != MSYS* \
+  && "${OS:-$(uname -s)}" != CYGWIN* ]]; then
+  lifecycle_bin="$tmp_root/lifecycle-bin"
+  lifecycle_ready="$tmp_root/lifecycle-ready"
+  lifecycle_release="$tmp_root/lifecycle-release"
+  mkdir -p "$lifecycle_bin"
+  mkfifo "$lifecycle_ready" "$lifecycle_release"
+  cat > "$lifecycle_bin/rustc-probe" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$$" > "$LIFECYCLE_READY"
+IFS= read -r _ < "$LIFECYCLE_RELEASE"
+SH
+  cp "$lifecycle_bin/rustc-probe" "$lifecycle_bin/sccache"
+  chmod +x "$lifecycle_bin/rustc-probe" "$lifecycle_bin/sccache"
+
+  assert_process_replaced() {
+    local route="$1"
+    local wrapper_pid compiler_pid
+    if [[ "$route" == direct ]]; then
+      CARGO_BIN_EXE_probe=placeholder \
+        LIFECYCLE_READY="$lifecycle_ready" \
+        LIFECYCLE_RELEASE="$lifecycle_release" \
+        "$wrapper_binary" "$lifecycle_bin/rustc-probe" &
+    else
+      PATH="$lifecycle_bin:$PATH" \
+        LIFECYCLE_READY="$lifecycle_ready" \
+        LIFECYCLE_RELEASE="$lifecycle_release" \
+        "$wrapper_binary" "$lifecycle_bin/rustc-probe" &
+    fi
+    wrapper_pid=$!
+    IFS= read -r compiler_pid < "$lifecycle_ready"
+    if [[ "$compiler_pid" != "$wrapper_pid" ]]; then
+      printf 'wrapper did not preserve process identity for %s route: wrapper=%s compiler=%s\n' \
+        "$route" "$wrapper_pid" "$compiler_pid" >&2
+      return 1
+    fi
+    printf 'release\n' > "$lifecycle_release"
+    wait "$wrapper_pid"
+  }
+
+  assert_process_replaced direct
+  assert_process_replaced sccache
+fi
+
 fixture="$tmp_root/cargo-binary-env"
 mkdir -p "$fixture/src" "$fixture/tests"
 cat > "$fixture/Cargo.toml" <<'TOML'

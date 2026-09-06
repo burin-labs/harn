@@ -363,13 +363,16 @@ build_sccache_rustc_wrapper() {
     mkdir -p "$wrapper_dir"
     temporary_path="$wrapper_path.tmp.$$"
     rustc --edition=2021 -C strip=symbols "$source_path" -o "$temporary_path"
-    # Multiple worktrees may run setup together. Publish once without
-    # replacing a wrapper that another setup process has already made live.
-    mv -n "$temporary_path" "$wrapper_path"
-    if [[ -e "$temporary_path" ]]; then
+    # A same-filesystem hard link publishes the complete executable atomically
+    # and never replaces a live wrapper, including on Windows. A concurrent
+    # publisher may win first; its source-addressed artifact is equivalent.
+    if ! ln "$temporary_path" "$wrapper_path" 2>/dev/null \
+      && [[ ! -x "$wrapper_path" ]]; then
       rm -f "$temporary_path"
+      echo "error: failed to publish the sccache wrapper" >&2
+      return 1
     fi
-    chmod +x "$wrapper_path"
+    rm -f "$temporary_path"
   fi
 
   printf '%s\n' "$wrapper_path"
