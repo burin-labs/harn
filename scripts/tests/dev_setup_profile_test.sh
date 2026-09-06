@@ -54,6 +54,7 @@ make_fixture_repo() {
 
   mkdir -p "$repo/scripts/lib" "$repo/bin"
   cp "$repo_root/scripts/dev_setup.sh" "$repo/scripts/dev_setup.sh"
+  cp "$repo_root/scripts/sccache_rustc_wrapper.rs" "$repo/scripts/sccache_rustc_wrapper.rs"
   cp "$repo_root/scripts/cargo_target_seed.sh" "$repo/scripts/cargo_target_seed.sh"
   cp "$repo_root/scripts/lib/file_time.sh" "$repo/scripts/lib/file_time.sh"
   chmod +x "$repo/scripts/dev_setup.sh" "$repo/scripts/cargo_target_seed.sh"
@@ -107,6 +108,20 @@ set -euo pipefail
 if [[ "${1:-}" == "-vV" ]]; then
   printf 'rustc:%s\n' "$*" >> "${DEV_SETUP_TEST_RUSTC_QUERY_RECORD:-/dev/null}"
   printf 'rustc 1.90.0 (fixture)\nhost: fixture-target\n'
+  exit 0
+fi
+if [[ "$*" == *sccache_rustc_wrapper.rs* ]]; then
+  output=""
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == "-o" ]]; then
+      output="$2"
+      break
+    fi
+    shift
+  done
+  [[ -n "$output" ]] || exit 65
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$output"
+  chmod +x "$output"
   exit 0
 fi
 echo "unexpected fixture rustc invocation: $*" >&2
@@ -378,6 +393,13 @@ if ! grep -Fxq \
   'SCCACHE_BASEDIRS = { value = ".", relative = true, force = true } # harn-dev-setup-managed' \
   "$rust_repo/.cargo/config.toml"; then
   echo "rust setup did not normalize sccache paths across worktrees" >&2
+  exit 1
+fi
+rust_wrapper=$(sed -n 's/^[[:space:]]*rustc-wrapper = "\([^"]*\)".*/\1/p' \
+  "$rust_repo/.cargo/config.toml")
+if [[ ! -x "$rust_wrapper" \
+  || "$rust_wrapper" != "$rust_storage_root"/sccache-wrapper/fixture-target-*/harn-sccache-wrapper ]]; then
+  echo "rust setup did not install the native cross-platform sccache wrapper" >&2
   exit 1
 fi
 if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
