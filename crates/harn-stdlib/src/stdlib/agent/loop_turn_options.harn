@@ -92,20 +92,21 @@ pub fn __sync_tool_search_state(opts: any, turn_opts: dict) {
   return synced
 }
 
-// A successful annotated workspace mutation advances the repair write epoch.
+// Producer mutation evidence outranks transport success for repair progress.
 pub const __REPAIR_EDIT_KINDS = ["edit", "write", "scaffold", "delete", "mutation", "mutate"]
 
 pub fn __turn_made_edit(dispatch: AgentToolDispatch?, tools: any) -> bool {
   if dispatch == nil {
     return false
   }
-  for name in __tool_names_by_status(dispatch, true) {
-    const entry = __tool_registry_entry(tools, name)
+  for result in __dispatch_results_list(dispatch) {
+    const entry = __tool_registry_entry(tools, __tool_result_name(result))
     const annotations = agent_tool_entry_annotations(entry)
     const kind = lowercase(
       to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""),
     )
-    if contains(__REPAIR_EDIT_KINDS, kind) {
+    if contains(__REPAIR_EDIT_KINDS, kind)
+      && (__intra_turn_result_mutated(result) ?? __tool_result_ok(result)) {
       return true
     }
   }
