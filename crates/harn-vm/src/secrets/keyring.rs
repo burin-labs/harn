@@ -625,21 +625,97 @@ mod tests {
         assert!(error.to_string().contains("mock read-only store"));
     }
 
+    /// A credential store that never answers, so the deadline is the only
+    /// thing that can end a probe against it.
+    ///
+    /// The obvious way to test a deadline is to set it to zero, and that is
+    /// what this test used to do. It does not test the deadline: the probe
+    /// runs on its own thread, and `recv_timeout` hands back a result that is
+    /// already in the channel no matter how short the deadline is, so a zero
+    /// deadline only fails the probe when the caller loses a race against
+    /// thread startup. On one host the probe was slower and the test passed;
+    /// on a hosted runner the probe won and the same code reported a healthy
+    /// store under an expired deadline.
+    ///
+    /// Blocking in `build` reproduces what the deadline exists for. A locked
+    /// Secret Service collection stops answering there, inside the platform
+    /// client, with no way to cancel it from the calling thread.
+    #[derive(Debug)]
+    struct NeverAnswersStore {
+        released: Mutex<bool>,
+        released_signal: std::sync::Condvar,
+    }
+
+    impl NeverAnswersStore {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                released: Mutex::new(false),
+                released_signal: std::sync::Condvar::new(),
+            })
+        }
+
+        /// Let the abandoned probe thread finish.
+        ///
+        /// Production leaves it parked for the life of the process on purpose,
+        /// which is fine for a command that is about to exit and rude in a
+        /// test binary that keeps running.
+        fn release(&self) {
+            *self.released.lock().expect("release lock") = true;
+            self.released_signal.notify_all();
+        }
+    }
+
+    impl keyring_core::api::CredentialStoreApi for NeverAnswersStore {
+        fn vendor(&self) -> String {
+            "harn-test/never-answers".to_string()
+        }
+
+        fn id(&self) -> String {
+            "never-answers".to_string()
+        }
+
+        fn build(
+            &self,
+            _service: &str,
+            _user: &str,
+            _modifiers: Option<&HashMap<&str, &str>>,
+        ) -> keyring_core::Result<Entry> {
+            let mut released = self.released.lock().expect("release lock");
+            while !*released {
+                released = self
+                    .released_signal
+                    .wait(released)
+                    .expect("wait for release");
+            }
+            Err(KeyringError::NoStorageAccess(Box::new(
+                std::io::Error::other("the test released a parked probe"),
+            )))
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
     #[test]
     fn healthcheck_gives_up_on_a_store_that_does_not_answer() {
-        let store: Arc<CredentialStore> = keyring_core::mock::Store::new().unwrap();
-        let keyring = NativeKeyring::with_store("harn.healthcheck-deadline", store);
+        // Positive control first: the same call against a store that does
+        // answer passes, so the refusal below is the deadline firing and not
+        // the probe failing for some other reason.
+        NativeKeyring::with_store(
+            "harn.healthcheck-deadline",
+            keyring_core::mock::Store::new().unwrap(),
+        )
+        .healthcheck_within(Duration::from_secs(5))
+        .expect("a responsive store passes within the deadline");
 
-        // Positive control first: with a real deadline this store passes, so
-        // the timeout branch below is the deadline firing and not the probe
-        // failing for some other reason.
-        keyring
-            .healthcheck_within(Duration::from_secs(5))
-            .expect("a responsive store passes within the deadline");
+        let store = NeverAnswersStore::new();
+        let blocking: Arc<CredentialStore> = store.clone();
+        let keyring = NativeKeyring::with_store("harn.healthcheck-deadline", blocking);
 
         let error = keyring
-            .healthcheck_within(Duration::ZERO)
-            .expect_err("an expired deadline must not report a healthy store");
+            .healthcheck_within(Duration::from_millis(50))
+            .expect_err("a store that never answers must not report a healthy store");
 
         assert!(
             matches!(error, NativeKeyringError::Unresponsive { .. }),
@@ -654,5 +730,7 @@ mod tests {
             Some(NativeKeyringUnavailable::InteractionRequired),
             "a store awaiting a prompt is unavailable, not an operational failure"
         );
+
+        store.release();
     }
 }
