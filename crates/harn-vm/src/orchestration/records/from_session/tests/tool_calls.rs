@@ -5,6 +5,7 @@ use serde_json::json;
 
 use super::super::*;
 use super::support::*;
+
 #[tokio::test]
 async fn tool_calls_join_their_updates_and_results_by_provider_call_id() {
     let (store, id) = capstone_like_store().await;

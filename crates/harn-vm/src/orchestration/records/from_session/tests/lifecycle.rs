@@ -5,6 +5,7 @@ use serde_json::json;
 
 use super::super::*;
 use super::support::*;
+
 #[tokio::test]
 async fn a_loop_that_ended_in_error_projects_as_a_failed_run() {
     let store = MemorySessionStore::default();

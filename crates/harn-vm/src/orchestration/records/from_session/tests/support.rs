@@ -10,6 +10,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 
 use super::super::*;
+
 pub(super) fn custom(kind: &str) -> SessionEventKind {
     SessionEventKind::Custom {
         custom_type: kind.to_string(),

@@ -5,6 +5,7 @@ use serde_json::json;
 
 use super::super::*;
 use super::support::*;
+
 #[tokio::test]
 async fn readable_messages_project_in_order_without_private_payload_fields() {
     let (store, id) = capstone_like_store().await;

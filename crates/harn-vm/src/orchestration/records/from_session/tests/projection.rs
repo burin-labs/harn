@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use super::super::*;
 use super::support::*;
+
 #[tokio::test]
 async fn a_headless_session_projects_the_run_record_no_host_ever_wrote() {
     let (store, id) = capstone_like_store().await;
