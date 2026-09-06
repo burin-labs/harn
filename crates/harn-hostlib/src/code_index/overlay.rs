@@ -50,6 +50,11 @@ pub enum FileDelta {
         source: String,
         /// Raw import strings to register against the branch view.
         imports: Vec<String>,
+        /// This file's **resolved** imports on the branch, which scope
+        /// call resolution. Whoever stages the delta owns resolving
+        /// them; an empty vector means "imports nothing", not "resolve
+        /// against the whole workspace".
+        imported_files: Vec<FileId>,
     },
     /// The branch no longer has this file at all.
     Removed,
@@ -112,9 +117,16 @@ impl BranchOverlay {
                     language,
                     source,
                     imports,
+                    imported_files,
                 } => {
-                    self.materialized
-                        .rebuild_file(*file_id, path, *language, source, imports);
+                    self.materialized.rebuild_file(
+                        *file_id,
+                        path,
+                        *language,
+                        source,
+                        imports,
+                        imported_files,
+                    );
                 }
             }
         }
@@ -242,9 +254,9 @@ mod tests {
 
     fn base_graph() -> SymbolGraph {
         let mut g = SymbolGraph::new();
-        g.rebuild_file(1, "src/a.rs", Language::Rust, "fn a() {}\n", &[]);
-        g.rebuild_file(2, "src/b.rs", Language::Rust, "fn b() {}\n", &[]);
-        g.rebuild_file(3, "src/c.rs", Language::Rust, "fn c() {}\n", &[]);
+        g.rebuild_file(1, "src/a.rs", Language::Rust, "fn a() {}\n", &[], &[]);
+        g.rebuild_file(2, "src/b.rs", Language::Rust, "fn b() {}\n", &[], &[]);
+        g.rebuild_file(3, "src/c.rs", Language::Rust, "fn c() {}\n", &[], &[]);
         g
     }
 
@@ -271,6 +283,7 @@ mod tests {
                 language: Language::Rust,
                 source: "fn b2() {}\nfn b3() {}\n".into(),
                 imports: Vec::new(),
+                imported_files: Vec::new(),
             },
         );
         overlay.materialize(&base);
@@ -364,9 +377,16 @@ mod tests {
     #[test]
     fn overlay_relink_replaces_stale_harn_reference_edges() {
         let mut base = SymbolGraph::new();
-        base.rebuild_file(1, "a.harn", Language::Harn, "fn run() { 1 }", &[]);
-        base.rebuild_file(2, "b.harn", Language::Harn, "fn run() { 2 }", &[]);
-        base.rebuild_file(3, "use.harn", Language::Harn, "fn use_it() { run() }", &[]);
+        base.rebuild_file(1, "a.harn", Language::Harn, "fn run() { 1 }", &[], &[]);
+        base.rebuild_file(2, "b.harn", Language::Harn, "fn run() { 2 }", &[], &[]);
+        base.rebuild_file(
+            3,
+            "use.harn",
+            Language::Harn,
+            "fn use_it() { run() }",
+            &[],
+            &[],
+        );
         let mut overlay = BranchOverlay::new("topic/refs");
         overlay.materialize(&base);
         overlay.relink_harn_references(&[ResolvedHarnReference {

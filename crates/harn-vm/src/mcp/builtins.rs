@@ -1001,8 +1001,9 @@ const REAUTH_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
 
 /// Select the OAuth-backed HTTP MCP servers from registry specs and map them to
 /// bulk-auth driver inputs. An OAuth server is HTTP with a URL and no static
-/// bearer (`auth_token`): static/secret-backed servers resolve a bearer at
-/// registration time and are excluded. Client/scope details are left unset —
+/// bearer (`auth_token`) or deferred static-auth declaration (`auth_static`).
+/// Lazy secret-backed servers are excluded without loading their credentials.
+/// Client/scope details are left unset —
 /// silent refresh reuses the stored token's client, and the interactive
 /// fallback uses the CIMD default.
 fn oauth_servers_from_specs(
@@ -1020,7 +1021,13 @@ fn oauth_servers_from_specs(
                 .get("auth_token")
                 .and_then(|value| value.as_str())
                 .is_some_and(|token| !token.is_empty());
-            if transport.as_str() != "http" || url.is_empty() || has_static_bearer {
+            let static_declared =
+                spec.get("auth_static").and_then(|value| value.as_bool()) == Some(true);
+            if transport.as_str() != "http"
+                || url.is_empty()
+                || has_static_bearer
+                || static_declared
+            {
                 return None;
             }
             let name = spec
@@ -1080,6 +1087,13 @@ mod reauth_tests {
                 "transport": "http",
                 "url": "https://internal/mcp",
                 "auth_token": "secret",
+            }),
+            // A deferred static credential must not become an OAuth candidate.
+            serde_json::json!({
+                "name": "DeferredStatic",
+                "transport": "http",
+                "url": "https://static.example/mcp",
+                "auth_static": true,
             }),
             // stdio server → excluded.
             serde_json::json!({
