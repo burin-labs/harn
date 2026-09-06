@@ -53,11 +53,16 @@ async fn test_parallel_fail_fast_cancels_slow_sibling() {
                 run_harn_result_async(
                     r#"pipeline t(harness: Harness, task: unknown) {
 const survived = harness.runtime.atomic(0)
+const sibling_started = harness.runtime.atomic(0)
 try {
   parallel 2 { i ->
     if i == 0 {
+      while harness.runtime.atomic_get(sibling_started) == 0 {
+        harness.runtime.yield_now()
+      }
       throw "boom"
     }
+    harness.runtime.atomic_set(sibling_started, 1)
     harness.clock.sleep_ms(5000)
     harness.runtime.atomic_set(survived, 1)
     i
@@ -88,11 +93,16 @@ async fn test_parallel_each_fail_fast_cancels_slow_sibling() {
                 run_harn_result_async(
                     r#"pipeline t(harness: Harness, task: unknown) {
 const survived = harness.runtime.atomic(0)
+const sibling_started = harness.runtime.atomic(0)
 try {
   parallel each ["fail", "slow"] { item ->
     if item == "fail" {
+      while harness.runtime.atomic_get(sibling_started) == 0 {
+        harness.runtime.yield_now()
+      }
       throw "each boom"
     }
+    harness.runtime.atomic_set(sibling_started, 1)
     harness.clock.sleep_ms(5000)
     harness.runtime.atomic_set(survived, 1)
     item
