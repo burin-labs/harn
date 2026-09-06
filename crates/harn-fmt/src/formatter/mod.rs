@@ -481,14 +481,65 @@ impl<'a> Formatter<'a> {
         prefix_col: usize,
         indent: usize,
     ) -> String {
+        self.format_call_args_spanned(args, prefix_col, indent, None)
+    }
+
+    /// Format call arguments, claiming any comments written between them.
+    ///
+    /// `call_span` is the caller's own `(line, end_line)`. With it, a full-line
+    /// comment sitting between two arguments is attached to the argument below
+    /// it and the call is forced multiline so the comment can be emitted in
+    /// place. Without it the comment belongs to no argument, stays unclaimed,
+    /// and the end-of-file sweep re-emits it after the last top-level item —
+    /// which silently moved a comment out of the call it documented.
+    ///
+    /// A call is a comma sequence like a list or dict literal, and this routes
+    /// it through the same claiming path those already use rather than adding
+    /// a second one.
+    pub(super) fn format_call_args_spanned(
+        &self,
+        args: &[SNode],
+        prefix_col: usize,
+        indent: usize,
+        call_span: Option<(usize, usize)>,
+    ) -> String {
         // Each arg may itself wrap; if it does, it will land at `indent + 1`
         // so we render children at that depth so their internal wraps are
         // aligned correctly.
-        let rendered = args
+        let Some((call_line, call_end_line)) = call_span else {
+            let rendered = args
+                .iter()
+                .map(|arg| self.format_expr(arg, indent + 1, wrapped_item_column(indent)))
+                .collect::<Vec<_>>();
+            return self.format_comma_sequence(rendered, prefix_col, indent);
+        };
+        // A synthesized call has a zero span and anchors no comments. Treating
+        // its range as starting at line 0 would claim every unclaimed comment
+        // above it in the file, so fall back to the uncommented path.
+        if call_line == 0 {
+            let rendered = args
+                .iter()
+                .map(|arg| self.format_expr(arg, indent + 1, wrapped_item_column(indent)))
+                .collect::<Vec<_>>();
+            return self.format_comma_sequence(rendered, prefix_col, indent);
+        }
+        let mut from_line = call_line + 1;
+        let items = args
             .iter()
-            .map(|arg| self.format_expr(arg, indent + 1, wrapped_item_column(indent)))
+            .map(|arg| {
+                let body = self.format_expr(arg, indent + 1, wrapped_item_column(indent));
+                let item = self.commented_item(
+                    body,
+                    from_line,
+                    arg.span.line,
+                    arg.span.end_line,
+                    call_end_line,
+                );
+                from_line = arg.span.end_line + 1;
+                item
+            })
             .collect::<Vec<_>>();
-        self.format_comma_sequence(rendered, prefix_col, indent)
+        self.format_comma_sequence_commented(items, prefix_col, indent)
     }
 
     /// Format selective import names, wrapping when they exceed `line_width`.

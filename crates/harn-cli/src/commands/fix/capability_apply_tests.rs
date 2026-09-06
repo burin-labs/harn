@@ -903,7 +903,7 @@ fn capability_apply_repairs_session_ids_from_agent_session_producers() {
 #[test]
 fn capability_apply_projects_retired_host_call_count_through_testing() {
     let (result, updated) = apply_single(
-        "import { host_call_count, with_temp_dir } from \"std/testing\"\n\npipeline test_main(harness: Harness, _task: any) {\n  assert(host_call_count() == 0)\n  return with_temp_dir(harness.fs, { dir -> dir })\n}\n",
+        "import { host_call_count, with_temp_dir } from \"std/testing\"\n\npipeline test_main(harness: Harness) {\n  assert(host_call_count() == 0)\n  return with_temp_dir(harness.fs, { dir -> dir })\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,

@@ -270,10 +270,11 @@ impl Formatter<'_> {
                             .join(", ")
                     )
                 };
-                let args_str = self.format_call_args(
+                let args_str = self.format_call_args_spanned(
                     args,
                     column + text_width(name) + text_width(&type_args_str) + 1,
                     indent,
+                    Some((node.span.line, node.span.end_line)),
                 );
                 format!("{name}{type_args_str}({args_str})")
             }
@@ -282,8 +283,16 @@ impl Formatter<'_> {
                 if needs_parens_as_postfix_object(&callee.node) {
                     callee_text = format!("({callee_text})");
                 }
-                let args_str =
-                    self.format_call_args(args, column + text_width(&callee_text) + 1, indent);
+                // Bound the comment range at the callee's last line, not the
+                // call's first: a callee that spans lines owns the comments
+                // written inside it, and claiming from the call's start would
+                // pull them out into the argument list.
+                let args_str = self.format_call_args_spanned(
+                    args,
+                    column + text_width(&callee_text) + 1,
+                    indent,
+                    Some((callee.span.end_line, node.span.end_line)),
+                );
                 format!("{callee_text}({args_str})")
             }
             Node::MethodCall {
@@ -300,8 +309,18 @@ impl Formatter<'_> {
                 let wrap = self.chain_wraps(&obj, &lead, text_width(method) + 2, column);
                 let prefix_len =
                     self.chain_prefix_len(&obj, text_width(method) + 2, column, indent, wrap);
-                let args_str =
-                    self.format_call_args(args, prefix_len, self.chain_args_indent(indent, wrap));
+                // Start the argument comment range at the FIRST argument's own
+                // line, not the call's. `chain_segment_comments` above has
+                // already claimed everything between the object and that first
+                // argument and rendered it as the chain lead; overlapping the
+                // two ranges would move a chain comment into the argument list.
+                let args_str = self.format_call_args_spanned(
+                    args,
+                    prefix_len,
+                    self.chain_args_indent(indent, wrap),
+                    args.first()
+                        .map(|first| (first.span.line, node.span.end_line)),
+                );
                 if wrap {
                     format!("{obj}\n{lead}{pad}.{method}({args_str})")
                 } else {
@@ -323,8 +342,18 @@ impl Formatter<'_> {
                 let wrap = self.chain_wraps(&obj, &lead, text_width(method) + 3, column);
                 let prefix_len =
                     self.chain_prefix_len(&obj, text_width(method) + 3, column, indent, wrap);
-                let args_str =
-                    self.format_call_args(args, prefix_len, self.chain_args_indent(indent, wrap));
+                // Start the argument comment range at the FIRST argument's own
+                // line, not the call's. `chain_segment_comments` above has
+                // already claimed everything between the object and that first
+                // argument and rendered it as the chain lead; overlapping the
+                // two ranges would move a chain comment into the argument list.
+                let args_str = self.format_call_args_spanned(
+                    args,
+                    prefix_len,
+                    self.chain_args_indent(indent, wrap),
+                    args.first()
+                        .map(|first| (first.span.line, node.span.end_line)),
+                );
                 if wrap {
                     format!("{obj}\n{lead}{pad}?.{method}({args_str})")
                 } else {

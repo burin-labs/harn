@@ -72,6 +72,98 @@ fn test_dict_entry_comments_stay_in_literal() {
 }
 
 #[test]
+fn test_call_argument_comment_stays_in_the_call() {
+    // harn#8274. A full-line comment between two call arguments was claimed by
+    // no argument, so it stayed unclaimed and the end-of-file sweep re-emitted
+    // it after the last top-level item. The comment did not vanish, which is
+    // why the round-trip token count still matched; it silently came to
+    // describe the end of the file instead of the argument below it.
+    let source = concat!(
+        "fn fixture(path: string, value: string) {\n",
+        "  write(\n",
+        "    path,\n",
+        "    // Keep this comment before the second argument.\n",
+        "    replace(value, \"old\", \"new\"),\n",
+        "  )\n",
+        "}\n",
+    );
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("    // Keep this comment before the second argument.\n    replace("),
+        "call-argument comment must stay above its argument, got:\n{result}"
+    );
+    assert!(
+        !result
+            .trim_end()
+            .ends_with("// Keep this comment before the second argument."),
+        "comment must not be flushed to the end of the file, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_method_call_argument_comment_stays_in_the_call() {
+    // harn#8274 as it was actually reported: the fixture that broke the
+    // Windows corpus audit is a method call, not a bare function call. The
+    // chain already claimed comments written between the object and the first
+    // argument; a comment before any LATER argument belonged to nobody.
+    let source = concat!(
+        "fn fixture(harness: Harness, path: string) {\n",
+        "  harness.fs.write_text(\n",
+        "    path,\n",
+        "    // An intentionally absent fixture name, not a production read.\n",
+        "    replace(path, \"__KEY__\", \"VALUE\"),\n",
+        "  )\n",
+        "}\n",
+    );
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains(
+            "    // An intentionally absent fixture name, not a production read.\n    replace("
+        ),
+        "method-call argument comment must stay above its argument, got:\n{result}"
+    );
+    assert!(
+        !result.trim_end().ends_with("not a production read."),
+        "comment must not be flushed to the end of the file, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_call_argument_trailing_comment_stays_on_the_argument() {
+    // The other half of the same seam: a same-line comment after an argument.
+    let source = concat!(
+        "fn fixture(path: string) {\n",
+        "  write(\n",
+        "    path, // the destination\n",
+        "    \"body\",\n",
+        "  )\n",
+        "}\n",
+    );
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("path,  // the destination"),
+        "trailing argument comment must stay on the argument, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_call_without_interior_comments_still_collapses() {
+    // Direction control. Forcing a call multiline whenever it has comments is
+    // only safe if a call with none still collapses; otherwise this widens
+    // every short call in the corpus.
+    let source =
+        "fn f() -> string {\n  return replace(\n    \"a\",\n    \"b\",\n    \"c\",\n  )\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("return replace(\"a\", \"b\", \"c\")"),
+        "a call with no comments must still collapse, got:\n{result}"
+    );
+}
+
+#[test]
 fn test_list_item_trailing_comment_stays_in_literal() {
     let source = "fn f() -> list {\n  let l = [\n    1, // one\n    2,\n  ]\n  l\n}\n";
     let result = format_source(source).unwrap();
