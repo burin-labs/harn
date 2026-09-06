@@ -192,7 +192,11 @@ startup. Windows uses a Job Object and the function returns `false`.
   a `handle_id`.
 - `tools/read_command_output` range-reads the artifact for a `command_id`,
   `handle_id`, or explicit `path`. Use it when `stdout`/`stderr` were capped
-  inline or when an agent needs to inspect large command output.
+  inline or when an agent needs to inspect large command output. Completed
+  results remain repeat-readable until this process's retention policy retires
+  them. `HARN_COMMAND_ARTIFACT_MAX_DIRS` is a per-process registration cap, so
+  N live processes may retain up to N times that value; shared cleanup removes
+  oldest unleased directories and never revokes active or registered results.
 - `tools/run_test` runs explicit `argv` verbatim or detects a default test
   runner from manifests in `cwd`. Pytest and vitest get a JUnit XML output
   path so `inspect_test_results` can drill into per-test records.
