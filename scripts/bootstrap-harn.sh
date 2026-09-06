@@ -54,20 +54,39 @@ digest() {
 }
 if [ "$HARN_EXT_BOOTSTRAP_OFFLINE" != 1 ]; then
   download "$base/SHA256SUMS" "$work/SHA256SUMS"
+  manifest_source=$work/SHA256SUMS
+else
+  [ -f "$cache/SHA256SUMS" ] || { echo 'offline seed manifest missing' >&2; exit 1; }
+  manifest_source=$cache/SHA256SUMS
+fi
+expected=$(awk -v asset="$asset" '
+  NF == 0 { next }
+  {
+    checksum = $1
+    name = $2
+    sub(/^\*/, "", name)
+    remainder = checksum
+    gsub(/[0-9a-fA-F]/, "", remainder)
+    if (NF != 2 || length(checksum) != 64 || remainder != "" || name == "" || name ~ /[\\\/]/ || seen[name]++) exit 1
+    if (name == asset) { count++; selected = checksum }
+  }
+  END { if (count != 1) exit 1; print selected }
+' "$manifest_source") || { echo 'invalid seed checksum manifest' >&2; exit 1; }
+expected=$(printf '%s' "$expected" | tr A-F a-f)
+if [ "$HARN_EXT_BOOTSTRAP_OFFLINE" != 1 ]; then
   if [ -f "$cache/SHA256SUMS" ]; then
     cmp -s "$work/SHA256SUMS" "$cache/SHA256SUMS" || { echo 'published seed checksums changed' >&2; exit 1; }
   else
     cp "$work/SHA256SUMS" "$manifest_tmp"
-    mv "$manifest_tmp" "$cache/SHA256SUMS"
+    if ln "$manifest_tmp" "$cache/SHA256SUMS" 2>/dev/null; then
+      :
+    elif [ ! -f "$cache/SHA256SUMS" ] \
+      || ! cmp -s "$manifest_tmp" "$cache/SHA256SUMS"; then
+      echo 'concurrent seed checksum publication changed' >&2
+      exit 1
+    fi
   fi
-elif [ ! -f "$cache/SHA256SUMS" ]; then
-  echo 'offline seed manifest missing' >&2
-  exit 1
 fi
-expected=$(awk -v asset="$asset" '$2 == asset || $2 == "*" asset { count++; checksum=$1 } END { if(count != 1) exit 1; print checksum }' "$cache/SHA256SUMS")
-case "$expected" in *[!0-9a-fA-F]*|'') echo 'invalid seed checksum' >&2; exit 1;; esac
-[ "${#expected}" = 64 ] || { echo 'invalid seed checksum length' >&2; exit 1; }
-expected=$(printf '%s' "$expected" | tr A-F a-f)
 actual=''
 downloaded=0
 if [ -f "$cache/$asset" ]; then cp "$cache/$asset" "$work/$asset"; actual=$(digest "$work/$asset"); fi

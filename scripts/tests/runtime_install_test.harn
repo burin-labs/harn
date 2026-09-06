@@ -59,6 +59,85 @@ fn fixture(harness: Harness) {
 }
 
 @test
+@heavy(threads: 2)
+pipeline bootstrap_cli_projects_resolve_install_and_action_outputs(
+  harness: Harness,
+  task: unknown,
+) {
+  const f = fixture(harness)
+  harness.fs.mkdir(dirname(f.plan.metadata_path))
+  harness.fs.write_text(f.plan.metadata_path, f.checksum + "  " + f.plan.asset + "\n")
+  const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const output = path_join(dirname(f.request.cache_dir), "github-output")
+  const path_output = path_join(dirname(f.request.cache_dir), "github-path")
+  const summary = path_join(dirname(f.request.cache_dir), "github-summary")
+  const common = [
+    "--version",
+    f.request.version,
+    "--target",
+    f.request.target,
+    "--cache-dir",
+    f.request.cache_dir,
+    "--install-dir",
+    f.request.install_dir,
+  ]
+  const environment = {
+    HARN_EXT_BOOTSTRAP_INSTALLER: f.request.installer,
+    HARN_BOOTSTRAP_REPOSITORY: f.request.repository,
+  }
+  const resolved = harness.process.run(
+    {
+      program: "sh",
+      args: [path_join(root, "scripts/bootstrap-harn.sh"), "resolve"]
+        + common
+        + ["--github-output", output],
+      cwd: root,
+      env: environment,
+      timeout_ms: 30000,
+    },
+  )
+  assert(resolved.success, resolved.stderr ?? "bootstrap resolve failed")
+  const resolved_receipt = json_parse(trim(resolved.stdout ?? ""))
+  assert_eq(resolved_receipt.version, f.request.version)
+  assert_eq(resolved_receipt.asset, f.plan.asset)
+  const resolve_outputs = harness.fs.read_text(output)
+  assert(resolve_outputs.contains("version=" + f.request.version + "\n"))
+  assert(resolve_outputs.contains("target=" + f.request.target + "\n"))
+  assert(resolve_outputs.contains(f.plan.metadata_path + "\n" + f.plan.archive_path))
+  harness.fs.write_text(output, "")
+  const installed = harness.process.run(
+    {
+      program: "sh",
+      args: [path_join(root, "scripts/bootstrap-harn.sh"), "install", "--offline"]
+        + common
+        + ["--github-output", output, "--github-path", path_output, "--github-summary", summary],
+      cwd: root,
+      env: environment,
+      timeout_ms: 30000,
+    },
+  )
+  assert(installed.success, installed.stderr ?? "bootstrap install failed")
+  const receipt = json_parse(trim(installed.stdout ?? ""))
+  assert_eq(receipt.schema_version, "harn-bootstrap-v1")
+  assert_eq(receipt.version, f.request.version)
+  assert_eq(receipt.checksum, f.checksum)
+  assert(receipt.cache_hit)
+  const install_outputs = harness.fs.read_text(output)
+  for expected in [
+    "version=" + f.request.version + "\n",
+    "target=" + f.request.target + "\n",
+    "path=" + receipt.binary_path + "\n",
+    "checksum=" + f.checksum + "\n",
+    "cache-hit=true\n",
+    "receipt=",
+  ] {
+    assert(install_outputs.contains(expected), "missing action output " + expected)
+  }
+  assert_eq(harness.fs.read_text(path_output), f.request.install_dir + "\n")
+  assert(harness.fs.read_text(summary).contains("Installed checksum-verified Harn"))
+}
+
+@test
 pipeline manifest_accepts_coreutils_checksum_and_rejects_ambiguous_metadata(
   harness: Harness,
   task: unknown,

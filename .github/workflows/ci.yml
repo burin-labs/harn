@@ -163,6 +163,7 @@ jobs:
               - '.github/workflows/ci.yml'
               - '.github/workflows/setup-harn-contract.yml'
               - 'scripts/bootstrap-harn.*'
+              - 'scripts/tests/bootstrap_harn_seed_test.sh'
               - 'scripts/tests/runtime_install_test.harn'
               - 'crates/harn-stdlib/src/stdlib/runtime/**'
               - '.harn-bootstrap-version'
