@@ -48,10 +48,6 @@
       "path": "crates/harn-cli/src/commands/bench.rs"
     },
     {
-      "max_bytes": 100238,
-      "path": "crates/harn-cli/src/commands/canon.rs"
-    },
-    {
       "max_bytes": 108244,
       "path": "crates/harn-cli/src/commands/chat.rs"
     },
@@ -334,10 +330,6 @@
     {
       "max_bytes": 164665,
       "path": "crates/harn-vm/src/llm/agent_host_tool_dispatch.rs"
-    },
-    {
-      "max_bytes": 100026,
-      "path": "crates/harn-vm/src/llm/agent_observe.rs"
     },
     {
       "max_bytes": 145262,

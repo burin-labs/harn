@@ -900,7 +900,7 @@ PATH="$fake_tools:$PATH" \
   cat "$tmp_root/full.txt" >&2
   exit 1
 }
-if ! grep -Fq "dump-protocol-artifacts --artifact-version 1.2.4" "$audit_record"; then
+if ! grep -Fq "dump-protocol-artifacts" "$audit_record"; then
   echo "release_gate full did not preserve the audited HARN_BIN through prepare" >&2
   cat "$audit_record" >&2
   exit 1
@@ -920,7 +920,7 @@ if ! grep -Fxq "publish --dry-run" "$audit_record"; then
   cat "$audit_record" >&2
   exit 1
 fi
-preserved_harn="$(grep -F "dump-protocol-artifacts --artifact-version 1.2.4" "$audit_record" | sed -n 's/.*self=\([^ ]*\/harn-bin\/harn\).*/\1/p' | head -1)"
+preserved_harn="$(grep -F "dump-protocol-artifacts" "$audit_record" | sed -n 's/.*self=\([^ ]*\/harn-bin\/harn\).*/\1/p' | head -1)"
 
 # Preparation stamps 1.2.4 artifacts through the still-warmed 1.2.3 binary.
 # A later generated audit must tell that binary to check the workspace version,
@@ -957,7 +957,7 @@ if PATH="$fake_tools:$PATH" \
   echo "release_gate full ignored the injected prepare failure" >&2
   exit 1
 fi
-failed_harn="$(grep -F "dump-protocol-artifacts --artifact-version 1.2.4" "$audit_record" | sed -n 's/.*self=\([^ ]*\/harn-bin\/harn\).*/\1/p' | head -1)"
+failed_harn="$(grep -F "dump-protocol-artifacts" "$audit_record" | sed -n 's/.*self=\([^ ]*\/harn-bin\/harn\).*/\1/p' | head -1)"
 if [[ -z "$failed_harn" || -e "$(dirname "$(dirname "$failed_harn")")" ]]; then
   echo "release_gate full did not clean its audit directory after prepare failure" >&2
   cat "$audit_record" >&2

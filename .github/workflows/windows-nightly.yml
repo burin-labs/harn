@@ -110,11 +110,14 @@ jobs:
       # the shared-cache policy's pre-cache step-sequence comparison fails.
       # Toggled together via the single HARN_WINDOWS_DEVDRIVE repo variable. See
       # the ci.yml windows job for the full rationale.
-      # Exact candidates get a higher Dynamic ceiling so a restored warm target
-      # and the version-bumped workspace rebuild can coexist without hitting the
-      # old fixed 25 GB VHDX cap (harn#6027 / harn#6485). Growth remains bounded
-      # by host free space on C:. Drive sizes are owned by cache-policy.json
-      # windows_workspace_warm and locked by check_ci_cache_policy.harn.
+      # This job compiles the whole workspace on every ref, so it takes the
+      # full-workspace ceiling unconditionally: a restored warm target and the
+      # workspace rebuild must coexist on one volume (harn#6027 / harn#6485).
+      # The ceiling used to apply only to release-certify refs, which sized the
+      # drive for a run this job never performs and left ordinary nightlies to
+      # run out of space mid-link. Growth remains bounded by host free space on
+      # C:. The size is owned by cache-policy.json windows_workspace_warm and
+      # locked by check_ci_cache_policy.harn.
       # Tier-gated, not just variable-gated: the Blacksmith Windows image does
       # not expose the Hyper-V New-VHD command this action needs, so the Dev
       # Drive experiment is reachable only on the github-hosted fallback.
@@ -122,7 +125,7 @@ jobs:
         if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted' }}
         uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
-          drive-size: ${{ startsWith(github.ref_name, 'release-certify/') && '50GB' || '25GB' }}
+          drive-size: 50GB
           drive-format: ReFS
           env-mapping: |
             CARGO_HOME,{{ DEV_DRIVE }}/.cargo
@@ -173,10 +176,15 @@ jobs:
           else
             echo "Windows release certification falling cold; no compatible warm artifact."
           fi
+      # A measurement nothing acts on is not a budget. This is the last point
+      # where free space can be reported before a multi-gigabyte link, so the
+      # reading is also the gate: below the policy's build headroom the compile
+      # cannot finish, and failing here names the number instead of surfacing
+      # ENOSPC thousands of lines into cargo output.
       - name: Report Windows storage (before build)
         if: always()
         shell: bash
-        run: ./scripts/ci/windows_storage_budget.sh report before_build
+        run: ./scripts/ci/windows_storage_budget.sh report before_build --require-free-headroom
       - name: Install Go formatter
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

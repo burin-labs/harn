@@ -1,8 +1,10 @@
 use std::fs;
 
-use harn_session_store::{StoreContention, StoreError};
+use harn_session_store::{SessionLeaseError, StoreContention, StoreError};
 
-use super::{open_store, store_error, store_path, ErrorCategory, SessionStoreDir};
+use super::{
+    open_store, session_lease_error, store_error, store_path, ErrorCategory, SessionStoreDir,
+};
 
 #[test]
 fn store_contention_maps_to_typed_transient_category() {
@@ -20,6 +22,22 @@ fn store_contention_maps_to_typed_transient_category() {
         error.to_string(),
         "Error [resource_busy]: session_store: retryable backend contention (database_busy): database is locked"
     );
+}
+
+#[test]
+fn session_lease_contention_maps_to_typed_transient_category() {
+    let error = session_lease_error(
+        "agent transcript journal",
+        SessionLeaseError::Contended {
+            path: "project.lock".into(),
+        },
+    );
+
+    assert_eq!(
+        crate::value::error_to_category(&error),
+        ErrorCategory::ResourceBusy
+    );
+    assert!(ErrorCategory::ResourceBusy.is_transient());
 }
 
 #[test]

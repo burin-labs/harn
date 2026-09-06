@@ -110,6 +110,12 @@ pub fn __judge_emit_decision(
       escalation_target: verdict?.escalation_target,
       judge_outcome: verdict?.judge_outcome,
       terminal_evidence_preserved: verdict?.terminal_evidence_preserved ?? false,
+      // The judge's own answer beside the answer of record, and the typed
+      // override when the two differ. Without the pair a reader cannot tell an
+      // override from the judge's word, which is how a record came to report
+      // `done` on a run whose every judge decision was `continue`.
+      judge_verdict: verdict?.judge_verdict,
+      override: verdict?.override,
     },
   )
   return nil
@@ -749,12 +755,21 @@ pub type CompletionVerificationState = {
  * authorization. It loses authority only over `failed_verification`, the single
  * question a deterministic oracle may already have answered. An absent or
  * unrecognized value reads as `other`, which never yields authority.
+ *
+ * `none` is the value an APPROVAL sends. It exists because the enum previously
+ * had no legal way to say "no gap": a `done` reply was told to omit the field,
+ * and models routinely sent `other` instead, which is the catch-all for a gap
+ * whose class is unclear. Offering an enum with no member for the commonest
+ * case and then refusing the nearest member is a defect in the offer, not in
+ * the answer. `none` yields no authority, exactly like `other`, so nothing
+ * downstream gains a new way to convert a refusal.
  */
 pub type CompletionJudgeGapClass = "missing_artifact" \
   | "unmet_manner_clause" \
   | "failed_verification" \
   | "unresolved_authorization" \
-  | "other"
+  | "other" \
+  | "none"
 
 /** The gap classes a model `continue` may name. See `CompletionJudgeGapClass`. */
 pub const COMPLETION_JUDGE_GAP_CLASSES = [
@@ -763,6 +778,7 @@ pub const COMPLETION_JUDGE_GAP_CLASSES = [
   "failed_verification",
   "unresolved_authorization",
   "other",
+  "none",
 ]
 
 /**
@@ -780,9 +796,15 @@ pub fn __completion_judge_gap_class(value: string?) -> CompletionJudgeGapClass {
   if named == "missing_artifact"
     || named == "unmet_manner_clause"
     || named == "failed_verification"
-    || named == "unresolved_authorization" {
+    || named == "unresolved_authorization"
+    || named == "none" {
     return named
   }
+  // Absent and blank still read as `other`, NOT as `none`. `none` is a claim
+  // the reply made; absence is a reply that said nothing here, and reading
+  // silence as an explicit "no gap" would let an omitted field speak for a
+  // refusal. Both grant the same authority, so the distinction costs nothing
+  // and keeps the record honest about which one the judge sent.
   return "other"
 }
 

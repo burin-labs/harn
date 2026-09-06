@@ -11,9 +11,17 @@ permissions:
   pull-requests: read
 
 concurrency:
-  # A main push is immutable proof for one commit. Keying it by refs/heads/main
-  # lets a later push evict an older pending proof before any job starts.
+  # A main push is immutable proof for one commit, so each one gets its own key.
+  # Keying main by the branch instead lets a later push evict an older pending
+  # proof before any job starts, and merges land closer together than a run
+  # takes, so most main commits never finish being proved at all. A head commit
+  # whose run was evicted carries no executed result, and a branch reporting
+  # nothing is indistinguishable from a branch reporting green. Per-commit keys
+  # let main runs execute in parallel rather than queue behind each other.
+  # Pull requests and merge groups keep their own keys.
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
+  # A new commit genuinely invalidates the previous pull-request result, so
+  # those still supersede. Nothing supersedes a main push.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -537,7 +545,7 @@ jobs:
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
     # time and disk on these link-bound lanes while keeping panic line numbers
     # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
@@ -554,7 +562,7 @@ jobs:
       # link-arg appended. Linux-only: the windows/macos jobs never see this and
       # keep the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-      HARN_RUNNER_TIER: github-hosted
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted' }}
     outputs:
       lint_ok: ${{ steps.lint-ok.outputs.ok }}
     steps:
@@ -1112,7 +1120,7 @@ jobs:
     # verifies the exact-commit binary only at the last responsible moment.
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     # The immutable CLI producer is shared, but conformance and the independent
     # source/grammar/generated audits use separate free hosted workers. Putting
     # both four-way pools on one four-core runner starved conformance and kept
@@ -1542,7 +1550,9 @@ jobs:
     # artifact barrier as harn-audit.
     needs: [changes, rust-artifacts-ready]
     if: >-
-      needs.changes.outputs.rust == 'true'
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && needs.changes.outputs.rust == 'true'
       && needs.rust-artifacts-ready.result == 'success'
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
@@ -2088,15 +2098,10 @@ jobs:
         shell: bash
         run: ./scripts/ci/windows_storage_budget.sh report terminal
 
-  # Deterministic, always-on Windows *compile* gate. Unlike the path-gated
-  # `windows` job above (which skips on routine PRs + the whole merge queue and
-  # is subject to Windows-runner flakiness), this runs on every PR, merge_group,
-  # and push, in a pinned cross-rs image on a Linux runner, and is a hard-required
-  # check in `ci-status`.
-  # It exists to catch the recurring cfg-gating / missing-`#[cfg(unix)]` break
-  # class (#4199 scoped-write, #3914 hostlib) at merge time instead of letting
-  # it slip to main and resurface as phantom "Windows flakiness" on an unrelated
-  # PR. `cross check` performs no linking, so the windows-gnu target compiles the
+  # Deterministic Windows compile integration ratchet. The path-gated native
+  # Windows job remains the pre-merge product proof; this pinned cross-rs pass
+  # runs on each Rust-changing main tree and reports through `ci-status`.
+  # `cross check` performs no linking, so the windows-gnu target compiles the
   # C-dependency graph in the digest-pinned MinGW image and reaches workspace Rust —
   # `x86_64-pc-windows-msvc` cannot (it needs the Windows SDK headers). The
   # `cfg(windows)` / `cfg(not(unix))` surface is identical across gnu/msvc, so a
@@ -2106,12 +2111,11 @@ jobs:
   windows-cross-check:
     name: Windows cross-compile check
     needs: changes
-    # Also consumes the `rust` gate: skip when the `changes` job proved the diff
-    # is docs/website/editors-vscode/markdown-only (no Rust surface -> no missing-cfg
-    # break class possible). merge_group and non-metadata pushes keep it on: the
-    # `force` step pins `rust=true` on merge_group, and `merge_group_proven` is
-    # push-only, so both operands are true there and the lane always runs.
-    if: needs.changes.outputs.merge_group_proven != 'true' && needs.changes.outputs.rust == 'true'
+    # Main pushes force the Rust surface on, while non-Rust pushes may skip.
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -2579,6 +2583,9 @@ jobs:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
           COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
+          RUST_SELECTED: ${{ needs.changes.outputs.rust }}
         run: |
           # A skipped job is valid only when its owning condition permits it.
           # Missing, pending, failed, and cancelled results always fail closed.
@@ -2646,12 +2653,8 @@ jobs:
           require_result "$release_contract_result" \
             "Release contract failed, or did not report a verdict while release-relevant paths were touched." [ "$release_contract_expected" != "true" ]
 
-          # The heavy Linux Rust lanes (rust-checks, audit-scripts) skip on a
-          # docs/website/markdown-only PR (gated by the `changes` job) and run
-          # unconditionally on merge_group / push. Treat `skipped` as passing
-          # here so branch protection isn't deadlocked when they skip; only an
-          # actual failure should fail the gate. (The `changes` job itself stays
-          # a hard required-success above, so a filter-job failure still blocks.)
+          # Rust checks remain pre-merge product proof. Repository policies are
+          # handled separately below as a main-only integration ratchet.
           rust_checks_result="${{ needs['rust-checks'].result }}"
           lint_ok="${{ needs['rust-checks'].outputs.lint_ok }}"
           echo "Rust lint: $rust_checks_result (lint_ok=$lint_ok)"
@@ -2748,7 +2751,8 @@ jobs:
           audit_scripts_result="${{ needs['audit-scripts'].result }}"
           echo "Repository policy checks: $audit_scripts_result"
           require_result "$audit_scripts_result" \
-            "Repository policy checks failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+            "Repository policy checks failed or skipped on a Rust-changing main push." \
+            test "${EVENT_NAME}:${GIT_REF}:${RUST_SELECTED}" != "push:refs/heads/main:true"
 
           # Native Windows runs once on a Windows-sensitive merge-group
           # candidate. Its exact successful proof suppresses the identical
@@ -2758,28 +2762,13 @@ jobs:
           echo "Rust on Windows (build + smoke test): $windows_result"
           require_result "$windows_result" "Windows job failed." true
 
-          # The cross-compile check runs on every source-changing event. A push
-          # may skip only when this exact workflow + SHA already passed on
-          # merge_group; otherwise `skipped` remains a hard failure. This is the
-          # non-flaky Windows-compile gate that closes the path-filter /
-          # merge-queue coverage gaps that let #4199 through.
-          # Cross-compile check now also consumes the `rust` gate: it skips on a
-          # docs/website/editors-vscode/markdown-only PR (no Rust surface -> no cfg-gate
-          # break class). A skip is PASS only when that gate is off
-          # (changes.rust != 'true') OR when exact-SHA merge-group proof reused a
-          # prior pass on a push. Any other non-success (failure/cancelled) still
-          # fails the aggregate so a broken or dropped dep never rolls up green.
+          # Cross-compilation is an integration ratchet. It runs on every
+          # Rust-changing main tree and remains visible through this aggregate.
           windows_cross_result="${{ needs['windows-cross-check'].result }}"
           echo "Windows cross-compile check: $windows_cross_result"
-          if [ "$windows_cross_result" != "success" ]; then
-            if [ "$windows_cross_result" = "skipped" ] \
-              && { [ "$merge_group_proven" = "true" ] || [ "${{ needs.changes.outputs.rust }}" != "true" ]; }; then
-              :
-            else
-              echo "::error::Windows cross-compile check failed or skipped while it was required."
-              exit 1
-            fi
-          fi
+          require_result "$windows_cross_result" \
+            "Windows cross-compile check failed or skipped on a Rust-changing main push." \
+            test "${EVENT_NAME}:${GIT_REF}:${RUST_SELECTED}" != "push:refs/heads/main:true"
 
           # The macOS job runs on `push` to main and on pull requests whose
           # diff touches macOS-gated process/sandbox/secret-store/CLI paths. It

@@ -3,7 +3,9 @@ import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
+import { __agent_stall_verification_dispatch } from "std/agent/stall_checkpoint"
 import { AgentStallState } from "std/agent/stall_types"
+import { __agent_stall_fold_verify_state } from "std/agent/stall_verification"
 pub import { __turn_end_judge_hit } from "std/agent/turn_end"
 
 pub type AgentLoopCompletedDispatchStall = {state: AgentStallState, no_information_gain: bool}
@@ -30,8 +32,8 @@ pub type AgentIterationInfo = {
 }
 
 /**
- * Fold the two stall signals that become authoritative only after dispatch:
- * exact observation recurrence and completed read-only actuation.
+ * Fold observations and caller progress once after dispatch completes, before
+ * the checkpoint is exposed to a callback or returned across a stage boundary.
  *
  * @effects: [agent]
  * @errors: [agent_loop]
@@ -65,7 +67,18 @@ pub fn __agent_loop_completed_dispatch_stall(args: dict) -> AgentLoopCompletedDi
           ),
       ),
     }
-  return {state: state, no_information_gain: completed.no_information_gain}
+  const progressed = __agent_stall_fold_verify_state(
+    state,
+    args.stall_config,
+    {
+      dispatch: args.dispatch,
+      verification_dispatch: __agent_stall_verification_dispatch(args.dispatch, args.turn_opts),
+      iteration: args.iteration,
+      session_id: args.session_id,
+    },
+    __turn_made_edit(args.dispatch, args.turn_opts?.tools),
+  )
+  return {state: progressed, no_information_gain: completed.no_information_gain}
 }
 
 pub fn __sync_tool_search_state(opts: any, turn_opts: dict) {
@@ -79,20 +92,21 @@ pub fn __sync_tool_search_state(opts: any, turn_opts: dict) {
   return synced
 }
 
-// A successful annotated workspace mutation advances the repair write epoch.
+// Producer mutation evidence outranks transport success for repair progress.
 pub const __REPAIR_EDIT_KINDS = ["edit", "write", "scaffold", "delete", "mutation", "mutate"]
 
 pub fn __turn_made_edit(dispatch: AgentToolDispatch?, tools: any) -> bool {
   if dispatch == nil {
     return false
   }
-  for name in __tool_names_by_status(dispatch, true) {
-    const entry = __tool_registry_entry(tools, name)
+  for result in __dispatch_results_list(dispatch) {
+    const entry = __tool_registry_entry(tools, __tool_result_name(result))
     const annotations = agent_tool_entry_annotations(entry)
     const kind = lowercase(
       to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""),
     )
-    if contains(__REPAIR_EDIT_KINDS, kind) {
+    if contains(__REPAIR_EDIT_KINDS, kind)
+      && (__intra_turn_result_mutated(result) ?? __tool_result_ok(result)) {
       return true
     }
   }

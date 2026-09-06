@@ -2,15 +2,23 @@ use harn_hostlib::session::{
     SessionCapability, APPEND_BUILTIN, GET_BUILTIN, LIST_BUILTIN, OPEN_BUILTIN,
     SEARCH_HYBRID_BUILTIN, UPDATE_BUILTIN,
 };
-use harn_hostlib::{BuiltinRegistry, HostlibCapability};
+use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
 use serde_json::json;
 
-async fn invoke(registry: &BuiltinRegistry, name: &str, request: serde_json::Value) -> VmValue {
+async fn invoke_result(
+    registry: &BuiltinRegistry,
+    name: &str,
+    request: serde_json::Value,
+) -> Result<VmValue, HostlibError> {
     let builtin = registry
         .find_async(name)
         .unwrap_or_else(|| panic!("{name} must be registered"));
-    (builtin.handler)(vec![harn_vm::json_to_vm_value(&request)])
+    (builtin.handler)(vec![harn_vm::json_to_vm_value(&request)]).await
+}
+
+async fn invoke(registry: &BuiltinRegistry, name: &str, request: serde_json::Value) -> VmValue {
+    invoke_result(registry, name, request)
         .await
         .unwrap_or_else(|error| panic!("{name} failed: {error}"))
 }
@@ -105,4 +113,61 @@ async fn hostlib_session_surface_round_trips_one_canonical_store() {
         Some("fts")
     );
     assert_eq!(list_len(search.get("hits")), Some(1));
+}
+
+#[tokio::test]
+async fn session_open_is_crud_while_maintenance_excludes_real_appends() {
+    let temp = tempfile::tempdir().expect("temp root");
+    let root = temp.path().to_string_lossy();
+    let mut registry = BuiltinRegistry::new();
+    SessionCapability::default().register_builtins(&mut registry);
+
+    invoke(
+        &registry,
+        OPEN_BUILTIN,
+        json!({"root": root, "id": "crud-session"}),
+    )
+    .await;
+
+    let maintenance = harn_vm::open_canonical_store_for_maintenance(temp.path())
+        .expect("a completed CRUD open retains no writer lease");
+    let blocked = invoke_result(
+        &registry,
+        APPEND_BUILTIN,
+        json!({
+            "root": root,
+            "session_id": "crud-session",
+            "event": {
+                "kind": {"kind": "message"},
+                "payload": {"text": "blocked during maintenance"},
+            },
+        }),
+    )
+    .await
+    .expect_err("maintenance must exclude a real hostlib append");
+    match blocked {
+        HostlibError::Backend { builtin, message } => {
+            assert_eq!(builtin, APPEND_BUILTIN);
+            assert!(
+                message.contains("(maintenance_active)"),
+                "contention classifier was not preserved: {message}"
+            );
+        }
+        other => panic!("append returned the wrong error class: {other}"),
+    }
+
+    drop(maintenance);
+    invoke(
+        &registry,
+        APPEND_BUILTIN,
+        json!({
+            "root": root,
+            "session_id": "crud-session",
+            "event": {
+                "kind": {"kind": "message"},
+                "payload": {"text": "append after maintenance"},
+            },
+        }),
+    )
+    .await;
 }

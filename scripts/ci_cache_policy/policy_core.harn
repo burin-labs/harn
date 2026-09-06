@@ -19,7 +19,6 @@ pub type WindowsWorkspaceWarmPolicy = {
   build_headroom_bytes: int,
   dev_drive_size_default: string,
   dev_drive_size_full_workspace: string,
-  dev_drive_size_release_certify: string,
 }
 
 /**
@@ -173,6 +172,12 @@ pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
 pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
 
+/** The step that names where the slow E2E suite is about to land. */
+pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
+
+/** The input that carries the evacuation switch into that decision. */
+pub const E2E_EVACUATION_INPUT = "FLEET_EVACUATION"
+
 pub const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
 
 // Blacksmith's Ubuntu image does not expose Landlock. Keep the complete set of
@@ -225,11 +230,33 @@ pub const LIVE_ARTIFACT_CONSUMERS = ["audit-scripts", "ci-walltime-report"]
 
 pub const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
+/**
+ * Every main push gets its own key; pull requests and merge groups keep theirs.
+ *
+ * Keying main by the branch shares one key across every merge, so a later push
+ * evicts an older pending proof before any job starts. Merges land closer
+ * together than a run takes, so under that key most main commits never finish
+ * being proved, and a head commit with no executed result reads the same as a
+ * passing one.
+ */
 pub const CI_WORKFLOW_CONCURRENCY_GROUP = "$"
   + "{{ github.workflow }}-$"
   + "{{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}"
 
+/**
+ * Pull-request runs supersede; nothing supersedes a main push.
+ *
+ * This is the second half of the per-commit key above. The key stops a later
+ * merge from evicting a pending run, and this stops a push from cancelling one
+ * already executing. Either alone leaves main commits without proof.
+ */
 pub const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_request' }}"
+
+pub const MAIN_ONLY_RUST_IF =
+  "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
+
+pub const MAIN_ONLY_POLICY_IF = MAIN_ONLY_RUST_IF
+  + " && needs.rust-artifacts-ready.result == 'success'"
 
 pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "harn-ci-rust-cache-refresh"
 
@@ -370,6 +397,13 @@ pub const WINDOWS_WARM_REPORT_STEP = "Report Windows warm restore outcome"
 
 pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
 
+/**
+ * The before-build reading is the one receipt that must also refuse. Without
+ *  this flag the step measures free space and enters the build anyway, which
+ *  is how a Dev Drive with under a gibibyte left reached the linker.
+ */
+pub const WINDOWS_STORAGE_HEADROOM_FLAG = "--require-free-headroom"
+
 pub const WINDOWS_STORAGE_INITIAL_STEP = "Report Windows storage (initial)"
 
 pub const WINDOWS_STORAGE_INITIAL_STEP_ID = "windows-storage-initial"
@@ -443,7 +477,6 @@ pub fn windows_workspace_warm_schema() {
       build_headroom_bytes: schema_int() + {minimum: 8589934592},
       dev_drive_size_default: drive_size_schema(),
       dev_drive_size_full_workspace: drive_size_schema(),
-      dev_drive_size_release_certify: drive_size_schema(),
     },
   )
 }
@@ -487,13 +520,17 @@ pub fn policy_schema() {
   )
 }
 
-pub fn windows_release_certify_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
-  return "$"
-    + "{{ startsWith(github.ref_name, 'release-certify/') && '"
-    + warm.dev_drive_size_release_certify
-    + "' || '"
-    + warm.dev_drive_size_default
-    + "' }}"
+/**
+ * The nightly workspace job compiles every crate on every ref, so its Dev
+ *  Drive takes the full-workspace ceiling unconditionally. It previously took
+ *  the default ceiling except on release-certify refs, which sized the drive
+ *  for a run the job never performs: an ordinary nightly ran out of space
+ *  mid-link with a restored warm target already occupying most of the volume.
+ *  A ref-conditional expression here would be a second owner of the same
+ *  question the workload already answers.
+ */
+pub fn windows_nightly_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
+  return warm.dev_drive_size_full_workspace
 }
 
 pub fn windows_ci_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
@@ -782,7 +819,6 @@ pub fn policy_from_validated(value: dict) -> CiCachePolicy {
       build_headroom_bytes: warm.build_headroom_bytes,
       dev_drive_size_default: warm.dev_drive_size_default,
       dev_drive_size_full_workspace: warm.dev_drive_size_full_workspace,
-      dev_drive_size_release_certify: warm.dev_drive_size_release_certify,
     },
     macos_workspace_warm: {
       artifact_name: macos_warm.artifact_name,
@@ -1399,22 +1435,117 @@ pub fn ci_cache_policy_errors(
   return errors
 }
 
-/**
- * Main pushes are immutable integration proofs, so each commit needs its own
- * concurrency key. Grouping every push under `refs/heads/main` allows GitHub's
- * one-pending-run rule to evict an older commit before any job starts.
- */
+/** Keep one current pull-request proof and an executed result per main head. */
 pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
     errors = errors
       + [
-        "ci.yml concurrency.group must key main pushes by github.sha while preserving PR, merge-group, and ref keys",
+        "ci.yml concurrency.group must give each main push its own key while preserving PR, merge-group, and ref keys",
       ]
   }
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != CI_WORKFLOW_CANCEL_POLICY {
     errors = errors
-      + ["ci.yml may cancel superseded pull-request runs only"]
+      + [
+        "ci.yml must cancel superseded pull-request runs only; nothing may supersede a main push, so every head sha keeps an executed result",
+      ]
+  }
+  return errors
+}
+
+/** Keep integration ratchets and publication tails off pull-request runners. */
+pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
+  let errors: list<string> = []
+  const jobs = ci?.jobs ?? {}
+  const elastic_runner = "$"
+    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
+  for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
+    if trim(jobs[name]?.["runs-on"] ?? "") != "ubuntu-latest" {
+      errors = errors + ["ci.yml:${name} must use GitHub-hosted ubuntu-latest"]
+    }
+  }
+  for name in ["rust-checks", "rust-check-inputs", "harn-audit"] {
+    if trim(jobs[name]?.["runs-on"] ?? "") != elastic_runner {
+      errors = errors + ["ci.yml:${name} must use the shared elastic Linux runner switch"]
+    }
+  }
+  if trim(jobs["audit-scripts"]?.if ?? "") != MAIN_ONLY_POLICY_IF {
+    errors = errors + ["ci.yml:audit-scripts must run on Rust-changing main pushes only"]
+  }
+  if trim(jobs["windows-cross-check"]?.if ?? "") != MAIN_ONLY_RUST_IF {
+    errors = errors + ["ci.yml:windows-cross-check must run on Rust-changing main pushes only"]
+  }
+  const status = jobs["ci-status"] ?? {}
+  for name in ["audit-scripts", "windows-cross-check", ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
+    if !(status?.needs ?? []).contains(name) {
+      errors = errors + ["ci.yml:ci-status must retain ${name}"]
+    }
+  }
+  const status_run = step_by_name(status?.steps ?? [], "Verify required CI jobs")?.run ?? ""
+  for message in [
+    "Repository policy checks failed or skipped on a Rust-changing main push.",
+    "Windows cross-compile check failed or skipped on a Rust-changing main push.",
+  ] {
+    if !contains(status_run, message) {
+      errors = errors + ["ci.yml:ci-status does not enforce '${message}'"]
+    }
+  }
+  const publish_on = publish["on"] ?? {}
+  const push = publish_on?.push ?? {}
+  if len(push?.branches ?? []) != 0 {
+    errors = errors + ["publish-release.yml must not trigger on branch pushes"]
+  }
+  if (push?.tags ?? []) != ["v*"] {
+    errors = errors + ["publish-release.yml must trigger on release tags"]
+  }
+  if publish_on?.workflow_dispatch == nil {
+    errors = errors + ["publish-release.yml must retain manual recovery dispatch"]
+  }
+  return errors
+}
+
+/**
+ * Keep the slow suite evacuable through the same paid-capacity switch.
+ *
+ * The switch has to reach two places, and only one of them is the routing
+ * expression. The capacity job names where this suite is about to land, and a
+ * name that reads the owned census while the switch sends the job to elastic
+ * paid capacity is worse than no name at all: it attributes the run to a rung
+ * it never touched. So the switch is required on `runs-on` and on the input
+ * the capacity script actually measures the route from.
+ *
+ * This checks that seam rather than a specific environment variable on the
+ * job. The suite derives its own compiler and thread budget on the runner it
+ * lands on, so there is no longer a static budget variable to name, and a
+ * rule that named one would pass by matching a string while the switch failed
+ * to reach the route.
+ */
+pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
+  const job = e2e?.jobs?.e2e ?? {}
+  const capacity_job = e2e?.jobs?.["e2e-capacity"] ?? {}
+  const capacity_step = step_by_name(capacity_job?.steps ?? [], E2E_CAPACITY_DECISION_STEP)
+  let errors: list<string> = []
+  if !contains(to_string(job?.["runs-on"] ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
+    errors = errors
+      + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
+  }
+  if !contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_8CPU_RUNNER) {
+    errors = errors + ["e2e.yml:e2e must route the paid override to ${BLACKSMITH_8CPU_RUNNER}"]
+  }
+  if capacity_step == nil {
+    errors = errors
+      + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]
+    return errors
+  }
+  if !contains(
+    to_string(capacity_step?.env?.[E2E_EVACUATION_INPUT] ?? ""),
+    "vars.${BLACKSMITH_ENABLE_VAR} == 'true'",
+  ) {
+    errors = errors
+      + [
+        "e2e.yml:e2e-capacity must pass ${BLACKSMITH_ENABLE_VAR} to the route it measures "
+          + "as ${E2E_EVACUATION_INPUT}",
+      ]
   }
   return errors
 }

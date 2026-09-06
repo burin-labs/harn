@@ -3941,7 +3941,9 @@ version = "0.10.132-dev"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
+ "blake3",
  "ed25519-dalek",
+ "harn-flock",
  "harn-sqlite",
  "hex",
  "rusqlite",

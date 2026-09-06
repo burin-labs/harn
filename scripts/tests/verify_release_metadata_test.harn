@@ -14,7 +14,7 @@ import {
   is_bump_ahead,
   is_descending,
   is_development_after_release,
-  protocol_artifact_version,
+  is_release_lineage_subject,
   success_message,
 } from "../verify_release_metadata.harn"
 
@@ -42,23 +42,6 @@ const ACP_MANIFEST = "{\n"
 @test
 pipeline test_current_version(harness: Harness, task: unknown) {
   assert_eq(current_version(CARGO), "0.8.71")
-}
-
-@test
-pipeline test_protocol_artifact_version(harness: Harness, task: unknown) {
-  const manifest =
-    "{\n  \"protocolVersion\": \"0.3.0\",\n  \"artifactVersion\": \"0.8.71\",\n  \"x\": 1\n}\n"
-  assert_eq(protocol_artifact_version(manifest), "0.8.71")
-}
-
-@test
-pipeline test_protocol_artifact_version_missing(harness: Harness, task: unknown) {
-  const r = try {
-    protocol_artifact_version("{\n  \"protocolVersion\": \"0.3.0\"\n}\n")
-  } catch (e) {
-    e
-  }
-  assert_eq(r, "error: missing artifactVersion in spec/protocol-artifacts/manifest.json")
 }
 
 @test
@@ -332,4 +315,42 @@ pipeline test_success_message(harness: Harness, task: unknown) {
     success_message("0.8.72-dev", "0.8.71"),
     "verified development metadata for v0.8.72-dev (latest release v0.8.71)",
   )
+}
+
+@test
+pipeline test_release_lineage_subject_accepts_both_records(harness: Harness, task: unknown) {
+  // The release commit itself.
+  assert(is_release_lineage_subject("Release v0.10.131", "0.10.131"))
+  assert(is_release_lineage_subject("Release v0.10.131 (#8205)", "0.10.131"))
+  // The fold that carries it back onto a linear main. This is the subject main
+  // actually holds, and the only record it can hold, so refusing it fails every
+  // release rather than catching a bad one.
+  assert(is_release_lineage_subject("[Release] Fold v0.10.131 into main", "0.10.131"))
+  assert(is_release_lineage_subject("[Release] Fold v0.10.131 into main (#8205)", "0.10.131"))
+}
+
+@test
+pipeline test_release_lineage_subject_rejects_a_log_without_either(
+  harness: Harness,
+  task: unknown,
+) {
+  // A history carrying neither record must still fail, or the widened gate
+  // would accept anything.
+  assert(!is_release_lineage_subject("[CI] Restore main green", "0.10.131"))
+  assert(!is_release_lineage_subject("Revert \"Release v0.10.131\"", "0.10.131"))
+  assert(!is_release_lineage_subject("[Release] Publish v0.10.131", "0.10.131"))
+  assert(!is_release_lineage_subject("[Release] Fold v0.10.131 into next", "0.10.131"))
+  assert(!is_release_lineage_subject("", "0.10.131"))
+}
+
+@test
+pipeline test_release_lineage_subject_binds_to_the_exact_version(harness: Harness, task: unknown) {
+  // A record for a different version is not this version's record. The version
+  // is matched literally, so a neighbouring release cannot satisfy the gate and
+  // the dots cannot behave as regex wildcards.
+  assert(!is_release_lineage_subject("Release v0.10.130", "0.10.131"))
+  assert(!is_release_lineage_subject("Release v0.10.1310", "0.10.131"))
+  assert(!is_release_lineage_subject("[Release] Fold v0.10.130 into main", "0.10.131"))
+  assert(!is_release_lineage_subject("Release v0X10X131", "0.10.131"))
+  assert(!is_release_lineage_subject("Release v0.10.13", "0.10.131"))
 }

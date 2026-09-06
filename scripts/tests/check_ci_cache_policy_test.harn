@@ -1,3 +1,4 @@
+import { read_yaml } from "std/fs"
 import {
   CiCachePolicy,
   NATIVE_CACHE_INPUTS,
@@ -8,6 +9,7 @@ import {
   ci_cache_policy_parse,
   ci_workflow_concurrency_errors,
   macos_warm_errors,
+  minimal_pr_capacity_errors,
   nextest_version_errors,
   release_aot_runner_errors,
   release_warm_cache_concurrency_errors,
@@ -102,23 +104,80 @@ pipeline test_sccache_action_rejects_a_step_local_inherited_size_override(
 }
 
 @test
-pipeline test_ci_concurrency_preserves_every_main_commit(harness: Harness, task: unknown) {
+pipeline test_ci_concurrency_keeps_an_executed_result_per_main_head(
+  harness: Harness,
+  task: unknown,
+) {
   assert_eq(ci_workflow_concurrency_errors({concurrency: ci_concurrency()}), [])
 }
 
 @test
-pipeline test_ci_concurrency_rejects_shared_main_ref(harness: Harness, task: unknown) {
+pipeline test_ci_concurrency_rejects_cancelling_main_pushes(harness: Harness, task: unknown) {
+  // The other half of the defect: even with a per-commit key, cancelling on
+  // push lets a merge kill a run already executing, so that head sha still
+  // ends with no executed result.
+  let cancels_main = ci_concurrency()
+  cancels_main["cancel-in-progress"] = gha_expression(
+    "github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')",
+  )
+  const errors = ci_workflow_concurrency_errors({concurrency: cancels_main})
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "nothing may supersede a main push"))
+}
+
+@test
+pipeline test_ci_concurrency_rejects_one_shared_main_key(harness: Harness, task: unknown) {
+  // The defect the per-commit key exists to refuse: one key for every main
+  // push lets a later merge evict a pending proof before any job starts, so
+  // most main commits never finish being proved.
   const invalid = {
     concurrency: {
       group: gha_expression("github.workflow")
         + "-"
         + gha_expression(
-          "github.event.pull_request.number || github.event.merge_group.head_sha || github.ref",
+          "github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && 'main') || github.ref",
         ),
-      "cancel-in-progress": gha_expression("github.event_name == 'pull_request'"),
+      "cancel-in-progress": ci_concurrency()["cancel-in-progress"],
     },
   }
-  assert_eq(len(ci_workflow_concurrency_errors(invalid)), 1)
+  const errors = ci_workflow_concurrency_errors(invalid)
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "its own key"))
+}
+
+@test
+pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness, task: unknown) {
+  const publish = read_yaml(harness.fs, "../../.github/workflows/publish-release.yml")
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  assert_eq(minimal_pr_capacity_errors(ci, publish), [])
+  let self_hosted_waiter = ci
+  self_hosted_waiter.jobs["rust-artifacts-ready"]["runs-on"] = "self-hosted"
+  assert(
+    minimal_pr_capacity_errors(self_hosted_waiter, publish).contains(
+      "ci.yml:rust-artifacts-ready must use GitHub-hosted ubuntu-latest",
+    ),
+  )
+  let pr_policy = ci
+  pr_policy.jobs["audit-scripts"].if = "needs.changes.outputs.rust == 'true'"
+  assert(
+    minimal_pr_capacity_errors(pr_policy, publish).contains(
+      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
+    ),
+  )
+  let main_publish = publish
+  main_publish["on"].push.branches = ["main"]
+  assert(
+    minimal_pr_capacity_errors(ci, main_publish).contains(
+      "publish-release.yml must not trigger on branch pushes",
+    ),
+  )
+  let unrouted_source_checks = ci
+  unrouted_source_checks.jobs["harn-audit"]["runs-on"] = "ubuntu-latest"
+  assert(
+    minimal_pr_capacity_errors(unrouted_source_checks, publish).contains(
+      "ci.yml:harn-audit must use the shared elastic Linux runner switch",
+    ),
+  )
 }
 
 @test
@@ -1169,6 +1228,31 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
       "windows-nightly.yml:nextest must always emit the terminal storage receipt through the shared budget owner",
     ),
   )
+  // Dropping the gate flag leaves a step that still reports before_build, so
+  // every receipt assertion above stays satisfied. Without this control the
+  // job could go back to measuring free space and entering the build anyway.
+  const unguarded_before_build = {
+    ...producer,
+    jobs: {
+      nextest: {
+        ...producer.jobs.nextest,
+        steps: producer.jobs.nextest.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Report Windows storage (before build)" {
+              return step
+            }
+            return {...step, run: "./scripts/ci/windows_storage_budget.sh report before_build"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_release_certify_warm_errors(declared_policy, unguarded_before_build).contains(
+      "windows-nightly.yml:nextest must refuse the build when the before_build reading is under the declared headroom",
+    ),
+  )
 }
 
 pipeline test_nextest_version_locks_every_workflow_pin(harness: Harness, task: unknown) {
@@ -1238,14 +1322,14 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
     nextest_version: base.nextest_version,
     windows_workspace_warm: {
       ...base.windows_workspace_warm,
-      dev_drive_size_release_certify: base.windows_workspace_warm.dev_drive_size_default,
+      dev_drive_size_full_workspace: base.windows_workspace_warm.dev_drive_size_default,
     },
     macos_workspace_warm: base.macos_workspace_warm,
     writers: base.writers,
   }
   assert(
     actions_cache_capacity_errors(flat_drive).contains(
-      "cache-policy.json windows_workspace_warm must give full-workspace and release-certify runs larger Dev Drive ceilings than the default",
+      "cache-policy.json windows_workspace_warm must give full-workspace runs a larger Dev Drive ceiling than the default",
     ),
   )
   // The macOS ceiling is governed too. Without this the new block could declare

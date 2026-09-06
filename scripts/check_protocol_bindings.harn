@@ -33,10 +33,6 @@ def main() -> int:
     hp = load_bindings(artifacts)
     fixture = json.loads((artifacts / "fixtures" / "round_trip.json").read_text())
 
-    if fixture["artifactVersion"] != hp.HARN_PROTOCOL_ARTIFACT_VERSION:
-        raise AssertionError(
-            f"version drift: bindings={hp.HARN_PROTOCOL_ARTIFACT_VERSION} fixture={fixture['artifactVersion']}"
-        )
     if fixture["harnAgentEventMethod"] != hp.HARN_AGENT_EVENT_METHOD:
         raise AssertionError(
             f"agent-event method drift: bindings={hp.HARN_AGENT_EVENT_METHOD} fixture={fixture['harnAgentEventMethod']}"
@@ -61,6 +57,7 @@ def main() -> int:
         ("MCPUnsupportedProtocolVersionError", fixture["mcpUnsupportedProtocolVersionError"], hp.MCPUnsupportedProtocolVersionError),
         ("ToolCallReceipt", fixture["toolCallReceipt"], hp.ToolCallReceipt),
         ("HarnSessionRecapAvailability", fixture["sessionRecapAvailability"], hp.HarnSessionRecapAvailability),
+        ("HarnPlanDocument", fixture["planDocument"], hp.HarnPlanDocument),
     ]
     for label, payload, cls in cases:
         instance = cls.from_wire(payload)
@@ -101,6 +98,14 @@ def main() -> int:
                 pass
             else:
                 raise AssertionError("unknown recap verification status was accepted")
+
+    for cls, base, field, non_null in [
+        (hp.HarnPlanStep, {"id": "step", "content": "Verify", "status": "pending"}, "priority", "high"),
+        (hp.HarnPlanApproval, {"state": "unrequested"}, "reviewers", ["reviewer"]),
+        (hp.HarnPlanCommentAnchor, {"step_id": "step"}, "range", {"start": 0, "end": 1}),
+    ]:
+        for extra, expected in [({}, base), ({field: None}, base), ({field: non_null}, {**base, field: non_null})]:
+            assert_round_trip(cls.__name__, expected, cls.from_wire({**base, **extra}).to_wire())
 
     print("python bindings: OK")
     return 0

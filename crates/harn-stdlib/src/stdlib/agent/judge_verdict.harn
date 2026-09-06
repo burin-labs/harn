@@ -150,13 +150,23 @@ pub const COMPLETION_JUDGE_NAMED_GAP_CLASSES = [
  *
  * This keys on `gap_declared`, not on membership in the four named gap
  * classes. A judge free to launder an unmet obligation into `gap_class:
- * "other"` — the same value a genuinely gapless `done` is told to leave
- * absent — used exactly that escape: the same blocked-write fact that got
- * `unresolved_authorization` (refused) on one call got `other` (accepted) on
- * the next, no schema violation either time. Keying on the four names cannot
- * close that, because `other` is never one of the four names; keying on
- * whether the field was populated at all can, because a compliant `done`
- * never populates it. See harn#7910.
+ * "other"` — the catch-all for a gap whose class is unclear — used exactly
+ * that escape: the same blocked-write fact that got `unresolved_authorization`
+ * (refused) on one call got `other` (accepted) on the next, no schema
+ * violation either time. Keying on the four names cannot close that, because
+ * `other` is never one of the four names. See harn#7910.
+ *
+ * It also keys on the `gaps` array, which is the half that carries the claim.
+ * Either alone is insufficient. A reply can name a gap in the array while
+ * leaving the class unsent, and a reply can name a class while sending no
+ * array, and both are the same self-contradiction.
+ *
+ * What is NOT a contradiction, since `none` joined the enum, is an approval
+ * saying so. `gap_declared` is raw presence minus `none`, so a `done` that
+ * omits the field and a `done` that explicitly sends `none` both pass, while
+ * an explicit `other` on a `done` is refused exactly as harn#7910 requires —
+ * `other` is no longer the value a compliant approval is left with, so a `done`
+ * still sending it is naming a gap it declined to classify.
  *
  * @effects: []
  * @errors: []
@@ -164,7 +174,76 @@ pub const COMPLETION_JUDGE_NAMED_GAP_CLASSES = [
  * @example: __judge_completion_verdict_contradicts_itself({verdict: "done", detail: "", gap_class: "other", gap_declared: true})
  */
 pub fn __judge_completion_verdict_contradicts_itself(decoded: CompletionJudgeVerdict) -> bool {
-  return decoded.verdict == "done" && decoded.gap_declared
+  return decoded.verdict == "done" && (len(decoded.gaps) > 0 || decoded.gap_declared)
+}
+
+/**
+ * __judge_completion_verdict_refuses_without_a_gap.
+ *
+ * The converse shape: a `continue` that names nothing. A refusal with no gap
+ * hands the actor a verdict it cannot act on, which is the same dead end a
+ * contradiction produces from the other side.
+ *
+ * This rule used to live in the reply schema as `minItems: 1` on `gaps`, where
+ * it could not see the verdict, so it refused every approval to enforce a rule
+ * about refusals. Here it can see the verdict, so it costs approvals nothing.
+ *
+ * A `continue` reaching this state keeps its verdict. Converting a refusal into
+ * an approval over a shape defect is the one direction that can end a run that
+ * should not end, and the reply still carries `detail`, which is required and
+ * non-empty. The caller names the shape on the record instead.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_completion_verdict_refuses_without_a_gap({verdict: "continue", detail: "x", gap_class: "other", gaps: [], gap_declared: false})
+ */
+pub fn __judge_completion_verdict_refuses_without_a_gap(decoded: CompletionJudgeVerdict) -> bool {
+  return decoded.verdict == "continue" && len(decoded.gaps) == 0 && !decoded.gap_declared
+}
+
+/**
+ * What the actor is told when a `done` was overridden for contradicting itself.
+ *
+ * The branch this serves used to fall through to the judge's own `detail`,
+ * which on a `done` reply is its rationale for finishing. Injecting that as the
+ * reason a run may not stop hands the actor a paragraph saying the work is
+ * complete, so the veto is indistinguishable from an approval, the actor has
+ * nothing to act on, and the loop cannot advance. Measured on three read-only
+ * review cells: the same sentence re-injected on five consecutive iterations,
+ * one tool call across seven turns, and a run that ended at the judge cap.
+ *
+ * So this names the condition instead: that a gap was declared alongside the
+ * `done`, which gap, and the two ways out. The gap's own detail is included
+ * when it has one, because the class alone is a label and the actor needs the
+ * claim. The quote is deliberately NOT echoed: on the measured cells it was the
+ * judge's own summary prose rather than a line from the evidence, so repeating
+ * it would reintroduce exactly the sentence this function exists to stop
+ * sending.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_contradiction_feedback({verdict: "done", detail: "", gap_class: "other", gaps: [], gap_declared: true})
+ */
+pub fn __judge_contradiction_feedback(decoded: CompletionJudgeVerdict) -> string {
+  const first = if len(decoded.gaps) > 0 {
+    trim(to_string(decoded.gaps[0]?.detail ?? ""))
+  } else {
+    ""
+  }
+  const named = if first != "" {
+    " The outstanding item is: " + first
+  } else {
+    ""
+  }
+  return "The completion check reported the work finished while also recording an "
+    + "outstanding gap of class `"
+    + to_string(decoded.gap_class)
+    + "`, so it cannot be read as a confirmation."
+    + named
+    + " Either resolve that gap and say what you changed, or, if it does not "
+    + "apply to this task, say why it does not before finishing."
 }
 
 /**
@@ -178,9 +257,16 @@ pub fn __judge_completion_verdict_contradicts_itself(decoded: CompletionJudgeVer
  * required: the checkpoint validates this schema strictly, and cached, replayed,
  * and older-pin judge responses carry no such field. An absent value decodes to
  * `other`, which is the reading that grants no authority — so the compatible
- * direction and the safe direction are the same direction. A `done` verdict
- * that populates the field at all, `other` included, is refused; see
- * `__judge_completion_verdict_contradicts_itself`.
+ * direction and the safe direction are the same direction. An approval says so
+ * with `none`, or by omitting the field; see
+ * `__judge_completion_verdict_contradicts_itself` for what still counts as a
+ * `done` that names a gap.
+ *
+ * This schema states shape that holds for BOTH verdicts and nothing else. A
+ * JSON validator is handed the reply without the question, so it cannot tell an
+ * approval from a refusal, and any rule that depends on which one this is can
+ * only be half enforced here. Those rules live in
+ * `__judge_completion_verdict_read` and its two predicates.
  *
  * @effects: []
  * @errors: []
@@ -201,7 +287,7 @@ pub fn __judge_completion_verdict_schema(raw_requirement_contract: unknown = nil
       type: "string",
       enum: COMPLETION_JUDGE_GAP_CLASSES,
       description:
-        "On `continue`, the kind of gap being named. Leave unset on `done`; setting it, including to `other`, is read as an unresolved gap and refused.",
+        "On `continue`, the kind of gap being named. On `done`, send `none` or omit the field.",
     },
     // The judge used to have one `detail` and one `gap_class` to answer with,
     // and was told to use them for "the single most important gap". A judge
@@ -210,11 +296,29 @@ pub fn __judge_completion_verdict_schema(raw_requirement_contract: unknown = nil
     // cap of three that is a task with three real gaps failing inside its own
     // budget while every refusal it received was correct. `gaps` is the room
     // to say all of it at once.
+    // NO `minItems`. It used to be 1, unconditionally, while this field's own
+    // description told the model to omit the array on `done`. `gaps` is not in
+    // `required`, so omitting it is legal and sending `[]` was not — and those
+    // two encode the same fact. Measured over an eval archive of 62 judge
+    // calls: not one `done` reply reached the pipeline carrying no gap. All 22
+    // were schema-rejected for `gaps: []`, and the repair turn, which hands the
+    // model its own text back and asks it to correct the JSON, can only satisfy
+    // a one-item minimum by inventing a gap. The model did what it was asked
+    // and lifted a sentence out of its own `detail` into `evidence_quote`.
+    // Everything downstream then reacted to that artifact: the self-
+    // contradiction check fired, the re-ask flipped the verdict, the invented
+    // sentence could not be grounded, a second re-ask fired, and the gate
+    // converted the whole thing back to `done`. Three judge calls and two
+    // re-asks to arrive where the first answer already was, on 22 of 62 calls.
+    //
+    // A validator cannot see the verdict, so verdict-dependent shape put here
+    // can only ever be enforced in one direction. It lives in the typed read
+    // now, which can see it, and which already owned the converse rule.
     gaps: {
       type: "array",
-      minItems: 1,
       description: "On `continue`, EVERY gap you currently hold, not the most important one. "
-        + "The actor can only converge on a set it is shown in full. Omit on `done`.",
+        + "The actor can only converge on a set it is shown in full. On `done`, send `[]` or "
+        + "omit the field.",
       items: {
         type: "object",
         required: ["criterion", "gap_class", "detail"],
@@ -316,8 +420,15 @@ pub fn __judge_completion_verdict_read(
   // folds a missing field, a blank string, an unrecognized string, and an
   // explicit `"other"` into the same `"other"` value, which is right for
   // display and for the arbitration ladder but wrong for this one question:
-  // did the reply say anything here at all?
-  const gap_declared = trim(to_string(result?.gap_class ?? "")) != ""
+  // did the reply CLAIM a gap here?
+  //
+  // `none` is excluded because it is the one value that answers that question
+  // with no. Without it in the enum, an approval had nothing legal to send and
+  // models sent `other`, which read as a claimed gap and made every such
+  // approval a self-contradiction. Blank and absent stay outside the claim too;
+  // they always did.
+  const raw_gap_class = lowercase(trim(to_string(result?.gap_class ?? "")))
+  const gap_declared = raw_gap_class != "" && raw_gap_class != "none"
   const contract = completion_requirement_contract(raw_requirement_contract)
   return {
     verdict: verdict,

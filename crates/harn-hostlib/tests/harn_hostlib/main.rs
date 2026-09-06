@@ -42,6 +42,7 @@ mod process_tools;
 mod process_tools_background_schema;
 mod process_tools_capture_transport;
 mod process_tools_e2e;
+mod process_tools_toolchain;
 mod process_tools_wait_command;
 mod process_tools_wait_output;
 mod registration;

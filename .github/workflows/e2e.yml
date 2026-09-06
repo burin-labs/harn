@@ -51,11 +51,41 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
+  # Say where this suite is about to land, and refuse when that cannot be
+  # measured. The routing expression below can only choose; it cannot report,
+  # and it reads an unreadable census exactly like a census that reported no
+  # capacity. Both would fall through to a hosted runner and silently downgrade
+  # the tier, leaving nothing to attribute the downgrade to.
+  e2e-capacity:
+    name: Name the E2E runner capacity decision
+    needs: runner-availability
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Decide where the slow E2E suite lands
+        run: bash scripts/ci/e2e_runner_capacity.sh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
+          RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
+          # The same switch the routing expression below reads. Without it here
+          # this step would report the owned census while the job ran on
+          # elastic paid capacity.
+          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
+
   e2e:
     name: Slow E2E suite
-    needs: runner-availability
-    # Main pushes prefer the big self-hosted rung: 24 cores at no cost, and
-    # this suite compiles the whole workspace before it runs a single test.
+    needs: [runner-availability, e2e-capacity]
+    # The fleet-evacuation switch takes every event to elastic paid capacity.
+    # When it is off, main pushes prefer the big self-hosted rung: 24 cores at
+    # no cost, and this suite compiles the CLI integration tests before running
+    # them.
     # `online` rather than `idle` is the deliberate part. A main push is not
     # racing anyone, so waiting for a busy box costs queue time and nothing
     # else, while routing to a hosted runner on every busy day would quietly
@@ -68,7 +98,9 @@ jobs:
     # work on a shared box to serve them is the trade this repository already
     # declined for its per-PR lanes.
     runs-on: >-
-      ${{ (github.event_name == 'push'
+      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
+        && 'blacksmith-8vcpu-ubuntu-2404')
+        || (github.event_name == 'push'
         && needs.runner-availability.outputs.selfhosted_disabled == ''
         && needs.runner-availability.outputs.capacity != ''
         && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
@@ -80,28 +112,13 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
     timeout-minutes: 90
-    # A mirror of `runs-on`, and it has to stay one. Both halves of this job
-    # scale with core count: Cargo builds the whole workspace, then nextest
-    # fans out tests that each spawn `harn` as a subprocess. Unbounded, that
-    # starved the runner agent off the network on three separate workers, which
-    # GitHub reports as a lost runner with no step conclusion and no log at
-    # all, so the suite looked broken rather than crowded.
-    #
-    # The share below is the box divided by how many heavy jobs may sit on it
-    # at once, not anything derived from `nproc`. That rung has 24 cores and
-    # runs up to four heavy jobs concurrently, so a job that sizes itself from
-    # the machine claims four times its share and starves the other three along
-    # with the agent. Hosted runners need no cap: their core count already is
-    # one.
-    env:
-      HARN_E2E_JOBS: >-
-        ${{ (github.event_name == 'push'
-          && needs.runner-availability.outputs.selfhosted_disabled == ''
-          && needs.runner-availability.outputs.capacity != ''
-          && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
-          && '6') || '4' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Measure the E2E CPU and compiler memory budget
+        id: resource-budget
+        run: bash scripts/ci/e2e_resource_budget.sh
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/sccache-install
         # sccache is a build-cache optimization, not a build requirement. The
@@ -124,8 +141,8 @@ jobs:
       - run: make test-e2e
         env:
           NEXTEST_PROFILE: e2e
-          NEXTEST_TEST_THREADS: ${{ env.HARN_E2E_JOBS }}
-          CARGO_BUILD_JOBS: ${{ env.HARN_E2E_JOBS }}
+          NEXTEST_TEST_THREADS: ${{ steps.resource-budget.outputs.test_threads }}
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
       # Postgres hostlib loadgen. The Make target skips before invoking Cargo
       # when HARN_TEST_POSTGRES_URL is unset, which it is until a Postgres
       # instance + dedicated runner are provisioned (tracked separately).

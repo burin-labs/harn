@@ -32,6 +32,9 @@ const STACK_ENV = "RUST_MIN_STACK"
 
 const REQUIRED_STACK = "16777216"
 
+// The resource owner derives the CPU share and applies its typed memory cap.
+const E2E_BUILD_JOBS = "$" + "{{ steps.resource-budget.outputs.build_jobs }}"
+
 pub type LaneViolation = {workflow: string, job: string, command: string, reason: string}
 
 /**
@@ -99,6 +102,26 @@ pub fn step_violations(
     || env_pins_stack(workflow_env)
   let violations: list<LaneViolation> = []
   for command in logical_commands(run) {
+    if contains(command, "make test-e2e") {
+      const jobs = to_string(
+        step?.env?.CARGO_BUILD_JOBS
+          ?? job_env?.CARGO_BUILD_JOBS
+          ?? workflow_env?.CARGO_BUILD_JOBS
+          ?? "",
+      )
+      if jobs != E2E_BUILD_JOBS {
+        violations = violations
+          + [
+            {
+              workflow: workflow,
+              job: job,
+              command: command,
+              reason:
+                "E2E_BUILD_MEMORY_BUDGET: use CARGO_BUILD_JOBS=${E2E_BUILD_JOBS}; observed '${jobs}'",
+            },
+          ]
+      }
+    }
     if !executes_rust_tests(command) {
       continue
     }
@@ -125,8 +148,32 @@ pub fn workflow_violations(workflow: string, document: dict) -> list<LaneViolati
   const jobs = document?.jobs ?? {}
   for job in jobs.keys().sorted() {
     const job_env = jobs[job]?.env ?? {}
+    let e2e_consumers = 0
+    let budget_owners = 0
     for step in jobs[job]?.steps ?? [] {
       violations = violations + step_violations(workflow, job, step, job_env, workflow_env)
+      if contains(to_string(step?.run ?? ""), "make test-e2e") {
+        e2e_consumers = e2e_consumers + 1
+      }
+      if step?.id == "resource-budget"
+        && step?.run == "bash scripts/ci/e2e_resource_budget.sh"
+        && step?.["if"] == nil
+        && step?.["continue-on-error"] == nil
+        && step?.env?.RUNNER_ENVIRONMENT == "$" + "{{ runner.environment }}" {
+        budget_owners = budget_owners + 1
+      }
+    }
+    if e2e_consumers > 0 && budget_owners != 1 {
+      violations = violations
+        + [
+          {
+            workflow: workflow,
+            job: job,
+            command: "make test-e2e",
+            reason:
+              "E2E_RESOURCE_BUDGET_UNMEASURED: expected one unconditional owner, found ${budget_owners}",
+          },
+        ]
     }
   }
   return violations

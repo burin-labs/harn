@@ -608,6 +608,18 @@ pub fn __verification_delta_explicit_failure(value: any) -> bool {
   return __verification_delta_outcome(value) == "fail"
 }
 
+/** Completeness is producer evidence, never inferred from a shorter rendered body. */
+fn __verification_delta_complete(value: unknown) -> bool {
+  return value?.diagnostics_complete == true
+    && __verification_delta_has_collection(value)
+    && value?.timed_out != true
+    && value?.truncated != true
+    && !["timed_out", "timeout", "cancelled", "killed", "running", "pending"].contains(
+      __verification_delta_status(value),
+    )
+    && __verification_delta_outcome(value) != "unknown"
+}
+
 /**
  * Command facts outrank the surrounding tool's successful dispatch receipt.
  *
@@ -632,6 +644,8 @@ pub fn __verification_command_fact(value: dict) -> dict {
   const passed = !failed
     && ((exit == 0 && terminal.contains(status))
       || ["success", "succeeded", "passed", "pass", "ok"].contains(status))
+  const diagnostics = data?.diagnostics ?? value?.diagnostics
+  const errors = data?.errors ?? value?.errors
   return value
     + {
       ok: passed ? true : failed ? false : nil,
@@ -639,9 +653,11 @@ pub fn __verification_command_fact(value: dict) -> dict {
       exit: nil,
       exit_code: exit,
       status: passed ? "passed" : failed ? "failed" : "pending",
-      diagnostics: passed || (failed && len(value?.diagnostics ?? []) > 0) ? value
-        ?.diagnostics : nil,
-      errors: passed || (failed && len(value?.errors ?? []) > 0) ? value?.errors : nil,
+      diagnostics_complete: __verification_delta_complete(
+        value + data + command + {status: status, exit_code: exit},
+      ),
+      diagnostics: passed || (failed && len(diagnostics ?? []) > 0) ? diagnostics : nil,
+      errors: passed || (failed && len(errors ?? []) > 0) ? errors : nil,
     }
 }
 
@@ -821,10 +837,20 @@ pub fn __verification_delta_direct_count(value: unknown) {
 pub fn __verification_delta_info(agent: HarnessAgent, value: unknown, cfg: dict) -> dict {
   const entries = __verification_delta_raw_entries(value)
   let normalized: list<string> = []
+  let failure_signatures: list<string> = []
   for entry in entries {
     const signature = __verification_delta_signature(agent, entry, cfg)
     if signature != "" && !__verification_delta_ignored(signature, cfg) {
       normalized = normalized.appending(signature)
+      const severity = if type_of(entry) == "dict" {
+        lowercase(to_string(entry?.severity ?? entry?.level ?? "error"))
+      } else {
+        "error"
+      }
+      if !["warning", "warn", "note", "info", "help", "hint"].contains(severity)
+        && !failure_signatures.contains(signature) {
+        failure_signatures = failure_signatures.appending(signature)
+      }
     }
   }
   let signatures: list<string> = []
@@ -840,6 +866,8 @@ pub fn __verification_delta_info(agent: HarnessAgent, value: unknown, cfg: dict)
     || (!has_collection && __verification_delta_explicit_failure(value))
   return {
     count: count,
+    complete: __verification_delta_complete(value),
+    failure_count: len(failure_signatures),
     explicit_success: __verification_delta_explicit_success(value),
     failed: failed,
     feedsGates: __verification_delta_feeds_gates(value),
@@ -879,6 +907,8 @@ pub fn __verification_delta_gate_signatures(info: dict) -> list<string> {
 pub fn __verification_delta_snapshot(info: dict) -> dict {
   return {
     count: info.count,
+    complete: info.complete,
+    failure_count: info.failure_count,
     feedsGates: info.feedsGates,
     feeds_gates: info.feeds_gates,
     signatures: info.signatures,

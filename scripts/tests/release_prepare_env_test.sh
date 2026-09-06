@@ -250,7 +250,7 @@ if ! grep -Fq 'serde = { version = "1", optional = true }' "$release_root/crates
   exit 1
 fi
 
-if ! grep -Fxq "argv=dump-protocol-artifacts --artifact-version 1.2.4" "$record_harn"; then
+if ! grep -Fxq "argv=dump-protocol-artifacts" "$record_harn"; then
   echo "release_gate prepare did not generate explicitly versioned protocol artifacts through HARN_BIN" >&2
   cat "$record_harn" >&2
   exit 1

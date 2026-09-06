@@ -1,0 +1,39 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_tool_call, with_llm_script } from "std/testing"
+
+/** Execute real single-turn loops across one explicit checkpoint lifetime. */
+pub fn stall_checkpoint_fixture(harness: Harness, session: string, tools: any, policy: any) {
+  let checkpoint = nil
+  return fn(name: string, args: any, call_id: string = "fixture-call") {
+    const result = with_llm_script(
+      harness.llm,
+      [llm_tool_call(name, args, call_id)],
+      { ->
+        const options: AgentSpec = {
+          provider: "mock",
+          session_id: session,
+          tools: tools,
+          tool_format: "native",
+          max_iterations: 1,
+          stall_checkpoint: checkpoint,
+          stall_diagnostics: {
+            enabled: true,
+            no_net_progress_extend_guard: true,
+            repair_aware: false,
+            post_edit_reverify: false,
+            repeat_same_observation: 99,
+            repeat_same_error: 99,
+            repeat_success: 99,
+            ping_pong_cycles: 99,
+            hard_stop_after_trips: 99,
+          }
+            + policy,
+        }
+        agent_loop(harness, "Continue", nil, options)
+      },
+    )
+    checkpoint = result.stall_checkpoint
+    return result
+  }
+}

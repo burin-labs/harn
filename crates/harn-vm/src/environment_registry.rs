@@ -896,7 +896,6 @@ mod tests {
         assert!(is_reference_source(runtime));
         assert!(variable_spec("HARN_AGENT_EVENT_KINDS").is_none());
         assert!(variable_spec("HARN_WORKER_STATUSES").is_none());
-        assert!(protocol_symbols.contains("HARN_PROTOCOL_ARTIFACT_VERSION"));
         assert!(protocol_symbols.contains("HARN_AGENT_EVENT_KINDS"));
         assert!(!protocol_symbols.contains("HARN_ACP_VERBOSE"));
     }

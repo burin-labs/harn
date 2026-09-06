@@ -12,7 +12,7 @@ use std::sync::Arc;
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
     ListFilter, ListOrder, ListSortKey, ReadRange, SearchFilter, SearchMode, SearchQuery,
-    SessionEventKind, SessionImporter, SessionStatus, SessionStore, SessionType,
+    SessionEventKind, SessionImporter, SessionLeaseError, SessionStatus, SessionStore, SessionType,
     SqliteSessionStore, StoreError, StoreHooks, StoredEvent, VerifyReport, MAX_READ_BATCH,
 };
 use serde::Deserialize;
@@ -374,6 +374,14 @@ fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
     Ok(CanonicalStore::new(store))
 }
 
+fn open_maintenance_store(
+    state_dir: &SessionStoreDir,
+) -> harn_session_store::StoreResult<CanonicalStore> {
+    let store =
+        SqliteSessionStore::open_for_maintenance_with_hooks(store_path(state_dir), store_hooks())?;
+    Ok(CanonicalStore::new(store))
+}
+
 fn store_hooks() -> StoreHooks {
     StoreHooks {
         redaction: Some(Arc::new(crate::redact::current_policy())),
@@ -471,6 +479,17 @@ fn store_path(state_dir: &SessionStoreDir) -> PathBuf {
 /// one answer.
 pub fn open_canonical_store(root: &Path) -> Result<CanonicalStore, VmError> {
     open_store(&SessionStoreDir::under_root(root))
+}
+
+/// Open the canonical session store for exclusive project-wide maintenance.
+///
+/// The handle preserves the canonical redaction, change-notification, and WAL
+/// watch contracts while preventing every participating writer from entering.
+/// Keep it alive across the complete inventory and mutation operation.
+pub fn open_canonical_store_for_maintenance(
+    root: &Path,
+) -> harn_session_store::StoreResult<CanonicalStore> {
+    open_maintenance_store(&SessionStoreDir::under_root(root))
 }
 
 pub(crate) fn open_existing_canonical_store(
@@ -1066,6 +1085,16 @@ fn store_error(error: StoreError) -> VmError {
     }
 }
 
+pub(crate) fn session_lease_error(context: &str, error: SessionLeaseError) -> VmError {
+    let message = format!("{context}: {error}");
+    match error {
+        SessionLeaseError::Contended { .. } => {
+            categorized_error(message, ErrorCategory::ResourceBusy)
+        }
+        _ => VmError::Runtime(message),
+    }
+}
+
 #[cfg(test)]
 #[path = "session_store_error_tests.rs"]
 mod error_tests;
@@ -1077,6 +1106,10 @@ mod execution_env_tests;
 #[cfg(test)]
 #[path = "session_store_read_only_tests.rs"]
 mod read_only_tests;
+
+#[cfg(test)]
+#[path = "session_store_maintenance_tests.rs"]
+mod maintenance_tests;
 
 #[cfg(test)]
 mod tests {

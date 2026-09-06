@@ -1,0 +1,110 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_tool_call, with_llm_script } from "std/testing"
+
+/** Real handler execution keeps transport disposition separate from committed writes. */
+fn mutation_sequence(harness: Harness, mutations: list<string>, failed_transport: bool) -> list {
+  const sid = harness.agent.open()
+  const path = path_join(harness.fs.cwd(), ".harn", "mutation-evidence-${sid}.txt")
+  let executions = 0
+  let writes = 0
+  let observations = []
+  const tools = tool_define(
+    tool_registry(),
+    "edit",
+    "Apply source change",
+    {
+      parameters: {mutation: {type: "string"}},
+      annotations: {kind: "edit"},
+      handler: { args ->
+        executions += 1
+        if args.mutation == "applied" || args.mutation == "legacy" {
+          writes += 1
+          harness.fs.write_text(path, "written-${writes}")
+        }
+        if args.mutation == "legacy" {
+          return "Applied source change"
+        }
+        const result = agent_tool_handler_result(
+          "Edit completed with advisory",
+          {mutation_status: args.mutation},
+        )
+        return if failed_transport {
+          result + {ok: false}
+        } else {
+          result
+        }
+      },
+    },
+  )
+  try {
+    with_llm_script(
+      harness.llm,
+      mutations.map({ mutation -> llm_tool_call("edit", {mutation: mutation}) }).to_list(),
+      { ->
+        const opts: AgentSpec = {
+          provider: "mock",
+          session_id: sid,
+          tools: tools,
+          tool_format: "native",
+          max_iterations: len(mutations),
+          stall_diagnostics: {enabled: true},
+          post_turn_callback: { info ->
+            const state = agent_stall_checkpoint_state(harness.agent, info.stall_checkpoint)
+            observations = observations
+              + [
+                {
+                  status: info.stall_checkpoint.dispatch[0].status,
+                  mutation: info.stall_checkpoint.dispatch[0].data?.mutation_status,
+                  write_epoch: state.write_epoch,
+                },
+              ]
+            return nil
+          },
+        }
+        agent_loop(harness, "Edit source", nil, opts)
+      },
+    )
+    require executions == len(mutations) && len(observations) == len(mutations),
+      "every scheduled handler must execute and reach the canonical checkpoint"
+    require writes > 0 && harness.fs.read_text(path) == "written-${writes}",
+      "applied results must correspond to real committed file writes"
+    return observations
+  } finally {
+    harness.fs.delete(path)
+    harness.agent.close(sid)
+  }
+}
+
+pipeline test_successful_transport_uses_mutation_evidence_before_edit_annotation(harness: Harness) {
+  const rows = mutation_sequence(harness, ["applied", "not_applied", "unchanged", "legacy"], false)
+  assert(
+    rows.all({ row -> row.status == "ok" }),
+    "all producer results must complete successfully at the transport boundary",
+  )
+  assert_eq(
+    rows.map({ row -> row.mutation }).to_list(),
+    ["applied", "not_applied", "unchanged", nil],
+    "native dispatch must retain explicit mutation facts and distinguish missing evidence",
+  )
+  assert_eq(
+    rows.map({ row -> row.write_epoch }).to_list(),
+    [1, 1, 1, 2],
+    "rejected and nonmutating results must not advance writes; untyped edit success remains compatible",
+  )
+}
+
+pipeline test_failed_transport_retains_explicit_applied_mutation(harness: Harness) {
+  const rows = mutation_sequence(harness, ["applied"], true)
+  assert(
+    rows[0].status == "error" && rows[0].mutation == "applied",
+    "the executed dispatch must preserve failure disposition alongside applied evidence",
+  )
+  assert_eq(
+    rows[0].write_epoch,
+    1,
+    "an authenticated applied mutation remains a write despite its transport failure",
+  )
+}
