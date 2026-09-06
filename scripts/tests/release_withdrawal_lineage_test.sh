@@ -15,8 +15,7 @@ trap 'rm -rf "$tmp_root"' EXIT
 fixture_repo="$tmp_root/repo"
 mkdir -p \
   "$fixture_repo/.github" \
-  "$fixture_repo/spec/acp-registry/harn" \
-  "$fixture_repo/spec/protocol-artifacts"
+  "$fixture_repo/spec/acp-registry/harn"
 
 cat > "$fixture_repo/Cargo.toml" <<'EOF'
 [workspace]
@@ -34,9 +33,6 @@ cat > "$fixture_repo/CHANGELOG.md" <<'EOF'
 ## v0.10.50
 
 - Last published release.
-EOF
-cat > "$fixture_repo/spec/protocol-artifacts/manifest.json" <<'EOF'
-{"artifactVersion":"0.10.51"}
 EOF
 cat > "$fixture_repo/spec/acp-registry/harn/agent.json" <<'EOF'
 {

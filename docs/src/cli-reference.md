@@ -1898,10 +1898,9 @@ Process cleanup may add a short grace period after the deadline.
 - **Toolchain** — `rustc`, `cargo` (FAIL when missing).
 - **Optional dev tools** — `cargo-nextest`, `sccache`, `actionlint` (WARN
   when missing; each has a documented fallback).
-- **Protocol artifacts** — when run inside the harn repo, compares the
-  pinned `HARN_PROTOCOL_ARTIFACT_VERSION` in
-  `spec/protocol-artifacts/harn-protocol.ts` against the binary's own
-  version and FAILs on drift.
+- **Protocol artifacts** — when run inside the harn repo, renders the
+  protocol manifest this binary would write and compares it to the
+  checked-in `spec/protocol-artifacts/manifest.json`, FAILing on drift.
 - **Portal frontend** — `node`, `npm`, and the portal's `node_modules`
   directory when run inside the repo.
 - **Platform capabilities** — `notify` file-watcher backend availability and

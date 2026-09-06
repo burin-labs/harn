@@ -50,18 +50,11 @@ pub(super) fn generate_manifest(source: &ProtocolArtifactSource) -> Result<Strin
     let external_actions = ExternalActionVocabulary::load(source)?;
     let connector_setup = ConnectorSetupVocabulary::load(source)?;
     let activity = ActivityVocabulary::load(source)?;
-    generate_manifest_for_version(
-        source,
-        env!("CARGO_PKG_VERSION"),
-        &external_actions,
-        &connector_setup,
-        &activity,
-    )
+    generate_manifest_with_vocabularies(source, &external_actions, &connector_setup, &activity)
 }
 
-pub(super) fn generate_manifest_for_version(
+pub(super) fn generate_manifest_with_vocabularies(
     source: &ProtocolArtifactSource,
-    artifact_version: &str,
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
     activity: &ActivityVocabulary,
@@ -126,7 +119,6 @@ pub(super) fn generate_manifest_for_version(
 
     serde_json::to_string_pretty(&json!({
         "schemaVersion": 1,
-        "artifactVersion": artifact_version,
         "generatedBy": "harn dump-protocol-artifacts",
         "checkCommand": "make check-protocol-artifacts",
         "bindings": {
@@ -363,14 +355,7 @@ pub(super) fn generate_readme() -> String {
     )
 }
 
-#[cfg(test)]
 pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
-    generate_round_trip_fixture_for_version(env!("CARGO_PKG_VERSION"))
-}
-
-pub(super) fn generate_round_trip_fixture_for_version(
-    artifact_version: &str,
-) -> Result<String, String> {
     let tool_call = json!({
         "sessionUpdate": "tool_call",
         "toolCallId": "call-001",
@@ -537,7 +522,11 @@ pub(super) fn generate_round_trip_fixture_for_version(
         "_meta": {
             "io.modelcontextprotocol/serverInfo": {
                 "name": "harn",
-                "version": artifact_version,
+                // These envelopes are representative shapes, not a live server
+                // report, so this is a fixed example rather than the running
+                // version. Pinning the crate version here restaled the fixture
+                // on every development bump without the protocol moving.
+                "version": "0.0.0",
             },
         },
         "instructions": "Use MCP 2026-07-28. Harn server endpoints do not emulate older lifecycles.",
@@ -576,7 +565,6 @@ pub(super) fn generate_round_trip_fixture_for_version(
 
     let session_recap_availability = super::session_recap::session_recap_round_trip_fixture()?;
     let fixture = json!({
-        "artifactVersion": artifact_version,
         "harnAgentEventMethod": HARN_AGENT_EVENT_METHOD,
         "harnProviderCatalogMethod": HARN_PROVIDER_CATALOG_METHOD,
         "envelopes": {

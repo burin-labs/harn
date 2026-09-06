@@ -1232,10 +1232,10 @@ cmd_prepare() {
     reconcile_cargo_lock
 
     harn_cmd run scripts/sync_protocol_fixture_runtime_versions.harn -- --from "$current" --to "$next"
-    # Artifact contents come from the already-audited source checkout. Stamp the
-    # selected release version explicitly so a Cargo.toml-only rewrite does not
-    # force a second full CLI build.
-    harn_cmd dump-protocol-artifacts --artifact-version "$next"
+    # Artifact contents come from the already-audited source checkout and no
+    # longer carry a version stamp, so a Cargo.toml-only rewrite leaves them
+    # byte-identical.
+    harn_cmd dump-protocol-artifacts
     # The package/release payload is intentionally ignored rather than committed.
     # Generate it once after the version bump with the stable pre-bump generator;
     # later audit/package steps verify the same target-independent bytes.

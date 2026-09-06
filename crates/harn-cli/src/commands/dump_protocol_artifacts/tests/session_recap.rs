@@ -9,9 +9,9 @@ fn verification(value: &mut serde_json::Value) -> &mut serde_json::Value {
 #[test]
 fn generated_bindings_expose_one_session_recap_contract() {
     let bindings = [
-        ("Rust", generate_rust()),
-        ("Swift", generate_swift()),
-        ("TypeScript", generate_typescript()),
+        ("Rust", generate_rust_for_tests()),
+        ("Swift", generate_swift_for_tests()),
+        ("TypeScript", generate_typescript_for_tests()),
         ("Python", generate_python()),
         ("Go", generate_go()),
     ];

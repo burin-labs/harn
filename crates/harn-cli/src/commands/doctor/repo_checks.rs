@@ -21,49 +21,45 @@ fn check_protocol_artifacts_from(anchor: &Path) -> Vec<DoctorCheck> {
         }];
     };
 
-    let ts_path = repo.join("spec/protocol-artifacts/harn-protocol.ts");
-    let Ok(text) = fs::read_to_string(&ts_path) else {
-        return vec![DoctorCheck {
-            id: "protocol-artifacts".to_string(),
-            status: DoctorStatus::Warn,
-            label: "protocol-artifacts".to_string(),
-            detail: format!("unable to read {}", ts_path.display()),
-            fix_command: Some("make gen-protocol-artifacts".to_string()),
-            docs_url: Some("https://harnlang.com/protocol-artifacts.html".to_string()),
-            blocks: vec!["release"],
-        }];
+    // Artifacts no longer carry a version stamp, so drift is a content
+    // question: render the manifest the running binary would write and
+    // compare it to the checked-in bytes.
+    let manifest_path = repo.join("spec/protocol-artifacts/manifest.json");
+    let checked_in = match fs::read_to_string(&manifest_path) {
+        Ok(text) => text,
+        Err(error) => {
+            return vec![DoctorCheck {
+                id: "protocol-artifacts".to_string(),
+                status: DoctorStatus::Warn,
+                label: "protocol-artifacts".to_string(),
+                detail: format!("unable to read {}: {error}", manifest_path.display()),
+                fix_command: Some("make gen-protocol-artifacts".to_string()),
+                docs_url: Some("https://harnlang.com/protocol-artifacts.html".to_string()),
+                blocks: vec!["release"],
+            }];
+        }
+    };
+    let generated = match crate::commands::dump_protocol_artifacts::manifest_json_from(&repo) {
+        Ok(text) => text,
+        Err(error) => {
+            return vec![DoctorCheck {
+                id: "protocol-artifacts".to_string(),
+                status: DoctorStatus::Warn,
+                label: "protocol-artifacts".to_string(),
+                detail: format!("unable to render the protocol manifest: {error}"),
+                fix_command: Some("make gen-protocol-artifacts".to_string()),
+                docs_url: Some("https://harnlang.com/protocol-artifacts.html".to_string()),
+                blocks: vec!["release"],
+            }];
+        }
     };
 
-    let pinned_version = text
-        .lines()
-        .find_map(|line| {
-            line.split_once("HARN_PROTOCOL_ARTIFACT_VERSION = \"")
-                .map(|(_, rest)| rest)
-                .and_then(|rest| rest.split_once('"').map(|(version, _)| version.to_string()))
-        })
-        .unwrap_or_default();
-    let current = env!("CARGO_PKG_VERSION");
-    if pinned_version.is_empty() {
-        return vec![DoctorCheck {
-            id: "protocol-artifacts".to_string(),
-            status: DoctorStatus::Warn,
-            label: "protocol-artifacts".to_string(),
-            detail: format!(
-                "could not parse HARN_PROTOCOL_ARTIFACT_VERSION from {}",
-                ts_path.display()
-            ),
-            fix_command: Some("make gen-protocol-artifacts".to_string()),
-            docs_url: Some("https://harnlang.com/protocol-artifacts.html".to_string()),
-            blocks: vec!["release"],
-        }];
-    }
-
-    if pinned_version == current {
+    if checked_in.trim() == generated.trim() {
         vec![DoctorCheck {
             id: "protocol-artifacts".to_string(),
             status: DoctorStatus::Ok,
             label: "protocol-artifacts".to_string(),
-            detail: format!("pinned at v{pinned_version}"),
+            detail: "checked-in manifest matches this binary".to_string(),
             ..Default::default()
         }]
     } else {
@@ -71,7 +67,10 @@ fn check_protocol_artifacts_from(anchor: &Path) -> Vec<DoctorCheck> {
             id: "protocol-artifacts".to_string(),
             status: DoctorStatus::Fail,
             label: "protocol-artifacts".to_string(),
-            detail: format!("stale: pinned v{pinned_version}, current v{current}"),
+            detail: format!(
+                "stale: {} differs from this binary",
+                manifest_path.display()
+            ),
             fix_command: Some("make gen-protocol-artifacts".to_string()),
             docs_url: Some("https://harnlang.com/protocol-artifacts.html".to_string()),
             blocks: vec!["release"],

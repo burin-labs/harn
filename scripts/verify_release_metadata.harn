@@ -28,8 +28,6 @@ const CARGO_PATH = "Cargo.toml"
 
 const CHANGELOG_PATH = "CHANGELOG.md"
 
-const MANIFEST_PATH = "spec/protocol-artifacts/manifest.json"
-
 const ACP_AGENT_MANIFEST_PATH = "spec/acp-registry/harn/agent.json"
 
 const RELEASE_WITHDRAWALS_PATH = ".github/release-withdrawals.json"
@@ -44,20 +42,6 @@ pub fn current_version(cargo_text: string) -> string {
   const caps = regex_captures(r#"(?m)^version = "([^"]+)""#, cargo_text)
   if caps.count == 0 {
     throw "error: missing workspace version in Cargo.toml"
-  }
-  return caps[0].groups[0]
-}
-
-/**
- * Pull `artifactVersion` from the protocol-artifact manifest JSON text.
- * `make gen-protocol-artifacts` regenerates this from the crate version, so a
- * version bump that forgets to regenerate leaves it stale. Throws the canonical
- * error when the field is missing.
- */
-pub fn protocol_artifact_version(manifest_text: string) -> string {
-  const caps = regex_captures(r#""artifactVersion"\s*:\s*"([^"]+)""#, manifest_text)
-  if caps.count == 0 {
-    throw "error: missing artifactVersion in " + MANIFEST_PATH
   }
   return caps[0].groups[0]
 }
@@ -505,18 +489,6 @@ pipeline main(harness: Harness, task: unknown) {
     const changelog_text = harness.fs.read_text(CHANGELOG_PATH)
     const version = current_version(cargo_text)
     const effective_version = check_metadata(cargo_text, changelog_text)
-    // Fast staleness guard: `make gen-protocol-artifacts` stamps the crate
-    // version into the manifest, so a version bump that skipped the regen is
-    // caught here instead of by the slow `check-protocol-artifacts` audit.
-    const manifest_text = harness.fs.read_text(MANIFEST_PATH)
-    const artifact_version = protocol_artifact_version(manifest_text)
-    if artifact_version != version {
-      throw "error: " + MANIFEST_PATH + " artifactVersion " + artifact_version
-        + " does not match Cargo.toml version "
-        + version
-        + "; run `make gen-protocol-artifacts` (and "
-        + "scripts/sync_protocol_fixture_runtime_versions.harn) after bumping the version"
-    }
     const withdrawals = load_release_withdrawals(harness.fs, RELEASE_WITHDRAWALS_PATH)
     const distribution_source = if is_development_after_release(version, effective_version) {
       effective_version

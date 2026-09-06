@@ -45,7 +45,7 @@ case "$*" in
     ;;
   *"/sync_protocol_fixture_runtime_versions.harn "*) ;;
   *"/sync_grammar_fitness_receipt.harn") ;;
-  "dump-protocol-artifacts --artifact-version 1.2.4-dev") ;;
+  "dump-protocol-artifacts") ;;
   *)
     echo "unexpected fake Harn invocation: $*" >&2
     exit 2
@@ -80,7 +80,7 @@ grep -Fxq 'metadata --format-version=1' "$cargo_record"
 grep -Fxq 'metadata --format-version=1 --locked' "$cargo_record"
 grep -Fq 'sync_protocol_fixture_runtime_versions.harn -- --from 1.2.3 --to 1.2.4-dev' \
   "$harn_record"
-grep -Fxq 'dump-protocol-artifacts --artifact-version 1.2.4-dev' "$harn_record"
+grep -Fxq 'dump-protocol-artifacts' "$harn_record"
 grep -Fq 'sync_grammar_fitness_receipt.harn' "$harn_record"
 
 printf 'untracked\n' > "$fixture/UNTRACKED"

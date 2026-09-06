@@ -76,16 +76,12 @@ impl Artifact {
     }
 }
 
-pub(crate) fn run(output_dir: &str, check_only: bool, artifact_version: Option<&str>) {
-    let artifact_version = resolve_artifact_version(artifact_version).unwrap_or_else(|error| {
-        eprintln!("error: {error}");
-        process::exit(2);
-    });
+pub(crate) fn run(output_dir: &str, check_only: bool) {
     let source = ProtocolArtifactSource::discover().unwrap_or_else(|error| {
         eprintln!("error: failed to locate protocol sources: {error}");
         process::exit(1);
     });
-    let artifacts = generate_artifacts(&source, artifact_version).unwrap_or_else(|error| {
+    let artifacts = generate_artifacts(&source).unwrap_or_else(|error| {
         eprintln!("error: failed to generate protocol artifacts: {error}");
         process::exit(1);
     });
@@ -130,28 +126,17 @@ pub(crate) fn run(output_dir: &str, check_only: bool, artifact_version: Option<&
     }
 }
 
-fn resolve_artifact_version(requested: Option<&str>) -> Result<&str, String> {
-    let version = requested.unwrap_or(env!("CARGO_PKG_VERSION"));
-    semver::Version::parse(version)
-        .map(|_| version)
-        .map_err(|error| format!("invalid protocol artifact version '{version}': {error}"))
-}
-
-fn generate_artifacts(
-    source: &ProtocolArtifactSource,
-    artifact_version: &str,
-) -> Result<Vec<Artifact>, String> {
+fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, String> {
     let external_actions = ExternalActionVocabulary::load(source)?;
     let connector_setup = ConnectorSetupVocabulary::load(source)?;
     let activity = ActivityVocabulary::load(source)?;
-    let go_artifact = generate_go_artifact_for_version(artifact_version)?;
+    let go_artifact = generate_go_artifact()?;
     let mut artifacts = vec![
         Artifact::new("README.md", generate_readme()),
         Artifact::new(
             "manifest.json",
-            generate_manifest_for_version(
+            generate_manifest_with_vocabularies(
                 source,
-                artifact_version,
                 &external_actions,
                 &connector_setup,
                 &activity,
@@ -159,45 +144,24 @@ fn generate_artifacts(
         ),
         Artifact::new(
             "harn-protocol.ts",
-            generate_typescript_for_version(
-                artifact_version,
-                &external_actions,
-                &connector_setup,
-                &activity,
-            ),
+            generate_typescript(&external_actions, &connector_setup, &activity),
         ),
         Artifact::new(
             "HarnProtocol.swift",
-            generate_swift_for_version(
-                artifact_version,
-                &external_actions,
-                &connector_setup,
-                &activity,
-            ),
+            generate_swift(&external_actions, &connector_setup, &activity),
         ),
         Artifact::new(
             "harn-protocol.rs",
             format_rust_source(
-                generate_rust_for_version(
-                    artifact_version,
-                    &external_actions,
-                    &connector_setup,
-                    &activity,
-                ),
+                generate_rust(&external_actions, &connector_setup, &activity),
                 source.repo_root(),
             )?,
         ),
-        Artifact::new(
-            "python/harn_protocol.py",
-            generate_python_for_version(artifact_version),
-        ),
+        Artifact::new("python/harn_protocol.py", generate_python()),
         Artifact::new("python/__init__.py", PYTHON_INIT_STUB.to_string()),
         Artifact::new("go/harnprotocol/harnprotocol.go", go_artifact),
         Artifact::new("go/harnprotocol/go.mod", generate_go_mod()),
-        Artifact::new(
-            "fixtures/round_trip.json",
-            generate_round_trip_fixture_for_version(artifact_version)?,
-        ),
+        Artifact::new("fixtures/round_trip.json", generate_round_trip_fixture()?),
         Artifact::new(
             TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
             generate_tool_call_receipt_schema()?,
