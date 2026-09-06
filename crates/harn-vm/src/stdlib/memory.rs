@@ -779,7 +779,7 @@ pub(crate) fn resolve_memory_root(explicit: Option<&str>) -> PathBuf {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| std::env::var("HARN_MEMORY_ROOT").ok())
+        .or_else(|| std::env::var(crate::runtime_paths::HARN_MEMORY_ROOT_ENV).ok())
         .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
         .unwrap_or_else(|| crate::stdlib::process::runtime_root_base().join(".harn/memory"))
 }
