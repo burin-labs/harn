@@ -230,12 +230,27 @@ pub const LIVE_ARTIFACT_CONSUMERS = ["audit-scripts", "ci-walltime-report"]
 
 pub const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
+/**
+ * Every main push gets its own key; pull requests and merge groups keep theirs.
+ *
+ * Keying main by the branch shares one key across every merge, so a later push
+ * evicts an older pending proof before any job starts. Merges land closer
+ * together than a run takes, so under that key most main commits never finish
+ * being proved, and a head commit with no executed result reads the same as a
+ * passing one.
+ */
 pub const CI_WORKFLOW_CONCURRENCY_GROUP = "$"
   + "{{ github.workflow }}-$"
-  + "{{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && 'main') || github.ref }}"
+  + "{{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}"
 
-pub const CI_WORKFLOW_CANCEL_POLICY = "$"
-  + "{{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}"
+/**
+ * Pull-request runs supersede; nothing supersedes a main push.
+ *
+ * This is the second half of the per-commit key above. The key stops a later
+ * merge from evicting a pending run, and this stops a push from cancelling one
+ * already executing. Either alone leaves main commits without proof.
+ */
+pub const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_request' }}"
 
 pub const MAIN_ONLY_RUST_IF =
   "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
@@ -1420,18 +1435,20 @@ pub fn ci_cache_policy_errors(
   return errors
 }
 
-/** Keep one current pull-request proof and one current main proof. */
+/** Keep one current pull-request proof and an executed result per main head. */
 pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
     errors = errors
       + [
-        "ci.yml concurrency.group must share one main lane while preserving PR, merge-group, and ref keys",
+        "ci.yml concurrency.group must give each main push its own key while preserving PR, merge-group, and ref keys",
       ]
   }
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != CI_WORKFLOW_CANCEL_POLICY {
     errors = errors
-      + ["ci.yml must cancel superseded pull-request and main-push runs only"]
+      + [
+        "ci.yml must cancel superseded pull-request runs only; nothing may supersede a main push, so every head sha keeps an executed result",
+      ]
   }
   return errors
 }
