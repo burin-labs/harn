@@ -1129,6 +1129,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 reason,
                 confirm,
                 converted_from,
+                specific_gaps,
+                accepted_evidence,
             } => {
                 self.emit_agent_event_ext(
                     "judge_decision",
@@ -1143,6 +1145,8 @@ impl AgentEventSink for AcpAgentEventSink {
                         "reason": reason,
                         "confirm": confirm,
                         "convertedFrom": converted_from,
+                        "specificGaps": specific_gaps,
+                        "acceptedEvidence": accepted_evidence,
                     }),
                 );
             }

@@ -1,0 +1,80 @@
+import { with_temp_dir } from "std/testing"
+import "../check_harn_syntax_sensitive_scans.harn"
+
+fn mkdirs(path: string) -> nil {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
+    "/"
+  } else {
+    ""
+  }
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    current = if current == "" || current == "/" {
+      current + part
+    } else {
+      path_join(current, part)
+    }
+    if !harness.fs.exists(current) {
+      harness.fs.mkdir(current)
+    }
+  }
+  return nil
+}
+
+fn write_text(root: string, rel: string, text: string) -> nil {
+  const path = path_join(root, rel)
+  mkdirs(dirname(path) ?? root)
+  harness.fs.write_text(path, text)
+  return nil
+}
+
+@test
+pipeline test_line_detectors(task) {
+  assert_eq(line_has_let_only_harn_binding_regex("const pattern = \"let\\\\s+foo\""), true)
+  assert_eq(line_has_let_only_harn_binding_regex("const pattern = \"(?:const|let)\\\\s+foo\""), false)
+  assert_eq(line_has_let_only_harn_binding_regex("const pattern = \"(?:let|const)\\\\s+foo\""), false)
+  const stale_registry = " * " + "var " + "reg = tool_registry()"
+  assert_eq(line_has_stale_var_tool_registry_example(stale_registry), true)
+  assert_eq(line_has_stale_var_tool_registry_example("let reg = tool_registry()"), false)
+  assert_eq(line_has_stale_var_tool_registry_example("var count = 0"), false)
+}
+
+@test
+pipeline test_scan_text_reports_both_issue_classes(task) {
+  const findings = harn_syntax_sensitive_scan_text(
+    "scripts/example.harn",
+    "const pattern = \"let\\\\s+_EVIDENCE_\"\n * " + "var " + "reg = tool_registry()\n",
+  )
+  assert_eq(findings.count, 2)
+  assert_eq(findings[0].line, 1)
+  assert_eq(findings[0].kind, "let-only-harn-binding-regex")
+  assert_eq(findings[1].line, 2)
+  assert_eq(findings[1].kind, "stale-var-tool-registry-example")
+}
+
+@test
+pipeline test_temp_tree_skips_generated_and_reports_findings(task) {
+  with_temp_dir(
+    { root ->
+      write_text(root, "scripts/bad.harn", "const pattern = \"let\\\\s+name\"\n")
+      write_text(root, "docs/bad.md", "```harn\n" + "var " + "reg = tool_registry()\n```\n")
+      write_text(root, "docs/good.md", "```harn\nlet reg = tool_registry()\n```\n")
+      write_text(root, "docs/dist/generated.md", "var " + "reg = tool_registry()\n")
+      write_text(root, "target/generated.harn", "const pattern = \"let\\\\s+x\"\n")
+      const files = harn_syntax_sensitive_files(root)
+      assert_eq(files.contains("scripts/bad.harn"), true)
+      assert_eq(files.contains("docs/bad.md"), true)
+      assert_eq(files.contains("docs/dist/generated.md"), false)
+      assert_eq(files.contains("target/generated.harn"), false)
+      const report = check_harn_syntax_sensitive_scans(root)
+      assert_eq(report.violation_count, 2)
+      assert_eq(
+        report.findings.map({ row -> row.path }).to_list().sort(),
+        ["docs/bad.md", "scripts/bad.harn"],
+      )
+    },
+  )
+}

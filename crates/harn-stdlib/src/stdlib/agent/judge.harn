@@ -7,6 +7,7 @@ import {
   __judge_classify_verdict,
   __judge_run_checkpoint,
 } from "std/agent/judge_internals"
+import { __with_prompt_fragment } from "std/agent/preflight"
 import { completion_judge_user_prompt } from "std/agent/prompts"
 import {
   agent_emit_event,
@@ -41,6 +42,50 @@ fn __session_tool_names(messages) {
     }
   }
   return __unique_names(names)
+}
+
+fn __judge_string_list(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    let out = []
+    for item in value {
+      const text = trim(to_string(item ?? ""))
+      if text != "" {
+        out = out.push(text)
+      }
+    }
+    return out
+  }
+  const text = trim(to_string(value))
+  if text == "" {
+    return []
+  }
+  return [text]
+}
+
+fn __judge_gap_feedback(gaps) {
+  if len(gaps) == 0 {
+    return ""
+  }
+  return "Address these specific gaps before finishing:\n- " + join(gaps, "\n- ")
+}
+
+fn __judge_checkpoint_raw_object(checkpoint) {
+  let raw = trim(to_string(checkpoint?.raw_text ?? ""))
+  const outputs = checkpoint?.raw_outputs ?? []
+  if raw == "" && len(outputs) > 0 {
+    raw = trim(to_string(outputs[len(outputs) - 1] ?? ""))
+  }
+  if raw == "" {
+    return {}
+  }
+  const parsed = json_parse(raw) ?? {}
+  if type_of(parsed) != "dict" {
+    return {}
+  }
+  return parsed
 }
 
 fn __judge_payload(session, opts, stop_reason, text, iteration) {
@@ -94,7 +139,14 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     properties: {
       verdict: {type: "string", description: "Use `done` or `continue`."},
       reasoning: {type: "string"},
+      rationale: {type: "string", description: "Alias for reasoning; accepted for stricter contracts."},
       next_step: {type: "string"},
+      specific_gaps: {
+        type: "list",
+        items: {type: "string"},
+        description: "Concrete gaps to repair when verdict is `continue`.",
+      },
+      accepted_evidence: {type: "list", items: {type: "string"}, description: "Evidence accepted when verdict is `done`."},
     },
     required: ["verdict"],
   }
@@ -132,7 +184,19 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     }
   }
   const result = checkpoint.data
-  const {reasoning = "", next_step = ""} = result ?? {}
+  const raw_result = __judge_checkpoint_raw_object(checkpoint)
+  const reasoning = to_string(result?.reasoning ?? result?.rationale ?? "")
+  const next_step = to_string(result?.next_step ?? result?.nextStep ?? "")
+  const specific_gaps = __judge_string_list(
+    result?.specific_gaps ?? result?.specificGaps ?? raw_result?.specific_gaps
+      ?? raw_result?.specificGaps,
+  )
+  const accepted_evidence = __judge_string_list(
+    result?.accepted_evidence
+      ?? result?.acceptedEvidence
+      ?? raw_result?.accepted_evidence
+      ?? raw_result?.acceptedEvidence,
+  )
   // The done-judge prompt only ever asks for `done` or `continue`. A reflexive
   // `"yes"` from a cheap model usually means "yes, keep going" (continue), and
   // a bare `"true"` is just as ambiguous — classifying either as DONE
@@ -142,14 +206,16 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
   const outcome = __judge_classify_verdict(
     result?.verdict ?? "continue",
     done_verdicts,
-    [next_step, reasoning],
+    [__judge_gap_feedback(specific_gaps), next_step, reasoning],
     feedback_default,
   )
   return outcome
     + {
+    accepted_evidence: accepted_evidence,
     reasoning: reasoning,
     next_step: next_step,
     judge_duration_ms: duration_ms,
+    specific_gaps: specific_gaps,
     typed_checkpoint: checkpoint,
   }
 }
@@ -238,7 +304,89 @@ fn __emit_judge_decision(session_id, iteration, verdict) {
       reason: verdict?.reason ?? nil,
       confirm: verdict?.confirm ?? !verdict.vetoed,
       converted_from: verdict?.converted_from ?? nil,
+      specific_gaps: verdict?.specific_gaps ?? [],
+      accepted_evidence: verdict?.accepted_evidence ?? [],
     },
+  )
+}
+
+fn __done_contract_primary_prompt(opts) {
+  const marker = to_string(opts?.done_sentinel ?? "the configured done sentinel")
+  return join(
+    [
+      "Before yielding as done, state a concise Done claim immediately before " + marker + ".",
+      "The claim must cover: requested work, evidence observed, files or artifacts changed, and anything deliberately not done.",
+      "Do not claim completion from a green self-authored check alone; connect the evidence back to the user's visible request.",
+    ],
+    "\n",
+  )
+}
+
+fn __done_contract_judge_system(opts) {
+  const extra = trim(to_string(opts?.rubric ?? ""))
+  let lines = [
+    "You are a strict done-contract judge for an autonomous agent.",
+    "Decide whether the latest completion claim is justified by the task, transcript, tool results, and changed artifacts.",
+    "Return `done` only when the claim covers the visible request and names adequate evidence.",
+    "Return `continue` when evidence is missing, self-authored tests are too weak, or visible requirements are unaddressed.",
+    "On `done`, provide `reasoning` and `accepted_evidence`.",
+    "On `continue`, provide `reasoning` and `specific_gaps`; each gap must be concrete enough to inject as repair feedback.",
+  ]
+  if extra != "" {
+    lines = lines.push("Additional rubric:\n" + extra)
+  }
+  return join(lines, "\n")
+}
+
+/**
+ * agent_done_contract.
+ *
+ * Build an agent_loop option bundle for a bidirectional done contract:
+ * the primary agent must state a concise completion claim before yielding, and
+ * the done judge must return rationale plus `specific_gaps[]` on veto or
+ * `accepted_evidence[]` on approval. The helper rides the existing `done_judge`
+ * seam and context-profile prompt-fragment channel; it does not add a new loop
+ * hook. Compose it with base options:
+ *
+ * ```harn,ignore
+ * agent_loop(task, nil, base_opts + agent_done_contract({max_invocations: 3}))
+ * ```
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_done_contract(options = {}) {
+  const opts = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  const judge = if type_of(opts?.judge) == "dict" {
+    opts.judge
+  } else {
+    {}
+  }
+  const max_invocations = opts?.max_invocations ?? opts?.max_feedback ?? judge?.max_invocations ?? judge?.max_feedback ?? 3
+  const bundle = {
+    done_judge: judge
+      + {
+      enabled: true,
+      fail_open: opts?.fail_open ?? judge?.fail_open ?? false,
+      fail_open_on_error: opts?.fail_open_on_error ?? judge?.fail_open_on_error,
+      feedback_fallback: opts?.feedback_fallback
+        ?? judge?.feedback_fallback
+        ?? "The done claim is not yet justified; address the specific gaps before finishing.",
+      max_invocations: max_invocations,
+      model: opts?.model ?? judge?.model,
+      provider: opts?.provider ?? judge?.provider,
+      system: opts?.system ?? judge?.system ?? __done_contract_judge_system(opts),
+    },
+    loop_until_done: opts?.loop_until_done ?? true,
+  }
+  return __with_prompt_fragment(
+    bundle,
+    {body: __done_contract_primary_prompt(opts), id: "done_contract", source: "std/agent/judge"},
   )
 }
 

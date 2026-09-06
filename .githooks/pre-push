@@ -270,7 +270,9 @@ fi
 
 if hook_paths_match "$changed" "$HOOK_HIGHLIGHT_PATTERN"; then
   echo "=== Pre-push: checking generated highlight keywords ==="
-  make -s check-highlight
+  # Highlight keywords mirror the branch lexer/stdlib. Do not reuse an
+  # installed HARN_BIN here; pre-commit also forces branch-source generation.
+  HARN_BIN= make -s check-highlight
   echo "    Highlight keywords OK."
 else
   echo "=== Pre-push: skipping highlight check (no lexer/stdlib changes) ==="

@@ -55,6 +55,7 @@ GATES=(
   check-provider-catalog
   check-provider-catalog-drift
   check-python-boundary
+  check-harn-syntax-sensitive-scans
   check-crate-sibling-versions
   check-docs-workflow-quickstart
   check-vm-rss-soak

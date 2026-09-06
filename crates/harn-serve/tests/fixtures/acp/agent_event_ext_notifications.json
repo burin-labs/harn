@@ -251,6 +251,7 @@
     "jsonrpc": "2.0",
     "method": "_harn/agentEvent",
     "params": {
+      "acceptedEvidence": [],
       "confirm": false,
       "convertedFrom": "cosmetic_only",
       "iteration": 0,
@@ -260,6 +261,10 @@
       "reason": "no_source_write",
       "reasoning": "needs one more concrete action",
       "sessionId": "session-1",
+      "specificGaps": [
+        "rerun the verifier",
+        "cite the changed source file"
+      ],
       "trigger": "stalled",
       "verdict": "continue"
     }
