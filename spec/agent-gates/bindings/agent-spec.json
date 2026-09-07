@@ -169,6 +169,10 @@
         "name": "opts"
       },
       {
+        "function": "__validate_agent_loop_option_keys",
+        "name": "opts"
+      },
+      {
         "function": "__validate_removed_agent_loop_options",
         "name": "opts"
       },
