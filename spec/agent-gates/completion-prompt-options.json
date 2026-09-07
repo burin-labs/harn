@@ -1,5 +1,22 @@
 [
   {
+    "default": "absent; a supplied key is rejected",
+    "evidence": "__validate_removed_agent_loop_options rejects this renamed option and names turn_end_condition.",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.done_judge",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 595,
+        "reader": "__validate_removed_agent_loop_options"
+      }
+    ],
+    "reason": "Move renamed-option rejection to the owning closed input contract and remove the one-off guard.",
+    "verdict": "DELETE"
+  },
+  {
     "default": "AgentSpec.tool_examples, then empty string",
     "evidence": "The text tool contract reads turn_policy.tool_examples before the runner fallback.",
     "expiry": "2026-09-13",

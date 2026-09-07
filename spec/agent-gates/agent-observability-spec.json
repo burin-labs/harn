@@ -28,12 +28,12 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 734,
+        "line": 740,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 735,
+        "line": 741,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -51,7 +51,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-        "line": 59,
+        "line": 69,
         "reader": "agent_loop"
       },
       {
