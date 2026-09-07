@@ -1,6 +1,7 @@
 import { AgentModelSpec } from "std/agent/options_types"
 import { AgentGateBindingScope, agent_gate_binding_reads } from "std/dev/agent_gate_bindings"
 import {
+  AgentGateBindingSource,
   AgentGateEntry,
   AgentGateRegistry,
   agent_gate_audit,
@@ -13,13 +14,11 @@ type GateEntries = list<AgentGateEntry>
 @test
 pipeline test_schema_walker_keeps_its_option_origin(harness: Harness, task: unknown) {
   const root = path_join(harness.fs.source_dir(), "../..")
-  const binding = json_parse(
-    harness.fs.read_text(path_join(root, "spec/agent-gates/bindings/agent-spec.json")),
+  const binding: AgentGateBindingSource = schema_expect(
+    json_parse(harness.fs.read_text(path_join(root, "spec/agent-gates/bindings/agent-spec.json"))),
+    schema_of(AgentGateBindingSource),
   )
-  const scope: AgentGateBindingScope = schema_expect(
-    binding.config,
-    schema_of(AgentGateBindingScope),
-  )
+  const scope: AgentGateBindingScope = binding.config
   const api = {ast: harness.ast, fs: harness.fs}
   const actual = agent_gate_binding_reads(
     api,
@@ -52,7 +51,7 @@ pipeline test_schema_walker_keeps_its_option_origin(harness: Harness, task: unkn
   assert_eq(registered.failures, [])
   const findings = agent_gate_findings([entry()], changed.reads, [])
   assert_eq(len(findings.failures), 1)
-  assert(contains(findings.failures[0], "uninventoried_probe"))
+  assert(contains(findings.failures[0] ?? "", "uninventoried_probe"))
 }
 
 @test
