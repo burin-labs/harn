@@ -302,7 +302,9 @@ pipeline test_scalar_done_cannot_override_pending_requirement_on_public_completi
         { receipt -> (receipt?.requirements?.required_count ?? 0) > 0 },
       )
         .to_list()
-      assert_eq(len(requirement_receipts), 1)
+      assert_eq(len(requirement_receipts), 2)
+      assert_eq(requirement_receipts[1].action, "stop_unverified")
+      assert_eq(requirement_receipts[1].requirements.pending_count, 2)
       assert_eq(requirement_receipts[0].action, "continue")
       assert_eq(requirement_receipts[0].reason, "completion_requirements_pending")
       assert_eq(requirement_receipts[0].requirements.pending_count, 1)
@@ -552,7 +554,9 @@ pipeline test_unmeasured_mutation_scores_unsatisfied_rather_than_absent(
         { receipt -> (receipt?.requirements?.required_count ?? 0) > 0 },
       )
         .to_list()
-      assert_eq(len(requirement_receipts), 1)
+      assert_eq(len(requirement_receipts), 2)
+      assert_eq(requirement_receipts[1].action, "stop_unverified")
+      assert_eq(requirement_receipts[1].requirements.pending_count, 1)
       assert_eq(requirement_receipts[0].action, "continue")
       assert_eq(requirement_receipts[0].reason, "completion_requirements_pending")
       assert_eq(requirement_receipts[0].requirements.pending_count, 1)
@@ -787,7 +791,9 @@ pipeline test_omitted_report_is_attributed_to_the_judge_after_one_retry(
         { receipt -> (receipt?.requirements?.required_count ?? 0) > 0 },
       )
         .to_list()
-      assert_eq(len(receipts), 1)
+      assert_eq(len(receipts), 2)
+      assert_eq(receipts[1].action, "stop_unverified")
+      assert_eq(receipts[1].requirements.pending_count, 1)
       assert_eq(receipts[0].action, "continue")
       assert_eq(receipts[0].reason, "completion_judge_report_omitted")
       // The judge was re-asked exactly once and still did not itemize.
@@ -1004,7 +1010,9 @@ pipeline test_a_declared_ledger_still_demands_a_report_and_falls_closed(
         { receipt -> (receipt?.requirements?.required_count ?? 0) > 0 },
       )
         .to_list()
-      assert_eq(len(receipts), 1)
+      assert_eq(len(receipts), 2)
+      assert_eq(receipts[1].action, "stop_unverified")
+      assert_eq(receipts[1].requirements.pending_count, 1)
       assert_eq(receipts[0].action, "continue")
       assert_eq(receipts[0].reason, "completion_judge_report_omitted")
     },

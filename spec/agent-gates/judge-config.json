@@ -84,7 +84,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 591,
+        "line": 593,
         "reader": "__judge_invoke_structured"
       }
     ],
@@ -242,22 +242,22 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 996,
-        "reader": "__completion_boundary_ledger"
+        "line": 980,
+        "reader": "__completion_boundary_requirements"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 1002,
-        "reader": "__completion_boundary_ledger"
+        "line": 983,
+        "reader": "__completion_boundary_requirements"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 417,
+        "line": 419,
         "reader": "__judge_invoke_structured"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 331,
+        "line": 333,
         "reader": "__judge_stable_prefix"
       },
       {
@@ -285,7 +285,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 324,
+        "line": 326,
         "reader": "__judge_stable_prefix"
       }
     ],
@@ -303,7 +303,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 416,
+        "line": 418,
         "reader": "__judge_invoke_structured"
       }
     ],

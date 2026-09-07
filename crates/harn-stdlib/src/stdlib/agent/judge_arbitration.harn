@@ -29,7 +29,10 @@
 // which is the exact reading harn#8229 exists to prevent, surviving on the half
 // of the ladder it did not reach.
 import { CompletionEvidenceSnapshot } from "std/agent/completion_evidence"
-import { CompletionRequirementReport } from "std/agent/completion_requirements"
+import {
+  CompletionRequirementBoundary,
+  CompletionRequirementReport,
+} from "std/agent/completion_requirements"
 import {
   CompletionJudgeAdmission,
   CompletionJudgeGapClass,
@@ -95,12 +98,9 @@ pub type CompletionPolicyEvaluation = {
   // The deterministic gate's own reason, held separately because
   // `evaluation.verdict` is overwritten by every stage that follows it.
   deterministic_reason: string,
-  // This boundary's acceptance ledger, read with no model assessment in hand,
-  // so every declared row is pending. Computed once for the boundary rather
-  // than per stage: both decisions that can end a run without asking the judge
-  // — the typed-green skip and the judge cap — are boundary-level, and a ledger
-  // each of them read separately could disagree. Empty when no ledger is
-  // declared, never absent. See harn#8110.
+  // Each stage replaces only its own assessment. The ledger is the projection
+  // across all stages, including declarations that have not yet been assessed.
+  requirement_boundary: CompletionRequirementBoundary,
   ledger: CompletionRequirementReport,
 }
 
