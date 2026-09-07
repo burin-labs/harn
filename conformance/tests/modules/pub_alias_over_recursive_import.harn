@@ -1,0 +1,11 @@
+// Loading the importer is the whole case: it used to throw before this pipeline
+// ran. The calls prove the recursive alias still constrains the outer shape at
+// runtime after the recursive slot itself is left unconstrained.
+import { probe_pub_alias } from "pub_alias_over_recursive_import_b"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(probe_pub_alias({op: "leaf", n: 1}))
+  harness.stdio.println(
+    probe_pub_alias({op: "node", of: [{op: "leaf", n: 2}]}),
+  )
+}
