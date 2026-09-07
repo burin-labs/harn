@@ -244,15 +244,18 @@ impl AcpServer {
         );
         let profile_turn = self.begin_profile_turn(&session_id);
         let mode_policy = modes::ModePolicyScope::new(&current_mode_id, &self.sandbox);
+        // Both scoped spans are boxed before they are awaited. `Scoped` holds the
+        // wrapped future inline, so keeping these on the stack would add the whole
+        // prompt body's state to this frame, which a nested descent re-enters.
         let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match mode_policy
-            .run(self.prepare_vm_baseline_cached(
+            .run(Box::pin(self.prepare_vm_baseline_cached(
                 &source,
                 source_path.as_deref(),
                 target_pipeline.as_deref(),
                 &cwd,
                 &project_root,
                 &current_mode_id,
-            ))
+            )))
             .await
         {
             Ok(value) => value,
@@ -269,7 +272,7 @@ impl AcpServer {
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
         let result = mode_policy
-            .run(async {
+            .run(Box::pin(async {
                 let _budget_guard = prompt_budget.as_ref().and_then(BudgetSpec::install);
                 execute::execute_chunk(
                     chunk,
@@ -293,7 +296,7 @@ impl AcpServer {
                     },
                 )
                 .await
-            })
+            }))
             .await;
         self.finish_profile_turn(&session_id, profile_turn);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
