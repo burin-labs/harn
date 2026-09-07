@@ -63,9 +63,6 @@ pub(super) fn truncate_catastrophe(
 pub(super) enum ProtectedTargetReason {
     /// Git tracks the file: overwriting it replaces reviewed project state.
     GitTracked,
-    /// No Git tracking is available and the file already exists. The floor
-    /// cannot tell reviewed state from scratch output, so it refuses.
-    ExistsWithoutGit,
     /// No execution root is known, so the target cannot be resolved at all.
     Unresolvable,
 }
@@ -76,9 +73,6 @@ impl ProtectedTargetReason {
         match self {
             Self::GitTracked => format!(
                 "`{target}` is tracked by Git, so writing it would replace reviewed project state. Use the edit tool to change it."
-            ),
-            Self::ExistsWithoutGit => format!(
-                "`{target}` already exists and this workspace has no Git tracking to consult, so the floor cannot tell reviewed project state from scratch output. Use the edit tool to change it, or write to a path that does not exist yet."
             ),
             Self::Unresolvable => format!(
                 "`{target}` cannot be resolved because no execution root is known, so whether it is project state cannot be established."
@@ -117,12 +111,23 @@ fn protected_project_file_reason(
     let target = resolved_target(cwd, target);
     match git_tracks_file(cwd, &target) {
         Some(true) => Some(ProtectedTargetReason::GitTracked),
-        Some(false) => None,
-        None if target.is_absolute() && !target.starts_with(cwd) => None,
-        None => target
-            .symlink_metadata()
-            .is_ok()
-            .then_some(ProtectedTargetReason::ExistsWithoutGit),
+        // Git says the file is not tracked, or there is no Git here to ask.
+        // Neither is evidence of reviewed project state.
+        //
+        // This used to refuse any path that merely existed when Git could not
+        // be consulted, which is the most aggressive reading available applied
+        // exactly where the least is known. It made the same redirect legal
+        // once and never-approvable the second time, because the run had by
+        // then created the file itself. Workspaces without Git are the normal
+        // case for a project assembled in a temporary directory, so that is
+        // where it was met.
+        //
+        // A never-approvable floor should assert only what it can point at.
+        // The redirect still carries `write_intent`, which the consent gate
+        // judges and an operator can clear; what is gone is the unappealable
+        // no. Positive Git evidence, and a target that cannot be resolved at
+        // all, still hold the floor.
+        Some(false) | None => None,
     }
 }
 
