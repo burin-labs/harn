@@ -639,7 +639,7 @@
   },
   {
     "default": "dynamic: absent for a top-level run; set by the host when a run is spawned from another",
-    "evidence": "Host-injected run lineage. Written into the child option dict by the sub-agent lifecycle and read back at the session journal.",
+    "evidence": "Host-injected run lineage. agents_sub_agent_lifecycle.normalize_run_identity writes it into the child option dict; worker and workflow records preserve parent-run linkage.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
