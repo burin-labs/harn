@@ -1,6 +1,16 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_surface.harn",
+    "expression": "__collect_unread_keys(opts, schema_of(AgentPresetOptions), \"\")",
+    "owner": "__collect_unread_keys",
+    "evidence": "The schema walker receives the complete option dict. Its value parameter stays an independently required origin so future literal option reads remain audited.",
+    "consumers": [
+      {"scope": "AgentSpec", "function": "__collect_unread_keys", "parameter": "value"}
+    ]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "__compact_options(opts, engine_strategy, keep_last)",
     "owner": "__compact_options",
@@ -3256,5 +3266,33 @@
     "expression": "type_of(options)",
     "owner": "type_of",
     "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+    "expression": "__validate_removed_agent_loop_options(options ?? {})",
+    "owner": "__validate_removed_agent_loop_options",
+    "evidence": "Consumer __validate_removed_agent_loop_options.opts is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__validate_removed_agent_loop_options",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+    "expression": "__validate_agent_loop_option_keys(options)",
+    "owner": "__validate_agent_loop_option_keys",
+    "evidence": "Consumer __validate_agent_loop_option_keys.opts is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__validate_agent_loop_option_keys",
+        "parameter": "opts"
+      }
+    ]
   }
 ]
