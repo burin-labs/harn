@@ -1,6 +1,16 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_surface.harn",
+    "expression": "__collect_unread_keys(opts, schema_of(AgentPresetOptions), \"\")",
+    "owner": "__collect_unread_keys",
+    "evidence": "The schema walker receives the complete option dict. Its value parameter stays an independently required origin so future literal option reads remain audited.",
+    "consumers": [
+      {"scope": "AgentSpec", "function": "__collect_unread_keys", "parameter": "value"}
+    ]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "__compact_options(opts, engine_strategy, keep_last)",
     "owner": "__compact_options",

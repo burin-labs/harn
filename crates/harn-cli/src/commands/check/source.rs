@@ -8,15 +8,14 @@ use harn_parser::{Parser, SNode};
 pub(super) type ParsedModule = Arc<(String, Vec<SNode>)>;
 
 /// Identity of an on-disk file for memo invalidation: `(len, mtime_ns)`.
-/// Mirrors the bytecode cache's `file_stat_identity` — any content change
-/// flips at least one component, so long-lived processes (`harn watch`,
-/// `harn dev`) never replay a stale parse. Virtual `<std>/...` paths have no
+/// Mirrors the bytecode cache's `file_stat_identity`: a changed length or
+/// modification time starts a new memo entry. Virtual `<std>/...` paths have no
 /// stat; their content is embedded in the binary and immutable per process,
 /// so they memoize under a fixed sentinel identity.
 type FileIdentity = (u64, i128);
 
 type ParseMemoKey = (PathBuf, FileIdentity);
-type ParseMemo = Mutex<HashMap<ParseMemoKey, Option<ParsedModule>>>;
+type ParseMemo = Mutex<HashMap<ParseMemoKey, Arc<OnceLock<Option<ParsedModule>>>>>;
 
 fn parse_memo() -> &'static ParseMemo {
     static MEMO: OnceLock<ParseMemo> = OnceLock::new();
@@ -61,20 +60,14 @@ pub(super) fn parse_resolved_module(path: &Path) -> Option<ParsedModule> {
         // behavior matches the un-memoized path exactly.
         return parse_module_uncached(path);
     };
-    let key = (path.to_path_buf(), identity);
-    if let Some(hit) = parse_memo()
+    let key = (harn_modules::canonical_path(path), identity);
+    let parsed = parse_memo()
         .lock()
         .expect("check parse memo lock poisoned")
-        .get(&key)
-    {
-        return hit.clone();
-    }
-    let parsed = parse_module_uncached(path);
-    parse_memo()
-        .lock()
-        .expect("check parse memo lock poisoned")
-        .insert(key, parsed.clone());
-    parsed
+        .entry(key)
+        .or_default()
+        .clone();
+    parsed.get_or_init(|| parse_module_uncached(path)).clone()
 }
 
 fn parse_module_uncached(path: &Path) -> Option<ParsedModule> {
@@ -89,4 +82,43 @@ fn parse_module_uncached(path: &Path) -> Option<ParsedModule> {
 fn is_stdlib_virtual_path(path: &Path) -> bool {
     path.to_str()
         .is_some_and(|value| value.starts_with("<std>/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aliases_share_a_parse_across_threads_and_edits_invalidate_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("module.harn");
+        std::fs::create_dir(dir.path().join("nested")).unwrap();
+        std::fs::write(&path, "const answer = 1").unwrap();
+        let alias = dir.path().join("nested/../module.harn");
+        let barrier = std::sync::Barrier::new(8);
+        let parsed = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|i| {
+                    let path = if i % 2 == 0 { &path } else { &alias };
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        parse_resolved_module(path).unwrap()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|w| w.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        let first = &parsed[0];
+        assert!(parsed.iter().all(|shared| Arc::ptr_eq(first, shared)));
+        std::fs::write(&path, "const =").unwrap();
+        assert!(parse_resolved_module(&path).is_none());
+        std::fs::write(&path, "const answer = 222").unwrap();
+        let edited = parse_resolved_module(&path).unwrap();
+        assert!(!Arc::ptr_eq(first, &edited));
+        assert_eq!(edited.0, "const answer = 222");
+    }
 }
