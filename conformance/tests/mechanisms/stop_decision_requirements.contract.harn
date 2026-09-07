@@ -1,3 +1,6 @@
+// Trigger: a declared response requirement lacks supporting observations.
+// Effect: the live stop decision remains incomplete and names the pending row.
+// Negative: a supported read-only answer completes without invented tool calls.
 import { CompletionFacts, agent_completion_gate } from "std/agent/completion_gate"
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
