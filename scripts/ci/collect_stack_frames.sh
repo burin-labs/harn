@@ -11,7 +11,20 @@
 set -euo pipefail
 
 raw_out="${1:?usage: collect_stack_frames.sh <raw-json-out> [threshold-bytes]}"
-threshold="${2:-100000}"
+# The MEASUREMENT floor, not the discovery threshold.
+#
+# These were one number, and that made a budgeted frame that shrank past the
+# number vanish from the census. The gate then could not tell a shrink from a
+# crate it had failed to measure and refused the file, so a change that made a
+# frame smaller could not go green.
+#
+# Measuring low and judging high separates them: every budgeted file keeps
+# reporting a number no matter how far it shrinks, while the budget's own
+# `threshold_bytes` still decides which UNBUDGETED file is worth surfacing and
+# banking. The floor sits well under the smallest banked budget so a real
+# shrink stays visible, and stays high enough that an ordinary frame is not a
+# diagnostic.
+threshold="${2:-16384}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
