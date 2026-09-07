@@ -155,10 +155,11 @@ the lower-level pure-Harn connector contract check.
 same test discovery engine as `harn test` and reports what it found, without
 running anything or changing a file. Each file should contain at least one
 pipeline whose name starts with `test_` or that carries `@test`; an ordinary
-pipeline such as `pipeline test(...)` is not a test. The receipt records every
-selected file, its SHA-256 digest, its discovered test pipelines, and any file
-that discovered none. A package that intentionally has no test files declares
-that exception in `harn.toml` and explains it:
+pipeline such as `pipeline test(...)` is not a test. The schema-v1 receipt
+reports selected-file and discovered-test counts. For each file with no test or
+with a discovery error, it records the path and SHA-256 digest; files that pass
+discovery are not enumerated. A package that intentionally has no test files
+declares that exception in `harn.toml` and explains it:
 
 ```toml
 [tests]

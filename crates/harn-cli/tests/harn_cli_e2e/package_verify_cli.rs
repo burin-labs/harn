@@ -103,7 +103,7 @@ fn ordinary_package_receipt_marks_connector_gate_not_applicable() {
     let (_temp, package) = scaffold_and_install("package");
     let receipt = verify(&package);
 
-    assert_eq!(receipt["schemaVersion"], 3);
+    assert_eq!(receipt["schemaVersion"], 2);
     assert_eq!(receipt["ok"], true);
     assert_eq!(receipt["data"]["strict_requested"], false);
     assert_eq!(
@@ -126,7 +126,7 @@ fn strict_package_receipt_proves_both_source_gate_policies_fired() {
     let (_temp, package) = scaffold_and_install("package");
     let receipt = verify_with_policy(&package, true);
 
-    assert_eq!(receipt["schemaVersion"], 3);
+    assert_eq!(receipt["schemaVersion"], 2);
     assert_eq!(receipt["data"]["strict_requested"], true);
     assert_strict_source_gate_commands(&receipt);
 }

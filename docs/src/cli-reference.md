@@ -4098,12 +4098,9 @@ lints, and format-checks package-owned Harn files; runs package tests; installs
 the package into a temporary consumer and checks each export; validates
 documentation and generated API docs; and dry-runs package packing. Connector
 packages also run their connector metadata and deterministic fixture contract.
-Each receipt check records whether the gate was applicable and reached, plus
-its command, result, timing, and diagnostics. Schema-v3 receipts also include
-`test_discovery`: the selected file count, discovered test-pipeline count,
-per-file names and SHA-256 digests, and the exact files that contained no
-discoverable test pipeline. Empty suites fail unless `harn.toml` declares both
-`[tests].allow_empty = true` and a non-empty `[tests].reason`.
+Each schema-v2 receipt check records whether the gate was applicable and
+reached, plus its command, result, timing, and diagnostics. Package test
+discovery has a separate read-only command and receipt.
 
 ## harn package test-inventory
 
@@ -4121,7 +4118,9 @@ harn package test-inventory . --json \
 
 The command exits nonzero for an unreasoned empty suite, a parse or discovery
 error, or any selected file with no discoverable test pipeline. Its schema-v1
-receipt includes the exact per-file identities used by the verdict.
+receipt reports selected-file and discovered-test counts, the configured empty
+suite exception, and path plus SHA-256 identity for each file with no test or
+with a discovery error. It does not enumerate files that passed discovery.
 
 `--strict` makes both check and lint warnings fatal and enables strict boundary
 type checking. Schema-v2 receipts expose `strict_requested` and record the
