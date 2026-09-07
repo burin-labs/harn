@@ -1,6 +1,16 @@
 import "./host_bound_rust_test_filter.harn"
 import "./policy_core.harn"
 
+/** The workflow that owns the main-scoped Rust cache write. */
+const CACHE_REFRESH_WORKFLOW = "rust-cache-refresh.yml"
+
+/** The ref GitHub keeps cache entries for. */
+const PERSISTENT_BRANCH = "main"
+
+fn strings_of(values: any) -> list<string> {
+  return (values ?? []).map({ value -> return trim(to_string(value)) }).to_list()
+}
+
 fn blacksmith_runner_expression(runner: string) -> string {
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
@@ -299,21 +309,30 @@ fn persistent_compile_lane_errors(
 fn hosted_refresh_lane_errors(workflow: dict) -> list<string> {
   const job = workflow?.jobs?.["rust-cache-refresh"]
   if job == nil {
-    return ["ci.yml:rust-cache-refresh must define the hosted Linux compile lane"]
+    return [
+      "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must define the hosted Linux compile lane",
+    ]
   }
   let errors: list<string> = []
   if trim(job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
-    errors = errors + ["ci.yml:rust-cache-refresh must run on ${HOSTED_LINUX_RUNNER}"]
+    errors = errors
+      + ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must run on ${HOSTED_LINUX_RUNNER}"]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != HOSTED_RUNNER_TIER {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must declare ${RUNNER_TIER_ENV}: ${HOSTED_RUNNER_TIER}"]
+      + [
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must declare ${RUNNER_TIER_ENV}: ${HOSTED_RUNNER_TIER}",
+      ]
   }
   if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0 {
-    errors = errors + ["ci.yml:rust-cache-refresh must not mount persistent sccache"]
+    errors = errors
+      + ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must not mount persistent sccache"]
   }
   if trim(job?.permissions?.actions ?? "") != "write" {
-    errors = errors + ["ci.yml:rust-cache-refresh must grant actions: write to persist rust-cache"]
+    errors = errors
+      + [
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must grant actions: write to persist rust-cache",
+      ]
   }
   return errors
 }
@@ -323,12 +342,14 @@ pub fn rust_cache_refresh_concurrency_errors(job: dict) -> list<string> {
   let errors: list<string> = []
   if trim(job?.concurrency?.group ?? "") != CI_CACHE_REFRESH_CONCURRENCY_GROUP {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must serialize cache mutation across main commits"]
+      + [
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must serialize cache mutation across main commits",
+      ]
   }
   if lowercase(trim(to_string(job?.concurrency?.["cancel-in-progress"] ?? true))) != "false" {
     errors = errors
       + [
-        "ci.yml:rust-cache-refresh must finish the active cache save before the newest pending one",
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must finish the active cache save before the newest pending one",
       ]
   }
   return errors
@@ -347,7 +368,9 @@ pub fn rust_cache_refresh_miss_only_errors(job: dict) -> list<string> {
   const headroom = step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")
   if trim(headroom?.if ?? "") != CACHE_MISS_GUARD {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must prepare a generation only after a cache miss"]
+      + [
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must prepare a generation only after a cache miss",
+      ]
   }
   for name in ["Install cargo-nextest", "Warm Cargo graph"] {
     const step = step_by_name(job?.steps ?? [], name)
@@ -356,24 +379,67 @@ pub fn rust_cache_refresh_miss_only_errors(job: dict) -> list<string> {
     }
     if !contains(trim(step?.if ?? ""), CACHE_MISS_GUARD) {
       errors = errors
-        + ["ci.yml:rust-cache-refresh must skip ${name} when the exact cache key already restored"]
+        + [
+          "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must skip ${name} when the exact cache key already restored",
+        ]
     }
   }
   return errors
 }
 
-/** Keep the post-merge main-scoped cache refresher wired to proof reuse. */
+/**
+ * The refresh's triggers have to be events that fire under the repository as it
+ * is configured, not under an optional one.
+ *
+ * This job used to live in ci.yml and run only when a push to main had already
+ * been proved on merge_group. Turning the merge queue off therefore turned the
+ * refresh off, silently and for as long as the queue stayed off, and the caches
+ * it maintains went unmaintained. Nothing failed; branches simply started
+ * compiling from nothing.
+ *
+ * A trigger that depends on an optional queue is refused here. The workflow has
+ * to name the persistent ref directly and carry a scheduled backstop for
+ * periods with no pushes.
+ */
+pub fn cache_refresh_trigger_errors(workflow: dict) -> list<string> {
+  guard workflow != nil else {
+    return ["${CACHE_REFRESH_WORKFLOW} must exist as the cache refresh owner"]
+  }
+  const triggers = workflow["on"] ?? {}
+  let errors: list<string> = []
+  const push_branches = strings_of(triggers?.push?.branches)
+  if !push_branches.contains(PERSISTENT_BRANCH) {
+    errors = errors
+      + [
+        "${CACHE_REFRESH_WORKFLOW} must trigger on a push to ${PERSISTENT_BRANCH}; a refresh gated on the merge queue stops running when the queue is off",
+      ]
+  }
+  let crons: list<string> = []
+  for row in triggers?.schedule ?? [] {
+    crons = crons + [trim(to_string(row?.cron ?? ""))]
+  }
+  if len(crons.filter({ cron -> cron != "" }).to_list()) == 0 {
+    errors = errors
+      + [
+        "${CACHE_REFRESH_WORKFLOW} must carry a scheduled backstop so a quiet period does not leave the caches unwritten",
+      ]
+  }
+  if contains(to_string(triggers.keys()), "merge_group") {
+    errors = errors
+      + [
+        "${CACHE_REFRESH_WORKFLOW} must not depend on merge_group; the merge queue is optional and its absence must not disable the refresh",
+      ]
+  }
+  return errors
+}
+
+/** Keep the main-scoped cache refresher's shape intact after the move. */
 fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
   const job = workflow?.jobs?.["rust-cache-refresh"]
   if job == nil {
-    return ["ci.yml:rust-cache-refresh must define the main-scoped cache writer"]
+    return ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must define the main-scoped cache writer"]
   }
-  let errors: list<string> = []
-  errors = errors + rust_cache_refresh_concurrency_errors(job)
-  if trim(job?.if ?? "") != "needs.changes.outputs.rust_cache_refresh == 'true'" {
-    errors = errors
-      + ["ci.yml:rust-cache-refresh must run only when changes.outputs.rust_cache_refresh is true"]
-  }
+  let errors: list<string> = cache_refresh_trigger_errors(workflow)
   // Matrix legs write each Linux merge-gate key with that lane's env fingerprint.
   let matrix_keys: list<string> = []
   for entry in job?.strategy?.matrix?.include ?? [] {
@@ -388,28 +454,36 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
     }
     if trim(to_string(entry?.save_headroom_bytes ?? "")) != expected_headroom {
       errors = errors
-        + ["ci.yml:rust-cache-refresh matrix legs must reserve their measured save envelope"]
+        + [
+          "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh matrix legs must reserve their measured save envelope",
+        ]
     }
   }
   if !matrix_keys.contains("workspace-tests") || !matrix_keys.contains("package-audit") {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must matrix-write workspace-tests and package-audit cache keys"]
+      + [
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must matrix-write workspace-tests and package-audit cache keys",
+      ]
   }
   const caches = matching_steps(job, RUST_CACHE_ACTION)
   if len(caches) != 1 || !save_requested(caches[0]) {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must authorize a matrix rust-cache save"]
+      + ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must authorize a matrix rust-cache save"]
   } else if !contains(trim(caches[0]?.with?.["shared-key"] ?? ""), "matrix.cache_key") {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must bind rust-cache shared-key to matrix.cache_key"]
+      + [
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must bind rust-cache shared-key to matrix.cache_key",
+      ]
   } else if trim(caches[0]?.id ?? "") != "rust-cache" {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must expose the rust-cache hit result as steps.rust-cache"]
+      + [
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must expose the rust-cache hit result as steps.rust-cache",
+      ]
   }
   if contains(to_string(job?.env ?? {}), "CARGO_BUILD_JOBS") {
     errors = errors
       + [
-        "ci.yml:rust-cache-refresh must not set job-level CARGO_BUILD_JOBS (breaks Swatinem key parity)",
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must not set job-level CARGO_BUILD_JOBS (breaks Swatinem key parity)",
       ]
   }
   errors = errors + rust_cache_refresh_miss_only_errors(job)
@@ -419,12 +493,14 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
   if !contains(headroom_run, "prune_ci_cache_generations.sh --clear-family-prefix")
     || !contains(headroom_run, "prune_ci_cache_generations.sh --ensure-headroom") {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must replace stale generations with bounded save headroom"]
+      + [
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must replace stale generations with bounded save headroom",
+      ]
   }
   const warm = step_by_name(job?.steps ?? [], "Warm Cargo graph")
   if !contains(trim(warm?.run ?? ""), "matrix.warm_script") {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must warm through matrix.warm_script"]
+      + ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must warm through matrix.warm_script"]
   }
   return errors
 }
@@ -812,7 +888,14 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
   return errors
 }
 
-/** Keep one persistent producer, one lint lane, and one package lane. */
+/**
+ * Keep one persistent producer, one lint lane, and one package lane.
+ * Every check the moved cache-refresh workflow owns, in one call.
+ */
+pub fn cache_refresh_workflow_errors(workflow: dict) -> list<string> {
+  return hosted_refresh_lane_errors(workflow) + rust_cache_refresh_errors(workflow)
+}
+
 pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
     + elastic_compile_lane_errors(workflow, "rust-checks", "workspace-tests")
@@ -823,7 +906,6 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
       "workspace-tests",
       "workspace-tests",
     )
-    + hosted_refresh_lane_errors(workflow)
   const rust_job = workflow?.jobs?.["rust-checks"]
   if rust_job?.strategy != nil {
     errors = errors
@@ -844,7 +926,6 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   errors = errors + colocated_rust_proof_errors(workflow)
   errors = errors + live_artifact_handoff_errors(workflow)
   errors = errors + walltime_report_errors(workflow)
-  errors = errors + rust_cache_refresh_errors(workflow)
   for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
     if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0
       && to_string(job_name)
