@@ -1,4 +1,5 @@
 import { AgentModelSpec } from "std/agent/options_types"
+import { AgentGateBindingScope, agent_gate_binding_reads } from "std/dev/agent_gate_bindings"
 import {
   AgentGateEntry,
   AgentGateRegistry,
@@ -10,24 +11,100 @@ import {
 type GateEntries = list<AgentGateEntry>
 
 @test
+pipeline test_schema_walker_keeps_its_option_origin(harness: Harness, task: unknown) {
+  const root = path_join(harness.fs.source_dir(), "../..")
+  const binding = json_parse(
+    harness.fs.read_text(path_join(root, "spec/agent-gates/bindings/agent-spec.json")),
+  )
+  const scope: AgentGateBindingScope = schema_expect(
+    binding.config,
+    schema_of(AgentGateBindingScope),
+  )
+  const api = {ast: harness.ast, fs: harness.fs}
+  const actual = agent_gate_binding_reads(
+    api,
+    path_join(root, "crates/harn-stdlib/src/stdlib/agent/options_surface.harn"),
+    scope,
+  )
+  assert(
+    actual.parameters.any(
+      fn(parameter) { return parameter.function == "__collect_unread_keys"
+        && parameter.name == "value" },
+    ),
+    "The real schema walker must retain its options origin",
+  )
+  const dir = harness.fs.mkdtemp_in_workspace("schema-walker-census")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const fixture = path_join(dir, "fixture.harn")
+  harness.fs.write_text(
+    fixture,
+    "fn __collect_unread_keys(value: any, node: any, path: string) { return value.uninventoried_probe }",
+  )
+  const changed = agent_gate_binding_reads(api, fixture, scope)
+  assert_eq(changed.reads.map(fn(read) { return read.name }), ["AgentSpec.uninventoried_probe"])
+  const registered = agent_gate_findings(
+    [entry() + {name: "AgentSpec.uninventoried_probe"}],
+    changed.reads,
+    [],
+  )
+  assert_eq(registered.failures, [])
+  const findings = agent_gate_findings([entry()], changed.reads, [])
+  assert_eq(len(findings.failures), 1)
+  assert(contains(findings.failures[0], "uninventoried_probe"))
+}
+
+@test
+// Every key declared on the compiled model shape must be inventoried, and the
+// model inventory files must not carry a key the shape does not declare.
+//
+// The two directions read different sets on purpose. Entry names share one flat
+// namespace and the registry refuses a duplicate, so a declared key may be
+// filed under whichever entry file owns its theme: `run_id` sits in the
+// execution spec and `token_budget` in the budget file. Asking whether a
+// declared key is inventoried therefore has to ask the WHOLE registry, the same
+// list of files the audit itself runs over, rather than two filenames repeated
+// here. Keying the question on a hand-picked pair made a correctly filed key
+// indistinguishable from a missing one, and a key added to the shape could not
+// be satisfied at all: filing it in the model file duplicates the existing
+// entry and the registry throws.
 pipeline test_model_setting_inventory_matches_compiled_top_level_shape(
   harness: Harness,
   task: unknown,
 ) {
   const root = path_join(harness.fs.source_dir(), "../../spec/agent-gates")
-  let actual: list<string> = []
-  for file in ["agent-model-spec.json", "agent-model-routing.json"] {
+  const registry = schema_expect(
+    json_parse(harness.fs.read_text(path_join(root, "registry.json"))),
+    schema_of(AgentGateRegistry),
+  )
+  let inventoried: list<string> = []
+  for file in registry.entry_files {
     const entries = schema_expect(
-      json_parse(harness.fs.read_text(path_join(root, file))),
+      json_parse(harness.fs.read_text(path_join(harness.fs.source_dir(), "../..", file))),
       schema_of(GateEntries),
     )
-    actual = actual + entries.map(fn(entry) { return entry.name })
+    inventoried = inventoried + entries.map(fn(entry) { return entry.name })
   }
   const declared = schema_of(AgentModelSpec).properties.keys().map(
     fn(name) { return "AgentSpec." + name },
   )
   assert(len(declared) > 0)
-  assert_eq(actual.sorted(), declared.sorted())
+  assert(len(inventoried) > 0)
+  const uninventoried = declared.filter(fn(name) { return !contains(inventoried, name) })
+  assert_eq(uninventoried.sorted(), [])
+  // The reverse direction stays scoped to the files that own this shape: an
+  // entry there naming a key the shape no longer declares is stale.
+  let model_named: list<string> = []
+  for file in ["agent-model-spec.json", "agent-model-routing.json"] {
+    const entries = schema_expect(
+      json_parse(harness.fs.read_text(path_join(root, file))),
+      schema_of(GateEntries),
+    )
+    model_named = model_named + entries.map(fn(entry) { return entry.name })
+  }
+  const undeclared = model_named.filter(fn(name) { return !contains(declared, name) })
+  assert_eq(undeclared.sorted(), [])
 }
 
 fn entry() -> AgentGateEntry {

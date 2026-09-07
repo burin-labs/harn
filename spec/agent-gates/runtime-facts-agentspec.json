@@ -600,5 +600,33 @@
     "expression": "base?._harn_one_shot_prefill",
     "owner": "llm_clear_one_shot_prefill",
     "evidence": "Internal lifecycle marker armed by llm_arm_one_shot_prefill and consumed by llm_clear_one_shot_prefill."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_surface.harn",
+    "expression": "type_of(opts)",
+    "owner": "__validate_agent_loop_option_keys",
+    "evidence": "Shape guard on the option dict itself, not a read of any option."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_surface.harn",
+    "expression": "keys(value)",
+    "owner": "__collect_unread_keys",
+    "evidence": "Enumerates supplied names for schema validation without choosing a behavior value."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_surface.harn",
+    "expression": "type_of(value)",
+    "owner": "__collect_unread_keys",
+    "evidence": "Language type inspection determines whether a nested value has keys to validate."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_surface.harn",
+    "expression": "value[key]",
+    "owner": "__collect_unread_keys",
+    "evidence": "Recurses into each supplied value using its declared child schema; this is generic shape validation, not a selected behavior setting."
   }
 ]

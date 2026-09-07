@@ -143,17 +143,17 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 770,
+        "line": 776,
         "reader": "__normalize_reminder_provider_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 773,
+        "line": 779,
         "reader": "__normalize_reminder_provider_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 774,
+        "line": 780,
         "reader": "__normalize_reminder_provider_options"
       }
     ],
@@ -207,7 +207,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 764,
+        "line": 770,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
@@ -312,12 +312,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 761,
+        "line": 767,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 762,
+        "line": 768,
         "reader": "__validate_agent_loop_callback_options"
       },
       {

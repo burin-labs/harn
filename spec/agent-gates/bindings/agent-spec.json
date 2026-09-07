@@ -15,6 +15,7 @@
       "AgentObservabilitySpec"
     ],
     "parameters": [
+      {"function": "__collect_unread_keys", "name": "value"},
       {"function": "__served_tool_groups", "name": "opts"},
       {"function": "__context_profile", "name": "opts"},
       {"function": "__skill_catalog_always", "name": "opts"},
@@ -166,6 +167,10 @@
       },
       {
         "function": "__turn_end_judge_when_due",
+        "name": "opts"
+      },
+      {
+        "function": "__validate_agent_loop_option_keys",
         "name": "opts"
       },
       {
