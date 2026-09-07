@@ -5,7 +5,11 @@ import {
   e2e_elastic_capacity_errors,
   producer_cache_save_reserve_minutes,
   producer_hosted_ceiling_minutes,
+  producer_owned_ceiling_minutes,
+  producer_runner_expression,
   producer_step_budget_margin_errors,
+  producer_tier_expression,
+  producer_timeout_expression,
   step_budget_margin_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
@@ -32,7 +36,7 @@ fn e2e_workflow(runs_on: string, evacuation_input: string) -> dict {
         steps: [
           {
             name: "Decide where the slow E2E suite lands",
-            run: "bash scripts/ci/e2e_runner_capacity.sh",
+            run: "bash scripts/ci/runner_capacity.sh",
             env: {FLEET_EVACUATION: evacuation_input},
           },
         ],
@@ -96,18 +100,9 @@ fn persistent_lane(
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   let lane = {
-    "runs-on": gha_expression(
-      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && ${paid_event} && '${runner}' || 'ubuntu-latest'",
-    ),
-    "timeout-minutes": gha_expression(
-      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && ${paid_event} && 20 || 70",
-    ),
-    env: {
-      HARN_RUNNER_TIER: gha_expression(
-        "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && ${paid_event} && 'blacksmith' || 'github-hosted'",
-      ),
-      SCCACHE_CACHE_SIZE: "15G",
-    },
+    "runs-on": producer_runner_expression(runner),
+    "timeout-minutes": producer_timeout_expression(),
+    env: {HARN_RUNNER_TIER: producer_tier_expression(), SCCACHE_CACHE_SIZE: "15G"},
     steps: [
       {
         uses: "./.github/actions/sccache",
@@ -116,7 +111,7 @@ fn persistent_lane(
       },
       {
         uses: "./.github/actions/rust-cache",
-        if: "env.HARN_RUNNER_TIER == 'github-hosted'",
+        if: "env.HARN_RUNNER_TIER != 'blacksmith'",
         with: cache_inputs,
       },
       {
@@ -940,6 +935,58 @@ pipeline test_rejects_rust_lint_runner_switch_removal(harness: Harness, task: un
 }
 
 @test
+/**
+ * A tier guard that names the tiers it knows makes a new tier a silent skip.
+ *
+ * On the producer's rust-cache step that is not a cosmetic miss: the owned rung
+ * would restore nothing, compile from cold, and report a clean pass, with the
+ * skipped step the only evidence and nobody reading it. The guard is therefore
+ * written as an exclusion, and this refuses the inclusion form that #8334
+ * identified.
+ */
+pipeline test_rejects_a_producer_cache_guard_that_names_only_the_hosted_tier(harness: Harness) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  const guarded = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-check-inputs": {
+        ...producer,
+        steps: producer.steps.map(
+          fn(step) {
+            if trim(to_string(step?.uses ?? "")) != "./.github/actions/rust-cache" {
+              return step
+            }
+            return {...step, if: "env.HARN_RUNNER_TIER == 'github-hosted'"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(guarded)
+  assert(
+    errors.contains(
+      "ci.yml:rust-check-inputs must restore rust-cache on every tier except Blacksmith, which has its own sticky sccache",
+    ),
+    "a guard naming only the hosted tier must be refused; got ${to_string(errors)}",
+  )
+}
+
+/**
+ * The owned ceiling is derived, not chosen. It is the hosted ceiling without
+ * the cache-save reserve, because the owned rung is pull-request-only and
+ * `rust-cache` saves only from `main`, so it never reaches the save.
+ */
+pipeline test_owned_ceiling_drops_only_the_cache_save_reserve(harness: Harness) {
+  assert_eq(
+    producer_owned_ceiling_minutes(),
+    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes(),
+    "the owned ceiling must be the hosted ceiling minus the save it never performs",
+  )
+}
+
 pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   harness: Harness,
   task: unknown,
@@ -968,13 +1015,13 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must route only merge_group and same-repository pull_request to blacksmith-8vcpu-ubuntu-2404 with a hosted fallback",
+      "ci.yml:rust-check-inputs must ladder paid blacksmith-8vcpu-ubuntu-2404, the owned linux_big pool on same-repository pull requests, then a hosted fallback",
     ),
   )
-  assert(errors.contains("ci.yml:rust-check-inputs must mirror its Blacksmith/hosted runner tier"))
+  assert(errors.contains("ci.yml:rust-check-inputs must mirror all three of its runner tiers"))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 70-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse, the 58-minute owned ceiling, and the 70-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }

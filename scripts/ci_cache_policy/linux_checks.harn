@@ -18,6 +18,21 @@ fn blacksmith_runner_expression(runner: string) -> string {
     + "{{ vars.${BLACKSMITH_ENABLE_VAR} == 'true' && ${paid_event} && '${runner}' || '${HOSTED_LINUX_RUNNER}' }}"
 }
 
+/**
+ * The owned rung the Rust workspace producer may prefer, as it appears inside
+ * every one of that job's three routing expressions.
+ *
+ * Pull requests only, and the reason is the cache writer rather than caution:
+ * `rust-cache` saves only from `main`, so routing main pushes onto the owned
+ * pool would retire the authorized writer and leave every later hosted run
+ * compiling cold. Merge groups stay hosted for the same reason #6217 removed
+ * the previous ladder, which is that merge throughput must not depend on a
+ * residential machine's health.
+ *
+ * It reads `online` rather than a per-lane boolean. Those booleans go false
+ * both when the fleet is switched off and when it is merely busy, and a busy
+ * fleet is a reason to queue, not a reason to downgrade the tier.
+ */
 fn blacksmith_tier_expression() -> string {
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
@@ -110,6 +125,16 @@ pub fn producer_cache_save_reserve_minutes() -> int {
   return PRODUCER_CACHE_SAVE_RESERVE_MINUTES
 }
 
+/**
+ * The owned rung never saves a cache, so it does not carry the save's reserve.
+ * Everything else is identical: same steps, same budgets, same setup. It is a
+ * hang backstop on a 24-core box rather than a performance claim, so it is not
+ * sized down for the extra cores either.
+ */
+pub fn producer_owned_ceiling_minutes() -> int {
+  return producer_hosted_ceiling_minutes() - PRODUCER_CACHE_SAVE_RESERVE_MINUTES
+}
+
 pub fn producer_hosted_ceiling_minutes() -> int {
   let total = PRODUCER_SETUP_OVERHEAD_MINUTES + PRODUCER_CACHE_SAVE_RESERVE_MINUTES
   for budget in PRODUCER_STEP_BUDGETS {
@@ -118,11 +143,12 @@ pub fn producer_hosted_ceiling_minutes() -> int {
   return total
 }
 
-fn blacksmith_timeout_expression() -> string {
-  const paid_event =
-    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
-  return "$"
-    + "{{ vars.${BLACKSMITH_ENABLE_VAR} == 'true' && ${paid_event} && ${PRODUCER_PAID_FUSE_MINUTES} || ${producer_hosted_ceiling_minutes()} }}"
+pub fn producer_timeout_expression() -> string {
+  return producer_rung_expression(
+    to_string(PRODUCER_PAID_FUSE_MINUTES),
+    to_string(producer_owned_ceiling_minutes()),
+    to_string(producer_hosted_ceiling_minutes()),
+  )
 }
 
 fn step_named(job: dict, name: string) {
@@ -292,23 +318,23 @@ fn persistent_compile_lane_errors(
     return ["ci.yml:${job_name} must define the persistent Linux compile lane"]
   }
   let errors: list<string> = []
-  if trim(job?.["runs-on"] ?? "") != blacksmith_runner_expression(runner) {
+  if trim(job?.["runs-on"] ?? "") != producer_runner_expression(runner) {
     errors = errors
       + [
-        "ci.yml:${job_name} must route only merge_group and same-repository pull_request to ${runner} with a hosted fallback",
+        "ci.yml:${job_name} must ladder paid ${runner}, the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then a hosted fallback",
       ]
   }
-  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != blacksmith_tier_expression() {
+  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_tier_expression() {
     errors = errors
-      + ["ci.yml:${job_name} must mirror its Blacksmith/hosted runner tier"]
+      + ["ci.yml:${job_name} must mirror all three of its runner tiers"]
   }
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
-  if trim(to_string(job?.["timeout-minutes"] ?? "")) != blacksmith_timeout_expression() {
+  if trim(to_string(job?.["timeout-minutes"] ?? "")) != producer_timeout_expression() {
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the ${PRODUCER_PAID_FUSE_MINUTES}-minute paid-runner fuse and ${producer_hosted_ceiling_minutes()}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+        "ci.yml:${job_name} must keep the ${PRODUCER_PAID_FUSE_MINUTES}-minute paid-runner fuse, the ${producer_owned_ceiling_minutes()}-minute owned ceiling, and the ${producer_hosted_ceiling_minutes()}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
       ]
   }
   errors = errors + producer_step_budget_errors(job, job_name)
@@ -329,9 +355,14 @@ fn persistent_compile_lane_errors(
   if len(caches) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure ${RUST_CACHE_ACTION} exactly once"]
   } else if trim(caches[0]?.if ?? "")
-    != "env.${RUNNER_TIER_ENV} == '${HOSTED_RUNNER_TIER}'" {
+    != "env.${RUNNER_TIER_ENV} != '${BLACKSMITH_RUNNER_TIER}'" {
+    // Named by what it excludes, not by what it includes. A guard that lists
+    // the tiers it knows makes a new tier skip in silence, which on this step
+    // means a cold compile reported as a clean pass.
     errors = errors
-      + ["ci.yml:${job_name} must use rust-cache only on the GitHub-hosted fallback"]
+      + [
+        "ci.yml:${job_name} must restore rust-cache on every tier except Blacksmith, which has its own sticky sccache",
+      ]
   } else if trim(to_string(caches[0]?.with?.["shared-key"] ?? "")) != rust_cache_key
     || trim(to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? ""))
       != "true" {
