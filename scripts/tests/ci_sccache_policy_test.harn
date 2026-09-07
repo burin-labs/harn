@@ -96,7 +96,7 @@ fn persistent_lane(
       "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && ${paid_event} && '${runner}' || 'ubuntu-latest'",
     ),
     "timeout-minutes": gha_expression(
-      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && ${paid_event} && 20 || 65",
+      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && ${paid_event} && 20 || 68",
     ),
     env: {
       HARN_RUNNER_TIER: gha_expression(
@@ -225,7 +225,7 @@ fn workflow() {
             {name: "Upload portable Harn CLI", uses: "actions/upload-artifact@pinned"},
             {
               name: "Build security test archive",
-              "timeout-minutes": 12,
+              "timeout-minutes": 15,
               run: "./scripts/ci/rust_artifact.sh build-security security-bundle sha",
             },
             {name: "Upload security test archive", uses: "actions/upload-artifact@pinned"},
@@ -914,7 +914,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   assert(errors.contains("ci.yml:rust-check-inputs must mirror its Blacksmith/hosted runner tier"))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 65-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 68-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }

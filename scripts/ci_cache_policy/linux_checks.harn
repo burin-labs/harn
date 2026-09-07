@@ -29,12 +29,21 @@ fn blacksmith_tier_expression() -> string {
  *
  * Sized from the five most recent green main runs of `rust-check-inputs` plus
  * the two slowest in that window, with a full-generation save measured at
- * 8m35s. Observed step maxima: portable CLI 7m01s, security archive 8m56s,
+ * 8m35s. Observed step maxima: portable CLI 7m01s, security archive 11m33s,
  * workspace tests 20m03s, setup and cache restore together 3m33s.
+ *
+ * The security archive was first sized at 12 minutes against an 8m56s maximum.
+ * It has since grown: seven consecutive green main runs measured 8m01s, 8m35s,
+ * 10m49s, 10m59s, 11m01s, 11m30s and 11m33s, leaving the slowest 27 seconds
+ * under its own ceiling. A step that green main clears by under half a percent
+ * is not a hang detector, it is a coin flip that attributes a fleet-wide
+ * margin problem to whichever pull request adds the next compile unit. Each
+ * ceiling here carries roughly 30 percent headroom over its observed maximum;
+ * 15 minutes restores that for this step.
  */
 const PRODUCER_STEP_BUDGETS: list<{name: string, minutes: int}> = [
   {name: "Build portable Harn CLI", minutes: 9},
-  {name: "Build security test archive", minutes: 12},
+  {name: "Build security test archive", minutes: 15},
   {name: "Run Rust workspace tests", minutes: 26},
 ]
 
