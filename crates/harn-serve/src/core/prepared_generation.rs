@@ -56,9 +56,7 @@ impl PreparedDispatchGeneration {
             ))
         })?;
 
-        let profile_vm_start = Instant::now();
         let mut vm = Vm::new();
-        let profile_vm_us = profile_vm_start.elapsed().as_micros();
         if config.trusted_host_dispatch {
             vm.enable_trusted_host_dispatch()
                 .map_err(classify_vm_error)?;
@@ -70,7 +68,6 @@ impl PreparedDispatchGeneration {
             Arc::new(AtomicBool::new(false)),
         );
 
-        let profile_modules_start = Instant::now();
         let cache = PreparedModuleCache::for_immutable_generation();
         let stats = if config.trusted_host_dispatch {
             cache
@@ -79,7 +76,6 @@ impl PreparedDispatchGeneration {
             cache.prepare_module_generation(std::slice::from_ref(&config.script_path))
         }
         .map_err(classify_vm_error)?;
-        let profile_modules_us = profile_modules_start.elapsed().as_micros();
         if stats.cache.entries < stats.source_modules as usize {
             return Err(DispatchError::Validation(format!(
                 "prepared generation has {} source modules but retained only {} artifacts",
@@ -117,14 +113,8 @@ impl PreparedDispatchGeneration {
             );
         }
 
-        let profile_baseline_start = Instant::now();
-        let baseline = vm.baseline();
-        let profile_baseline_us = profile_baseline_start.elapsed().as_micros();
-        if std::env::var_os("HARN_DISPATCH_GENERATION_DEBUG").is_some() {
-            eprintln!("{{\"startup_phase\":\"generation\",\"vm_new_us\":{profile_vm_us},\"modules_us\":{profile_modules_us},\"baseline_us\":{profile_baseline_us},\"total_us\":{}}}", started.elapsed().as_micros());
-        }
         Ok(Self {
-            baseline,
+            baseline: vm.baseline(),
             source: Arc::from(source),
             receipt,
         })

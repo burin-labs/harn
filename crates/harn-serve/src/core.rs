@@ -68,9 +68,7 @@ fn install_dispatch_vm_runtime(
     source: &str,
     cancel_token: Arc<AtomicBool>,
 ) {
-    let profile_start = std::time::Instant::now();
     harn_vm::register_vm_stdlib(vm);
-    let profile_stdlib_us = profile_start.elapsed().as_micros();
     #[cfg(feature = "hostlib")]
     crate::install_dispatch_hostlib(vm);
     let store_base = script_path.parent().unwrap_or(Path::new("."));
@@ -80,9 +78,6 @@ fn install_dispatch_vm_runtime(
     vm.set_source_dir(store_base);
     vm.install_cancel_token(cancel_token);
     vm.set_harness(harn_vm::Harness::real());
-    if std::env::var_os("HARN_DISPATCH_GENERATION_DEBUG").is_some() {
-        eprintln!("{{\"startup_phase\":\"runtime_install\",\"stdlib_us\":{profile_stdlib_us},\"total_us\":{}}}", profile_start.elapsed().as_micros());
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -275,21 +270,14 @@ pub struct DispatchCore {
 
 impl DispatchCore {
     pub fn new(config: DispatchCoreConfig) -> Result<Self, DispatchError> {
-        let profile_start = std::time::Instant::now();
         let tools = PreparedTools::prepare(&config.script_path)?;
-        let profile_tools_us = profile_start.elapsed().as_micros();
-        let profile_event_start = std::time::Instant::now();
         let event_log = install_default_for_base_dir(&config.base_dir).map_err(|error| {
             DispatchError::Io(format!(
                 "failed to initialize event log for {}: {error}",
                 config.base_dir.display()
             ))
         })?;
-        let profile_event_us = profile_event_start.elapsed().as_micros();
         let generation = PreparedDispatchGeneration::prepare(&config, tools.exports())?;
-        if std::env::var_os("HARN_DISPATCH_GENERATION_DEBUG").is_some() {
-            eprintln!("{{\"startup_phase\":\"core\",\"tools_us\":{profile_tools_us},\"event_log_us\":{profile_event_us},\"total_us\":{}}}", profile_start.elapsed().as_micros());
-        }
         Ok(Self {
             config,
             tools,
@@ -1538,9 +1526,6 @@ pub fn whoami(harness: Harness) -> string {
     mod prepared_generation_tests;
     #[path = "prepared_tools_tests.rs"]
     mod prepared_tools_tests;
-
-    #[path = "startup_probe.rs"]
-    mod startup_probe;
     #[path = "trusted_host_dispatch_tests.rs"]
     mod trusted_host_dispatch_tests;
     #[path = "typed_pipeline_tests.rs"]
