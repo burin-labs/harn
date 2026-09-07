@@ -1005,6 +1005,22 @@ pub(super) fn lookup_with(
     builtin: &CapabilitiesFile,
     user: Option<&CapabilitiesFile>,
 ) -> Capabilities {
+    lookup_with_match(provider, model, builtin, user).0
+}
+
+/// The same resolution, plus whether any rule actually matched the route.
+///
+/// A caller that must distinguish "this route declares these capabilities"
+/// from "no rule named this route, so every field is the restrictive default"
+/// needs the second answer, and the returned `Capabilities` cannot carry it:
+/// an unmatched route and a route that genuinely declares nothing produce the
+/// same value.
+pub(super) fn lookup_with_match(
+    provider: &str,
+    model: &str,
+    builtin: &CapabilitiesFile,
+    user: Option<&CapabilitiesFile>,
+) -> (Capabilities, bool) {
     // The normal chain walks provider → family(provider) → … with a
     // visited-guard to avoid cycles in malformed user overrides. `mock` walks
     // its own rows and then the spoof layers instead; `resolve_route` owns
@@ -1021,16 +1037,16 @@ pub(super) fn lookup_with(
         if provider == "mock" && matched_layer == Some("anthropic") {
             caps.native_tool_wire_format = "openai".to_string();
         }
-        return caps;
+        return (caps, true);
     }
     if provider == "mock" {
-        return Capabilities::default();
+        return (Capabilities::default(), false);
     }
     if effective_defaults.has_any_field() {
-        return defaults_to_caps(&effective_defaults);
+        return (defaults_to_caps(&effective_defaults), false);
     }
     super::diagnostics::warn_unmatched_route_once(provider, model);
-    Capabilities::default()
+    (Capabilities::default(), false)
 }
 
 pub(super) fn merged_provider_defaults(

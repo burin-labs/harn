@@ -225,6 +225,9 @@ pub(crate) fn admit_portable_option_for_thinking(
     provider_contract_probe: Option<PortableOption>,
 ) -> Result<(), CapabilityAdmissionError> {
     debug_assert_ne!(option, PortableOption::PromptCacheTtl);
+    // Same substituted route the `Capabilities` lookup resolves, so a mocked
+    // call cannot admit here and refuse there (harn#7693, harn#8119).
+    let (provider, model) = super::lookup::effective_capability_route(provider, model);
     if !crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
         provider_contract_probe,
         option,
@@ -275,6 +278,7 @@ pub fn admit_prompt_cache_ttl(
     model: &str,
     ttl: &str,
 ) -> Result<(), CapabilityAdmissionError> {
+    let (provider, model) = super::lookup::effective_capability_route(provider, model);
     let user = current_user_overrides();
     let builtin = super::lookup::builtin();
     let (cache_supported, supported_values) = declared_portable_option_support(
