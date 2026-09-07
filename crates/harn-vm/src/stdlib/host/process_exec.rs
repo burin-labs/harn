@@ -195,9 +195,21 @@ pub(super) async fn dispatch_process_exec_after_policy(
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped())
     .kill_on_drop(true);
-    let mut child = cmd
-        .spawn()
-        .map_err(|error| crate::value::environment_io_error_thrown(&error, error.to_string()))?;
+    // A spawn that fails on its working directory reports only the platform's
+    // word for it — Windows says "The directory name is invalid." and names
+    // neither the directory nor the option that chose it, which is how a
+    // corrupted `cwd` read as a bare platform error for a whole release.
+    let spawn_cwd = cmd
+        .as_std()
+        .get_current_dir()
+        .map(|dir| dir.display().to_string());
+    let mut child = cmd.spawn().map_err(|error| {
+        let message = match &spawn_cwd {
+            Some(dir) => format!("{error} (working directory: {dir})"),
+            None => error.to_string(),
+        };
+        crate::value::environment_io_error_thrown(&error, message)
+    })?;
     let stdin_task = match stdin {
         crate::stdlib::sandbox::ProcessStdin::Bytes(input) => {
             let mut pipe = child.stdin.take().ok_or_else(|| {
