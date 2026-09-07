@@ -151,7 +151,7 @@ pub(super) fn inspect_package_test_discovery(
         (true, None) => problems
             .push("[tests].allow_empty = true requires a non-empty [tests].reason".to_string()),
         (false, Some(_)) => {
-            problems.push("[tests].reason requires [tests].allow_empty = true".to_string())
+            problems.push("[tests].reason requires [tests].allow_empty = true".to_string());
         }
         _ => {}
     }

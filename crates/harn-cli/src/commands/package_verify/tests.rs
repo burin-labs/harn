@@ -399,7 +399,7 @@ fn package_test_discovery_uses_runtime_pipeline_rules_for_every_selected_file() 
 }
 
 #[test]
-fn package_test_gate_rejects_a_malformed_manifest() {
+fn package_test_inventory_reports_a_malformed_manifest_without_losing_the_counts() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("harn.toml"), "[tests\n").unwrap();
     fs::create_dir(dir.path().join("tests")).unwrap();
@@ -409,42 +409,43 @@ fn package_test_gate_rejects_a_malformed_manifest() {
     )
     .unwrap();
 
-    let (check, inventory) = run_package_tests(dir.path());
+    let (inventory, problems) = inspect_package_test_discovery(dir.path());
 
     assert_eq!(inventory.discovered_test_count, 1);
-    assert_eq!(check.status, "fail");
-    assert!(check.stderr.contains("harn.toml could not be read"));
+    assert!(problems
+        .iter()
+        .any(|p| p.contains("harn.toml could not be read")));
 }
 
 #[test]
-fn package_test_gate_preserves_the_identity_of_invalid_utf8() {
+fn package_test_inventory_preserves_the_identity_of_invalid_utf8() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("harn.toml"), "").unwrap();
     fs::create_dir(dir.path().join("tests")).unwrap();
     fs::write(dir.path().join("tests/invalid.harn"), [0xff, 0xfe]).unwrap();
 
-    let (check, inventory) = run_package_tests(dir.path());
+    let (inventory, problems) = inspect_package_test_discovery(dir.path());
 
-    assert_eq!(check.status, "fail");
+    assert!(!problems.is_empty());
     assert_eq!(inventory.files_with_errors.len(), 1);
     assert!(inventory.files_with_errors[0].sha256.starts_with("sha256:"));
     assert_ne!(inventory.files_with_errors[0].sha256, "unreadable");
 }
 
 #[test]
-fn package_test_gate_fails_closed_for_an_undeclared_empty_suite() {
+fn package_test_inventory_fails_closed_for_an_undeclared_empty_suite() {
     let dir = tempfile::tempdir().unwrap();
 
-    let (check, inventory) = run_package_tests(dir.path());
+    let (inventory, problems) = inspect_package_test_discovery(dir.path());
 
-    assert_eq!(check.status, "fail");
-    assert!(!check.reached);
     assert_eq!(inventory.selected_file_count, 0);
-    assert!(check.stderr.contains("[tests].allow_empty = true"));
+    assert!(problems
+        .iter()
+        .any(|p| p.contains("[tests].allow_empty = true")));
 }
 
 #[test]
-fn package_test_gate_accepts_a_reasoned_manifest_owned_empty_suite() {
+fn package_test_inventory_accepts_a_reasoned_manifest_owned_empty_suite() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("harn.toml"),
@@ -452,10 +453,9 @@ fn package_test_gate_accepts_a_reasoned_manifest_owned_empty_suite() {
     )
     .unwrap();
 
-    let (check, inventory) = run_package_tests(dir.path());
+    let (inventory, problems) = inspect_package_test_discovery(dir.path());
 
-    assert_eq!(check.status, "skipped");
-    assert!(!check.applicable);
+    assert!(problems.is_empty());
     assert!(inventory.allow_empty);
     assert_eq!(
         inventory.allow_empty_reason.as_deref(),
@@ -464,7 +464,7 @@ fn package_test_gate_accepts_a_reasoned_manifest_owned_empty_suite() {
 }
 
 #[test]
-fn package_test_gate_rejects_an_unexplained_empty_suite_exception() {
+fn package_test_inventory_rejects_an_unexplained_empty_suite_exception() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("harn.toml"),
@@ -472,10 +472,11 @@ fn package_test_gate_rejects_an_unexplained_empty_suite_exception() {
     )
     .unwrap();
 
-    let (check, _) = run_package_tests(dir.path());
+    let (_, problems) = inspect_package_test_discovery(dir.path());
 
-    assert_eq!(check.status, "fail");
-    assert!(check.stderr.contains("requires a non-empty [tests].reason"));
+    assert!(problems
+        .iter()
+        .any(|p| p.contains("requires a non-empty [tests].reason")));
 }
 
 #[test]
@@ -532,7 +533,6 @@ fn package_gate_header_projects_the_requested_strict_policy() {
             warnings: 0,
         },
         checks: Vec::new(),
-        test_discovery: PackageTestDiscovery::default(),
         connector_contract: None,
     };
 

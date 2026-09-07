@@ -4124,7 +4124,7 @@ error, or any selected file with no discoverable test pipeline. Its schema-v1
 receipt includes the exact per-file identities used by the verdict.
 
 `--strict` makes both check and lint warnings fatal and enables strict boundary
-type checking. Schema-v3 receipts expose `strict_requested` and record the
+type checking. Schema-v2 receipts expose `strict_requested` and record the
 exact strict command for each source gate; manifest-level `[check]` policy is
 still applied monotonically by those commands.
 

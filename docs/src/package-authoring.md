@@ -151,13 +151,14 @@ contract fixtures, package-local fixture tests, install/import smoke tests, and
 standalone Harn doc examples. Use `harn connector check .` when you only need
 the lower-level pure-Harn connector contract check.
 
-Package verification parses every `tests/**/*.harn` file through the same test
-discovery engine as `harn test`. Each file must contain at least one pipeline
-whose name starts with `test_` or that carries `@test`; an ordinary pipeline
-such as `pipeline test(...)` is not a test. The JSON receipt records every
+`harn package test-inventory .` parses every `tests/**/*.harn` file through the
+same test discovery engine as `harn test` and reports what it found, without
+running anything or changing a file. Each file should contain at least one
+pipeline whose name starts with `test_` or that carries `@test`; an ordinary
+pipeline such as `pipeline test(...)` is not a test. The receipt records every
 selected file, its SHA-256 digest, its discovered test pipelines, and any file
-that discovered none. A package that intentionally has no test files must own
-that exception in `harn.toml` and explain it:
+that discovered none. A package that intentionally has no test files declares
+that exception in `harn.toml` and explains it:
 
 ```toml
 [tests]
@@ -165,12 +166,12 @@ allow_empty = true
 reason = "schema-only package with no executable behavior"
 ```
 
-This exception applies only when the package has no selected test files. It
-does not hide a test file that contains no discoverable test pipeline.
+The exception applies only when the package has no selected test files. It does
+not hide a test file that contains no discoverable test pipeline.
 
 Use `harn package verify . --strict` for warning-free release admission. It
 makes check and lint warnings fatal, enables strict boundary typing, and records
-the exact source-gate commands in the schema-v3 receipt.
+the exact source-gate commands in the schema-v2 receipt.
 
 Connector packages should also declare package-facing capability coverage on
 their `[[providers]]` entry so `harn check --connector-matrix` can compare

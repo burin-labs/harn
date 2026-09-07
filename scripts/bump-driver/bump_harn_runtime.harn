@@ -24,8 +24,12 @@ fn package_test_receipt(fs: HarnessFs, env: HarnessEnv) -> string? {
   if path == "" {
     return nil
   }
-  if !fs.exists(path) {
-    throw "bump_harn_runtime: package test receipt path does not exist: " + path
+  // `fs.exists` renders a sandbox scope denial as absence, so a receipt the
+  // run was forbidden to read would be reported as one nobody wrote. Ask for
+  // the status instead and name what was actually observed.
+  const status = to_string(fs.status(path, "read")?.status ?? "stat_error")
+  if status != "present_file" {
+    throw "bump_harn_runtime: package test receipt at ${path} is not a readable file: ${status}"
   }
   const receipt = trim(fs.read_text(path))
   if receipt == "" {
@@ -59,7 +63,7 @@ pipeline main(harness: Harness) {
       token: token,
       branch: branch,
       base: base,
-      package_test_receipt: package_test_receipt(harness.fs, harness.env),
+      package_test_receipt: package_test_receipt(harness.fs, harness.env) ?? "",
     },
   )
   const adapter = live_bump_adapter(

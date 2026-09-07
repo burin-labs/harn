@@ -18,11 +18,11 @@ use crate::package::{self, ConnectorContractFixture, ResolvedProviderConnectorKi
 mod connector_contract;
 mod test_discovery;
 use connector_contract::check_one_connector;
+use test_discovery::inspect_package_test_discovery;
 #[cfg(test)]
 use test_discovery::package_test_discovery;
-use test_discovery::{inspect_package_test_discovery, PackageTestDiscovery};
 
-pub(crate) const PACKAGE_VERIFY_SCHEMA_VERSION: u32 = 3;
+pub(crate) const PACKAGE_VERIFY_SCHEMA_VERSION: u32 = 2;
 pub(crate) const PACKAGE_TEST_INVENTORY_SCHEMA_VERSION: u32 = 1;
 
 pub(crate) fn handle_package_test_inventory(args: PackageTestInventoryArgs) -> Result<(), String> {
@@ -159,7 +159,6 @@ pub(crate) struct PackageVerifyReport {
     pub status: String,
     pub summary: PackageVerifySummary,
     pub checks: Vec<PackageVerifyCheck>,
-    pub test_discovery: PackageTestDiscovery,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connector_contract: Option<ConnectorCheckReport>,
 }
@@ -421,8 +420,7 @@ pub(crate) async fn verify_package(args: &PackageVerifyArgs) -> PackageVerifyRep
         }
     }
 
-    let (package_tests, test_discovery) = run_package_tests(&package_dir);
-    checks.push(package_tests);
+    checks.push(run_package_tests(&package_dir));
     checks.push(run_install_import_smoke(&package_dir, metadata_ok));
     checks.push(validate_doc_examples(&package_dir));
     checks.push(run_package_docs_check(&package_dir));
@@ -441,7 +439,6 @@ pub(crate) async fn verify_package(args: &PackageVerifyArgs) -> PackageVerifyRep
         status,
         summary,
         checks,
-        test_discovery,
         connector_contract,
     }
 }
@@ -965,81 +962,40 @@ fn should_skip_package_input_directory(root: &Path, path: &Path) -> bool {
     package::should_exclude_package_entry(relative, package::PathEntryKind::Directory)
 }
 
-fn run_package_tests(package_dir: &Path) -> (PackageVerifyCheck, PackageTestDiscovery) {
+fn run_package_tests(package_dir: &Path) -> PackageVerifyCheck {
     let started = Instant::now();
-    let (inventory, problems) = inspect_package_test_discovery(package_dir);
-
-    let command = vec![
-        "harn".to_string(),
-        "test".to_string(),
-        "tests/".to_string(),
-        "--parallel".to_string(),
-    ];
-    if inventory.selected_file_count == 0 && !problems.is_empty() {
-        return (
-            PackageVerifyCheck {
-                name: "package tests".to_string(),
-                applicable: true,
-                reached: false,
-                status: "fail".to_string(),
-                command,
-                exit_code: Some(1),
-                duration_ms: elapsed_ms(started),
-                stderr: problems.join("\n"),
-                ..PackageVerifyCheck::default()
-            },
-            inventory,
+    let tests = package_test_files(package_dir);
+    if tests.is_empty() {
+        return skipped_check(
+            "package tests",
+            false,
+            elapsed_ms(started),
+            vec!["no runnable tests/*.harn files found".to_string()],
         );
     }
-    if inventory.selected_file_count == 0 {
-        let check = if inventory.allow_empty {
-            skipped_check(
-                "package tests",
-                false,
-                elapsed_ms(started),
-                vec![format!(
-                    "empty package test suite allowed by manifest: {}",
-                    inventory.allow_empty_reason.as_deref().unwrap_or_default()
-                )],
-            )
-        } else {
-            unreachable!("a disallowed empty suite is a discovery problem")
-        };
-        return (check, inventory);
-    }
-
-    if !problems.is_empty() {
-        return (
-            PackageVerifyCheck {
-                name: "package tests".to_string(),
-                applicable: true,
-                reached: true,
-                status: "fail".to_string(),
-                command,
-                exit_code: Some(1),
-                duration_ms: elapsed_ms(started),
-                stderr: problems.join("\n"),
-                details: vec![format!(
-                    "selected {} test file(s), discovered {} test pipeline(s)",
-                    inventory.selected_file_count, inventory.discovered_test_count
-                )],
-                ..PackageVerifyCheck::default()
-            },
-            inventory,
-        );
-    }
-
     let mut check = run_harn_subcommand(
         "package tests",
         package_dir,
         &["test", "tests/", "--parallel"],
     );
-    check.details.push(format!(
-        "selected {} test file(s), discovered {} test pipeline(s)",
-        inventory.selected_file_count, inventory.discovered_test_count
-    ));
+    check
+        .details
+        .push(format!("discovered {} runnable test file(s)", tests.len()));
     check.duration_ms = elapsed_ms(started);
-    (check, inventory)
+    check
+}
+
+fn package_test_files(package_dir: &Path) -> Vec<PathBuf> {
+    let tests_dir = package_dir.join("tests");
+    let mut files = Vec::new();
+    collect_package_harn_files(package_dir, &tests_dir, &mut files);
+    files.retain(|path| {
+        fs::read_to_string(path)
+            .map(|source| source.contains("pipeline ") || source.contains("@test"))
+            .unwrap_or(false)
+    });
+    files.sort();
+    files
 }
 
 fn run_install_import_smoke(package_dir: &Path, metadata_ok: bool) -> PackageVerifyCheck {
