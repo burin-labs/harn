@@ -176,11 +176,41 @@ pub fn frame_bytes(message: string) {
  * ground the budget already held, on files they never touched.
  *
  * A budgeted file that is ABSENT from the census is still a refusal, and it is
- * the one kind of absence that cannot be relaxed. Absence has two causes that
- * look identical here: the frame fell under the collection threshold, or the
- * census never measured that crate. The second is exactly how this gate shipped
- * a baseline too low to hold, so absence must never read as a pass.
+ * the one kind of absence that cannot be relaxed. It now has ONE cause: the
+ * census never measured that crate, which is exactly how this gate shipped a
+ * baseline too low to hold. Absence must never read as a pass.
+ *
+ * It used to have two, and they were indistinguishable from here: a crate that
+ * went unmeasured, or a frame that shrank under the collection threshold. That
+ * second cause made shrinking a frame unmergeable, because the reward for
+ * making a frame smaller was a refusal naming it absent. The census is now
+ * taken at a MEASUREMENT floor well under the smallest banked budget, so a
+ * budgeted frame keeps reporting a number however far it shrinks, and
+ * `threshold_bytes` governs only which unbudgeted file is worth surfacing.
  */
+/**
+ * The rows a banking run writes, from the census it just took.
+ *
+ * Only frames at or above the discovery threshold are banked. The census is
+ * taken at a lower measurement floor so a budgeted frame that shrinks still
+ * reports a number, and banking every measured file would turn a budget of the
+ * frames worth watching into a census of every frame in the workspace.
+ *
+ * A budgeted file that shrank under the threshold is dropped, and that IS the
+ * tightening: afterwards it is an ordinary unbudgeted file judged against the
+ * threshold, exactly as it was before it ever grew.
+ */
+pub fn banked_files(worst: dict<string, int>, budget: StackFrameBudget) {
+  let files = []
+  for path in keys(worst).sorted() {
+    const measured = worst[path] ?? 0
+    if measured >= budget.threshold_bytes {
+      files = files + [{path: path, max_bytes: measured}]
+    }
+  }
+  return files
+}
+
 pub fn judge_stack_frames(worst: dict<string, int>, budget: StackFrameBudget, today: string) {
   const near_floor = to_int(to_float(budget.ceiling_bytes) * (1.0 - budget.near_ceiling_fraction))
   let exception_for: dict<string, StackFrameException> = {}
@@ -462,15 +492,7 @@ fn main(harness: Harness) {
       )
       harness.runtime.exit(2)
     }
-    // Rewrite from the CENSUS, not from the previous budget. Walking the old
-    // entries could only ever adjust files that were already listed, so a
-    // frame crossing the threshold for the first time stayed "unlisted"
-    // forever and the remediation this gate prints was a dead end. Building
-    // from the measurement also drops a file that fell back under it.
-    let files = []
-    for path in keys(worst).sorted() {
-      files = files + [{path: path, max_bytes: worst[path] ?? 0}]
-    }
+    const files = banked_files(worst, budget)
     harness.fs.write_text(budget_path, json_stringify_pretty({...budget, files: files}) + "\n")
     harness.stdio.println("stack-frame budget rewritten to the observed frame sizes.")
     return nil
