@@ -1123,7 +1123,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: cargo-bloat
 
@@ -2330,7 +2330,7 @@ jobs:
         # recovery preserves that pointer. The per-arch archives were already
         # uploaded incrementally by each build leg; re-listing them here is a
         # harmless idempotent overwrite that also covers any retried upload.
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.setup.outputs.ref }}
           body_path: release-notes.md

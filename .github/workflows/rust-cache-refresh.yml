@@ -114,7 +114,7 @@ jobs:
           ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
       - name: Install cargo-nextest
         if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: nextest@0.9.132
       # Warm only after a miss. An exact-key restore means this family's entry
