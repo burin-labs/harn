@@ -164,6 +164,9 @@
             },
             "allow_tcp_loopback": {
               "type": "boolean"
+            },
+            "unix_socket_roots": {
+              "$ref": "#/$defs/stringArray"
             }
           }
         }
@@ -271,7 +274,8 @@
                 "filesystem_read",
                 "filesystem_write",
                 "process_read_root",
-                "process_write_root"
+                "process_write_root",
+                "process_unix_socket_root"
               ]
             },
             "root": {

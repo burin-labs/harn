@@ -214,6 +214,59 @@ pub(crate) fn inject_workspace_process_env(
             env.push((key, value));
         }
     }
+    inject_jvm_loopback_env(env, policy);
+}
+
+/// The JVM option that makes a loopback-only grant hold for Java children.
+const JVM_PREFER_IPV4_STACK: &str = "-Djava.net.preferIPv4Stack=true";
+
+/// Make `allow_tcp_loopback` mean what it says for JVM children on macOS.
+///
+/// The seatbelt matches loopback endpoints by the literal `localhost` filter,
+/// and that filter does not match an IPv4-mapped IPv6 address. A dual-stack
+/// JVM — the default — binds and connects `127.0.0.1` as `::ffff:127.0.0.1`,
+/// so a Gradle daemon, an sbt server, or any Java test server on a granted
+/// loopback dies with a bare `SocketException: Operation not permitted`
+/// while a Python or Node server beside it works. The seatbelt grammar
+/// offers no spelling for the mapped form (measured: numeric hosts are
+/// rejected at profile parse), so the fix is on the JVM side: prefer the
+/// IPv4 stack, which makes the JVM emit the addresses the filter matches.
+///
+/// `JAVA_TOOL_OPTIONS` is the one JVM-wide knob every launcher honours
+/// (Gradle's wrapper, sbt, Maven, `java` itself). A caller's own value is
+/// kept and appended to, never replaced; a caller that already chose an IP
+/// stack is left alone. The JVM announces the variable on stderr
+/// (`Picked up JAVA_TOOL_OPTIONS: ...`); that line is the price of a loopback
+/// grant that actually works, and it is on stderr, not stdout.
+fn inject_jvm_loopback_env(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
+    if !cfg!(target_os = "macos") || !policy.process_sandbox.allow_tcp_loopback {
+        return;
+    }
+    let existing = env
+        .iter()
+        .position(|(key, _)| key == "JAVA_TOOL_OPTIONS")
+        .map(|index| env[index].1.clone())
+        .or_else(
+            || match crate::stdlib::process::current_session_environment() {
+                Some(environment) => environment
+                    .launcher_value("JAVA_TOOL_OPTIONS")
+                    .map(str::to_string),
+                None => crate::test_env::env_var_seamed("JAVA_TOOL_OPTIONS"),
+            },
+        )
+        .unwrap_or_default();
+    if existing.contains("java.net.preferIPv4Stack")
+        || existing.contains("java.net.preferIPv6Addresses")
+    {
+        return;
+    }
+    let value = if existing.trim().is_empty() {
+        JVM_PREFER_IPV4_STACK.to_string()
+    } else {
+        format!("{} {JVM_PREFER_IPV4_STACK}", existing.trim_end())
+    };
+    env.retain(|(key, _)| key != "JAVA_TOOL_OPTIONS");
+    env.push(("JAVA_TOOL_OPTIONS".to_string(), value));
 }
 
 /// Workspace-local temp and mutable toolchain-state defaults for the active
@@ -363,5 +416,45 @@ mod tests {
             Some(&cache.join("harn").display().to_string()),
             "HARN_CACHE_DIR is already the cache root, not an XDG base"
         );
+    }
+
+    #[test]
+    fn a_loopback_grant_pins_the_jvm_to_the_ipv4_stack_on_macos() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut policy = policy(workspace.path());
+        let mut env = Vec::new();
+        inject_workspace_process_env(&mut env, &policy);
+        assert!(
+            !env.iter().any(|(key, _)| key == "JAVA_TOOL_OPTIONS"),
+            "no loopback grant, no JVM option"
+        );
+
+        policy.process_sandbox.allow_tcp_loopback = true;
+        let mut env = vec![("JAVA_TOOL_OPTIONS".to_string(), "-Xmx1g".to_string())];
+        inject_workspace_process_env(&mut env, &policy);
+        let value = env
+            .iter()
+            .find(|(key, _)| key == "JAVA_TOOL_OPTIONS")
+            .map(|(_, value)| value.clone())
+            .unwrap();
+        if cfg!(target_os = "macos") {
+            assert_eq!(value, format!("-Xmx1g {JVM_PREFER_IPV4_STACK}"));
+        } else {
+            assert_eq!(value, "-Xmx1g", "only the macOS seatbelt needs the pin");
+        }
+
+        // An operator who already chose a stack keeps their choice.
+        let mut env = vec![(
+            "JAVA_TOOL_OPTIONS".to_string(),
+            "-Djava.net.preferIPv6Addresses=true".to_string(),
+        )];
+        inject_workspace_process_env(&mut env, &policy);
+        assert_eq!(
+            env.iter()
+                .filter(|(key, _)| key == "JAVA_TOOL_OPTIONS")
+                .count(),
+            1
+        );
+        assert_eq!(env[0].1, "-Djava.net.preferIPv6Addresses=true");
     }
 }

@@ -313,6 +313,20 @@ pub struct ProcessSandboxPolicy {
     /// retaining the deny on non-loopback destinations. Backends that cannot
     /// enforce this distinction reject the spawn rather than widening it.
     pub allow_tcp_loopback: bool,
+    /// Directories under which a confined child may bind and connect
+    /// Unix-domain sockets. Path-scoped: a socket outside every root is still
+    /// refused, and nothing here grants IP networking. Build servers (sbt,
+    /// Gradle's Kotlin daemon, MSBuild worker nodes) talk to themselves over a
+    /// socket file under the project or temp dir; without this grant they die
+    /// with a bare `Operation not permitted` that reads like a toolchain defect.
+    ///
+    /// Enforced on macOS, where the seatbelt filters sockets by path. Linux,
+    /// Windows, and OpenBSD cannot scope a Unix socket by path, so a non-empty
+    /// grant there rejects the spawn rather than widening, the contract
+    /// `allow_tcp_loopback` follows. Omitted from the wire when empty so no
+    /// workflow graph digest pinned before the field existed moves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unix_socket_roots: Vec<String>,
 }
 
 /// Runtime-owned forwarding endpoints for a managed child-process egress
@@ -340,6 +354,7 @@ impl ProcessSandboxPolicy {
         extend_unique(&mut self.write_roots, &other.write_roots);
         extend_unique(&mut self.read_deny_roots, &other.read_deny_roots);
         self.allow_tcp_loopback |= other.allow_tcp_loopback;
+        extend_unique(&mut self.unix_socket_roots, &other.unix_socket_roots);
     }
 
     fn intersect(&self, requested: &Self) -> Self {
@@ -367,6 +382,10 @@ impl ProcessSandboxPolicy {
             // a nested request may neither invent it nor erase an outer grant.
             // Host configuration still composes additively through `extend`.
             allow_tcp_loopback: self.allow_tcp_loopback,
+            unix_socket_roots: intersect_roots(
+                &self.unix_socket_roots,
+                &requested.unix_socket_roots,
+            ),
         }
     }
 }
@@ -947,6 +966,11 @@ impl CapabilityPolicy {
                 "process_sandbox.write_roots",
                 &ceiling_ps.write_roots,
                 &requested_ps.write_roots,
+            ),
+            (
+                "process_sandbox.unix_socket_roots",
+                &ceiling_ps.unix_socket_roots,
+                &requested_ps.unix_socket_roots,
             ),
         ] {
             let widened: Vec<String> = requested_roots

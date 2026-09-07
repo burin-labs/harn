@@ -19,6 +19,12 @@ use super::{
     SandboxBackend, SandboxFallback,
 };
 
+#[path = "refusal_mechanism.rs"]
+mod refusal_mechanism;
+pub use refusal_mechanism::{
+    infer_process_sandbox_mechanism, ProcessSandboxGrants, ProcessSandboxMechanism,
+};
+
 /// How a child-process refusal was determined, and therefore how much its
 /// `refused_paths` can be trusted.
 ///
@@ -128,6 +134,16 @@ pub struct ProcessSandboxRefusal {
     pub cwd: String,
     pub backend: String,
     pub operation: ProcessSandboxOperation,
+    /// Which sandbox boundary refused the child: egress, a local socket, a
+    /// home-directory read, a write, or unknown. Inferred from the output
+    /// under the same `observability` as the rest of the record. Records
+    /// written before the field existed read back as `Unknown`.
+    #[serde(default)]
+    pub mechanism: ProcessSandboxMechanism,
+    /// The mechanism spelled out with the grants in force, for the agent and
+    /// the receipt. Diagnostic prose; the typed fact is `mechanism`.
+    #[serde(default)]
+    pub reason: String,
     /// The refused resource when the backend reports one. `None` under the
     /// current inference-only contract; never recover this by parsing prose.
     pub resource: Option<String>,
@@ -162,6 +178,11 @@ impl ProcessSandboxRefusal {
         );
         metadata.insert("resource".to_string(), serde_json::json!(self.resource));
         metadata.insert(
+            "mechanism".to_string(),
+            serde_json::json!(self.mechanism.as_str()),
+        );
+        metadata.insert("reason".to_string(), serde_json::json!(self.reason));
+        metadata.insert(
             "refused_paths".to_string(),
             serde_json::json!(self.refused_paths),
         );
@@ -182,16 +203,36 @@ impl ProcessSandboxRefusal {
     }
 
     pub fn inferred(backend: String, command: Vec<String>, cwd: String, evidence: &str) -> Self {
+        Self::inferred_under(backend, command, cwd, evidence, None)
+    }
+
+    /// Classify against the policy that confined the child, so the mechanism
+    /// explanation can name the grants that were in force.
+    pub fn inferred_under(
+        backend: String,
+        command: Vec<String>,
+        cwd: String,
+        evidence: &str,
+        policy: Option<&CapabilityPolicy>,
+    ) -> Self {
         let mut stderr_excerpt: String = evidence.chars().take(Self::MAX_EXCERPT).collect();
         if evidence.chars().count() > Self::MAX_EXCERPT {
             stderr_excerpt.push('…');
         }
+        let (mechanism, grants) = infer_process_sandbox_mechanism(evidence, policy);
+        let operation = match mechanism {
+            ProcessSandboxMechanism::HomeRead => ProcessSandboxOperation::Read,
+            ProcessSandboxMechanism::Write => ProcessSandboxOperation::Write,
+            _ => ProcessSandboxOperation::Unknown,
+        };
         Self {
             schema: Self::SCHEMA.to_string(),
             command,
             cwd,
             backend,
-            operation: ProcessSandboxOperation::Unknown,
+            operation,
+            mechanism,
+            reason: mechanism.explanation(&grants),
             resource: None,
             refused_paths: Vec::new(),
             observability: RefusalObservability::Inferred,
@@ -209,6 +250,7 @@ impl ProcessSandboxRefusal {
             "capability": "process.run",
             "backend": self.backend,
             "operation": self.operation.as_str(),
+            "mechanism": self.mechanism.as_str(),
             "resource": self.resource,
             "command": self.command,
             "cwd": self.cwd,
@@ -217,7 +259,7 @@ impl ProcessSandboxRefusal {
             "stderr_excerpt": self.stderr_excerpt,
             "count": self.count,
             "retryable": false,
-            "reason": "The process sandbox refused an operation in the child process.",
+            "reason": format!("The process sandbox refused an operation in the child process: {}.", self.reason),
         })
     }
 
@@ -233,11 +275,16 @@ impl ProcessSandboxRefusal {
 pub struct ProcessSandboxReportingContext {
     pub backend: String,
     pub reporting: ProcessSandboxDenialReporting,
+    /// The policy that confined the spawn, captured on the spawning thread so
+    /// a refusal classified later (on a waiter thread) still names the grants
+    /// that were actually in force.
+    pub policy: Option<Box<CapabilityPolicy>>,
 }
 
 impl ProcessSandboxReportingContext {
     pub fn current() -> Self {
-        let reporting = match super::active_sandbox_policy() {
+        let policy = super::active_sandbox_policy();
+        let reporting = match policy {
             Some(_) if ActiveBackend::available() => ProcessSandboxDenialReporting::InferredOnly,
             Some(_) => ProcessSandboxDenialReporting::BackendUnavailable,
             _ => ProcessSandboxDenialReporting::NotEnforced,
@@ -245,6 +292,7 @@ impl ProcessSandboxReportingContext {
         Self {
             backend: super::active_backend_filesystem_mechanism().to_string(),
             reporting,
+            policy: policy.map(|(policy, _)| Box::new(policy)),
         }
     }
 
@@ -272,11 +320,12 @@ impl ProcessSandboxReportingContext {
                 } else {
                     stdout
                 };
-                ProcessSandboxRefusal::inferred(
+                ProcessSandboxRefusal::inferred_under(
                     self.backend.clone(),
                     command.to_vec(),
                     cwd.to_string(),
                     &String::from_utf8_lossy(evidence),
+                    self.policy.as_deref(),
                 )
             });
         ProcessSandboxAssessment {
@@ -324,8 +373,11 @@ pub fn process_violation_error(
         };
         return Some(sandbox_denial_error(
             format!(
-                "sandbox violation: process was {action} by the OS sandbox (status {})",
+                "sandbox violation: process was {action} by the OS sandbox (status {}); \
+                 mechanism={}: {}",
                 output.status,
+                refusal.mechanism.as_str(),
+                refusal.reason,
             ),
             &format!("{stderr}\n{stdout}"),
             &policy,

@@ -861,6 +861,7 @@ impl AcpSandboxConfig {
             || !self.process.read_roots.is_empty()
             || !self.process.write_roots.is_empty()
             || self.process.allow_tcp_loopback
+            || !self.process.unix_socket_roots.is_empty()
     }
 
     pub fn with_read_only_roots(roots: Vec<String>) -> Self {

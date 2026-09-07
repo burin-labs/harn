@@ -156,6 +156,12 @@ pub(super) fn sandboxed_output(
             "TCP loopback-only child networking is not enforceable by AppContainer capabilities",
         ));
     }
+    if !policy.process_sandbox.unix_socket_roots.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "path-scoped Unix-domain sockets for child processes are not enforceable by AppContainer capabilities",
+        ));
+    }
     sandbox_trace(
         "pending",
         format!("start program={program:?} argc={}", args.len()),

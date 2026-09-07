@@ -15,7 +15,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write,
+    normalized_process_roots, policy_allows_network, policy_allows_workspace_write,
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
@@ -378,6 +378,24 @@ fn render_profile_with_extra_read_roots(
         profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
         profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
         profile.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
+    }
+    // Unix-domain sockets are filtered by the socket file's path, so a
+    // `subpath` filter on the three socket operations admits exactly the
+    // sockets under the granted roots and nothing over IP: `subpath` never
+    // matches an inet endpoint, and the loopback block above never matches a
+    // socket file. Creating the socket (`socket(2)`) is not filtered; the
+    // bind or connect is, which is where a build server dies today with a
+    // bare EPERM. Both spellings of a `/tmp`- or `/var`-rooted path are
+    // emitted for the same reason the write denies emit them.
+    for root in normalized_process_roots(&policy.process_sandbox.unix_socket_roots) {
+        for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+            let escaped = sandbox_profile_escape(&path);
+            profile.push_str(&format!(
+                "(allow network-bind (subpath \"{escaped}\"))\n\
+                 (allow network-inbound (subpath \"{escaped}\"))\n\
+                 (allow network-outbound (subpath \"{escaped}\"))\n"
+            ));
+        }
     }
     // The read denylist is emitted LAST, after every allow in this function.
     //

@@ -394,4 +394,61 @@ fn the_process_sandbox_policy_serializes_every_field_including_empty_ones() {
          docs/src/workflow-authoring-quickstart.md and \
          scripts/check_docs_workflow_quickstart.harn"
     );
+    assert!(
+        !object.contains_key("unix_socket_roots"),
+        "`unix_socket_roots` is omitted when empty precisely so it does not \
+         repin every digest; a graph that grants a root serializes it"
+    );
+    let granted = serde_json::to_value(ProcessSandboxPolicy {
+        unix_socket_roots: vec!["/work".to_string()],
+        ..ProcessSandboxPolicy::default()
+    })
+    .expect("serialize");
+    assert_eq!(granted["unix_socket_roots"], serde_json::json!(["/work"]));
+}
+
+#[test]
+fn unix_socket_roots_narrow_like_the_other_process_roots() {
+    let allowed = CapabilityPolicy {
+        process_sandbox: ProcessSandboxPolicy {
+            unix_socket_roots: vec!["/work".to_string()],
+            ..ProcessSandboxPolicy::default()
+        },
+        ..CapabilityPolicy::default()
+    };
+    let narrower = CapabilityPolicy {
+        process_sandbox: ProcessSandboxPolicy {
+            unix_socket_roots: vec!["/work/build".to_string()],
+            ..ProcessSandboxPolicy::default()
+        },
+        ..CapabilityPolicy::default()
+    };
+    let elsewhere = CapabilityPolicy {
+        process_sandbox: ProcessSandboxPolicy {
+            unix_socket_roots: vec!["/elsewhere".to_string()],
+            ..ProcessSandboxPolicy::default()
+        },
+        ..CapabilityPolicy::default()
+    };
+
+    assert_eq!(
+        allowed
+            .intersect(&narrower)
+            .expect("a nested root under the grant intersects")
+            .process_sandbox
+            .unix_socket_roots,
+        vec!["/work/build".to_string()]
+    );
+    assert!(allowed
+        .intersect(&elsewhere)
+        .expect("a nested root outside the grant intersects to nothing")
+        .process_sandbox
+        .unix_socket_roots
+        .is_empty());
+    CapabilityPolicy::default()
+        .assert_within_ceiling(&allowed)
+        .expect_err("a flattened stage cannot invent socket authority");
+    allowed
+        .assert_within_ceiling(&elsewhere)
+        .expect_err("a flattened stage cannot move socket authority elsewhere");
 }
