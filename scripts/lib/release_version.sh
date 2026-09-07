@@ -96,6 +96,26 @@ release_head_is_release_commit_for_version() {
     | grep -Eq "^\+version = \"$version\"$"
 }
 
+# A required squash merge replaces a certified release commit with a new commit
+# carrying the same patch. Accept that fold without weakening the ancestry check
+# to a matching version or subject: every commit unique to the tag's history
+# must have a patch-equivalent commit in HEAD.
+release_tag_is_represented_in_head() {
+  local tag="${1:-}"
+  [[ -n "$tag" ]] || return 1
+
+  git merge-base --is-ancestor "$tag" HEAD && return 0
+
+  local cherry line saw_commit=false
+  cherry="$(git cherry HEAD "$tag" 2>/dev/null)" || return 1
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    saw_commit=true
+    [[ "$line" == "- "* ]] || return 1
+  done <<< "$cherry"
+  [[ "$saw_commit" == true ]]
+}
+
 # Decide whether a published stable workspace needs the next development
 # identity. This is release state, not branch-tip authorship: after the tag is
 # public, unrelated commits may sit above the release commit without changing
@@ -139,7 +159,7 @@ release_development_bump_plan() {
     RELEASE_DEVELOPMENT_BUMP_REASON="workspace_does_not_match_latest_stable"
     return 0
   fi
-  if ! git merge-base --is-ancestor "$latest_tag" HEAD; then
+  if ! release_tag_is_represented_in_head "$latest_tag"; then
     RELEASE_DEVELOPMENT_BUMP_REASON="latest_stable_tag_is_not_in_head_ancestry"
     return 0
   fi

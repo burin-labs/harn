@@ -15,7 +15,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 279,
+        "line": 277,
         "reader": "__compaction_enabled"
       },
       {
@@ -106,12 +106,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 459,
+        "line": 457,
         "reader": "agent_autocompact_if_needed"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 458,
+        "line": 456,
         "reader": "agent_autocompact_if_needed"
       },
       {
@@ -139,7 +139,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 281,
+        "line": 279,
         "reader": "__compaction_enabled"
       },
       {
@@ -167,23 +167,18 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 280,
+        "line": 278,
         "reader": "__compaction_enabled"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 451,
+        "line": 449,
         "reader": "agent_autocompact_if_needed"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 452,
+        "line": 450,
         "reader": "agent_autocompact_if_needed"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 195,
-        "reader": "__compact_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

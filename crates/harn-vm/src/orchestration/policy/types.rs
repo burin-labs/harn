@@ -1289,6 +1289,14 @@ pub struct ModelPolicy {
     /// Policy for native-tool stages when a provider emits text-mode
     /// `<tool_call>` output instead of native tool calls.
     pub native_tool_fallback: NativeToolFallbackPolicy,
+    /// Optional per-stage stall detector configuration. When absent, the
+    /// workflow stage inherits `agent_loop`'s generic default rather than
+    /// inventing a workflow-specific threshold policy.
+    ///
+    /// Validation belongs to `std/agent/stall_config`; keeping the value
+    /// open here lets that owning shape evolve without a second Rust schema.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stall_diagnostics: Option<serde_json::Value>,
 }
 
 /// Wrapper that always compares equal, allowing non-Eq types in derived PartialEq structs.
