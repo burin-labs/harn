@@ -1,0 +1,109 @@
+// Workflow stages deliberately inherit the generic agent_loop stall default.
+// A stage opts in through model_policy.stall_diagnostics; workflow does not
+// invent a second threshold policy.
+//
+// This test observes the detector event from two otherwise identical live
+// workflow stages. Checking only the flattened options would have passed while
+// the old workflow-only threshold names configured nothing.
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+import { workflow_execute } from "std/workflow/execute"
+import { ModelPolicySpec } from "std/workflow/options"
+
+fn events_of(events: list, kind: string) -> list {
+  return events.filter({ event -> event.type == kind }).to_list()
+}
+
+fn stage_graph(session_id: string, configure_stall_diagnostics: bool) {
+  let calls = 0
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "Return the same harmless observation.",
+    {
+      handler: { _args ->
+        calls += 1
+        return "same observation"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  const base_policy: ModelPolicySpec = {
+    provider: "mock",
+    model: "mock",
+    tool_format: "native",
+    max_iterations: 3,
+  }
+  let model_policy = base_policy + {session_id: session_id}
+  if configure_stall_diagnostics {
+    const configured_policy: ModelPolicySpec = base_policy
+      + {stall_diagnostics: {threshold: 2, inject_feedback: false, hard_stop_after_trips: 99}}
+    model_policy = configured_policy + {session_id: session_id}
+  }
+  return {
+    graph: workflow_graph(
+      {
+        entry: "work",
+        nodes: {
+          work: {
+            kind: "agent",
+            prompt: "Call noop twice, then finish.",
+            tools: tools,
+            model_policy: model_policy,
+          },
+        },
+        edges: [],
+      },
+    ),
+    calls: { -> return calls },
+  }
+}
+
+fn run_stage(harness: Harness, session_id: string, configure_stall_diagnostics: bool) {
+  const fixture = stage_graph(session_id, configure_stall_diagnostics)
+  return with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "noop-1", name: "noop", arguments: {}}]},
+      {text: "", tool_calls: [{id: "noop-2", name: "noop", arguments: {}}]},
+      llm_text("finished"),
+    ],
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { return workflow_execute(
+          harness,
+          "Exercise the stage stall policy.",
+          fixture.graph,
+          [],
+          {max_steps: 1},
+        ) },
+      )
+      require captured.result.status == "completed",
+        "the workflow stage must complete, got "
+        + to_string(captured.result.status)
+      require fixture.calls() == 2,
+        "both repeated calls must reach the tool, got "
+        + to_string(fixture.calls())
+      return events_of(captured.events, "agent_loop_stall_warning")
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const inherited = run_stage(harness, "workflow-stall-default", false)
+  require len(inherited) == 0,
+    "an unconfigured workflow stage must inherit the disabled loop default"
+  const configured = run_stage(harness, "workflow-stall-configured", true)
+  require len(configured) == 1, "a configured stage must reach the live detector exactly once"
+  require configured[0].warning.threshold == 2,
+    "the stage threshold must reach the detector, got "
+    + to_string(configured[0].warning.threshold)
+  harness.stdio.println(len(inherited))
+  harness.stdio.println(len(configured))
+  harness.stdio.println(configured[0].warning.threshold)
+}

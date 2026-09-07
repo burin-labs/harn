@@ -298,10 +298,11 @@ fn model_policy_spec_matches_model_policy() {
         "ModelPolicySpec ↔ ModelPolicy",
         &harn_alias_keys(workflow_options_harn(), "ModelPolicySpec"),
         &serde_default_keys::<ModelPolicy>(),
-        // `post_turn_callback` is a real ModelPolicy field but carries a
-        // closure, so it is `#[serde(skip)]` and absent from the
-        // serialized default.
-        &["post_turn_callback"],
+        // Both keys are real ModelPolicy fields but absent from the serialized
+        // default: `post_turn_callback` carries a closure and is
+        // `#[serde(skip)]`; an unset `stall_diagnostics` is omitted so adding
+        // the opt-in policy does not change existing workflow graph digests.
+        &["post_turn_callback", "stall_diagnostics"],
         &[],
     );
 }
