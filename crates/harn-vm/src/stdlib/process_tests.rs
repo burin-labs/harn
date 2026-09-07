@@ -478,3 +478,47 @@ fn resolve_program_path_resolved_environment_wins_over_overlay_and_process_env()
     let resolved = super::resolve_program_path("myprog", &resolved_environment, false, &overlay);
     assert_eq!(resolved, "myprog", "overlay's PATH must not be consulted");
 }
+
+/// `process.run` and its siblings reach the child through `run_captured_spawn`,
+/// which took the caller's `cwd` verbatim. A directory that came from `cwd()`
+/// or `canonicalize` on Windows carries the `\\?\` prefix, and a child cannot
+/// be started in that form (ERROR_DIRECTORY, os error 267), while the same
+/// directory through `process.exec` worked because that seam already went
+/// through `child_process_cwd`. Windows-only because the prefix only exists
+/// there; the string rule itself is covered on every platform above.
+#[cfg(windows)]
+#[test]
+fn run_captured_spawn_starts_the_child_in_a_verbatim_prefixed_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let verbatim = dir.path().canonicalize().unwrap();
+    let verbatim_text = verbatim.to_string_lossy().into_owned();
+    assert!(
+        verbatim_text.starts_with(r"\\?\"),
+        "canonicalize must hand back the verbatim form for this to test anything: {verbatim_text}"
+    );
+    let args = vec!["/C".to_string(), "cd".to_string()];
+    let run = super::run_captured_spawn(super::CapturedSpawn {
+        label: "test",
+        cmd: "cmd",
+        args: &args,
+        cwd: Some(verbatim_text.as_str()),
+        env: &[],
+        env_clear: false,
+        stdin: None,
+        timeout: Some(std::time::Duration::from_secs(10)),
+    })
+    .expect("a verbatim-prefixed cwd must still start the child");
+    assert!(
+        run.output.status.success(),
+        "child did not start: {}",
+        String::from_utf8_lossy(&run.output.stderr)
+    );
+    let reported = String::from_utf8_lossy(&run.output.stdout)
+        .trim()
+        .to_string();
+    assert_eq!(
+        std::path::PathBuf::from(&reported).canonicalize().unwrap(),
+        verbatim,
+        "the child must run in the directory the caller named, not in the parent's",
+    );
+}
