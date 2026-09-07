@@ -84,7 +84,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 590,
+        "line": 591,
         "reader": "__judge_invoke_structured"
       }
     ],
@@ -242,17 +242,17 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 995,
+        "line": 996,
         "reader": "__completion_boundary_ledger"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 1001,
+        "line": 1002,
         "reader": "__completion_boundary_ledger"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 416,
+        "line": 417,
         "reader": "__judge_invoke_structured"
       },
       {
@@ -303,7 +303,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 415,
+        "line": 416,
         "reader": "__judge_invoke_structured"
       }
     ],

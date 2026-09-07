@@ -14,7 +14,7 @@ categories:
 | --- | --- | --- |
 | `logical_task` | Execution context that must follow a logical VM task. | Convert to `tokio::task_local!` scope or explicit `Vm` / `AsyncBuiltinCtx` fields before relying on it from work-stealing tasks. |
 | `runtime_registry` | Runtime/resource registry that a VM or host owns. | Promote to an `Arc`-backed registry and scope or pass that handle into spawned work. |
-| `thread_private` | Cache, mock, warning de-dupe, or test harness state. | Keep thread-local only while it stays non-authoritative and resettable. |
+| `thread_private` | Cache, mock, warning de-dupe, or test harness state. | Keep non-authoritative state thread-local; mutable state must be resettable and immutable caches reconstructible from static inputs. |
 
 `crates/harn-vm/tests/harn_vm/thread_local_audit.rs` scans the VM source tree and
 fails when a new `thread_local!` site is added without an audit entry. The

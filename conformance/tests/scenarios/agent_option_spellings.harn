@@ -1,0 +1,50 @@
+import { agent_scratchpad_options } from "std/agent/scratchpad"
+import { agent_skills_preview } from "std/agent/skills"
+
+fn assert_scratchpad_has_one_spelling_per_setting() {
+  const canonical = agent_scratchpad_options(
+    {
+      scratchpad: {
+        recite: false,
+        reorganize_every: 5,
+        schema_retries: 2,
+        reorganizer: {provider: "mock"},
+      },
+    },
+  )
+  assert_eq(canonical.recite, false)
+  assert_eq(canonical.reorganize_every, 5)
+  assert_eq(canonical.schema_retries, 2)
+  assert_eq(canonical.reorganizer, {provider: "mock"})
+  for retired in [
+    {recitation: false},
+    {reorg_every: 5},
+    {periodic_reorg_every: 5},
+    {retries: 2},
+    {reorganizer_options: {provider: "mock"}},
+    {llm_options: {provider: "mock"}},
+  ] {
+    assert_eq(
+      agent_scratchpad_options({scratchpad: retired}),
+      agent_scratchpad_options({scratchpad: {}}),
+    )
+  }
+}
+
+fn assert_only_the_declared_skills_field_advertises_loading(agent: HarnessAgent) {
+  skill alpha {
+    description "Alpha workflow"
+    when_to_use "Use alpha for alpha-shaped work"
+    prompt "Alpha instructions."
+  }
+  const canonical = agent_skills_preview(agent, {skills: alpha})
+  assert(contains(json_stringify(canonical?.tools), "load_skill"))
+  const retired = agent_skills_preview(agent, {skill_registry: alpha})
+  assert(retired?.tools == nil)
+}
+
+pipeline default(harness: Harness) {
+  assert_scratchpad_has_one_spelling_per_setting()
+  assert_only_the_declared_skills_field_advertises_loading(harness.agent)
+  harness.stdio.println("agent option spellings passed")
+}

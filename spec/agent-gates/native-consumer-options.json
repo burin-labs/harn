@@ -23,7 +23,7 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "initial_message_content, then the initial message string",
+    "default": "the initial message string",
     "evidence": "agent_session_host.initial_user_content selects structured initial transcript content.",
     "expiry": "2026-09-13",
     "kind": "option",
@@ -39,23 +39,6 @@
     ],
     "reason": "The initial transcript must preserve caller-provided structured content.",
     "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "absent; use initial message string",
-    "evidence": "Fallback alias read by agent_session_host.initial_user_content.",
-    "kind": "option",
-    "layer": "runner",
-    "name": "AgentSpec.initial_message_content",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-vm/src/llm/agent_session_host.rs",
-        "line": 518,
-        "reader": "opt_json"
-      }
-    ],
-    "reason": "Use initial_user_content as the single structured initial-content input.",
-    "verdict": "DELETE"
   },
   {
     "default": "standard",

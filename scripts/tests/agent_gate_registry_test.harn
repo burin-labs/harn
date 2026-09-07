@@ -1,5 +1,7 @@
 import { AgentModelSpec } from "std/agent/options_types"
+import { AgentGateBindingScope, agent_gate_binding_reads } from "std/dev/agent_gate_bindings"
 import {
+  AgentGateBindingSource,
   AgentGateEntry,
   AgentGateRegistry,
   agent_gate_audit,
@@ -8,6 +10,49 @@ import {
 } from "std/dev/agent_gates"
 
 type GateEntries = list<AgentGateEntry>
+
+@test
+pipeline test_schema_walker_keeps_its_option_origin(harness: Harness, task: unknown) {
+  const root = path_join(harness.fs.source_dir(), "../..")
+  const binding: AgentGateBindingSource = schema_expect(
+    json_parse(harness.fs.read_text(path_join(root, "spec/agent-gates/bindings/agent-spec.json"))),
+    schema_of(AgentGateBindingSource),
+  )
+  const scope: AgentGateBindingScope = binding.config
+  const api = {ast: harness.ast, fs: harness.fs}
+  const actual = agent_gate_binding_reads(
+    api,
+    path_join(root, "crates/harn-stdlib/src/stdlib/agent/options_surface.harn"),
+    scope,
+  )
+  assert(
+    actual.parameters.any(
+      fn(parameter) { return parameter.function == "__collect_unread_keys"
+        && parameter.name == "value" },
+    ),
+    "The real schema walker must retain its options origin",
+  )
+  const dir = harness.fs.mkdtemp_in_workspace("schema-walker-census")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const fixture = path_join(dir, "fixture.harn")
+  harness.fs.write_text(
+    fixture,
+    "fn __collect_unread_keys(value: any, node: any, path: string) { return value.uninventoried_probe }",
+  )
+  const changed = agent_gate_binding_reads(api, fixture, scope)
+  assert_eq(changed.reads.map(fn(read) { return read.name }), ["AgentSpec.uninventoried_probe"])
+  const registered = agent_gate_findings(
+    [entry() + {name: "AgentSpec.uninventoried_probe"}],
+    changed.reads,
+    [],
+  )
+  assert_eq(registered.failures, [])
+  const findings = agent_gate_findings([entry()], changed.reads, [])
+  assert_eq(len(findings.failures), 1)
+  assert(contains(findings.failures[0] ?? "", "uninventoried_probe"))
+}
 
 @test
 // Every key declared on the compiled model shape must be inventoried, and the

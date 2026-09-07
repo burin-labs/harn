@@ -281,10 +281,9 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
 /// installs the macro-emitted signature slice into the parser registry
 /// (idempotent under repeat calls with the same slice pointer).
 pub fn register_vm_stdlib(vm: &mut Vm) {
-    register_core_stdlib(vm);
-    register_io_stdlib(vm);
-    register_agent_stdlib(vm);
-    vm.project_declared_capability_methods();
+    if !vm.install_shared_stdlib_registration() {
+        register_stdlib_bindings(vm);
+    }
     if vm.harness().is_none() {
         vm.set_harness(crate::harness::Harness::real());
     }
@@ -296,6 +295,13 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     }
     vm.project_legacy_capability_globals();
     harn_builtin_registry::install_builtin_manifest(all_builtin_manifest());
+}
+
+pub(crate) fn register_stdlib_bindings(vm: &mut Vm) {
+    register_core_stdlib(vm);
+    register_io_stdlib(vm);
+    register_agent_stdlib(vm);
+    vm.project_declared_capability_methods();
 }
 
 pub(crate) fn rebind_execution_state_builtins(vm: &mut Vm) {
