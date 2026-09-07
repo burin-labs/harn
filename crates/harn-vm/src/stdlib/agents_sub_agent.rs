@@ -17,6 +17,9 @@ use lifecycle::{
 mod string_list;
 use string_list::parse_string_list;
 
+#[path = "agents_sub_agent_child_error.rs"]
+mod child_error;
+
 const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
 #[cfg(test)]
 #[path = "agents_sub_agent_lifecycle_tests.rs"]
@@ -835,52 +838,7 @@ pub(super) async fn execute_sub_agent(
             let transcript_json = result.get("transcript").cloned().unwrap_or_default();
             (result, crate::stdlib::json_to_vm_value(&transcript_json))
         }
-        Err(error) => {
-            let stop_details = stop_details_for_error(&error);
-            let error_value = match &error {
-                VmError::CategorizedError { message, category } => {
-                    sub_agent_error_dict(category.as_str(), message.clone(), None)
-                }
-                VmError::Thrown(VmValue::String(message)) => {
-                    sub_agent_error_dict("runtime", message.to_string(), None)
-                }
-                _ => sub_agent_error_dict(
-                    crate::value::error_to_category(&error).as_str(),
-                    error.to_string(),
-                    None,
-                ),
-            };
-            let transcript = crate::agent_sessions::transcript(&spec.session_id)
-                .unwrap_or_else(|| crate::stdlib::json_to_vm_value(&serde_json::json!({})));
-            let tokens_used = transcript_tokens_used(&transcript);
-            let envelope = wrap_sub_agent_error(
-                String::new(),
-                VmValue::List(std::sync::Arc::new(Vec::new())),
-                0,
-                tokens_used,
-                false,
-                &spec.session_id,
-                error_value.clone(),
-                Some(transcript.clone()),
-            );
-            append_parent_sub_agent_event(
-                spec.parent_session_id.as_deref(),
-                sub_agent_result_event(
-                    &spec,
-                    false,
-                    "",
-                    0,
-                    false,
-                    Some(crate::llm::vm_value_to_json(&error_value)),
-                ),
-            );
-            return Ok(finish_sub_agent(
-                &spec,
-                crate::llm::vm_value_to_json(&envelope),
-                transcript,
-                stop_details,
-            ));
-        }
+        Err(error) => return child_error::child_error_outcome(&spec, error),
     };
     let tokens_used = transcript_tokens_used(&transcript);
 

@@ -469,7 +469,16 @@ pub fn __agent_loop_normalize_boundary_error(
     }
     return __agent_loop_finalize_failed(agent, session, 0, error)
   }
-  return __agent_loop_terminal_error(error, 0)
+  return __agent_loop_terminal_error(
+    {
+      kind: "agent_loop_initialization_failed",
+      category: error_category(error),
+      reason: "initialization_failed",
+      message: to_string(error),
+      cause: error,
+    },
+    0,
+  )
 }
 
 pub type AgentLoopRunExitState = {
