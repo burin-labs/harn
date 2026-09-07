@@ -18,8 +18,12 @@ if [[ -z "$floor" ]]; then
   exit 1
 fi
 
-discovery=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["threshold_bytes"])' "$budget")
-smallest=$(python3 -c 'import json,sys; print(min(f["max_bytes"] for f in json.load(open(sys.argv[1]))["files"]))' "$budget")
+discovery=$(jq -r '.threshold_bytes' "$budget")
+smallest=$(jq -r '[.files[].max_bytes] | min' "$budget")
+if [[ -z "$discovery" || "$discovery" == "null" || -z "$smallest" || "$smallest" == "null" ]]; then
+  echo "FAIL - could not read the discovery threshold or the banked budgets from $budget" >&2
+  exit 1
+fi
 
 failures=0
 report() {
