@@ -53,12 +53,12 @@
       "shared_key": "workspace-tests"
     },
     {
-      "workflow": "ci.yml",
+      "workflow": "rust-cache-refresh.yml",
       "job": "rust-cache-refresh",
       "shared_key": "workspace-tests"
     },
     {
-      "workflow": "ci.yml",
+      "workflow": "rust-cache-refresh.yml",
       "job": "rust-cache-refresh",
       "shared_key": "package-audit"
     }

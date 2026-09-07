@@ -1,4 +1,6 @@
 import {
+  cache_refresh_trigger_errors,
+  cache_refresh_workflow_errors,
   ci_linux_lane_policy_errors,
   e2e_elastic_capacity_errors,
   producer_cache_save_reserve_minutes,
@@ -452,9 +454,20 @@ pipeline test_accepts_persistent_compile_lanes_with_hosted_fallback(
   assert_eq(ci_linux_lane_policy_errors(workflow()), [])
 }
 
+/**
+ * The refresh lives in its own workflow now, so its checks take a document with
+ * its own `on:` block rather than a job inside the CI graph.
+ */
+fn refresh_workflow() -> dict {
+  return {
+    on: {push: {branches: ["main"]}, schedule: [{cron: "43 9 * * *"}], workflow_dispatch: nil},
+    jobs: {"rust-cache-refresh": workflow().jobs["rust-cache-refresh"]},
+  }
+}
+
 @test
 pipeline test_rejects_cache_writer_without_actions_write(harness: Harness, task: unknown) {
-  const valid = workflow()
+  const valid = refresh_workflow()
   const invalid = {
     ...valid,
     jobs: {
@@ -462,9 +475,44 @@ pipeline test_rejects_cache_writer_without_actions_write(harness: Harness, task:
       "rust-cache-refresh": {...valid.jobs["rust-cache-refresh"], permissions: {contents: "read"}},
     },
   }
-  const errors = ci_linux_lane_policy_errors(invalid)
+  const errors = cache_refresh_workflow_errors(invalid)
   assert(
-    errors.contains("ci.yml:rust-cache-refresh must grant actions: write to persist rust-cache"),
+    errors.contains(
+      "rust-cache-refresh.yml:rust-cache-refresh must grant actions: write to persist rust-cache",
+    ),
+  )
+}
+
+/**
+ * The falsifier for the trigger itself. The refresh spent a week doing nothing
+ * because it was gated on a merge-queue proof while the queue was off, and no
+ * check noticed: the job was present, correct, and unreachable. A trigger set
+ * that names an optional event instead of the persistent ref is refused here,
+ * and so is one with no scheduled backstop.
+ */
+@test
+pipeline test_rejects_a_cache_refresh_trigger_that_may_never_fire(harness: Harness, task: unknown) {
+  assert_eq(cache_refresh_trigger_errors(refresh_workflow()), [])
+  const queue_gated = {
+    ...refresh_workflow(),
+    on: {merge_group: nil, schedule: [{cron: "43 9 * * *"}]},
+  }
+  const queue_errors = cache_refresh_trigger_errors(queue_gated)
+  assert(
+    queue_errors.contains(
+      "rust-cache-refresh.yml must trigger on a push to main; a refresh gated on the merge queue stops running when the queue is off",
+    ),
+  )
+  assert(
+    queue_errors.contains(
+      "rust-cache-refresh.yml must not depend on merge_group; the merge queue is optional and its absence must not disable the refresh",
+    ),
+  )
+  const no_backstop = {...refresh_workflow(), on: {push: {branches: ["main"]}}}
+  assert(
+    cache_refresh_trigger_errors(no_backstop).contains(
+      "rust-cache-refresh.yml must carry a scheduled backstop so a quiet period does not leave the caches unwritten",
+    ),
   )
 }
 
@@ -497,18 +545,20 @@ pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
       },
     },
   }
-  const errors = ci_linux_lane_policy_errors(invalid)
+  const errors = cache_refresh_workflow_errors({...refresh_workflow(), jobs: invalid.jobs})
   assert(
     errors.contains(
-      "ci.yml:rust-cache-refresh matrix legs must reserve their measured save envelope",
+      "rust-cache-refresh.yml:rust-cache-refresh matrix legs must reserve their measured save envelope",
     ),
   )
   assert(
-    errors.contains("ci.yml:rust-cache-refresh must prepare a generation only after a cache miss"),
+    errors.contains(
+      "rust-cache-refresh.yml:rust-cache-refresh must prepare a generation only after a cache miss",
+    ),
   )
   assert(
     errors.contains(
-      "ci.yml:rust-cache-refresh must replace stale generations with bounded save headroom",
+      "rust-cache-refresh.yml:rust-cache-refresh must replace stale generations with bounded save headroom",
     ),
   )
 }
@@ -543,9 +593,17 @@ pipeline test_rejects_missing_main_scoped_cache_refresh(harness: Harness, task: 
       jobs[name] = job
     }
   }
-  const errors = ci_linux_lane_policy_errors({...valid, jobs: jobs})
-  assert(errors.contains("ci.yml:rust-cache-refresh must define the hosted Linux compile lane"))
-  assert(errors.contains("ci.yml:rust-cache-refresh must define the main-scoped cache writer"))
+  const errors = cache_refresh_workflow_errors({...refresh_workflow(), jobs: jobs})
+  assert(
+    errors.contains(
+      "rust-cache-refresh.yml:rust-cache-refresh must define the hosted Linux compile lane",
+    ),
+  )
+  assert(
+    errors.contains(
+      "rust-cache-refresh.yml:rust-cache-refresh must define the main-scoped cache writer",
+    ),
+  )
 }
 
 @test

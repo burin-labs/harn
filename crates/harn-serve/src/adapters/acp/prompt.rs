@@ -243,16 +243,19 @@ impl AcpServer {
             })),
         );
         let profile_turn = self.begin_profile_turn(&session_id);
-        let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id, &self.sandbox);
-        let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match self
-            .prepare_vm_baseline_cached(
+        let mode_policy = modes::ModePolicyScope::new(&current_mode_id, &self.sandbox);
+        // Both scoped spans are boxed before they are awaited. `Scoped` holds the
+        // wrapped future inline, so keeping these on the stack would add the whole
+        // prompt body's state to this frame, which a nested descent re-enters.
+        let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match mode_policy
+            .run(Box::pin(self.prepare_vm_baseline_cached(
                 &source,
                 source_path.as_deref(),
                 target_pipeline.as_deref(),
                 &cwd,
                 &project_root,
                 &current_mode_id,
-            )
+            )))
             .await
         {
             Ok(value) => value,
@@ -268,31 +271,34 @@ impl AcpServer {
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
-        let _budget_guard = prompt_budget.as_ref().and_then(BudgetSpec::install);
-        let result = execute::execute_chunk(
-            chunk,
-            bridge.clone(),
-            host_bridge,
-            execute::PromptGlobals {
-                text: &prompt_text,
-                content: &prompt.content,
-                messages: &prompt.messages,
-            },
-            execute::VmSetup {
-                source: &source,
-                baseline: vm_baseline.as_ref(),
-                baseline_cache_hit: vm_baseline_cache_hit,
-                baseline_prepare_ms: vm_baseline_prepare_ms,
-                source_path: source_path.as_deref(),
-                cwd: &cwd,
-                project_root: Some(&project_root),
-                runtime_configurator: self.runtime_configurator.clone(),
-                session_environment: environment_policy.clone(),
-            },
-        )
-        .await;
+        let result = mode_policy
+            .run(Box::pin(async {
+                let _budget_guard = prompt_budget.as_ref().and_then(BudgetSpec::install);
+                execute::execute_chunk(
+                    chunk,
+                    bridge.clone(),
+                    host_bridge,
+                    execute::PromptGlobals {
+                        text: &prompt_text,
+                        content: &prompt.content,
+                        messages: &prompt.messages,
+                    },
+                    execute::VmSetup {
+                        source: &source,
+                        baseline: vm_baseline.as_ref(),
+                        baseline_cache_hit: vm_baseline_cache_hit,
+                        baseline_prepare_ms: vm_baseline_prepare_ms,
+                        source_path: source_path.as_deref(),
+                        cwd: &cwd,
+                        project_root: Some(&project_root),
+                        runtime_configurator: self.runtime_configurator.clone(),
+                        session_environment: environment_policy.clone(),
+                    },
+                )
+                .await
+            }))
+            .await;
         self.finish_profile_turn(&session_id, profile_turn);
-        drop(_mode_guard);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
 
         match result {

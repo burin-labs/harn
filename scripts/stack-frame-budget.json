@@ -312,10 +312,6 @@
       "path": "crates/harn-serve/src/adapters/acp/execute.rs"
     },
     {
-      "max_bytes": 104480,
-      "path": "crates/harn-serve/src/adapters/acp/prompt.rs"
-    },
-    {
       "max_bytes": 470892,
       "path": "crates/harn-serve/src/core.rs"
     },
