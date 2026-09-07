@@ -111,6 +111,45 @@ git -C "$tmp_repo" tag v1.2.4 HEAD~1
   echo "release_version_test: later main commit disabled the published development bump" >&2
   exit 1
 }
+
+# A release PR lands through the repository's required squash method. The tag
+# therefore names the certified candidate while main carries an equivalent
+# one-parent fold, not the tag commit as an ancestor. That published release is
+# still the stable identity main declares and must advance to the next -dev.
+fold_repo="$tmp_repo/squash-fold"
+git init --initial-branch=main --quiet "$fold_repo"
+git -C "$fold_repo" config user.name "release-version-test"
+git -C "$fold_repo" config user.email "release-version-test@example.com"
+git -C "$fold_repo" config commit.gpgsign false
+git -C "$fold_repo" config tag.gpgSign false
+printf '[workspace.package]\nversion = "1.2.3"\n' > "$fold_repo/Cargo.toml"
+git -C "$fold_repo" add Cargo.toml
+git -C "$fold_repo" commit --quiet -m initial
+fold_base="$(git -C "$fold_repo" rev-parse HEAD)"
+git -C "$fold_repo" switch --quiet -c certified-candidate
+printf '[workspace.package]\nversion = "1.2.4"\n' > "$fold_repo/Cargo.toml"
+printf 'certified release note\n' > "$fold_repo/CHANGELOG.md"
+git -C "$fold_repo" add Cargo.toml CHANGELOG.md
+git -C "$fold_repo" commit --quiet -m 'Release v1.2.4'
+git -C "$fold_repo" tag v1.2.4
+git -C "$fold_repo" diff "$fold_base"..v1.2.4 > "$tmp_repo/release.patch"
+git -C "$fold_repo" switch --quiet main
+printf 'unrelated main work\n' > "$fold_repo/README.md"
+git -C "$fold_repo" add README.md
+git -C "$fold_repo" commit --quiet -m 'Unrelated main work'
+git -C "$fold_repo" apply "$tmp_repo/release.patch"
+git -C "$fold_repo" add Cargo.toml CHANGELOG.md
+git -C "$fold_repo" commit --quiet -m 'Release v1.2.4 (#42)'
+(
+  cd "$fold_repo"
+  release_development_bump_plan 1.2.4 v1.2.4 true
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REQUIRED" == true ]]
+  [[ "$RELEASE_DEVELOPMENT_BUMP_VERSION" == 1.2.5-dev ]]
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REASON" == published_stable_needs_development_identity ]]
+) || {
+  echo "release_version_test: squash-folded published release did not advance development" >&2
+  exit 1
+}
 (
   cd "$tmp_repo"
   release_development_bump_plan 1.2.5-dev v1.2.4 true

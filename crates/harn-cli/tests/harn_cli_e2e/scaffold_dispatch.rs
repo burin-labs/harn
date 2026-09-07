@@ -394,3 +394,49 @@ fn init_pipeline_lab_dispatch_is_deterministic() {
     );
     assert_snapshots_match("init pipeline-lab", &harn_snap, &repeat_snap);
 }
+
+/// A scaffold must satisfy the same strict lint every other Harn source in
+/// the repository does.
+///
+/// The generated sources live as string literals inside the scaffolding
+/// script, so no sweep over checked-in `.harn` files can ever see them. A
+/// linter change can therefore tighten a rule, fix every call site in the
+/// tree, and still leave `harn new` emitting a package that fails its own
+/// `harn package verify --strict`. That happened: the unused private
+/// pipeline input rule reached the connector scaffold's generated test only
+/// after the change landed on main. This renders each template and lints it
+/// so the next such change fails here instead.
+#[test]
+fn scaffolded_sources_pass_the_strict_lint() {
+    for template in ["package", "connector"] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let output = run_scaffold(&["init", "--template", template], tmp.path());
+        assert!(
+            output.status.success(),
+            "init {template} failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+
+        let sources: Vec<String> = snapshot_tree(tmp.path())
+            .into_keys()
+            .filter(|path| path.ends_with(".harn"))
+            .collect();
+        assert!(
+            !sources.is_empty(),
+            "{template} scaffold produced no Harn sources to lint",
+        );
+
+        let mut args = vec!["lint", "--strict"];
+        args.extend(sources.iter().map(String::as_str));
+        let linted = run_scaffold(&args, tmp.path());
+        assert!(
+            linted.status.success(),
+            "{template} scaffold fails the strict lint it ships with; \
+             a scaffolded project cannot pass its own package verification.\n\
+             sources={sources:?}\nstdout={}\nstderr={}",
+            String::from_utf8_lossy(&linted.stdout),
+            String::from_utf8_lossy(&linted.stderr),
+        );
+    }
+}

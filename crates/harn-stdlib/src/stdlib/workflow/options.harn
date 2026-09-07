@@ -1,3 +1,4 @@
+import { StallDiagnostics } from "std/agent/options_types"
 import { pick_keys } from "std/collections"
 
 // -------------------------------------------------------------------------------------------------
@@ -81,6 +82,12 @@ pub type ModelPolicySpec = {
   turn_policy?: WorkflowTurnPolicy,
   tool_format?: string,
   native_tool_fallback?: string,
+  /**
+   * Per-stage opt-in to the agent loop's stall detector. Omission deliberately
+   * keeps the generic `agent_loop` default; workflow stages do not synthesize
+   * their own thresholds.
+   */
+  stall_diagnostics?: bool | StallDiagnostics,
 }
 
 // Inline copy of `TurnPolicy` (std/agent/options) — cross-module type
@@ -226,6 +233,7 @@ type WorkflowModelPolicy = {
   max_nudges?: int,
   tool_format?: string,
   native_tool_fallback?: string,
+  stall_diagnostics?: bool | StallDiagnostics,
 }
 
 /** Host-supplied tool-format defaults consumed when normalizing a stage. */
@@ -345,6 +353,7 @@ fn __workflow_agent_loop_options(
     "reasoning_policy",
     "reasoning_scale",
     "reasoning_task",
+    "stall_diagnostics",
   ]
   let options = {
     loop_until_done: true,
