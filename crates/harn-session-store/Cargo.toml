@@ -14,8 +14,8 @@ base64 = "0.23"
 blake3 = "1.8.7"
 ed25519-dalek = { version = "3", features = ["rand_core"] }
 hex = "0.4"
-harn-flock = { path = "../harn-flock", version = "=0.10.132-dev" }
-harn-sqlite = { path = "../harn-sqlite", version = "=0.10.132-dev" }
+harn-flock = { path = "../harn-flock", version = "=0.10.132" }
+harn-sqlite = { path = "../harn-sqlite", version = "=0.10.132" }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
