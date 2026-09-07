@@ -322,6 +322,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 356,
+        "reader": "workflow-loop-key-domain"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
         "line": 48,
         "reader": "agent_loop_run_settings"
