@@ -1,0 +1,49 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "JudgeConfig",
+    "prefix": "JudgeConfig.",
+    "types": [
+      "JudgeConfig"
+    ],
+    "parameters": [
+      {
+        "function": "__judge_apply_llm_overrides",
+        "name": "judge_cfg"
+      },
+      {
+        "function": "__judge_resolve_model",
+        "name": "judge_cfg"
+      },
+      {
+        "function": "__judge_invoke_structured",
+        "name": "judge_cfg"
+      },
+      {
+        "function": "__normalize_judge_config",
+        "name": "value"
+      },
+      {
+        "function": "__judge_provider_family",
+        "name": "judge_cfg"
+      },
+      {
+        "function": "__judge_run_checkpoint",
+        "name": "request",
+        "path": [
+          "judge_cfg"
+        ]
+      },
+      {
+        "function": "__judge_stable_prefix",
+        "name": "judge_cfg"
+      },
+      {
+        "function": "agent_turn_end_judge_cap",
+        "name": "judge_cfg"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

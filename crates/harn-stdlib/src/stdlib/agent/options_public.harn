@@ -231,6 +231,8 @@ pub fn agent_options(options: AgentSpec = {}) -> AgentSpec {
  */
 pub fn agent_loop_options(harness: Harness, options: any = nil) {
   let opts = options ?? {}
+  // Removed options first: each has a message naming its replacement, which
+  // is more useful than "not an option".
   __validate_removed_agent_loop_options(opts)
   __validate_agent_loop_completion_options(opts)
   __validate_agent_loop_callback_options(opts)

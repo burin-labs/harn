@@ -469,3 +469,65 @@ async fn conformance_harness_sidecar_error_fails_expected_error_fixture() {
         "unexpected message: {message}"
     );
 }
+
+/// A case that uses the memory builtins must not write into its own directory.
+///
+/// Memory is not covered by `HARN_STATE_DIR`. It resolves source-relative and
+/// defaults to `.harn/memory` beside the running script, so before this was
+/// fixed a passing fixture left `<fixture dir>/.harn/memory/<ns>/events.jsonl`
+/// behind. The stray artifact changed the source input inventory and failed the
+/// exact-binary freshness gate that runs after the suite.
+///
+/// The non-vacuity guard is the fixture itself. It stores a record and then
+/// recalls it, and its expected output contains the recalled subject, so the
+/// case can only pass if memory really wrote and read a nonempty record
+/// somewhere. Asserting the absent source path alone would pass just as well if
+/// memory had done nothing at all.
+#[tokio::test]
+async fn conformance_memory_writes_into_case_state_not_the_fixture_directory() {
+    let temp = TempTestDir::new();
+    temp.write_content(
+        "conformance/tests/memory_root.harn",
+        r#"import { memory_recall, memory_store } from "std/memory"
+
+pipeline default(harness: Harness) {
+  memory_store(
+    harness.memory,
+    "conformance-memory-root",
+    "fact-1",
+    {subject: "release published"},
+    ["release"],
+  )
+  const hits = memory_recall(harness.memory, "conformance-memory-root", "release", 3)
+  harness.stdio.println(len(hits) > 0)
+  harness.stdio.println(hits[0].value.subject)
+}
+"#,
+    );
+    temp.write_content(
+        "conformance/tests/memory_root.expected",
+        "true\nrelease published\n",
+    );
+    let harn_file = temp.path().join("conformance/tests/memory_root.harn");
+
+    let evaluation = evaluate_case_with_timeout_serialized(
+        &harn_file,
+        "tests/memory_root.harn",
+        10_000,
+        &conformance_options(),
+    )
+    .await;
+
+    assert!(
+        evaluation.passed,
+        "the fixture must store and recall a real record, or the absence assertion below \
+         proves nothing: {:?}",
+        evaluation.message
+    );
+    let stray = temp.path().join("conformance/tests/.harn");
+    assert!(
+        !stray.exists(),
+        "conformance memory must live in case-owned temporary state, but the case wrote {}",
+        stray.display()
+    );
+}

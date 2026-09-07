@@ -1,0 +1,11 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/caller_transport.harn",
+  "config": {
+    "id": "CallerTransport",
+    "prefix": "AgentSpec.llm_caller_transport.",
+    "types": ["LlmCallerTransport"],
+    "parameters": [{"function": "__normalize_llm_caller_transport", "name": "value"}],
+    "normalizers": [],
+    "containers": []
+  }
+}

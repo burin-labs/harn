@@ -1,0 +1,22 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "DetectorSpec",
+    "prefix": "DetectorSpec.",
+    "types": [
+      "DetectorSpec"
+    ],
+    "parameters": [
+      {
+        "function": "detector_spec_to_stall",
+        "name": "spec"
+      },
+      {
+        "function": "detector_spec_token_runaway",
+        "name": "spec"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

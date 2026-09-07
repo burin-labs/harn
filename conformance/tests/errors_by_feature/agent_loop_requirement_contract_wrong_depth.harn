@@ -1,0 +1,21 @@
+import { agent_loop } from "std/agent/loop"
+
+// harn#8159. `requirement_contract` is real, and it is read on the judge
+// config, never at the top level. Setting it here used to be accepted in
+// silence: the run proceeded with no ledger and reported `requirements: null`,
+// which is also what a correct run without a ledger reports. Two probes were
+// written against the ledger this way and both would have passed while
+// measuring its absence. The refusal has to name the path that works, because
+// "not an option" alone does not tell a caller where the option lives.
+pipeline test(harness: Harness, task: unknown) {
+  agent_loop(
+    harness,
+    "do work",
+    nil,
+    {
+      provider: "mock",
+      max_iterations: 1,
+      requirement_contract: {requirements: [{requirement_id: "build", name: "Build it."}]},
+    },
+  )
+}

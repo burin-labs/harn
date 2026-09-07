@@ -1,0 +1,11 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+  "config": {
+    "id": "SkillMatch",
+    "prefix": "AgentSpec.skill_match.",
+    "types": [],
+    "parameters": [],
+    "normalizers": ["__match_config"],
+    "containers": []
+  }
+}

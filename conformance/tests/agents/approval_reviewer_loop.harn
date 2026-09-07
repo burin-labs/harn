@@ -75,7 +75,6 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: nil,
           approval_policy: asking_policy,
         },
       )
@@ -106,7 +105,6 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: nil,
           approval_policy: asking_policy,
           approval_reviewer: granting_reviewer(),
         },

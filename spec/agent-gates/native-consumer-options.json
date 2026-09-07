@@ -1,0 +1,168 @@
+[
+  {
+    "default": "false",
+    "evidence": "The bridge-observed llm_call reads this flag before producing call notifications.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.user_visible",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_config.rs",
+        "line": 500,
+        "reader": "opt_bool"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/call.rs",
+        "line": 756,
+        "reader": "helpers::opt_bool"
+      }
+    ],
+    "reason": "Preserve the host visibility contract while consolidating call observation.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "initial_message_content, then the initial message string",
+    "evidence": "agent_session_host.initial_user_content selects structured initial transcript content.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.initial_user_content",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host.rs",
+        "line": 517,
+        "reader": "opt_json"
+      }
+    ],
+    "reason": "The initial transcript must preserve caller-provided structured content.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; use initial message string",
+    "evidence": "Fallback alias read by agent_session_host.initial_user_content.",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.initial_message_content",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host.rs",
+        "line": 518,
+        "reader": "opt_json"
+      }
+    ],
+    "reason": "Use initial_user_content as the single structured initial-content input.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "standard",
+    "evidence": "The native options extractor delegates catalog validation and execution-mode selection to reasoning_modes.resolve_requested.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.reasoning_mode",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 902,
+        "reader": "opt_str"
+      }
+    ],
+    "reason": "Model execution-mode intent belongs in the typed model request.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "5; negative values clamp to zero",
+    "evidence": "with_rate_limit bounds retry attempts using this helper option.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "RateLimitOptions.max_retries",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/mod.rs",
+        "line": 844,
+        "reader": "helpers::opt_int"
+      }
+    ],
+    "reason": "Preserve an explicit retry bound in the owning rate-limit helper.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "1000; values below one clamp to one",
+    "evidence": "with_rate_limit initializes its retry backoff using this helper option.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "RateLimitOptions.backoff_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/mod.rs",
+        "line": 845,
+        "reader": "helpers::opt_int"
+      }
+    ],
+    "reason": "Preserve bounded retry pacing in the owning rate-limit helper.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true; reminders=false also disables providers",
+    "evidence": "reminder_providers.enabled_provider_ids returns an empty provider set when this field is false.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.reminders.enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/reminder_providers.rs",
+        "line": 1458,
+        "reader": "get"
+      }
+    ],
+    "reason": "Keep explicit provider admission policy until the typed runner reminder contract is settled.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "canonical default-enabled providers plus user providers",
+    "evidence": "reminder_providers.enabled_provider_ids adds selected ids and removes ids prefixed with a minus sign.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.reminders.providers",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/reminder_providers.rs",
+        "line": 1475,
+        "reader": "get"
+      }
+    ],
+    "reason": "Provider admission is caller policy over the canonical provider registry.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; provider-specific defaults apply",
+    "evidence": "provider_config_json resolves each provider's policy content from this map, then checks the legacy direct provider key.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.reminders.config",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/reminder_providers.rs",
+        "line": 1696,
+        "reader": "get"
+      }
+    ],
+    "reason": "Keep provider policy content as data while eliminating competing configuration shapes.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

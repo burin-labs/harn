@@ -1,0 +1,22 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "AgentStopOptions",
+    "prefix": "AgentStopOptions.",
+    "types": [
+      "AgentStopOptions"
+    ],
+    "parameters": [
+      {
+        "function": "__agent_stop_options",
+        "name": "options"
+      },
+      {
+        "function": "__worker_options",
+        "name": "value"
+      }
+    ],
+    "normalizers": [{"function": "__worker_options", "argument": 0}],
+    "containers": []
+  }
+}

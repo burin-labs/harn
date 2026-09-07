@@ -589,6 +589,12 @@ pub fn __validate_removed_agent_loop_options(opts: dict) {
   if __has_key(opts, "persistent") {
     throw "agent_loop: `persistent` was removed; use `loop_until_done` for completion looping and `session_id` for transcript persistence"
   }
+  // Renamed with no alias. The surface check would refuse this key anyway, but
+  // "no option reads `done_judge`" sends a caller looking for a feature that
+  // is still here under another name.
+  if __has_key(opts, "done_judge") {
+    throw "agent_loop: `done_judge` was renamed; use `turn_end_condition`, which takes the same config"
+  }
 }
 
 pub fn __validate_agent_loop_completion_options(opts: dict) {

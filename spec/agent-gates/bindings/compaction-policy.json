@@ -1,0 +1,38 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "CompactionPolicy",
+    "prefix": "CompactionPolicy.",
+    "types": [
+      "CompactionPolicy"
+    ],
+    "parameters": [
+      {
+        "function": "__has_compaction_policy",
+        "name": "policy"
+      },
+      {
+        "function": "__compaction_policy_merge_fields",
+        "name": "fields"
+      },
+      {
+        "function": "__compaction_policy_merge_fields",
+        "name": "policy"
+      },
+      {
+        "function": "__compaction_instruction_mode",
+        "name": "policy"
+      },
+      {
+        "function": "__compaction_policy_event_fields",
+        "name": "policy"
+      }
+    ],
+    "normalizers": [
+      "compaction_policy",
+      "__compaction_policy_from_options",
+      "__compaction_policy_merge_fields"
+    ],
+    "containers": []
+  }
+}

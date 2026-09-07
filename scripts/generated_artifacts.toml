@@ -94,6 +94,29 @@ exempt_checks = [
 # ---------------------------------------------------------------------------
 
 [[artifact]]
+id = "agent-gates"
+description = "Typed runner, stop decision, and stall handler configuration with structural read coverage and generated review tables."
+gen = "gen-agent-gates"
+check = "check-agent-gates"
+outputs = ["docs/src/dev/agent-gates/runner.md", "docs/src/dev/agent-gates/stop-decision.md", "docs/src/dev/agent-gates/stall-handler.md"]
+sources = [
+  "spec/agent-gates/",
+  "crates/harn-builtin-meta/src/llm_options.rs",
+  "scripts/agent_gate_registry.harn",
+  "crates/harn-stdlib/src/stdlib/dev/",
+  "crates/harn-stdlib/src/stdlib/agent/",
+  "crates/harn-stdlib/src/stdlib/llm/options.harn",
+  "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+  "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+  "crates/harn-stdlib/src/stdlib/workflow/",
+  "crates/harn-stdlib/src/stdlib/cli/try.harn",
+  "crates/harn-vm/src/llm/",
+  "crates/harn-vm/src/orchestration/",
+]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "release-contract"
 description = "Typed Harn-owned release semantics consumed by the external release orchestrator, including version/fold/tag policy and cross-repository workflow identifiers."
 gen = "gen-release-contract"
@@ -614,6 +637,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 #               toolchain (go), a sibling repo checkout, executes runtime
 #               fixtures, or is a perf soak; in neither preflight.
 [preflight.dispatch]
+"check-agent-gates" = "binary"
 # --- source: fast, reads committed files (check-drift) ---
 "check-crate-sibling-versions" = "source"
 "check-protocol-symbol-removals" = "source"

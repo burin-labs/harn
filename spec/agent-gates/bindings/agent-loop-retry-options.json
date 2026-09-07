@@ -1,0 +1,20 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "extra_globs": ["crates/harn-stdlib/src/stdlib/llm/resilience.harn"],
+  "config": {
+    "id": "AgentLoopRetryOptions",
+    "prefix": "AgentLoopRetryOptions.",
+    "types": [
+      "AgentLoopRetryOptions"
+    ],
+    "parameters": [
+      {"function": "with_retry", "name": "opts"},
+      {
+        "function": "__agent_loop_retry_with_default_predicate",
+        "name": "retry_cfg"
+      }
+    ],
+    "normalizers": [{"function": "__opts_dict", "argument": 0}],
+    "containers": []
+  }
+}

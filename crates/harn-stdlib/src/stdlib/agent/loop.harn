@@ -8,6 +8,8 @@ import {
   __loop_progress_nudge_text,
 } from "std/agent/loop_turn_options"
 import { agent_tool_format_override_warning_text } from "std/agent/options"
+import { __validate_agent_loop_option_keys } from "std/agent/options_surface"
+import { __validate_removed_agent_loop_options } from "std/agent/options_validation"
 import {
   agent_purpose_label_config,
   agent_purpose_label_prompt_fragment,
@@ -45,6 +47,14 @@ pub fn agent_loop(
   // from a caller-supplied dictionary with the same public shape.
   let inner_terminal: AgentLoopTerminalError? = nil
   try {
+    // The caller's own dict, before any normalization. `agent_loop_options` is
+    // not the place for this: it is also the re-normalizer the loop feeds its
+    // own output back through, and the surface check belongs on what a caller
+    // wrote rather than on what the runtime derived from it.
+    // Removed options first: each carries a message naming its replacement,
+    // which is more use than "no option reads this".
+    __validate_removed_agent_loop_options(options ?? {})
+    __validate_agent_loop_option_keys(options)
     let opts = agent_loop_options(
       harness,
       agent_progress_apply_options(harness.agent, agent_completion_claim_apply_options(options)),

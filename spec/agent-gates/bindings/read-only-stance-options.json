@@ -1,0 +1,52 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "ReadOnlyStanceOptions",
+    "prefix": "ReadOnlyStanceOptions.",
+    "types": [
+      "ReadOnlyStanceOptions"
+    ],
+    "parameters": [
+      {
+        "function": "__stance_config",
+        "name": "opts",
+        "path": [
+          "read_only_stance"
+        ]
+      },
+      {
+        "function": "__stance_policy_patch",
+        "name": "opts",
+        "path": [
+          "read_only_stance"
+        ]
+      },
+      {
+        "function": "__stance_register_escape_tool",
+        "name": "opts",
+        "path": [
+          "read_only_stance"
+        ]
+      },
+      {
+        "function": "__normalize_read_only_stance",
+        "name": "value"
+      },
+      {
+        "function": "__stance_register_escape_tool",
+        "name": "cfg"
+      },
+      {
+        "function": "agent_stance_prepare",
+        "name": "opts",
+        "path": [
+          "read_only_stance"
+        ]
+      }
+    ],
+    "normalizers": [
+      "__stance_config"
+    ],
+    "containers": []
+  }
+}

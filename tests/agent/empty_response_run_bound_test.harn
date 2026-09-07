@@ -91,7 +91,7 @@ fn empty_classifying_caller(harness: Harness) {
  * must be the whole cost of the run: exhausting it ends the run instead of
  * starting further single-call empty turns.
  */
-pipeline test_exhausted_empty_attempts_end_the_run(harness: Harness, _task: unknown) {
+pipeline test_exhausted_empty_attempts_end_the_run(harness: Harness) {
   with_llm_script(
     harness.llm,
     [
@@ -152,7 +152,7 @@ pipeline test_exhausted_empty_attempts_end_the_run(harness: Harness, _task: unkn
  * the same caller, so the bound above cannot be satisfied by a caller that
  * refuses every response.
  */
-pipeline test_non_empty_response_still_advances(harness: Harness, _task: unknown) {
+pipeline test_non_empty_response_still_advances(harness: Harness) {
   with_llm_script(
     harness.llm,
     [
@@ -206,7 +206,7 @@ pipeline test_non_empty_response_still_advances(harness: Harness, _task: unknown
  * the end of the run, so the run costs exactly one provider call. Before the
  * fix this ran until `max_iterations` and cost one call per iteration.
  */
-pipeline test_a_turn_that_commits_nothing_ends_the_run(harness: Harness, _task: unknown) {
+pipeline test_a_turn_that_commits_nothing_ends_the_run(harness: Harness) {
   with_llm_script(
     harness.llm,
     [

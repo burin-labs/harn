@@ -1,0 +1,18 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "ConsecutiveFailureBudget",
+    "prefix": "ConsecutiveFailureBudget.",
+    "types": [
+      "ConsecutiveFailureBudget"
+    ],
+    "parameters": [
+      {
+        "function": "__normalize_consecutive_failure_budget",
+        "name": "value"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

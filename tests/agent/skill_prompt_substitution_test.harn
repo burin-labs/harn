@@ -35,7 +35,7 @@ fn active_skills_body(agent: HarnessAgent, session_id: string) -> string {
 }
 
 /** The served active-skills block carries the session id, not the placeholder. */
-pipeline test_active_skills_block_substitutes_the_session(harness: Harness, _task: unknown) {
+pipeline test_active_skills_block_substitutes_the_session(harness: Harness) {
   const body = active_skills_body(harness.agent, SESSION_ID)
   assert(body != "", "the active-skills fragment must be served at all")
   assert(
@@ -53,7 +53,7 @@ pipeline test_active_skills_block_substitutes_the_session(harness: Harness, _tas
  * whose prompt never contained a placeholder, which is the failure mode this
  * whole class is made of.
  */
-pipeline test_fixture_prompt_really_carries_a_placeholder(harness: Harness, _task: unknown) {
+pipeline test_fixture_prompt_really_carries_a_placeholder(harness: Harness) {
   assert(
     skill_entry().prompt.contains(SESSION_PLACEHOLDER),
     "the fixture prompt must contain a placeholder, else the positive case is vacuous",

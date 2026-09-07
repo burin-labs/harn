@@ -31,7 +31,15 @@
     "signal": { "type": ["string", "null"] },
     "timed_out": { "type": "boolean" },
     "stdout": { "type": "string" },
+    "stdout_truncated": {
+      "type": "boolean",
+      "description": "The returned stdout omits bytes the process wrote, because the capture exceeded max_inline_bytes. The full stream is at stdout_path and its true size is byte_count."
+    },
     "stderr": { "type": "string" },
+    "stderr_truncated": {
+      "type": "boolean",
+      "description": "The returned stderr omits bytes the process wrote. Always false when stderr was merged into stdout, because nothing was routed to it."
+    },
     "output_path": { "type": "string" },
     "stdout_path": { "type": "string" },
     "stderr_path": { "type": "string" },
@@ -109,7 +117,9 @@
     "signal",
     "timed_out",
     "stdout",
+    "stdout_truncated",
     "stderr",
+    "stderr_truncated",
     "output_path",
     "stdout_path",
     "stderr_path",

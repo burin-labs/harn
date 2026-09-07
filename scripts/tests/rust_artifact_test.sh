@@ -31,12 +31,11 @@ case "$1" in
       "$7" == "-E" && "$8" == 'all()' && "$9" == "--archive-file" && -n "${10}" ]]; then
       printf 'tests archive\n' > "${10}"
       : > "${CARGO_RECEIPTS:?}/nextest-tests"
-    elif [[ "$#" -eq 13 && "$2" == "archive" && "$3" == "--locked" && \
-      "$4" == "-p" && "$5" == "harn-vm" && "$6" == "-p" && "$7" == "harn-hostlib" && \
-      "$8" == "--profile" && "$9" == "ci" && "${10}" == "-E" && \
-      "${11}" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
-      "${12}" == "--archive-file" && -n "${13}" ]]; then
-      printf 'security tests archive\n' > "${13}"
+    elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
+      "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && "$7" == "-E" && \
+      "$8" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
+      "$9" == "--archive-file" && -n "${10}" ]]; then
+      printf 'security tests archive\n' > "${10}"
       : > "${CARGO_RECEIPTS:?}/nextest-security"
     else
       printf 'unexpected cargo nextest argv:' >&2

@@ -1,0 +1,26 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "CompletionGateOptions",
+    "prefix": "CompletionGateOptions.",
+    "types": [
+      "CompletionGateOptions"
+    ],
+    "parameters": [
+      {
+        "function": "__completion_gate_evaluate",
+        "name": "opts"
+      },
+      {
+        "function": "__completion_gate_validate_options",
+        "name": "opts"
+      },
+      {
+        "function": "agent_completion_gate",
+        "name": "options"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}
