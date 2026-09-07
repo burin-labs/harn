@@ -250,6 +250,14 @@ adaptive or fixed loop limits; scripts no longer need to copy that cap into
 when both fields are present `iteration_budget.max` is the cap used by the agent
 loop. Invalid budget fields fail at loop startup instead of being ignored.
 
+Workflow stages do not install their own repetition thresholds. An agent-backed
+stage with no `model_policy.stall_diagnostics` uses the generic `agent_loop`
+default, where stall diagnostics are disabled. Opt in per stage with the same
+typed `stall_diagnostics` value accepted by `agent_loop`; the workflow forwards
+that value unchanged and the agent loop owns its validation and behavior. The
+older workflow-only warn, block, and skip thresholds belonged to a deleted
+interceptor and do not map one-to-one onto today's detector.
+
 `verify` nodes can also run deterministic checks without an LLM loop:
 
 ```harn,ignore
