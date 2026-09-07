@@ -305,7 +305,7 @@ fn collect_anchors(
     let mut seen: BTreeMap<(usize, usize), AnchorSpan> = BTreeMap::new();
 
     while let Some(m) = matches.next() {
-        for capture in m.captures {
+        for capture in m.captures() {
             if capture.index != target_index {
                 continue;
             }
@@ -474,14 +474,12 @@ fn last_child_plan(
     // Empty container — insert just before the closing delimiter (the
     // anchor's last child) and re-emit the anchor's own indent for the
     // delimiter line.
-    let closer = anchor
-        .child((anchor.child_count() - 1) as u32)
-        .ok_or_else(|| {
-            format!(
-                "anchor `{}` has no children to anchor against",
-                anchor.kind()
-            )
-        })?;
+    let closer = anchor.child(anchor.child_count() - 1).ok_or_else(|| {
+        format!(
+            "anchor `{}` has no children to anchor against",
+            anchor.kind()
+        )
+    })?;
     // Walk back over the closer's leading whitespace on its own line
     // so we splice in *before* that indent.
     let closer_line_start = closer.start_byte() - line_indent(bytes, closer.start_byte()).len();

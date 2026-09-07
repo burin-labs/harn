@@ -127,7 +127,7 @@ pub(super) fn collect_target_spans(
     let mut seen: BTreeMap<(usize, usize), Span> = BTreeMap::new();
 
     while let Some(m) = matches.next() {
-        for capture in m.captures {
+        for capture in m.captures() {
             if capture.index != target_index {
                 continue;
             }
