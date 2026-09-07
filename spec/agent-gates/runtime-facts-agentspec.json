@@ -600,5 +600,19 @@
     "expression": "base?._harn_one_shot_prefill",
     "owner": "llm_clear_one_shot_prefill",
     "evidence": "Internal lifecycle marker armed by llm_arm_one_shot_prefill and consumed by llm_clear_one_shot_prefill."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_surface.harn",
+    "expression": "type_of(opts)",
+    "owner": "__validate_agent_loop_option_keys",
+    "evidence": "Shape guard on the option dict itself, not a read of any option."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_surface.harn",
+    "expression": "__collect_unread_keys(opts, schema_of(AgentPresetOptions), \"\")",
+    "owner": "__validate_agent_loop_option_keys",
+    "evidence": "The surface check walks the supplied key set against the declared shape. It treats every key alike and never branches on an option's value, so it reads no option."
   }
 ]

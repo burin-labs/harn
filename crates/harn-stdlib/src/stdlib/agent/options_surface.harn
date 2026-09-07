@@ -201,7 +201,7 @@ fn __collect_unread_keys(value: any, node: any, path: string) -> list<string> {
  * @effects: []
  * @errors: [ValueError]
  */
-pub fn __validate_agent_loop_option_keys(opts: any) {
+pub fn __validate_agent_loop_option_keys(opts: any) -> nil {
   if type_of(opts) != "dict" {
     return
   }
