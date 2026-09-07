@@ -39,6 +39,9 @@ HOOK_GENREGISTRY_PATTERN='(^scripts/generated_artifacts\.toml$|^scripts/check_ge
 # whether a push is worth ~10 seconds of local proof.
 HOOK_SOURCE_LENGTH_PATTERN='(\.rs$|^crates/harn-stdlib/src/stdlib/.*\.harn$|^scripts/source-file-length-legacy\.json$|^scripts/check_source_file_lengths\.harn$)'
 HOOK_HARN_FORMAT_SKIP=' semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn '
+# The census inputs that are not readers: the registry it compares against, the
+# script that runs it, the module that implements it, and its projections.
+HOOK_AGENT_GATES_OWN_PATTERN='(^spec/agent-gates/|^scripts/agent_gate_registry\.harn$|^crates/harn-stdlib/src/stdlib/dev/agent_gates\.harn$|^docs/src/dev/agent-gates/)'
 
 hook_paths_match() {
   file_list=$1
@@ -453,6 +456,73 @@ hook_warn_generated_artifact_drift() {
     echo "warning: generated-artifact drift check did not run (harn exited $status); the required repository gate will check it before merge" >&2
   fi
   rm -f "$staged_in_repo"
+}
+
+# True when the pushed range touches something the agent gate census reads.
+#
+# The trigger set is read out of spec/agent-gates/ rather than restated as a
+# pattern here. Every registry row records the file and line of the read it
+# covers, so the registry already knows which sources it depends on, and a
+# second hand-maintained copy is one more thing to forget when a reader moves.
+#
+# Fails safe: if the registry cannot be read, answer yes and let the census
+# decide, because "I could not tell" must not read the same as "nothing to do".
+hook_agent_gate_sources_changed() {
+  changed_file_list=$1
+  repo_root=$2
+  [ -s "$changed_file_list" ] || return 1
+  if grep -Eq "$HOOK_AGENT_GATES_OWN_PATTERN" "$changed_file_list"; then
+    return 0
+  fi
+  registry_dir="$repo_root/spec/agent-gates"
+  # No registry in this tree means there is no census to keep honest. That is
+  # different from a registry we failed to read, which is handled below.
+  [ -d "$registry_dir" ] || return 1
+  readers=$(grep -ho '"file"[[:space:]]*:[[:space:]]*"[^"]*"' "$registry_dir"/*.json 2>/dev/null |
+    sed -e 's/.*:[[:space:]]*"//' -e 's/"$//' | sort -u)
+  # A registry that exists but yields no readers is a read we did not manage,
+  # not a registry with nothing in it. Run the census and let it decide.
+  [ -n "$readers" ] || return 0
+  reader_list=$(mktemp)
+  printf '%s\n' "$readers" > "$reader_list"
+  if grep -Fxqf "$reader_list" "$changed_file_list"; then
+    rm -f "$reader_list"
+    return 0
+  fi
+  rm -f "$reader_list"
+  return 1
+}
+
+# Run the agent gate census and, when it disagrees with the sources it records,
+# refuse the push naming the rows that went stale.
+#
+# The census prints one JSON report line and then throws; `failures` is the list
+# of stale rows. Print those, and fall back to the whole report if the shape
+# ever changes, so a parsing miss cannot turn a refusal into silence.
+hook_run_agent_gate_census() {
+  agent_gate_harn=$1
+  census_log=$(mktemp)
+  if HARN_BIN="$agent_gate_harn" make -s check-agent-gates >"$census_log" 2>&1; then
+    rm -f "$census_log"
+    return 0
+  fi
+  stale=$(sed -n 's/.*"failures":\[\([^]]*\)\].*/\1/p' "$census_log" |
+    tr ',' '\n' | sed -e 's/^"//' -e 's/"$//' -e '/^$/d')
+  echo "" >&2
+  echo "  The agent gate census no longer matches the sources it records:" >&2
+  if [ -n "$stale" ]; then
+    printf '%s\n' "$stale" | sed 's/^/    /' >&2
+  else
+    cat "$census_log" >&2
+  fi
+  echo "" >&2
+  echo "  A read that moved by a line is enough. Regenerate and stage:" >&2
+  echo "    make gen-agent-gates" >&2
+  echo "    git add spec/agent-gates docs/src/dev/agent-gates" >&2
+  echo "    git commit --amend --no-edit    # or a separate commit" >&2
+  echo "" >&2
+  rm -f "$census_log"
+  return 1
 }
 
 hook_export_existing_harn_bin_for_non_rust_changes() {
