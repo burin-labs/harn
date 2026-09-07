@@ -185,10 +185,7 @@ pipeline test_restricted_mock_still_refuses_unsupported_options(harness: Harness
  * does not fail on a build that suppresses the gates under a mock, which is
  * what makes it the check worth having rather than one more passing case.
  */
-pipeline test_a_scripted_turn_still_refuses_an_unsupported_option(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_a_scripted_turn_still_refuses_an_unsupported_option(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("this reply must never be reached"), llm_text("nor this one")],
