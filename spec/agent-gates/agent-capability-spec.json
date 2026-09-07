@@ -81,12 +81,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 749,
+        "line": 755,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 750,
+        "line": 756,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
