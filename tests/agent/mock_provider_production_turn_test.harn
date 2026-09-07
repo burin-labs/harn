@@ -15,16 +15,14 @@
 // against `mock` and then asserted some later mechanism did NOT fire could not
 // tell "correctly skipped" from "the turn threw before reaching it".
 //
-// NOTE ON WHY THERE IS NO `with_llm_script` HERE. An installed builtin mock
-// script sets `enforce_capability_gates = false` for the whole call, so a
-// scripted turn cannot observe this defect at all — a scripted version of this
-// test passes on the broken build. The turns below run against the built-in
-// mock responder with the gates on, which is the only shape that reaches the
-// admission seam.
+// Most turns below run against the built-in mock responder with no installed
+// script, because that is the shape the harn#7693 defect appeared in. One
+// scripted turn is deliberately included: see the last pipeline in this file,
+// which is the falsifier for harn#8119.
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec, agent_options } from "std/agent/options"
-import { assert_throws } from "std/testing"
+import { assert_throws, llm_text, with_llm_script } from "std/testing"
 
 fn production_turn_tools() {
   let tools = tool_registry()
@@ -171,5 +169,58 @@ pipeline test_restricted_mock_still_refuses_unsupported_options(harness: Harness
     ),
     "a restricted mock id must still refuse prompt caching with the typed capability error, got: "
       + turn_error_message(cache_result),
+  )
+}
+
+/**
+ * The falsifier for harn#8119: a capability refusal asserted while an LLM mock
+ * is serving the call.
+ *
+ * Every VM capability gate used to be guarded by one boolean that went false
+ * whenever a mock was active, so this exact assertion passed whether the gate
+ * worked or not, and the test output said nothing about it. That is the failure
+ * mode where absence reads as success: the case could not fail.
+ *
+ * Deleting the prompt-cache refusal from the source must make this fail. It
+ * does not fail on a build that suppresses the gates under a mock, which is
+ * what makes it the check worth having rather than one more passing case.
+ */
+pipeline test_a_scripted_turn_still_refuses_an_unsupported_option(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("this reply must never be reached"), llm_text("nor this one")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Answer briefly.",
+        nil,
+        agent_options(
+          {
+            provider: "mock",
+            model: "mock-minimal",
+            cache: true,
+            loop_until_done: false,
+            max_iterations: 1,
+          },
+        ),
+      )
+      assert_eq(
+        result.status,
+        "exception",
+        "a scripted turn must reach the capability gate, not be waved through by the mock",
+      )
+      assert(
+        contains(
+          turn_error_message(result),
+          "option `cache` is not supported by `mock-minimal` (provider `mock`)",
+        ),
+        "the scripted refusal must be the same typed capability error the unscripted turn gets, got: "
+          + turn_error_message(result),
+      )
+      return nil
+    },
   )
 }

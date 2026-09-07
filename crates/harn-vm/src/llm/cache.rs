@@ -270,16 +270,13 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
         .or_else(|| default_float("frequency_penalty"));
     let presence_penalty = super::helpers::opt_float(&options, "presence_penalty")
         .or_else(|| default_float("presence_penalty"));
-    let caps = crate::llm::capabilities::lookup(&provider, &model);
-    let enforce_capability_gates = !crate::llm::mock::cli_llm_mock_replay_active()
-        && !crate::llm::mock::builtin_llm_mock_active();
+    let caps = crate::llm::capabilities::lookup_for_mockable_route(&provider, &model);
     let thinking = super::helpers::resolve_thinking_config(
         options.as_ref(),
         &model_defaults,
         &provider,
         &model,
         &caps,
-        enforce_capability_gates,
     )?;
 
     let prompt = args

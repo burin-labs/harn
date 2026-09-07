@@ -87,19 +87,10 @@ pub(crate) fn resolve_thinking_config(
     provider: &str,
     model: &str,
     caps: &crate::llm::capabilities::Capabilities,
-    enforce_capability_gates: bool,
 ) -> Result<crate::llm::api::ThinkingConfig, VmError> {
     let policy =
         crate::llm::reasoning_policy::resolve_for_llm_call(options, provider, model, caps)?;
-    resolve_thinking_config_with_policy(
-        options,
-        model_defaults,
-        provider,
-        model,
-        caps,
-        enforce_capability_gates,
-        policy,
-    )
+    resolve_thinking_config_with_policy(options, model_defaults, provider, model, caps, policy)
 }
 
 /// Resolve catalog defaults without inheriting ambient session policy.
@@ -108,17 +99,8 @@ pub(crate) fn resolve_catalog_thinking_config(
     provider: &str,
     model: &str,
     caps: &crate::llm::capabilities::Capabilities,
-    enforce_capability_gates: bool,
 ) -> Result<crate::llm::api::ThinkingConfig, VmError> {
-    resolve_thinking_config_with_policy(
-        None,
-        model_defaults,
-        provider,
-        model,
-        caps,
-        enforce_capability_gates,
-        None,
-    )
+    resolve_thinking_config_with_policy(None, model_defaults, provider, model, caps, None)
 }
 
 fn resolve_thinking_config_with_policy(
@@ -127,7 +109,6 @@ fn resolve_thinking_config_with_policy(
     provider: &str,
     model: &str,
     caps: &crate::llm::capabilities::Capabilities,
-    enforce_capability_gates: bool,
     policy: Option<crate::llm::reasoning_policy::ReasoningPolicyApplication>,
 ) -> Result<crate::llm::api::ThinkingConfig, VmError> {
     let explicit_effort = parse_reasoning_effort_option(options)?;
@@ -170,8 +151,7 @@ fn resolve_thinking_config_with_policy(
     // The probe suspends both effort gates, not just the ladder. A route
     // declaring no effort support at all is exactly as much a catalog claim as
     // a route declaring three rungs, and "is that true?" is the same question.
-    if enforce_capability_gates
-        && matches!(source, ThinkingSource::Effort)
+    if matches!(source, ThinkingSource::Effort)
         && effort_requires_provider_support
         && !caps.reasoning_effort_supported
         && !effort_ladder_check_suspended()
@@ -182,22 +162,20 @@ fn resolve_thinking_config_with_policy(
             model,
         ));
     }
-    if enforce_capability_gates {
-        validate_thinking_supported(
-            &thinking,
-            provider,
-            model,
-            &caps.thinking_modes,
-            source.option_name(),
-        )?;
-        validate_reasoning_effort_level_supported(
-            &thinking,
-            provider,
-            model,
-            caps,
-            source.option_name(),
-        )?;
-    }
+    validate_thinking_supported(
+        &thinking,
+        provider,
+        model,
+        &caps.thinking_modes,
+        source.option_name(),
+    )?;
+    validate_reasoning_effort_level_supported(
+        &thinking,
+        provider,
+        model,
+        caps,
+        source.option_name(),
+    )?;
     Ok(thinking)
 }
 
@@ -377,7 +355,6 @@ pub(super) fn parse_anthropic_beta_features_option(
     thinking: &crate::llm::api::ThinkingConfig,
     provider: &str,
     model: &str,
-    enforce_capability_gates: bool,
 ) -> Result<Vec<String>, VmError> {
     let mut features = Vec::new();
     if let Some(raw) = options.and_then(|o| o.get("anthropic_beta_features")) {
@@ -429,7 +406,7 @@ pub(super) fn parse_anthropic_beta_features_option(
         .and_then(|o| o.get("interleaved_thinking"))
         .is_some_and(|value| value.is_truthy());
     let caps = crate::llm::capabilities::lookup(provider, model);
-    if enforce_capability_gates && explicit_interleaved && !caps.interleaved_thinking_supported {
+    if explicit_interleaved && !caps.interleaved_thinking_supported {
         return Err(unsupported_option_error(
             "interleaved_thinking",
             provider,

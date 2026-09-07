@@ -128,6 +128,60 @@ pub fn lookup(provider: &str, model: &str) -> Capabilities {
     caps
 }
 
+/// The route every capability consumer resolves against, including while an
+/// LLM mock is serving the call.
+///
+/// A recorded fixture may name a provider or a model the capability registry
+/// has never heard of. Such a route resolves to `Capabilities::default()`,
+/// which declares nothing supported, so enforcing the gates against it would
+/// refuse a replay for reasons the recording never had. The previous answer
+/// was to switch every capability gate off whenever a mock was active. That
+/// made every mock-backed refusal assertion vacuous: the case passed whether
+/// the gate worked or not, and nothing in the test output said so (harn#8119).
+///
+/// The answer here supplies capabilities instead of suppressing the check. An
+/// unmatched route under a mock borrows the capable mock row, which is authored
+/// once in the capability sources rather than implied by an absent check. A
+/// route the registry does know keeps its own row, so a fixture on
+/// `mock`/`mock-minimal` still refuses what that row declares unsupported.
+///
+/// The substitution happens here, on the route itself, rather than in any one
+/// consumer, because `resolve_route` exists so the `Capabilities` lookup and
+/// the portable-option admission gate can never resolve the same pair
+/// differently (harn#7693). Substituting in one of them would reintroduce
+/// exactly that split.
+pub(crate) fn effective_capability_route<'a>(
+    provider: &'a str,
+    model: &'a str,
+) -> (&'a str, &'a str) {
+    if !crate::llm::mock::any_llm_mock_active() {
+        return (provider, model);
+    }
+    let user = current_user_overrides();
+    let (_, matched) = super::rule::lookup_with_match(
+        provider,
+        &crate::llm_config::capability_model_id(provider, model),
+        builtin(),
+        user.as_ref(),
+    );
+    if matched {
+        (provider, model)
+    } else {
+        MOCK_FALLBACK_ROUTE
+    }
+}
+
+/// [`lookup`] through [`effective_capability_route`].
+pub fn lookup_for_mockable_route(provider: &str, model: &str) -> Capabilities {
+    let (provider, model) = effective_capability_route(provider, model);
+    lookup(provider, model)
+}
+
+/// The route an unmatched mocked call borrows its capabilities from. It is a
+/// real registry row, not a literal in this file, so the permissive surface a
+/// replay sees is maintained with every other capability row.
+pub const MOCK_FALLBACK_ROUTE: (&str, &str) = ("mock", "mock");
+
 pub(crate) fn should_use_responses_transport(
     provider: &str,
     model: &str,
