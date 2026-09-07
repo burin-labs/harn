@@ -1,0 +1,14 @@
+// Importer: a `pub` alias whose body names the imported recursive alias. A
+// selective import registers body-less and lowers to a runtime load by name, so
+// when the recursive alias published no schema this module failed at load with
+// `Undefined variable: PubAliasRecur` on a name that is a type, not a variable.
+import { PubAliasRecur } from "pub_alias_over_recursive_import_a"
+
+pub type PubAliasHolder = {r: PubAliasRecur}
+
+pub fn probe_pub_alias(node: PubAliasRecur) -> string {
+  if node.op == "leaf" {
+    return "leaf"
+  }
+  return "node"
+}

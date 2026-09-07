@@ -28,6 +28,16 @@ const MAX_SCHEMA_ALIAS_NEST: usize = 128;
 const SCHEMA_FRAGMENT_NODE_BUDGET: usize = 4096;
 
 impl SchemaFragment {
+    /// A position that constrains nothing.
+    ///
+    /// The validator dispatches on which keys a schema carries, so a schema
+    /// with none of them reaches no check and accepts any value. This is the
+    /// representation for a slot the compiler deliberately declines to
+    /// constrain, as opposed to one it failed to lower.
+    fn unconstrained() -> Self {
+        SchemaFragment::Dict(BTreeMap::new())
+    }
+
     /// Emission weight: the number of bytecode-emitting nodes in the fragment.
     /// A `Value` containing a dict or list still emits per-element construction
     /// ops, so its internal nodes count toward the budget.
@@ -201,7 +211,23 @@ impl Compiler {
         body: &TypeExpr,
         visiting: &mut Vec<TypeExpr>,
     ) -> Option<SchemaFragment> {
-        if visiting.len() >= MAX_SCHEMA_ALIAS_NEST || visiting.contains(guard_key) {
+        // A cycle-broken position lowers to no runtime constraint, the same
+        // answer `expand_alias` already gives for the same cycle. Abandoning
+        // the whole fragment instead meant a recursive alias published no
+        // schema at all, and an importing module — which registers a selective
+        // import body-less and so lowers it to a runtime load by name — found
+        // nothing to load and failed at load time as `Undefined variable` on a
+        // name that is a type.
+        //
+        // The outer shape stays constrained; only the recursive slot opens.
+        if visiting.contains(guard_key) {
+            return Some(SchemaFragment::unconstrained());
+        }
+        // The nesting cap is a different condition. It says the alias graph is
+        // too deep to lower, not that it closed a cycle, so it stays a refusal
+        // and a genuinely unmaterializable alias still fails at compile time
+        // under a message naming it.
+        if visiting.len() >= MAX_SCHEMA_ALIAS_NEST {
             return None;
         }
         visiting.push(guard_key.clone());
