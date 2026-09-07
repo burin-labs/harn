@@ -10,16 +10,6 @@ updates:
       time: "09:00"
       timezone: "America/Los_Angeles"
     groups:
-      cranelift:
-        patterns:
-          - "cranelift-*"
-      wasmtime:
-        patterns:
-          - "wasmtime*"
-      opentelemetry:
-        patterns:
-          - "opentelemetry*"
-          - "tracing-opentelemetry"
       # Every tree-sitter crate, runtime and grammars alike. A grammar bump is
       # not a routine dependency bump: it changes how source parses, so it is
       # gated by the `harn-hostlib` parser-agreement corpus and by the fitness
@@ -34,24 +24,21 @@ updates:
       tree-sitter:
         patterns:
           - "tree-sitter*"
-      # Everything else routine, in one weekly PR. Majors match no group and
-      # keep their own PR and their own revert. The excludes are what keep the
-      # named families above out of this batch: GitHub would resolve the
-      # overlap by file order, but an explicit exclusion is a property of the
-      # group rather than of its position, and `scripts/check_dependabot_groups.harn`
+      # Everything else, majors included, in one weekly pull request. A group
+      # holding a single package still opens its own pull request, so carving
+      # families out of this one buys nothing but repetition: the cranelift,
+      # wasmtime and opentelemetry groups are gone for that reason. Only the
+      # exclusion above survives, because it is not about noise.
+      #
+      # The exclusion is explicit rather than positional. GitHub would resolve
+      # the overlap by file order, but an exclusion is a property of the group
+      # rather than of its position, and `scripts/check_dependabot_groups.harn`
       # can check it.
-      cargo-minor-patch:
+      cargo:
         patterns:
           - "*"
         exclude-patterns:
-          - "cranelift-*"
-          - "wasmtime*"
-          - "opentelemetry*"
-          - "tracing-opentelemetry"
           - "tree-sitter*"
-        update-types:
-          - "minor"
-          - "patch"
     # A grammar we hold back on purpose. The `=` pin in
     # `crates/harn-hostlib/Cargo.toml` records the decision for a reader; this
     # records it for the bot, which cannot see a comment. Without it the same
@@ -81,22 +68,13 @@ updates:
       time: "09:00"
       timezone: "America/Los_Angeles"
     groups:
-      react-runtime:
-        patterns:
-          - "react"
-          - "react-dom"
-      # Spans every configured directory. Dependabot still splits a group when
-      # two directories need incompatible versions of one package, so a portal
-      # constraint cannot drag the VS Code extension along with it.
-      npm-minor-patch:
+      # Spans every configured directory, majors included. Dependabot still
+      # splits a group when two directories need incompatible versions of one
+      # package, so a portal constraint cannot drag the VS Code extension along
+      # with it.
+      npm:
         patterns:
           - "*"
-        exclude-patterns:
-          - "react"
-          - "react-dom"
-        update-types:
-          - "minor"
-          - "patch"
     # The extension compiles against its declared minimum VS Code API.
     # Move this type package only with a deliberate engines review.
     ignore:

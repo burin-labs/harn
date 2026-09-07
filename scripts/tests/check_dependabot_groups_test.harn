@@ -102,11 +102,14 @@ pipeline test_actual_dependabot_document(harness: Harness, task: unknown) {
     [],
   )
   // A routine dependency lands in the batch rather than opening its own PR.
-  assert_eq(matching_groups(groups_for(entries, "cargo"), "serde"), ["cargo-minor-patch"])
-  assert_eq(matching_groups(groups_for(entries, "npm"), "vite"), ["npm-minor-patch"])
-  // A named family stays reviewable on its own.
-  assert_eq(matching_groups(groups_for(entries, "cargo"), "wasmtime-wasi"), ["wasmtime"])
-  assert_eq(matching_groups(groups_for(entries, "npm"), "react-dom"), ["react-runtime"])
+  assert_eq(matching_groups(groups_for(entries, "cargo"), "serde"), ["cargo"])
+  assert_eq(matching_groups(groups_for(entries, "npm"), "vite"), ["npm"])
+  // Families that only reduced the size of one review are gone: what used to
+  // be its own pull request now rides in the batch.
+  assert_eq(matching_groups(groups_for(entries, "cargo"), "wasmtime-wasi"), ["cargo"])
+  assert_eq(matching_groups(groups_for(entries, "cargo"), "cranelift-jit"), ["cargo"])
+  assert_eq(matching_groups(groups_for(entries, "cargo"), "opentelemetry-otlp"), ["cargo"])
+  assert_eq(matching_groups(groups_for(entries, "npm"), "react-dom"), ["npm"])
   // Parser runtime and grammars leave the batch together: a bump to either is
   // answerable only by the corpus result, and in the catch-all one grammar
   // question blocks every unrelated crate in the same PR (#6205, #6240).
@@ -114,10 +117,7 @@ pipeline test_actual_dependabot_document(harness: Harness, task: unknown) {
   assert_eq(matching_groups(groups_for(entries, "cargo"), "tree-sitter-swift"), ["tree-sitter"])
   assert_eq(matching_groups(groups_for(entries, "cargo"), "tree-sitter-kotlin-ng"), ["tree-sitter"])
   // The npm entry governs the nested package directories too, not just the root.
-  assert_eq(
-    matching_groups(groups_for(entries, "npm", "/editors/vscode"), "react-dom"),
-    ["react-runtime"],
-  )
+  assert_eq(matching_groups(groups_for(entries, "npm", "/editors/vscode"), "react-dom"), ["npm"])
 }
 
 @test
