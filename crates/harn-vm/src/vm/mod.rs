@@ -19,6 +19,7 @@ pub(crate) mod ops;
 mod scope;
 mod state;
 mod stdlib_artifact;
+mod stdlib_registration;
 pub mod subtask;
 mod task_cleanup;
 mod tool_callable;
