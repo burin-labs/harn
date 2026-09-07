@@ -748,6 +748,64 @@ fn first_call_of_a_session_keeps_the_worst_case_projection() {
 }
 
 #[test]
+fn a_worst_case_projection_denies_the_next_call_at_56_percent_of_actual_spend() {
+    // Characterization of the reported incident, at the seam that decided it.
+    // A run whose cumulative ACTUAL spend is 56% of its cap is denied its next
+    // call, because the admission bound for that call is priced worst-case.
+    // The denial is conservative by design; what it cannot do on its own is
+    // land the run, which is what `std/agent/cut_landing` adds above it.
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    reset_cost_state();
+
+    record_cached_calls(22);
+    let session_cost = peek_total_cost();
+    // A cap this session has spent exactly 56% of.
+    let cap = session_cost / 0.56;
+    let opts = long_transcript_opts(cap);
+
+    // Drop the session's own evidence, keeping its spend: this is the pricing
+    // basis the incident ran under.
+    reset_cost_state();
+    let projection = project_llm_call_cost(&opts, session_cost);
+    assert_eq!(projection.basis, ProjectionBasis::WorstCase);
+
+    let envelope = opts
+        .budget
+        .clone()
+        .expect("the fixture sets a total budget");
+    let error = check_budget_envelope(&envelope, &projection)
+        .expect_err("a worst-case bound over 44% headroom must deny the call");
+    let dict = thrown_dict(error);
+    assert_eq!(dict_str(&dict, "limit"), "total_budget_usd");
+    assert_eq!(dict_str(&dict, "projection_basis"), "worst_case");
+
+    // Actual spend and the rejected bound are already two numbers in the
+    // receipt. Actual is 56% of the cap; the bound alone exceeds the rest.
+    let reported_actual = dict_float(&dict, "session_cost_usd");
+    let reported_projection = dict_float(&dict, "projected_cost_usd");
+    assert!(
+        (reported_actual / cap - 0.56).abs() < 1e-6,
+        "the fixture must stop the run at 56% of its cap, got {}",
+        reported_actual / cap
+    );
+    assert!(
+        reported_projection > cap - reported_actual,
+        "the projected bound {reported_projection} must exceed the {} of headroom left",
+        cap - reported_actual
+    );
+
+    // Negative control: the same spend against the same cap, priced from the
+    // session's own completed calls, is admitted.
+    record_cached_calls(22);
+    let observed = project_llm_call_cost(&opts, session_cost);
+    assert_eq!(observed.basis, ProjectionBasis::Observed);
+    check_budget_envelope(&envelope, &observed)
+        .expect("an observed bound inside the remaining 44% must be admitted");
+    reset_cost_state();
+}
+
+#[test]
 fn observed_projection_that_exceeds_the_cap_still_stops_and_says_so() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
