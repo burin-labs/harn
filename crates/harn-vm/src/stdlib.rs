@@ -281,15 +281,9 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
 /// installs the macro-emitted signature slice into the parser registry
 /// (idempotent under repeat calls with the same slice pointer).
 pub fn register_vm_stdlib(vm: &mut Vm) {
-    let started = std::time::Instant::now();
-    register_core_stdlib(vm);
-    let core = started.elapsed().as_micros();
-    register_io_stdlib(vm);
-    let io = started.elapsed().as_micros();
-    register_agent_stdlib(vm);
-    let agent = started.elapsed().as_micros();
-    vm.project_declared_capability_methods();
-    let projection = started.elapsed().as_micros();
+    if !vm.install_shared_stdlib_registration() {
+        register_stdlib_bindings(vm);
+    }
     if vm.harness().is_none() {
         vm.set_harness(crate::harness::Harness::real());
     }
@@ -301,9 +295,13 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     }
     vm.project_legacy_capability_globals();
     harn_builtin_registry::install_builtin_manifest(all_builtin_manifest());
-    if std::env::var_os("HARN_DISPATCH_GENERATION_DEBUG").is_some() {
-        eprintln!("{{\"phase\":\"stdlib_parts\",\"core_us\":{core},\"io_us\":{},\"agent_us\":{},\"projection_us\":{},\"rest_us\":{}}}", io-core, agent-io, projection-agent, started.elapsed().as_micros()-projection);
-    }
+}
+
+pub(crate) fn register_stdlib_bindings(vm: &mut Vm) {
+    register_core_stdlib(vm);
+    register_io_stdlib(vm);
+    register_agent_stdlib(vm);
+    vm.project_declared_capability_methods();
 }
 
 pub(crate) fn rebind_execution_state_builtins(vm: &mut Vm) {
