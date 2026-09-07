@@ -65,12 +65,33 @@ pub fn completion_requirement_boundary_report(
       for prior in rows {
         if prior.requirement_id == row.requirement_id {
           found = true
+          let evidence_refs = prior.evidence_refs
+          for evidence_ref in row.evidence_refs {
+            if !evidence_refs.contains(evidence_ref) {
+              evidence_refs = evidence_refs + [evidence_ref]
+            }
+          }
+          let evidence_roles = prior.evidence_roles
+          for evidence_role in row.evidence_roles {
+            if !evidence_roles.contains(evidence_role) {
+              evidence_roles = evidence_roles + [evidence_role]
+            }
+          }
+          // The first declaration owns the display name. All adjudicators'
+          // evidence survives, while any pending assessment remains blocking.
           combined = combined
             + [
-              if prior.met {
-                row
-              } else {
-                prior
+              {
+                requirement_id: prior.requirement_id,
+                name: prior.name,
+                met: prior.met && row.met,
+                evidence_refs: evidence_refs,
+                evidence_roles: evidence_roles,
+                status: if prior.met {
+                  row.status
+                } else {
+                  prior.status
+                },
               },
             ]
         } else {

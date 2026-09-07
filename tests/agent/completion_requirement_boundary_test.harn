@@ -70,6 +70,7 @@ pipeline test_shared_requirement_stays_pending_until_all_assessors_support_it() 
     assert_eq(report.pending_count, 1)
     assert_eq(report.pending_names, ["answer"])
     assert(!report.complete)
+    assert_eq(report.rows[0].evidence_refs, [-1])
   }
   const completed = completion_requirement_boundary_report(
     {gate: met, verification: met, completion: empty},
@@ -97,4 +98,50 @@ pipeline test_invalid_assessment_diagnostics_survive_the_join() {
   assert_eq(report.pending_count, 2)
   assert_eq(report.pending_names, ["answer", "Unknown requirement `unknown`"])
   assert(!report.complete)
+}
+
+pipeline test_shared_met_requirement_retains_each_assessors_evidence() {
+  const answer = supported("answer")
+  const verified = completion_requirement_report(
+    {
+      requirements: [
+        {
+          requirement_id: "answer",
+          name: "Verified answer",
+          evidence_roles: ["deterministic_verification"],
+        },
+      ],
+    },
+    [{requirement_id: "answer", met: true, evidence_refs: [-2]}],
+    {
+      requirement_evidence: [
+        {
+          evidence_index: -2,
+          role: "deterministic_verification",
+          supports_completion: true,
+          measurement: "passed",
+          summary: "Verification passed.",
+          representative_artifact_ids: [],
+        },
+      ],
+    },
+  )
+    ?? completion_requirement_ledger_empty()
+  assert(verified.complete)
+  for boundary in [
+    {gate: answer, verification: verified, completion: answer},
+    {gate: verified, verification: answer, completion: verified},
+  ] {
+    const report = completion_requirement_boundary_report(boundary)
+    assert(report.complete)
+    assert_eq(report.required_count, 1)
+    assert_eq(report.pending_count, 0)
+    assert_eq(len(report.rows[0].evidence_refs), 2)
+    assert(report.rows[0].evidence_refs.contains(-1))
+    assert(report.rows[0].evidence_refs.contains(-2))
+    assert_eq(len(report.rows[0].evidence_roles), 2)
+    assert(report.rows[0].evidence_roles.contains("assistant_output"))
+    assert(report.rows[0].evidence_roles.contains("deterministic_verification"))
+    assert_eq(report.rows[0].name, boundary.gate.rows[0].name)
+  }
 }
