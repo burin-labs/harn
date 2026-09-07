@@ -220,6 +220,38 @@ jobs:
         shell: bash
         run: harn install --locked
 
+      # Observe the caller before the bump mutates its pin or generated files.
+      # A discovery failure is migration evidence, not a reason to suppress the
+      # repair PR: the exact compact receipt travels in that PR body and is also
+      # retained as a workflow artifact. Older target runtimes predate the
+      # command and get an explicit unsupported receipt instead of a false zero.
+      - name: Inventory package tests before mutation
+        id: package-test-inventory
+        working-directory: package
+        env:
+          HARN_SECRET_PROVIDERS: env
+          RECEIPT_PATH: ${{ runner.temp }}/harn-package-test-discovery.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          if harn package test-inventory --help >/dev/null 2>&1; then
+            harn package test-inventory . --json --receipt-out "$RECEIPT_PATH" >/dev/null \
+              || status=$?
+          else
+            printf '%s\n' '{"schemaVersion":1,"ok":false,"error":{"code":"package_test_inventory_unsupported","message":"target Harn runtime predates package test inventory"}}' \
+              > "$RECEIPT_PATH"
+            status=2
+          fi
+          if [[ ! -s "$RECEIPT_PATH" ]]; then
+            echo "package test inventory returned without a receipt" >&2
+            exit 1
+          fi
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          if (( status != 0 )); then
+            echo "::notice::Pre-mutation package test discovery found a compatibility migration; the exact receipt will be attached to the bump PR."
+          fi
+
       - name: Run bump orchestration
         working-directory: package
         env:
@@ -235,6 +267,7 @@ jobs:
           HARN_BUMP_ENABLE_AUTOMERGE: ${{ inputs.enable-auto-merge }}
           HARN_BUMP_PUBLISH_FAILURE_FOR_REPAIR: ${{ inputs.publish-failure-for-repair }}
           HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES: ${{ inputs.apply-behavior-preserving-fixes }}
+          HARN_BUMP_PACKAGE_TEST_RECEIPT: ${{ runner.temp }}/harn-package-test-discovery.json
         shell: bash
         run: |
           set -euo pipefail
@@ -284,3 +317,12 @@ jobs:
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           harn --version
           harn run --no-sandbox ../.harn-runtime/scripts/bump-driver/bump_harn_runtime.harn
+
+      - name: Upload package test discovery receipt
+        if: always() && steps.package-test-inventory.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-package-test-discovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/harn-package-test-discovery.json
+          if-no-files-found: error
+          retention-days: 30

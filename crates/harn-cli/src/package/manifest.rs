@@ -33,6 +33,11 @@ pub struct Manifest {
     pub mcp: Vec<McpServerConfig>,
     #[serde(default)]
     pub check: CheckConfig,
+    /// `[tests]` table — package-owned policy for the package verification
+    /// test gate. Empty suites fail closed unless the package explicitly
+    /// declares why it intentionally ships without tests.
+    #[serde(default)]
+    pub tests: PackageTestsConfig,
     #[serde(default)]
     pub workspace: WorkspaceConfig,
     /// `[registry]` table — lightweight package discovery index configuration.
@@ -118,6 +123,14 @@ pub struct Manifest {
     /// one signed package may populate any mix of both.
     #[serde(default)]
     pub contributes: Vec<ContributionEntry>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageTestsConfig {
+    #[serde(default)]
+    pub allow_empty: bool,
+    pub reason: Option<String>,
 }
 
 /// A single `[[contributes]]` host-surface contribution.

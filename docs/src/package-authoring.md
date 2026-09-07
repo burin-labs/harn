@@ -151,6 +151,25 @@ contract fixtures, package-local fixture tests, install/import smoke tests, and
 standalone Harn doc examples. Use `harn connector check .` when you only need
 the lower-level pure-Harn connector contract check.
 
+`harn package test-inventory .` parses every `tests/**/*.harn` file through the
+same test discovery engine as `harn test` and reports what it found, without
+running anything or changing a file. Each file should contain at least one
+pipeline whose name starts with `test_` or that carries `@test`; an ordinary
+pipeline such as `pipeline test(...)` is not a test. The schema-v1 receipt
+reports selected-file and discovered-test counts. For each file with no test or
+with a discovery error, it records the path and SHA-256 digest; files that pass
+discovery are not enumerated. A package that intentionally has no test files
+declares that exception in `harn.toml` and explains it:
+
+```toml
+[tests]
+allow_empty = true
+reason = "schema-only package with no executable behavior"
+```
+
+The exception applies only when the package has no selected test files. It does
+not hide a test file that contains no discoverable test pipeline.
+
 Use `harn package verify . --strict` for warning-free release admission. It
 makes check and lint warnings fatal, enables strict boundary typing, and records
 the exact source-gate commands in the schema-v2 receipt.

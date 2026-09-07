@@ -280,10 +280,6 @@
       "path": "crates/harn-cli/src/package/extensions.rs"
     },
     {
-      "max_bytes": 104312,
-      "path": "crates/harn-cli/src/package/lockfile/build.rs"
-    },
-    {
       "max_bytes": 243736,
       "path": "crates/harn-cli/src/source_exec.rs"
     },
