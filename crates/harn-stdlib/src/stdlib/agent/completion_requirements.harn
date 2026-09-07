@@ -34,6 +34,82 @@ pub type CompletionRequirementReport = {
   rows: list<CompletionRequirementStatus>,
 }
 
+/** The reports owned by the three adjudicators at one completion boundary. */
+pub type CompletionRequirementBoundary = {
+  gate: CompletionRequirementReport,
+  verification: CompletionRequirementReport,
+  completion: CompletionRequirementReport,
+}
+
+/**
+ * Preserve every declared requirement across completion adjudicators.
+ * A shared requirement is complete only when every adjudicator that declares
+ * it has supporting evidence. An empty report cannot erase another report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_boundary_report(boundary)
+ */
+pub fn completion_requirement_boundary_report(
+  boundary: CompletionRequirementBoundary,
+) -> CompletionRequirementReport {
+  let rows: list<CompletionRequirementStatus> = []
+  let extra_pending: list<string> = []
+  let reported_count = 0
+  for report in [boundary.gate, boundary.verification, boundary.completion] {
+    reported_count = reported_count + report.reported_count
+    for row in report.rows {
+      let found = false
+      let combined: list<CompletionRequirementStatus> = []
+      for prior in rows {
+        if prior.requirement_id == row.requirement_id {
+          found = true
+          combined = combined
+            + [
+              if prior.met {
+                row
+              } else {
+                prior
+              },
+            ]
+        } else {
+          combined = combined + [prior]
+        }
+      }
+      rows = if found {
+        combined
+      } else {
+        rows + [row]
+      }
+    }
+    // Invalid or unknown assessment rows also prevent completion. They have no
+    // authoritative row, so retain their diagnostics separately from the join.
+    const row_names = report.rows.map(fn(row) { return row.name }).to_list()
+    for name in report.pending_names {
+      if !row_names.contains(name) && !extra_pending.contains(name) {
+        extra_pending = extra_pending + [name]
+      }
+    }
+  }
+  let pending_names: list<string> = []
+  for row in rows {
+    if !row.met {
+      pending_names = pending_names + [row.name]
+    }
+  }
+  pending_names = pending_names + extra_pending
+  return {
+    schema: "harn.completion_requirement_report.v1",
+    complete: len(pending_names) == 0,
+    required_count: len(rows),
+    reported_count: reported_count,
+    pending_count: len(pending_names),
+    pending_names: pending_names,
+    rows: rows,
+  }
+}
+
 /** One typed, bounded fact a requirement assessment may cite. */
 pub type CompletionRequirementEvidenceRecord = {
   evidence_index: int,
