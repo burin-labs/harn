@@ -1,5 +1,17 @@
 [
   {
+    "default": "dynamic: absent unless sub_agent_run supplies it; the host then resolves the child's workspace scope from it",
+    "evidence": "Host-injected child-run workspace anchor. Read by the sub-agent request parser, not by the loop.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.anchor",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Lineage input the host writes into the child's option dict; retain until the worker request carries it on its own channel rather than through loop options.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
     "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
     "expiry": "2026-09-13",
@@ -626,6 +638,30 @@
     "verdict": "KEEP-with-expiry"
   },
   {
+    "default": "dynamic: absent for a top-level run; set by the host when a run is spawned from another",
+    "evidence": "Host-injected run lineage. agents_sub_agent_lifecycle.normalize_run_identity writes it into the child option dict; worker and workflow records preserve parent-run linkage.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.parent_run_id",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Provenance a fan-out is reconstructed from; retain until worker lineage moves off the loop option dict.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: absent for a top-level run; set by the host when a run is spawned from another",
+    "evidence": "Host-injected session lineage. Read at the session journal and at session-bundle snapshot resolution.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.parent_session_id",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Provenance a fan-out is reconstructed from; retain until worker lineage moves off the loop option dict.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
     "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
     "expiry": "2026-09-13",
@@ -1065,6 +1101,18 @@
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: unset for a top-level run; the host sets \"subagent\" when the loop is entered through sub_agent_run",
+    "evidence": "Host-injected journal classification. Read at the session journal boundary, not by the loop.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.session_type",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Classifies the transcript the journal opens; retain until the journal takes it from run identity rather than from loop options.",
     "verdict": "KEEP-with-expiry"
   },
   {
@@ -1512,7 +1560,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-        "line": 54,
+        "line": 64,
         "reader": "agent_loop"
       },
       {

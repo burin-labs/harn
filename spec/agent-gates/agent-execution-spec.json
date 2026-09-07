@@ -226,12 +226,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 743,
+        "line": 749,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 744,
+        "line": 750,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -345,12 +345,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 731,
+        "line": 737,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 732,
+        "line": 738,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
@@ -482,12 +482,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 725,
+        "line": 731,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 726,
+        "line": 732,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -525,12 +525,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 752,
+        "line": 758,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 753,
+        "line": 759,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -752,12 +752,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 746,
+        "line": 752,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 747,
+        "line": 753,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -785,12 +785,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 755,
+        "line": 761,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 756,
+        "line": 762,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -808,7 +808,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 237,
+        "line": 239,
         "reader": "agent_loop_options"
       }
     ],
@@ -954,12 +954,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 740,
+        "line": 746,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 741,
+        "line": 747,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -1010,12 +1010,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 737,
+        "line": 743,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 738,
+        "line": 744,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -1102,12 +1102,12 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 758,
+        "line": 764,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 759,
+        "line": 765,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
