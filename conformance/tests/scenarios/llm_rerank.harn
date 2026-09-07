@@ -2,7 +2,7 @@ import { pairwise_rerank, self_certainty } from "std/llm/rerank"
 import { llm_call_count, with_llm_mocks } from "std/testing"
 
 fn run_mock_self_certainty(llm: HarnessLlm) {
-  return self_certainty(llm, "calibrated", {provider: "mock"})
+  return self_certainty(llm, "calibrated", {provider: "mock", model: "mock"})
 }
 
 pipeline default(harness: Harness, task: unknown) {
@@ -17,7 +17,7 @@ pipeline default(harness: Harness, task: unknown) {
       const result = pairwise_rerank(
         harness,
         ["weak", "best", "ok"],
-        {task: "Pick the strongest answer.", provider: "mock"},
+        {task: "Pick the strongest answer.", provider: "mock", model: "mock"},
       )
       return {result: result, calls: llm_call_count(harness.llm)}
     },
@@ -51,7 +51,11 @@ pipeline default(harness: Harness, task: unknown) {
   const mocked_result = with_llm_mocks(
     harness.llm,
     [{text: "visible", logprobs: [{token: "visible", logprob: 0.0}]}],
-    fn() { return harness.llm.call("return visible", nil, {provider: "mock", logprobs: true}) },
+    fn() { return harness.llm.call(
+      "return visible",
+      nil,
+      {provider: "mock", model: "mock", logprobs: true},
+    ) },
   )
   require mocked_result.logprobs != nil && len(mocked_result.logprobs) == 1,
     "mock response must preserve its single logprob"
