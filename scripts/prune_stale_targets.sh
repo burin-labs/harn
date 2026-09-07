@@ -50,6 +50,15 @@
 #
 # Usage:
 #   scripts/prune_stale_targets.sh [--dry-run]
+#   scripts/prune_stale_targets.sh [--dry-run] --remove-entry NAME [--remove-entry NAME]...
+#
+# `--remove-entry` names entries to retire regardless of their rank or age. It
+# exists because rank and age answer "was this touched recently", not "is this
+# still wanted": a lane whose pull request merged yesterday leaves a warm tree
+# that every automatic rule protects. An operator who has established that an
+# entry is finished had no way to say so through this tool, and the alternative
+# was removing paths around it, which skips the liveness probe and the
+# read-back. Named entries still go through both: a live process always wins.
 # Env:
 #   HARN_TARGET_GC_ROOTS        space-separated repo search roots
 #                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
@@ -59,6 +68,14 @@
 #                               (default 10; a negative value disables the cap)
 #   HARN_TARGET_GC_MAX_IDLE_SECS idle age past which a warm tree outside the
 #                               most-recent set is retired (default 259200)
+#   HARN_TARGET_GC_MAX_BYTES    per-root size ceiling; once the entries this
+#                               run kept exceed it, the coldest are retired
+#                               until the root fits. 0 (the default) disables
+#                               it. Off by default because enforcing it costs
+#                               a full `du` of every kept entry, which is
+#                               seconds to minutes on a large root and is not
+#                               a price every dev-setup should pay; enable it
+#                               on the periodic cleanup path.
 #   HARN_DEV_SETUP_STORAGE_ROOT one base for harn-target; when unset, sweep
 #                               both the legacy $TMPDIR and durable cache roots
 #   HARN_TARGET_GC_PROTECT      the caller's own entry (path or name), kept
@@ -103,7 +120,35 @@ target_entry_activity_epoch() {
 }
 
 dry_run=0
-[[ "${1:-}" == "--dry-run" ]] && dry_run=1
+requested_entries=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=1; shift ;;
+    --remove-entry)
+      [ "$#" -ge 2 ] || { echo "--remove-entry needs a NAME" >&2; exit 2; }
+      # One path segment only. A name carrying a separator could otherwise
+      # address a directory outside the managed root.
+      case "$2" in
+        ""|.|..|*/*) echo "invalid --remove-entry name: $2" >&2; exit 2 ;;
+      esac
+      requested_entries+=("$2"); shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+# Was this entry named on the command line?
+entry_requested() {
+  local name="$1" want
+  [ "${#requested_entries[@]}" -gt 0 ] || return 1
+  for want in "${requested_entries[@]}"; do
+    [ "$want" = "$name" ] && return 0
+  done
+  return 1
+}
+
+# Names the caller asked for that no root turned out to hold. Reported at the
+# end: a removal request that silently matched nothing would read as success.
+matched_entries=()
 
 scanned=0; removed=0; kept=0; summary_printed=0
 # Paths reported as kept, read back after a destructive pass.
@@ -112,9 +157,31 @@ kept_paths=()
 # than the run had.
 walked_roots=()
 
+# A name that matched nothing is reported by name. Without this, a typo or an
+# already-removed entry would leave the run looking like it did the work.
+report_unmatched_entries() {
+  [ "${#requested_entries[@]}" -gt 0 ] || return 0
+  local want found
+  for want in "${requested_entries[@]}"; do
+    found=0
+    if [ "${#matched_entries[@]}" -gt 0 ]; then
+      for name in "${matched_entries[@]}"; do
+        [ "$name" = "$want" ] && { found=1; break; }
+      done
+    fi
+    if [ "$found" -eq 0 ]; then
+      echo "warning: --remove-entry matched no entry in any managed root: $want" >&2
+    fi
+  done
+  # An `&&` as the last statement would return 1 whenever the name DID match,
+  # and `set -e` turns that into a failing run that just did its job correctly.
+  return 0
+}
+
 print_summary() {
   [ "$summary_printed" -eq 1 ] && return 0
   summary_printed=1
+  report_unmatched_entries
   suffix=""
   [ "$dry_run" -eq 1 ] && suffix=" (dry-run)"
   local roots
@@ -185,6 +252,14 @@ cutoff=$(( $(date +%s) - min_age ))
 # once. The newest few are the working set and are never touched. Past that,
 # a tree nobody has built in days is cache, and the cost of dropping it is a
 # rebuild.
+# Count and age answer "was this touched recently", never "is this small
+# enough". Without a size rule a root stays healthy-looking at any size: a
+# fleet that touches every entry inside the idle bound keeps all of them, and
+# the count cap alone protects the newest ten however large they are.
+max_bytes="${HARN_TARGET_GC_MAX_BYTES:-0}"
+case "$max_bytes" in
+  ''|*[!0-9]*) echo "HARN_TARGET_GC_MAX_BYTES must be a non-negative integer: $max_bytes" >&2; exit 2 ;;
+esac
 keep_recent="${HARN_TARGET_GC_KEEP_RECENT:-10}"
 max_idle="${HARN_TARGET_GC_MAX_IDLE_SECS:-259200}"
 idle_cutoff=$(( $(date +%s) - max_idle ))
@@ -296,9 +371,13 @@ release_keep_file="$(mktemp)"
 # Warm entries a live worktree still points at, one `<mtime> <path>` line per
 # root, so the retention cap below can rank them by recency.
 warm_file="$(mktemp)"
+# Entries this run kept whose ONLY protection is rank or age. The size pass may
+# evict from here and nowhere else: a live process or the caller's own entry is
+# never a candidate no matter how far over the ceiling the root sits.
+evictable_file="$(mktemp)"
 # Print the summary from the EXIT trap so no stray failure can ever make the
 # GC die silently again.
-trap 'rm -f "$keep_file" "$release_keep_file" "$warm_file"; print_summary' EXIT
+trap 'rm -f "$keep_file" "$release_keep_file" "$warm_file" "$evictable_file"; print_summary' EXIT
 
 live_worktrees() {
   discover_repo_roots | while read -r repo; do
@@ -363,6 +442,9 @@ prune_root() {
   walked_roots+=("$target_root")
   # Warm entries are ranked across this root, so the list starts empty for it.
   : > "$warm_file"
+  # Same for the size pass: its candidates are per-root, and carrying them
+  # between roots would let one root's ceiling evict another root's entries.
+  : > "$evictable_file"
   local warm_entry=0
   for d in "$target_root"/*; do
     [ -d "$d" ] || continue
@@ -394,6 +476,16 @@ prune_root() {
         echo "keep (live process: $pids): $name"
         kept=$((kept + 1)); kept_paths+=("$d"); continue
       fi
+    fi
+
+    # Placed after the liveness probe and before the rank and age rules on
+    # purpose. A live process still wins, because the caller can be wrong about
+    # a lane being finished but cannot be wrong about a compiler holding the
+    # tree open. Rank and age are exactly what the caller is overriding.
+    if entry_requested "$name"; then
+      matched_entries+=("$name")
+      remove_entry "$target_root" "$d" "named by caller"
+      continue
     fi
 
     if [ "$warm_entry" -eq 1 ]; then
@@ -437,15 +529,98 @@ prune_root() {
       base="$(basename "$path")"
       if [ "$rank" -le "$keep_recent" ]; then
         echo "keep (within the $keep_recent most recent): $base"
-        kept=$((kept + 1)); kept_paths+=("$path"); continue
+        kept=$((kept + 1)); kept_paths+=("$path")
+        printf '%s %s\n' "$mtime" "$path" >> "$evictable_file"
+        continue
       fi
       if [ "$mtime" -ge "$idle_cutoff" ]; then
         echo "keep (past the $keep_recent most recent but built within ${max_idle}s): $base"
-        kept=$((kept + 1)); kept_paths+=("$path"); continue
+        kept=$((kept + 1)); kept_paths+=("$path")
+        printf '%s %s\n' "$mtime" "$path" >> "$evictable_file"
+        continue
       fi
       remove_entry "$target_root" "$path" "cold cache"
     done < <(sort -rn "$warm_file")
   fi
+
+  enforce_size_ceiling "$target_root"
+}
+
+# Drop one path from the kept list. The size pass runs after entries have
+# already been recorded as kept, and the run's final read-back asserts that
+# every kept path still exists. Without this the ceiling's own eviction would
+# trip that check and report a correct run as an error.
+forget_kept_path() {
+  local drop="$1" keptp rebuilt=()
+  for keptp in "${kept_paths[@]}"; do
+    [ "$keptp" = "$drop" ] && continue
+    rebuilt+=("$keptp")
+  done
+  kept_paths=()
+  [ "${#rebuilt[@]}" -gt 0 ] && kept_paths=("${rebuilt[@]}")
+  return 0
+}
+
+# Bytes on disk for one entry, or empty when it cannot be measured.
+entry_kib() {
+  local kib
+  kib="$(du -sk "$1" 2>/dev/null | awk 'NR == 1 { print $1 }')"
+  case "$kib" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  printf '%s\n' "$kib"
+}
+
+# Third pass: the size ceiling, over entries the earlier rules kept on rank or
+# age alone. Count and age cannot answer "is this root too big": a fleet that
+# touches every entry inside the idle bound keeps all of them, so a root can
+# sit at any size and every rule still reports a pass. This runs last so that
+# liveness, the caller's own entry, and an explicit name all outrank it.
+enforce_size_ceiling() {
+  local target_root="$1"
+  [ "$max_bytes" -gt 0 ] || return 0
+  [ -s "$evictable_file" ] || return 0
+
+  # Measure every entry the run kept, protected ones included: the ceiling is a
+  # statement about the root's total size, and ignoring the protected entries
+  # would let a root sit permanently over it while this pass evicted the rest.
+  local total_kib=0 kib path mtime measured=0 unmeasured=0
+  for path in "${kept_paths[@]}"; do
+    case "$path" in "$target_root"/*) ;; *) continue ;; esac
+    if kib="$(entry_kib "$path")"; then
+      total_kib=$((total_kib + kib)); measured=$((measured + 1))
+    else
+      unmeasured=$((unmeasured + 1))
+    fi
+  done
+  local ceiling_kib=$((max_bytes / 1024))
+  echo "size ceiling: root holds ${total_kib}KiB in ${measured} measured entr(y|ies), ceiling ${ceiling_kib}KiB"
+  # An entry this run could not measure is not a zero. Say so rather than
+  # letting a failed `du` read as headroom.
+  if [ "$unmeasured" -gt 0 ]; then
+    echo "size ceiling: ${unmeasured} kept entr(y|ies) could not be measured; the total above is a lower bound" >&2
+  fi
+  [ "$total_kib" -gt "$ceiling_kib" ] || return 0
+
+  # Coldest first. `sort -n` puts the oldest activity stamp at the top, which
+  # is the opposite order from the retention cap above and is deliberate.
+  while IFS=' ' read -r mtime path; do
+    [ -n "$path" ] || continue
+    [ "$total_kib" -gt "$ceiling_kib" ] || break
+    case "$path" in "$target_root"/*) ;; *) continue ;; esac
+    [ -d "$path" ] || continue
+    kib="$(entry_kib "$path")" || continue
+    remove_entry "$target_root" "$path" "over the size ceiling"
+    # Only count the space back when the entry is really gone. Under --dry-run
+    # nothing is removed, but the projection must still advance or the loop
+    # would report every entry as needing removal.
+    if [ "$dry_run" -eq 1 ] || [ ! -e "$path" ]; then
+      total_kib=$((total_kib - kib))
+      kept=$((kept - 1))
+      forget_kept_path "$path"
+    fi
+  done < <(sort -n "$evictable_file")
+  echo "size ceiling: root now holds ${total_kib}KiB against ceiling ${ceiling_kib}KiB"
 }
 
 # Remove one entry, or report what would happen under --dry-run. Both passes

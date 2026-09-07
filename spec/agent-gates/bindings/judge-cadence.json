@@ -1,0 +1,18 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+  "extra_globs": ["crates/harn-stdlib/src/stdlib/agent/options_validation.harn"],
+  "config": {
+    "id": "JudgeCadence",
+    "prefix": "JudgeConfig.cadence.",
+    "types": [],
+    "parameters": [
+      {"function": "__validate_judge_cadence", "name": "value"},
+      {"function": "__turn_end_judge_when_due", "name": "cadence"},
+      {"function": "__turn_end_judge_every_due", "name": "cadence"},
+      {"function": "__turn_end_judge_past_warmup", "name": "cadence"},
+      {"function": "__turn_end_judge_under_cap", "name": "cadence"}
+    ],
+    "normalizers": ["__turn_end_judge_cadence", "__agent_turn_end_judge_stall_cadence"],
+    "containers": []
+  }
+}

@@ -1,0 +1,1003 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "extra_globs": ["crates/harn-stdlib/src/stdlib/llm/options.harn"],
+  "config": {
+    "id": "AgentSpec",
+    "prefix": "AgentSpec.",
+    "types": [
+      "AgentSpec",
+      "AgentPresetOptions",
+      "AgentCapabilitySpec",
+      "AgentContextSpec",
+      "AgentExecutionSpec",
+      "AgentLifecycleSpec",
+      "AgentModelSpec",
+      "AgentObservabilitySpec"
+    ],
+    "parameters": [
+      {"function": "__served_tool_groups", "name": "opts"},
+      {"function": "__context_profile", "name": "opts"},
+      {"function": "__skill_catalog_always", "name": "opts"},
+      {"function": "__skill_catalog_budget", "name": "opts"},
+      {"function": "__skill_catalog_limit", "name": "opts"},
+      {"function": "__context_profile_skill_bindings", "name": "opts"},
+      {"function": "__host_skill_score_candidates", "name": "opts"},
+      {"function": "__match_top_n", "name": "opts"},
+      {"function": "__skill_scoped_tools", "name": "opts"},
+      {"function": "__skill_catalog_prompt", "name": "opts"},
+      {"function": "__agent_daemon_raw_resume_conditions", "name": "opts"},
+      {"function": "daemon_timer_feedback_prompt", "name": "options"},
+      {"function": "daemon_watch_feedback_prompt", "name": "options"},
+      {"function": "__dispatch_request_has_payload", "name": "llm_opts"},
+      {"function": "llm_call_options", "name": "options"},
+      {"function": "llm_enable_equivalent_failover", "name": "options"},
+      {"function": "__mcp_mounted_server_ids", "name": "opts"},
+      {"function": "__agent_monologue_actuation_route_suppression", "name": "options"},
+      {"function": "agent_render_tool_call_prefix", "name": "options"},
+      {"function": "agent_route_capabilities", "name": "opts"},
+      {"function": "llm_has_explicit_routing_owner", "name": "options"},
+      {"function": "llm_equivalent_failover_enabled", "name": "options"},
+      {"function": "__opts_with_active_skills", "name": "opts"},
+      {"function": "__score_candidates", "name": "opts"},
+      {"function": "__record_matched", "name": "opts"},
+      {"function": "__active_from_context_profile", "name": "opts"},
+      {"function": "__top_active_from_scores", "name": "opts"},
+      {"function": "__load_skill_for_session", "name": "opts"},
+      {"function": "__agent_daemon_await_resumption", "name": "opts"},
+      {"function": "__agent_daemon_feedback", "name": "opts"},
+      {"function": "__dispatch_reject_removed_options", "name": "options"},
+      {"function": "__dispatch_reject_empty_request", "name": "llm_opts"},
+      {"function": "__dispatch_emit_call_start", "name": "llm_opts"},
+      {"function": "__dispatch_invoke_once", "name": "llm_opts"},
+      {"function": "__dispatch_structured_output_schema", "name": "llm_opts"},
+      {"function": "__dispatch_prompt_mode_request", "name": "llm_opts"},
+      {"function": "agent_prefill_eligibility", "name": "options"},
+      {"function": "__agent_loop_enable_equivalent_failover", "name": "llm_opts"},
+      {"function": "llm_arm_one_shot_prefill", "name": "options"},
+      {"function": "__mcp_delta_specs", "name": "opts"},
+      {"function": "agent_monologue_actuation_take", "name": "llm_options"},
+      {"function": "__with_load_skill_tool", "name": "opts"},
+      {"function": "__match_config", "name": "opts"},
+      {"function": "__tool_search_provider_has_native", "name": "opts"},
+      {"function": "agent_completion_prompt_bindings", "name": "options"},
+      {"function": "__agent_loop_ordinary_turn_llm_options", "name": "opts"},
+      {"function": "agent_invoke_llm", "name": "llm_opts"},
+      {"function": "agent_direct_llm_options", "name": "turn_llm_opts"},
+      {"function": "agent_monologue_actuation_take_for_turn", "name": "turn_options"},
+      {"function": "agent_monologue_actuation_take_for_turn", "name": "llm_options"},
+      {"function": "__agent_loop_enable_equivalent_failover", "name": "loop_opts"},
+      {"function": "agent_mcp_mount_additional", "name": "opts"},
+      {"function": "agent_mcp_admit_bootstrap", "name": "opts"},
+      {"function": "__skills_registry", "name": "opts"},
+      {"function": "__fresh_skill_projection_inputs", "name": "opts"},
+      {"function": "__match_strategy_manual", "name": "opts"},
+      {"function": "__match_strategy", "name": "opts"},
+      {"function": "__match_sticky", "name": "opts"},
+      {"function": "__tool_search_client_requested", "name": "opts"},
+      {"function": "__tool_search_initial_state", "name": "opts"},
+      {"function": "__tool_search_build_tools", "name": "opts"},
+      {"function": "agent_progress_apply_options", "name": "options"},
+      {"function": "agent_loop_control_invoke", "name": "opts"},
+      {"function": "agent_daemon_step", "name": "opts"},
+      {"function": "agent_autocompact_if_needed", "name": "opts"},
+      {"function": "__compaction_keep_last", "name": "opts"},
+      {"function": "__compact_options", "name": "opts"},
+      {"function": "__compaction_enabled", "name": "opts"},
+      {"function": "agent_skills_match", "name": "opts"},
+      {"function": "__turn_llm_opts", "name": "opts"},
+      {"function": "agent_stance_apply", "name": "turn_opts"},
+      {"function": "agent_reset_tool_surface_narrowing", "name": "opts"},
+      {"function": "agent_tool_search_inject_if_needed", "name": "opts"},
+      {"function": "__judge_tool_entries", "name": "opts"},
+      {"function": "llm_clear_one_shot_prefill", "name": "options"},
+      {"function": "__llm_one_shot_prefill_options", "name": "options"},
+      {"function": "__agent_loop_provider_request_options", "name": "opts"},
+      {"function": "__autocontinue_max_continuations", "name": "llm_opts"},
+      {"function": "__autocontinue_raised_cap", "name": "llm_opts"},
+      {"function": "__judge_tool_entry", "name": "opts"},
+      {"function": "__with_mcp_tool_ceiling", "name": "opts"},
+      {
+        "function": "__agent_lifecycle_await_enabled",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_lifecycle_has_subagent_capability",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_has_terminal_output_contract",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_with_llm_render_context",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_projection_with_scratchpad_barrier",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_required_tools_from_options",
+        "name": "opts"
+      },
+      {
+        "function": "__clear_tool_format_resolution",
+        "name": "opts"
+      },
+      {
+        "function": "__completion_claim_requirement_ids",
+        "name": "opts"
+      },
+      {
+        "function": "__invoke_tool",
+        "name": "options"
+      },
+      {
+        "function": "__judge_resolve_model",
+        "name": "opts"
+      },
+      {
+        "function": "__merge_hook_dict",
+        "name": "base"
+      },
+      {
+        "function": "__next_tool_claim",
+        "name": "opts"
+      },
+      {
+        "function": "__post_turn_stop_needs_verify",
+        "name": "opts"
+      },
+      {
+        "function": "__stack_dict",
+        "name": "value"
+      },
+      {
+        "function": "__turn_end_judge_cadence",
+        "name": "opts"
+      },
+      {
+        "function": "__turn_end_judge_loop_state",
+        "name": "opts"
+      },
+      {
+        "function": "__turn_end_judge_under_cap",
+        "name": "opts"
+      },
+      {
+        "function": "__turn_end_judge_when_due",
+        "name": "opts"
+      },
+      {
+        "function": "__validate_removed_agent_loop_options",
+        "name": "opts"
+      },
+      {
+        "function": "__with_resolved_tool_format",
+        "name": "opts"
+      },
+      {
+        "function": "__zero_tool_completion_context",
+        "name": "opts"
+      },
+      {
+        "function": "agent_apply_default_retry",
+        "name": "options"
+      },
+      {
+        "function": "agent_budget_pre_call_blocked",
+        "name": "opts"
+      },
+      {
+        "function": "agent_completion_review",
+        "name": "opts"
+      },
+      {
+        "function": "agent_daemon_snapshot",
+        "name": "opts"
+      },
+      {
+        "function": "agent_mcp_bootstrap_if_needed",
+        "name": "opts"
+      },
+      {
+        "function": "agent_merge_llm_options",
+        "name": "base"
+      },
+      {
+        "function": "agent_prompt_catalog",
+        "name": "options"
+      },
+      {
+        "function": "agent_reminder_providers_fire",
+        "name": "opts"
+      },
+      {
+        "function": "agent_required_tools_enforce",
+        "name": "opts"
+      },
+      {
+        "function": "agent_tool_format",
+        "name": "options"
+      },
+      {
+        "function": "agent_loop",
+        "name": "options"
+      },
+      {
+        "function": "agent_loop_options",
+        "name": "options"
+      },
+      {
+        "function": "__agent_apply_projection",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_completion_prompt_bindings",
+        "name": "options"
+      },
+      {
+        "function": "__agent_loop_build_turn_prompt",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_effective_llm_options",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_fire_resume_continuity",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_native_tool_contract_prompt",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_tool_format",
+        "name": "opts"
+      },
+      {
+        "function": "__emit_synthetic_tool_lifecycle_finish",
+        "name": "options"
+      },
+      {
+        "function": "__interpret_verdict",
+        "name": "opts"
+      },
+      {
+        "function": "__intra_turn_dependent_suffix_count",
+        "name": "options"
+      },
+      {
+        "function": "__intra_turn_has_keyed_mutating_calls",
+        "name": "options"
+      },
+      {
+        "function": "__invoke_tool_with_index",
+        "name": "options"
+      },
+      {
+        "function": "__maybe_inject_completion_confirmation",
+        "name": "opts"
+      },
+      {
+        "function": "__native_tool_text_completion",
+        "name": "opts"
+      },
+      {
+        "function": "__post_turn_verdict_result",
+        "name": "_opts"
+      },
+      {
+        "function": "__tool_surface_claimable_names",
+        "name": "opts"
+      },
+      {
+        "function": "__tool_surface_current_names",
+        "name": "opts"
+      },
+      {
+        "function": "__turn_end_judge_due",
+        "name": "opts"
+      },
+      {
+        "function": "agent_collapse_duplicate_read_calls",
+        "name": "options"
+      },
+      {
+        "function": "agent_completion_claim_apply_options",
+        "name": "options"
+      },
+      {
+        "function": "agent_lifecycle_tools",
+        "name": "options"
+      },
+      {
+        "function": "agent_render_tool_call_exemplar",
+        "name": "options"
+      },
+      {
+        "function": "agent_required_tools_missing_from_session",
+        "name": "opts"
+      },
+      {
+        "function": "agent_scratchpad_init",
+        "name": "opts"
+      },
+      {
+        "function": "agent_scratchpad_options",
+        "name": "opts"
+      },
+      {
+        "function": "agent_scratchpad_recitation_fragment",
+        "name": "opts"
+      },
+      {
+        "function": "agent_session_init",
+        "name": "opts"
+      },
+      {
+        "function": "agent_take_one_shot_prefill",
+        "name": "options"
+      },
+      {
+        "function": "agent_tool_call_paradigm",
+        "name": "options"
+      },
+      {
+        "function": "agent_tool_search_emit_queries",
+        "name": "opts"
+      },
+      {
+        "function": "agent_tool_search_record_results",
+        "name": "opts"
+      },
+      {
+        "function": "loop_until_done_system_prompt",
+        "name": "options"
+      },
+      {
+        "function": "render_agent_prompt_id",
+        "name": "options"
+      },
+      {
+        "function": "__agent_context_profile_fragments",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_decorate_turn_message",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_done_sentinel",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_has_system_prompt_options",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_json_tool_contract_prompt",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_apply_deadline",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_call_budget_new",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_contract_prompt",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_effective_wrapup_context",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_final_wrapup",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_finalize",
+        "name": "state",
+        "path": [
+          "opts"
+        ]
+      },
+      {
+        "function": "__agent_loop_has_host_wrapup_directive",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_llm_overrides",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_next_tool_output_contract",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_output_contract",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_prepare_output_contract",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_project_terminal_result",
+        "name": "state",
+        "path": [
+          "opts"
+        ]
+      },
+      {
+        "function": "__agent_loop_run",
+        "name": "initial_opts"
+      },
+      {
+        "function": "__agent_loop_turn_setup",
+        "name": "state",
+        "path": [
+          "opts"
+        ]
+      },
+      {
+        "function": "__agent_loop_verify_closure_exists",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__agent_loop_wrapup_directive",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_wrapup_response_protocol_tail",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_mcp_initialize_advisory_prompt",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_primary_system_text",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_projection_options",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_route_identity",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_text_tool_contract_prompt",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_turn_end_judge_stall_cadence",
+        "name": "opts"
+      },
+      {
+        "function": "__apply_post_turn_options",
+        "name": "opts"
+      },
+      {
+        "function": "__arbitrate_stalled_toolless_turn",
+        "name": "opts"
+      },
+      {
+        "function": "__autocontinue_should_continue",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__capability_gap_event",
+        "name": "opts"
+      },
+      {
+        "function": "__classify_missing_tool_call",
+        "name": "opts"
+      },
+      {
+        "function": "__completion_boundary_ledger",
+        "name": "opts"
+      },
+      {
+        "function": "__completion_policy_plan",
+        "name": "opts"
+      },
+      {
+        "function": "__completion_result",
+        "name": "opts"
+      },
+      {
+        "function": "__context_profile_disabled",
+        "name": "opts"
+      },
+      {
+        "function": "__context_profile_options",
+        "name": "opts"
+      },
+      {
+        "function": "__context_profile_root",
+        "name": "opts"
+      },
+      {
+        "function": "__default_done_sentinel",
+        "name": "opts"
+      },
+      {
+        "function": "__detect_native_fallback",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__dispatch_tool_calls",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__dispatch_tool_calls_with_middleware",
+        "name": "options"
+      },
+      {
+        "function": "__done_contract_primary_prompt",
+        "name": "opts"
+      },
+      {
+        "function": "__explicit_provider",
+        "name": "opts"
+      },
+      {
+        "function": "__explicit_tool_format",
+        "name": "opts"
+      },
+      {
+        "function": "__intra_turn_resource_guard",
+        "name": "options"
+      },
+      {
+        "function": "__intra_turn_resource_keys",
+        "name": "options"
+      },
+      {
+        "function": "__judge_provider_family",
+        "name": "opts"
+      },
+      {
+        "function": "__judge_run_checkpoint",
+        "name": "request",
+        "path": [
+          "opts"
+        ]
+      },
+      {
+        "function": "__maybe_inject_action_nudge",
+        "name": "opts"
+      },
+      {
+        "function": "__missing_tool_call_recovery_classifier",
+        "name": "opts"
+      },
+      {
+        "function": "__missing_tool_call_recovery_config",
+        "name": "opts"
+      },
+      {
+        "function": "__native_completion_context",
+        "name": "opts"
+      },
+      {
+        "function": "__native_tools_complete_naturally",
+        "name": "opts"
+      },
+      {
+        "function": "__normalize_iteration_budget",
+        "name": "opts"
+      },
+      {
+        "function": "__normalize_reminder_provider_options",
+        "name": "opts"
+      },
+      {
+        "function": "__parse_feedback_has_non_structural_tools",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__post_turn_callback_verdict",
+        "name": "opts"
+      },
+      {
+        "function": "__purpose_label_arm",
+        "name": "opts"
+      },
+      {
+        "function": "__required_tools_text_completion",
+        "name": "opts"
+      },
+      {
+        "function": "__resolve_intra_turn_failure_fanout_cap",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__resolve_intra_turn_resource_fail_fast",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__resolve_max_concurrent_tools",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__run_input_guardrail",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__run_pre_turn_scope_classifier",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__run_structural_validator",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__stack_pack_options",
+        "name": "base"
+      },
+      {
+        "function": "__stance_config",
+        "name": "opts"
+      },
+      {
+        "function": "__stance_policy_patch",
+        "name": "opts"
+      },
+      {
+        "function": "__stance_register_escape_tool",
+        "name": "opts"
+      },
+      {
+        "function": "__stop_after_successful_tools",
+        "name": "opts"
+      },
+      {
+        "function": "__task_ledger_from_shorthand",
+        "name": "opts"
+      },
+      {
+        "function": "__terminal_callback_verdict",
+        "name": "opts"
+      },
+      {
+        "function": "__text_family_toolless_turn",
+        "name": "opts"
+      },
+      {
+        "function": "__tool_batch_call_classification",
+        "name": "options"
+      },
+      {
+        "function": "__tool_batch_emit_receipt",
+        "name": "options"
+      },
+      {
+        "function": "__tool_batch_plan",
+        "name": "options"
+      },
+      {
+        "function": "__tool_envelope",
+        "name": "options"
+      },
+      {
+        "function": "__tool_format_route",
+        "name": "opts"
+      },
+      {
+        "function": "__tool_surface_claim_authority",
+        "name": "opts"
+      },
+      {
+        "function": "__tool_surface_current_entries",
+        "name": "opts"
+      },
+      {
+        "function": "__tool_surface_narrowing_post_turn",
+        "name": "opts"
+      },
+      {
+        "function": "__turn_end_condition_config",
+        "name": "opts"
+      },
+      {
+        "function": "__validate_agent_loop_callback_options",
+        "name": "opts"
+      },
+      {
+        "function": "__validate_agent_loop_completion_options",
+        "name": "opts"
+      },
+      {
+        "function": "__with_prompt_fragment",
+        "name": "agent_options"
+      },
+      {
+        "function": "agent_apply_tool_surface_narrowing",
+        "name": "opts"
+      },
+      {
+        "function": "agent_build_turn_messages",
+        "name": "opts"
+      },
+      {
+        "function": "agent_build_turn_system_fragments",
+        "name": "opts"
+      },
+      {
+        "function": "agent_compute_post_turn",
+        "name": "opts"
+      },
+      {
+        "function": "agent_extract_tool_calls",
+        "name": "opts"
+      },
+      {
+        "function": "agent_has_tools",
+        "name": "opts"
+      },
+      {
+        "function": "agent_loop_run_settings",
+        "name": "opts"
+      },
+      {
+        "function": "agent_loop_turn_projection",
+        "name": "turn_opts"
+      },
+      {
+        "function": "agent_refresh_tool_format_for_route",
+        "name": "options"
+      },
+      {
+        "function": "agent_stance_prepare",
+        "name": "opts"
+      },
+      {
+        "function": "agent_tool_format_resolution",
+        "name": "options"
+      },
+      {
+        "function": "__budget_envelope",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_completion_review",
+        "name": "opts"
+      },
+      {
+        "function": "__daemon_compaction_summary",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_invoke_main_request",
+        "name": "llm_opts"
+      },
+      {
+        "function": "__agent_loop_invoke_main_request",
+        "name": "turn_opts"
+      },
+      {
+        "function": "agent_loop_demote_empty_turn",
+        "name": "turn_llm_opts"
+      },
+      {
+        "function": "agent_stall_turn_end_judge_due",
+        "name": "opts"
+      },
+      {
+        "function": "__run_structural_validator",
+        "name": "llm_opts"
+      },
+      {
+        "function": "__sync_tool_search_state",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_post_dispatch",
+        "name": "turn_llm_opts"
+      },
+      {
+        "function": "agent_budget_post_call_stop_reason",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_recover_context_overflow",
+        "name": "llm_opts"
+      },
+      {
+        "function": "__agent_loop_recover_context_overflow",
+        "name": "turn_opts"
+      },
+      {
+        "function": "agent_loop_provider_failure",
+        "name": "turn_llm_opts"
+      },
+      {
+        "function": "agent_step_judge",
+        "name": "opts"
+      },
+      {
+        "function": "__stall_judge_opts",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__agent_stall_verification_dispatch",
+        "name": "opts"
+      },
+      {
+        "function": "agent_session_record_usage",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_apply_stall_judge_veto",
+        "name": "turn_llm_opts"
+      },
+      {
+        "function": "agent_dispatch_tool_call",
+        "name": "options"
+      },
+      {
+        "function": "__default_invoke_tool",
+        "name": "options"
+      },
+      {
+        "function": "__mcp_bootstrap_and_admit",
+        "name": "opts"
+      },
+      {
+        "function": "agent_completion_adjudicator_declared",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_prompt_overrides",
+        "name": "options"
+      },
+      {
+        "function": "agent_required_tools_missing_from_result",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_required_tools_emit_friction",
+        "name": "opts"
+      },
+      {
+        "function": "__validate_agent_loop_retry",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_retry_config",
+        "name": "opts"
+      },
+      {
+        "function": "__retry_has_key",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_next_tool_claim_receipt",
+        "name": "opts"
+      },
+      {
+        "function": "__invoke_llm_with_autocontinue",
+        "name": "llm_opts"
+      },
+      {
+        "function": "__invoke_llm_with_autocontinue",
+        "name": "turn_opts"
+      },
+      {
+        "function": "__agent_loop_context_overflow_max_recoveries",
+        "name": "llm_opts"
+      },
+      {
+        "function": "agent_emergency_compact",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_loop_emit_provider_error",
+        "name": "llm_opts"
+      },
+      {
+        "function": "__mcp_admit_tools",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_options_are_direct_prompt_catalog",
+        "name": "options"
+      },
+      {
+        "function": "__agent_validate_prompt_overrides",
+        "name": "overrides"
+      },
+      {
+        "function": "__agent_required_tools_friction_event",
+        "name": "opts"
+      },
+      {
+        "function": "__judge_tool_descriptor",
+        "name": "opts"
+      },
+      {
+        "function": "__invoke",
+        "name": "opts"
+      }
+    ],
+    "normalizers": [
+      {"function": "__fresh_skill_projection_inputs", "path": ["tool_opts"]},
+      {"function": "__with_load_skill_tool", "argument": 2},
+      {"function": "__opts_with_active_skills", "argument": 0},
+      {"function": "agent_mcp_mount_additional", "argument": 2},
+      {"function": "agent_mcp_admit_bootstrap", "argument": 0},
+      {"function": "agent_progress_apply_options", "argument": 1},
+      {"function": "agent_direct_llm_options", "argument": 0},
+      {"function": "__agent_loop_ordinary_turn_llm_options", "argument": 0},
+      {"function": "__purpose_label_arm", "path": ["options"]},
+      {"function": "__agent_loop_effective_llm_options", "argument": 1},
+      {"function": "agent_merge_llm_options", "argument": 0},
+      {"function": "__turn_llm_opts", "argument": 2},
+      {"function": "agent_skills_match", "argument": 2},
+      {"function": "agent_stance_apply", "argument": 0},
+      {"function": "agent_reset_tool_surface_narrowing", "argument": 0},
+      {"function": "agent_tool_search_inject_if_needed", "argument": 1},
+      {"function": "agent_apply_tool_surface_narrowing", "argument": 0},
+      {"function": "__llm_one_shot_prefill_options", "path": []},
+      "agent_options",
+      "agent_loop_options",
+      "agent_preset_options",
+      "agent_mcp_bootstrap_if_needed",
+      "__agent_loop_apply_deadline",
+      {
+        "function": "__agent_loop_turn_setup",
+        "path": [
+          "opts"
+        ],
+        "additional_paths": [
+          [
+            "turn_opts"
+          ],
+          [
+            "turn_llm_opts"
+          ],
+          [
+            "llm_opts"
+          ]
+        ]
+      },
+      {
+        "function": "__agent_loop_terminal_boundary",
+        "path": [
+          "opts"
+        ]
+      },
+      {
+        "function": "agent_loop_post_turn_transition",
+        "path": [
+          "state",
+          "opts"
+        ]
+      },
+      {
+        "function": "agent_loop_provider_failure",
+        "path": [
+          "opts"
+        ]
+      },
+      "__sync_tool_search_state"
+    ],
+    "containers": [
+      "iteration_budget",
+      "stall_diagnostics",
+      "judge",
+      "turn_policy",
+      "compaction",
+      "model_policy"
+    ]
+  }
+}

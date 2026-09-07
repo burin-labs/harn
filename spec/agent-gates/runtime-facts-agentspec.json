@@ -1,0 +1,604 @@
+[
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+    "expression": "opts?._turn_end_judge_due",
+    "owner": "__completion_policy_plan",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+    "expression": "opts?._turn_end_judge_invocations",
+    "owner": "__completion_policy_plan",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+    "expression": "opts?._turn_end_judge_trigger",
+    "owner": "__completion_policy_plan",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+    "expression": "opts?._verify_completion_judge_invocations",
+    "owner": "__completion_policy_plan",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+    "expression": "opts?._verify_completion_judge_trigger",
+    "owner": "__completion_policy_plan",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
+    "expression": "registry?.tools",
+    "owner": "__judge_tool_entries",
+    "evidence": "Extracts the tool entries from the dictionary form of AgentSpec.tools; the alternative list form is returned directly. This is the registry payload, not another caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+    "expression": "opts?._deadline_at_ms",
+    "owner": "__judge_run_checkpoint",
+    "evidence": "Computed from the resolved deadline contract in loop_foundation; not an independently selected deadline."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._context_overflow_recovery_attempt",
+    "owner": "__dispatch_emit_call_start",
+    "evidence": "Measured overflow-recovery attempt recorded by loop_foundation and projected into llm_dispatch telemetry."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._final_wrapup",
+    "owner": "__dispatch_emit_call_start",
+    "evidence": "Turn marker set by loop_turn_scope when invoking the final wrapup and read by dispatch telemetry."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._iteration",
+    "owner": "__dispatch_invoke_once",
+    "evidence": "Current iteration projected by loop_turn_options into the turn request; not a configured iteration ceiling."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._structured_output_prompt_fallback",
+    "owner": "agent_invoke_llm",
+    "evidence": "Dispatch lifecycle marker set after structured-output fallback; prevents repeating the fallback."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._truncation_auto_continue_attempt",
+    "owner": "__dispatch_emit_call_start",
+    "evidence": "Measured truncation continuation attempt written by loop_foundation and projected into dispatch telemetry."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+    "expression": "opts._tool_format_capability_gap",
+    "owner": "agent_loop",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+    "expression": "opts._tool_format_override",
+    "owner": "agent_loop",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+    "expression": "opts?._tool_format_capability_gap",
+    "owner": "agent_loop",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+    "expression": "opts?._tool_format_override",
+    "owner": "agent_loop",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "options?._iteration",
+    "owner": "__tool_batch_plan",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "options?._tool_batch_dependency_state",
+    "owner": "__tool_batch_plan",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "turn_opts?._iteration",
+    "owner": "__dispatch_tool_calls",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "turn_opts?._stop_reason",
+    "owner": "__dispatch_tool_calls",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "turn_opts?._tool_batch_dependency_state",
+    "owner": "__dispatch_tool_calls",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "claim?.source",
+    "owner": "__agent_loop_next_tool_output_contract",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "claim?.tool_name",
+    "owner": "__agent_loop_next_tool_output_contract",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "loop_opts?._agent_loop_last_llm_route_patch_complete",
+    "owner": "__agent_loop_enable_equivalent_failover",
+    "evidence": "Derived provider/model route-patch completeness recorded by loop_turn_options and inspected by loop_support."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "loop_opts?._agent_loop_last_llm_route_patch_seen",
+    "owner": "__agent_loop_enable_equivalent_failover",
+    "evidence": "Derived route-patch presence recorded by loop_turn_options and inspected by loop_support."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "merged?._next_tool_claim_applied",
+    "owner": "__agent_loop_effective_llm_options",
+    "evidence": "Receipt set by loop_support after projecting the next-tool claim into provider request options."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "merged?._output_contract_repair",
+    "owner": "__agent_loop_effective_llm_options",
+    "evidence": "Repair-turn marker set by loop_turn_scope and consumed by loop_support; the output contract owns the requested schema."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "opts?._next_tool_claim",
+    "owner": "__agent_loop_next_tool_output_contract",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "opts?._next_tool_claim_applied",
+    "owner": "__agent_loop_next_tool_claim_receipt",
+    "evidence": "Receipt set by loop_support after projecting the next-tool claim into provider request options."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+    "expression": "options?._iteration",
+    "owner": "__tool_envelope",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+    "expression": "options?._run_id",
+    "owner": "__tool_envelope",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+    "expression": "options?._tool_call_index",
+    "owner": "__tool_envelope",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+    "expression": "turn_opts?._iteration",
+    "owner": "__run_structural_validator",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+    "expression": "turn_opts?._run_id",
+    "owner": "__run_structural_validator",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+    "expression": "turn_opts?.tools?.tools",
+    "owner": "__parse_feedback_has_non_structural_tools",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+    "expression": "opts?._resume_continuity",
+    "owner": "__agent_loop_fire_resume_continuity",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+    "expression": "payload?.iteration",
+    "owner": "__agent_loop_fire_resume_continuity",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+    "expression": "payload?.turn",
+    "owner": "__agent_loop_fire_resume_continuity",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "opts?._mcp_delta_bootstrap",
+    "owner": "__agent_loop_turn_setup",
+    "evidence": "Bootstrap result produced by mcp mounting and consumed by loop_turn_setup for newly mounted servers."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "turn_opts?._skill_activated_this_turn",
+    "owner": "__agent_loop_turn_setup",
+    "evidence": "Computed activation result written by skills and consumed by loop_turn_setup."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "ceiling.contains",
+    "owner": "__with_mcp_tool_ceiling",
+    "evidence": "Collection membership intrinsic on the configured tool ceiling, not a separate policy setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "existing?._type",
+    "owner": "__mcp_admit_tools",
+    "evidence": "Runtime tool-registry discriminator inspected during MCP tool admission."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "existing?.tools",
+    "owner": "__mcp_admit_tools",
+    "evidence": "Tool-registry payload projected during MCP tool admission; the tools setting owns this data."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "opts?._mcp_server_info",
+    "owner": "__mcp_bootstrap_and_admit",
+    "evidence": "Accumulated server metadata from MCP bootstrap results in mcp; not a capability-policy input."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+    "expression": "opts?._tool_format_source",
+    "owner": "agent_refresh_tool_format_for_route",
+    "evidence": "Tool-format resolution provenance written by options_public and options_validation."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+    "expression": "opts.removing",
+    "owner": "__clear_tool_format_resolution",
+    "evidence": "Dictionary removal intrinsic, not an option named removing."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "batch_state?.deferred_signatures",
+    "owner": "__completion_result",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "opts?._consecutive_text_only",
+    "owner": "__maybe_inject_completion_confirmation",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "opts?._next_tool_claim",
+    "owner": "agent_compute_post_turn",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "opts?._next_tool_claim?.source",
+    "owner": "agent_compute_post_turn",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "opts?._session_rejected_tools",
+    "owner": "agent_compute_post_turn",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "opts?._session_successful_tools",
+    "owner": "agent_compute_post_turn",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "opts?._stall_checkpoint",
+    "owner": "agent_compute_post_turn",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "opts?._tool_batch_dependency_state",
+    "owner": "__completion_result",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "opts?._turn_tool_call_feedback",
+    "owner": "__native_tool_text_completion",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+    "expression": "base.removing",
+    "owner": "agent_take_one_shot_prefill",
+    "evidence": "Dictionary removal intrinsic, not an option named removing."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+    "expression": "opts._primary_system",
+    "owner": "__agent_primary_system_text",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+    "expression": "opts?._mcp_server_info",
+    "owner": "__agent_mcp_initialize_advisory_prompt",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+    "expression": "opts?._primary_system",
+    "owner": "__agent_has_system_prompt_options",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+    "expression": "opts?._progress_tool_system_prompt_nudge",
+    "owner": "agent_build_turn_system_fragments",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+    "expression": "registry?.tools",
+    "owner": "agent_has_tools",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+    "expression": "options.keys",
+    "owner": "__agent_options_are_direct_prompt_catalog",
+    "evidence": "Dictionary key iteration intrinsic, not an option named keys."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+    "expression": "overrides.keys",
+    "owner": "__agent_validate_prompt_overrides",
+    "evidence": "Dictionary key iteration intrinsic, not an option named keys."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
+    "expression": "opts.persona",
+    "owner": "__agent_required_tools_friction_event",
+    "evidence": "Actor label copied into required-tool friction evidence and recurrence hints; this reader makes no persona-dependent policy decision."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
+    "expression": "opts?._preset_kind",
+    "owner": "__agent_required_tools_friction_event",
+    "evidence": "Resolved preset identity recorded by agent_preset_options; the preset selector owns the configuration."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
+    "expression": "opts?.persona",
+    "owner": "__agent_required_tools_friction_event",
+    "evidence": "Actor label copied into required-tool friction evidence and recurrence hints; this reader makes no persona-dependent policy decision."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
+    "expression": "opts.keys",
+    "owner": "__retry_has_key",
+    "evidence": "Dictionary key iteration intrinsic, not an option named keys."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "opts?.tools?.tools",
+    "owner": "__served_tool_groups",
+    "evidence": "Tool-registry payload projected during MCP tool admission; the tools setting owns this data."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "registry?.tools",
+    "owner": "__skill_scoped_tools",
+    "evidence": "Tool-registry payload projected during MCP tool admission; the tools setting owns this data."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+    "expression": "allowed.appending",
+    "owner": "__stance_policy_patch",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+    "expression": "turn_opts?._read_only_stance_tools",
+    "owner": "agent_stance_apply",
+    "evidence": "Resolved tool names recorded by stance after applying the read-only tool policy."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+    "expression": "opts?._tool_search_client",
+    "owner": "agent_tool_search_record_results",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+    "expression": "state.name",
+    "owner": "agent_tool_search_record_results",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+    "expression": "state.strategy_label",
+    "owner": "agent_tool_search_emit_queries",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "names.appending",
+    "owner": "agent_apply_tool_surface_narrowing",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "opts?._next_tool_claim",
+    "owner": "agent_apply_tool_surface_narrowing",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "opts?._next_tool_claim?.tool_name",
+    "owner": "agent_apply_tool_surface_narrowing",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "opts?._tool_surface_claim_authority",
+    "owner": "__tool_surface_claim_authority",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "opts?._tool_surface_narrowed_tools",
+    "owner": "__tool_surface_narrowing_post_turn",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "opts?._tool_surface_narrowing_history",
+    "owner": "__tool_surface_narrowing_post_turn",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "registry?.tools",
+    "owner": "__tool_surface_current_entries",
+    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "opts?._turn_end_judge_invocations",
+    "owner": "__turn_end_judge_under_cap",
+    "evidence": "Measured invocation count projected from loop state; JudgeConfig owns the configured cap."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "opts?._turn_end_judge_loop_state",
+    "owner": "__turn_end_judge_loop_state",
+    "evidence": "Loop evidence projected by loop_post_turn for cadence evaluation; not caller-selected policy."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "opts?._turn_end_judge_trigger",
+    "owner": "__turn_end_judge_when_due",
+    "evidence": "Derived stalled trigger written by loop_turn_options, not a caller-selected cadence."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "base.removing",
+    "owner": "llm_clear_one_shot_prefill",
+    "evidence": "Dictionary removal intrinsic, not an option named removing."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "base?._harn_one_shot_prefill",
+    "owner": "llm_clear_one_shot_prefill",
+    "evidence": "Internal lifecycle marker armed by llm_arm_one_shot_prefill and consumed by llm_clear_one_shot_prefill."
+  }
+]

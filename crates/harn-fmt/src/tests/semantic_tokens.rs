@@ -12,10 +12,10 @@ use harn_lexer::{Lexer, StringSegment, TokenKind};
 use harn_parser::Parser;
 
 use super::corpus::{repository_harn_files, workspace_root};
-use crate::format_source;
+use crate::{format_source, line_width_violations, LINE_WIDTH_DEFAULT};
 
 #[test]
-fn current_harn_corpus_preserves_semantic_tokens() {
+fn current_harn_corpus_preserves_tokens_idempotence_and_width() {
     // A few real stdlib modules contain deeply nested expressions. Match the
     // CLI's practical stack headroom instead of making the invariant depend on
     // libtest's comparatively small worker stack.
@@ -67,11 +67,28 @@ fn audit_current_harn_corpus() {
         if let Err(error) = assert_same_semantic_tokens(&source, &formatted) {
             failures.push(format!("{relative}: {error}"));
         }
+        match format_source(&formatted) {
+            Ok(reformatted) if reformatted != formatted => {
+                failures.push(format!("{relative}: formatted source is not idempotent"));
+            }
+            Err(error) => {
+                failures.push(format!(
+                    "{relative}: formatted source is not parseable: {error}"
+                ));
+            }
+            Ok(_) => {}
+        }
+        let violations = line_width_violations(&formatted, LINE_WIDTH_DEFAULT);
+        if !violations.is_empty() {
+            failures.push(format!(
+                "{relative}: breakable width overflow: {violations:?}"
+            ));
+        }
     }
 
     assert!(
         failures.is_empty(),
-        "the formatter changed these files into different programs. \
+        "the formatter violated token preservation, idempotence, or line width. \
          The defect is in the formatter, not in the listed files; do not \
          rewrite the listed source to make this pass.\n{}",
         failures.join("\n")

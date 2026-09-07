@@ -1,0 +1,70 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "CommandWaitOptions",
+    "prefix": "CommandWaitOptions.",
+    "types": [
+      "CommandWaitOptions"
+    ],
+    "parameters": [
+      {
+        "function": "__cl_apply_one",
+        "name": "cw"
+      },
+      {
+        "function": "__cl_advance_schedule_row",
+        "name": "cw"
+      },
+      {
+        "function": "command_ledger_apply_updates",
+        "name": "cw"
+      },
+      {
+        "function": "command_ledger_build_digest",
+        "name": "cw"
+      },
+      {
+        "function": "command_ledger_decide",
+        "name": "cw"
+      },
+      {
+        "function": "__cl_ceiling_breaches",
+        "name": "cw"
+      },
+      {
+        "function": "__cl_decision_wording",
+        "name": "cw"
+      },
+      {
+        "function": "__cl_earliest_deadline",
+        "name": "cw"
+      },
+      {
+        "function": "__cl_new_row",
+        "name": "cw"
+      },
+      {
+        "function": "__cl_row_fires",
+        "name": "cw"
+      },
+      {
+        "function": "command_ledger_after_digest",
+        "name": "cw"
+      },
+      {
+        "function": "command_ledger_apply_ceiling",
+        "name": "cw"
+      },
+      {
+        "function": "command_ledger_hold",
+        "name": "cw"
+      },
+      {
+        "function": "command_wait_normalize",
+        "name": "raw"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

@@ -52,9 +52,10 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: burin-labs/.github/.github/actions/pr-title-check@3f0f1f36795f7cd0705564f0697152b3d0f59043
+      - uses: burin-labs/.github/.github/actions/pr-title-check@62309a1164fd47bc1f2ed75632ba84e41d3707a8
         with:
           areas: "Parser|VM|LLM|Models|Stdlib|Agent|CLI|Modules|Orchestrator|ACP|Evals|Docs|CI|Release"
+          area-suggestions: "Build=CI|Lint=CI"
 
   public-metadata-privacy:
     name: Public metadata privacy

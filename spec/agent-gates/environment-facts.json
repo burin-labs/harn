@@ -1,0 +1,9 @@
+[
+  {
+    "scope": "runner-native-environment",
+    "file": "crates/harn-vm/src/orchestration/command_policy/catastrophic/semantic_shell.rs",
+    "expression": "\"SystemRoot\"",
+    "owner": "Windows command resolver",
+    "evidence": "Operating-system executable location, not an agent policy switch."
+  }
+]

@@ -1,0 +1,28 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "agent_done_contract",
+    "prefix": "agent_done_contract.",
+    "types": [],
+    "parameters": [
+      {
+        "function": "__done_contract_primary_prompt",
+        "name": "opts"
+      },
+      {
+        "function": "__done_contract_judge_system",
+        "name": "opts"
+      },
+      {
+        "function": "__judge_stable_prefix",
+        "name": "opts"
+      },
+      {
+        "function": "agent_done_contract",
+        "name": "options"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

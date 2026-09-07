@@ -99,7 +99,6 @@ pipeline default(harness: Harness, task: unknown) {{
     tool_format: "native",
     loop_until_done: true,
     max_iterations: {MAX_ITERATIONS},
-    done_judge: nil,
   }})
   harness.fs.append({tick_path_literal}, "STATUS:" + to_string(result.status) + "\n")
 }}
@@ -254,7 +253,6 @@ pipeline default(harness: Harness, task: unknown) {{
     tool_format: "native",
     loop_until_done: true,
     max_iterations: {MAX_ITERATIONS},
-    done_judge: nil,
   }})
   harness.stdio.println("LOOP_STATUS:" + to_string(result.status))
 }}
@@ -408,7 +406,6 @@ pipeline default(harness: Harness, task: unknown) {{
     tool_format: "native",
     loop_until_done: true,
     max_iterations: 6,
-    done_judge: nil,
   }})
 }}
 "#
@@ -715,7 +712,6 @@ pipeline default(harness: Harness, task: unknown) {{
     tool_format: "native",
     loop_until_done: true,
     max_iterations: {MAX_ITERATIONS},
-    done_judge: nil,
   }})
   harness.fs.append({tick_path_literal}, "STATUS:" + to_string(result.status) + "\n")
 }}

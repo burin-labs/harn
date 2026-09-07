@@ -275,6 +275,7 @@ audit_root="$tmp_root/audit-root"
 mkdir -p \
   "$audit_root/scripts" \
   "$audit_root/scripts/ci" \
+  "$audit_root/scripts/config" \
   "$audit_root/docs/src" \
   "$audit_root/crates/harn-vm" \
   "$audit_root/crates/harn-cli" \
@@ -290,6 +291,8 @@ printf 'OAuth MCP trust boundary mutation session worker_update\n' > "$audit_roo
 printf 'spec\n' > "$audit_root/spec/HARN_SPEC.md"
 printf 'tag = "v1.2.3"\n' > "$audit_root/docs/src/embedding-rust.md"
 printf '{}\n' > "$audit_root/scripts/release_audit_contract.json"
+cp "$repo_root/scripts/ci/host_bound_rust_test_filter.sh" "$audit_root/scripts/ci/"
+cp "$repo_root/scripts/config/host-bound-rust-tests.txt" "$audit_root/scripts/config/"
 printf 'jobs: {}\n' > "$audit_root/.github/workflows/ci.yml"
 git -C "$audit_root" init -q
 git -C "$audit_root" config user.email test@example.com
@@ -442,13 +445,9 @@ if [[ "${HARN_CONFORMANCE_HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
   echo "make received cargo target HARN_CONFORMANCE_HARN_BIN" >&2
   exit 1
 fi
-if [[ "${1:-}" == "check-protocol-artifacts" && -n "${FAKE_WARMED_HARN_VERSION:-}" ]]; then
-  workspace_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
-  if [[ "$workspace_version" != "$FAKE_WARMED_HARN_VERSION" ]] &&
-    [[ " $* " != *" PROTOCOL_ARTIFACT_VERSION=$workspace_version "* ]]; then
-    echo "older warmed Harn binary checked bumped protocol artifacts without the workspace version" >&2
-    exit 20
-  fi
+if [[ "${1:-}" == "check-protocol-artifacts" ]] && [[ " $* " == *" PROTOCOL_ARTIFACT_VERSION="* ]]; then
+  echo "protocol-artifact check was given a version; artifacts have carried none since #8234" >&2
+  exit 20
 fi
 if [[ -n "${CARGO_TARGET_DIR-}" ]]; then
   rm -f "$CARGO_TARGET_DIR/debug/harn"
@@ -600,15 +599,7 @@ do
   fi
 done
 
-expected_host_bound_filter="$(node -e '
-  const fs = require("node:fs")
-  const contract = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
-  const job = contract.merge_group_jobs.find((entry) => entry.job_id === "rust-check-inputs")
-  const command = job.steps.find((step) => step.id === "release-audit-rust-test").run
-  const match = command.match(/-E '\''not \((.*)\)'\''$/)
-  if (!match) process.exit(1)
-  process.stdout.write(match[1])
-' "$repo_root/scripts/release_audit_contract.json")"
+expected_host_bound_filter="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh")"
 HARN_RUNNER_TIER=blacksmith run_audit blacksmith --source-only
 expected_make="make test ARGS=--workspace -E 'not ($expected_host_bound_filter)'"
 if ! grep -Fq "$expected_make" "$audit_record"; then
@@ -922,12 +913,18 @@ if ! grep -Fxq "publish --dry-run" "$audit_record"; then
 fi
 preserved_harn="$(grep -F "dump-protocol-artifacts" "$audit_record" | sed -n 's/.*self=\([^ ]*\/harn-bin\/harn\).*/\1/p' | head -1)"
 
-# Preparation stamps 1.2.4 artifacts through the still-warmed 1.2.3 binary.
-# A later generated audit must tell that binary to check the workspace version,
-# not the version embedded when the binary was built.
-FAKE_WARMED_HARN_VERSION=1.2.3 run_audit bumped-metadata --receipt "$receipt"
-if ! grep -Fq "make check-protocol-artifacts PROTOCOL_ARTIFACT_VERSION=1.2.4" "$audit_record"; then
-  echo "release audit did not check bumped protocol artifacts against the workspace version" >&2
+# Preparation regenerates 1.2.4 artifacts through the still-warmed 1.2.3 binary.
+# Since #8234 the artifacts embed no version, so the audit must check them with
+# no version argument at all: passing one is now an unknown flag the CLI
+# rejects, and the version that produced the binary no longer matters.
+run_audit bumped-metadata --receipt "$receipt"
+if ! grep -Fq "make check-protocol-artifacts" "$audit_record"; then
+  echo "release audit did not check protocol artifacts" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+if grep -Fq "PROTOCOL_ARTIFACT_VERSION" "$audit_record"; then
+  echo "release audit still stamps a version onto the protocol-artifact check" >&2
   cat "$audit_record" >&2
   exit 1
 fi

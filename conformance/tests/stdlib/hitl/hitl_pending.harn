@@ -2,12 +2,16 @@ import "std/hitl"
 
 pipeline test(harness: Harness, task: unknown) {
   const prompt = "Need a human " + harness.random.uuid()
+  const cursor = harness.obs.event_log_latest("hitl.questions")
+  const requests = harness.obs.event_log_subscribe(
+    {topic: "hitl.questions", from_cursor: cursor, kind_prefix: "hitl.question_asked"},
+  )
   const handle = spawn {
     harness.interaction.ask_user(prompt, {timeout: 5m})
   }
-  harness.clock.sleep_ms(10ms)
+  const requested = requests.next().value
   const rows: list<HitlPendingRequest> = harness.interaction.hitl_pending({}).filter(
-    { row -> row.prompt == prompt },
+    { row -> row.request_id == requested.payload.request_id && row.prompt == prompt },
   )
     .to_list()
   harness.stdio.println(len(rows))

@@ -7,7 +7,6 @@
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
 
 HARN_BIN ?=
-PROTOCOL_ARTIFACT_VERSION ?=
 HARN_CONFORMANCE_TIMEOUT_MS ?= 60000
 HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
 define HARN_REQUIRE_NEXTEST
@@ -30,7 +29,6 @@ HARN_NO_BUILD_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_
 HARN_CMD_VERBOSE = $(HARN_CMD)
 HARN_CLI_CMD = $(HARN_CMD)
 HARN_BIN_ASSIGN = harn_bin="$$($(HARN_BIN_PRINT_CMD))"
-PROTOCOL_ARTIFACT_CHECK_ARGS = $(if $(strip $(PROTOCOL_ARTIFACT_VERSION)),--artifact-version "$(PROTOCOL_ARTIFACT_VERSION)" --check,--check)
 HARN_WASM_PACK_VERSION ?= 0.15.0
 HARN_WASM_PACK_DIR ?= $(or $(TMPDIR),/tmp)/harn-tools/wasm-pack-$(HARN_WASM_PACK_VERSION)
 HARN_WASM_PACK = $(HARN_WASM_PACK_DIR)/bin/wasm-pack
@@ -64,6 +62,7 @@ all: fmt
 	stable_root="$$(mktemp -d "$${TMPDIR:-/tmp}/harn-all-bin.XXXXXX")" || exit 1; \
 	trap 'rm -rf "$$stable_root"' EXIT; \
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
+	$(MAKE) HARN_BIN="$$harn_bin" check-agent-gates || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-protocol-artifacts check-connector-schemas check-harness-migrations check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-scheduled-workflows check-vm-exposures portal-check || exit 1; \
 	if [ -z "$(strip $(HARN_BIN))" ]; then HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --record-receipt; fi
 
@@ -872,7 +871,7 @@ gen-protocol-artifacts:
 
 check-protocol-artifacts:
 	@echo "=== Checking Harn protocol artifacts are up to date ==="
-	@$(HARN_CLI_CMD) dump-protocol-artifacts $(PROTOCOL_ARTIFACT_CHECK_ARGS)
+	@$(HARN_CLI_CMD) dump-protocol-artifacts --check
 	@echo "    Harn protocol artifacts OK."
 
 gen-connector-schemas:
@@ -1293,6 +1292,13 @@ check-python-boundary:
 
 check-loud-boundaries:
 	@$(HARN_NO_BUILD_CMD) run scripts/check_loud_boundaries.harn
+
+.PHONY: gen-agent-gates check-agent-gates
+gen-agent-gates:
+	@$(HARN_CMD) run scripts/agent_gate_registry.harn -- spec/agent-gates/registry.json --write
+
+check-agent-gates:
+	@$(HARN_CMD) run scripts/agent_gate_registry.harn -- spec/agent-gates/registry.json
 
 # Structural seam between the product turn-end check and measurement surfaces.
 # The product module may not name grading vocabulary; eval/bench modules may

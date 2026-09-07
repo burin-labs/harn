@@ -1,0 +1,14 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "TurnPolicy",
+    "prefix": "TurnPolicy.",
+    "types": [
+      "TurnPolicy",
+      "WorkflowTurnPolicy"
+    ],
+    "parameters": [],
+    "normalizers": [],
+    "containers": []
+  }
+}

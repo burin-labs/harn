@@ -1,0 +1,163 @@
+[
+  {
+    "scope": "cli-runner-environment",
+    "file": "crates/harn-stdlib/src/stdlib/cli/try.harn",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/agent_observe.rs",
+    "expression": "name",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/agent_observe/retry_tests.rs",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/agent_observe/served_context_receipts.rs",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/api/options.rs",
+    "expression": "name",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/healthcheck.rs",
+    "expression": "name",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/mod.rs",
+    "expression": "EFFORT_LADDER_UNGATED_ENV",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/mod.rs",
+    "expression": "LLM_CALLS_DISABLED_ENV",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/provider_auth.rs",
+    "expression": "name",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/providers/azure_openai.rs",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/providers/bedrock.rs",
+    "expression": "name",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/rate_governor.rs",
+    "expression": "RATE_GOVERNOR_ENABLED_ENV",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/rate_limit.rs",
+    "expression": "DURABLE_RATE_LIMIT_ENABLED_ENV",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/rate_limit.rs",
+    "expression": "DURABLE_RATE_LIMIT_MAX_WAIT_MS_ENV",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/rate_limit.rs",
+    "expression": "DURABLE_RATE_LIMIT_STATE_PATH_ENV",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/rate_limit.rs",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/rate_limit/durable_admission.rs",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/stream.rs",
+    "expression": "crate::llm::LLM_CALLS_DISABLED_ENV",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/test_env.rs",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/tool_scorecard/fitness.rs",
+    "expression": "TOOL_FORMAT_FITNESS_PATH_ENV",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-native-environment",
+    "file": "crates/harn-vm/src/orchestration/records/eval_pack/ledger.rs",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-native-environment",
+    "file": "crates/harn-vm/src/orchestration/stage_options.rs",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-stdlib-environment",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  }
+]

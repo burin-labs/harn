@@ -1,0 +1,13 @@
+import { agent_loop } from "std/agent/loop"
+
+// harn#8159, the easy half. A key the option surface has never heard of is
+// refused rather than ignored, and the message does not invent a path for a
+// name that is read nowhere.
+pipeline test(harness: Harness, task: unknown) {
+  agent_loop(
+    harness,
+    "do work",
+    nil,
+    {provider: "mock", max_iterations: 1, completion_requirements: {requirements: []}},
+  )
+}

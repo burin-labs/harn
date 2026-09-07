@@ -1,0 +1,20 @@
+[
+  {
+    "default": "dynamic: provider catalog default",
+    "evidence": "Native workflow stage preparation injects into std/workflow/options; static only",
+    "expiry": "2026-09-13",
+    "kind": "environment bridge",
+    "layer": "runner",
+    "name": "HARN_AGENT_TOOL_FORMAT",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/orchestration/stage_options.rs",
+        "line": 44,
+        "reader": "non_empty_env"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

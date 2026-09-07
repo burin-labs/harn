@@ -1,0 +1,22 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/workflow/**/*.harn",
+  "config": {
+    "id": "StageSpec",
+    "prefix": "StageSpec.",
+    "types": [
+      "StageSpec"
+    ],
+    "parameters": [
+      {
+        "function": "__stage_compaction_options",
+        "name": "node"
+      },
+      {
+        "function": "__stage_max_attempts",
+        "name": "node"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

@@ -186,13 +186,15 @@ startup. Windows uses a Job Object and the function returns `false`.
   enforces `timeout_ms`, forwards optional `cwd`, `env`, `env_mode`, and
   `stdin`, and returns a command
   envelope with `command_id`, `status`, pid/process-group metadata, inline
-  output capped by `capture.max_inline_bytes`, full output artifact paths,
-  byte/line counts, `output_sha256`, sandbox metadata, and `audit_id`.
+  output capped by `capture.max_inline_bytes`, `stdout_truncated` and
+  `stderr_truncated` saying whether that cap dropped anything, full output
+  artifact paths, byte/line counts, `output_sha256`, sandbox metadata, and
+  `audit_id`.
   `background: true` returns the same envelope with `status: "running"` and
   a `handle_id`.
 - `tools/read_command_output` range-reads the artifact for a `command_id`,
-  `handle_id`, or explicit `path`. Use it when `stdout`/`stderr` were capped
-  inline or when an agent needs to inspect large command output. Completed
+  `handle_id`, or explicit `path`. Use it when `stdout_truncated` or
+  `stderr_truncated` says the inline copy was capped or when an agent needs to inspect large command output. Completed
   results remain repeat-readable until this process's retention policy retires
   them. `HARN_COMMAND_ARTIFACT_MAX_DIRS` is a per-process registration cap, so
   N live processes may retain up to N times that value; shared cleanup removes

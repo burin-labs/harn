@@ -1,0 +1,451 @@
+[
+  {
+    "default": "false",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/agent_observe.rs:156; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_LLM_TRANSCRIPT_VERBOSE",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_observe.rs",
+        "line": 156,
+        "reader": "env_flag_enabled"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/agent_observe/raw_provider_capture.rs:46; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_LLM_TRANSCRIPT_RAW",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_observe/raw_provider_capture.rs",
+        "line": 46,
+        "reader": "super::env_flag_enabled"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unset; use the ambient transcript directory",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/agent_observe/transcript_ambient.rs:217; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_LLM_TRANSCRIPT_DIR",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_observe/transcript_ambient.rs",
+        "line": 217,
+        "reader": "std::env::var"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/api/openai_normalize.rs:389; canonical headless use is not observed by a source scan.",
+    "expiry": null,
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_DEBUG_MESSAGE_SHAPES",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/openai_normalize.rs",
+        "line": 389,
+        "reader": "std::env::var"
+      }
+    ],
+    "reason": "Remove the separate debug-print switch during the runner cleanup; inspect structured provider/transcript evidence instead.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "120 seconds",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/api/options.rs:1283; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_LLM_TIMEOUT",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/options.rs",
+        "line": 1283,
+        "reader": "std::env::var"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unset; use the default Ollama endpoint",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/api/transport_stub_tests.rs:521; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "OLLAMA_HOST",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
+        "line": 521,
+        "reader": "std::env::var"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
+        "line": 655,
+        "reader": "std::env::var"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
+        "line": 1126,
+        "reader": "std::env::var"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
+        "line": 1292,
+        "reader": "std::env::var"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/api/ollama.rs",
+        "line": 120,
+        "reader": "OLLAMA_HOST_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "32768",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/api/transport_stub_tests.rs:1127; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_OLLAMA_NUM_CTX",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
+        "line": 1127,
+        "reader": "std::env::var"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/api/ollama.rs",
+        "line": 116,
+        "reader": "HARN_OLLAMA_NUM_CTX_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "30m",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/api/transport_stub_tests.rs:1128; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_OLLAMA_KEEP_ALIVE",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
+        "line": 1128,
+        "reader": "std::env::var"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/api/ollama.rs",
+        "line": 117,
+        "reader": "HARN_OLLAMA_KEEP_ALIVE_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unset; use the configured local provider endpoint",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/api/transport_stub_tests.rs:1417; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "LOCAL_LLM_BASE_URL",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
+        "line": 1417,
+        "reader": "std::env::var"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unset; use the configured local provider model",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/config_builtins/healthcheck_builtins.rs:43; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "LOCAL_LLM_MODEL",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/config_builtins/healthcheck_builtins.rs",
+        "line": 43,
+        "reader": "crate::test_env::env_var_seamed"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unset; use the canonical memory root resolver",
+    "evidence": "Structural environment access/declaration at crates/harn-stdlib/src/stdlib/agent/canon.harn:148; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_CANON_ROOT",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/canon.harn",
+        "line": 148,
+        "reader": "get_or"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/canon.harn",
+        "line": 502,
+        "reader": "get_or"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "harn on PATH",
+    "evidence": "Structural environment access/declaration at crates/harn-stdlib/src/stdlib/agent/crystallization_curator.harn:221; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_BIN",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/crystallization_curator.harn",
+        "line": 221,
+        "reader": "get"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "10000",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/api/ollama.rs:118; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_OLLAMA_UNLOAD_GRACE_MS",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/ollama.rs",
+        "line": 118,
+        "reader": "HARN_OLLAMA_UNLOAD_GRACE_MS_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "10000; HARN_OLLAMA_UNLOAD_GRACE_MS takes precedence",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/api/ollama.rs:119; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "OLLAMA_UNLOAD_GRACE_MS",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/ollama.rs",
+        "line": 119,
+        "reader": "OLLAMA_UNLOAD_GRACE_MS_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "harn",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/introspection.rs:38; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_HARNESS",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/introspection.rs",
+        "line": 38,
+        "reader": "HARN_HARNESS_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/mod.rs:107; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_EFFORT_PROBE_UNGATED",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/mod.rs",
+        "line": 107,
+        "reader": "EFFORT_LADDER_UNGATED_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/mod.rs:329; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_LLM_CALLS_DISABLED",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/mod.rs",
+        "line": 329,
+        "reader": "LLM_CALLS_DISABLED_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/rate_governor.rs:44; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_LLM_RATE_GOVERNOR",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/rate_governor.rs",
+        "line": 44,
+        "reader": "RATE_GOVERNOR_ENABLED_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/rate_limit.rs:40; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_LLM_RATE_LIMIT_DURABLE",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/rate_limit.rs",
+        "line": 40,
+        "reader": "DURABLE_RATE_LIMIT_ENABLED_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unset; use the runtime state-root resolver",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/rate_limit.rs:41; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_LLM_RATE_LIMIT_STATE_PATH",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/rate_limit.rs",
+        "line": 41,
+        "reader": "DURABLE_RATE_LIMIT_STATE_PATH_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "30000",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/rate_limit.rs:52; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_LLM_RATE_LIMIT_MAX_WAIT_MS",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/rate_limit.rs",
+        "line": 52,
+        "reader": "DURABLE_RATE_LIMIT_MAX_WAIT_MS_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unset; no structural experiment",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/structural_experiments.rs:35; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_STRUCTURAL_EXPERIMENT",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/structural_experiments.rs",
+        "line": 35,
+        "reader": "STRUCTURAL_EXPERIMENT_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unset; use the default tool-format fitness artifact",
+    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/tool_scorecard/fitness.rs:14; canonical headless use is not observed by a source scan.",
+    "expiry": "2026-09-13",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_TOOL_FORMAT_FITNESS_PATH",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/tool_scorecard/fitness.rs",
+        "line": 14,
+        "reader": "TOOL_FORMAT_FITNESS_PATH_ENV"
+      }
+    ],
+    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

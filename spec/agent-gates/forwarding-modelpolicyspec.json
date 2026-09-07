@@ -1,0 +1,58 @@
+[
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "__workflow_agent_loop_options(config, model_policy, tool_format)",
+    "owner": "__workflow_agent_loop_options",
+    "evidence": "Consumer __workflow_agent_loop_options.model_policy in crates/harn-stdlib/src/stdlib/workflow/options.harn is an independently required binding origin for ModelPolicySpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ModelPolicySpec",
+        "function": "__workflow_agent_loop_options",
+        "parameter": "model_policy"
+      }
+    ]
+  },
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "__workflow_llm_options(config, model_policy, tool_format)",
+    "owner": "__workflow_llm_options",
+    "evidence": "Consumer __workflow_llm_options.model_policy in crates/harn-stdlib/src/stdlib/workflow/options.harn is an independently required binding origin for ModelPolicySpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ModelPolicySpec",
+        "function": "__workflow_llm_options",
+        "parameter": "model_policy"
+      }
+    ]
+  },
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "__workflow_stage_tool_format(model_policy, host)",
+    "owner": "__workflow_stage_tool_format",
+    "evidence": "Consumer __workflow_stage_tool_format.model_policy in crates/harn-stdlib/src/stdlib/workflow/options.harn is an independently required binding origin for ModelPolicySpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ModelPolicySpec",
+        "function": "__workflow_stage_tool_format",
+        "parameter": "model_policy"
+      }
+    ]
+  },
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "pick_keys(model_policy, loop_option_keys, {drop_nil: true})",
+    "owner": "pick_keys",
+    "evidence": "The literal loop_option_keys domain is independently audited by workflow-loop-key-domain under the destination AgentSpec setting names. pick_keys copies those values without introducing another key domain."
+  },
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "pick_keys(model_policy, model_option_keys, {drop_nil: true})",
+    "owner": "pick_keys",
+    "evidence": "model_option_keys comes from __llm_call_option_registry().keys, projected from LLM_CALL_OPTION_FIELDS in harn-builtin-meta. model-registry-key-domain independently audits every accepted name; pick_keys copies those values unchanged."
+  }
+]

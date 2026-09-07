@@ -33,6 +33,25 @@ if [[ -z "$areas" || "$areas" != *"Release"* ]]; then
   exit 1
 fi
 
+suggestions_line="$(grep -E '^ +area-suggestions: "' "$workflow" || true)"
+suggestions="$(sed 's/.*area-suggestions: "\(.*\)".*/\1/' <<<"$suggestions_line")"
+if [[ "$suggestions" != "Build=CI|Lint=CI" ]]; then
+  echo "pr_title_convention_test: rejected Build and Lint titles must point contributors to CI" >&2
+  exit 1
+fi
+
+# The pull-request form is the one contribution guide every author sees before
+# submitting. Keep its complete list as a checked projection of the gate rather
+# than making an author leave the form and guess from another repository.
+template="$root/.github/pull_request_template.md"
+template_areas="${areas//|/ | }"
+template_text="$(tr '\n' ' ' <"$template" | tr -s '[:space:]' ' ')"
+if [[ "$template_text" != *"$template_areas"* ]]; then
+  echo "pr_title_convention_test: the pull-request template does not show the gate's accepted areas" >&2
+  echo "  expected: ${template_areas}" >&2
+  exit 1
+fi
+
 # Subjects the action exempts by name. `Release vX.Y.Z` is matched verbatim by
 # publish-release.yml before it tags, so it must not gain a bracket.
 exempt_pattern='^Release v[0-9]'

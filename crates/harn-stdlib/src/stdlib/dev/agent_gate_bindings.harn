@@ -1,0 +1,714 @@
+/** Configuration origins owned by one registry scope, independent of option keys. */
+pub type AgentGateBindingScope = {
+  id: string,
+  prefix: string,
+  types: list<string>,
+  parameters: list<{function: string, name: string, path?: list<string>}>,
+  normalizers: list<string \
+    | {function: string, path: list<string>, additional_paths?: list<list<string>>} \
+    | {function: string, argument: int}>,
+  /** Nested object paths; scalar leaves never forward configuration authority. */
+  containers?: list<string>,
+}
+
+pub type AgentGateBindingRead = {
+  reader: string,
+  scope: string,
+  file: string,
+  line: int,
+  expression: string,
+  name: string,
+}
+
+/** Unresolved forwarding is evidence to review, never an absent read. */
+pub type AgentGateBindingResult = {
+  owners: list<string>,
+  parameters: list<{scope: string, function: string, name: string}>,
+  reads: list<AgentGateBindingRead>,
+  unresolved: list<{
+    reader: string,
+    scope: string,
+    file: string,
+    line: int,
+    expression: string,
+    name: string,
+    reason: string,
+    target?: {
+      function: string,
+      argument: int,
+      origin: list<string>,
+      pending?: list<string>,
+      additional_paths?: list<list<string>>,
+    },
+  }>,
+}
+
+fn children(tree: dict, node: dict) -> list {
+  return tree.children[to_string(node.id)] ?? []
+}
+
+fn text(tree: dict, node: dict) -> string {
+  return bytes_to_string(bytes_slice(tree.source, node.start_byte, node.end_byte))
+}
+
+fn ancestor(tree: dict, node: dict, kinds: list<string>) -> dict? {
+  let current = node
+  while current.parent_id != nil {
+    current = tree.nodes[current.parent_id]
+    if contains(kinds, current.kind) {
+      return current
+    }
+  }
+  return nil
+}
+
+fn inside(tree: dict, node: dict, scope: dict) -> bool {
+  let current = node
+  while true {
+    if current.id == scope.id {
+      return true
+    }
+    if current.parent_id == nil {
+      return false
+    }
+    current = tree.nodes[current.parent_id]
+  }
+}
+
+fn function_name(tree: dict, node: dict) -> string {
+  const owner = ancestor(tree, node, ["fn_declaration", "fn_expression", "closure"])
+  if owner != nil && owner.kind == "fn_declaration" {
+    for child in children(tree, owner) {
+      if child.kind == "identifier" {
+        return text(tree, child)
+      }
+    }
+  }
+  return ""
+}
+
+fn has_type(tree: dict, node: dict, types: list<string>) -> bool {
+  if contains(types, text(tree, node)) {
+    return true
+  }
+  if !contains(["type_annotation", "identifier"], node.kind) {
+    return false
+  }
+  for token in tree.tokens[to_string(node.id)] ?? [] {
+    if token == "<" || token == "[" {
+      return false
+    }
+  }
+  for child in children(tree, node) {
+    if has_type(tree, child, types) {
+      return true
+    }
+  }
+  return false
+}
+
+fn binding(tree: dict, name: string, at: dict) -> dict? {
+  let selected = nil
+  for candidate in tree.bindings[name] ?? [] {
+    if candidate.node.end_byte <= at.start_byte
+      && inside(tree, at, candidate.scope) {
+      if selected == nil || candidate.node.start_byte > selected.node.start_byte {
+        selected = candidate
+      }
+    }
+  }
+  return selected
+}
+
+fn constant_key(tree: dict, node: dict) -> string? {
+  if node.kind == "identifier" || node.kind == "keyword_identifier" {
+    return text(tree, node)
+  }
+  if node.kind == "string_literal" {
+    const decoded = try {
+      json_parse(text(tree, node))
+    }
+    if is_ok(decoded) && type_of(unwrap(decoded)) == "string" {
+      return to_string(unwrap(decoded))
+    }
+  }
+  return nil
+}
+
+/** Resolve value origins; opaque calls report forwarding without inventing return identity. */
+type BindingOrigin = {pending: list<string>, path: list<string>, alternatives: list<list<string>>}
+
+fn descend(base: BindingOrigin?, key: string?) -> BindingOrigin? {
+  if base == nil || key == nil {
+    return nil
+  }
+  if len(base.pending) > 0 {
+    const candidates = ([base.pending] + base.alternatives).filter(
+      fn(path) { return path[0] == key },
+    )
+      .map(fn(path) { return path.slice(1) })
+    if len(candidates) == 0 {
+      return nil
+    }
+    return {pending: candidates[0], path: [], alternatives: candidates.slice(1)}
+  }
+  return {pending: [], path: base.path + [key], alternatives: []}
+}
+
+fn is_container(tree: dict, value: BindingOrigin) -> bool {
+  return len(value.pending) > 0 || len(value.path) == 0
+    || contains(tree.config.containers ?? [], value.path.join("."))
+}
+
+fn normalized_origin(tree: dict, node: dict, depth: int) -> BindingOrigin? {
+  const parts = children(tree, node)
+  const callee = text(tree, parts[0])
+  for normalizer in tree.config.normalizers {
+    const name = if type_of(normalizer) == "string" {
+      normalizer
+    } else {
+      normalizer.function
+    }
+    if name == callee {
+      if type_of(normalizer) != "string" && normalizer?.argument != nil {
+        const args = children(tree, parts[len(parts) - 1])
+        return if normalizer.argument < len(args) {
+          origin(tree, args[normalizer.argument], depth + 1)
+        } else {
+          nil
+        }
+      }
+      return {
+        pending: if type_of(normalizer) == "string" {
+          []
+        } else {
+          normalizer.path
+        },
+        alternatives: if type_of(normalizer) == "string" {
+          []
+        } else {
+          normalizer.additional_paths ?? []
+        },
+        path: [],
+      }
+    }
+  }
+  return nil
+}
+
+fn lookup_origin(tree: dict, node: dict, depth: int) -> BindingOrigin? {
+  const parts = children(tree, node)
+  if len(parts) < 2 {
+    return nil
+  }
+  const callee = children(tree, parts[0])
+  if parts[0].kind != "property_access" || len(callee) != 2
+    || !contains(["get", "get_or"], constant_key(tree, callee[1])) {
+    return nil
+  }
+  const args = children(tree, parts[len(parts) - 1])
+  if len(args) == 0 || args[0].kind != "string_literal" {
+    return nil
+  }
+  return descend(origin(tree, callee[0], depth + 1), constant_key(tree, args[0]))
+}
+
+fn origin(tree: dict, node: dict, depth: int = 0) -> BindingOrigin? {
+  if depth > 128 {
+    throw "agent gate bindings: alias chain exceeds structural bound"
+  }
+  const parts = children(tree, node)
+  if node.kind == "identifier" {
+    const found = binding(tree, text(tree, node), node)
+    if found == nil {
+      return nil
+    }
+    if found.root {
+      return {pending: found.path, path: [], alternatives: []}
+    }
+    return if found.value == nil {
+      nil
+    } else {
+      origin(tree, found.value, depth + 1)
+    }
+  }
+  if node.kind == "call_expression" && len(parts) > 0 {
+    return normalized_origin(tree, node, depth) ?? lookup_origin(tree, node, depth)
+  }
+  if node.kind == "property_access" && len(parts) == 2 {
+    const base = origin(tree, parts[0], depth + 1)
+    const key = constant_key(tree, parts[1])
+    return descend(base, key)
+  }
+  if node.kind == "subscript_expression" && len(parts) == 2 {
+    const base = origin(tree, parts[0], depth + 1)
+    // Identifier indexes are dynamic keys, even when a variable has a suggestive name.
+    const key = if parts[1].kind == "string_literal" {
+      constant_key(tree, parts[1])
+    } else {
+      nil
+    }
+    return descend(base, key)
+  }
+  if contains(
+    [
+      "binary_expression",
+      "nil_coalescing_expression",
+      "parenthesized_expression",
+      "if_expression",
+      "if_statement",
+      "block",
+      "expression_statement",
+    ],
+    node.kind,
+  ) {
+    if node.kind == "binary_expression"
+      && !contains(tree.tokens[to_string(node.id)] ?? [], "+") {
+      return nil
+    }
+    let found = nil
+    for part in parts {
+      if node.kind == "if_statement" && part.kind != "block" {
+        continue
+      }
+      if node.kind == "block" && part.id != parts[len(parts) - 1].id {
+        continue
+      }
+      const candidate = origin(tree, part, depth + 1)
+      if candidate != nil
+        && is_container(tree, candidate) {
+        if found != nil && found != candidate {
+          throw "agent gate bindings: conflicting configuration origins"
+        }
+        found = candidate
+      }
+    }
+    return found
+  }
+  return nil
+}
+
+fn read_record(tree: dict, node: dict, path: list<string>?) -> AgentGateBindingRead {
+  return {
+    reader: function_name(tree, node),
+    scope: tree.config.id,
+    file: tree.file,
+    line: node.start_row + 1,
+    expression: text(tree, node),
+    name: if path == nil {
+      ""
+    } else {
+      tree.config.prefix + path.join(".")
+    },
+  }
+}
+
+fn contains_root(tree: dict, node: dict) -> bool {
+  if node.kind == "dict_entry" {
+    const parts = children(tree, node)
+    // Literal field names do not refer to bindings with the same spelling.
+    return len(parts) > 1 && contains_root(tree, parts[len(parts) - 1])
+  }
+  const path = origin(tree, node)
+  if path != nil {
+    return is_container(tree, path)
+  }
+  // Calls own their argument-forwarding records. A field read or a nested
+  // statement cannot embed its receiver in the enclosing binding's result.
+  if contains(
+    [
+      "call_expression",
+      "method_call",
+      "property_access",
+      "subscript_expression",
+      "block",
+      "if_statement",
+      "fn_expression",
+      "closure",
+    ],
+    node.kind,
+  ) {
+    return false
+  }
+  if node.kind == "binary_expression"
+    && !contains(tree.tokens[to_string(node.id)] ?? [], "+") {
+    return false
+  }
+  for child in children(tree, node) {
+    if contains_root(tree, child) {
+      return true
+    }
+  }
+  return false
+}
+
+fn parse_tree(harness: {ast: HarnessAst, fs: HarnessFs}, file: string) -> dict {
+  const parsed = harness.ast.parse_file({path: file, language: "harn", max_bytes: 0})
+  if parsed?.had_errors != false || parsed?.health?.support != "supported"
+    || parsed?.nodes == nil
+    || len(parsed.nodes) == 0 {
+    throw "agent gate bindings: incomplete parse ${file}"
+  }
+  let tree = {
+    nodes: parsed.nodes,
+    children: {},
+    tokens: {},
+    names: {},
+    parameters: {},
+    calls: {},
+    source: bytes_from_string(harness.fs.read_text(file)),
+    file: file,
+  }
+  for node in tree.nodes {
+    if node.kind == "identifier" || node.kind == "keyword_identifier" {
+      tree.names[text(tree, node)] = true
+    }
+    if node.parent_id != nil && node.is_named {
+      const key = to_string(node.parent_id)
+      tree.children[key] = (tree.children[key] ?? []) + [node]
+    } else if node.parent_id != nil {
+      const key = to_string(node.parent_id)
+      tree.tokens[key] = (tree.tokens[key] ?? []) + [node.kind]
+    }
+  }
+  for node in tree.nodes {
+    const parts = children(tree, node)
+    if node.kind == "typed_parameter" && len(parts) > 0 {
+      tree.parameters[function_name(tree, node) + ":" + text(tree, parts[0])] = true
+    }
+    if node.kind == "call_expression" && len(parts) > 0 {
+      tree.calls[text(tree, parts[0])] = true
+    }
+  }
+  return tree
+}
+
+@complexity(allow)
+fn binding_reads(source: dict, config: AgentGateBindingScope) -> AgentGateBindingResult {
+  for normalizer in config.normalizers {
+    if type_of(normalizer) == "string" {
+      continue
+    }
+    if normalizer?.argument != nil {
+      if normalizer.argument < 0 || normalizer?.path != nil
+        || normalizer?.additional_paths != nil {
+        throw "agent gate bindings: invalid input-preserving normalizer ${normalizer.function}"
+      }
+      continue
+    }
+    const paths = [normalizer.path] + (normalizer.additional_paths ?? [])
+    for left in range(0, len(paths)) {
+      for right in range(left + 1, len(paths)) {
+        const common = min(len(paths[left]), len(paths[right]))
+        if paths[left].slice(0, common) == paths[right].slice(0, common) {
+          throw "agent gate bindings: overlapping normalization paths for ${normalizer.function}"
+        }
+      }
+    }
+  }
+  let tree = source + {config: config, bindings: {}}
+  let parameter_roots: dict<string, list<string>> = {}
+  for parameter in config.parameters {
+    parameter_roots[parameter.function + ":" + parameter.name] = parameter.path ?? []
+  }
+  for node in tree.nodes {
+    if !contains(
+      ["typed_parameter", "const_binding", "let_binding", "var_binding", "assignment"],
+      node.kind,
+    ) {
+      continue
+    }
+    const parts = children(tree, node)
+    if len(parts) == 0 || parts[0].kind != "identifier" {
+      continue
+    }
+    const name = text(tree, parts[0])
+    let root = false
+    for part in parts {
+      if part.kind == "type_annotation" && has_type(tree, part, config.types) {
+        root = true
+      }
+    }
+    let root_path: list<string> = []
+    if node.kind == "typed_parameter" {
+      const declared_path = parameter_roots[function_name(tree, node) + ":" + name]
+      if declared_path != nil {
+        root = true
+        root_path = declared_path
+      }
+    }
+    const scope = ancestor(
+      tree,
+      node,
+      if node.kind == "typed_parameter" {
+        ["fn_declaration", "fn_expression", "closure"]
+      } else {
+        ["block", "fn_declaration"]
+      },
+    )
+    if scope != nil {
+      tree.bindings[name] = (tree.bindings[name] ?? [])
+        + [
+          {
+            node: node,
+            name: name,
+            root: root,
+            path: root_path,
+            scope: scope,
+            value: if node.kind == "typed_parameter" {
+              nil
+            } else {
+              parts[len(parts) - 1]
+            },
+          },
+        ]
+    }
+  }
+  let reads: list<AgentGateBindingRead> = []
+  let unresolved = []
+  for node in tree.nodes {
+    const parts = children(tree, node)
+    if contains(["dict_literal", "list_literal", "array_literal", "tuple_expression"], node.kind)
+      && contains_root(tree, node) {
+      unresolved = unresolved
+        + [read_record(tree, node, nil) + {reason: "configuration embedded in a container"}]
+    }
+    if contains(["const_binding", "let_binding", "var_binding", "assignment"], node.kind)
+      && len(parts) > 1 {
+      const value = parts[len(parts) - 1]
+      if !contains(["call_expression", "property_access", "subscript_expression"], value.kind)
+        && origin(tree, value) == nil
+        && contains_root(tree, value) {
+        unresolved = unresolved
+          + [
+            read_record(tree, node, nil)
+              + {reason: "configuration embedded in unsupported binding"},
+          ]
+      }
+    }
+    if contains(["property_access", "subscript_expression"], node.kind) && len(parts) == 2 {
+      const base = origin(tree, parts[0])
+      if base == nil {
+        continue
+      }
+      const parent = if node.parent_id == nil {
+        nil
+      } else {
+        tree.nodes[node.parent_id]
+      }
+      if parent != nil && parent.kind == "assignment" && children(tree, parent)[0].id == node.id {
+        continue
+      }
+      if parent != nil && parent.kind == "call_expression"
+        && children(tree, parent)[0].id == node.id
+        && contains(["get", "get_or", "has_key", "contains_key"], text(tree, parts[1])) {
+        continue
+      }
+      const key = if node.kind == "subscript_expression" && parts[1].kind != "string_literal" {
+        nil
+      } else {
+        constant_key(tree, parts[1])
+      }
+      const value = descend(base, key)
+      if key != nil && (value == nil || len(value.pending) > 0 || len(value.path) == 0) {
+        continue
+      }
+      const record = read_record(
+        tree,
+        node,
+        if key == nil {
+          nil
+        } else {
+          value.path
+        },
+      )
+      if key == nil {
+        unresolved = unresolved + [record + {reason: "dynamic configuration index"}]
+      } else {
+        reads = reads + [record]
+      }
+    }
+    if contains(["call_expression", "method_call"], node.kind) && len(parts) > 1 {
+      const callee = parts[0]
+      const args = children(tree, parts[len(parts) - 1])
+      const callee_parts = children(tree, callee)
+      const method = if node.kind == "method_call" {
+        constant_key(tree, parts[1])
+      } else if callee.kind == "property_access" && len(callee_parts) == 2 {
+        constant_key(tree, callee_parts[1])
+      } else {
+        text(tree, callee)
+      }
+      const object = if node.kind == "method_call" {
+        origin(tree, parts[0])
+      } else if callee.kind == "property_access" {
+        origin(tree, callee_parts[0])
+      } else {
+        nil
+      }
+      const helper = contains(["has_key", "__has_key"], method)
+      const keyed =
+        (object != nil && contains(["get", "get_or", "has_key", "contains_key"], method))
+        || helper
+      const base = if helper && len(args) > 0 {
+        origin(tree, args[0])
+      } else {
+        object
+      }
+      const index = if helper {
+        1
+      } else {
+        0
+      }
+      if keyed && base != nil && len(args) > index {
+        const key = if args[index].kind == "string_literal" {
+          constant_key(tree, args[index])
+        } else {
+          nil
+        }
+        const value = descend(base, key)
+        if key != nil && (value == nil || len(value.pending) > 0 || len(value.path) == 0) {
+          continue
+        }
+        const record = read_record(
+          tree,
+          node,
+          if key == nil {
+            nil
+          } else {
+            value.path
+          },
+        )
+        if key == nil {
+          unresolved = unresolved + [record + {reason: "dynamic configuration lookup"}]
+        } else {
+          reads = reads + [record]
+        }
+      } else {
+        if object != nil && node.kind == "method_call" && method != nil {
+          const value = descend(object, method)
+          if value != nil && len(value.pending) == 0 && len(value.path) > 0 {
+            reads = reads + [read_record(tree, node, value.path)]
+          }
+        }
+        for argument_index in range(0, len(args)) {
+          const arg = args[argument_index]
+          const path = origin(tree, arg)
+          if path != nil && is_container(tree, path) {
+            unresolved = unresolved
+              + [
+                read_record(tree, node, nil)
+                  + {
+                    reason: "configuration forwarded to an opaque call",
+                    target: {
+                      function: text(tree, callee),
+                      argument: argument_index,
+                      origin: path.path,
+                      pending: path.pending,
+                      additional_paths: path.alternatives,
+                    },
+                  },
+              ]
+          }
+        }
+      }
+    }
+  }
+  let unique = []
+  let seen = []
+  for finding in unresolved {
+    const identity = json_stringify(finding)
+    if !contains(seen, identity) {
+      seen = seen + [identity]
+      unique = unique + [finding]
+    }
+  }
+  const owner = config.id
+  const parameters = config.parameters.filter(
+    fn(parameter) {
+      const identity = parameter.function + ":" + parameter.name
+      return tree.parameters[identity] == true
+    },
+  )
+  return {
+    owners: if may_bind(tree, config) {
+      [config.id]
+    } else {
+      []
+    },
+    parameters: parameters.map(
+      fn(parameter) { return {scope: owner, function: parameter.function, name: parameter.name} },
+    ),
+    reads: reads,
+    unresolved: unique,
+  }
+}
+
+/**
+ * Follow one configuration owner through lexical bindings and report opaque forwarding.
+ * @effects: [host]
+ * @errors: [validation, backend]
+ * @api_stability: experimental
+ */
+pub fn agent_gate_binding_reads(
+  harness: {ast: HarnessAst, fs: HarnessFs},
+  file: string,
+  config: AgentGateBindingScope,
+) -> AgentGateBindingResult {
+  return binding_reads(parse_tree(harness, file), config)
+}
+
+fn may_bind(tree: dict, config: AgentGateBindingScope) -> bool {
+  for type_name in config.types {
+    if tree.names[type_name] == true {
+      return true
+    }
+  }
+  for parameter in config.parameters {
+    if tree.parameters[parameter.function + ":" + parameter.name] == true {
+      return true
+    }
+  }
+  for normalizer in config.normalizers {
+    const name = if type_of(normalizer) == "string" {
+      normalizer
+    } else {
+      normalizer.function
+    }
+    if tree.calls[name] == true {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Parse and index a source file once for all configuration owners.
+ * @effects: [host]
+ * @errors: [validation, backend]
+ * @api_stability: experimental
+ */
+pub fn agent_gate_binding_scopes_reads(
+  harness: {ast: HarnessAst, fs: HarnessFs},
+  file: string,
+  configs: list<AgentGateBindingScope>,
+) -> AgentGateBindingResult {
+  if len(configs) == 0 {
+    throw "agent gate bindings: no configuration owners"
+  }
+  const tree = parse_tree(harness, file)
+  let result: AgentGateBindingResult = {owners: [], parameters: [], reads: [], unresolved: []}
+  for config in configs {
+    if !may_bind(tree, config) {
+      continue
+    }
+    const found = binding_reads(tree, config)
+    result = {
+      owners: result.owners + found.owners,
+      parameters: result.parameters + found.parameters,
+      reads: result.reads + found.reads,
+      unresolved: result.unresolved + found.unresolved,
+    }
+  }
+  return result
+}

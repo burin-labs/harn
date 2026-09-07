@@ -31,8 +31,11 @@ fn slow_tools(harness: Harness) {
     "wait_a_bit",
     "Sleep briefly",
     {
-      handler: { args -> harness.clock.sleep_ms(400)
-        return "waited" },
+      handler: { args ->
+        harness.fs.write_text("tool-started.txt", "started")
+        harness.clock.sleep_ms(400)
+        return "waited"
+      },
       parameters: {},
       returns: {type: "string"},
     },
@@ -93,6 +96,7 @@ fn stopping_a_background_sub_agent_survives_the_default_worker_stack() {
     // fresh HOME is what keeps a pass meaningful.
     let output = harn_e2e_command()
         .arg("run")
+        .args(["--timeout", "120s"])
         .arg(&script)
         .current_dir(dir.path())
         .env("HOME", dir.path())
@@ -113,6 +117,14 @@ fn stopping_a_background_sub_agent_survives_the_default_worker_stack() {
         output.status
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        dir.path().join("tool-started.txt").exists(),
+        "the worker never entered its tool handler\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("stop_reason=operator pressed stop"),
+        "the graceful handoff lost the stop reason\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
     assert!(
         stdout.contains("final_status=stopped"),
         "the stop did not reach a terminal state\nstdout:\n{stdout}\nstderr:\n{stderr}"

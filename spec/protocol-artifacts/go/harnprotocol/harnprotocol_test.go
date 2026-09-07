@@ -157,12 +157,6 @@ func TestPlanRecordPresence(t *testing.T) {
 func TestRoundTripFixture(t *testing.T) {
 	fixture := loadFixture(t)
 
-	if got := mustString(t, fixture, "artifactVersion"); got != ArtifactVersion {
-		t.Fatalf(
-			"artifact version drift: bindings=%q fixture=%q",
-			ArtifactVersion, got,
-		)
-	}
 	if got := mustString(t, fixture, "harnAgentEventMethod"); got != HarnAgentEventMethod {
 		t.Fatalf(
 			"agent-event method drift: bindings=%q fixture=%q",

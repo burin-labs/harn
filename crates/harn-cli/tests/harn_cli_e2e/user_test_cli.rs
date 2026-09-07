@@ -110,6 +110,69 @@ fn affected_test_plan_reports_selection_and_safe_fallback_without_running_tests(
     assert!(!invalid.status.success());
     assert!(String::from_utf8_lossy(&invalid.stderr)
         .contains("--plan requires --affected-from <git-ref>"));
+
+    // A CI machine can export HARN_TEST_JOBS for the whole job. While that
+    // variable was bound straight onto `--jobs`, an exported worker count was
+    // indistinguishable from a typed one, so `--plan` was refused on every
+    // such machine and on no other. The plan is a read-only projection;
+    // ambient host configuration must not change its answer.
+    let clean = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["test", "suite", "--affected-from", &base, "--plan"])
+        .output()
+        .expect("spawn baseline test plan");
+    assert!(clean.status.success());
+    let clean_json: serde_json::Value =
+        serde_json::from_slice(&clean.stdout).expect("baseline plan JSON");
+
+    let ambient = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["test", "suite", "--affected-from", &base, "--plan"])
+        .env("HARN_TEST_JOBS", "4")
+        .env("HARN_TEST_SHARD_INDEX", "1")
+        .env("HARN_TEST_SHARD_TOTAL", "1")
+        .env("HARN_TEST_TIMING_ENVIRONMENT", "ci-linux-x64")
+        .env("HARN_TEST_DIAGNOSE", "1")
+        .output()
+        .expect("spawn ambient-environment test plan");
+    assert!(
+        ambient.status.success(),
+        "an exported worker count must not change the plan; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&ambient.stdout),
+        String::from_utf8_lossy(&ambient.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&ambient.stdout).expect("ambient plan JSON"),
+        clean_json,
+        "the plan must be byte-identical with and without the exported options",
+    );
+
+    // The sibling control. The refusal still has to fire on what a caller
+    // actually types, or the assertion above would be satisfied by deleting
+    // the check outright.
+    let typed = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args([
+            "test",
+            "suite",
+            "--affected-from",
+            &base,
+            "--plan",
+            "--jobs",
+            "4",
+        ])
+        .output()
+        .expect("spawn typed-option test plan");
+    assert!(
+        !typed.status.success(),
+        "a typed --jobs must still be refused; stdout:\n{}",
+        String::from_utf8_lossy(&typed.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&typed.stderr).contains("--plan inspects affected test files only"),
+        "{}",
+        String::from_utf8_lossy(&typed.stderr)
+    );
 }
 
 #[test]

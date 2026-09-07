@@ -1,0 +1,47 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "ToolSurfaceNarrowingOptions",
+    "prefix": "ToolSurfaceNarrowingOptions.",
+    "types": [
+      "ToolSurfaceNarrowingOptions"
+    ],
+    "parameters": [
+      {
+        "function": "__tool_surface_current_entries",
+        "name": "opts",
+        "path": [
+          "tool_surface_narrowing"
+        ]
+      },
+      {
+        "function": "__tool_surface_current_names",
+        "name": "opts",
+        "path": [
+          "tool_surface_narrowing"
+        ]
+      },
+      {
+        "function": "__normalize_tool_surface_narrowing",
+        "name": "value"
+      },
+      {
+        "function": "__tool_surface_entry_prunable",
+        "name": "config"
+      },
+      {
+        "function": "__tool_surface_narrowing_post_turn",
+        "name": "opts",
+        "path": [
+          "tool_surface_narrowing"
+        ]
+      },
+      {
+        "function": "__tool_surface_removed",
+        "name": "config"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

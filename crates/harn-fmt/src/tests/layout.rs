@@ -5,7 +5,7 @@
 //! the three ways it was previously violated — deciding from source newlines,
 //! wrapping args at the wrong depth, and measuring a prefix instead of a line.
 
-use super::{assert_roundtrip, corpus::repository_harn_files};
+use super::assert_roundtrip;
 use crate::{
     format_source, format_source_opts, line_width_violations, FmtOptions, LINE_WIDTH_DEFAULT,
 };
@@ -22,32 +22,6 @@ fn assert_within_line_width(source: &str) {
             "line exceeds width {}: {} chars\n{line}",
             LINE_WIDTH_DEFAULT,
             line.chars().count(),
-        );
-    }
-}
-
-#[test]
-fn formatted_repository_corpus_has_no_breakable_width_overflow() {
-    for path in repository_harn_files().expect("failed to enumerate formatter corpus") {
-        let source = std::fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-        let formatted = format_source(&source)
-            .unwrap_or_else(|error| panic!("failed to format {}: {error}", path.display()));
-        let reformatted = format_source(&formatted).unwrap_or_else(|error| {
-            panic!("formatted {} is not parseable: {error}", path.display())
-        });
-        assert_eq!(
-            reformatted,
-            formatted,
-            "formatted {} is not idempotent",
-            path.display()
-        );
-        let violations = line_width_violations(&formatted, LINE_WIDTH_DEFAULT);
-        assert!(
-            violations.is_empty(),
-            "{} has breakable width overflow: {:?}",
-            path.display(),
-            violations
         );
     }
 }

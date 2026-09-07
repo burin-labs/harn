@@ -64,6 +64,42 @@ fn strict_posture_puts_openai_store_false_on_the_wire() {
     );
 }
 
+/// Azure reuses OpenAI's `store` field but is a separate catalog row with its
+/// own citations, so the field it puts on the wire is its own claim. Without
+/// this case the row could be declared with any field name and every gate
+/// would stay green: the totality gate only asks that a declaration exists.
+#[test]
+fn strict_posture_puts_azure_openai_store_false_on_the_wire() {
+    let mut body = base_body();
+    let plan = resolve(
+        "azure_openai",
+        MODEL_WITH_NO_DECLARATION,
+        DataControlDialect::OpenAiSse,
+        DataPosture::StrictestAvailable,
+    );
+    plan.write_body(&mut body);
+
+    assert_eq!(body["store"], json!(false));
+    assert_eq!(plan.receipt.outcome, DataControlsOutcome::Applied);
+    assert_eq!(plan.receipt.applied.len(), 1);
+    let applied = &plan.receipt.applied[0];
+    assert_eq!(applied.location, "body");
+    assert_eq!(applied.name, "store");
+    assert_eq!(applied.value, json!(false));
+    assert_eq!(applied.effect, "retention");
+    // Azure's abuse-monitoring store is an account-level application rather
+    // than a per-request caveat, so the receipt carries it as the
+    // declaration's note and not as a caveat on the applied control.
+    assert!(applied.caveat.is_none());
+    assert!(
+        plan.receipt
+            .note
+            .as_deref()
+            .is_some_and(|note| note.contains("abuse-monitoring")),
+        "the receipt must say what the applied control does not reach"
+    );
+}
+
 /// The negative control the issue asks for. Anthropic exposes no per-request
 /// retention flag, so the strict posture must report that it was NOT achieved
 /// rather than reporting success over an unchanged body.

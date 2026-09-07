@@ -7,6 +7,7 @@
 - [Start here](./concepts/index.md)
 - [Mental model](./concepts/mental-model.md)
 - [Glossary](./concepts/glossary.md)
+- [Execution vocabulary](./concepts/execution-vocabulary.md)
 - [Portable execution](./concepts/portable-execution.md)
 - [Choosing an agent abstraction](./concepts/abstraction-ladder.md)
 - [The expressiveness spectrum](./concepts/expressiveness-spectrum.md)
@@ -338,6 +339,11 @@
 - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [LLM dialect ownership](./dev/llm-dialect-contract.md)
 - [Agent plane ownership](./dev/agent-loops.md)
+- [Agent harness ownership](./dev/agent-harness-ownership.md)
+- [Agent configuration registry](./dev/agent-gates.md)
+  - [Runner configuration](./dev/agent-gates/runner.md)
+  - [Stop decision configuration](./dev/agent-gates/stop-decision.md)
+  - [Stall handler configuration](./dev/agent-gates/stall-handler.md)
 - [Evidence-aware repair loop](./dev/repair-diagnostics.md)
 
 ## Protocol contributions
@@ -385,6 +391,7 @@
 - [Agent shell guard](./dev/agent-shell-guard.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
+- [Windows CI speed experiments](./dev/windows-ci-experiments.md)
 - [Testbench mode](./dev/testbench.md)
 - [DES runtime mode](./dev/des-mode.md)
 - [Tape format](./dev/tape-format.md)

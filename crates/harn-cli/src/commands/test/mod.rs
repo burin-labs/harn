@@ -41,7 +41,11 @@ use reporting::{
 };
 
 pub(crate) async fn run_command(mut args: TestArgs) {
-    args.diagnose |= test_runner::diagnose_enabled_via_env();
+    // Record what the caller typed before the environment gets a vote. The
+    // `--plan` refusal below is the only consumer that has to tell the two
+    // apart, and it cannot once the two have been merged.
+    let plan_conflict_was_typed = plan_conflicting_option_was_typed(&args);
+    resolve_environment_defaults(&mut args);
 
     #[cfg(feature = "hostlib")]
     if supervisor::requires_supervision(&args) && !supervisor::is_payload() {
@@ -105,32 +109,7 @@ pub(crate) async fn run_command(mut args: TestArgs) {
     if args.plan && args.affected_from.is_none() {
         command_error("--plan requires --affected-from <git-ref>");
     }
-    if args.plan
-        && (args.watch
-            || args.determinism
-            || args.evals
-            || args.record
-            || args.replay
-            || args.coverage
-            || args.coverage_out.is_some()
-            || args.junit.is_some()
-            || args.json
-            || args.json_out.is_some()
-            || args.parallel
-            || args.fail_fast
-            || args.jobs.is_some()
-            || args.shard_index.is_some()
-            || args.shard_total.is_some()
-            || args.timing_baseline.is_some()
-            || args.timing_environment.is_some()
-            || args.filter.is_some()
-            || args.verbose
-            || args.timing
-            || args.diagnose
-            || !args.approve_risky.is_empty()
-            || !args.skill_dir.is_empty()
-            || args.trusted_host_dispatch)
-    {
+    if args.plan && plan_conflict_was_typed {
         command_error(
             "--plan inspects affected test files only; remove execution, report, filter, shard, coverage, and skill options",
         );
@@ -498,6 +477,89 @@ fn default_test_dir_or_exit() -> String {
     } else {
         command_error("no path specified and no tests/ directory found");
     }
+}
+
+/// Whether the caller typed an option `--plan` cannot honor.
+///
+/// `--plan` prints the affected-test plan and runs nothing, so an execution,
+/// report, filter, shard, coverage or skill option would be silently ignored.
+/// Refusing says so instead.
+///
+/// Only what the caller typed counts, which is why this runs before
+/// `resolve_environment_defaults`. A value the host exported is ambient
+/// configuration rather than a request. A CI machine that exports
+/// `HARN_TEST_JOBS` for the whole job means every job on it, not one command;
+/// while that variable was bound straight onto `--jobs`, this refusal fired on
+/// every `--plan` invocation on such a machine and on no other.
+fn plan_conflicting_option_was_typed(args: &TestArgs) -> bool {
+    args.watch
+        || args.determinism
+        || args.evals
+        || args.record
+        || args.replay
+        || args.coverage
+        || args.coverage_out.is_some()
+        || args.junit.is_some()
+        || args.json
+        || args.json_out.is_some()
+        || args.parallel
+        || args.fail_fast
+        || args.jobs.is_some()
+        || args.shard_index.is_some()
+        || args.shard_total.is_some()
+        || args.timing_baseline.is_some()
+        || args.timing_environment.is_some()
+        || args.filter.is_some()
+        || args.verbose
+        || args.timing
+        || args.diagnose
+        || !args.approve_risky.is_empty()
+        || !args.skill_dir.is_empty()
+        || args.trusted_host_dispatch
+}
+
+/// Fill in the test options the caller left out from the environment.
+///
+/// One owner for every ambient default, applied once, after the caller's own
+/// options have been read. Binding these env vars onto their clap arguments
+/// instead would be shorter, but it erases the difference between a value the
+/// caller typed and one the host exported, and `--plan` needs that difference.
+///
+/// `--jobs` is deliberately absent: `test_runner::resolve_workers` already
+/// owns the `HARN_TEST_JOBS` fallback and reads it whenever no worker count
+/// reaches it, so resolving it a second time here would be a second owner.
+fn resolve_environment_defaults(args: &mut TestArgs) {
+    args.diagnose |= test_runner::diagnose_enabled_via_env();
+    if args.shard_index.is_none() {
+        args.shard_index = usize_via_env("HARN_TEST_SHARD_INDEX");
+    }
+    if args.shard_total.is_none() {
+        args.shard_total = usize_via_env("HARN_TEST_SHARD_TOTAL");
+    }
+    if args.timing_environment.is_none() {
+        args.timing_environment = non_empty_via_env("HARN_TEST_TIMING_ENVIRONMENT");
+    }
+}
+
+/// A whole number from the environment, or a named refusal.
+///
+/// An unset or blank variable reads as "the caller said nothing", which is how
+/// a CI job that declares a variable it does not always fill behaves. A value
+/// that is present but not a number is a misconfiguration worth naming, the
+/// same way clap named it while these vars were bound to their arguments.
+fn usize_via_env(name: &str) -> Option<usize> {
+    let raw = non_empty_via_env(name)?;
+    match raw.parse::<usize>() {
+        Ok(value) => Some(value),
+        Err(_) => command_error(&format!("{name} must be a whole number; got {raw:?}")),
+    }
+}
+
+fn non_empty_via_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|raw| raw.trim().to_string())
+        .filter(|raw| !raw.is_empty())
 }
 
 fn resolve_test_shard(

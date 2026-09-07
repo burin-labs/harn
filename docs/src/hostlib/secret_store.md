@@ -79,7 +79,7 @@ this primitive. Concretely:
 ## Verifying a setup
 
 ```text
-HARN_SECRET_STORE_BACKEND=file cargo test -p harn-hostlib --test harn_hostlib secret_store
+HARN_SECRET_STORE_BACKEND=file ./scripts/cargo_with_worktree_build_dir.sh test -p harn-hostlib --test harn_hostlib secret_store
 ```
 
 `tests/harn_hostlib/secret_store.rs` (file backend) runs on every CI runner.

@@ -1,0 +1,25 @@
+[
+  {
+    "default": "dynamic: configured model",
+    "evidence": "Native workflow route/default owner; CLI try also reads at try_cmd.rs:51,59; static only",
+    "expiry": "2026-09-13",
+    "kind": "environment bridge",
+    "layer": "runner",
+    "name": "HARN_LLM_MODEL",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/config_builtins/healthcheck_builtins.rs",
+        "line": 42,
+        "reader": "crate::test_env::env_var_seamed"
+      },
+      {
+        "file": "crates/harn-vm/src/orchestration/stage_options.rs",
+        "line": 82,
+        "reader": "non_empty_env"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

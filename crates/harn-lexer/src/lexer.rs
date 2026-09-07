@@ -153,17 +153,11 @@ impl<'src> Lexer<'src> {
                     continue;
                 }
                 b'/' if self.byte_at(self.pos + 1) == Some(b'/') => {
-                    let tok = self.read_line_comment();
-                    if keep_comments {
-                        tokens.push(tok);
-                    }
+                    tokens.extend(self.read_line_comment(keep_comments));
                     continue;
                 }
                 b'/' if self.byte_at(self.pos + 1) == Some(b'*') => {
-                    let tok = self.read_block_comment()?;
-                    if keep_comments {
-                        tokens.push(tok);
-                    }
+                    tokens.extend(self.read_block_comment(keep_comments)?);
                     continue;
                 }
                 b'r' if self.byte_at(self.pos + 1) == Some(b'"') => {
@@ -325,7 +319,7 @@ impl<'src> Lexer<'src> {
         )
     }
 
-    fn read_line_comment(&mut self) -> Token {
+    fn read_line_comment(&mut self, keep: bool) -> Option<Token> {
         let start_byte = self.byte_pos();
         let start_col = self.column;
         let start_line = self.line;
@@ -340,16 +334,18 @@ impl<'src> Lexer<'src> {
         }
         let text = self.rest_of_line();
         self.consume_str(text);
-        Token::with_span(
-            TokenKind::LineComment {
-                text: text.to_string(),
-                is_doc,
-            },
-            Span::with_offsets(start_byte, self.byte_pos(), start_line, start_col),
-        )
+        keep.then(|| {
+            Token::with_span(
+                TokenKind::LineComment {
+                    text: text.to_string(),
+                    is_doc,
+                },
+                Span::with_offsets(start_byte, self.byte_pos(), start_line, start_col),
+            )
+        })
     }
 
-    fn read_block_comment(&mut self) -> Result<Token, LexerError> {
+    fn read_block_comment(&mut self, keep: bool) -> Result<Option<Token>, LexerError> {
         let start_byte = self.byte_pos();
         let start = Span::with_offsets(start_byte, start_byte, self.line, self.column);
         self.pos += 2; // `/*`
@@ -407,13 +403,15 @@ impl<'src> Lexer<'src> {
         // the LSP, diagnostics).
         let mut span = Span::with_offsets(start_byte, self.byte_pos(), start.line, start.column);
         span.end_line = self.line;
-        Ok(Token::with_span(
-            TokenKind::BlockComment {
-                text: self.src_slice(text_start, text_end).to_string(),
-                is_doc,
-            },
-            span,
-        ))
+        Ok(keep.then(|| {
+            Token::with_span(
+                TokenKind::BlockComment {
+                    text: self.src_slice(text_start, text_end).to_string(),
+                    is_doc,
+                },
+                span,
+            )
+        }))
     }
 
     /// Capture the raw source text of an interpolation hole `${ ... }`.

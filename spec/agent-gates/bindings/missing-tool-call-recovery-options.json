@@ -1,0 +1,40 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "extra_globs": ["crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn"],
+  "config": {
+    "id": "MissingToolCallRecoveryOptions",
+    "prefix": "MissingToolCallRecoveryOptions.",
+    "types": [
+      "MissingToolCallRecoveryOptions"
+    ],
+    "parameters": [
+      {
+        "function": "__missing_tool_call_recovery_config",
+        "name": "opts",
+        "path": [
+          "missing_tool_call_recovery"
+        ]
+      },
+      {
+        "function": "__missing_tool_call_recovery_classifier",
+        "name": "opts",
+        "path": [
+          "missing_tool_call_recovery"
+        ]
+      },
+      {
+        "function": "__validate_missing_tool_call_recovery",
+        "name": "value"
+      }
+    ],
+    "normalizers": [
+      {
+        "function": "__missing_tool_call_recovery_config",
+        "path": [
+          "options"
+        ]
+      }
+    ],
+    "containers": []
+  }
+}

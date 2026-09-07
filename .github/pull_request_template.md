@@ -1,6 +1,8 @@
 <!--
 Title this pull request `[Area] Sentence case description`. The area tags are
-listed in CONTRIBUTING.md ("Pull request titles and descriptions").
+`Parser | VM | LLM | Models | Stdlib | Agent | CLI | Modules | Orchestrator |
+ACP | Evals | Docs | CI | Release`. CONTRIBUTING.md ("Pull request titles and
+descriptions") explains what each one owns.
 Release pull requests stay exactly `Release vX.Y.Z` — publish-release.yml
 matches that subject. Bot titles are left as generated.
 

@@ -1,0 +1,63 @@
+[
+  {
+    "default": "nil; no envelope cost ceiling",
+    "evidence": "agent_budget_post_call_stop_reason checks measured or conservatively projected cost after each call. The native pre-call projection currently returns false without inspecting the envelope.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentBudget.total_budget_usd",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cost.rs",
+        "line": 319,
+        "reader": "get"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+        "line": 47,
+        "reader": "agent_budget_post_call_stop_reason"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+        "line": 50,
+        "reader": "agent_budget_post_call_stop_reason"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+        "line": 55,
+        "reader": "agent_budget_post_call_stop_reason"
+      }
+    ],
+    "reason": "Preserve the resource ceiling while consolidating budget admission and removing the inert pre-call projection.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "nil; no token ceiling",
+    "evidence": "agent_budget_post_call_stop_reason compares tokens_used against this ceiling.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.token_budget",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+        "line": 34,
+        "reader": "agent_budget_post_call_stop_reason"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+        "line": 37,
+        "reader": "agent_budget_post_call_stop_reason"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+        "line": 38,
+        "reader": "agent_budget_post_call_stop_reason"
+      }
+    ],
+    "reason": "A caller-selected run resource ceiling.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

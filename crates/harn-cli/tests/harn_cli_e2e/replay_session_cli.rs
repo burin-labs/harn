@@ -738,7 +738,9 @@ fn offline_coding_fixture(
         "signal": null,
         "status": "completed",
         "stderr": "",
+        "stderr_truncated": false,
         "stdout": "1:hello world\n",
+        "stdout_truncated": false,
         "timed_out": false
     });
     let successful_verify = verify_args == json!({"argv":["grep","-n","hello world","note.txt"]});

@@ -1,0 +1,16 @@
+import { agent_gate_audit } from "std/dev/agent_gates"
+
+fn main(harness: Harness) {
+  if len(argv) < 1 {
+    throw "usage: agent_gate_registry.harn <registry.json> [--write]"
+  }
+  const report = agent_gate_audit(
+    {fs: harness.fs, ast: harness.ast, process: harness.process},
+    argv[0],
+    contains(argv, "--write"),
+  )
+  harness.stdio.println(json_stringify(report))
+  if report.pending > 0 {
+    throw "agent gate registry: unregistered reads or stale projections"
+  }
+}

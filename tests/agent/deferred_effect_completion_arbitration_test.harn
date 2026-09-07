@@ -79,10 +79,7 @@ fn completion_receipts(events: list) -> list {
     .to_list()
 }
 
-pipeline test_completion_gate_arbitrates_a_superseded_deferred_effect(
-  harness: Harness,
-  _task: unknown,
-) {
+pipeline test_completion_gate_arbitrates_a_superseded_deferred_effect(harness: Harness) {
   const run_count = harness.runtime.atomic(0)
   const verify_count = harness.runtime.atomic(0)
   const gate_count = harness.runtime.atomic(0)
@@ -133,10 +130,7 @@ pipeline test_completion_gate_arbitrates_a_superseded_deferred_effect(
   assert(decisions[0].invoked.deterministic)
 }
 
-pipeline test_deferred_effect_remains_pending_without_a_completion_adjudicator(
-  harness: Harness,
-  _task: unknown,
-) {
+pipeline test_deferred_effect_remains_pending_without_a_completion_adjudicator(harness: Harness) {
   const run_count = harness.runtime.atomic(0)
   const verify_count = harness.runtime.atomic(0)
   const session = "deferred-effect-conservative-" + harness.random.uuid()

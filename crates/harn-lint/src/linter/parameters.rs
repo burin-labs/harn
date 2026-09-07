@@ -18,10 +18,15 @@ impl Linter<'_> {
         owner: &str,
         removal_allowed: bool,
     ) {
-        let removal_allowed = removal_allowed
-            && self
-                .pipeline_input_attribute_owner
-                .unwrap_or(!Self::is_test_pipeline_name(owner));
+        // An unattributed declaration owns its own arity. `harn test` derives
+        // one Nil argument per declared non-`Harness` parameter, so a
+        // `test_*` pipeline runs identically whether or not it keeps a
+        // vestigial trailing input; the slot is removable like any other. An
+        // attributed declaration is different: `@test(cases: ...)` rows and
+        // `@test(fixture: ...)` count the slot, so only a bare `@test` allows
+        // removal.
+        let removal_allowed =
+            removal_allowed && self.pipeline_input_attribute_owner.unwrap_or(true);
         let used: std::collections::HashSet<_> = if removal_allowed
             && params
                 .iter()

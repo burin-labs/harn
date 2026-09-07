@@ -1,0 +1,16 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+  "config": {
+    "id": "StepJudgeOptions",
+    "prefix": "StepJudgeOptions.",
+    "types": [],
+    "parameters": [
+      {"function": "agent_step_judge", "name": "opts", "path": ["step_judge"]},
+      {"function": "__should_skip", "name": "judge_cfg"},
+      {"function": "__invoke", "name": "judge_cfg"},
+      {"function": "__invoke", "name": "opts", "path": ["step_judge"]}
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

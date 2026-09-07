@@ -1,0 +1,144 @@
+[
+  {
+    "default": "3",
+    "evidence": "__should_skip bounds configured per-turn critique attempts; no canonical headless activation trace collected.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "StepJudgeOptions.max_attempts",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 56,
+        "reader": "__should_skip"
+      }
+    ],
+    "reason": "A caller-selected bound on model review attempts.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "1",
+    "evidence": "__should_skip reserves the remaining runner iterations; no canonical headless activation trace collected.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "StepJudgeOptions.skip_when_iterations_remaining",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 60,
+        "reader": "__should_skip"
+      }
+    ],
+    "reason": "Must be reconciled with the single stop-decision budget during cutover.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true",
+    "evidence": "__should_skip bypasses critique when neither text nor tools were returned.",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "StepJudgeOptions.skip_when_empty",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 64,
+        "reader": "__should_skip"
+      }
+    ],
+    "reason": "Empty-response recovery belongs to the runner; remove the duplicate model-review branch.",
+    "verdict": "PROMOTE-TO-DEFAULT"
+  },
+  {
+    "default": "true",
+    "evidence": "__should_skip bypasses critique when a stall warning is already present.",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "StepJudgeOptions.skip_when_stalled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 70,
+        "reader": "__should_skip"
+      }
+    ],
+    "reason": "The stall handler owns recovery from a detected stall; remove competing review control.",
+    "verdict": "PROMOTE-TO-DEFAULT"
+  },
+  {
+    "default": "default",
+    "evidence": "__invoke supplies rubric content to the review prompt.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "StepJudgeOptions.rubric",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 78,
+        "reader": "__invoke"
+      }
+    ],
+    "reason": "Rubric content is caller policy, distinct from the review mechanism.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true",
+    "evidence": "__invoke distinguishes an unavailable reviewer from a passing review.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "StepJudgeOptions.fail_open_on_error",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 96,
+        "reader": "__invoke"
+      }
+    ],
+    "reason": "Replace the boolean with the typed stop-decision policy after failure-path evidence.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "The previous response should be revised.",
+    "evidence": "__invoke uses this feedback when the reviewer supplies no critique.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "StepJudgeOptions.feedback_fallback",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 131,
+        "reader": "__invoke"
+      }
+    ],
+    "reason": "Caller-owned feedback wording is policy content.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "replace",
+    "evidence": "agent_step_judge selects the response to a negative review.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "StepJudgeOptions.on_veto",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 242,
+        "reader": "agent_step_judge"
+      }
+    ],
+    "reason": "Reconcile veto handling with the single typed stop decision during cutover.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

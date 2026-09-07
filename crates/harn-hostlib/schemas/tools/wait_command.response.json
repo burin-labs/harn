@@ -20,7 +20,15 @@
     "signal": { "type": ["string", "null"] },
     "timed_out": { "type": "boolean" },
     "stdout": { "type": "string" },
+    "stdout_truncated": {
+      "type": "boolean",
+      "description": "The returned stdout omits bytes the process wrote, because the capture exceeded max_inline_bytes."
+    },
     "stderr": { "type": "string" },
+    "stderr_truncated": {
+      "type": "boolean",
+      "description": "The returned stderr omits bytes the process wrote."
+    },
     "output_path": { "type": "string" },
     "stdout_path": { "type": "string" },
     "stderr_path": { "type": "string" },

@@ -1,7 +1,10 @@
-# Harn
+# Execution vocabulary
 
-Harn is the provider-neutral execution language and runtime for durable,
-inspectable agent workflows.
+The words Harn uses for an execution, its evidence, its conversation history,
+its external effects, and its run authority. Each entry names the preferred
+term and the near-synonyms to avoid, so code, receipts, events, and prose all
+say the same thing. For conversation-unit terms and cross-references to other
+frameworks, see the [Glossary](./glossary.md).
 
 ## Execution evidence
 

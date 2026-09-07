@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use keyring_core::{CredentialStore, Entry, Error as KeyringError};
@@ -20,6 +21,12 @@ pub enum NativeKeyringError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("credential store verification failed: {0}")]
     Verification(&'static str),
+    #[error(
+        "credential store did not answer within {}ms; a locked collection waiting on an \
+         interactive unlock never returns on a headless host",
+        .timeout.as_millis()
+    )]
+    Unresponsive { timeout: Duration },
 }
 
 /// A stable reason that the operating-system credential store cannot service
@@ -72,6 +79,10 @@ impl NativeKeyringError {
                 // whose login keychain cannot present an unlock prompt.
                 Some(NativeKeyringUnavailable::InteractionRequired)
             }
+            // A store that never answers is the same fact the macOS arm
+            // reports as an error code: the platform wants a human at a
+            // prompt this process cannot present.
+            Self::Unresponsive { .. } => Some(NativeKeyringUnavailable::InteractionRequired),
             _ => None,
         }
     }
@@ -180,9 +191,57 @@ impl NativeKeyring {
         Ok(self.list()?.iter().any(|entry| entry == user))
     }
 
+    /// How long [`Self::healthcheck`] waits for the platform store.
+    ///
+    /// Matches the deadline the CLI's diagnostic subprocess probes use, so a
+    /// caller that runs several checks sees one consistent worst case.
+    pub const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Prove the credential store round-trips a probe, within a deadline.
+    ///
+    /// The deadline is the whole point. On Linux the Secret Service answers a
+    /// locked collection by raising an interactive unlock prompt and blocking
+    /// until somebody types a password, so on a headless host this call used
+    /// to never return; the caller had no way to tell an unavailable store
+    /// from one that simply had not answered yet. The probe now runs on its
+    /// own thread and is abandoned when the deadline passes, which keeps the
+    /// process able to finish and report.
+    ///
+    /// Abandoning it leaks that thread, still parked on the prompt, for the
+    /// life of the process. That is deliberate: the blocking call lives
+    /// inside the platform client and cannot be cancelled from here, and a
+    /// parked thread costs a stack while a hung process costs the run.
     pub fn healthcheck(&self) -> Result<String, NativeKeyringError> {
-        let user = format!("__harn_probe__:{}", uuid::Uuid::now_v7().simple());
-        self.healthcheck_with_user(&user)
+        self.healthcheck_within(Self::HEALTHCHECK_TIMEOUT)
+    }
+
+    /// [`Self::healthcheck`] with an explicit deadline, for tests.
+    pub fn healthcheck_within(&self, timeout: Duration) -> Result<String, NativeKeyringError> {
+        use std::sync::mpsc::RecvTimeoutError;
+
+        let probe = Self {
+            service: self.service.clone(),
+            entries: Mutex::new(HashMap::new()),
+            store: self.store.clone(),
+        };
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("harn-keyring-healthcheck".to_string())
+            .spawn(move || {
+                let user = format!("__harn_probe__:{}", uuid::Uuid::now_v7().simple());
+                let _ = sender.send(probe.healthcheck_with_user(&user));
+            })
+            .map_err(|_| {
+                NativeKeyringError::Verification("could not start the healthcheck probe")
+            })?;
+
+        match receiver.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => Err(NativeKeyringError::Unresponsive { timeout }),
+            Err(RecvTimeoutError::Disconnected) => Err(NativeKeyringError::Verification(
+                "the healthcheck probe ended without reporting a result",
+            )),
+        }
     }
 
     fn healthcheck_with_user(&self, user: &str) -> Result<String, NativeKeyringError> {
@@ -564,5 +623,114 @@ mod tests {
             .expect_err("read-only store must fail the healthcheck");
 
         assert!(error.to_string().contains("mock read-only store"));
+    }
+
+    /// A credential store that never answers, so the deadline is the only
+    /// thing that can end a probe against it.
+    ///
+    /// The obvious way to test a deadline is to set it to zero, and that is
+    /// what this test used to do. It does not test the deadline: the probe
+    /// runs on its own thread, and `recv_timeout` hands back a result that is
+    /// already in the channel no matter how short the deadline is, so a zero
+    /// deadline only fails the probe when the caller loses a race against
+    /// thread startup. On one host the probe was slower and the test passed;
+    /// on a hosted runner the probe won and the same code reported a healthy
+    /// store under an expired deadline.
+    ///
+    /// Blocking in `build` reproduces what the deadline exists for. A locked
+    /// Secret Service collection stops answering there, inside the platform
+    /// client, with no way to cancel it from the calling thread.
+    #[derive(Debug)]
+    struct NeverAnswersStore {
+        released: Mutex<bool>,
+        released_signal: std::sync::Condvar,
+    }
+
+    impl NeverAnswersStore {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                released: Mutex::new(false),
+                released_signal: std::sync::Condvar::new(),
+            })
+        }
+
+        /// Let the abandoned probe thread finish.
+        ///
+        /// Production leaves it parked for the life of the process on purpose,
+        /// which is fine for a command that is about to exit and rude in a
+        /// test binary that keeps running.
+        fn release(&self) {
+            *self.released.lock().expect("release lock") = true;
+            self.released_signal.notify_all();
+        }
+    }
+
+    impl keyring_core::api::CredentialStoreApi for NeverAnswersStore {
+        fn vendor(&self) -> String {
+            "harn-test/never-answers".to_string()
+        }
+
+        fn id(&self) -> String {
+            "never-answers".to_string()
+        }
+
+        fn build(
+            &self,
+            _service: &str,
+            _user: &str,
+            _modifiers: Option<&HashMap<&str, &str>>,
+        ) -> keyring_core::Result<Entry> {
+            let mut released = self.released.lock().expect("release lock");
+            while !*released {
+                released = self
+                    .released_signal
+                    .wait(released)
+                    .expect("wait for release");
+            }
+            Err(KeyringError::NoStorageAccess(Box::new(
+                std::io::Error::other("the test released a parked probe"),
+            )))
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[test]
+    fn healthcheck_gives_up_on_a_store_that_does_not_answer() {
+        // Positive control first: the same call against a store that does
+        // answer passes, so the refusal below is the deadline firing and not
+        // the probe failing for some other reason.
+        NativeKeyring::with_store(
+            "harn.healthcheck-deadline",
+            keyring_core::mock::Store::new().unwrap(),
+        )
+        .healthcheck_within(Duration::from_secs(5))
+        .expect("a responsive store passes within the deadline");
+
+        let store = NeverAnswersStore::new();
+        let blocking: Arc<CredentialStore> = store.clone();
+        let keyring = NativeKeyring::with_store("harn.healthcheck-deadline", blocking);
+
+        let error = keyring
+            .healthcheck_within(Duration::from_millis(50))
+            .expect_err("a store that never answers must not report a healthy store");
+
+        assert!(
+            matches!(error, NativeKeyringError::Unresponsive { .. }),
+            "expected an unresponsive-store error, got {error}"
+        );
+        assert!(
+            error.to_string().contains("interactive unlock"),
+            "the error must name why a store stops answering: {error}"
+        );
+        assert_eq!(
+            error.unavailable_reason(),
+            Some(NativeKeyringUnavailable::InteractionRequired),
+            "a store awaiting a prompt is unavailable, not an operational failure"
+        );
+
+        store.release();
     }
 }

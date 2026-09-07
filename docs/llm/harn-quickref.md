@@ -151,7 +151,7 @@ harn merge-captain run --backend replay \
   --once --no-stdout
 
 # Run the in-process fake GitHub/fake git golden-transition suite.
-cargo test -p harn-cli --test merge_captain_cli issue_1012
+./scripts/cargo_with_worktree_build_dir.sh test -p harn-cli --test merge_captain_cli issue_1012
 ```
 
 Backends:

@@ -1,0 +1,94 @@
+[
+  {
+    "default": "3; nonnegative integer overrides the default",
+    "evidence": "__agent_loop_context_overflow_max_recoveries bounds emergency compaction retries after provider context overflow.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.context_overflow_recover_max",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 326,
+        "reader": "__agent_loop_context_overflow_max_recoveries"
+      }
+    ],
+    "reason": "Preserve bounded recovery while moving the recovery policy into the typed runner contract.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "2; nonnegative integer overrides the default",
+    "evidence": "__autocontinue_max_continuations bounds retries after truncated tool calls or hidden-reasoning-only responses.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.truncation_auto_continue_max",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 101,
+        "reader": "__autocontinue_max_continuations"
+      }
+    ],
+    "reason": "Preserve bounded recovery while moving the recovery policy into the typed runner contract.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "16384; positive integer overrides the default",
+    "evidence": "__autocontinue_raised_cap uses this output-token cap when the original call had no explicit cap, then clamps it to the configured ceiling.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.truncation_auto_continue_base",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 121,
+        "reader": "__autocontinue_raised_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 118,
+        "reader": "__autocontinue_raised_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 119,
+        "reader": "__autocontinue_raised_cap"
+      }
+    ],
+    "reason": "Preserve explicit recovery resource limits in the typed runner contract.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "32768; positive integer overrides the default",
+    "evidence": "__autocontinue_raised_cap clamps the doubled or base output-token cap to this ceiling.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.truncation_auto_continue_ceiling",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 128,
+        "reader": "__autocontinue_raised_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 125,
+        "reader": "__autocontinue_raised_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 126,
+        "reader": "__autocontinue_raised_cap"
+      }
+    ],
+    "reason": "Preserve explicit recovery resource limits in the typed runner contract.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

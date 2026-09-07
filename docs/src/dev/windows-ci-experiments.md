@@ -3,8 +3,8 @@
 Two independently-toggleable experiments for the `Rust on Windows (build +
 smoke test)` job in `.github/workflows/ci.yml` and its cache writer,
 `.github/workflows/windows-nightly.yml`. Each is gated by a repo variable and
-defaults **off**, so merging this branch changes nothing until a variable is
-set. Attribute wins by flipping one variable at a time.
+defaults **off**, so neither is active until someone sets its variable.
+Attribute wins by flipping one variable at a time.
 
 ## Baseline
 
