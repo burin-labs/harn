@@ -516,7 +516,11 @@ impl ModePolicyScope {
                 drop(ssrf_guard);
                 scoped.await
             }
-            None => inner.await,
+            // A mode that installs no policy of its own still needs the span to
+            // own its ambient context. The prompt body holds resource ceilings
+            // across these awaits, and on an unscoped span those live on the
+            // polling thread, where the other turn reads and restores them.
+            None => harn_vm::orchestration::scope_ambient_context(inner).await,
         }
     }
 }
@@ -1119,6 +1123,79 @@ mod tests {
         assert!(
             current_execution_policy().is_none(),
             "neither turn's policy may outlive its own prompt scope"
+        );
+        clear_execution_policy_stacks();
+    }
+
+    /// Two prompts in flight must also keep their own resource ceilings.
+    ///
+    /// Same cause and same seam as the policy arms above: the prompt body
+    /// installs the turn's caps and holds them across the awaited execution, so
+    /// on an unscoped span they live on the polling thread and the other turn
+    /// reads and restores them. This arm covers the `code` mode with no
+    /// embedder sandbox config, which installs no capability policy at all and
+    /// was therefore the one span still running unscoped.
+    ///
+    /// The cap is read back through `mcp_calls_spent`, which answers `None`
+    /// when no budget is installed and `Some` once one is. Charging a call
+    /// against it first is what makes the read non-null: a probe that could
+    /// only ever report `None` would pass with no budget installed anywhere.
+    ///
+    /// Falsifier: drop the `None` arm's scope back to a bare `inner.await`.
+    /// The first turn then reads the second turn's budget.
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_turns_each_keep_their_own_resource_ceiling() {
+        use harn_vm::orchestration::clear_execution_policy_stacks;
+
+        /// `code` with no sandbox config: the mode that installs no policy.
+        fn unconfigured() -> AcpSandboxConfig {
+            AcpSandboxConfig::default()
+        }
+
+        clear_execution_policy_stacks();
+        assert!(
+            policy_for_mode("code", &unconfigured()).is_none(),
+            "this arm must exercise the span that installs no capability policy"
+        );
+
+        async fn turn(scope: &ModePolicyScope, cap: u64, extra_yields: usize) -> Option<u64> {
+            scope
+                .run(async move {
+                    let _budget = harn_vm::install_mcp_call_budget(cap);
+                    harn_vm::charge_mcp_call().expect("first charge is under every cap here");
+                    for _ in 0..=extra_yields {
+                        tokio::task::yield_now().await;
+                    }
+                    // Charge again and report the total this turn has spent.
+                    // Its own budget was charged once, so a turn that reads its
+                    // own ceiling sees 2.
+                    harn_vm::charge_mcp_call().ok();
+                    harn_vm::mcp_calls_spent()
+                })
+                .await
+        }
+
+        let first = ModePolicyScope::new("code", &unconfigured());
+        let second = ModePolicyScope::new("code", &unconfigured());
+        // The same fixed interleave as the policy arms: `join!` polls in order,
+        // and the yield counts place the second turn's install between the
+        // first turn's install and its own read.
+        let (first_spent, second_spent) = tokio::join!(turn(&first, 8, 0), turn(&second, 8, 1));
+
+        assert_eq!(
+            first_spent,
+            Some(2),
+            "the first turn must charge its OWN budget on both calls; reading anything else \
+             means the second turn's ceiling replaced it while this one was suspended"
+        );
+        assert_eq!(
+            second_spent,
+            Some(2),
+            "and the second turn must keep its own, so the pair cannot pass by simply swapping"
+        );
+        assert!(
+            harn_vm::mcp_calls_spent().is_none(),
+            "neither turn's ceiling may outlive its own prompt scope"
         );
         clear_execution_policy_stacks();
     }
