@@ -27,16 +27,64 @@ fn blacksmith_tier_expression() -> string {
  * green (#7845), and bounding each step is what keeps an overrun from eating
  * that reserve.
  *
- * Sized from the five most recent green main runs of `rust-check-inputs` plus
- * the two slowest in that window, with a full-generation save measured at
- * 8m35s. Observed step maxima: portable CLI 7m01s, security archive 8m56s,
- * workspace tests 20m03s, setup and cache restore together 3m33s.
+ * Every budget is sized from the step's COLD wall, not its warm one. The shared
+ * workspace cache is written only from the persistent ref, and the repository
+ * sits close enough to its Actions cache ceiling that the entry is evicted
+ * between writes, so a branch that compiles from no restore at all is the
+ * ordinary case rather than the exception. Sizing from warm runs is what left
+ * the security archive 47 seconds of headroom and then cancelled it.
+ *
+ * Same steps, same runner class, one warm and one cold measurement each:
+ *
+ *   step                      warm (exact restore)   cold (no restore)
+ *   Build portable Harn CLI   279s                   435s
+ *   Build security archive    481s                   673s completed,
+ *                                                    cancelled at 720s
+ *   Run Rust workspace tests  489s                   496s
+ *
+ * `cold_seconds` records the largest cold wall observed for the step. The
+ * cancelled security-archive run is recorded at the ceiling that cancelled it,
+ * because its true wall is only known to be at least that long.
  */
-const PRODUCER_STEP_BUDGETS: list<{name: string, minutes: int}> = [
-  {name: "Build portable Harn CLI", minutes: 9},
-  {name: "Build security test archive", minutes: 12},
-  {name: "Run Rust workspace tests", minutes: 26},
+const PRODUCER_STEP_BUDGETS: list<{name: string, minutes: int, cold_seconds: int}> = [
+  {name: "Build portable Harn CLI", minutes: 10, cold_seconds: 435},
+  {name: "Build security test archive", minutes: 16, cold_seconds: 720},
+  {name: "Run Rust workspace tests", minutes: 26, cold_seconds: 496},
 ]
+
+/**
+ * How far above its recorded cold wall a budget has to sit. A budget equal to
+ * the measurement is not a budget: the next cold run on a slightly slower
+ * runner cancels a step that did nothing wrong.
+ */
+const PRODUCER_COLD_MARGIN_PERCENT = 130
+
+/**
+ * A budget that does not clear its own recorded cold measurement by the margin
+ * is refused here rather than discovered as a cancelled step. Kept pure over
+ * the table so the shipped rows and a deliberately short row take the same
+ * path.
+ */
+pub fn step_budget_margin_errors(
+  budgets: list<{name: string, minutes: int, cold_seconds: int}>,
+) -> list<string> {
+  let errors: list<string> = []
+  for budget in budgets {
+    const required = budget.cold_seconds * PRODUCER_COLD_MARGIN_PERCENT
+    if budget.minutes * 60 * 100 < required {
+      errors = errors
+        + [
+          "ci.yml step '${budget.name}' budget of ${budget.minutes}m must clear its recorded ${budget.cold_seconds}s cold wall by ${PRODUCER_COLD_MARGIN_PERCENT}%",
+        ]
+    }
+  }
+  return errors
+}
+
+/** The shipped producer table, measured against its own recorded cold walls. */
+pub fn producer_step_budget_margin_errors() -> list<string> {
+  return step_budget_margin_errors(PRODUCER_STEP_BUDGETS)
+}
 
 /** Checkout, disk reclaim, mold, toolchain, cache restore, nextest, uploads. */
 const PRODUCER_SETUP_OVERHEAD_MINUTES = 6
@@ -845,6 +893,7 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   errors = errors + live_artifact_handoff_errors(workflow)
   errors = errors + walltime_report_errors(workflow)
   errors = errors + rust_cache_refresh_errors(workflow)
+  errors = errors + producer_step_budget_margin_errors()
   for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
     if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0
       && to_string(job_name)
