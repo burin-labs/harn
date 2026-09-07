@@ -5,6 +5,8 @@ import {
   e2e_elastic_capacity_errors,
   producer_cache_save_reserve_minutes,
   producer_hosted_ceiling_minutes,
+  producer_step_budget_margin_errors,
+  step_budget_margin_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
 import {
@@ -98,7 +100,7 @@ fn persistent_lane(
       "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && ${paid_event} && '${runner}' || 'ubuntu-latest'",
     ),
     "timeout-minutes": gha_expression(
-      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && ${paid_event} && 20 || 65",
+      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && ${paid_event} && 20 || 70",
     ),
     env: {
       HARN_RUNNER_TIER: gha_expression(
@@ -221,13 +223,13 @@ fn workflow() {
           + [
             {
               name: "Build portable Harn CLI",
-              "timeout-minutes": 9,
+              "timeout-minutes": 10,
               run: "./scripts/ci/rust_artifact.sh build-cli cli-bundle sha",
             },
             {name: "Upload portable Harn CLI", uses: "actions/upload-artifact@pinned"},
             {
               name: "Build security test archive",
-              "timeout-minutes": 12,
+              "timeout-minutes": 16,
               run: "./scripts/ci/rust_artifact.sh build-security security-bundle sha",
             },
             {name: "Upload security test archive", uses: "actions/upload-artifact@pinned"},
@@ -972,7 +974,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   assert(errors.contains("ci.yml:rust-check-inputs must mirror its Blacksmith/hosted runner tier"))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 65-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 70-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }
@@ -1280,4 +1282,34 @@ pipeline test_producer_ceiling_reserves_a_full_cache_generation_save(
   assert(producer_cache_save_reserve_minutes() >= 9)
   assert(producer_hosted_ceiling_minutes() > producer_cache_save_reserve_minutes())
   assert_eq(ci_linux_lane_policy_errors(workflow()), [])
+}
+
+/**
+ * A step budget is only honest about the wall it was measured against. The
+ * producer's cache is written from the persistent ref alone and is evicted
+ * between writes, so a branch compiling from no restore is ordinary, and a
+ * budget sized on a warm run cancels a step that did nothing wrong. Recording
+ * the cold wall next to the budget makes that failure a policy error instead of
+ * a cancelled job with no diagnostic.
+ */
+@test
+pipeline test_a_step_budget_below_its_recorded_cold_wall_is_refused(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(
+    step_budget_margin_errors(
+      [{name: "Build security test archive", minutes: 12, cold_seconds: 720}],
+    ),
+    [
+      "ci.yml step 'Build security test archive' budget of 12m must clear its recorded 720s cold wall by 130%",
+    ],
+  )
+  assert_eq(
+    step_budget_margin_errors(
+      [{name: "Build security test archive", minutes: 16, cold_seconds: 720}],
+    ),
+    [],
+  )
+  assert_eq(producer_step_budget_margin_errors(), [])
 }
