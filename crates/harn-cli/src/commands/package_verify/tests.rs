@@ -340,7 +340,7 @@ fn package_gates_share_exact_input_exclusions() {
 }
 
 #[test]
-fn package_test_discovery_recurses_through_owned_test_lanes() {
+fn package_test_discovery_uses_runtime_pipeline_rules_for_every_selected_file() {
     let dir = tempfile::tempdir().unwrap();
     for relative in [
         "tests/unit/parse.harn",
@@ -369,19 +369,114 @@ fn package_test_discovery_recurses_through_owned_test_lanes() {
         .unwrap();
     }
 
-    let files = package_test_files(dir.path())
-        .into_iter()
-        .map(|path| path.strip_prefix(dir.path()).unwrap().to_path_buf())
-        .collect::<Vec<_>>();
+    fs::write(
+        dir.path().join("tests/ordinary.harn"),
+        "pipeline test(harness: Harness, task) {}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("tests/annotated.harn"),
+        "@test\npipeline verifies_annotation(harness: Harness, task) {}\n",
+    )
+    .unwrap();
 
+    let inventory = package_test_discovery(dir.path());
+
+    assert_eq!(inventory.selected_file_count, 6);
+    assert_eq!(inventory.discovered_test_count, 4);
     assert_eq!(
-        files,
-        [
-            PathBuf::from("tests/contract/provider.harn"),
-            PathBuf::from("tests/integration/workflow.harn"),
-            PathBuf::from("tests/unit/parse.harn"),
-        ]
+        inventory
+            .files_without_tests
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        ["tests/ordinary.harn", "tests/unit/helpers.harn"]
     );
+    assert!(inventory
+        .files_without_tests
+        .iter()
+        .all(|file| { file.sha256.starts_with("sha256:") && file.sha256.len() == 71 }));
+}
+
+#[test]
+fn package_test_inventory_reports_a_malformed_manifest_without_losing_the_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("harn.toml"), "[tests\n").unwrap();
+    fs::create_dir(dir.path().join("tests")).unwrap();
+    fs::write(
+        dir.path().join("tests/valid.harn"),
+        "pipeline test_valid(harness: Harness, task) {}\n",
+    )
+    .unwrap();
+
+    let (inventory, problems) = inspect_package_test_discovery(dir.path());
+
+    assert_eq!(inventory.discovered_test_count, 1);
+    assert!(problems
+        .iter()
+        .any(|p| p.contains("harn.toml could not be read")));
+}
+
+#[test]
+fn package_test_inventory_preserves_the_identity_of_invalid_utf8() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("harn.toml"), "").unwrap();
+    fs::create_dir(dir.path().join("tests")).unwrap();
+    fs::write(dir.path().join("tests/invalid.harn"), [0xff, 0xfe]).unwrap();
+
+    let (inventory, problems) = inspect_package_test_discovery(dir.path());
+
+    assert!(!problems.is_empty());
+    assert_eq!(inventory.files_with_errors.len(), 1);
+    assert!(inventory.files_with_errors[0].sha256.starts_with("sha256:"));
+    assert_ne!(inventory.files_with_errors[0].sha256, "unreadable");
+}
+
+#[test]
+fn package_test_inventory_fails_closed_for_an_undeclared_empty_suite() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let (inventory, problems) = inspect_package_test_discovery(dir.path());
+
+    assert_eq!(inventory.selected_file_count, 0);
+    assert!(problems
+        .iter()
+        .any(|p| p.contains("[tests].allow_empty = true")));
+}
+
+#[test]
+fn package_test_inventory_accepts_a_reasoned_manifest_owned_empty_suite() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("harn.toml"),
+        "[tests]\nallow_empty = true\nreason = \"schema-only package\"\n",
+    )
+    .unwrap();
+
+    let (inventory, problems) = inspect_package_test_discovery(dir.path());
+
+    assert!(problems.is_empty());
+    assert!(inventory.allow_empty);
+    assert_eq!(
+        inventory.allow_empty_reason.as_deref(),
+        Some("schema-only package")
+    );
+}
+
+#[test]
+fn package_test_inventory_rejects_an_unexplained_empty_suite_exception() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("harn.toml"),
+        "[tests]\nallow_empty = true\n",
+    )
+    .unwrap();
+
+    let (_, problems) = inspect_package_test_discovery(dir.path());
+
+    assert!(problems
+        .iter()
+        .any(|p| p.contains("requires a non-empty [tests].reason")));
 }
 
 #[test]

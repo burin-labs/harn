@@ -1,5 +1,5 @@
 import { assert_eq } from "std/testing"
-import { github_bump_remote } from "../github_remote"
+import { bump_pull_request_body, github_bump_remote } from "../github_remote"
 
 const API = "https://api.github.com"
 
@@ -142,6 +142,14 @@ pipeline test_base_head_projects_exact_identity_and_unavailable_state(
   assert_eq(unavailable.oid, nil)
   assert(trim(unavailable.detail) != "")
   harness.testing.http_mock_clear()
+}
+
+pipeline test_bump_pr_body_attaches_exact_package_test_receipt(task: unknown) {
+  const receipt = "{\"schemaVersion\":1,\"ok\":false}"
+  const body = bump_pull_request_body(receipt)
+  assert(contains(body, "sha256:" + sha256(receipt)))
+  assert(contains(body, base64_encode(receipt)))
+  assert_eq(base64_decode(base64_encode(receipt)), receipt)
 }
 
 pipeline test_release_projection_is_closed_and_exact(harness: Harness, task: unknown) {

@@ -183,7 +183,6 @@ pub(super) fn probe_request_payload_for_format(
         provider,
         model,
         &caps,
-        true,
     )
     .map_err(|error| error.to_string())?;
     let api_mode = crate::llm::api::effective_tool_api_mode(

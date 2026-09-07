@@ -508,6 +508,15 @@ pub(crate) fn builtin_llm_mock_active() -> bool {
     with_mock_state(|state| state.builtin_queue.is_active())
 }
 
+/// Whether any LLM mock is serving this call, from either install point.
+///
+/// The one predicate capability resolution asks. Both mocks make the same
+/// difference to a route: the provider and model on the call may be names the
+/// capability registry has never seen.
+pub(crate) fn any_llm_mock_active() -> bool {
+    cli_llm_mock_replay_active() || builtin_llm_mock_active()
+}
+
 pub(crate) fn builtin_llm_mock_strict_scopes() -> bool {
     with_mock_state(|state| state.builtin_queue.strict_scopes())
 }

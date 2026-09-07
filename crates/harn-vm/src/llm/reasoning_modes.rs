@@ -80,34 +80,29 @@ pub(crate) fn resolve_requested(
     requested: Option<&str>,
     model: &str,
     provider: &str,
-    enforce_gates: bool,
 ) -> Result<Option<String>, crate::value::VmError> {
     let mode_id = match requested {
         None | Some(STANDARD_MODE_ID) => return Ok(None),
         Some(other) => other,
     };
-    if enforce_gates {
-        let thrown = |message: String| {
-            crate::value::VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
-                message,
-            )))
-        };
-        match gate(model, mode_id) {
-            ReasoningModeGate::Usable => {}
-            ReasoningModeGate::Unsupported => {
-                return Err(thrown(format!(
-                    "reasoning_mode: model \"{model}\" (provider \"{provider}\") declares no \
-                     \"{mode_id}\" reasoning mode in the catalog; remove `reasoning_mode` or \
-                     pick a model that advertises it under `reasoning_modes`"
-                )));
-            }
-            ReasoningModeGate::Deprecated { note } => {
-                let detail = note.map(|n| format!(" ({n})")).unwrap_or_default();
-                return Err(thrown(format!(
-                    "reasoning_mode: the \"{mode_id}\" reasoning mode for model \"{model}\" is \
-                     deprecated{detail}"
-                )));
-            }
+    let thrown = |message: String| {
+        crate::value::VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(message)))
+    };
+    match gate(model, mode_id) {
+        ReasoningModeGate::Usable => {}
+        ReasoningModeGate::Unsupported => {
+            return Err(thrown(format!(
+                "reasoning_mode: model \"{model}\" (provider \"{provider}\") declares no \
+                 \"{mode_id}\" reasoning mode in the catalog; remove `reasoning_mode` or \
+                 pick a model that advertises it under `reasoning_modes`"
+            )));
+        }
+        ReasoningModeGate::Deprecated { note } => {
+            let detail = note.map(|n| format!(" ({n})")).unwrap_or_default();
+            return Err(thrown(format!(
+                "reasoning_mode: the \"{mode_id}\" reasoning mode for model \"{model}\" is \
+                 deprecated{detail}"
+            )));
         }
     }
     Ok(Some(mode_id.to_string()))

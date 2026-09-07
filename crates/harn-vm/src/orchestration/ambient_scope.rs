@@ -458,7 +458,7 @@ pub(crate) fn scope_run_event_sink<F: Future>(
 }
 
 mod policy_scope;
-pub use policy_scope::scope_execution_policy;
+pub use policy_scope::{scope_ambient_context, scope_execution_policy};
 pub(crate) use policy_scope::{
     scope_approval_policy, scope_autonomy_policy, scope_command_policy, scope_dynamic_permissions,
 };

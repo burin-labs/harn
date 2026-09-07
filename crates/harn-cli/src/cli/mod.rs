@@ -184,7 +184,8 @@ pub use pack::{PackArgs, PackCommand, PackRepackArgs, PackUnpackArgs, PackVerify
 pub(crate) use package::{
     AddArgs, InstallArgs, PackageArgs, PackageArtifactsCommand, PackageCacheCommand,
     PackageCommand, PackageRegistryCommand, PackageScaffoldCommand, PackageScaffoldOpenapiArgs,
-    PackageSearchArgs, PackageVerifyArgs, PublishArgs, RemoveArgs, UpdateArgs,
+    PackageSearchArgs, PackageTestInventoryArgs, PackageVerifyArgs, PublishArgs, RemoveArgs,
+    UpdateArgs,
 };
 pub(crate) use parse_tokens::{ParseArgs, TokensArgs};
 pub(crate) use persona::{

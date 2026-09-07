@@ -222,6 +222,78 @@ fn connector_test_namespace_is_removed() {
 }
 
 #[test]
+fn package_test_inventory_is_parser_backed_and_read_only() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("harn.toml"), "").expect("manifest");
+    fs::create_dir(temp.path().join("tests")).expect("tests directory");
+    fs::write(
+        temp.path().join("tests/by_name.harn"),
+        "pipeline test_by_name(task: unknown) { assert(true) }\n",
+    )
+    .expect("named test");
+    fs::write(
+        temp.path().join("tests/by_attribute.harn"),
+        "@test\npipeline arbitrary_name(task: unknown) { assert(true) }\n",
+    )
+    .expect("annotated test");
+    let mut before = fs::read_dir(temp.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    before.sort();
+
+    let output = run(Command::new(harn_e2e_binary())
+        .current_dir(temp.path())
+        .args(["package", "test-inventory", ".", "--json"]));
+
+    assert!(
+        output.status.success(),
+        "inventory failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).expect("receipt");
+    assert_eq!(receipt["schemaVersion"], 1);
+    assert_eq!(receipt["data"]["selected_file_count"], 2);
+    assert_eq!(receipt["data"]["discovered_test_count"], 2);
+    assert!(receipt["data"].get("files").is_none());
+    assert_eq!(
+        receipt["data"]["files_without_tests"],
+        serde_json::json!([])
+    );
+    let mut after = fs::read_dir(temp.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    after.sort();
+    assert_eq!(after, before, "inventory mutated the package");
+}
+
+#[test]
+fn package_test_inventory_rejects_an_ordinary_pipeline_with_file_identity() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("harn.toml"), "").expect("manifest");
+    fs::create_dir(temp.path().join("tests")).expect("tests directory");
+    fs::write(
+        temp.path().join("tests/noop.harn"),
+        "pipeline test(task: unknown) { assert(true) }\n",
+    )
+    .expect("ordinary pipeline");
+
+    let output = run(Command::new(harn_e2e_binary())
+        .current_dir(temp.path())
+        .args(["package", "test-inventory", ".", "--json"]));
+
+    assert!(!output.status.success());
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).expect("receipt");
+    assert!(receipt["error"]["details"]["inventory"]
+        .get("files")
+        .is_none());
+    let empty = &receipt["error"]["details"]["inventory"]["files_without_tests"][0];
+    assert_eq!(empty["path"], "tests/noop.harn");
+    assert!(empty["sha256"].as_str().unwrap().starts_with("sha256:"));
+}
+
+#[test]
 fn tool_scaffold_passes_canonical_package_verification() {
     let temp = tempfile::tempdir().expect("tempdir");
     let package = temp.path().join("example-tool");
