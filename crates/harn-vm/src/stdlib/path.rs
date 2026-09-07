@@ -28,20 +28,41 @@ fn to_native(s: &str) -> String {
     }
 }
 
+/// The Windows verbatim prefix, in the spelling [`to_posix`] produces.
+///
+/// `\\?\C:\repo` arrives here as `//?/C:/repo`. Without this, the empty
+/// segment between its two leading slashes is dropped along with every other
+/// empty segment and the path comes back as `/?/C:/repo`: neither a verbatim
+/// path nor a drive-absolute one, and no longer the prefix
+/// `stdlib/process.rs`'s `child_process_cwd` is written to strip. Windows
+/// rejects the result as a working directory, which is how a normalized `cwd`
+/// became "The directory name is invalid".
+const VERBATIM_PREFIX: &str = "//?/";
+
 /// Split a path into segments, preserving whether it was absolute.
+///
+/// The second element is the root to reprint ahead of the segments: a drive
+/// (`C:`), a verbatim prefix and its drive (`//?/C:`), or a bare verbatim
+/// prefix ahead of a UNC share (`//?/`). Everything after it is ordinary
+/// segment arithmetic.
 #[expect(
     clippy::string_slice,
     reason = "the drive prefix split at 2 is guarded to be two ASCII bytes"
 )]
 fn split_segments(p: &str) -> (bool, Option<String>, Vec<String>) {
     let posix = to_posix(p);
-    let mut drive: Option<String> = None;
+    let mut root = String::new();
     let mut rest: &str = &posix;
-    let bytes = posix.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        drive = Some(posix[..2].to_string());
-        rest = &posix[2..];
+    if let Some(after_prefix) = posix.strip_prefix(VERBATIM_PREFIX) {
+        root.push_str(VERBATIM_PREFIX);
+        rest = after_prefix;
     }
+    let bytes = rest.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        root.push_str(&rest[..2]);
+        rest = &rest[2..];
+    }
+    let drive = if root.is_empty() { None } else { Some(root) };
     let absolute = rest.starts_with('/');
     let segments: Vec<String> = rest
         .split('/')
@@ -545,6 +566,52 @@ mod tests {
             normalize("C:\\repo\\pkg\\..\\main.harn"),
             "C:/repo/main.harn"
         );
+    }
+
+    /// A Windows verbatim path survives normalization.
+    ///
+    /// The test runner canonicalizes every case file, and Windows
+    /// canonicalization returns `\\?\D:\...`, so `harness.fs.cwd()` hands
+    /// scripts a verbatim path and `path_normalize(path_join(cwd, "../.."))`
+    /// is the ordinary way to reach a repository root. Collapsing the prefix
+    /// to `/?/` produced a directory Windows refuses to launch a process in.
+    #[test]
+    fn normalize_keeps_a_windows_verbatim_prefix() {
+        assert_eq!(
+            normalize("\\\\?\\D:\\a\\harn\\harn\\scripts\\tests/../.."),
+            "//?/D:/a/harn/harn"
+        );
+        assert_eq!(
+            normalize("//?/C:/repo/pkg/../main.harn"),
+            "//?/C:/repo/main.harn"
+        );
+        assert_eq!(normalize("//?/C:/"), "//?/C:/");
+        // A verbatim UNC share keeps its prefix too; there is no drive-letter
+        // form of it to fall back to.
+        assert_eq!(
+            normalize("\\\\?\\UNC\\server\\share\\pkg\\..\\main.harn"),
+            "//?/UNC/server/share/main.harn"
+        );
+        // A single leading slash is an ordinary absolute path, not a prefix.
+        assert_eq!(normalize("/a/b/../c"), "/a/c");
+    }
+
+    /// The whole chain the Windows installer case walks: a canonicalized cwd,
+    /// normalized by a script, handed back as a child process working
+    /// directory. `child_process_cwd` is written to strip the `//?/` spelling
+    /// this module produces, and only sees one if normalization kept it.
+    #[test]
+    fn a_normalized_verbatim_cwd_still_reaches_a_launchable_directory() {
+        let normalized = normalize("\\\\?\\D:\\a\\harn\\harn\\scripts\\tests/../..");
+        let launched =
+            crate::stdlib::process::child_process_cwd(std::path::PathBuf::from(&normalized));
+        assert_eq!(launched, std::path::PathBuf::from("D:/a/harn/harn"));
+    }
+
+    #[test]
+    fn parent_keeps_a_windows_verbatim_prefix() {
+        assert_eq!(parent("//?/D:/a/harn/harn"), "//?/D:/a/harn");
+        assert_eq!(parent("//?/D:/a"), "//?/D:/");
     }
 
     #[test]
