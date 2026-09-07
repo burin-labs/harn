@@ -281,7 +281,9 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
 /// installs the macro-emitted signature slice into the parser registry
 /// (idempotent under repeat calls with the same slice pointer).
 pub fn register_vm_stdlib(vm: &mut Vm) {
-    if !vm.install_shared_stdlib_registration() {
+    if std::env::var_os("HARN_PROFILE_UNCACHED_STDLIB").is_some()
+        || !vm.install_shared_stdlib_registration()
+    {
         register_stdlib_bindings(vm);
     }
     if vm.harness().is_none() {
