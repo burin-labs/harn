@@ -216,14 +216,11 @@ pipeline test_classify_writes_other_kind_not_source(harness: Harness, task: unkn
 }
 
 pipeline test_combine_verify_nil_is_nil(harness: Harness, task: unknown) {
-  assert_eq(__completion_gate_combine_verify(nil, nil), nil)
+  assert_eq(__completion_gate_combine_verify(nil), nil)
 }
 
 pipeline test_combine_verify_any_red_blocks(harness: Harness, task: unknown) {
-  const combined = __completion_gate_combine_verify(
-    [{ok: true}, {ok: false, findings: "lint"}],
-    nil,
-  )
+  const combined = __completion_gate_combine_verify([{ok: true}, {ok: false, findings: "lint"}])
   assert_eq(combined.ok, false)
   assert_eq(combined.findings, "lint")
 }
@@ -231,17 +228,13 @@ pipeline test_combine_verify_any_red_blocks(harness: Harness, task: unknown) {
 pipeline test_combine_verify_concatenates_findings(harness: Harness, task: unknown) {
   const combined = __completion_gate_combine_verify(
     [{ok: false, findings: "a"}, {ok: false, findings: "b"}],
-    nil,
   )
   assert_eq(combined.ok, false)
   assert_eq(combined.findings, "a; b")
 }
 
-pipeline test_combine_verify_custom_combiner_wins(harness: Harness, task: unknown) {
-  const combiner = fn(_verdicts) { return {ok: true, findings: "overridden"} }
-  const combined = __completion_gate_combine_verify([{ok: false, findings: "x"}], combiner)
-  assert_eq(combined.ok, true)
-  assert_eq(combined.findings, "overridden")
+pipeline test_combine_verify_empty_is_unmeasured(harness: Harness, task: unknown) {
+  assert_eq(__completion_gate_combine_verify([]), nil)
 }
 
 pipeline test_budget_allow_never_charges(harness: Harness, task: unknown) {

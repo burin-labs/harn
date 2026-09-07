@@ -38,7 +38,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 681,
+        "line": 682,
         "reader": "__done_contract_primary_prompt"
       },
       {
@@ -327,12 +327,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 924,
+        "line": 925,
         "reader": "__completion_policy_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 1001,
+        "line": 1002,
         "reader": "__completion_boundary_ledger"
       },
       {
@@ -420,12 +420,12 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 908,
+        "line": 909,
         "reader": "__completion_policy_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 909,
+        "line": 910,
         "reader": "__completion_policy_plan"
       },
       {
@@ -468,12 +468,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 911,
+        "line": 912,
         "reader": "__completion_policy_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 995,
+        "line": 996,
         "reader": "__completion_boundary_ledger"
       },
       {
