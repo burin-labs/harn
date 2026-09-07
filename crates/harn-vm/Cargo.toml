@@ -143,7 +143,7 @@ shell-words = "1.1"
 # Full POSIX/bash syntax ownership for command-policy semantics. These versions
 # match harn-hostlib's existing AST family, so policy adds no parallel parser or
 # dependency graph. Kernel child confinement remains the security boundary.
-tree-sitter = "0.26"
+tree-sitter = "0.27"
 tree-sitter-bash = "0.25"
 tree-sitter-powershell = "0.26.4"
 strip-ansi-escapes = "0.2"

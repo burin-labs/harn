@@ -280,7 +280,7 @@ impl StructuralTree {
         }
         self.visited_nodes += 1;
 
-        let mut children = Vec::with_capacity(node.child_count());
+        let mut children = Vec::with_capacity(node.child_count() as usize);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             children.push(self.push_node(child, limits)?);

@@ -217,15 +217,15 @@ fn collect_matches(query: &Query, tree: &Tree, source: &str) -> Vec<SearchMatch>
     let mut out: Vec<SearchMatch> = Vec::new();
 
     while let Some(m) = iter.next() {
-        if m.captures.is_empty() {
+        if m.captures().is_empty() {
             // A capture-less pattern in a multi-pattern query yields no
             // bindings and no range — nothing for a caller to act on.
             continue;
         }
         let mut captures: Vec<CaptureBinding> = Vec::new();
-        let mut start = Span::of(m.captures[0].node);
+        let mut start = Span::of(m.captures()[0].node);
         let mut end = start.clone();
-        for capture in m.captures {
+        for capture in m.captures() {
             let span = Span::of(capture.node);
             if span.start_byte < start.start_byte {
                 start = span.clone();

@@ -16,7 +16,7 @@ harn-hostlib = { path = "../harn-hostlib", version = "=0.10.133-dev", default-fe
     "ast",
     "grammar-harn",
 ] }
-tree-sitter = "0.26"
+tree-sitter = "0.27"
 streaming-iterator = "0.1"
 regex = "1"
 serde = { version = "1", features = ["derive"] }

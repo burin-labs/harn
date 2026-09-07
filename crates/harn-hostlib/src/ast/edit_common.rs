@@ -127,7 +127,7 @@ pub(super) fn collect_target_spans(
     let mut seen: BTreeMap<(usize, usize), Span> = BTreeMap::new();
 
     while let Some(m) = matches.next() {
-        for capture in m.captures {
+        for capture in m.captures() {
             if capture.index != target_index {
                 continue;
             }
@@ -263,7 +263,7 @@ pub(super) fn first_syntax_error(source: &[u8], language: Language) -> Option<St
             ));
         }
         for i in (0..node.child_count()).rev() {
-            if let Some(child) = node.child(i as u32) {
+            if let Some(child) = node.child(i) {
                 if child.has_error() || child.is_missing() {
                     stack.push(child);
                 }

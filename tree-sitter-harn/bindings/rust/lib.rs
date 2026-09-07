@@ -136,7 +136,7 @@ where id = {user_id}
         let mut matches = cursor.matches(&query, tree.root_node(), source.as_bytes());
         let mut captured = Vec::new();
         while let Some(query_match) = matches.next() {
-            for capture in query_match.captures {
+            for capture in query_match.captures() {
                 if capture.index == capture_index {
                     captured.push(capture.node.utf8_text(source.as_bytes()).unwrap());
                 }

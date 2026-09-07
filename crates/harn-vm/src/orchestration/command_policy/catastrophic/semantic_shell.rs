@@ -777,7 +777,7 @@ fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnaly
 
 fn redirect_operator_from_children(redirect: Node<'_>, source: &[u8]) -> Option<String> {
     (0..redirect.child_count()).find_map(|index| {
-        let child = redirect.child(index as u32)?;
+        let child = redirect.child(index)?;
         let text = node_text(child, source)?;
         matches!(
             text,

@@ -156,7 +156,7 @@ fn flatten(tree: &Tree) -> (u32, Vec<ParsedNode>) {
             end_col: e.column as u32,
         });
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(i as u32) {
+            if let Some(child) = node.child(i) {
                 queue.push_back((child, Some(id)));
             }
         }

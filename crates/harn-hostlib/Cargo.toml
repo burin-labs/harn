@@ -156,7 +156,7 @@ uuid = { version = "1", features = ["v7"] }
 # tree-sitter and its grammars only back the `ast`/`code-index` modules; both
 # are gated behind the `ast` feature so deterministic-tool-only embedding
 # clients (file I/O, search, process, secret store) never compile them.
-tree-sitter = { version = "0.26", optional = true }
+tree-sitter = { version = "0.27", optional = true }
 streaming-iterator = { version = "0.1", optional = true }
 grep-searcher = "0.1"
 grep-matcher = "0.1"
