@@ -263,7 +263,7 @@ pub(super) fn first_syntax_error(source: &[u8], language: Language) -> Option<St
             ));
         }
         for i in (0..node.child_count()).rev() {
-            if let Some(child) = node.child(i as u32) {
+            if let Some(child) = node.child(i) {
                 if child.has_error() || child.is_missing() {
                     stack.push(child);
                 }

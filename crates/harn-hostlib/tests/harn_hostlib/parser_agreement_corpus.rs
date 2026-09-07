@@ -144,7 +144,7 @@ fn resolved_grammars_pass_the_versioned_fitness_corpus() {
             match_count += 1;
             if first_span.is_none() {
                 first_span = query_match
-                    .captures
+                    .captures()
                     .first()
                     .map(|capture| (capture.node.start_byte(), capture.node.end_byte()));
             }

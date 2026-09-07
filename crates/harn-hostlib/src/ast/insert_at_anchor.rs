@@ -350,7 +350,7 @@ fn locate_node<'a>(root: Node<'a>, start: usize, end: usize) -> Option<Node<'a>>
         // Only descend into nodes that could still contain the span.
         if node.start_byte() <= start && node.end_byte() >= end {
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i as u32) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -494,7 +494,7 @@ fn last_child_plan(
 
 fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
+        if let Some(child) = node.child(i) {
             if child.is_named() {
                 return Some(child);
             }
@@ -505,7 +505,7 @@ fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
 
 fn last_named_child(node: Node<'_>) -> Option<Node<'_>> {
     for i in (0..node.child_count()).rev() {
-        if let Some(child) = node.child(i as u32) {
+        if let Some(child) = node.child(i) {
             if child.is_named() {
                 return Some(child);
             }
