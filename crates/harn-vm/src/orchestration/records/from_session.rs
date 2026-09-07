@@ -628,6 +628,17 @@ fn assemble(
     let run_clock = RunClock::from_session(&meta, &fold);
 
     let mut metadata = BTreeMap::new();
+    // The host records its completion owner's receipt as a durable attribute.
+    // Preserve it verbatim across every projection; it does not reinterpret
+    // or override the loop's terminal status. Null distinguishes no recorded
+    // receipt from an older projector that never exposed this field.
+    metadata.insert(
+        "completion_receipt".to_string(),
+        meta.attributes
+            .get("completion_receipt")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    );
     metadata.insert(
         "projected_from".to_string(),
         json!({

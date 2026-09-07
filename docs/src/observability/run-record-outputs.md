@@ -4,6 +4,20 @@ Harn persists the projections it computes while an agent runs. Observability
 consumers should read these fields instead of parsing assistant text or
 reconstructing spans from cumulative usage totals.
 
+## Session completion receipt
+
+Session-backed run records always carry `metadata.completion_receipt`. A host
+stores the completion owner's JSON receipt in the canonical session attribute
+`completion_receipt`, including when the receipt becomes available after the
+session was created. Harn copies that value without interpreting its schema or
+changing the loop's terminal status. Re-projecting a run from its session
+preserves the receipt without requiring the launcher's stdout.
+
+An absent or explicitly null session attribute projects as JSON `null`, meaning
+no receipt was recorded. A missing metadata key identifies a record produced
+before this projection contract. Consumers interpret non-null receipts according
+to the producing owner's schema.
+
 ## Execution evidence
 
 Each run record carries one `evidence` object:

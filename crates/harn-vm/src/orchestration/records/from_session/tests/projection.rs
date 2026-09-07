@@ -8,6 +8,65 @@ use super::super::*;
 use super::support::*;
 
 #[tokio::test]
+async fn completion_receipt_survives_projection_and_explicit_absence() {
+    let (store, id) = capstone_like_store().await;
+    let receipt = json!({
+        "schema": "example.completion_receipt.v1",
+        "terminal_cause": "verification_failed",
+        "rows": [{"id": "answer", "met": false, "evidence_refs": [-2]}],
+    });
+    store
+        .update(
+            &id,
+            harn_session_store::UpdateSession {
+                attributes: BTreeMap::from([("completion_receipt".to_string(), receipt.clone())]),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("persist receipt after the session exists");
+    for _ in 0..2 {
+        let run = project_run_record_from_session(&store, &id)
+            .await
+            .expect("project");
+        assert_eq!(run.metadata.get("completion_receipt"), Some(&receipt));
+        assert_eq!(
+            run.status, "stopped",
+            "a receipt does not override the loop terminal"
+        );
+    }
+    store
+        .update(
+            &id,
+            harn_session_store::UpdateSession {
+                attributes: BTreeMap::from([(
+                    "completion_receipt".to_string(),
+                    serde_json::Value::Null,
+                )]),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("record that no receipt was produced");
+    let run = project_run_record_from_session(&store, &id)
+        .await
+        .expect("project absence");
+    assert_eq!(
+        run.metadata.get("completion_receipt"),
+        Some(&serde_json::Value::Null)
+    );
+
+    let (unreported, unreported_id) = capstone_like_store().await;
+    let run = project_run_record_from_session(&unreported, &unreported_id)
+        .await
+        .expect("project unreported");
+    assert_eq!(
+        run.metadata.get("completion_receipt"),
+        Some(&serde_json::Value::Null)
+    );
+}
+
+#[tokio::test]
 async fn a_headless_session_projects_the_run_record_no_host_ever_wrote() {
     let (store, id) = capstone_like_store().await;
     let run = project_run_record_from_session(&store, &id)
