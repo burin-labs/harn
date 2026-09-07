@@ -67,6 +67,11 @@ prompt_caching = true
 prompt_cache_min_prefix_tokens = 1024
 structured_output = "native"
 structured_output_mode = "native_json"
+# The double replays whatever a scripted response carries, including token
+# logprobs, so the rerank helpers can be exercised offline. Declare that here:
+# the restricted `mock-minimal*` row above still omits it, which is what keeps
+# the "option is not supported" refusal provable.
+advanced_generation_options = ["logprobs", "logit_bias"]
 vision = true
 vision_supported = true
 audio_supported = true
