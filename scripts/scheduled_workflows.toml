@@ -99,6 +99,14 @@ cadence_reason = "Five minutes is the recovery objective for scarce runner capac
 job_ids = ["cancel-obsolete-runs", "check"]
 
 [[workflow]]
+path = ".github/workflows/rust-cache-refresh.yml"
+name = "Refresh Rust cache"
+claim = "The shared Linux compile caches stay written to the persistent ref"
+crons = ["43 9 * * *"]
+cadence_reason = "The refresh normally rides every push to main; the daily run is the backstop for a quiet period, since an unwritten entry is evicted and every branch after it compiles cold."
+job_ids = ["rust-cache-refresh"]
+
+[[workflow]]
 path = ".github/workflows/secret-scan.yml"
 name = "Secret exposure report"
 claim = "The shipped tree is rescanned for newly recognized secret exposure patterns"

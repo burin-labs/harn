@@ -1,0 +1,143 @@
+name: Refresh Rust cache
+
+# The shared Linux compile caches are written only from the persistent ref, and
+# GitHub evicts least-recently-used entries once the repository reaches its
+# Actions cache ceiling, so an entry that is not rewritten disappears and every
+# branch after it compiles from nothing.
+#
+# This workflow used to be a job inside ci.yml, scheduled only when a push to
+# main had already been proved on merge_group. With the merge queue off that
+# condition is never met, the refresh never ran, and the caches it maintains
+# went unmaintained for as long as the queue stayed off. Its triggers
+# are now the events that fire regardless of queue configuration: every push to
+# the persistent ref, a daily backstop for quiet periods, and manual dispatch.
+#
+# A generation is only produced on a restore MISS. Cargo.lock, the crate
+# manifests and the toolchain change far less often than main advances, so most
+# commits restore the exact key and have nothing to write; those legs
+# short-circuit instead of recompiling a target dir that is never saved. That is
+# what makes a per-push trigger affordable.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Quiet-period backstop. Minute 43 and hour 9 are unused by the other
+    # scheduled workflows, so this does not contend with the nightly platform
+    # suites or the release warm build.
+    - cron: "43 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  rust-cache-refresh:
+    name: Refresh Rust cache (${{ matrix.cache_key }})
+    runs-on: ubuntu-latest
+    # Serialize this mutating tail across overlapping main pushes: GitHub
+    # retains the running job and the newest pending job, avoiding concurrent
+    # prune and save operations against the same cache family.
+    concurrency:
+      group: harn-ci-rust-cache-refresh
+      cancel-in-progress: false
+    # Serial legs: each save needs its own headroom under the 10 GiB ceiling.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          # Match rust-check-inputs / rust-checks workspace-tests env hash.
+          - cache_key: workspace-tests
+            rustflags: "-D warnings -Clink-arg=-fuse-ld=mold"
+            install_mold: true
+            install_nextest: true
+            warm_script: ./scripts/ci/warm_rust_cache.sh
+            save_headroom_bytes: 4294967296
+          # Match package-audit: workflow RUSTFLAGS only (no mold).
+          - cache_key: package-audit
+            rustflags: "-D warnings"
+            install_mold: false
+            install_nextest: false
+            warm_script: ./scripts/ci/warm_package_audit_cache.sh
+            save_headroom_bytes: 2147483648
+    permissions:
+      contents: read
+      actions: write
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      HARN_RUNNER_TIER: github-hosted
+      # Do NOT set CARGO_BUILD_JOBS here. Swatinem hashes every CARGO_* env var
+      # into the cache key; consumers only set jobs on build steps, so a
+      # job-level value here makes the saved key unrestorable (#5003).
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/free-disk-space
+      - name: Install mold linker
+        if: matrix.install_mold
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: mold
+          check-command: mold
+      - uses: ./.github/actions/rust-toolchain
+      - id: rust-cache
+        uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: ${{ matrix.cache_key }}
+          cache-on-failure: true
+          cache-bin: false
+          cache-workspace-crates: "true"
+          save: "true"
+      # A cache miss means the immutable entry for this family is obsolete.
+      # Delete it only after restore (so its contents remain available to the
+      # local warm build), then reserve the measured per-family envelope (4 GiB
+      # workspace-tests, 2 GiB package-audit). Release compile caches yield
+      # here; the other Linux merge-gate family remains protected (#5003).
+      - name: Prepare Linux cache generation save
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
+          HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
+        run: |
+          ./scripts/prune_ci_cache_generations.sh --clear-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
+          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
+      - name: Install cargo-nextest
+        if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        with:
+          tool: nextest@0.9.132
+      # Warm only after a miss. An exact-key restore means this family's entry
+      # already holds this commit's env + lockfile fingerprint, and GitHub's
+      # cache entries are immutable: Swatinem's post step then reports
+      # "Cache up-to-date." and writes nothing, so a warm build compiles for
+      # ~10 min and is discarded with the runner. On a miss this step is
+      # unchanged and still produces the generation the post step saves.
+      - name: Warm Cargo graph
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        env:
+          CARGO_BUILD_JOBS: "4"
+        run: ${{ matrix.warm_script }}
+      - name: Report cache generation already current
+        if: steps.rust-cache.outputs.cache-hit == 'true'
+        env:
+          HARN_CACHE_FAMILY: ${{ matrix.cache_key }}
+        run: |
+          {
+            echo "### Rust cache refresh (${HARN_CACHE_FAMILY})"
+            echo
+            echo "Exact-key restore: the main-scoped generation already matches"
+            echo "this commit's Rust environment and lockfile fingerprint."
+            echo "Nothing to warm: GitHub cache entries are immutable, so a"
+            echo "rebuild would be discarded rather than saved."
+          } >> "$GITHUB_STEP_SUMMARY"

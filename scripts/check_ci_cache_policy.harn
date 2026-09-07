@@ -1,5 +1,7 @@
 import { run_ci_cache_policy } from "./ci_cache_policy/entrypoint.harn"
 pub import {
+  cache_refresh_trigger_errors,
+  cache_refresh_workflow_errors,
   ci_linux_lane_policy_errors,
   producer_cache_save_reserve_minutes,
   producer_hosted_ceiling_minutes,
