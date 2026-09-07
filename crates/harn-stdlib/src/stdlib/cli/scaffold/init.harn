@@ -628,7 +628,7 @@ fn __connector_files(project_name: string, harn_range: string, harn_version: str
     + "}\n"
   const test_harn = "import \"../connectors/echo\"\n"
     + "\n"
-    + "pipeline test_provider_id(_task: unknown) {\n"
+    + "pipeline test_provider_id() {\n"
     + "  assert_eq(provider_id(), \"echo\")\n"
     + "  assert_eq(kinds(), [\"webhook\"])\n"
     + "}\n"
