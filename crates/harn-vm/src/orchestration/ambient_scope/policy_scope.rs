@@ -35,6 +35,18 @@ pub fn scope_execution_policy<F: Future>(
     scope_modified(inner, |scope| scope.execution.push(policy))
 }
 
+/// Run `inner` with the caller's ambient context owned by this task, without
+/// adding a policy to it.
+///
+/// The counterpart to [`scope_execution_policy`] for a span that installs no
+/// policy of its own but still holds thread-local state across `.await` — a
+/// resource ceiling, say. Without this, such a span has nowhere to put that
+/// state except the polling thread, where a task that interleaves with it
+/// reads and restores the wrong value.
+pub fn scope_ambient_context<F: Future>(inner: F) -> impl Future<Output = F::Output> {
+    scope_modified(inner, |_| {})
+}
+
 pub(crate) fn scope_approval_policy<F: Future>(policy: ToolApprovalPolicy, inner: F) -> Scoped<F> {
     scope_modified(inner, |scope| scope.approval.push(policy))
 }

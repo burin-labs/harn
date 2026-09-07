@@ -277,7 +277,7 @@ pub use actor_chain::{
 };
 pub use call_budget::{
     charge_mcp_call, charge_pg_query, install_mcp_call_budget, install_pg_query_budget,
-    McpCallBudgetGuard, PgQueryBudgetGuard,
+    mcp_calls_spent, pg_queries_spent, McpCallBudgetGuard, PgQueryBudgetGuard,
 };
 pub use checkpoint::register_checkpoint_builtins;
 pub use chunk::*;
