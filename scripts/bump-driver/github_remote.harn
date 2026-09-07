@@ -35,6 +35,7 @@ pub type GithubBumpRemoteConfig = {
   branch: string,
   base: string,
   repo_dir?: string,
+  package_test_receipt?: string,
 }
 
 type GithubRepo = {owner: string, name: string}
@@ -52,6 +53,22 @@ fn __must(result: any, operation: string) {
     throw "bump-driver: " + operation + " failed: " + json_stringify(unwrap_err(result))
   }
   return unwrap(result)
+}
+
+/** Render the exact pre-mutation package-test receipt into the bump PR. */
+pub fn bump_pull_request_body(package_test_receipt: string? = nil) -> string {
+  const base =
+    "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
+  const receipt = trim(package_test_receipt ?? "")
+  if receipt == "" {
+    return base
+  }
+  return base
+    + "\n\n<details><summary>Pre-mutation package test discovery receipt (sha256:"
+    + sha256(receipt)
+    + ")</summary>\n\n```base64\n"
+    + base64_encode(receipt)
+    + "\n```\n\n</details>"
 }
 
 fn __retryable_publication_failure(failure: GithubConnectorError) -> bool {
@@ -279,8 +296,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         head: config.branch,
         base: config.base,
         title: "Bump Harn runtime",
-        body:
-          "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow.",
+        body: bump_pull_request_body(config.package_test_receipt),
         expected_head_oid: expected_head_oid,
         previous_head_oid: existing?.head_oid,
         options: options,

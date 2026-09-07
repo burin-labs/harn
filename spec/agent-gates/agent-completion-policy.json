@@ -38,7 +38,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 682,
+        "line": 684,
         "reader": "__done_contract_primary_prompt"
       },
       {
@@ -210,7 +210,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 351,
+        "line": 343,
         "reader": "workflow-loop-key-domain"
       },
       {
@@ -261,7 +261,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 350,
+        "line": 342,
         "reader": "workflow-loop-key-domain"
       },
       {
@@ -327,13 +327,13 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 925,
+        "line": 920,
         "reader": "__completion_policy_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 1002,
-        "reader": "__completion_boundary_ledger"
+        "line": 983,
+        "reader": "__completion_boundary_requirements"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
@@ -420,12 +420,12 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 909,
+        "line": 904,
         "reader": "__completion_policy_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 910,
+        "line": 905,
         "reader": "__completion_policy_plan"
       },
       {
@@ -468,13 +468,13 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 912,
+        "line": 907,
         "reader": "__completion_policy_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 996,
-        "reader": "__completion_boundary_ledger"
+        "line": 980,
+        "reader": "__completion_boundary_requirements"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",

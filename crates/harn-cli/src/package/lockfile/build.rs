@@ -80,6 +80,18 @@ pub(crate) fn enqueue_manifest_dependencies(
     }
 }
 
+fn enqueue_dependencies_from_dir(
+    pending: &mut Vec<PendingDependency>,
+    manifest_dir: PathBuf,
+    parent: String,
+    parent_is_remote: bool,
+) -> Result<(), PackageError> {
+    if let Some(manifest) = read_package_manifest_from_dir(&manifest_dir)? {
+        enqueue_manifest_dependencies(pending, manifest, manifest_dir, parent, parent_is_remote);
+    }
+    Ok(())
+}
+
 fn resolve_registry_version_dependency(
     workspace: &PackageWorkspace,
     alias: &str,
@@ -264,15 +276,7 @@ pub(crate) fn build_lockfile(
                     }
                     let inserted = replace_lock_entry(&mut lock, entry.clone())?;
                     if inserted {
-                        if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
-                            enqueue_manifest_dependencies(
-                                &mut pending,
-                                manifest,
-                                cache_dir,
-                                alias,
-                                true,
-                            );
-                        }
+                        enqueue_dependencies_from_dir(&mut pending, cache_dir, alias, true)?;
                     }
                 } else if entry.source.starts_with("archive+") {
                     let url = archive_url_from_source_uri(&entry.source)?;
@@ -305,15 +309,7 @@ pub(crate) fn build_lockfile(
                     }
                     let inserted = replace_lock_entry(&mut lock, entry.clone())?;
                     if inserted {
-                        if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
-                            enqueue_manifest_dependencies(
-                                &mut pending,
-                                manifest,
-                                cache_dir,
-                                alias,
-                                true,
-                            );
-                        }
+                        enqueue_dependencies_from_dir(&mut pending, cache_dir, alias, true)?;
                     }
                 } else if entry.source.starts_with("path+") {
                     let source = path_from_source_uri(&entry.source)?;
@@ -329,15 +325,12 @@ pub(crate) fn build_lockfile(
                     let inserted = replace_lock_entry(&mut lock, entry.clone())?;
                     if inserted {
                         if let Some(manifest_dir) = manifest_dir {
-                            if let Some(manifest) = read_package_manifest_from_dir(&manifest_dir)? {
-                                enqueue_manifest_dependencies(
-                                    &mut pending,
-                                    manifest,
-                                    manifest_dir,
-                                    alias,
-                                    false,
-                                );
-                            }
+                            enqueue_dependencies_from_dir(
+                                &mut pending,
+                                manifest_dir,
+                                alias,
+                                false,
+                            )?;
                         }
                     }
                 } else {
@@ -389,15 +382,12 @@ pub(crate) fn build_lockfile(
             let inserted = replace_lock_entry(&mut lock, entry)?;
             if inserted {
                 if let Some(manifest_dir) = manifest_dir {
-                    if let Some(manifest) = read_package_manifest_from_dir(&manifest_dir)? {
-                        enqueue_manifest_dependencies(
-                            &mut pending,
-                            manifest,
-                            manifest_dir,
-                            package_alias,
-                            false,
-                        );
-                    }
+                    enqueue_dependencies_from_dir(
+                        &mut pending,
+                        manifest_dir,
+                        package_alias,
+                        false,
+                    )?;
                 }
             }
             continue;
@@ -436,9 +426,7 @@ pub(crate) fn build_lockfile(
             fill_provenance(&mut entry, provenance);
             let inserted = replace_lock_entry(&mut lock, entry)?;
             if inserted {
-                if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
-                    enqueue_manifest_dependencies(&mut pending, manifest, cache_dir, alias, true);
-                }
+                enqueue_dependencies_from_dir(&mut pending, cache_dir, alias, true)?;
             }
             continue;
         }
@@ -491,9 +479,7 @@ pub(crate) fn build_lockfile(
             fill_provenance(&mut entry, provenance);
             let inserted = replace_lock_entry(&mut lock, entry)?;
             if inserted {
-                if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
-                    enqueue_manifest_dependencies(&mut pending, manifest, cache_dir, alias, true);
-                }
+                enqueue_dependencies_from_dir(&mut pending, cache_dir, alias, true)?;
             }
             continue;
         }
