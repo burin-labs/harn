@@ -267,7 +267,7 @@ pub(super) fn first_identifier<'tree>(node: Node<'tree>) -> Option<Node<'tree>> 
 }
 
 /// Field name this node occupies in its parent, if any.
-pub(super) fn field_name(node: Node<'_>) -> Option<&'static str> {
+pub(super) fn field_name<'tree>(node: Node<'tree>) -> Option<&'tree str> {
     let parent = node.parent()?;
     let mut cursor = parent.walk();
     for (idx, child) in parent.children(&mut cursor).enumerate() {
