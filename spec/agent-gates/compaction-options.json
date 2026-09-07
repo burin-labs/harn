@@ -10,7 +10,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 287,
+        "line": 285,
         "reader": "__compaction_enabled"
       }
     ],
@@ -18,8 +18,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "kind, then type, then hybrid for an object",
-    "evidence": "autocompact.__compaction_strategy_label resolves object strategy aliases in this order; a string configuration is already the strategy label.",
+    "default": "hybrid for an object",
+    "evidence": "autocompact.__compaction_strategy_label reads strategy from an object; a string configuration is already the strategy label.",
     "expiry": "2026-09-13",
     "kind": "strategy",
     "layer": "runner",
@@ -33,7 +33,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 297,
+        "line": 295,
         "reader": "__compaction_enabled"
       }
     ],
@@ -41,52 +41,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "absent; consulted after strategy",
-    "evidence": "autocompact.__compaction_strategy_label and __compaction_enabled read this spelling as a strategy alias.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.compaction.kind",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 8,
-        "reader": "__compaction_strategy_label"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 297,
-        "reader": "__compaction_enabled"
-      }
-    ],
-    "reason": "Use strategy as the single compaction strategy field.",
-    "verdict": "DELETE"
-  },
-  {
-    "default": "absent; consulted after strategy and kind",
-    "evidence": "autocompact.__compaction_strategy_label and __compaction_enabled read this spelling as a strategy alias.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.compaction.type",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 8,
-        "reader": "__compaction_strategy_label"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 297,
-        "reader": "__compaction_enabled"
-      }
-    ],
-    "reason": "Use strategy as the single compaction strategy field.",
-    "verdict": "DELETE"
-  },
-  {
-    "default": "keep_last, then compact_keep_last, then engine default",
-    "evidence": "autocompact.__compaction_keep_last accepts an integer under keep_last_n before checking the other spellings.",
+    "default": "compact_keep_last, then engine default",
+    "evidence": "autocompact.__compaction_keep_last accepts an integer under keep_last_n before the top-level compact_keep_last.",
     "expiry": "2026-09-13",
     "kind": "retention limit",
     "layer": "runner",
@@ -101,56 +57,5 @@
     ],
     "reason": "Retain the primary field until compaction request normalization has one owner.",
     "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "absent; consulted after keep_last_n",
-    "evidence": "autocompact.__compaction_keep_last reads keep_last as a fallback spelling within the compaction object.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.compaction.keep_last",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 153,
-        "reader": "__compaction_keep_last"
-      }
-    ],
-    "reason": "Use keep_last_n for the public compaction object's retention request.",
-    "verdict": "DELETE"
-  },
-  {
-    "default": "absent; fallback after auto_compact policy and compaction_policy",
-    "evidence": "autocompact.__compact_options resolves this policy only after the earlier compaction policy projections.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.compaction.policy",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 195,
-        "reader": "__compact_options"
-      }
-    ],
-    "reason": "Use auto_compact.policy as the single compaction policy location.",
-    "verdict": "DELETE"
-  },
-  {
-    "default": "absent; fallback after auto_compact policy",
-    "evidence": "autocompact.__compact_options supplies this value to the compaction policy normalizer only when auto_compact did not provide policy.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.compaction_policy",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 194,
-        "reader": "__compact_options"
-      }
-    ],
-    "reason": "Use auto_compact.policy as the single compaction policy location.",
-    "verdict": "DELETE"
   }
 ]

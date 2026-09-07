@@ -1,6 +1,6 @@
 [
   {
-    "default": "daemon_event_topic, then absent",
+    "default": "absent",
     "evidence": "daemon.__agent_daemon_raw_resume_conditions adds on_event only when the resolved topic is non-nil.",
     "expiry": "2026-09-13",
     "kind": "configuration",
@@ -16,23 +16,6 @@
     ],
     "reason": "Preserve one event subscription input at the resumption owner.",
     "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "absent; fallback after resume_event_topic",
-    "evidence": "daemon.__agent_daemon_raw_resume_conditions reads this spelling only after resume_event_topic.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.daemon_event_topic",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
-        "line": 69,
-        "reader": "__agent_daemon_raw_resume_conditions"
-      }
-    ],
-    "reason": "Use resume_event_topic as the single event subscription input.",
-    "verdict": "DELETE"
   },
   {
     "default": "true within an explicit equivalent_failover object",
