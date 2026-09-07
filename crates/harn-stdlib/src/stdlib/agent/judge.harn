@@ -371,6 +371,7 @@ fn __judge_invoke_closure(
       feedback: message,
       confirm: confirm,
       verification: __completion_verification_state_read(result?.verification),
+      requirement_report: result?.requirement_report,
       source: "deterministic",
       reason: if result?.reason == nil {
         nil

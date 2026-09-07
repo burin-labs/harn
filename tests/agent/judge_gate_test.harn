@@ -41,11 +41,14 @@ pipeline test_noncallable_verify_command_throws(harness: Harness, task: any) {
   assert(is_err(outcome), "gate rejects a non-callable verify_command")
 }
 
-pipeline test_noncallable_veto_combine_throws(harness: Harness, task: any) {
+pipeline test_requirement_contract_without_facts_throws(harness: Harness, task: any) {
   const outcome = try {
-    agent_completion_gate(harness.runtime, {facts: __facts, veto_combine: 3})
+    agent_completion_gate(
+      harness.runtime,
+      {requirement_contract: {requirements: [{requirement_id: "answer", name: "Answer"}]}},
+    )
   }
-  assert(is_err(outcome), "gate rejects a non-callable veto_combine")
+  assert(is_err(outcome), "A declared requirement needs an observable facts provider")
 }
 
 pipeline test_classify_write_without_facts_throws(harness: Harness, task: any) {
