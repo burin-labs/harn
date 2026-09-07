@@ -314,39 +314,24 @@ mod tests {
         assert!(redirect_target_over_tracked_reason("tracked file", Some(cwd), &[]).is_some());
     }
 
-    /// THE MISDIAGNOSIS THIS CLOSES.
+    /// THE FALSE POSITIVE THIS CLOSES.
     ///
-    /// Outside a Git repository the floor has no tracking to consult and treats
-    /// every existing file as protected. That is the conservative choice, but
-    /// the refusal used to say the target was a "tracked project file" in a
-    /// workspace with no tracking at all, sending readers to hunt a Git problem
-    /// that does not exist. The block is unchanged; only the reason is now true.
+    /// Outside a Git repository there is no positive tracking evidence. A file
+    /// created by an earlier command therefore stays eligible for a later
+    /// redirect or truncation; the write-intent consent gate still owns whether
+    /// that mutation may proceed.
     #[test]
-    fn an_existing_file_without_git_is_refused_by_existence_not_by_tracking() {
+    fn an_existing_file_without_git_is_not_treated_as_reviewed_project_state() {
         let temp = tempfile::tempdir().unwrap();
         let cwd = temp.path();
         // Deliberately NOT a Git repository.
         assert!(redirect_target_over_tracked_reason("proof.txt", Some(cwd), &[]).is_none());
         std::fs::write(cwd.join("proof.txt"), "first").unwrap();
 
-        let reason = redirect_target_over_tracked_reason("proof.txt", Some(cwd), &[])
-            .expect("a second write to an existing file is still refused");
-        assert!(
-            reason.contains("already exists") && reason.contains("no Git tracking"),
-            "the refusal must name existence, not tracking: {reason}"
-        );
-        assert!(
-            !reason.contains("tracked by Git"),
-            "a workspace with no Git must not be told its file is tracked by Git: {reason}"
-        );
+        assert!(redirect_target_over_tracked_reason("proof.txt", Some(cwd), &[]).is_none());
 
         let truncate_args = ["-s".to_string(), "0".to_string(), "proof.txt".to_string()];
-        let truncate_reason = truncate_catastrophe(&truncate_args, Some(cwd), &[])
-            .expect("truncation of an existing file is still refused");
-        assert!(
-            truncate_reason.contains("already exists"),
-            "truncation names the same reason as redirection: {truncate_reason}"
-        );
+        assert!(truncate_catastrophe(&truncate_args, Some(cwd), &[]).is_none());
     }
 
     /// DIRECTION CONTROL. A genuinely tracked file keeps the tracking reason,
