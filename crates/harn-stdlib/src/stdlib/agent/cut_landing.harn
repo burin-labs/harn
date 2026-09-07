@@ -1,0 +1,853 @@
+// std/agent/cut_landing.harn
+//
+// The cut-rule layer: a closed predicate grammar over the run meter, and the
+// latched soft-landing machine that consumes it.
+//
+// The grammar and the machine live in one module because a cut rule's
+// condition is part of the rule, and the recursive predicate type is shared by
+// both halves.
+import {
+  MeterObservation,
+  RunMeter,
+  meter_observation_render,
+  meter_observation_upper,
+  run_meter_digest,
+  run_meter_field_registered,
+  run_meter_read,
+  run_meter_registry_digest,
+} from "std/agent/run_meter"
+
+// --- Predicate grammar -----------------------------------------------------
+//
+// A closed predicate-as-data grammar over registered run-meter fields.
+//
+// A cut rule's condition is a value, not a callback. That is what makes a
+// decision replayable: the same predicate and the same meter digest always
+// produce the same outcome, and a receipt can name the fields the decision
+// actually read.
+//
+// Evaluation is three-valued. `indeterminate` is a first-class answer for an
+// unmeasured field or a bound that straddles the threshold, so an unreported
+// provider usage can never be read as a satisfied condition.
+/**
+ * A cut-rule condition.
+ *
+ * `at_least` is the only leaf comparison: a field is at least a threshold, in
+ * that field's registered unit. `all` and `any` combine, and both must be
+ * non-empty — an empty group has a vacuous answer, which is exactly the shape
+ * that makes an unarmed rule look satisfied.
+ */
+pub type CutPredicate = {op: "at_least", field: string, threshold: float} \
+  | {op: "all", of: list<CutPredicate>} \
+  | {op: "any", of: list<CutPredicate>}
+
+/** The three answers a predicate can give. */
+pub type PredicateOutcome = "matched" | "not_matched" | "indeterminate"
+
+/** One field the evaluator read, with the provenance of the value it saw. */
+pub type FieldRead = {field: string, basis: string, observation: string}
+
+/** The result of evaluating one predicate against one meter. */
+pub type PredicateResult = {
+  outcome: PredicateOutcome,
+  fields_read: list<FieldRead>,
+  rejections: list<string>,
+}
+
+fn __cut_predicate_leaf(meter: RunMeter, field: string, threshold: float) -> PredicateResult {
+  const observation: MeterObservation = run_meter_read(meter, field)
+  const read: FieldRead = {
+    field: field,
+    basis: observation.basis,
+    observation: meter_observation_render(observation),
+  }
+  let rejections: list<string> = []
+  if !run_meter_field_registered(field) {
+    rejections = rejections + ["at_least: unregistered field " + field]
+  }
+  match observation.basis {
+    "exact" -> {
+      const outcome: PredicateOutcome = if observation.value >= threshold {
+        "matched"
+      } else {
+        "not_matched"
+      }
+      return {outcome: outcome, fields_read: [read], rejections: rejections}
+    }
+    "bounded" -> {
+      if observation.lower >= threshold {
+        return {outcome: "matched", fields_read: [read], rejections: rejections}
+      }
+      if observation.upper < threshold {
+        return {outcome: "not_matched", fields_read: [read], rejections: rejections}
+      }
+      // The interval straddles the threshold: the true value could be on
+      // either side, so neither answer is supported by the observation.
+      return {outcome: "indeterminate", fields_read: [read], rejections: rejections}
+    }
+    "unavailable" -> { return {outcome: "indeterminate", fields_read: [read], rejections: rejections} }
+  }
+}
+
+/**
+ * Evaluate a predicate against a meter.
+ *
+ * `all` is matched only when every child matched; it is not_matched as soon as
+ * one child is not_matched, even if a sibling is indeterminate, because one
+ * false conjunct settles the group. Otherwise an indeterminate child makes the
+ * group indeterminate. `any` is the mirror: one matched child settles it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_predicate_evaluate(meter: RunMeter, predicate: CutPredicate) -> PredicateResult {
+  match predicate.op {
+    "at_least" -> { return __cut_predicate_leaf(meter, predicate.field, predicate.threshold) }
+    "all" | "any" -> {
+      const is_all = predicate.op == "all"
+      let fields_read: list<FieldRead> = []
+      let rejections: list<string> = []
+      if len(predicate.of) == 0 {
+        // A vacuous group is rejected rather than answered. An empty `all` is
+        // true and an empty `any` is false under ordinary logic, and both are
+        // silent ways for a rule that names no condition to look decided.
+        return {
+          outcome: "indeterminate",
+          fields_read: [],
+          rejections: [predicate.op + ": an empty predicate group is rejected"],
+        }
+      }
+      let settled = false
+      let saw_indeterminate = false
+      for child in predicate.of {
+        const result = cut_predicate_evaluate(meter, child)
+        fields_read = fields_read + result.fields_read
+        rejections = rejections + result.rejections
+        if is_all && result.outcome == "not_matched" {
+          settled = true
+        }
+        if !is_all && result.outcome == "matched" {
+          settled = true
+        }
+        if result.outcome == "indeterminate" {
+          saw_indeterminate = true
+        }
+      }
+      if settled {
+        const outcome: PredicateOutcome = if is_all {
+          "not_matched"
+        } else {
+          "matched"
+        }
+        return {outcome: outcome, fields_read: fields_read, rejections: rejections}
+      }
+      if saw_indeterminate {
+        return {outcome: "indeterminate", fields_read: fields_read, rejections: rejections}
+      }
+      const outcome: PredicateOutcome = if is_all {
+        "matched"
+      } else {
+        "not_matched"
+      }
+      return {outcome: outcome, fields_read: fields_read, rejections: rejections}
+    }
+  }
+}
+
+/**
+ * Structural problems with a predicate, independent of any meter: empty
+ * groups and unregistered field names. An empty list means the predicate is
+ * well formed.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_predicate_validate(predicate: CutPredicate) -> list<string> {
+  match predicate.op {
+    "at_least" -> {
+      if !run_meter_field_registered(predicate.field) {
+        return ["at_least: unregistered field " + predicate.field]
+      }
+      return []
+    }
+    "all" | "any" -> {
+      if len(predicate.of) == 0 {
+        return [predicate.op + ": an empty predicate group is rejected"]
+      }
+      let problems: list<string> = []
+      for child in predicate.of {
+        problems = problems + cut_predicate_validate(child)
+      }
+      return problems
+    }
+  }
+}
+
+/**
+ * Render a predicate as a stable string, for rule digests and receipts.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_predicate_render(predicate: CutPredicate) -> string {
+  match predicate.op {
+    "at_least" -> { return "at_least(" + predicate.field + ">=" + to_string(predicate.threshold) + ")" }
+    "all" | "any" -> {
+      let parts: list<string> = []
+      for child in predicate.of {
+        parts = parts + [cut_predicate_render(child)]
+      }
+      return predicate.op + "(" + parts.join(",") + ")"
+    }
+  }
+}
+
+// --- Soft landing ----------------------------------------------------------
+//
+// A cut rule is data: a named predicate over the run meter plus a typed
+// effect. Evaluation is a latched `running -> landing -> stopped` machine.
+//
+// The vocabulary is chosen so an operator policy like "spend up to $1.50; or
+// keep running up to 30 minutes past that, to a $3 hard ceiling; and at any
+// soft boundary finish the current turn before terminating" is one list of
+// rules rather than branching host code.
+//
+// Two properties matter more than the arithmetic:
+//
+//   The latch is one-way. Once a soft cap has been crossed the run is landing,
+//   and a later tick where the predicate no longer matches cannot put it back.
+//
+//   The cause chain survives. Every tick appends typed causes, so a terminal
+//   state names the rule that evaluated, the admission that was denied, the
+//   landing that was chosen, and the termination that followed. A forced stop
+//   cannot be read as a completion, because completion requires a
+//   verifier-issued receipt that a forced stop does not have.
+/** What a soft boundary allows the run to finish before stopping. */
+pub type CutLandingTarget = "finish_turn" | "finish_task"
+
+/**
+ * How much extra the run may spend after a soft boundary. All three bounds
+ * are measured from a snapshot taken when the landing latched, so a grace
+ * envelope is an increment, not a new absolute cap.
+ */
+pub type CutGrace = {extra_cost_usd?: float, extra_wall_ms?: float, extra_turns?: float}
+
+/**
+ * What a matched rule does.
+ *
+ * A `land` effect carries its own grace envelope, so a soft boundary can never
+ * latch without a bound on what follows it.
+ */
+pub type CutEffect = {effect: "continue"} \
+  | {effect: "land", landing: CutLandingTarget, grace: CutGrace} \
+  | {effect: "stop"}
+
+/** One named cut rule. */
+pub type CutRule = {name: string, when: CutPredicate, effect: CutEffect}
+
+/** The ordered rule set evaluated on every tick. */
+pub type CutRulePolicy = {rules: list<CutRule>}
+
+/** Where the run is in the latched cut machine. */
+pub type CutPhase = "running" | "landing" | "stopped"
+
+/** The meter values captured when a landing latched. */
+pub type CutGraceAnchor = {cost_usd: float?, wall_ms: float?, turns: float?}
+
+/**
+ * One step in the cause chain. The chain is append-only across ticks, so the
+ * terminal state carries the whole story rather than the last line of it.
+ */
+pub type CutCause = {step: "rule_evaluated", rule: string, outcome: PredicateOutcome} \
+  | {step: "effect_selected", rule: string, effect: string} \
+  | {step: "landing_chosen", rule: string, landing: string} \
+  | {step: "admission_denied", action: string, reason: string} \
+  | {step: "grace_expired", limit: string, used: float, allowed: float} \
+  | {step: "grace_unmeasurable", limit: string} \
+  | {step: "terminated", reason: string}
+
+/** The latched cut-rule state. */
+pub type CutState = {
+  phase: CutPhase,
+  ticks: int,
+  landing: CutLandingTarget?,
+  landing_rule: string?,
+  grace: CutGrace?,
+  anchor: CutGraceAnchor?,
+  terminal_reason: string?,
+  terminal_emitted: bool,
+  cause_chain: list<CutCause>,
+}
+
+/** The receipt written on every canonical evaluation tick. */
+pub type CutReceipt = {
+  schema: string,
+  tick: int,
+  total_rules: int,
+  evaluated_rules: int,
+  matched_rules: list<string>,
+  indeterminate_rules: list<string>,
+  meter_digest: string,
+  registry_digest: string,
+  rules_digest: string,
+  fields_read: list<FieldRead>,
+  rejections: list<string>,
+  selected_effect: string,
+  selected_rule: string?,
+  transition: {from: CutPhase, to: CutPhase},
+  actual_cost_usd: string,
+  projected_next_call_cost_usd: string,
+  cause_chain: list<CutCause>,
+}
+
+/** A tick's new state and its receipt. */
+pub type CutTick = {state: CutState, receipt: CutReceipt}
+
+/** Whether one guarded action may run right now, and why. */
+pub type CutAction = "model_call" | "terminal_tool"
+
+/** The answer to an admission question, with the causes it produced. */
+pub type CutAdmission = {
+  admitted: bool,
+  action: CutAction,
+  reason: string,
+  projected_usd?: float,
+  remaining_usd?: float,
+  causes: list<CutCause>,
+}
+
+/** What the run's terminal state actually proves. */
+pub type CutTerminalEvidence = {
+  outcome: "running" | "completed" | "forced_stop",
+  reason: string,
+  verifier_completions: MeterObservation,
+  actual_cost_usd: MeterObservation,
+  projected_next_call_cost_usd: MeterObservation,
+  cause_chain: list<CutCause>,
+}
+
+/**
+ * A fresh cut state: running, nothing latched, an empty cause chain.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_state_new() -> CutState {
+  return {
+    phase: "running",
+    ticks: 0,
+    landing: nil,
+    landing_rule: nil,
+    grace: nil,
+    anchor: nil,
+    terminal_reason: nil,
+    terminal_emitted: false,
+    cause_chain: [],
+  }
+}
+
+/**
+ * A digest over the rule set: name, rendered predicate, and effect, in
+ * evaluation order. A receipt carrying this pins the policy that decided.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_rules_digest(policy: CutRulePolicy) -> string {
+  let parts: list<string> = []
+  for rule in policy.rules {
+    parts = parts
+      + [rule.name + "|" + cut_predicate_render(rule.when) + "|" + __cut_effect_render(rule.effect)]
+  }
+  return "sha256:" + sha256_hex(parts.join("\n")).slice(0, 16)
+}
+
+fn __cut_effect_render(effect: CutEffect) -> string {
+  match effect.effect {
+    "continue" -> { return "continue" }
+    "stop" -> { return "stop" }
+    "land" -> { return "land:" + effect.landing + ":" + __cut_grace_render(effect.grace) }
+  }
+}
+
+fn __cut_grace_render(grace: CutGrace) -> string {
+  return "cost="
+    + to_string(grace.extra_cost_usd ?? -1.0)
+    + ",wall="
+    + to_string(grace.extra_wall_ms ?? -1.0)
+    + ",turns="
+    + to_string(grace.extra_turns ?? -1.0)
+}
+
+/**
+ * Structural problems with a policy, independent of any meter: an empty rule
+ * set, a duplicate rule name, a malformed predicate, or a landing whose grace
+ * envelope bounds nothing. An empty list means the policy is well formed.
+ *
+ * A landing with no bound would be a soft cap that never lands, which is the
+ * failure this whole layer exists to prevent, so it is rejected here rather
+ * than discovered as an overrun.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_rules_validate(policy: CutRulePolicy) -> list<string> {
+  if len(policy.rules) == 0 {
+    return ["cut_rules: an empty rule set is rejected"]
+  }
+  let problems: list<string> = []
+  let seen: list<string> = []
+  for rule in policy.rules {
+    if rule.name == "" {
+      problems = problems + ["cut_rules: a rule must be named"]
+    }
+    if seen.contains(rule.name) {
+      problems = problems + ["cut_rules: duplicate rule name " + rule.name]
+    }
+    seen = seen + [rule.name]
+    for problem in cut_predicate_validate(rule.when) {
+      problems = problems + [rule.name + ": " + problem]
+    }
+    if rule.effect.effect == "land" && __cut_grace_bounds(rule.effect.grace).length_check == 0 {
+      problems = problems + [rule.name + ": a landing needs at least one grace bound"]
+    }
+  }
+  return problems
+}
+
+fn __cut_grace_bounds(grace: CutGrace) -> {length_check: int} {
+  let count = 0
+  if grace.extra_cost_usd != nil {
+    count = count + 1
+  }
+  if grace.extra_wall_ms != nil {
+    count = count + 1
+  }
+  if grace.extra_turns != nil {
+    count = count + 1
+  }
+  return {length_check: count}
+}
+
+fn __cut_anchor_of(meter: RunMeter) -> CutGraceAnchor {
+  return {
+    cost_usd: meter_observation_upper(run_meter_read(meter, "actual_cost_usd")),
+    wall_ms: meter_observation_upper(run_meter_read(meter, "wall_ms")),
+    turns: meter_observation_upper(run_meter_read(meter, "turns")),
+  }
+}
+
+/** How much of one grace bound the run has consumed since the landing latched. */
+type CutGraceUse = {
+  status: "within" | "expired" | "unmeasurable",
+  limit: string,
+  used: float,
+  allowed: float,
+}
+
+fn __cut_grace_use(limit: string, anchor: float?, current: float?, allowed: float?) -> CutGraceUse {
+  if allowed == nil {
+    return {status: "within", limit: limit, used: 0.0, allowed: 0.0}
+  }
+  if anchor == nil || current == nil {
+    // The bound is armed but the run cannot prove it is still inside it. That
+    // is not the same as being inside it, and it must not read as one.
+    return {status: "unmeasurable", limit: limit, used: 0.0, allowed: allowed}
+  }
+  const used = current - anchor
+  if used > allowed {
+    return {status: "expired", limit: limit, used: used, allowed: allowed}
+  }
+  return {status: "within", limit: limit, used: used, allowed: allowed}
+}
+
+fn __cut_grace_status(state: CutState, meter: RunMeter) -> CutGraceUse {
+  const grace = state.grace ?? {}
+  const anchor = state.anchor ?? {}
+  const checks = [
+    __cut_grace_use(
+      "extra_cost_usd",
+      anchor.cost_usd,
+      meter_observation_upper(run_meter_read(meter, "actual_cost_usd")),
+      grace.extra_cost_usd,
+    ),
+    __cut_grace_use(
+      "extra_wall_ms",
+      anchor.wall_ms,
+      meter_observation_upper(run_meter_read(meter, "wall_ms")),
+      grace.extra_wall_ms,
+    ),
+    __cut_grace_use(
+      "extra_turns",
+      anchor.turns,
+      meter_observation_upper(run_meter_read(meter, "turns")),
+      grace.extra_turns,
+    ),
+  ]
+  for check in checks {
+    if check.status == "expired" {
+      return check
+    }
+  }
+  for check in checks {
+    if check.status == "unmeasurable" {
+      return check
+    }
+  }
+  return {status: "within", limit: "none", used: 0.0, allowed: 0.0}
+}
+
+fn __cut_landing_tighter(
+  current: CutLandingTarget?,
+  candidate: CutLandingTarget,
+) -> CutLandingTarget {
+  if current == nil {
+    return candidate
+  }
+  // A latch may tighten but never loosen: once the run owes only the current
+  // turn, a later rule cannot re-open it to a whole task.
+  if current == "finish_turn" || candidate == "finish_turn" {
+    return "finish_turn"
+  }
+  return "finish_task"
+}
+
+fn __cut_first_matched(policy: CutRulePolicy, matched: list<string>, effect: string) -> CutRule? {
+  for rule in policy.rules {
+    if matched.contains(rule.name) && rule.effect.effect == effect {
+      return rule
+    }
+  }
+  return nil
+}
+
+/**
+ * Evaluate every rule against the meter and advance the latched machine one
+ * tick, returning the new state and a receipt.
+ *
+ * Selection is by effect strength, not rule order alone: a matched `stop` rule
+ * beats a matched `land` rule on the same tick, because a hard ceiling is not
+ * negotiable. Among equally strong matches the first in policy order wins.
+ *
+ * A tick on an already-stopped run evaluates nothing and says so through
+ * `evaluated_rules`, so a reader can tell a run that stopped from a run whose
+ * rules never ran.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_rules_tick(policy: CutRulePolicy, meter: RunMeter, state: CutState) -> CutTick {
+  const from_phase = state.phase
+  const tick = state.ticks + 1
+  const actual_cost = meter_observation_render(run_meter_read(meter, "actual_cost_usd"))
+  const projected = meter_observation_render(run_meter_read(meter, "projected_next_call_cost_usd"))
+  if from_phase == "stopped" {
+    const stopped: CutState = state + {ticks: tick}
+    return {
+      state: stopped,
+      receipt: {
+        schema: "harn.cut_rules_tick.v1",
+        tick: tick,
+        total_rules: len(policy.rules),
+        evaluated_rules: 0,
+        matched_rules: [],
+        indeterminate_rules: [],
+        meter_digest: run_meter_digest(meter),
+        registry_digest: run_meter_registry_digest(),
+        rules_digest: cut_rules_digest(policy),
+        fields_read: [],
+        rejections: [],
+        selected_effect: "stop",
+        selected_rule: state.landing_rule,
+        transition: {from: from_phase, to: "stopped"},
+        actual_cost_usd: actual_cost,
+        projected_next_call_cost_usd: projected,
+        cause_chain: state.cause_chain,
+      },
+    }
+  }
+  let matched: list<string> = []
+  let indeterminate: list<string> = []
+  let fields_read: list<FieldRead> = []
+  let rejections: list<string> = []
+  let causes: list<CutCause> = []
+  let evaluated = 0
+  for rule in policy.rules {
+    evaluated = evaluated + 1
+    for problem in cut_predicate_validate(rule.when) {
+      rejections = rejections + [rule.name + ": " + problem]
+    }
+    const result = cut_predicate_evaluate(meter, rule.when)
+    fields_read = fields_read + result.fields_read
+    for rejection in result.rejections {
+      rejections = rejections + [rule.name + ": " + rejection]
+    }
+    causes = causes + [{step: "rule_evaluated", rule: rule.name, outcome: result.outcome}]
+    if result.outcome == "matched" {
+      matched = matched + [rule.name]
+    }
+    if result.outcome == "indeterminate" {
+      indeterminate = indeterminate + [rule.name]
+    }
+  }
+  let next: CutState = state + {ticks: tick}
+  let selected_effect = "continue"
+  let selected_rule: string? = nil
+  const hard = __cut_first_matched(policy, matched, "stop")
+  if hard != nil {
+    selected_effect = "stop"
+    selected_rule = hard.name
+    causes = causes + [{step: "effect_selected", rule: hard.name, effect: "stop"}]
+    causes = causes + [{step: "terminated", reason: "hard_cut:" + hard.name}]
+    next = next + {phase: "stopped", terminal_reason: "hard_cut:" + hard.name}
+  } else {
+    const land = __cut_first_matched(policy, matched, "land")
+    if land != nil && land.effect.effect == "land" {
+      const target = __cut_landing_tighter(next.landing, land.effect.landing)
+      selected_effect = "land"
+      selected_rule = land.name
+      causes = causes + [{step: "effect_selected", rule: land.name, effect: "land"}]
+      if next.phase == "running" || next.landing != target {
+        causes = causes + [{step: "landing_chosen", rule: land.name, landing: target}]
+      }
+      const anchor = next.anchor ?? __cut_anchor_of(meter)
+      next = next
+        + {
+          phase: "landing",
+          landing: target,
+          landing_rule: next.landing_rule ?? land.name,
+          grace: next.grace ?? land.effect.grace,
+          anchor: anchor,
+        }
+    }
+    if next.phase == "landing" {
+      const grace = __cut_grace_status(next, meter)
+      if grace.status == "expired" {
+        selected_effect = "stop"
+        causes = causes
+          + [{step: "grace_expired", limit: grace.limit, used: grace.used, allowed: grace.allowed}]
+        causes = causes + [{step: "terminated", reason: "grace_expired:" + grace.limit}]
+        next = next + {phase: "stopped", terminal_reason: "grace_expired:" + grace.limit}
+      }
+      if grace.status == "unmeasurable" {
+        causes = causes + [{step: "grace_unmeasurable", limit: grace.limit}]
+      }
+      if selected_effect == "continue" {
+        selected_effect = "land"
+      }
+    }
+  }
+  next = next + {cause_chain: next.cause_chain + causes}
+  return {
+    state: next,
+    receipt: {
+      schema: "harn.cut_rules_tick.v1",
+      tick: tick,
+      total_rules: len(policy.rules),
+      evaluated_rules: evaluated,
+      matched_rules: matched,
+      indeterminate_rules: indeterminate,
+      meter_digest: run_meter_digest(meter),
+      registry_digest: run_meter_registry_digest(),
+      rules_digest: cut_rules_digest(policy),
+      fields_read: fields_read,
+      rejections: rejections,
+      selected_effect: selected_effect,
+      selected_rule: selected_rule,
+      transition: {from: from_phase, to: next.phase},
+      actual_cost_usd: actual_cost,
+      projected_next_call_cost_usd: projected,
+      cause_chain: next.cause_chain,
+    },
+  }
+}
+
+/**
+ * May this action run right now?
+ *
+ * A model call inside a landing must prove its projected upper bound fits in
+ * the cost grace that remains. That is the admission question, and it is asked
+ * of the projection only — the projection is never charged into actual usage,
+ * so a denial reports both numbers rather than conflating them.
+ *
+ * A terminal tool is admitted for the whole landing window even when a model
+ * call is not. That is the generic capability a mode's terminal tool consumes
+ * to force one final emit at a soft boundary.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_action_allowed(state: CutState, meter: RunMeter, action: CutAction) -> CutAdmission {
+  if state.phase == "stopped" {
+    return {
+      admitted: false,
+      action: action,
+      reason: "run_stopped",
+      causes: [{step: "admission_denied", action: action, reason: "run_stopped"}],
+    }
+  }
+  if action == "terminal_tool" {
+    return {admitted: true, action: action, reason: "terminal_tool_always_admitted", causes: []}
+  }
+  if state.phase == "running" {
+    return {admitted: true, action: action, reason: "running", causes: []}
+  }
+  const grace = state.grace ?? {}
+  const allowed = grace.extra_cost_usd
+  if allowed == nil {
+    // No cost bound on this landing: the wall-clock or turn bound governs, and
+    // a projection cannot deny a call against a limit that was never set.
+    return {admitted: true, action: action, reason: "no_cost_grace_bound", causes: []}
+  }
+  const anchor = (state.anchor ?? {}).cost_usd
+  const spent = meter_observation_upper(run_meter_read(meter, "actual_cost_usd"))
+  const projected = meter_observation_upper(run_meter_read(meter, "projected_next_call_cost_usd"))
+  if anchor == nil || spent == nil {
+    return {
+      admitted: false,
+      action: action,
+      reason: "grace_unmeasurable",
+      causes: [{step: "admission_denied", action: action, reason: "grace_unmeasurable"}],
+    }
+  }
+  if projected == nil {
+    return {
+      admitted: false,
+      action: action,
+      reason: "projection_unavailable",
+      remaining_usd: allowed - (spent - anchor),
+      causes: [{step: "admission_denied", action: action, reason: "projection_unavailable"}],
+    }
+  }
+  const remaining = allowed - (spent - anchor)
+  if projected > remaining {
+    return {
+      admitted: false,
+      action: action,
+      reason: "projection_exceeds_remaining_grace",
+      projected_usd: projected,
+      remaining_usd: remaining,
+      causes: [
+        {step: "admission_denied", action: action, reason: "projection_exceeds_remaining_grace"},
+      ],
+    }
+  }
+  return {
+    admitted: true,
+    action: action,
+    reason: "fits_remaining_grace",
+    projected_usd: projected,
+    remaining_usd: remaining,
+    causes: [],
+  }
+}
+
+/**
+ * Record an admission answer into the run's cause chain, so a denial that
+ * shaped the run is visible in the terminal evidence rather than only at the
+ * call site that asked.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_state_record_admission(state: CutState, admission: CutAdmission) -> CutState {
+  if len(admission.causes) == 0 {
+    return state
+  }
+  return state + {cause_chain: state.cause_chain + admission.causes}
+}
+
+/**
+ * Does the loop still owe a terminal emit at this soft boundary?
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_terminal_emit_due(state: CutState) -> bool {
+  return state.phase == "landing" && !state.terminal_emitted
+}
+
+/**
+ * Record that the terminal tool fired.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_state_record_terminal_emit(state: CutState) -> CutState {
+  return state + {terminal_emitted: true}
+}
+
+/**
+ * Stop the run with a verifier-issued completion.
+ *
+ * Refused unless the meter carries an exact, non-zero `verifier_completions`
+ * count. This is what keeps a forced stop from ever writing `completed`: the
+ * only path to that outcome needs evidence a cut cannot manufacture.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_state_complete(state: CutState, meter: RunMeter) -> Result<CutState, string> {
+  const completions = run_meter_read(meter, "verifier_completions")
+  if completions.basis != "exact" {
+    return Err("cut_rules: completion needs an exact verifier_completions count")
+  }
+  if completions.value < 1.0 {
+    return Err("cut_rules: completion needs a verifier-issued completion receipt")
+  }
+  return Ok(
+    state
+      + {
+        phase: "stopped",
+        terminal_reason: "verified_completion",
+        cause_chain: state.cause_chain + [{step: "terminated", reason: "verified_completion"}],
+      },
+  )
+}
+
+fn __cut_outcome_of(phase: CutPhase, verified: bool) -> "running" | "completed" | "forced_stop" {
+  if phase != "stopped" {
+    return "running"
+  }
+  if verified {
+    return "completed"
+  }
+  return "forced_stop"
+}
+
+/**
+ * What this run's terminal state proves, with actual spend and the next-call
+ * projection reported separately.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn cut_terminal_evidence(state: CutState, meter: RunMeter) -> CutTerminalEvidence {
+  const completions = run_meter_read(meter, "verifier_completions")
+  const reason = state.terminal_reason ?? "none"
+  const verified = reason == "verified_completion"
+    && completions.basis == "exact"
+    && completions.value >= 1.0
+  const outcome = __cut_outcome_of(state.phase, verified)
+  return {
+    outcome: outcome,
+    reason: reason,
+    verifier_completions: completions,
+    actual_cost_usd: run_meter_read(meter, "actual_cost_usd"),
+    projected_next_call_cost_usd: run_meter_read(meter, "projected_next_call_cost_usd"),
+    cause_chain: state.cause_chain,
+  }
+}

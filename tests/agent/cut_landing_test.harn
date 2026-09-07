@@ -1,0 +1,430 @@
+// Run: harn test tests/agent/cut_landing_test.harn
+//
+// Falsifiers for the soft-landing cut rules, the run meter, and the predicate
+// evaluator. Pure: no model, no host, no clock.
+import {
+  CutRulePolicy,
+  cut_action_allowed,
+  cut_predicate_evaluate,
+  cut_predicate_validate,
+  cut_rules_digest,
+  cut_rules_tick,
+  cut_rules_validate,
+  cut_state_complete,
+  cut_state_new,
+  cut_state_record_admission,
+  cut_state_record_terminal_emit,
+  cut_terminal_emit_due,
+  cut_terminal_evidence,
+} from "std/agent/cut_landing"
+import {
+  RunMeter,
+  run_meter_bounded,
+  run_meter_charge,
+  run_meter_exact,
+  run_meter_new,
+  run_meter_project_next_call,
+  run_meter_read,
+  run_meter_unavailable,
+} from "std/agent/run_meter"
+import { assert_contains } from "std/testing"
+
+// The governing operator policy from the issue, as data: spend up to $1.50; or
+// keep running up to 30 more minutes past that; hard ceiling $3.00; at the soft
+// boundary finish the current turn.
+const SOFT_CAP_USD = 1.5
+
+const HARD_CAP_USD = 3.0
+
+const GRACE_MS = 1800000.0
+
+fn governing_policy() -> CutRulePolicy {
+  return {
+    rules: [
+      {
+        name: "hard_ceiling",
+        when: {op: "at_least", field: "actual_cost_usd", threshold: HARD_CAP_USD},
+        effect: {effect: "stop"},
+      },
+      {
+        name: "soft_cost_cap",
+        when: {op: "at_least", field: "actual_cost_usd", threshold: SOFT_CAP_USD},
+        effect: {
+          effect: "land",
+          landing: "finish_turn",
+          grace: {extra_cost_usd: 0.25, extra_wall_ms: GRACE_MS},
+        },
+      },
+    ],
+  }
+}
+
+fn meter_of(actual_usd: float, projected_usd: float, wall_ms: float) -> RunMeter {
+  const a = unwrap(run_meter_exact(run_meter_new(), "actual_cost_usd", actual_usd))
+  const b = unwrap(run_meter_project_next_call(a, projected_usd))
+  const c = unwrap(run_meter_exact(b, "wall_ms", wall_ms))
+  return unwrap(run_meter_exact(c, "turns", 8.0))
+}
+
+fn cause_steps(chain: list<unknown>) -> list<string> {
+  let steps: list<string> = []
+  for cause in chain {
+    steps = steps + [to_string(cause?.step ?? "?")]
+  }
+  return steps
+}
+
+pipeline test_policy_is_well_formed(harness: Harness, task: unknown) {
+  assert_eq(cut_rules_validate(governing_policy()), [])
+}
+
+/**
+ * FALSIFIER 1. Crossing the soft cost cap below the hard ceiling latches a
+ * landing, names the rule, and records actual spend beside the separately
+ * projected next call.
+ */
+pipeline test_soft_cap_lands_and_reports_actual_beside_projection(harness: Harness, task: unknown) {
+  const meter = meter_of(1.6, 0.05, 120000.0)
+  const tick = cut_rules_tick(governing_policy(), meter, cut_state_new())
+  assert_eq(tick.state.phase, "landing")
+  assert_eq(tick.state.landing, "finish_turn")
+  assert_eq(tick.state.landing_rule, "soft_cost_cap")
+  assert_eq(tick.receipt.selected_effect, "land")
+  assert_eq(tick.receipt.selected_rule, "soft_cost_cap")
+  assert_eq(tick.receipt.transition.from, "running")
+  assert_eq(tick.receipt.transition.to, "landing")
+  assert_eq(tick.receipt.matched_rules, ["soft_cost_cap"])
+  assert_eq(tick.receipt.indeterminate_rules, [])
+  // Actual and projected are two fields, not one number.
+  assert_eq(tick.receipt.actual_cost_usd, "exact(1.6)")
+  assert_eq(tick.receipt.projected_next_call_cost_usd, "exact(0.05)")
+  // The grace envelope is anchored to the meter reading at latch time, so the
+  // bound is an increment on what was already spent.
+  assert_eq(tick.state.anchor?.cost_usd, 1.6)
+  assert_eq(tick.state.grace?.extra_cost_usd, 0.25)
+  assert_eq(tick.state.grace?.extra_wall_ms, GRACE_MS)
+  // The cause chain runs rule evaluation -> effect -> landing, in order.
+  assert_eq(
+    cause_steps(tick.receipt.cause_chain),
+    ["rule_evaluated", "rule_evaluated", "effect_selected", "landing_chosen"],
+  )
+  // Both rules were evaluated, so a rule that never ran is distinguishable
+  // from one that ran and answered false.
+  assert_eq(tick.receipt.total_rules, 2)
+  assert_eq(tick.receipt.evaluated_rules, 2)
+}
+
+/**
+ * FALSIFIER 2 (negative control). The run that stopped at 56% of its cap:
+ * actual spend well under the soft cap, a next-call projection large enough
+ * that actual + projected crosses it. The rule reads actual, so the run is
+ * admitted and keeps running.
+ */
+pipeline test_high_projection_over_low_actual_is_admitted(harness: Harness, task: unknown) {
+  const actual = SOFT_CAP_USD * 0.56
+  const projected = 0.9
+  assert_eq(actual + projected > SOFT_CAP_USD, true)
+  const meter = meter_of(actual, projected, 120000.0)
+  const tick = cut_rules_tick(governing_policy(), meter, cut_state_new())
+  assert_eq(tick.state.phase, "running")
+  assert_eq(tick.receipt.selected_effect, "continue")
+  assert_eq(tick.receipt.matched_rules, [])
+  assert_eq(tick.receipt.evaluated_rules, 2)
+  assert_eq(tick.receipt.transition.to, "running")
+  const admission = cut_action_allowed(tick.state, meter, "model_call")
+  assert_eq(admission.admitted, true)
+  assert_eq(admission.reason, "running")
+}
+
+/**
+ * FALSIFIER 3. Tightening the grace below the projected next-call bound denies
+ * that call and names the admission rule that denied it. The terminal tool is
+ * still admitted, which is the capability a mode's final emit consumes.
+ */
+pipeline test_tight_grace_denies_the_next_call_but_not_the_terminal_tool(
+  harness: Harness,
+  task: unknown,
+) {
+  const policy: CutRulePolicy = {
+    rules: [
+      {
+        name: "soft_cost_cap",
+        when: {op: "at_least", field: "actual_cost_usd", threshold: SOFT_CAP_USD},
+        effect: {effect: "land", landing: "finish_turn", grace: {extra_cost_usd: 0.02}},
+      },
+    ],
+  }
+  const meter = meter_of(1.6, 0.05, 120000.0)
+  const tick = cut_rules_tick(policy, meter, cut_state_new())
+  assert_eq(tick.state.phase, "landing")
+  const denied = cut_action_allowed(tick.state, meter, "model_call")
+  assert_eq(denied.admitted, false)
+  assert_eq(denied.reason, "projection_exceeds_remaining_grace")
+  assert_eq(denied.projected_usd, 0.05)
+  assert_eq(denied.remaining_usd, 0.02)
+  assert_eq(cause_steps(denied.causes), ["admission_denied"])
+  const allowed = cut_action_allowed(tick.state, meter, "terminal_tool")
+  assert_eq(allowed.admitted, true)
+  assert_eq(cut_terminal_emit_due(tick.state), true)
+  assert_eq(cut_terminal_emit_due(cut_state_record_terminal_emit(tick.state)), false)
+  // The denial reaches the terminal evidence, not just the call site.
+  const recorded = cut_state_record_admission(tick.state, denied)
+  assert_eq(cause_steps(recorded.cause_chain).contains("admission_denied"), true)
+  assert_eq(cause_steps(tick.state.cause_chain).contains("admission_denied"), false)
+}
+
+/**
+ * A projection that fits the remaining grace is admitted. Without this the
+ * test above would also pass on a landing that denies everything.
+ */
+pipeline test_projection_inside_the_grace_is_admitted(harness: Harness, task: unknown) {
+  const meter = meter_of(1.6, 0.05, 120000.0)
+  const tick = cut_rules_tick(governing_policy(), meter, cut_state_new())
+  const admission = cut_action_allowed(tick.state, meter, "model_call")
+  assert_eq(admission.admitted, true)
+  assert_eq(admission.reason, "fits_remaining_grace")
+  assert_eq(admission.remaining_usd, 0.25)
+}
+
+/**
+ * FALSIFIER 4. An expired grace envelope forces an immediate stop and the
+ * cause chain says which bound expired.
+ */
+pipeline test_expired_grace_forces_a_stop(harness: Harness, task: unknown) {
+  const landed = cut_rules_tick(governing_policy(), meter_of(1.6, 0.05, 120000.0), cut_state_new())
+  assert_eq(landed.state.phase, "landing")
+  // 31 minutes of wall time past the latch, still under the hard cost ceiling.
+  const later = meter_of(1.7, 0.05, 120000.0 + GRACE_MS + 60000.0)
+  const stopped = cut_rules_tick(governing_policy(), later, landed.state)
+  assert_eq(stopped.state.phase, "stopped")
+  assert_eq(stopped.state.terminal_reason, "grace_expired:extra_wall_ms")
+  assert_eq(stopped.receipt.selected_effect, "stop")
+  assert_eq(stopped.receipt.transition.from, "landing")
+  assert_eq(stopped.receipt.transition.to, "stopped")
+  const steps = cause_steps(stopped.receipt.cause_chain)
+  assert_eq(steps.contains("grace_expired"), true)
+  assert_eq(steps.contains("terminated"), true)
+  // The whole chain survives from the first tick.
+  assert_eq(steps.contains("landing_chosen"), true)
+}
+
+/**
+ * FALSIFIER 5. Removing provider usage produces indeterminate, never matched
+ * from an inferred zero, and the rule is named as indeterminate rather than
+ * silently counted as false.
+ */
+pipeline test_unavailable_usage_is_indeterminate(harness: Harness, task: unknown) {
+  const base = unwrap(
+    run_meter_unavailable(run_meter_new(), "actual_cost_usd", "provider_usage_missing"),
+  )
+  const meter = unwrap(run_meter_project_next_call(base, 0.05))
+  const tick = cut_rules_tick(governing_policy(), meter, cut_state_new())
+  assert_eq(tick.state.phase, "running")
+  assert_eq(tick.receipt.matched_rules, [])
+  assert_eq(tick.receipt.indeterminate_rules, ["hard_ceiling", "soft_cost_cap"])
+  assert_eq(tick.receipt.actual_cost_usd, "unavailable(provider_usage_missing)")
+  // A field never observed is also indeterminate, and says so differently.
+  const unobserved = cut_predicate_evaluate(
+    run_meter_new(),
+    {op: "at_least", field: "actual_cost_usd", threshold: 1.0},
+  )
+  assert_eq(unobserved.outcome, "indeterminate")
+  assert_eq(unobserved.fields_read[0]?.observation, "unavailable(not_observed)")
+}
+
+/**
+ * A bound that straddles the threshold cannot answer either way; a bound that
+ * clears it can.
+ */
+pipeline test_bounded_observations_answer_only_when_the_bound_settles_it(
+  harness: Harness,
+  task: unknown,
+) {
+  const straddle = unwrap(run_meter_bounded(run_meter_new(), "actual_cost_usd", 1.2, 1.8))
+  assert_eq(
+    cut_predicate_evaluate(straddle, {op: "at_least", field: "actual_cost_usd", threshold: 1.5})
+      .outcome,
+    "indeterminate",
+  )
+  const above = unwrap(run_meter_bounded(run_meter_new(), "actual_cost_usd", 1.6, 1.8))
+  assert_eq(
+    cut_predicate_evaluate(above, {op: "at_least", field: "actual_cost_usd", threshold: 1.5})
+      .outcome,
+    "matched",
+  )
+  const below = unwrap(run_meter_bounded(run_meter_new(), "actual_cost_usd", 1.0, 1.2))
+  assert_eq(
+    cut_predicate_evaluate(below, {op: "at_least", field: "actual_cost_usd", threshold: 1.5})
+      .outcome,
+    "not_matched",
+  )
+}
+
+/** FALSIFIER 6. Empty predicate groups are rejected rather than answered. */
+pipeline test_empty_predicate_groups_are_rejected(harness: Harness, task: unknown) {
+  const empty_all = cut_predicate_evaluate(run_meter_new(), {op: "all", of: []})
+  assert_eq(empty_all.outcome, "indeterminate")
+  assert_eq(len(empty_all.rejections), 1)
+  const empty_any = cut_predicate_evaluate(run_meter_new(), {op: "any", of: []})
+  assert_eq(empty_any.outcome, "indeterminate")
+  assert_eq(len(cut_predicate_validate({op: "any", of: []})), 1)
+  assert_eq(
+    len(cut_predicate_validate({op: "at_least", field: "no_such_field", threshold: 1.0})),
+    1,
+  )
+  assert_eq(len(cut_rules_validate({rules: []})), 1)
+}
+
+/**
+ * FALSIFIER 7. A run that stopped is distinguishable from a run whose rules
+ * never ran: nonzero rule counts, and zero evaluated rules after the stop.
+ */
+pipeline test_rule_counts_distinguish_stopped_from_never_evaluated(
+  harness: Harness,
+  task: unknown,
+) {
+  const meter = meter_of(3.1, 0.05, 120000.0)
+  const stop = cut_rules_tick(governing_policy(), meter, cut_state_new())
+  assert_eq(stop.state.phase, "stopped")
+  assert_eq(stop.receipt.evaluated_rules, 2)
+  assert_eq(stop.receipt.matched_rules, ["hard_ceiling", "soft_cost_cap"])
+  assert_eq(stop.receipt.selected_effect, "stop")
+  assert_eq(stop.state.terminal_reason, "hard_cut:hard_ceiling")
+  const after = cut_rules_tick(governing_policy(), meter, stop.state)
+  assert_eq(after.receipt.total_rules, 2)
+  assert_eq(after.receipt.evaluated_rules, 0)
+  assert_eq(after.receipt.transition.from, "stopped")
+  assert_eq(after.receipt.transition.to, "stopped")
+}
+
+/**
+ * FALSIFIER 8. Natural completion and forced termination over the same meter
+ * retain different typed terminal evidence, and a forced cut cannot write
+ * `completed`.
+ */
+pipeline test_forced_stop_and_verified_completion_differ(harness: Harness, task: unknown) {
+  const meter = meter_of(3.1, 0.05, 120000.0)
+  const forced = cut_rules_tick(governing_policy(), meter, cut_state_new()).state
+  const forced_evidence = cut_terminal_evidence(forced, meter)
+  assert_eq(forced_evidence.outcome, "forced_stop")
+  assert_eq(forced_evidence.reason, "hard_cut:hard_ceiling")
+  assert_eq(forced_evidence.verifier_completions.basis, "unavailable")
+  assert_eq(forced_evidence.actual_cost_usd.basis, "exact")
+  assert_eq(forced_evidence.projected_next_call_cost_usd.basis, "exact")
+  // A forced stop cannot claim completion, because the completion path needs a
+  // verifier-issued count the cut never produced.
+  assert_contains(unwrap_err(cut_state_complete(forced, meter)), "verifier_completions")
+  const verified_meter = unwrap(run_meter_exact(meter, "verifier_completions", 1.0))
+  const completed = unwrap(cut_state_complete(cut_state_new(), verified_meter))
+  const completed_evidence = cut_terminal_evidence(completed, verified_meter)
+  assert_eq(completed_evidence.outcome, "completed")
+  assert_eq(completed_evidence.reason, "verified_completion")
+  assert_ne(completed_evidence.outcome, forced_evidence.outcome)
+}
+
+/**
+ * A projected upper bound is an admission fact only. Charging it into actual
+ * usage is refused, so the two numbers can never merge.
+ */
+pipeline test_a_projection_is_never_charged_into_actual(harness: Harness, task: unknown) {
+  const meter = meter_of(1.0, 0.4, 120000.0)
+  assert_contains(
+    unwrap_err(run_meter_charge(meter, "projected_next_call_cost_usd", 0.4)),
+    "into actual usage",
+  )
+  const charged = unwrap(run_meter_charge(meter, "actual_cost_usd", 0.4))
+  assert_eq(run_meter_read(charged, "actual_cost_usd"), {basis: "exact", value: 1.4})
+  assert_eq(run_meter_read(charged, "projected_next_call_cost_usd"), {basis: "exact", value: 0.4})
+  assert_contains(unwrap_err(run_meter_exact(meter, "no_such_field", 1.0)), "unregistered field")
+}
+
+/**
+ * The latch is one-way: a later tick whose soft predicate no longer matches
+ * cannot return a landing run to running.
+ */
+pipeline test_the_landing_latch_does_not_reopen(harness: Harness, task: unknown) {
+  const landed = cut_rules_tick(governing_policy(), meter_of(1.6, 0.05, 120000.0), cut_state_new())
+  assert_eq(landed.state.phase, "landing")
+  // An implausible meter where spend fell back under the cap.
+  const reverted = cut_rules_tick(governing_policy(), meter_of(0.2, 0.05, 130000.0), landed.state)
+  assert_eq(reverted.state.phase, "landing")
+  assert_eq(reverted.state.landing, "finish_turn")
+  assert_eq(reverted.receipt.matched_rules, [])
+  assert_eq(reverted.receipt.selected_effect, "land")
+  assert_eq(reverted.receipt.transition.from, "landing")
+  assert_eq(reverted.receipt.transition.to, "landing")
+}
+
+/** The digests pin the vocabulary a receipt was produced under. */
+pipeline test_digests_change_with_the_policy_and_the_meter(harness: Harness, task: unknown) {
+  const policy = governing_policy()
+  const tighter: CutRulePolicy = {
+    rules: [
+      {
+        name: "hard_ceiling",
+        when: {op: "at_least", field: "actual_cost_usd", threshold: HARD_CAP_USD},
+        effect: {effect: "stop"},
+      },
+      {
+        name: "soft_cost_cap",
+        when: {op: "at_least", field: "actual_cost_usd", threshold: 1.25},
+        effect: {
+          effect: "land",
+          landing: "finish_turn",
+          grace: {extra_cost_usd: 0.25, extra_wall_ms: GRACE_MS},
+        },
+      },
+    ],
+  }
+  assert_ne(cut_rules_digest(policy), cut_rules_digest(tighter))
+  const a = cut_rules_tick(policy, meter_of(1.6, 0.05, 120000.0), cut_state_new())
+  const b = cut_rules_tick(policy, meter_of(1.7, 0.05, 120000.0), cut_state_new())
+  assert_ne(a.receipt.meter_digest, b.receipt.meter_digest)
+  assert_eq(a.receipt.registry_digest, b.receipt.registry_digest)
+  assert_eq(a.receipt.rules_digest, b.receipt.rules_digest)
+  assert_eq(a.receipt.schema, "harn.cut_rules_tick.v1")
+}
+
+/**
+ * Combinators are three-valued: one false conjunct settles an `all` even when a
+ * sibling is unmeasured, and one true disjunct settles an `any`.
+ */
+pipeline test_combinators_are_three_valued(harness: Harness, task: unknown) {
+  const partial = unwrap(run_meter_exact(run_meter_new(), "turns", 2.0))
+  const all_with_false = cut_predicate_evaluate(
+    partial,
+    {
+      op: "all",
+      of: [
+        {op: "at_least", field: "turns", threshold: 9.0},
+        {op: "at_least", field: "actual_cost_usd", threshold: 1.0},
+      ],
+    },
+  )
+  assert_eq(all_with_false.outcome, "not_matched")
+  const all_with_unknown = cut_predicate_evaluate(
+    partial,
+    {
+      op: "all",
+      of: [
+        {op: "at_least", field: "turns", threshold: 1.0},
+        {op: "at_least", field: "actual_cost_usd", threshold: 1.0},
+      ],
+    },
+  )
+  assert_eq(all_with_unknown.outcome, "indeterminate")
+  const any_with_true = cut_predicate_evaluate(
+    partial,
+    {
+      op: "any",
+      of: [
+        {op: "at_least", field: "turns", threshold: 1.0},
+        {op: "at_least", field: "actual_cost_usd", threshold: 1.0},
+      ],
+    },
+  )
+  assert_eq(any_with_true.outcome, "matched")
+  // Every field the decision read is named, with its provenance.
+  assert_eq(len(any_with_true.fields_read), 2)
+  assert_eq(any_with_true.fields_read[1]?.basis, "unavailable")
+}
