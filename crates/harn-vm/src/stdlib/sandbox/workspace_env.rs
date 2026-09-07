@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::orchestration::CapabilityPolicy;
 
@@ -138,6 +138,10 @@ fn workspace_toolchain_env_with_package_cache(
             path("YARN_CACHE_FOLDER", "yarn"),
         ),
         ("PNPM_HOME".to_string(), path("PNPM_HOME", "pnpm/home")),
+        (
+            "COMPOSER_CACHE_DIR".to_string(),
+            path("COMPOSER_CACHE_DIR", "composer"),
+        ),
         // ccache is a pure cache like the rest, but its TEMPDIR is the one that
         // actually breaks builds: it defaults to XDG_RUNTIME_DIR
         // (`/run/user/<uid>`), which no workspace write root covers, so a cgo
@@ -177,15 +181,98 @@ fn workspace_toolchain_env_with_package_cache(
         ));
         for (key, candidate) in [
             ("GIT_CONFIG_GLOBAL", home.join(".gitconfig")),
-            ("NPM_CONFIG_USERCONFIG", home.join(".npmrc")),
             ("PIP_CONFIG_FILE", home.join(".config/pip/pip.conf")),
         ] {
             if candidate.is_file() {
                 env.push((key.to_string(), candidate.display().to_string()));
             }
         }
+        // `~/.npmrc` is on the credential denylist, and npm and pnpm read it
+        // at startup and exit on the EPERM rather than proceeding without it.
+        // Pointing the tool at the denied file, or leaving the default, is the
+        // same crash. The stand-in keeps the non-credential lines (registry
+        // URLs, scopes, store settings) so a private registry still resolves,
+        // and never carries a token into the workspace.
+        env.push((
+            "NPM_CONFIG_USERCONFIG".to_string(),
+            seed_sanitized_npmrc(&home.join(".npmrc"), &root.join("npm/npmrc"))
+                .display()
+                .to_string(),
+        ));
+        // Composer treats an unreadable `auth.json` as fatal, and that file
+        // is on the credential denylist. Pointing COMPOSER_HOME at a
+        // workspace stand-in that carries `config.json` but never `auth.json`
+        // keeps repositories and preferred-install settings and drops tokens.
+        env.push((
+            "COMPOSER_HOME".to_string(),
+            seed_composer_home(&home, &root.join("composer/home"))
+                .display()
+                .to_string(),
+        ));
     }
     env
+}
+
+/// Write the credential-free projection of `source` to `stand_in` and return
+/// the stand-in path. The path is returned even when `source` is absent (npm
+/// treats a missing userconfig as empty), and the file is rewritten only when
+/// its content would change, so a spawn on a warm workspace touches nothing.
+fn seed_sanitized_npmrc(source: &Path, stand_in: &Path) -> PathBuf {
+    let Ok(raw) = std::fs::read_to_string(source) else {
+        return stand_in.to_path_buf();
+    };
+    let sanitized = sanitize_npmrc(&raw);
+    if std::fs::read_to_string(stand_in).ok().as_deref() != Some(sanitized.as_str()) {
+        if let Some(parent) = stand_in.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(stand_in, sanitized);
+    }
+    stand_in.to_path_buf()
+}
+
+/// Drop every npmrc line that carries a credential. npm scopes auth to a
+/// registry as `//host/path/:_authToken=…` (also `:_auth`, `:_password`,
+/// `:username`, `:email`, `:certfile`, `:keyfile`), and the legacy unscoped
+/// forms are `_auth`, `_authToken`, and `_password`. Any key whose final
+/// segment begins with `_`, or any registry-scoped (`//…/:`) key, goes; plain
+/// settings (`registry=`, `@scope:registry=`, `store-dir=`) stay.
+/// Workspace-local Composer home: copy non-credential files, never `auth.json`.
+fn seed_composer_home(operator_home: &Path, dest: &Path) -> PathBuf {
+    let _ = std::fs::create_dir_all(dest);
+    for name in ["config.json", "composer.json"] {
+        for source in [
+            operator_home.join(".composer").join(name),
+            operator_home.join(".config/composer").join(name),
+        ] {
+            if let Ok(raw) = std::fs::read_to_string(&source) {
+                let dest_file = dest.join(name);
+                if std::fs::read_to_string(&dest_file).ok().as_deref() != Some(raw.as_str()) {
+                    let _ = std::fs::write(&dest_file, raw);
+                }
+                break;
+            }
+        }
+    }
+    dest.to_path_buf()
+}
+
+fn sanitize_npmrc(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+        let key = trimmed
+            .split_once('=')
+            .map(|(key, _)| key.trim_end())
+            .unwrap_or(trimmed);
+        let leaf = key.rsplit(':').next().unwrap_or(key).trim();
+        let credential = key.starts_with("//") || leaf.starts_with('_');
+        if !credential {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
@@ -415,6 +502,83 @@ mod tests {
             env.get("HARN_CACHE_DIR"),
             Some(&cache.join("harn").display().to_string()),
             "HARN_CACHE_DIR is already the cache root, not an XDG base"
+        );
+    }
+
+    #[test]
+    fn the_npmrc_stand_in_keeps_settings_and_drops_every_credential_form() {
+        let raw = "registry=https://registry.example.test/\n\
+                   @acme:registry=https://npm.acme.test/\n\
+                   //npm.acme.test/:_authToken=secret-token\n\
+                   //npm.acme.test/:username=alice\n\
+                   //registry.npmjs.org/:_auth=YWxpY2U6aHVudGVyMg==\n\
+                   _authToken=legacy-secret\n\
+                   _password=hunter2\n\
+                   store-dir=/opt/pnpm-store\n\
+                   always-auth=true\n";
+        let sanitized = sanitize_npmrc(raw);
+        assert_eq!(
+            sanitized,
+            "registry=https://registry.example.test/\n\
+             @acme:registry=https://npm.acme.test/\n\
+             store-dir=/opt/pnpm-store\n\
+             always-auth=true\n"
+        );
+        for secret in ["secret-token", "hunter2", "YWxpY2U", "alice"] {
+            assert!(!sanitized.contains(secret), "{secret} leaked: {sanitized}");
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join(".npmrc");
+        let stand_in = dir.path().join("cache/npm/npmrc");
+        assert_eq!(seed_sanitized_npmrc(&source, &stand_in), stand_in);
+        assert!(
+            !stand_in.exists(),
+            "no source, no file: npm treats absent as empty"
+        );
+        std::fs::write(&source, raw).unwrap();
+        seed_sanitized_npmrc(&source, &stand_in);
+        assert_eq!(std::fs::read_to_string(&stand_in).unwrap(), sanitized);
+        let written = std::fs::metadata(&stand_in).unwrap().modified().unwrap();
+        seed_sanitized_npmrc(&source, &stand_in);
+        assert_eq!(
+            std::fs::metadata(&stand_in).unwrap().modified().unwrap(),
+            written,
+            "an unchanged stand-in is not rewritten"
+        );
+    }
+
+    #[test]
+    fn a_confined_child_never_reads_npm_config_from_the_denied_home_file() {
+        let workspace = tempfile::tempdir().unwrap();
+        let env: BTreeMap<_, _> =
+            workspace_toolchain_env_with_package_cache(&policy(workspace.path()), None)
+                .into_iter()
+                .collect();
+        let Some(userconfig) = env.get("NPM_CONFIG_USERCONFIG") else {
+            return; // no resolvable home on this host
+        };
+        let cache = workspace
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join(WORKSPACE_TOOLCHAIN_CACHE_NAME);
+        assert!(
+            PathBuf::from(userconfig).starts_with(&cache),
+            "userconfig must be the workspace stand-in, not ~/.npmrc: {userconfig}"
+        );
+        assert!(
+            PathBuf::from(env.get("COMPOSER_CACHE_DIR").unwrap()).starts_with(&cache),
+            "composer cache is a pure cache and relocates"
+        );
+        let composer_home = PathBuf::from(env.get("COMPOSER_HOME").unwrap());
+        assert!(
+            composer_home.starts_with(&cache),
+            "COMPOSER_HOME must be the workspace stand-in: {composer_home:?}"
+        );
+        assert!(
+            !composer_home.join("auth.json").exists(),
+            "the stand-in must never carry auth.json"
         );
     }
 

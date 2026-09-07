@@ -219,18 +219,15 @@ impl ProcessSandboxRefusal {
         if evidence.chars().count() > Self::MAX_EXCERPT {
             stderr_excerpt.push('…');
         }
+        // `operation` is what a BACKEND reports and stays `Unknown` under
+        // inference; `mechanism` is the inferred fact and says so.
         let (mechanism, grants) = infer_process_sandbox_mechanism(evidence, policy);
-        let operation = match mechanism {
-            ProcessSandboxMechanism::HomeRead => ProcessSandboxOperation::Read,
-            ProcessSandboxMechanism::Write => ProcessSandboxOperation::Write,
-            _ => ProcessSandboxOperation::Unknown,
-        };
         Self {
             schema: Self::SCHEMA.to_string(),
             command,
             cwd,
             backend,
-            operation,
+            operation: ProcessSandboxOperation::Unknown,
             mechanism,
             reason: mechanism.explanation(&grants),
             resource: None,

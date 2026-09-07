@@ -439,7 +439,7 @@ pub(super) fn default_run_capability_policy(
             .map(|path| normalize_run_workspace_root(path.as_path()))
             .map(|path| path.display().to_string())
             .collect(),
-        process_sandbox: harn_vm::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(harn_vm::orchestration::ProcessSandboxPolicy {
             presets: None,
             read_roots: process_read_roots,
             write_roots: process_write_roots
@@ -454,7 +454,7 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| normalize_run_workspace_root(path.as_path()))
                 .map(|path| path.display().to_string())
                 .collect(),
-        },
+        }),
         side_effect_level: Some(
             if allow_process_network {
                 harn_vm::tool_annotations::SideEffectLevel::Network

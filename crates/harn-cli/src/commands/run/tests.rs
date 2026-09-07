@@ -358,11 +358,11 @@ fn run_sandbox_attestation_reports_effective_policy() {
             http_port: 3128,
             socks_port: 1080,
         }),
-        process_sandbox: harn_vm::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(harn_vm::orchestration::ProcessSandboxPolicy {
             read_deny_roots: Vec::new(),
             allow_tcp_loopback: true,
             ..harn_vm::orchestration::ProcessSandboxPolicy::default()
-        },
+        }),
         ..harn_vm::orchestration::CapabilityPolicy::default()
     };
     harn_vm::orchestration::push_execution_policy(policy);

@@ -194,6 +194,18 @@ mod mechanism {
     }
 
     #[test]
+    fn a_jvm_write_to_a_home_lock_file_is_a_write_not_a_home_read() {
+        let home = super::super::super::sandbox_user_home_dir().expect("home dir");
+        let stderr = format!(
+            "java.io.FileNotFoundException: {}/.sbt/boot/sbt.boot.lock (Operation not permitted)\n\
+             \tat java.base/java.io.FileOutputStream.open0(Native Method)",
+            home.display()
+        );
+        let (mechanism, _) = infer_process_sandbox_mechanism(&stderr, Some(&confined("/work")));
+        assert_eq!(mechanism, ProcessSandboxMechanism::Write);
+    }
+
+    #[test]
     fn output_naming_no_boundary_stays_unknown() {
         let (mechanism, _) = infer_process_sandbox_mechanism("error: exit status 1", None);
         assert_eq!(mechanism, ProcessSandboxMechanism::Unknown);

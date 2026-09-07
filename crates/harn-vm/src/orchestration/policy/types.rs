@@ -424,7 +424,10 @@ pub struct CapabilityPolicy {
     pub sandbox_profile: SandboxProfile,
     /// Process-only filesystem allowances layered into OS subprocess
     /// sandboxes without widening Harn file builtins.
-    pub process_sandbox: ProcessSandboxPolicy,
+    ///
+    /// Boxed so adding a grant (socket roots, another denylist) does not
+    /// grow every stack frame that carries a `CapabilityPolicy` by value.
+    pub process_sandbox: Box<ProcessSandboxPolicy>,
     /// Managed proxy endpoints installed by the host for child traffic.
     /// `None` preserves the existing deny-all/unrestricted socket ceiling
     /// selected by `side_effect_level`.
@@ -482,7 +485,7 @@ impl From<&CapabilityPolicy> for CapabilityPolicyWire {
             tool_arg_constraints: policy.tool_arg_constraints.clone(),
             tool_annotations: policy.tool_annotations.clone(),
             sandbox_profile: policy.sandbox_profile,
-            process_sandbox: policy.process_sandbox.clone(),
+            process_sandbox: (*policy.process_sandbox).clone(),
             process_network_proxy: policy.process_network_proxy,
         }
     }
@@ -512,7 +515,7 @@ impl From<CapabilityPolicyWire> for CapabilityPolicy {
             tool_arg_constraints: wire.tool_arg_constraints,
             tool_annotations: wire.tool_annotations,
             sandbox_profile: wire.sandbox_profile,
-            process_sandbox: wire.process_sandbox,
+            process_sandbox: Box::new(wire.process_sandbox),
             process_network_proxy: wire.process_network_proxy,
         }
     }
@@ -778,7 +781,7 @@ impl CapabilityPolicy {
             tool_arg_constraints,
             tool_annotations,
             sandbox_profile,
-            process_sandbox,
+            process_sandbox: Box::new(process_sandbox),
             process_network_proxy,
         })
     }

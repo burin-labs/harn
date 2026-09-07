@@ -14,4 +14,9 @@
   network denial. On macOS a loopback grant also pins the JVM to the IPv4 stack
   (`-Djava.net.preferIPv4Stack=true` in `JAVA_TOOL_OPTIONS`), because a
   dual-stack JVM binds `127.0.0.1` as `::ffff:127.0.0.1`, which the seatbelt's
-  loopback filter refuses.
+  loopback filter refuses. A non-empty socket grant also admits sockets under
+  the UserTemp write roots (`/tmp`, `/var/folders`), because that is where
+  sbt's boot server and MSBuild worker nodes actually bind. npm and pnpm no
+  longer read the denied `~/.npmrc` at startup: `NPM_CONFIG_USERCONFIG` points
+  at a workspace stand-in with credential lines removed. Composer gets a
+  workspace `COMPOSER_HOME` that carries `config.json` and never `auth.json`.

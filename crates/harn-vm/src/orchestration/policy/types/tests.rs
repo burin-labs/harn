@@ -147,10 +147,10 @@ fn a_sibling_sharing_a_name_prefix_is_not_treated_as_nested() {
 #[test]
 fn tcp_loopback_is_host_owned_process_authority() {
     let allowed = CapabilityPolicy {
-        process_sandbox: ProcessSandboxPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
             allow_tcp_loopback: true,
             ..ProcessSandboxPolicy::default()
-        },
+        }),
         ..CapabilityPolicy::default()
     };
     let denied = CapabilityPolicy::default();
@@ -410,24 +410,24 @@ fn the_process_sandbox_policy_serializes_every_field_including_empty_ones() {
 #[test]
 fn unix_socket_roots_narrow_like_the_other_process_roots() {
     let allowed = CapabilityPolicy {
-        process_sandbox: ProcessSandboxPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
             unix_socket_roots: vec!["/work".to_string()],
             ..ProcessSandboxPolicy::default()
-        },
+        }),
         ..CapabilityPolicy::default()
     };
     let narrower = CapabilityPolicy {
-        process_sandbox: ProcessSandboxPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
             unix_socket_roots: vec!["/work/build".to_string()],
             ..ProcessSandboxPolicy::default()
-        },
+        }),
         ..CapabilityPolicy::default()
     };
     let elsewhere = CapabilityPolicy {
-        process_sandbox: ProcessSandboxPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
             unix_socket_roots: vec!["/elsewhere".to_string()],
             ..ProcessSandboxPolicy::default()
-        },
+        }),
         ..CapabilityPolicy::default()
     };
 

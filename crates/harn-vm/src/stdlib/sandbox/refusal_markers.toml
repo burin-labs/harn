@@ -67,6 +67,10 @@ local_socket = [
 # A refused write. The fix is a write root, not a read root.
 write = [
   "read-only file system",
+  "write failed",
+  "for writing",
+  # the JVM's write path; a refused `~/.sbt/boot` lock surfaces as this
+  "fileoutputstream",
   "could not create",
   "cannot create",
   "failed to create",

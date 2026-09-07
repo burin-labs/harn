@@ -179,15 +179,29 @@ fn permission_marker_present(haystack: &str) -> bool {
 /// recognised without anyone parsing the sentence around it.
 fn absolute_paths_in(text: &str) -> Vec<String> {
     let mut paths = Vec::new();
-    for token in text.split(|c: char| {
-        c.is_whitespace() || matches!(c, '\'' | '"' | '`' | '(' | ')' | ',' | ';' | ':')
-    }) {
-        let trimmed = token.trim_end_matches(['.', '!', '?']);
-        if trimmed.starts_with('/') && trimmed.len() > 1 {
+    // Do not split on `:`. A Windows path is `C:\Users\...`; splitting there
+    // leaves `C` and `\Users\...`, and neither looks absolute.
+    for token in text
+        .split(|c: char| c.is_whitespace() || matches!(c, '\'' | '"' | '`' | '(' | ')' | ',' | ';'))
+    {
+        let trimmed = token
+            .trim_end_matches(['.', '!', '?', ':'])
+            .trim_end_matches(['.', '!', '?']);
+        if is_absolute_path_token(trimmed) {
             paths.push(trimmed.to_string());
         }
     }
     paths
+}
+
+fn is_absolute_path_token(token: &str) -> bool {
+    let bytes = token.as_bytes();
+    (token.starts_with('/') && token.len() > 1)
+        || token.starts_with("\\\\")
+        || (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'\\' || bytes[2] == b'/'))
 }
 
 /// Classify the boundary a refused child hit from its output and the policy in
@@ -244,4 +258,25 @@ pub fn infer_process_sandbox_mechanism(
         return (ProcessSandboxMechanism::LocalSocket, grants);
     }
     (ProcessSandboxMechanism::Unknown, grants)
+}
+
+#[cfg(test)]
+mod path_tokens {
+    #[test]
+    fn a_windows_drive_path_is_one_token_not_a_split_on_the_colon() {
+        let paths = super::absolute_paths_in(
+            r"file C:\home\builder\.composer\config.json is not readable.",
+        );
+        assert_eq!(
+            paths,
+            vec![r"C:\home\builder\.composer\config.json".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_unix_path_is_still_collected() {
+        let paths =
+            super::absolute_paths_in("file /home/me/.composer/config.json is not readable.");
+        assert_eq!(paths, vec!["/home/me/.composer/config.json".to_string()]);
+    }
 }

@@ -1008,10 +1008,10 @@ fn package_manager_preset_policy() -> CapabilityPolicy {
     CapabilityPolicy {
         workspace_roots: vec!["/tmp/harn-workspace".to_string()],
         sandbox_profile: SandboxProfile::Worktree,
-        process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(crate::orchestration::ProcessSandboxPolicy {
             presets: Some(vec![ProcessSandboxPreset::PackageManagerConfig]),
             ..Default::default()
-        },
+        }),
         ..CapabilityPolicy::default()
     }
 }
@@ -1209,6 +1209,12 @@ fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
     }
     assert!(!profile.contains("(allow network*)"), "{profile}");
     assert!(!profile.contains("localhost:*"), "{profile}");
+    // Default presets include UserTemp, so a non-empty grant also admits
+    // sockets under the platform temp dirs. sbt binds `/tmp/bsbt/...`.
+    assert!(
+        profile.contains("(allow network-bind (subpath \"/tmp\"))"),
+        "UserTemp pairing missing:\n{profile}"
+    );
 }
 
 #[test]

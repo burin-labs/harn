@@ -324,9 +324,10 @@ home-scoped toolchain and package-manager roots under the first absolute
 `$HOME`. That includes user-managed runtimes such as `.local/share/uv`,
 `.cargo`, `.rustup`, `.pyenv`, `.nvm`, `.volta`, and `go`, plus
 package-manager config/cache paths such as `.npmrc`, `.gitconfig`, `.netrc`,
-`.yarnrc.yml`, `.config`, `.npm`, `.cache`, `.pip`, `.pypirc`,
-`.cargo/config`, `.cargo/config.toml`, `.cargo/credentials`,
-`.cargo/credentials.toml`, `.cargo/registry`, and `.cargo/git`. These grants
+`.yarnrc.yml`, `.config`, `.npm`, `.cache`, `.pip`, `.pypirc`, `.composer`,
+`Library/Preferences/pnpm`, `.cargo/config`, `.cargo/config.toml`,
+`.cargo/credentials`, `.cargo/credentials.toml`, `.cargo/registry`, and
+`.cargo/git`. These grants
 are process-only: Harn file builtins still need `workspace_roots` or
 `read_only_roots`, and the extra home-dir paths stay unwritable by the OS
 profile.
@@ -567,7 +568,7 @@ falls back to the warn/enforce decision documented above.
 | standard process devices | `(allow file-read* ...)` for `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd`; `(allow file-write* ...)` only for `/dev/null`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd` | common stdio, entropy, and zero devices work without granting broad `/dev` writes |
 | `process_sandbox.presets` | named read/write rules for `system_runtime`, `developer_toolchains`, `package_manager_config`, and `user_temp` | default process reach for system binaries, Xcode/Homebrew/toolchains, read-only package-manager home config, and per-user developer-tool caches without granting Harn file builtin access |
 | `process_sandbox.allow_tcp_loopback` | bind/inbound on local `localhost:*`; outbound to remote `localhost:*` | IPv4 and IPv6 loopback servers and clients work without opening remote egress |
-| `process_sandbox.unix_socket_roots` | `(allow network-bind (subpath "<root>"))`, `(allow network-inbound (subpath "<root>"))`, `(allow network-outbound (subpath "<root>"))` | build servers bind and connect Unix-domain sockets whose socket file lives under a granted root; `subpath` never matches an IP endpoint, so no egress opens |
+| `process_sandbox.unix_socket_roots` | `(allow network-bind (subpath "<root>"))`, `(allow network-inbound (subpath "<root>"))`, `(allow network-outbound (subpath "<root>"))` for each granted root, and for the UserTemp write roots (`/tmp`, `/var/folders`, …) when that preset is on | build servers bind and connect Unix-domain sockets whose socket file lives under a granted root or the platform temp dir; `subpath` never matches an IP endpoint, so no egress opens |
 | `workspace_roots: [...]` / `read_only_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace and read-only roots are readable |
 | `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | writable `user_temp`, `process_sandbox.write_roots`, and `workspace_roots`, followed by `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs, explicit process-write roots, and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |
 | `side_effect_level >= network` | `(allow network*)` | otherwise outbound network is denied |
