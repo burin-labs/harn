@@ -1,9 +1,8 @@
 # Layered runtime configuration
 
 Harn runtime configuration is a typed, layered document used by the CLI, VM
-hosts, and downstream products to explain model policy, permissions, protocol
-endpoints, package and skill sources, logging, replay, redaction, and runtime
-limits.
+hosts, and downstream products to explain model policy, protocol endpoints,
+package and skill sources, logging, replay, and redaction.
 
 The canonical file shape is `harn.config.toml`. Existing `harn.toml` manifests
 can also carry a `[config]` table for repo-checked package or agent defaults.
@@ -19,8 +18,8 @@ harn config schema --output docs/src/schemas/harn-config.schema.json
 ```
 
 `inspect --explain` prints the redacted merged config, each loaded layer, and a
-per-field explanation containing the winning source plus shadowed, locked, or
-denied candidates. Secret-shaped fields and high-confidence secret strings are
+per-field explanation containing the winning source plus any shadowed
+candidates. Secret-shaped fields and high-confidence secret strings are
 redacted with the same runtime redaction policy used for transcripts and event
 logs.
 
@@ -48,17 +47,9 @@ Layers are merged from lowest to highest precedence:
 10. Managed policy files.
 11. Environment overrides.
 
-Managed policies are merged before environment overrides so organizations can
-choose which fields stay adjustable. A managed file can set:
-
-```toml
-[policy]
-locked_fields = ["limits.network", "permissions.default"]
-denied_fields = ["endpoints.mcp.untrusted"]
-```
-
-Locked fields keep the managed value even if a later environment override tries
-to replace it. Denied fields reject later candidates entirely.
+Managed policy files are merged before environment overrides, so an
+organization-wide file wins over a user or project file while an explicit
+environment override still wins over both.
 
 ## File locations
 
@@ -126,12 +117,6 @@ bytecode-cache contract as the CLI.
 | `HARN_LOG_LEVEL` | `logging.level` |
 | `HARN_RETENTION_DAYS` | `retention.days` |
 | `HARN_REDACTION_MODE` | `redaction.mode` |
-| `HARN_TOKEN_BUDGET` | `limits.tokens` |
-| `HARN_BUDGET_USD` | `limits.budget_usd` |
-| `HARN_MAX_CONCURRENCY` | `limits.concurrency` |
-| `HARN_NETWORK_MODE` | `limits.network` |
-| `HARN_FILESYSTEM_MODE` | `limits.filesystem` |
-| `HARN_SANDBOX_MODE` | `limits.sandbox` |
 | `HARN_REPLAY_ENABLED` | `replay.enabled` |
 
 ## Local OSS example
@@ -143,16 +128,6 @@ schema_version = 1
 default_provider = "ollama"
 default_model = "qwen3:14b"
 capability_refs = ["local-qwen"]
-
-[permissions]
-default = "ask"
-
-[limits]
-network = "ask"
-filesystem = "sandboxed"
-sandbox = "process"
-tokens = 200000
-concurrency = 4
 
 [logging]
 level = "info"
@@ -169,26 +144,11 @@ alert_on_violation = true
 ## Org-managed example
 
 ```toml
-[permissions]
-default = "deny"
-
-[limits]
-network = "offline"
-filesystem = "sandboxed"
-sandbox = "worktree"
-
 [retention]
 days = 14
 
-[policy]
-locked_fields = [
-  "permissions.default",
-  "limits.network",
-  "limits.filesystem",
-  "limits.sandbox",
-  "retention.days",
-]
-denied_fields = ["endpoints.mcp.experimental"]
+[redaction]
+mode = "strict"
 ```
 
 ## Identity

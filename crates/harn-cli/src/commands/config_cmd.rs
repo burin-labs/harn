@@ -63,21 +63,11 @@ fn run_validate(args: ConfigValidateArgs) -> Result<(), String> {
         let content = fs::read_to_string(&path)
             .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
         if path.file_name().is_some_and(|name| name == MANIFEST) {
-            if let Some(value) = harn_vm::config::parse_manifest_config_table(&content, &source)
-                .map_err(|error| error.to_string())?
-            {
-                if args.managed {
-                    harn_vm::config::validate_policy_paths(&value)
-                        .map_err(|error| error.to_string())?;
-                }
-            }
-        } else {
-            let value = harn_vm::config::parse_config_toml(&content, &source)
+            harn_vm::config::parse_manifest_config_table(&content, &source)
                 .map_err(|error| error.to_string())?;
-            if args.managed {
-                harn_vm::config::validate_policy_paths(&value)
-                    .map_err(|error| error.to_string())?;
-            }
+        } else {
+            harn_vm::config::parse_config_toml(&content, &source)
+                .map_err(|error| error.to_string())?;
         }
         let kind = if args.managed {
             "managed policy"
@@ -483,39 +473,5 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("does not exist"));
-    }
-
-    #[test]
-    fn managed_validation_rejects_invalid_policy_paths() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("policy.toml");
-        fs::write(&path, "[policy]\nlocked_fields = [\"limits..network\"]\n").unwrap();
-
-        let error = run_validate(ConfigValidateArgs {
-            files: vec![path],
-            managed: true,
-        })
-        .unwrap_err();
-
-        assert!(error.contains("invalid config field path"));
-    }
-
-    #[test]
-    fn managed_validation_rejects_invalid_manifest_policy_paths() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("harn.toml");
-        fs::write(
-            &path,
-            "[package]\nname = \"demo\"\n\n[config.policy]\ndenied_fields = [\"endpoints..mcp\"]\n",
-        )
-        .unwrap();
-
-        let error = run_validate(ConfigValidateArgs {
-            files: vec![path],
-            managed: true,
-        })
-        .unwrap_err();
-
-        assert!(error.contains("invalid config field path"));
     }
 }

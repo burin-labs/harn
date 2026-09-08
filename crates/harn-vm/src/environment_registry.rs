@@ -289,11 +289,8 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
         "HARN_LLM_TIMEOUT"
         | "HARN_LLM_IDLE_TIMEOUT"
         | "HARN_LLM_FIRST_TOKEN_TIMEOUT"
-        | "HARN_MAX_CONCURRENCY"
         | "HARN_RETENTION_DAYS"
-        | "HARN_TOKEN_BUDGET"
         | "HARN_EVENT_LOG_QUEUE_DEPTH" => EnvironmentValueShape::UnsignedInteger,
-        "HARN_BUDGET_USD" => EnvironmentValueShape::NonNegativeNumber,
         "HARN_OTEL_SAMPLE_RATIO" => EnvironmentValueShape::UnitInterval,
         "HARN_ALLOW_TOOLCHAIN_MISMATCH"
         | "HARN_BYTECODE_CACHE"
