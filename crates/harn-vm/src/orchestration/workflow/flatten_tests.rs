@@ -328,10 +328,17 @@ fn weakening_tool_annotation_is_rejected() {
     assert!(ceiling.assert_within_ceiling(&narrowed_tools).is_ok());
 }
 
-/// The pinned pre-move Rust flattening algorithm (the deleted
-/// `workflow_stage_agent_loop_options` body + helpers), preserved verbatim
-/// as the parity oracle. `flatten_matches_pre_move_rust` asserts the Harn
-/// flattener reproduces it dict-for-dict.
+/// The pinned Rust flattening algorithm (the deleted
+/// `workflow_stage_agent_loop_options` body + helpers), kept as the parity
+/// oracle. `flatten_matches_pre_move_rust` asserts the Harn flattener
+/// reproduces it dict-for-dict.
+///
+/// It was preserved verbatim from before the move until harn#8353, which found
+/// that the verbatim original wrote the tier-2 knobs and the summarize prompt
+/// as siblings of `auto_compact`, where `std/agent/autocompact` never lifted
+/// them. Those four now sit inside the `auto_compact` dict here too, and the
+/// two callbacks nothing on the `transcript_auto_compact` path reads are gone.
+/// The oracle pins the corrected placement, not the historical one.
 fn legacy_flatten_reference(
     node: &WorkflowNode,
     session_id: &str,
@@ -368,35 +375,51 @@ fn legacy_flatten_reference(
             VmValue::Bool(false),
         );
     } else {
-        options.insert(
-            crate::value::intern_key("auto_compact"),
-            VmValue::Bool(true),
-        );
         if let Some(v) = node.auto_compact.token_threshold {
             options.insert(
                 crate::value::intern_key("compact_threshold"),
                 VmValue::Int(v as i64),
             );
         }
+        let raw = node.raw_auto_compact.as_ref().and_then(|v| v.as_dict());
+        // Inside the `auto_compact` dict: `std/agent/autocompact` takes that
+        // dict as its base, so these reach the compaction engine. As siblings
+        // they reached nothing (harn#8353).
+        let mut nested = crate::value::DictMap::new();
+        nested.insert(crate::value::intern_key("enabled"), VmValue::Bool(true));
         if let Some(v) = node.auto_compact.tool_output_max_chars {
-            options.insert(
+            nested.insert(
                 crate::value::intern_key("tool_output_max_chars"),
                 VmValue::Int(v as i64),
             );
         }
         if let Some(v) = node.auto_compact.hard_limit_tokens {
-            options.insert(
+            nested.insert(
                 crate::value::intern_key("hard_limit_tokens"),
                 VmValue::Int(v as i64),
             );
         }
+        if let Some(s) = node.auto_compact.hard_limit_strategy.as_ref() {
+            nested.put_str("hard_limit_strategy", s.clone());
+        }
+        if let Some(p) = raw
+            .and_then(|d| d.get("summarize_prompt"))
+            .and_then(|v| match v {
+                VmValue::String(t) if !t.trim().is_empty() => Some(t.to_string()),
+                _ => None,
+            })
+        {
+            nested.put_str("summarize_prompt", p);
+        }
+        options.insert(
+            crate::value::intern_key("auto_compact"),
+            VmValue::Dict(nested.into()),
+        );
+        // Siblings: the four keys `__compact_options` lifts into that dict, and
+        // which the pre-compact hook payload and the receipt label also read.
         if let Some(s) = node.auto_compact.compact_strategy.as_ref() {
             options.put_str("compact_strategy", s.clone());
         }
-        if let Some(s) = node.auto_compact.hard_limit_strategy.as_ref() {
-            options.put_str("hard_limit_strategy", s.clone());
-        }
-        let raw = node.raw_auto_compact.as_ref().and_then(|v| v.as_dict());
         let keep = raw
             .and_then(|d| d.get("compact_keep_last"))
             .and_then(|v| v.as_int())
@@ -412,24 +435,8 @@ fn legacy_flatten_reference(
                 VmValue::Int(v),
             );
         }
-        if let Some(p) = raw
-            .and_then(|d| d.get("summarize_prompt"))
-            .and_then(|v| match v {
-                VmValue::String(t) if !t.trim().is_empty() => Some(t.to_string()),
-                _ => None,
-            })
-        {
-            options.put_str("summarize_prompt", p);
-        }
-        if let Some(d) = raw {
-            for key in ["compress_callback", "mask_callback"] {
-                if let Some(cb) = d.get(key) {
-                    options.insert(crate::value::intern_key(key), cb.clone());
-                }
-            }
-            if let Some(cb) = d.get("custom_compactor") {
-                options.insert(crate::value::intern_key("compact_callback"), cb.clone());
-            }
+        if let Some(cb) = raw.and_then(|d| d.get("custom_compactor")) {
+            options.insert(crate::value::intern_key("compact_callback"), cb.clone());
         }
     }
     if !tool_names.is_empty() {

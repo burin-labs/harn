@@ -116,6 +116,8 @@ pub type TurnPolicy = {
   require_action_or_yield?: bool,
   allow_done_sentinel?: bool,
   max_prose_chars?: int,
+  /** Preferred over the top-level spelling; see `AgentExecutionSpec`. */
+  tool_examples?: string,
 }
 
 /**
@@ -406,6 +408,13 @@ pub type AgentExecutionSpec = {
   max_nudges?: int,
   nudge?: string,
   turn_policy?: TurnPolicy,
+  /**
+   * Worked examples appended to the text-tool contract block. Read at
+   * `std/agent/preflight` as `turn_policy?.tool_examples ?? opts?.tool_examples`,
+   * so both placements are live; `std/workflow/options` declares the stage-level
+   * spelling that flattens to this one.
+   */
+  tool_examples?: string,
   native_tool_fallback?: string,
   stop_after_successful_tools?: list<string>,
   require_successful_tools?: list,
@@ -498,6 +507,13 @@ pub type AgentCapabilitySpec = {
   allow_command?: any,
   subagents?: bool,
   subagent_tools?: bool,
+  /**
+   * Drop `agent_await_resumption` from the lifecycle tool registry. `agent_loop`
+   * hands its whole option dict to `agent_lifecycle_tools`, which reads this key
+   * from there, so it is live at the top level and the option-surface check
+   * refused it until it was declared here (harn#8353).
+   */
+  agent_await_resumption_enabled?: bool,
   mcp_servers?: list,
 }
 

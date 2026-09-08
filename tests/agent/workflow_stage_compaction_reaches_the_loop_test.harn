@@ -1,0 +1,86 @@
+/**
+ * Run: harn test tests/agent/workflow_stage_compaction_reaches_the_loop_test.harn
+ *
+ * Regression tests for harn#8353. `workflow_flatten_agent_loop_options` wrote a
+ * stage's tier-2 compaction knobs and its summarize prompt as SIBLINGS of
+ * `auto_compact`. `std/agent/autocompact` lifts exactly four sibling keys into
+ * the compaction options and none of those is among them, so every one of them
+ * was discarded in silence: a stage that asked for an LLM summary at the hard
+ * limit ran on the engine defaults instead.
+ *
+ * The instrument is a deliberately invalid strategy name. A parser that rejects
+ * it proves the option was READ; silence proves nothing read it. Asserting the
+ * key's presence in the flattened dict would not distinguish the two, because
+ * the broken version wrote the key too, just where nothing looked.
+ */
+import { workflow_flatten_agent_loop_options } from "std/workflow/stage"
+import { agent_loop } from "std/agent/loop"
+
+fn flattened_with(hard_limit_strategy: string, summarize_prompt: string) -> dict {
+  return workflow_flatten_agent_loop_options({
+    base: {model: "mock-model", provider: "mock"},
+    session_id: "stage-compaction-reachability",
+    auto_compact: {
+      enabled: true,
+      token_threshold: 1,
+      tool_output_max_chars: 2400,
+      compact_strategy: "truncate",
+      hard_limit_tokens: 4000,
+      hard_limit_strategy: hard_limit_strategy,
+    },
+    raw_auto_compact: {keep_last: 1, summarize_prompt: summarize_prompt},
+  })
+}
+
+pipeline test_tier_two_knobs_land_where_the_loop_reads_them(
+  harness: Harness,
+  task: unknown,
+) {
+  const options = flattened_with("llm", "some/prompt/path")
+  const nested = options?.auto_compact
+  assert_eq(type_of(nested), "dict")
+  // The four the loop reads only from inside the dict.
+  assert_eq(nested?.hard_limit_strategy, "llm")
+  assert_eq(nested?.hard_limit_tokens, 4000)
+  assert_eq(nested?.tool_output_max_chars, 2400)
+  assert_eq(nested?.summarize_prompt, "some/prompt/path")
+  // The four `__compact_options` lifts from the top level stay siblings, where
+  // the pre-compact hook payload and the receipt's strategy label read them.
+  assert_eq(options?.compact_threshold, 1)
+  assert_eq(options?.compact_strategy, "truncate")
+  assert_eq(options?.compact_keep_last, 1)
+}
+
+pipeline test_a_bad_tier_two_strategy_is_rejected_not_ignored(
+  harness: Harness,
+  task: unknown,
+) {
+  let message = ""
+  try {
+    agent_loop(harness, "hi", nil, flattened_with("bogus_strategy_name", ""))
+  } catch (error) {
+    message = to_string(error)
+  }
+  // The failure has to be the STRATEGY PARSER. Before the fix the run either
+  // succeeded (the sibling was discarded) or died on the option-surface check,
+  // and neither of those names the bad value.
+  assert_eq(
+    message.contains("unknown compact_strategy"),
+    true,
+    "the stage's hard_limit_strategy never reached the compaction parser: "
+      + message,
+  )
+  assert_eq(message.contains("bogus_strategy_name"), true, message)
+}
+
+pipeline test_a_good_tier_two_strategy_is_accepted(harness: Harness, task: unknown) {
+  // Positive control: the assertion above must not pass by refusing everything.
+  let message = ""
+  try {
+    agent_loop(harness, "hi", nil, flattened_with("llm", ""))
+  } catch (error) {
+    message = to_string(error)
+  }
+  assert_eq(message.contains("unknown compact_strategy"), false, message)
+  assert_eq(message.contains("no option reads"), false, message)
+}
