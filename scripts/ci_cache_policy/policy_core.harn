@@ -1344,7 +1344,94 @@ pub fn cache_key_inputs(
   return inputs
 }
 
-/** Return every policy violation without stopping at the first workflow. */
+/**
+ * Return every policy violation without stopping at the first workflow.
+ * The cache family a rust-cache step actually reads or writes.
+ *
+ * The local action composes the upstream shared key from three inputs, and the
+ * upstream action then appends the runner OS and architecture before any hash.
+ * That ordering is what makes this worth computing: a restore falls back to the
+ * key prefix, and the prefix ends at the architecture, so two families that
+ * differ anywhere in the shared key can never satisfy each other. A reader that
+ * names `workspace-tests` while the writer saves
+ * `workspace-tests-${WORKSPACE_CACHE_GENERATION}` restores nothing at all,
+ * which looks exactly like a cold repository and reports success either way.
+ */
+pub fn cache_family(step: dict) -> string {
+  const shared = trim(to_string(step?.with?.["shared-key"] ?? ""))
+  const source = trim(to_string(step?.with?.["source-key"] ?? ""))
+  const crates = lowercase(trim(to_string(step?.with?.["cache-workspace-crates"] ?? "false")))
+    == "true"
+  let family = shared
+  if source != "" {
+    family = family + "-" + source
+  }
+  if crates {
+    family = family + "-" + WORKSPACE_CACHE_GENERATION
+  }
+  return family
+}
+
+/** Expand a matrix-bound cache family into the families the job really writes. */
+pub fn cache_families_for_step(job_definition: dict, step: dict) -> list<string> {
+  const family = cache_family(step)
+  if !contains(family, "matrix.cache_key") {
+    return [family]
+  }
+  let families: list<string> = []
+  for entry in job_definition?.strategy?.matrix?.include ?? [] {
+    const matrix_key = trim(to_string(entry?.cache_key ?? ""))
+    if matrix_key != "" {
+      families = families + [replace(family, "$" + "{{ matrix.cache_key }}", matrix_key)]
+    }
+  }
+  return families
+}
+
+/**
+ * Refuse a restore that names a cache family nothing saves.
+ *
+ * This is the quiet half of the policy. A restore of an unwritten family never
+ * fails: it misses, the job compiles from nothing, and the only visible trace
+ * is wall time nobody attributes to it. The writers are already declared, so
+ * the answer is a comparison rather than a measurement, and the remedy is to
+ * name a maintained family or to drop a step that cannot help.
+ */
+pub fn rust_cache_reader_errors(policy: CiCachePolicy, workflows: dict) -> list<string> {
+  let written_families: list<string> = []
+  let reader_sites: list<string> = []
+  for workflow in workflows.keys().sorted() {
+    const jobs = workflows[workflow]?.jobs ?? {}
+    for job in jobs.keys().sorted() {
+      for step in jobs[job]?.steps ?? [] {
+        if step_uses(step) == policy.rust_cache_action {
+          const families = cache_families_for_step(jobs[job] ?? {}, step)
+          if save_requested(step) {
+            written_families = written_families + families
+          } else {
+            for family in families {
+              reader_sites = reader_sites + ["${workflow}:${job}:" + family]
+            }
+          }
+        }
+      }
+    }
+  }
+  let errors: list<string> = []
+  for site in reader_sites.sorted() {
+    // A step that names no family at all is a different defect, and the action
+    // already declares `shared-key` required, so it is not judged here.
+    const family = site.split(":")[-1]
+    if family != "" && !written_families.contains(family) {
+      errors = errors
+        + [
+          "${site} restores a Rust cache family no writer saves; name a maintained family or remove the step",
+        ]
+    }
+  }
+  return errors
+}
+
 pub fn ci_cache_policy_errors(
   policy: CiCachePolicy,
   action: dict,
@@ -1422,7 +1509,7 @@ pub fn ci_cache_policy_errors(
       errors = errors + ["authorized persistent cache writer is not active: " + key]
     }
   }
-  return errors
+  return errors + rust_cache_reader_errors(policy, workflows)
 }
 
 /** Keep one current pull-request proof and an executed result per main head. */

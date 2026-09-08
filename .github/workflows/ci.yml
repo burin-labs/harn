@@ -1330,13 +1330,17 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          # Its own key: this lane's artifacts are fingerprinted under a
-          # different clippy config than the lint lane's and would otherwise
-          # evict them.
-          shared-key: stack-frames
+          # Reads the maintained lane archive. This job compiles under a
+          # different clippy config, so the restore is partial, and it saves
+          # nothing, so it cannot evict what it borrows from. Its own key was
+          # written by no one and restored nothing at all.
+          shared-key: workspace-tests
+          # The maintained Linux archive keeps workspace-member artifacts, and the
+          # suffix that records it is part of the key. A reader without it restores
+          # nothing at all rather than restoring a thinner archive.
+          cache-workspace-crates: "true"
           cache-on-failure: true
           cache-bin: false
-          cache-workspace-crates: "true"
       # The census depends on nothing any other job produces, so it runs before
       # this lane waits for the shared CLI. The wait then overlaps a compile
       # that would otherwise have delayed the job's start.
@@ -2003,7 +2007,11 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          shared-key: windows-cross-check
+          shared-key: workspace-tests
+          # The maintained Linux archive keeps workspace-member artifacts, and the
+          # suffix that records it is part of the key. A reader without it restores
+          # nothing at all rather than restoring a thinner archive.
+          cache-workspace-crates: "true"
           cache-on-failure: true
       - name: cargo check (x86_64-pc-windows-gnu)
         env:

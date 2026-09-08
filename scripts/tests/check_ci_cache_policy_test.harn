@@ -533,6 +533,44 @@ pipeline test_release_warm_cache_prune_skips_only_superseded_warms(
   )
 }
 
+pipeline test_ci_cache_policy_refuses_a_restore_no_writer_can_satisfy(
+  harness: Harness,
+  task: unknown,
+) {
+  // The quiet half of this policy. A restore that names a family nothing saves
+  // does not fail: it misses, the job compiles from nothing, and the only trace
+  // is wall time. Both shapes below looked correct in review and restored
+  // nothing, so both are asserted rather than assumed.
+  const declared = workflows()
+  let unwritten = declared
+  unwritten["ci.yml"].jobs.package_audit_reader = {
+    steps: [{uses: "./.github/actions/rust-cache", with: {"shared-key": "a-family-nobody-saves"}}],
+  }
+  const unwritten_errors = ci_cache_policy_errors(policy(), action(), node_action(), unwritten)
+  assert(
+    unwritten_errors.any({ error -> contains(error, "a-family-nobody-saves") }),
+    "a restore of an unwritten family must be refused",
+  )
+  // The subtler shape: the right family name, without the suffix the writer
+  // appends. The restore key stops at the runner architecture, so a prefix that
+  // diverges before it can never match.
+  let unsuffixed = declared
+  unsuffixed["ci.yml"].jobs.suffixless_reader = {
+    steps: [
+      {
+        uses: "./.github/actions/rust-cache",
+        with: {"shared-key": "workspace-tests", "cache-workspace-crates": "false"},
+      },
+    ],
+  }
+  assert(
+    ci_cache_policy_errors(policy(), action(), node_action(), unsuffixed).any(
+      { error -> contains(error, "suffixless_reader") },
+    ),
+    "a restore missing the writer's workspace-crates suffix must be refused",
+  )
+}
+
 pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(
   harness: Harness,
   task: unknown,
