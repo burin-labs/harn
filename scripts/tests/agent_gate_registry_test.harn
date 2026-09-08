@@ -290,10 +290,13 @@ pipeline test_audit_regenerates_reader_locations_and_refuses_drift(
   assert_eq(generated.reads, 1)
   assert_eq(generated.pending, 0)
   assert_eq(agent_gate_audit(capabilities, manifest).pending, 0)
+  // A reader that moved down a line is the same reader. This assertion used to
+  // run the other way, which made the gate report stale entries for edits that
+  // changed nothing about what reads what, and left it red on unrelated work.
   harness.fs.write_text(source, "\nfn example(options: dict) { return options.enabled }\n")
   const moved = agent_gate_audit(capabilities, manifest)
-  assert(contains(moved.failures, "stale readers options.enabled"))
-  assert_eq(agent_gate_audit(capabilities, manifest, true).pending, 0)
+  assert(!contains(moved.failures, "stale readers options.enabled"))
+  assert_eq(moved.pending, 0)
   harness.fs.write_text(source, "fn example(options: dict) { return options.unregistered }\n")
   const unknown = agent_gate_audit(capabilities, manifest, true)
   assert_eq(unknown.reads, 1)

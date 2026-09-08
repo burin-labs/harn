@@ -191,8 +191,14 @@ build contention.
 Pre-commit hooks (`.githooks/pre-commit`) run cheap staged guards, markdown and
 workflow lint when touched, and a read-only `cargo fmt --check`. Pre-push hooks
 (`.githooks/pre-push`) enforce signed commits, merge-queue safety, and cheap
-drift guards. Required CI owns compilation, tests, Harn formatting/linting,
-generated mirrors, and portal lint. Set `HARN_HOOKS_FULL_LOCAL=1` to opt into
+drift guards. Those drift guards run whichever `harn` your `PATH` resolves, not
+one built from the tree you are pushing, so an older `harn` can fail them for a
+reason your branch did not cause: an unresolved import of a stdlib module that
+only the newer binary ships, reported as though your diff were stale. If a
+pre-push guard blames a file you did not touch, re-run the push with `HARN_BIN`
+set to the binary `./scripts/harn_bin.sh --print` names. Required CI owns
+compilation, tests, Harn formatting/linting, generated mirrors, and portal
+lint. Set `HARN_HOOKS_FULL_LOCAL=1` to opt into
 the targeted build-backed local gates; combine it with
 `HARN_PREPUSH_FULL_TESTS=1` to run `make test` too. The full local portal gate
 bootstraps dependencies through `./scripts/ensure_portal_deps.sh`; repo-root
