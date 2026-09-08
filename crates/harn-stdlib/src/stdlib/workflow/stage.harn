@@ -1247,51 +1247,52 @@ fn __stage_compact_keep_last(raw: dict?) {
 /**
  * Flatten the stage's auto-compaction policy into `options`. Mirrors the
  * former Rust `add_workflow_agent_compaction_options`: a disabled policy pins
- * `auto_compact: false` and stops; an enabled policy layers the token / hard
- * limit knobs (typed) plus the raw keep-last / summarize-prompt / callback
- * fields the typed struct cannot carry.
+ * `auto_compact: false` and stops. An enabled policy nests engine-owned
+ * compaction fields under `auto_compact`, while the loop's four compatibility
+ * aliases remain top-level for `__compact_options` to normalize.
  */
 fn __stage_flatten_compaction(options: dict, typed: dict, raw: dict?) {
   if !__stage_bool(typed?.enabled, false) {
     return options + {auto_compact: false}
   }
-  let out = options + {auto_compact: true}
+  let compact = {enabled: true}
+  let out = options
   const threshold = __stage_i64(typed?.token_threshold)
   if threshold != nil {
     out = out + {compact_threshold: threshold}
   }
   const tool_output = __stage_i64(typed?.tool_output_max_chars)
   if tool_output != nil {
-    out = out + {tool_output_max_chars: tool_output}
+    compact = compact + {tool_output_max_chars: tool_output}
   }
   const hard_limit = __stage_i64(typed?.hard_limit_tokens)
   if hard_limit != nil {
-    out = out + {hard_limit_tokens: hard_limit}
+    compact = compact + {hard_limit_tokens: hard_limit}
   }
   if type_of(typed?.compact_strategy) == "string" {
     out = out + {compact_strategy: typed.compact_strategy}
   }
   if type_of(typed?.hard_limit_strategy) == "string" {
-    out = out + {hard_limit_strategy: typed.hard_limit_strategy}
+    compact = compact + {hard_limit_strategy: typed.hard_limit_strategy}
   }
   const keep_last = __stage_compact_keep_last(raw)
   if keep_last != nil {
     out = out + {compact_keep_last: keep_last}
   }
   if type_of(raw?.summarize_prompt) == "string" && trim(raw.summarize_prompt) != "" {
-    out = out + {summarize_prompt: raw.summarize_prompt}
+    compact = compact + {summarize_prompt: raw.summarize_prompt}
   }
   if type_of(raw) == "dict" {
     for key in ["compress_callback", "mask_callback"] {
       if __stage_has_key(raw, key) {
-        out = out + {[key]: raw[key]}
+        compact = compact + {[key]: raw[key]}
       }
     }
     if __stage_has_key(raw, "custom_compactor") {
       out = out + {compact_callback: raw.custom_compactor}
     }
   }
-  return out
+  return out + {auto_compact: compact}
 }
 
 /**

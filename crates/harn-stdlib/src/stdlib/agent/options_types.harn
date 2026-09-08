@@ -523,6 +523,8 @@ pub type AgentLifecycleSpec = {
   compact_strategy?: string,
   compact_callback?: any,
   auto_compact?: bool | dict,
+  /** Include the model-facing suspension tool. Default on. */
+  agent_await_resumption_enabled?: bool,
 }
 
 /** Transcript, prompt, skill, and task-context extensions. */
@@ -537,6 +539,8 @@ pub type AgentContextSpec = {
   prompts?: dict,
   prompt_overrides?: dict,
   reminders?: dict | list,
+  /** Additional tool-call examples rendered into the agent preflight prompt. */
+  tool_examples?: string,
   auto_context_profile?: bool,
   context_profile_root?: string,
   context_profile_options?: dict,
