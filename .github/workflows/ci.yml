@@ -646,7 +646,13 @@ jobs:
         id: resource-budget
         run: bash scripts/ci/rust_resource_budget.sh
         env:
-          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          # `runner.environment` reports a vendor VM and one of our own boxes
+          # identically, and the two answer the census question differently: a
+          # vendor VM runs this job alone, an owned box shares its cores with
+          # every listener on it. The tier this job already declares is the
+          # honest source, and an owned rung added to the ladder has to declare
+          # itself there before it can reach this budget.
+          RUNNER_ENVIRONMENT: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'self-hosted' || 'github-hosted' }}
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
         uses: ./.github/actions/apt-install
