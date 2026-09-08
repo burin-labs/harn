@@ -1,4 +1,4 @@
-//! The `CapabilityPolicy` shapes an embedding host writes by hand.
+//! The `CapabilityPolicy` shape an embedding host writes by hand.
 //!
 //! This is an integration test, so it compiles against `harn-vm` the way a
 //! downstream crate does. Compiling it IS the assertion; the runtime checks
@@ -9,7 +9,7 @@
 //! `process_sandbox` is `Box<ProcessSandboxPolicy>` today and this test does
 //! NOT lock that in. It pins the weaker, more useful thing: a host that owns a
 //! `ProcessSandboxPolicy` by value can put it into a `CapabilityPolicy` struct
-//! literal with `.into()`, and read the fields back through the field. Both
+//! literal with `.into()`, and read the grants back off it afterwards. Both
 //! lines compile whether the field is boxed or held by value, because `Box<T>`
 //! has `From<T>` and derefs to `T`. So the representation stays free to change
 //! for stack-frame reasons, while the shape a consumer writes does not.
@@ -46,7 +46,7 @@ fn a_host_moves_an_owned_process_policy_into_the_capability_policy() {
     let policy = CapabilityPolicy {
         workspace_roots: vec!["/work".to_string()],
         sandbox_profile: SandboxProfile::Worktree,
-        process_sandbox: process.clone().into(),
+        process_sandbox: process.into(),
         ..CapabilityPolicy::default()
     };
 
