@@ -4,7 +4,7 @@
 //! inspect, validate, and explain configuration without depending on the CLI's
 //! `harn.toml` package manifest model.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -25,7 +25,6 @@ pub const CONFIG_SCHEMA_ID: &str = "https://harnlang.com/schemas/harn-config.sch
 pub struct HarnConfig {
     pub schema_version: u32,
     pub models: ModelPolicyConfig,
-    pub permissions: PermissionConfig,
     pub endpoints: EndpointCatalogConfig,
     pub packages: PackageSourcesConfig,
     pub skills: SkillSourcesConfig,
@@ -34,8 +33,6 @@ pub struct HarnConfig {
     pub retention: RetentionConfig,
     pub redaction: RedactionConfig,
     pub replay: ReplayConfig,
-    pub limits: RuntimeLimitsConfig,
-    pub policy: ManagedPolicyConfig,
     pub identity: IdentityConfig,
 }
 
@@ -44,7 +41,6 @@ impl Default for HarnConfig {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             models: ModelPolicyConfig::default(),
-            permissions: PermissionConfig::default(),
             endpoints: EndpointCatalogConfig::default(),
             packages: PackageSourcesConfig::default(),
             skills: SkillSourcesConfig::default(),
@@ -53,8 +49,6 @@ impl Default for HarnConfig {
             retention: RetentionConfig::default(),
             redaction: RedactionConfig::default(),
             replay: ReplayConfig::default(),
-            limits: RuntimeLimitsConfig::default(),
-            policy: ManagedPolicyConfig::default(),
             identity: IdentityConfig::default(),
         }
     }
@@ -86,31 +80,6 @@ pub struct ModelAliasConfig {
     pub model: String,
     pub provider: String,
     pub capability_refs: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum PermissionMode {
-    Allow,
-    #[default]
-    Ask,
-    Deny,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default, deny_unknown_fields)]
-pub struct PermissionConfig {
-    pub default: PermissionMode,
-    pub capabilities: BTreeMap<String, PermissionMode>,
-}
-
-impl Default for PermissionConfig {
-    fn default() -> Self {
-        Self {
-            default: PermissionMode::Ask,
-            capabilities: BTreeMap::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -426,66 +395,6 @@ impl Default for ReplayConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum NetworkMode {
-    Allow,
-    #[default]
-    Ask,
-    Deny,
-    Offline,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum FilesystemMode {
-    ReadWrite,
-    ReadOnly,
-    #[default]
-    Sandboxed,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum SandboxMode {
-    Host,
-    #[default]
-    Process,
-    Container,
-    Worktree,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
-pub struct RuntimeLimitsConfig {
-    pub budget_usd: Option<f64>,
-    pub tokens: Option<u64>,
-    pub concurrency: Option<u64>,
-    pub network: NetworkMode,
-    pub filesystem: FilesystemMode,
-    pub sandbox: SandboxMode,
-}
-
-impl Default for RuntimeLimitsConfig {
-    fn default() -> Self {
-        Self {
-            budget_usd: None,
-            tokens: None,
-            concurrency: None,
-            network: NetworkMode::Ask,
-            filesystem: FilesystemMode::Sandboxed,
-            sandbox: SandboxMode::Process,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct ManagedPolicyConfig {
-    pub locked_fields: Vec<String>,
-    pub denied_fields: Vec<String>,
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigLayerKind {
@@ -552,8 +461,6 @@ pub struct FieldCandidate {
     pub source: String,
     pub status: CandidateStatus,
     pub value: JsonValue,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub blocked_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -561,8 +468,6 @@ pub struct FieldCandidate {
 pub enum CandidateStatus {
     Applied,
     Shadowed,
-    Locked,
-    Denied,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -572,10 +477,6 @@ pub struct FieldExplanation {
     pub source: String,
     pub layer: String,
     pub kind: ConfigLayerKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub locked_by: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub denied_by: Option<String>,
     pub candidates: Vec<FieldCandidate>,
 }
 
@@ -709,23 +610,7 @@ where
     )?;
     set_env_enum(&mut value, &vars, "HARN_LOG_LEVEL", "logging.level")?;
     set_env_enum(&mut value, &vars, "HARN_REDACTION_MODE", "redaction.mode")?;
-    set_env_enum(&mut value, &vars, "HARN_NETWORK_MODE", "limits.network")?;
-    set_env_enum(
-        &mut value,
-        &vars,
-        "HARN_FILESYSTEM_MODE",
-        "limits.filesystem",
-    )?;
-    set_env_enum(&mut value, &vars, "HARN_SANDBOX_MODE", "limits.sandbox")?;
     set_env_u64(&mut value, &vars, "HARN_RETENTION_DAYS", "retention.days")?;
-    set_env_u64(&mut value, &vars, "HARN_TOKEN_BUDGET", "limits.tokens")?;
-    set_env_u64(
-        &mut value,
-        &vars,
-        "HARN_MAX_CONCURRENCY",
-        "limits.concurrency",
-    )?;
-    set_env_f64(&mut value, &vars, "HARN_BUDGET_USD", "limits.budget_usd")?;
     set_env_bool(&mut value, &vars, "HARN_REPLAY_ENABLED", "replay.enabled")?;
 
     if value.as_object().is_some_and(JsonMap::is_empty) {
@@ -744,8 +629,6 @@ pub fn merge_layers(layers: Vec<ConfigLayer>) -> Result<ResolvedConfig, ConfigEr
     let mut merged = JsonValue::Object(JsonMap::new());
     let mut candidate_map: BTreeMap<String, Vec<FieldCandidate>> = BTreeMap::new();
     let mut winner_map: BTreeMap<String, (String, String, ConfigLayerKind)> = BTreeMap::new();
-    let mut locked: BTreeMap<String, String> = BTreeMap::new();
-    let mut denied: BTreeMap<String, String> = BTreeMap::new();
     let mut summaries = Vec::new();
 
     for layer in layers {
@@ -759,39 +642,6 @@ pub fn merge_layers(layers: Vec<ConfigLayer>) -> Result<ResolvedConfig, ConfigEr
 
         let leaves = leaf_values(&layer.value);
         for (path, value) in leaves {
-            if path == "policy.locked_fields" || path == "policy.denied_fields" {
-                apply_candidate(
-                    &mut merged,
-                    &mut candidate_map,
-                    &mut winner_map,
-                    &layer,
-                    &path,
-                    value,
-                )?;
-                continue;
-            }
-            if let Some((policy_path, source)) = first_policy_match(&denied, &path) {
-                push_blocked_candidate(
-                    &mut candidate_map,
-                    &layer,
-                    &path,
-                    value,
-                    CandidateStatus::Denied,
-                    format!("{source} denied {policy_path}"),
-                );
-                continue;
-            }
-            if let Some((policy_path, source)) = first_policy_match(&locked, &path) {
-                push_blocked_candidate(
-                    &mut candidate_map,
-                    &layer,
-                    &path,
-                    value,
-                    CandidateStatus::Locked,
-                    format!("{source} locked {policy_path}"),
-                );
-                continue;
-            }
             apply_candidate(
                 &mut merged,
                 &mut candidate_map,
@@ -800,24 +650,6 @@ pub fn merge_layers(layers: Vec<ConfigLayer>) -> Result<ResolvedConfig, ConfigEr
                 &path,
                 value,
             )?;
-        }
-
-        if layer.kind == ConfigLayerKind::ManagedPolicy {
-            for path in string_list_at(&layer.value, "policy.locked_fields") {
-                validate_field_path(&path)?;
-                locked.insert(path, display_source.clone());
-            }
-            for path in string_list_at(&layer.value, "policy.denied_fields") {
-                validate_field_path(&path)?;
-                denied.insert(path.clone(), display_source.clone());
-                apply_denied_policy(
-                    &mut merged,
-                    &mut candidate_map,
-                    &mut winner_map,
-                    &path,
-                    &display_source,
-                )?;
-            }
         }
     }
 
@@ -832,8 +664,6 @@ pub fn merge_layers(layers: Vec<ConfigLayer>) -> Result<ResolvedConfig, ConfigEr
         let Some((source, layer, kind)) = winner_map.get(&path).cloned() else {
             continue;
         };
-        let locked_by = first_policy_match(&locked, &path).map(|(_, source)| source);
-        let denied_by = first_policy_match(&denied, &path).map(|(_, source)| source);
         let mut candidates = candidate_map.remove(&path).unwrap_or_default();
         for candidate in &mut candidates {
             candidate.value = redact_value_at_path(&path, candidate.value.clone());
@@ -844,8 +674,6 @@ pub fn merge_layers(layers: Vec<ConfigLayer>) -> Result<ResolvedConfig, ConfigEr
             source,
             layer,
             kind,
-            locked_by,
-            denied_by,
             candidates,
         });
     }
@@ -856,8 +684,6 @@ pub fn merge_layers(layers: Vec<ConfigLayer>) -> Result<ResolvedConfig, ConfigEr
         for candidate in &mut candidates {
             candidate.value = redact_value_at_path(&path, candidate.value.clone());
         }
-        let locked_by = first_policy_match(&locked, &path).map(|(_, source)| source);
-        let denied_by = first_policy_match(&denied, &path).map(|(_, source)| source);
         explain.push(FieldExplanation {
             path: path.clone(),
             value: JsonValue::Null,
@@ -867,8 +693,6 @@ pub fn merge_layers(layers: Vec<ConfigLayer>) -> Result<ResolvedConfig, ConfigEr
                 .last()
                 .map(|candidate| candidate.kind)
                 .unwrap_or(ConfigLayerKind::BuiltInDefaults),
-            locked_by,
-            denied_by,
             candidates,
         });
     }
@@ -879,16 +703,6 @@ pub fn merge_layers(layers: Vec<ConfigLayer>) -> Result<ResolvedConfig, ConfigEr
         layers: summaries,
         explain,
     })
-}
-
-pub fn validate_policy_paths(value: &JsonValue) -> Result<(), ConfigError> {
-    for path in string_list_at(value, "policy.locked_fields")
-        .into_iter()
-        .chain(string_list_at(value, "policy.denied_fields"))
-    {
-        validate_field_path(&path)?;
-    }
-    Ok(())
 }
 
 pub fn schema_json() -> JsonValue {
@@ -909,14 +723,6 @@ pub fn schema_json() -> JsonValue {
                     "capability_refs": {"type": "array", "items": {"type": "string"}},
                     "providers": {"type": "object", "additionalProperties": {"$ref": "#/$defs/provider"}},
                     "aliases": {"type": "object", "additionalProperties": {"$ref": "#/$defs/model_alias"}}
-                }
-            },
-            "permissions": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "default": {"$ref": "#/$defs/permission_mode"},
-                    "capabilities": {"type": "object", "additionalProperties": {"$ref": "#/$defs/permission_mode"}}
                 }
             },
             "endpoints": {
@@ -985,26 +791,6 @@ pub fn schema_json() -> JsonValue {
                     "directory": {"type": ["string", "null"]}
                 }
             },
-            "limits": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "budget_usd": {"type": ["number", "null"], "minimum": 0},
-                    "tokens": {"type": ["integer", "null"], "minimum": 0},
-                    "concurrency": {"type": ["integer", "null"], "minimum": 0},
-                    "network": {"enum": ["allow", "ask", "deny", "offline"]},
-                    "filesystem": {"enum": ["read-write", "read-only", "sandboxed"]},
-                    "sandbox": {"enum": ["host", "process", "container", "worktree"]}
-                }
-            },
-            "policy": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "locked_fields": {"type": "array", "items": {"type": "string"}},
-                    "denied_fields": {"type": "array", "items": {"type": "string"}}
-                }
-            },
             "identity": {
                 "type": "object",
                 "additionalProperties": false,
@@ -1021,7 +807,6 @@ pub fn schema_json() -> JsonValue {
             }
         },
         "$defs": {
-            "permission_mode": {"enum": ["allow", "ask", "deny"]},
             "provider": {
                 "type": "object",
                 "additionalProperties": false,
@@ -1171,28 +956,6 @@ fn set_env_u64(
     Ok(())
 }
 
-fn set_env_f64(
-    value: &mut JsonValue,
-    vars: &BTreeMap<String, String>,
-    env_key: &str,
-    path: &str,
-) -> Result<(), ConfigError> {
-    if let Some(raw) = vars
-        .get(env_key)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
-        let parsed = raw
-            .parse::<f64>()
-            .map_err(|error| ConfigError::InvalidConfig {
-                source: env_key.to_string(),
-                message: error.to_string(),
-            })?;
-        set_path(value, path, json!(parsed))?;
-    }
-    Ok(())
-}
-
 fn set_env_bool(
     value: &mut JsonValue,
     vars: &BTreeMap<String, String>,
@@ -1246,7 +1009,6 @@ fn apply_candidate(
             source: redact_display(&layer.source),
             status: CandidateStatus::Applied,
             value,
-            blocked_by: None,
         });
     winner_map.insert(
         path.to_string(),
@@ -1256,73 +1018,6 @@ fn apply_candidate(
             layer.kind,
         ),
     );
-    Ok(())
-}
-
-fn push_blocked_candidate(
-    candidate_map: &mut BTreeMap<String, Vec<FieldCandidate>>,
-    layer: &ConfigLayer,
-    path: &str,
-    value: JsonValue,
-    status: CandidateStatus,
-    blocked_by: String,
-) {
-    candidate_map
-        .entry(path.to_string())
-        .or_default()
-        .push(FieldCandidate {
-            layer: layer.name.clone(),
-            kind: layer.kind,
-            source: redact_display(&layer.source),
-            status,
-            value,
-            blocked_by: Some(blocked_by),
-        });
-}
-
-fn apply_denied_policy(
-    merged: &mut JsonValue,
-    candidate_map: &mut BTreeMap<String, Vec<FieldCandidate>>,
-    winner_map: &mut BTreeMap<String, (String, String, ConfigLayerKind)>,
-    policy_path: &str,
-    policy_source: &str,
-) -> Result<(), ConfigError> {
-    remove_path(merged, policy_path)?;
-    let blocked_by = format!("{policy_source} denied {policy_path}");
-    let keys = candidate_map
-        .keys()
-        .filter(|candidate_path| policy_path_matches(policy_path, candidate_path))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    for path in keys {
-        let mut fallback = None;
-        if let Some(candidates) = candidate_map.get_mut(&path) {
-            for candidate in candidates.iter_mut() {
-                if candidate.kind == ConfigLayerKind::BuiltInDefaults {
-                    candidate.status = CandidateStatus::Applied;
-                    candidate.blocked_by = None;
-                    fallback = Some((
-                        candidate.value.clone(),
-                        candidate.source.clone(),
-                        candidate.layer.clone(),
-                        candidate.kind,
-                    ));
-                } else {
-                    candidate.status = CandidateStatus::Denied;
-                    candidate.blocked_by = Some(blocked_by.clone());
-                }
-            }
-        }
-
-        if let Some((value, source, layer, kind)) = fallback {
-            set_path(merged, &path, value)?;
-            winner_map.insert(path, (source, layer, kind));
-        } else {
-            remove_path(merged, &path)?;
-            winner_map.remove(&path);
-        }
-    }
     Ok(())
 }
 
@@ -1376,30 +1071,6 @@ fn set_path(root: &mut JsonValue, path: &str, value: JsonValue) -> Result<(), Co
     Ok(())
 }
 
-fn remove_path(root: &mut JsonValue, path: &str) -> Result<(), ConfigError> {
-    validate_field_path(path)?;
-    let parts = path.split('.').collect::<Vec<_>>();
-    remove_path_parts(root, &parts);
-    Ok(())
-}
-
-fn remove_path_parts(value: &mut JsonValue, parts: &[&str]) -> bool {
-    let Some((part, rest)) = parts.split_first() else {
-        return false;
-    };
-    let Some(object) = value.as_object_mut() else {
-        return false;
-    };
-    if rest.is_empty() {
-        object.remove(*part);
-    } else if let Some(child) = object.get_mut(*part) {
-        if remove_path_parts(child, rest) {
-            object.remove(*part);
-        }
-    }
-    object.is_empty()
-}
-
 fn validate_field_path(path: &str) -> Result<(), ConfigError> {
     let valid = !path.trim().is_empty()
         && path
@@ -1416,41 +1087,6 @@ fn validate_field_path(path: &str) -> Result<(), ConfigError> {
 
 fn valid_path_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')
-}
-
-fn first_policy_match(policies: &BTreeMap<String, String>, path: &str) -> Option<(String, String)> {
-    policies
-        .iter()
-        .find(|(policy_path, _)| policy_path_matches(policy_path, path))
-        .map(|(policy_path, source)| (policy_path.clone(), source.clone()))
-}
-
-fn policy_path_matches(policy_path: &str, candidate_path: &str) -> bool {
-    candidate_path == policy_path
-        || candidate_path
-            .strip_prefix(policy_path)
-            .is_some_and(|suffix| suffix.starts_with('.'))
-        || policy_path
-            .strip_prefix(candidate_path)
-            .is_some_and(|suffix| suffix.starts_with('.'))
-}
-
-fn string_list_at(value: &JsonValue, path: &str) -> Vec<String> {
-    let mut cursor = value;
-    for part in path.split('.') {
-        let Some(next) = cursor.get(part) else {
-            return Vec::new();
-        };
-        cursor = next;
-    }
-    cursor
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.as_str().map(str::to_string))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
 }
 
 fn redact_value_at_path(path: &str, value: JsonValue) -> JsonValue {
@@ -1512,99 +1148,6 @@ mod tests {
             .iter()
             .any(|candidate| candidate.source == "user"
                 && candidate.status == CandidateStatus::Shadowed));
-    }
-
-    #[test]
-    fn managed_lock_blocks_later_environment_override() {
-        let resolved = merge_layers(vec![
-            built_in_defaults_layer(),
-            layer(
-                ConfigLayerKind::ManagedPolicy,
-                "managed",
-                json!({
-                    "limits": {"network": "offline"},
-                    "policy": {"locked_fields": ["limits.network"]}
-                }),
-            ),
-            layer(
-                ConfigLayerKind::EnvironmentOverrides,
-                "env",
-                json!({"limits": {"network": "allow"}}),
-            ),
-        ])
-        .unwrap();
-
-        assert_eq!(resolved.config.limits.network, NetworkMode::Offline);
-        let network = resolved
-            .explain
-            .iter()
-            .find(|field| field.path == "limits.network")
-            .expect("network explanation");
-        assert_eq!(network.locked_by.as_deref(), Some("managed"));
-        assert!(network
-            .candidates
-            .iter()
-            .any(|candidate| candidate.source == "env"
-                && candidate.status == CandidateStatus::Locked));
-    }
-
-    #[test]
-    fn managed_deny_blocks_later_field() {
-        let resolved = merge_layers(vec![
-            built_in_defaults_layer(),
-            layer(
-                ConfigLayerKind::ManagedPolicy,
-                "managed",
-                json!({"policy": {"denied_fields": ["endpoints.mcp.untrusted"]}}),
-            ),
-            layer(
-                ConfigLayerKind::ProjectConfig,
-                "project",
-                json!({"endpoints": {"mcp": {"untrusted": {"url": "https://example.com"}}}}),
-            ),
-        ])
-        .unwrap();
-
-        assert!(!resolved.config.endpoints.mcp.contains_key("untrusted"));
-        let candidates = resolved
-            .explain
-            .iter()
-            .flat_map(|field| field.candidates.iter())
-            .collect::<Vec<_>>();
-        assert!(candidates
-            .iter()
-            .any(|candidate| candidate.status == CandidateStatus::Denied));
-    }
-
-    #[test]
-    fn managed_deny_masks_lower_precedence_dynamic_fields() {
-        let resolved = merge_layers(vec![
-            built_in_defaults_layer(),
-            layer(
-                ConfigLayerKind::ProjectConfig,
-                "project",
-                json!({"endpoints": {"mcp": {"untrusted": {"url": "https://example.com"}}}}),
-            ),
-            layer(
-                ConfigLayerKind::ManagedPolicy,
-                "managed",
-                json!({"policy": {"denied_fields": ["endpoints.mcp.untrusted"]}}),
-            ),
-        ])
-        .unwrap();
-
-        assert!(!resolved.config.endpoints.mcp.contains_key("untrusted"));
-        let untrusted = resolved
-            .explain
-            .iter()
-            .find(|field| field.path == "endpoints.mcp.untrusted.url")
-            .expect("blocked endpoint explanation");
-        assert_eq!(untrusted.denied_by.as_deref(), Some("managed"));
-        assert!(untrusted
-            .candidates
-            .iter()
-            .any(|candidate| candidate.source == "project"
-                && candidate.status == CandidateStatus::Denied));
     }
 
     #[test]
@@ -1701,14 +1244,12 @@ alert_on_violation = false
     fn environment_overrides_are_typed() {
         let env = environment_layer([
             ("HARN_LOG_LEVEL", "debug"),
-            ("HARN_TOKEN_BUDGET", "1200"),
             ("HARN_REPLAY_ENABLED", "false"),
         ])
         .unwrap()
         .expect("env layer");
         let config: HarnConfig = serde_json::from_value(env.value).unwrap();
         assert_eq!(config.logging.level, LogLevel::Debug);
-        assert_eq!(config.limits.tokens, Some(1200));
         assert!(!config.replay.enabled);
     }
 
@@ -1716,6 +1257,79 @@ alert_on_violation = false
     fn environment_bool_overrides_reject_unknown_values() {
         let error = environment_layer([("HARN_REPLAY_ENABLED", "sometimes")]).unwrap_err();
         assert!(error.to_string().contains("expected one of"));
+    }
+
+    /// The retired sections are refused by name rather than quietly accepted.
+    ///
+    /// A run never read `limits`, `permissions` or `policy`, so an operator who
+    /// set one could not tell a respected ceiling from an ignored one. They are
+    /// gone from the typed shape, and because the shape denies unknown fields a
+    /// file that still carries one now fails at the parse boundary and names the
+    /// section. Reinstating any of the three makes these parses succeed again.
+    #[test]
+    fn retired_sections_are_refused_by_name() {
+        for section in ["limits", "permissions", "policy"] {
+            let error = parse_config_toml(
+                &format!("schema_version = 1\n\n[{section}]\n"),
+                "harn.config.toml",
+            )
+            .expect_err("a retired section must not parse");
+            let message = error.to_string();
+            assert!(
+                message.contains(section),
+                "error for [{section}] should name it, got: {message}"
+            );
+        }
+    }
+
+    /// An unset retired section is not an error, so the refusal above is
+    /// specific to the section rather than to config parsing in general.
+    #[test]
+    fn a_config_without_the_retired_sections_still_parses() {
+        parse_config_toml(
+            "schema_version = 1\n\n[logging]\nlevel = \"debug\"\n",
+            "harn.config.toml",
+        )
+        .expect("a config with only live sections parses");
+    }
+
+    /// The retired environment names no longer reach a config field.
+    ///
+    /// They were registered, which made them look supported while nothing read
+    /// the value they set. Setting one now contributes no layer at all.
+    /// Names are assembled without a `"HARN_` token so the registry census
+    /// does not treat this fixture as a live reader.
+    #[test]
+    fn retired_environment_names_contribute_no_layer() {
+        let layer = environment_layer([
+            (concat!("HARN", "_BUDGET_USD"), "0.01"),
+            (concat!("HARN", "_TOKEN_BUDGET"), "1"),
+            (concat!("HARN", "_MAX_CONCURRENCY"), "1"),
+            (concat!("HARN", "_NETWORK_MODE"), "offline"),
+            (concat!("HARN", "_FILESYSTEM_MODE"), "read-only"),
+            (concat!("HARN", "_SANDBOX_MODE"), "worktree"),
+        ])
+        .expect("retired names must not error");
+        assert!(
+            layer.is_none(),
+            "retired environment names must not build a config layer"
+        );
+    }
+
+    /// `harn config` must not present a ceiling a run does not enforce.
+    #[test]
+    fn merged_defaults_do_not_advertise_retired_sections() {
+        let resolved = merge_layers(vec![built_in_defaults_layer()]).unwrap();
+        let object = resolved
+            .redacted_config
+            .as_object()
+            .expect("merged config is an object");
+        for section in ["limits", "permissions", "policy"] {
+            assert!(
+                !object.contains_key(section),
+                "inspect output must not carry {section}"
+            );
+        }
     }
 
     #[test]
@@ -1733,10 +1347,13 @@ alert_on_violation = false
     fn schema_is_valid_json_schema_document() {
         let schema = schema_json();
         assert_eq!(schema["$id"], CONFIG_SCHEMA_ID);
-        assert_eq!(
-            schema["properties"]["limits"]["properties"]["network"]["enum"][3],
-            "offline"
-        );
+        let properties = schema["properties"].as_object().expect("schema properties");
+        for section in ["limits", "permissions", "policy"] {
+            assert!(
+                !properties.contains_key(section),
+                "editor schema must not advertise {section}"
+            );
+        }
         assert_eq!(
             schema["properties"]["identity"]["properties"]["scope_attenuation"]["properties"]
                 ["mode"]["enum"][1],
