@@ -20,7 +20,7 @@ pub use provider_layer::layer_from_providers_config;
 pub const CONFIG_SCHEMA_VERSION: u32 = 1;
 pub const CONFIG_SCHEMA_ID: &str = "https://harnlang.com/schemas/harn-config.schema.json";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct HarnConfig {
     pub schema_version: u32,

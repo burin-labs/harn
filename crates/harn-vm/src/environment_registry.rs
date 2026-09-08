@@ -550,8 +550,7 @@ mod tests {
             let error = validate_environment([(name, "1")]).expect_err(name);
             assert!(
                 error.to_string().contains(name),
-                "startup must name {name}, got {}",
-                error
+                "startup must name {name}, got {error}"
             );
             assert!(
                 variable_spec(name).is_none(),
