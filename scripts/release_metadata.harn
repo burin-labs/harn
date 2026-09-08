@@ -102,6 +102,27 @@ pub fn current_version(fs: HarnessFs, root: string) -> string {
   return workspace_version_from_doc(toml_parse(fs.read_text(path)))
 }
 
+/**
+ * Read a released version from a tag or a bare version, and refuse anything
+ * that is not an exact stable release.
+ *
+ * The caller passes what it published. Accepting a prerelease or a development
+ * identity here would put the very value this exists to reject back in the one
+ * position that is meant to be trustworthy.
+ */
+pub fn stable_release_version(released: string) -> string {
+  const bare = if released.starts_with("v") {
+    released.substring(1, released.len())
+  } else {
+    released
+  }
+  const parsed = semver.parse(bare)
+  if parsed == nil {
+    throw "released version must be an exact stable release SemVer: " + released
+  }
+  return bare
+}
+
 /** Project a stable release into the next patch's development identity. */
 pub fn development_version_from_stable(version: string) -> string {
   const parsed = semver.parse(version)
@@ -447,6 +468,7 @@ fn arg_spec() {
         {kind: "flag", name: "bump", long: "--bump", parse: "string", default: ""},
         {kind: "flag", name: "preid", long: "--preid", parse: "string", default: ""},
         {kind: "flag", name: "version", long: "--version", parse: "string", default: ""},
+        {kind: "flag", name: "released", long: "--released", parse: "string", default: ""},
       ],
     },
   )
@@ -455,7 +477,7 @@ fn arg_spec() {
 fn main(harness: Harness) -> int {
   if help_requested(argv) {
     harness.stdio.println(
-      "usage: harn run scripts/release_metadata.harn -- ACTION [--root PATH] [--bump KIND] [--preid ID] [--version VERSION]",
+      "usage: harn run scripts/release_metadata.harn -- ACTION [--root PATH] [--bump KIND] [--preid ID] [--version VERSION] [--released VERSION]",
     )
     return 0
   }
@@ -472,7 +494,23 @@ fn main(harness: Harness) -> int {
     if action == "current" {
       harness.stdio.println(current_version(harness.fs, root))
     } else if action == "development-target" {
-      harness.stdio.println(development_version_from_stable(current_version(harness.fs, root)))
+      // The released version is the authority when the caller knows it, and the
+      // caller after a publication always does: it just published the tag.
+      // Deriving from the workspace instead assumes the release pull request
+      // already merged, which is true only on the normal path. A hand-cut tag
+      // leaves the workspace on the old development identity, and this then
+      // refuses on that identity and strands main there, which is how the
+      // cutover after a hand-cut release came to be owed and never opened.
+      const released = trim(to_string(parsed.options?.released ?? ""))
+      harness.stdio.println(
+        development_version_from_stable(
+          if released == "" {
+            current_version(harness.fs, root)
+          } else {
+            stable_release_version(released)
+          },
+        ),
+      )
     } else if action == "release-target" {
       harness.stdio.println(stable_version_from_development(current_version(harness.fs, root)))
     } else if action == "next" {
