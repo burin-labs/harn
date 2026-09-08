@@ -1159,6 +1159,23 @@ impl Vm {
                             .map(Ok)
                             .unwrap_or_else(|| module_source::read(&file_path))
                             .map_err(|e| {
+                                // A bare specifier no installed package provides
+                                // still gets joined onto the importing file's
+                                // directory, so the path below is a guess made
+                                // from the relative traversal of the whole
+                                // import chain. Reporting it sends the reader
+                                // looking for a missing file in their own tree
+                                // instead of at the dependency they never
+                                // installed, so say which package is missing.
+                                if let Some(alias) = harn_modules::unresolved_package_alias(
+                                    &base.join("__harn_import_base__.harn"),
+                                    path,
+                                ) {
+                                    return VmError::Runtime(format!(
+                                        "Import error: '{path}' names package '{alias}', which no installed generation provides. Run `harn install` to materialize locked packages, or `harn package doctor` to see every package in this state. (imported from {})",
+                                        base.display()
+                                    ));
+                                }
                                 // Name the resolution base: relative imports resolve against
                                 // the importing file's dir (or CWD when unset), so an error
                                 // that prints only the joined path leaves the author guessing
