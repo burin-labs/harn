@@ -412,6 +412,12 @@ fn sandbox_profile_allows_home_toolchain_roots_read_only() {
         .expect("uv root")
         .display()
         .to_string();
+    let pnpm_path = toolchain_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new("Library/pnpm")))
+        .expect("pnpm root")
+        .display()
+        .to_string();
     let rustup_path = toolchain_roots
         .iter()
         .find(|path| path.ends_with(std::path::Path::new(".rustup")))
@@ -425,7 +431,7 @@ fn sandbox_profile_allows_home_toolchain_roots_read_only() {
         &[],
     );
 
-    for path in [uv_path, rustup_path] {
+    for path in [pnpm_path, uv_path, rustup_path] {
         let escaped = sandbox_profile_escape(&path);
         assert!(
             profile.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
@@ -436,6 +442,67 @@ fn sandbox_profile_allows_home_toolchain_roots_read_only() {
             "home toolchain root must stay read-only: {profile}"
         );
     }
+}
+
+#[test]
+fn a_live_confined_child_reads_the_pnpm_home_without_opening_the_whole_home() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let home = tempfile::tempdir().expect("home");
+    let home_path = home.path().canonicalize().expect("canonical home");
+    let pnpm_root = home_path.join("Library/pnpm");
+    std::fs::create_dir_all(&pnpm_root).expect("pnpm root");
+    let pnpm_runtime = pnpm_root.join("runtime.txt");
+    std::fs::write(&pnpm_runtime, "PNPM-RUNTIME-READABLE").expect("pnpm runtime");
+    let unrelated = home_path.join("unrelated.txt");
+    std::fs::write(&unrelated, "MUST-STAY-CLOSED").expect("unrelated home file");
+
+    let previous_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &home_path);
+    let workspace = tempfile::tempdir().expect("workspace");
+    let workspace_path = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.workspace_roots = vec![workspace_path.display().to_string()];
+    policy.process_sandbox.presets = Some(vec![
+        crate::orchestration::ProcessSandboxPreset::SystemRuntime,
+        crate::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+    ]);
+    let profile = render_profile(&policy);
+    let profile_path = workspace_path.join("profile.sb");
+    std::fs::write(&profile_path, profile).expect("sandbox profile");
+    let read = |path: &Path| {
+        std::process::Command::new(SANDBOX_EXEC_PATH)
+            .args(["-f"])
+            .arg(&profile_path)
+            .arg("/bin/cat")
+            .arg(path)
+            .output()
+            .expect("sandboxed cat")
+    };
+    let admitted = read(&pnpm_runtime);
+    let refused = read(&unrelated);
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+
+    assert!(
+        admitted.status.success()
+            && String::from_utf8_lossy(&admitted.stdout).contains("PNPM-RUNTIME-READABLE"),
+        "the child must read the standard pnpm runtime root: {admitted:?}"
+    );
+    assert!(
+        !refused.status.success()
+            && !String::from_utf8_lossy(&refused.stdout).contains("MUST-STAY-CLOSED"),
+        "the adjacent home file must remain outside the jail: {refused:?}"
+    );
 }
 
 #[test]

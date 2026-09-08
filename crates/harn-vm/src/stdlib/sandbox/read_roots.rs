@@ -42,6 +42,7 @@ pub(crate) fn developer_toolchain_read_roots_for_home(home: &Path) -> Vec<PathBu
         ".juliaup",
         ".local/bin",
         ".local/share/mise",
+        ".local/share/pnpm",
         ".local/share/uv",
         ".nvm",
         ".pyenv",
@@ -50,6 +51,7 @@ pub(crate) fn developer_toolchain_read_roots_for_home(home: &Path) -> Vec<PathBu
         ".sdkman",
         ".swiftly",
         ".volta",
+        "Library/pnpm",
         "go",
     ]
     .into_iter()

@@ -1160,7 +1160,9 @@ fn developer_toolchain_roots_cover_common_home_managed_runtimes() {
         Path::new(".pyenv"),
         Path::new(".nvm"),
         Path::new(".volta"),
+        Path::new(".local/share/pnpm"),
         Path::new(".local/share/uv"),
+        Path::new("Library/pnpm"),
         Path::new("go"),
     ] {
         assert!(
