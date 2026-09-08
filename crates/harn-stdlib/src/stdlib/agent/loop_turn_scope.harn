@@ -580,7 +580,28 @@ pub fn __agent_loop_terminal_callback_continue_allowed(final_status: string, sto
   if final_status == "stuck" {
     return true
   }
+  // A deadline stop still runs the callback, because writing whatever artifact
+  // the run owes is exactly what a host's last act is for. What it must not do
+  // is take the callback's `continue` and extend the loop: there is no time
+  // left to extend into, which is what `__agent_loop_terminal_may_extend`
+  // refuses.
+  if final_status == "budget_exhausted" && (stop_reason ?? "") == "deadline" {
+    return true
+  }
   return final_status == "budget_exhausted" && (stop_reason ?? "") == "max_iterations"
+}
+
+/**
+ * May a terminal callback's `continue` verdict reopen the loop?
+ *
+ * Every stop except the wall. A budget the caller sized can be widened by a
+ * host that judges the run worth more turns; a deadline cannot, because the
+ * turns it would grant have to happen before an instant that has already
+ * passed. Extending there produces exactly the outcome the deadline exists to
+ * prevent, one iteration later.
+ */
+pub fn __agent_loop_terminal_may_extend(stop_reason: string?) -> bool {
+  return to_string(stop_reason ?? "") != "deadline"
 }
 
 pub fn __agent_loop_terminal_callback_extend_by(budget: dict) {

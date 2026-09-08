@@ -305,7 +305,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
         session_rejected_tools: state.rejected_tools_seen,
       },
     )
-    if terminal_outcome.kind == "continue" {
+    if terminal_outcome.kind == "continue" && __agent_loop_terminal_may_extend(stop_reason) {
       call_budget = __agent_loop_record_grant(call_budget, "terminal_report")
       opts = __apply_post_turn_options(opts, terminal_outcome)
       const old_limit = current_max

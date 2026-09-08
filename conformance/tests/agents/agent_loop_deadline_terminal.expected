@@ -1,0 +1,10 @@
+alone_status=budget_exhausted
+alone_reason=deadline
+alone_kind=deadline
+alone_under_budget=true
+alone_elapsed=true
+callback_ran=true
+callback_status=budget_exhausted
+callback_reason=deadline
+absent_status=done
+absent_reason=sentinel

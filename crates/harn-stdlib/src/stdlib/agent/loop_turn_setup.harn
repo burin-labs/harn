@@ -65,6 +65,11 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
     loop_start_ms,
     current_max,
   )
+  // The loop's own wall. Checked before the iteration boundary because a
+  // deadline that has passed makes the next request unaffordable whatever the
+  // iteration count says, and because an embedder measuring the same wall from
+  // outside is about to kill the process: landing a terminal here is the only
+  // chance the run gets to say what it covered.
   if boundary_exhaustion.exhausted {
     __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, boundary_exhaustion)
     budget_decisions = __agent_loop_record_budget_stop(

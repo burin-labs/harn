@@ -1,0 +1,176 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+
+/**
+ * `deadline_ms` stops the loop, lands a typed terminal, and runs the terminal
+ * callback without letting it reopen the run.
+ *
+ * The defect: `deadline_ms` was resolved into the loop's internal
+ * `_deadline_at_ms` and then read by exactly one thing, the completion judge's
+ * admission check. No iteration compared the clock to it. The iteration
+ * boundary does have a wall-clock arm, but it reads `iteration_budget.wall_clock_ms`
+ * directly, so a caller who set `deadline_ms` alone ran past its own wall until
+ * the iteration budget ran out or an outer supervisor killed the process. That
+ * kill lands no terminal and runs no callback, so anything the run owed its
+ * caller was left unwritten and an absent artifact read the same as a run with
+ * nothing to report.
+ */
+fn first_event(events: list, event_type: string) {
+  for event in events {
+    if event.type == event_type {
+      return event
+    }
+  }
+  return nil
+}
+
+fn count_events(events: list, event_type: string) -> int {
+  let seen = 0
+  for event in events {
+    if event.type == event_type {
+      seen = seen + 1
+    }
+  }
+  return seen
+}
+
+/** A caller that burns more clock per turn than the deadline allows. */
+fn slow_caller(harness: Harness) {
+  return { _call ->
+    harness.testing.clock_advance(1500)
+    return {
+      ok: true,
+      value: {
+        text: "still working",
+        provider: "mock",
+        model: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
+}
+
+/**
+ * THE FALSIFIER. `deadline_ms` alone, no `wall_clock_ms` anywhere, and the
+ * loop must stop itself and say why. Before the fix this ran until the
+ * iteration budget was spent and reported that instead.
+ */
+fn deadline_alone_case(harness: Harness) {
+  harness.testing.clock_set(0)
+  const session = "deadline-alone-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "work",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        llm_caller: slow_caller(harness),
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_nudges: 20,
+        deadline_ms: 1000,
+        iteration_budget: {mode: "fixed", max: 40},
+      },
+    ) },
+  )
+  const budget_event = first_event(captured.events, "budget_exhausted")
+  harness.stdio.println("alone_status=" + captured.result.status)
+  harness.stdio.println("alone_reason=" + captured.result.stop_reason)
+  harness.stdio.println("alone_kind=" + budget_event.kind)
+  // The point of stopping early: the run ends far short of the iteration
+  // budget it would otherwise have spent against a wall already gone.
+  // The point of stopping on the wall: the run ends far short of the forty
+  // iterations it would otherwise have spent against a budget already gone.
+  harness.stdio.println(
+    "alone_under_budget=" + to_string(count_events(captured.events, "iteration_end") < 40),
+  )
+  harness.stdio.println("alone_elapsed=" + to_string(budget_event.wall_clock_ms >= 1000))
+  harness.testing.clock_reset()
+}
+
+/**
+ * The host's last act still runs, and cannot reopen the loop.
+ *
+ * A terminal callback is how a caller writes whatever the run owes before the
+ * run is gone, so it has to fire here of all places. What it must not do is
+ * take its `continue` verdict: the turns it would grant have to happen before
+ * an instant that has already passed.
+ */
+fn terminal_callback_case(harness: Harness) {
+  harness.testing.clock_set(0)
+  let callback_ran = 0
+  const session = "deadline-callback-" + harness.random.uuid()
+  const result = agent_loop(
+    harness,
+    "work",
+    nil,
+    {
+      session_id: session,
+      provider: "mock",
+      llm_caller: slow_caller(harness),
+      loop_until_done: true,
+      done_sentinel: "DONE",
+      max_nudges: 20,
+      deadline_ms: 1000,
+      iteration_budget: {mode: "adaptive", initial: 4, max: 40, extend_by: 4},
+      terminal_callback: { _info ->
+        callback_ran = callback_ran + 1
+        return {kind: "continue"}
+      },
+    },
+  )
+  harness.stdio.println("callback_ran=" + to_string(callback_ran >= 1))
+  harness.stdio.println("callback_status=" + result.status)
+  harness.stdio.println("callback_reason=" + result.stop_reason)
+  harness.testing.clock_reset()
+}
+
+/**
+ * DIRECTION CONTROL. No deadline configured, nothing stopped by one. A fix
+ * that reads an absent deadline as "already passed" ends every loop at
+ * iteration zero, and every assertion above would still hold.
+ */
+fn no_deadline_case(harness: Harness) {
+  harness.testing.clock_set(0)
+  const caller = { _call ->
+    harness.testing.clock_advance(1500)
+    return {
+      ok: true,
+      value: {
+        text: "DONE",
+        provider: "mock",
+        model: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
+  const session = "deadline-absent-" + harness.random.uuid()
+  const result = agent_loop(
+    harness,
+    "work",
+    nil,
+    {
+      session_id: session,
+      provider: "mock",
+      llm_caller: caller,
+      loop_until_done: true,
+      done_sentinel: "DONE",
+      iteration_budget: {mode: "fixed", max: 5},
+    },
+  )
+  harness.stdio.println("absent_status=" + result.status)
+  harness.stdio.println("absent_reason=" + result.stop_reason)
+  harness.testing.clock_reset()
+}
+
+pipeline default(harness: Harness) {
+  deadline_alone_case(harness)
+  terminal_callback_case(harness)
+  no_deadline_case(harness)
+}

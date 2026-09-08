@@ -53,6 +53,28 @@ pub fn __agent_loop_deadline_contract(
   return {deadline_at_ms: to_int(now_ms) + duration_ms, duration_ms: duration_ms, source: source}
 }
 
+/**
+ * Has the loop's resolved deadline passed?
+ *
+ * The deadline was resolved once, at loop start, into `_deadline_at_ms`. Until
+ * this existed the only reader of that field was the completion judge's
+ * admission check, which decides whether one more judge request still fits. So
+ * a caller that set `deadline_ms` and nothing else got a loop that would run
+ * past it indefinitely: an embedder measuring the same wall from outside would
+ * kill the process, no terminal would be landed, no terminal callback would
+ * run, and any artifact the run owed its caller would be left unwritten.
+ *
+ * Absent means not reached. A run with no deadline configured must never be
+ * stopped by one.
+ */
+pub fn __agent_loop_deadline_reached(opts: dict, now_ms: int) -> bool {
+  const at = to_int(opts?._deadline_at_ms)
+  if at == nil || at <= 0 {
+    return false
+  }
+  return to_int(now_ms) >= at
+}
+
 pub fn __agent_loop_apply_deadline(opts: dict, budget: dict, now_ms: int) -> dict {
   const contract = __agent_loop_deadline_contract(now_ms, opts?.deadline_ms, budget?.wall_clock_ms)
   return if contract == nil {
