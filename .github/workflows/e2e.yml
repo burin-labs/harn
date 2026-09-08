@@ -132,7 +132,11 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          shared-key: e2e
+          shared-key: workspace-tests
+          # The maintained Linux archive keeps workspace-member artifacts, and the
+          # suffix that records it is part of the key. A reader without it restores
+          # nothing at all rather than restoring a thinner archive.
+          cache-workspace-crates: "true"
           cache-bin: false
       - name: Install cargo-nextest
         uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
