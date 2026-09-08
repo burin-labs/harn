@@ -302,9 +302,9 @@ pub const CLI_COLD_START_JOB = "cold-start-budget"
 
 pub const CLI_COLD_START_BUILD_STEP = "Build release harn"
 
-pub const CLI_COLD_START_JOB_TIMEOUT_MINUTES = 30
+pub const CLI_COLD_START_JOB_TIMEOUT_MINUTES = 55
 
-pub const CLI_COLD_START_BUILD_TIMEOUT_MINUTES = 25
+pub const CLI_COLD_START_BUILD_TIMEOUT_MINUTES = 45
 
 // Both release head-ref shapes, matching `.github/scripts/release-ref.sh`. A
 // GitHub Actions `if:` cannot source that helper, so this constant is what
