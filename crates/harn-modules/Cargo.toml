@@ -14,7 +14,7 @@ include = [
 
 [dependencies]
 blake3 = "1.8.7"
-croner = "3.0.1"
+croner = "4.0.0"
 harn-flock = { path = "../harn-flock", version = "=0.10.134-dev" }
 harn-lexer = { path = "../harn-lexer", version = "=0.10.134-dev" }
 harn-parser = { path = "../harn-parser", version = "=0.10.134-dev" }

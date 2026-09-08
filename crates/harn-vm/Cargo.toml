@@ -112,7 +112,7 @@ quick_cache = "0.7"
 imbl = { version = "7", features = ["serde"] }
 chrono = "0.4"
 chrono-tz = "0.10.4"
-croner = "3.0.1"
+croner = "4.0.0"
 regex = "1"
 scraper = { version = "0.27", optional = true }
 serde_json = { version = "1", features = ["unbounded_depth"] }
@@ -120,7 +120,7 @@ rand = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 reqwest-eventsource = "0.6"
-rmcp = { version = "=3.1.4", default-features = false, features = ["client", "transport-child-process"] }
+rmcp = { version = "=3.2.0", default-features = false, features = ["client", "transport-child-process"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 jsonschema = { version = "0.52", default-features = false }
