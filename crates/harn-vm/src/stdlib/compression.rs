@@ -463,6 +463,7 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let cursor = Cursor::new(input);
     let mut archive =
         zip::ZipArchive::new(cursor).map_err(|error| builtin_error("zip_extract", error))?;
+    verify_zip_member_census(input, archive.central_directory_start(), archive.len())?;
     let mut output = Vec::new();
     let mut total_extracted: u64 = 0;
 
@@ -498,6 +499,43 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     }
 
     Ok(VmValue::List(std::sync::Arc::new(output)))
+}
+
+/// ZipArchive validates the directory but then indexes records by raw filename,
+/// overwriting duplicates. Count the validated directory records before trusting
+/// that lossy projection. This checks multiplicity only; ZIP parsing, offsets,
+/// decompression, and CRC validation remain owned by the ZIP reader.
+fn verify_zip_member_census(
+    input: &[u8],
+    directory_start: u64,
+    unique_members: usize,
+) -> Result<(), VmError> {
+    let mismatch = || {
+        builtin_error(
+            "zip_extract",
+            "ZIP central-directory member census disagrees with its unique names; \
+             duplicate members are not supported",
+        )
+    };
+    let start = usize::try_from(directory_start).map_err(|_| mismatch())?;
+    let mut remaining = input.get(start..).ok_or_else(mismatch)?;
+    let mut observed = 0;
+    while remaining.starts_with(b"PK\x01\x02") {
+        let header = remaining.get(..46).ok_or_else(mismatch)?;
+        let variable_size: usize = [28, 30, 32]
+            .into_iter()
+            .map(|offset| u16::from_le_bytes([header[offset], header[offset + 1]]) as usize)
+            .sum();
+        remaining = remaining.get(46 + variable_size..).ok_or_else(mismatch)?;
+        observed += 1;
+        if observed > unique_members {
+            return Err(mismatch());
+        }
+    }
+    if observed != unique_members {
+        return Err(mismatch());
+    }
+    Ok(())
 }
 
 pub(crate) fn register_compression_builtins(vm: &mut Vm) {
@@ -537,6 +575,80 @@ mod tests {
 
     fn text(value: &str) -> VmValue {
         VmValue::String(arcstr::ArcStr::from(value))
+    }
+
+    fn zip_fixture(large_file: bool) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default().large_file(large_file);
+        writer.set_comment("member census fixture");
+        writer.add_directory("nested/", options).unwrap();
+        for (name, body) in [
+            ("evidence.json", b"first".as_slice()),
+            ("evidencf.json", b"second"),
+        ] {
+            writer.start_file(name, options).unwrap();
+            writer.write_all(body).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn zip_extract_rejects_duplicate_names_before_extracting() {
+        let mut archive = zip_fixture(false);
+        let old = b"evidencf.json";
+        let mut changed = 0;
+        for offset in 0..=archive.len() - old.len() {
+            if &archive[offset..offset + old.len()] == old {
+                archive[offset..offset + old.len()].copy_from_slice(b"evidence.json");
+                changed += 1;
+            }
+        }
+        assert_eq!(changed, 2, "mutate the local and central directory names");
+        let decoded = zip::ZipArchive::new(Cursor::new(&archive)).unwrap();
+        assert_eq!(
+            decoded.len(),
+            2,
+            "the dependency collapsed two files plus a directory"
+        );
+        let error = call(&mut vm(), "zip_extract", vec![bytes_value(archive)])
+            .expect_err("ambiguous member names must be refused");
+        assert!(error.to_string().contains("duplicate members"), "{error}");
+    }
+
+    #[test]
+    fn zip_extract_preserves_ordinary_prefixed_and_zip64_archives() {
+        for large_file in [false, true] {
+            for prefix in [b"".as_slice(), b"self-extracting stub"] {
+                let mut archive = prefix.to_vec();
+                archive.extend(zip_fixture(large_file));
+                let result = call(&mut vm(), "zip_extract", vec![bytes_value(archive)]).unwrap();
+                let VmValue::List(entries) = result else {
+                    panic!("expected entries")
+                };
+                assert_eq!(
+                    entries.len(),
+                    2,
+                    "directory records are counted but not extracted"
+                );
+                assert_eq!(
+                    entries[0].as_dict().unwrap()["content"].as_bytes().unwrap(),
+                    b"first"
+                );
+                assert_eq!(
+                    entries[1].as_dict().unwrap()["content"].as_bytes().unwrap(),
+                    b"second"
+                );
+            }
+        }
+        let empty = zip::ZipWriter::new(Cursor::new(Vec::new()))
+            .finish()
+            .unwrap()
+            .into_inner();
+        let result = call(&mut vm(), "zip_extract", vec![bytes_value(empty)]).unwrap();
+        let VmValue::List(entries) = result else {
+            panic!("expected empty entries")
+        };
+        assert!(entries.is_empty());
     }
 
     #[test]
