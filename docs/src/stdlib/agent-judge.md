@@ -39,18 +39,31 @@ knobs. Every field is optional.
 | `require_source_write` | bool | `true` | Enforce the source-write evidence requirement. |
 | `requires_write` | bool | per-task fact | Override the "this task needs a source change" fact. |
 | `max_vetoes` | int | `3` | Per-session soft-veto budget; `0` disables. |
-| `veto_combine` | `fn(verdicts) -> CompletionVerifyVerdict` | AND-of-oracles | Override how multiple verifier verdicts combine. |
+| `requirement_contract` | `CompletionRequirementContract` | absent | Declares requirements assessed from the facts callback's typed evidence. Requires `facts`. |
 | `judge` | bool / dict | off | Attach a bounded LLM judge (`true` or a judge-config dict). |
 | `judge_seam` | string | `"verify_completion_judge"` | Which capped LLM seam the judge rides (`"verify_completion_judge"` or `"turn_end_condition"`). |
 | `feedback_templates` | dict | defaults | Override feedback by ladder key; repeated failures support `{attempts}` and `{findings}`. |
 | `escalation_threshold` | int | `3` | Failed-after-write streak required to recommend escalation. |
 | `escalation_target` | string | — | Host routing channel copied onto an escalated verdict and event. |
 
+All verifier results are required: one failed result blocks completion, and an
+empty result list remains unmeasured. The former `veto_combine` callback has been
+removed so a host cannot replace this rule with custom verdict arbitration.
+
+`requirement_contract` uses the same typed contract and evidence roles as the
+completion judge. The facts callback returns `requirement_assessments` and
+`requirement_evidence`; Harn joins them to the declared roster. Missing, duplicate,
+unsupported and unmet assessments remain pending, even when a separate verifier
+passed or the soft-veto budget was spent. The decision receipt includes the
+required count, pending count and pending names. An `assistant_output` requirement
+can cite a typed response observation without inventing a tool call or artifact.
+
 The fact types:
 
 - `CompletionFacts` — `{consecutive_failed_after_write?,
   source_write_count?, cosmetic_write_count?, writes?, verify?,
-  verification_failures_converging?, requires_write?}`. Supply counts directly,
+  verification_failures_converging?, requires_write?, requirement_assessments?,
+  requirement_evidence?}`. Supply counts directly,
   or a `writes` list of `CompletionWriteFact` for the gate to classify.
   `verify` is one `CompletionVerifyVerdict` or a list of them. When the streak
   is present, a red verifier uses the streak-aware reasons below; a converging

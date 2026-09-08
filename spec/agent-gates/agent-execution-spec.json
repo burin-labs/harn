@@ -307,7 +307,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 344,
+        "line": 352,
         "reader": "workflow-loop-key-domain"
       },
       {
@@ -711,7 +711,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 339,
+        "line": 347,
         "reader": "workflow-loop-key-domain"
       }
     ],
@@ -1033,7 +1033,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 340,
+        "line": 348,
         "reader": "workflow-loop-key-domain"
       },
       {
@@ -1130,7 +1130,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 341,
+        "line": 349,
         "reader": "workflow-loop-key-domain"
       },
       {
