@@ -188,9 +188,24 @@ pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 // empty (#5003).
 pub const CI_CACHE_WRITE_JOBS = ["package-audit", "rust-check-inputs", "rust-cache-refresh"]
 
-// Compile fan-out remains four even on the 8-vCPU producer so a link-heavy
-// crate cannot exhaust its memory.
-pub const HOSTED_BUILD_JOBS = "4"
+// Compile fan-out on the producer is measured, not typed. The ceiling is still
+// four even on the 8-vCPU producer, because the bound is a link-heavy crate's
+// memory rather than the core count, and it lives in
+// `scripts/ci/rust-resource-policy.json` with the E2E ceiling beside it. What
+// changed is the floor: a literal four also ran four compilers on a two-core
+// host. Measurement may only lower the ceiling, never raise it.
+//
+// An expression is more dangerous than a literal here, because a step id that
+// does not resolve expands to the empty string and an empty CARGO_BUILD_JOBS
+// means "use every core", which is the opposite of the bound. The measuring
+// step is therefore required to exist, by id and by profile.
+pub const HOSTED_BUILD_JOBS = "$" + "{{ steps.resource-budget.outputs.build_jobs }}"
+
+pub const BUILD_BUDGET_STEP_ID = "resource-budget"
+
+pub const BUILD_BUDGET_COMMAND = "bash scripts/ci/rust_resource_budget.sh"
+
+pub const BUILD_BUDGET_PRODUCER_PROFILE = "producer"
 
 // Hang backstop for the archived workspace-test consumer lanes. These lanes never
 // compile (the structural checks below pin that directly: archive-only test

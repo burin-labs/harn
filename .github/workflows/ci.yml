@@ -637,6 +637,17 @@ jobs:
         with:
           fetch-depth: 1
       - uses: ./.github/actions/free-disk-space
+      # How many rustc processes this box may start, measured here rather than
+      # typed. A literal is right for the runner someone had in mind and wrong
+      # for every other one: it oversubscribes a small hosted box and leaves a
+      # larger one idle. `scripts/ci/rust_resource_budget.sh` is the single
+      # owner of that arithmetic and refuses by name when it cannot measure.
+      - name: Measure the compile budget
+        id: resource-budget
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
@@ -665,7 +676,7 @@ jobs:
       - name: Build portable Harn CLI
         timeout-minutes: 10
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-cli
           "$RUNNER_TEMP/harn-cli.tar.zst"
@@ -688,7 +699,7 @@ jobs:
       - name: Build security test archive
         timeout-minutes: 16
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-security
           "$RUNNER_TEMP/harn-security.tar.zst"
@@ -706,7 +717,7 @@ jobs:
       - name: Build portable workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
@@ -716,7 +727,7 @@ jobs:
         id: release-audit-rust-test
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
         run: >-
           set -euo pipefail;

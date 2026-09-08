@@ -1,5 +1,6 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "reserved_host_cores": 1,
-  "e2e_max_compilers": 2
+  "e2e_max_compilers": 2,
+  "producer_max_compilers": 4
 }
