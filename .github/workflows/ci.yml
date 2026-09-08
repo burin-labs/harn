@@ -168,8 +168,12 @@ jobs:
             setup_action:
               - '.github/actions/setup-harn/**'
               - '.github/workflows/ci.yml'
-              - 'scripts/bootstrap_harn.mjs'
-              - 'scripts/tests/bootstrap_harn.test.mjs'
+              - '.github/workflows/setup-harn-contract.yml'
+              - 'scripts/bootstrap-harn.*'
+              - 'scripts/tests/bootstrap_harn_seed_test.sh'
+              - 'scripts/tests/runtime_install_test.harn'
+              - 'crates/harn-stdlib/src/stdlib/runtime/**'
+              - '.harn-bootstrap-version'
             # Everything that can move release semantics out of agreement with
             # the orchestrator that drives cuts. A release pull request always
             # touches `Cargo.toml` and `CHANGELOG.md`, so this fires on every
@@ -637,6 +641,23 @@ jobs:
         with:
           fetch-depth: 1
       - uses: ./.github/actions/free-disk-space
+      # How many rustc processes this box may start, measured here rather than
+      # typed. A literal is right for the runner someone had in mind and wrong
+      # for every other one: it oversubscribes a small hosted box and leaves a
+      # larger one idle. `scripts/ci/rust_resource_budget.sh` is the single
+      # owner of that arithmetic and refuses by name when it cannot measure.
+      - name: Measure the compile budget
+        id: resource-budget
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          # `runner.environment` reports a vendor VM and one of our own boxes
+          # identically, and the two answer the census question differently: a
+          # vendor VM runs this job alone, an owned box shares its cores with
+          # every listener on it. The tier this job already declares is the
+          # honest source, and an owned rung added to the ladder has to declare
+          # itself there before it can reach this budget.
+          RUNNER_ENVIRONMENT: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'self-hosted' || 'github-hosted' }}
+          HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
@@ -665,7 +686,7 @@ jobs:
       - name: Build portable Harn CLI
         timeout-minutes: 10
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-cli
           "$RUNNER_TEMP/harn-cli.tar.zst"
@@ -688,7 +709,7 @@ jobs:
       - name: Build security test archive
         timeout-minutes: 16
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-security
           "$RUNNER_TEMP/harn-security.tar.zst"
@@ -706,7 +727,7 @@ jobs:
       - name: Build portable workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
@@ -716,7 +737,7 @@ jobs:
         id: release-audit-rust-test
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
         run: >-
           set -euo pipefail;
@@ -1921,10 +1942,8 @@ jobs:
           fi
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           "$harn_bin" run smoke.harn
-          node --input-type=module - "$harn_bin" <<'NODE'
-          import { installMulticallAliases } from "./scripts/bootstrap_harn.mjs";
-          installMulticallAliases(process.argv[2], "x86_64-pc-windows-msvc");
-          NODE
+          cp "$harn_bin" "$target_dir/debug/harn-lsp.exe"
+          cp "$harn_bin" "$target_dir/debug/harn-dap.exe"
           "$target_dir/debug/harn-lsp.exe" --version | grep '^harn-lsp '
           "$target_dir/debug/harn-dap.exe" --version | grep '^harn-dap '
           printf 'windows_native_test_to_smoke_seconds=%s\n' \
@@ -2370,33 +2389,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Run deterministic setup-action tests
-        if: runner.os == 'Linux'
-        run: node --test scripts/tests/bootstrap_harn.test.mjs
-      - name: Install a published Harn release
-        id: harn
-        uses: ./.github/actions/setup-harn
-        with:
-          version: 0.10.28
-          max-attempts: "3"
-          retry-delay-seconds: "1"
-      - name: Verify installed release and receipt outputs
-        shell: bash
-        env:
-          HARN_PATH: ${{ steps.harn.outputs.path }}
-          HARN_VERSION: ${{ steps.harn.outputs.version }}
-          HARN_CHECKSUM: ${{ steps.harn.outputs.checksum }}
-          HARN_RECEIPT: ${{ steps.harn.outputs.receipt }}
-        run: |
-          set -euo pipefail
-          test "$HARN_VERSION" = "0.10.28"
-          [[ "$HARN_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]
-          test -x "$HARN_PATH" || [[ "$RUNNER_OS" = "Windows" && -f "$HARN_PATH" ]]
-          node -e 'const r = JSON.parse(process.env.HARN_RECEIPT); if (r.schema_version !== "harn-bootstrap-v1" || r.binary_path !== process.env.HARN_PATH) process.exit(1)'
-          harn --version
+    uses: ./.github/workflows/setup-harn-contract.yml
+    with:
+      os: ${{ matrix.os }}
 
   # The Slow E2E suite lives in its own workflow (`.github/workflows/e2e.yml`),
   # which owns the main-push trigger, the nightly schedule, the `e2e`-label PR

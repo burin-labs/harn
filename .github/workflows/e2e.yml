@@ -116,7 +116,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Measure the E2E CPU and compiler memory budget
         id: resource-budget
-        run: bash scripts/ci/e2e_resource_budget.sh
+        run: bash scripts/ci/rust_resource_budget.sh
         env:
           RUNNER_ENVIRONMENT: ${{ runner.environment }}
       - uses: ./.github/actions/rust-toolchain

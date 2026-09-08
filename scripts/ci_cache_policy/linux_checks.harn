@@ -962,6 +962,34 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   errors = errors + strict_clippy_entrypoint_errors(rust_job)
   errors = errors + early_source_policy_errors(workflow)
   const producer = workflow?.jobs?.["rust-check-inputs"]
+  // The measured budget only bounds anything if the step it reads exists and
+  // asks for this lane's ceiling. An unresolved step id expands to an empty
+  // value, which cargo reads as "every core" — a silent inversion of the bound.
+  const budget_step = (producer?.steps ?? []).filter(
+    { step -> trim(to_string(step?.id ?? "")) == BUILD_BUDGET_STEP_ID },
+  )
+    .to_list()
+  if len(budget_step) != 1
+    || trim(to_string(budget_step[0]?.run ?? "")) != BUILD_BUDGET_COMMAND
+    || trim(to_string(budget_step[0]?.env?.HARN_BUDGET_PROFILE ?? ""))
+      != BUILD_BUDGET_PRODUCER_PROFILE {
+    errors = errors
+      + [
+        "ci.yml:rust-check-inputs must measure its compile fan-out in one '${BUILD_BUDGET_STEP_ID}' step on the ${BUILD_BUDGET_PRODUCER_PROFILE} profile",
+      ]
+  }
+  // Every compiling step in this job, not just the archive builder. One step
+  // left on a literal is one box still oversubscribed, and it reads as a
+  // deliberate exception because the step beside it looks correct.
+  for step in producer?.steps ?? [] {
+    const fan_out = trim(to_string(step?.env?.CARGO_BUILD_JOBS ?? ""))
+    if fan_out != "" && fan_out != HOSTED_BUILD_JOBS {
+      errors = errors
+        + [
+          "ci.yml:rust-check-inputs step '${trim(to_string(step?.name ?? "<unnamed>"))}' sets CARGO_BUILD_JOBS to '${fan_out}'; it must read the measured budget",
+        ]
+    }
+  }
   const build_step = step_by_name(producer?.steps ?? [], "Build portable workspace test archive")
   if trim(build_step?.if ?? "")
     != "vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"

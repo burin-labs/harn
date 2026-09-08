@@ -277,16 +277,16 @@ fn build_confinement(program: &str) -> Result<Option<TransferredConfinement>, Pr
 
 /// Other platforms wrap the payload's argv, and the request carries argv, so
 /// their confinement crosses the handover on its own.
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn build_confinement(_program: &str) -> Result<Option<TransferredConfinement>, ProcessError> {
     Ok(None)
 }
 
 /// The no-op the non-Linux paths type-check against.
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 struct TransferredConfinement;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 impl TransferredConfinement {
     fn request(&self) -> GuardianConfinement {
         unreachable!("no platform but Linux builds a transferred confinement")
@@ -414,7 +414,7 @@ fn apply_confinement(
 /// request already carries, so there is nothing to reattach here. Being handed
 /// one anyway means the two sides disagree about who confines, and the safe
 /// reading of that is a refusal rather than an unconfined payload.
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn apply_confinement(
     _command: &mut Command,
     confinement: Option<GuardianConfinement>,
