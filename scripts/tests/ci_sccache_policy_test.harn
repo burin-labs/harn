@@ -21,6 +21,18 @@ fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
 }
 
+// The producer's compile fan-out is measured by a step rather than typed, so
+// the fixture carries the same expression the workflow does. A literal here
+// would make the fixture describe a producer the policy now refuses.
+const MEASURED_BUILD_JOBS = "$" + "{{ steps.resource-budget.outputs.build_jobs }}"
+
+const BUDGET_STEP = {
+  name: "Measure the compile budget",
+  id: "resource-budget",
+  run: "bash scripts/ci/rust_resource_budget.sh",
+  env: {HARN_BUDGET_PROFILE: "producer"},
+}
+
 const E2E_SWITCH_ROUTE =
   "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest'"
 
@@ -221,6 +233,7 @@ fn workflow() {
         env: {...producer.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
         steps: producer.steps
           + [
+            BUDGET_STEP,
             {
               name: "Build portable Harn CLI",
               "timeout-minutes": 10,
@@ -236,7 +249,7 @@ fn workflow() {
             {
               name: "Build portable workspace test archive",
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
-              env: {CARGO_BUILD_JOBS: "4"},
+              env: {CARGO_BUILD_JOBS: MEASURED_BUILD_JOBS},
               run: "./scripts/ci/rust_artifact.sh build-tests bundle sha",
             },
             {
