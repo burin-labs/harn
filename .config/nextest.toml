@@ -262,6 +262,29 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 
+# The formatter corpus audit walks every `.harn` file in the repository and now
+# makes two full formatting passes over each one: the original token-preservation
+# check, plus the idempotence and line-width checks folded into the same walk in
+# #8267 so the expensive setup is paid once instead of three times.
+#
+# Sharing that setup was the right trade, but it roughly doubled a test that was
+# already measured at 68.8s on the scheduled 16-thread parity job — 57% of the
+# 120s ceiling. It has exceeded the ceiling on every scheduled run since, with
+# the same test and the same cap each day, so this is arithmetic rather than
+# runner noise. That job fans out to 16 threads on a 4-core runner, which is the
+# most contended shape this test ever runs in.
+#
+# Scope is anchored to this single case on purpose. Its fast fixture siblings in
+# the same module keep the default ceiling, so a real slow-test regression in one
+# of them still trips immediately.
+#
+# This budget stops the corpus audit from being killed mid-walk; it does not make
+# the audit cheap. The durable fix is to stop reformatting every file twice, and
+# the honest blocker is that the second pass is the idempotence check itself.
+[[profile.default.overrides]]
+filter = 'package(harn-fmt) and test(/current_harn_corpus_preserves_tokens_idempotence_and_width/)'
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
+
 # Two burin-mini playground cases replay a taped 22-turn fixture through the VM
 # in-process, driving roughly 80K of pipeline and library Harn source per run.
 # Like the catalog audit above, they are heavy CPU-bound tests whose wall-time
