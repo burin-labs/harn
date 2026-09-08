@@ -31,6 +31,16 @@ pub use crate::stdlib::sandbox::{
     SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
 };
 
+/// Confinement an embedder builds here and enters in a process it re-execs.
+///
+/// An embedder that spawns the payload directly never needs this: `pre_exec`
+/// carries the Linux confinement for it. One that hands the payload to a helper
+/// process does, because a callback cannot cross an `exec` and its loss is
+/// silent — the payload runs unconfined and every step before it still reports
+/// success.
+#[cfg(target_os = "linux")]
+pub use crate::stdlib::sandbox::{transferable_confinement, TransferableConfinement};
+
 /// Push a transient execution policy with `sandbox_profile` replaced by the
 /// requested profile. The returned guard restores the surrounding policy on
 /// drop.
