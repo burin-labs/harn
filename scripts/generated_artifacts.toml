@@ -83,6 +83,7 @@ exempt_checks = [
   "check-optional-dep-feature-contracts", # optional-dep feature completeness ratchet (#5690), not a mirror
   "check-all-features",             # cargo check --all-features compile gate (#5690), not a mirror
   "check-release-audit-contract",  # validates typed release proof mapping against CI, not a mirror
+  "check-release-metadata",       # validates published release metadata, not a generated mirror
   "check-binary-size-policy",     # validates typed/bootstrap release size policy parity, not a mirror
   "check-generated-registry",       # the auditor itself
   "check-drift",                    # fast preflight aggregator (derives members from [preflight.dispatch])
@@ -444,7 +445,8 @@ sources = [
 ]
 # The production CLI and Rust integration test execute the same fixture engine.
 # The release residual audit supplies its already-certified exact HARN_BIN.
-ci = false
+# Also runs on every push to main through `make repository-policies`.
+ci = true
 make_all = true
 
 [[artifact]]
@@ -638,6 +640,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 #               fixtures, or is a perf soak; in neither preflight.
 [preflight.dispatch]
 "check-agent-gates" = "binary"
+"check-release-metadata" = "binary"
 # --- source: fast, reads committed files (check-drift) ---
 "check-crate-sibling-versions" = "source"
 "check-protocol-symbol-removals" = "source"
