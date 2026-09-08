@@ -19,13 +19,42 @@ use std::sync::Arc;
 use super::host_agent_dispatch_tool_call;
 use crate::value::{DictMap, VmClosure, VmEnv, VmValue};
 
+struct PipelineInputBridge;
+
+impl crate::HostCallBridge for PipelineInputBridge {
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        _params: &'a DictMap,
+    ) -> crate::HostCallDispatchFuture<'a> {
+        crate::host_call_ready(Ok(((capability, operation)
+            == ("runtime", "pipeline_input"))
+            .then(|| VmValue::String("pipeline-value".into()))))
+    }
+}
+
 /// Compile one Harn function into a callable closure, the same way a
 /// `tool_define`d handler is compiled from pipeline source.
 fn compiled_closure(name: &str, source: &str) -> Arc<VmClosure> {
+    compiled_closure_with(name, source, crate::compiler::Compiler::new())
+}
+
+fn compiled_trusted_closure(name: &str, source: &str) -> Arc<VmClosure> {
+    compiled_closure_with(
+        name,
+        source,
+        crate::compiler::Compiler::new_trusted_host_dispatch(),
+    )
+}
+
+fn compiled_closure_with(
+    name: &str,
+    source: &str,
+    compiler: crate::compiler::Compiler,
+) -> Arc<VmClosure> {
     let program = harn_parser::check_source_strict(source).expect("handler source parses");
-    let chunk = crate::compiler::Compiler::new()
-        .compile(&program)
-        .expect("handler source compiles");
+    let chunk = compiler.compile(&program).expect("handler source compiles");
     let function = chunk
         .functions
         .iter()
@@ -70,6 +99,27 @@ async fn dispatch(tool_name: &str, handler_source: &str) -> serde_json::Value {
     )
     .await
     .expect("dispatch returns a value for a handler that returns rather than throws");
+    crate::llm::helpers::vm_value_to_json(&result)
+}
+
+async fn dispatch_trusted(tool_name: &str, handler_source: &str) -> serde_json::Value {
+    let handler = compiled_trusted_closure("handler", handler_source);
+    let tools = tools_with_handler(tool_name, handler);
+    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "id": "trusted-handler-1",
+        "name": tool_name,
+        "arguments": {},
+    }));
+    let mut vm = crate::vm::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    let result = host_agent_dispatch_tool_call(
+        crate::vm::AsyncBuiltinCtx::for_test(vm),
+        call,
+        Some(&tools),
+        &DictMap::new(),
+    )
+    .await
+    .expect("dispatch returns a typed tool result");
     crate::llm::helpers::vm_value_to_json(&result)
 }
 
@@ -143,5 +193,31 @@ async fn a_non_throwing_ok_true_return_is_recorded_as_a_successful_call() {
         result["error_category"],
         serde_json::Value::Null,
         "{result}"
+    );
+}
+
+/// A privileged wire is owned by the host-selected pipeline boundary, not by
+/// a model-invoked handler. The same bridge remains serviceable outside the
+/// handler, which keeps this from passing because the bridge was disconnected.
+#[tokio::test(flavor = "current_thread")]
+async fn host_call_inside_tool_handler_fails_loudly_while_pipeline_call_remains_serviceable() {
+    let _bridge = crate::install_host_call_bridge(Arc::new(PipelineInputBridge));
+    let direct = crate::dispatch_host_operation("runtime", "pipeline_input", &DictMap::new())
+        .await
+        .expect("the host-selected pipeline boundary reaches the host bridge");
+    assert_eq!(direct.display(), "pipeline-value");
+
+    let result = dispatch_trusted(
+        "read_pipeline_input",
+        r#"fn handler(request: dict) { return host_call("runtime.pipeline_input", {}) }"#,
+    )
+    .await;
+
+    assert_eq!(result["ok"], serde_json::json!(false), "{result}");
+    assert!(
+        result["observation"]
+            .as_str()
+            .is_some_and(|text| text.contains("unavailable inside a tool handler")),
+        "the refusal must distinguish an unserviceable host call from an empty host answer: {result}"
     );
 }
