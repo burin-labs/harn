@@ -124,6 +124,37 @@ pub type Doc = {headers?: dict<string, RefOr<Header>>}
 }
 
 #[test]
+fn recursive_pub_alias_materializes_outer_shape() {
+    // A non-generic recursive alias used to abandon the whole fragment, so
+    // `schema_of` inside its own module was a hard compile error. The outer
+    // union tags and fields must survive; the recursive slot is the one that
+    // opens.
+    let source = r#"
+pub type Recur = {op: "leaf", n: int} | {op: "node", of: list<Recur>}
+"#;
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let chunks = Compiler::compile_public_type_schema_initializers(&program, None)
+        .expect("a recursive pub alias must materialize a schema");
+    assert_eq!(chunks.len(), 1, "one public alias");
+    let strings = chunks
+        .iter()
+        .flat_map(|chunk| &chunk.constants)
+        .filter_map(|constant| match constant {
+            Constant::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(strings.contains(&"Recur"), "{strings:?}");
+    assert!(strings.contains(&"op"), "{strings:?}");
+    assert!(strings.contains(&"leaf"), "{strings:?}");
+    assert!(strings.contains(&"node"), "{strings:?}");
+    assert!(strings.contains(&"n"), "{strings:?}");
+}
+
+#[test]
 fn recursive_generic_alias_terminates_and_denies_cleanly() {
     // A genuinely unbounded-recursive generic must not hang or overflow the
     // stack during materialization; reaching this test's assertion at all
