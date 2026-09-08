@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 74 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 75 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -325,6 +325,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-073`](#harn-lnt-073) | parameter carrying a narrow capability handle is not named for that capability | `bindings/name-capability-parameter` | `surface-changing` |
 | [`HARN-LNT-074`](#harn-lnt-074) | explicitly unused private pipeline input can be removed | `bindings/remove-unused-pipeline-input` | `surface-changing` |
 | [`HARN-LNT-075`](#harn-lnt-075) | tool handler returns a freeform dict, so its outcome must be inferred from key names instead of declared by its type | — | — |
+| [`HARN-LNT-076`](#harn-lnt-076) | tool handler reaches the privileged host wire | — | — |
 
 ## FMT — Formatter
 
@@ -4073,6 +4074,22 @@ fn search_handler(args: dict) -> dict {
 This reports as a warning while in-tree handlers migrate. It becomes an error
 once no untyped handler result remains, at which point outcome classification
 stops being a heuristic over key names.
+
+### `HARN-LNT-076`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+tool handler reaches the privileged host wire
+
+`host_call(...)` belongs to the trusted entry boundary selected by an embedding
+host. A tool handler runs later under model or client control, where that wire
+is not a stable capability: its bridge can be absent even when the same call
+worked while assembling the pipeline.
+
+Read the host-owned value before registering the handler and pass it through a
+closure or an explicit typed capability. At runtime, reaching `host_call` from
+a handler raises an error that names the unavailable operation; it never falls
+through to a standalone default that can be mistaken for an empty host answer.
 
 ### `HARN-FMT-001`
 

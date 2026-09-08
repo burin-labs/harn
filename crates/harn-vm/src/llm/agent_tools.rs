@@ -575,7 +575,9 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 };
                 let args_vm = crate::stdlib::json_to_vm_value(tool_args);
                 let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
-                let outcome = vm.call_closure_pub(&handler, &[args_vm]).await;
+                let outcome =
+                    crate::tool_handler_scope::scope(vm.call_closure_pub(&handler, &[args_vm]))
+                        .await;
                 let captured = vm.take_output();
                 if let Some(ctx) = ctx {
                     ctx.forward_output(&captured);
@@ -651,7 +653,8 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             };
             let args_vm = crate::stdlib::json_to_vm_value(tool_args);
             let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
-            let outcome = vm.call_closure_pub(&handler, &[args_vm]).await;
+            let outcome =
+                crate::tool_handler_scope::scope(vm.call_closure_pub(&handler, &[args_vm])).await;
             let captured = vm.take_output();
             if let Some(ctx) = ctx {
                 ctx.forward_output(&captured);

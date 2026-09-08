@@ -161,6 +161,14 @@ the model-visible observation, so changing the prose does not change the
 structured facts. Unmarked dict returns retain their historical display-string
 behavior and do not gain promoted `data`.
 
+Tool handlers cannot call the privileged `host_call(...)` wire, including
+through a helper. The wire is serviceable only while the host-selected trusted
+entry graph is assembling the run; a model- or client-invoked handler executes
+outside that boundary. Read host-owned inputs before registering the tool and
+close over the value, or pass the narrow typed capability the handler needs.
+`harn check` reports `HARN-LNT-076` for a direct or same-module transitive call,
+and the runtime raises an explicit error if one is reached dynamically.
+
 Then hand the registry to `agent_loop(harness, ...)`:
 
 ```harn,ignore

@@ -525,7 +525,10 @@ impl McpServer {
         let result = match crate::mcp_input::scope_input_context(
             params,
             client_capabilities(params),
-            scope_context(progress_ctx, vm.call_closure_pub(&tool.handler, &[args_vm])),
+            scope_context(
+                progress_ctx,
+                crate::tool_handler_scope::scope(vm.call_closure_pub(&tool.handler, &[args_vm])),
+            ),
         )
         .await
         {
