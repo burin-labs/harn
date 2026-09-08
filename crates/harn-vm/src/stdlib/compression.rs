@@ -580,7 +580,9 @@ mod tests {
     fn zip_fixture(large_file: bool) -> Vec<u8> {
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default().large_file(large_file);
-        writer.set_comment("member census fixture");
+        writer
+            .set_comment("member census fixture")
+            .expect("set ZIP fixture comment");
         writer.add_directory("nested/", options).unwrap();
         for (name, body) in [
             ("evidence.json", b"first".as_slice()),
