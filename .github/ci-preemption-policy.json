@@ -1,5 +1,7 @@
 {
-  "schema": "harn.ci_preemption_policy.v1",
+  "schema": "harn.ci_preemption_policy.v2",
   "aggregate_job_names": ["CI status"],
-  "timeout_completion_grace_seconds": 90
+  "timeout_completion_grace_seconds": 90,
+  "lost_verdict_retry_job_names": [],
+  "rerun_failed_jobs_events": ["pull_request"]
 }

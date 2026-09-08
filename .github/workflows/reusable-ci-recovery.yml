@@ -1,0 +1,67 @@
+name: CI recovery (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      target_run_id:
+        description: "Completed GitHub Actions run to classify and recover."
+        required: true
+        type: number
+      policy_path:
+        description: "Caller-default-branch recovery policy."
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  recover:
+    name: Classify and apply bounded CI recovery
+    runs-on: ubuntu-latest
+    steps:
+      # The called workflow's source owns classification. The caller checkout
+      # supplies only reviewed default-branch configuration; target PR code is
+      # never executed by this privileged workflow_run path.
+      - name: Checkout recovery controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-recovery/controller
+          persist-credentials: false
+
+      - name: Checkout caller configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.repository.default_branch }}
+          path: .ci-recovery/caller
+          persist-credentials: false
+
+      - name: Set up Harn
+        id: harn
+        uses: ./.ci-recovery/controller/.github/actions/setup-harn
+        with:
+          version: "0.10.119"
+
+      - name: Classify failure and apply safe recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HARN_BIN: ${{ steps.harn.outputs.path }}
+          POLICY_PATH: ${{ inputs.policy_path }}
+          TARGET_REPO: ${{ github.repository }}
+          TARGET_RUN_ID: ${{ inputs.target_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          .ci-recovery/controller/scripts/recover_ci_preemption.sh \
+            --repo "$TARGET_REPO" \
+            --run-id "$TARGET_RUN_ID" \
+            --workflow-root .ci-recovery/caller \
+            --policy ".ci-recovery/caller/$POLICY_PATH" \
+            --max-attempts 1 \
+            --apply \
+            --emit-summary

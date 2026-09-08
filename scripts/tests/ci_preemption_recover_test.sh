@@ -61,6 +61,48 @@ write_run_json() {
     }
   ]
 }
+
+write_lost_verdict_run_json() {
+  local path="$1"
+  local attempt="$2"
+  cat > "$path" <<JSON
+{
+  "databaseId": 7001,
+  "event": "push",
+  "conclusion": "failure",
+  "status": "completed",
+  "headBranch": "main",
+  "headSha": "0123456789abcdef",
+  "url": "https://example.test/actions/runs/7001",
+  "attempt": $attempt,
+  "workflowName": "CI",
+  "jobs": [
+    {
+      "databaseId": 101,
+      "name": "Tests",
+      "status": "completed",
+      "conclusion": "failure",
+      "startedAt": "2026-09-08T05:27:56Z",
+      "completedAt": "2026-09-08T05:42:57Z",
+      "steps": [
+        {"name":"Set up job","status":"completed","conclusion":"success","number":1},
+        {"name":"Tests","status":"in_progress","conclusion":"","number":2},
+        {"name":"Cleanup","status":"pending","conclusion":"","number":3}
+      ]
+    },
+    {
+      "databaseId": 199,
+      "name": "CI status",
+      "status": "completed",
+      "conclusion": "failure",
+      "startedAt": "2026-09-08T05:42:57Z",
+      "completedAt": "2026-09-08T05:43:07Z",
+      "steps": []
+    }
+  ]
+}
+JSON
+}
 JSON
 }
 
@@ -148,6 +190,59 @@ burin-labs/harn
 --failed
 EOF
 cmp "$transport_dir/expected-action" "$transport_dir/action"
+
+lost_dir="$tmp_root/lost-verdict"
+mkdir -p "$lost_dir/logs"
+write_lost_verdict_run_json "$lost_dir/run.json" 1
+cat > "$lost_dir/policy.json" <<'JSON'
+{
+  "schema": "harn.ci_preemption_policy.v2",
+  "aggregate_job_names": ["CI status"],
+  "timeout_completion_grace_seconds": 90,
+  "lost_verdict_retry_job_names": ["Tests"],
+  "rerun_failed_jobs_events": ["pull_request", "push"]
+}
+JSON
+lost_receipt=$(
+  PATH="$transport_dir/bin:$PATH" \
+    HARN_BIN="$harn_bin" \
+    ACTION_RECEIPT="$lost_dir/action" \
+    "$recover_script" \
+      --repo burin-labs/harn \
+      --run-id 7001 \
+      --run-json "$lost_dir/run.json" \
+      --workflow "$workflow" \
+      --logs-dir "$lost_dir/logs" \
+      --policy "$lost_dir/policy.json" \
+      --apply
+)
+assert_receipt "$lost_receipt" '
+  .classification == "runner_verdict_lost"
+  and .inspected_job_count == 1
+  and .retry_safe_job_count == 1
+  and .unknown_job_count == 0
+  and .evidence_complete == true
+  and .jobs[0].kind == "runner_verdict_lost"
+  and .jobs[0].log_available == false
+  and .planned_action == "rerun_failed_jobs"
+'
+cmp "$transport_dir/expected-action" "$lost_dir/action"
+
+write_lost_verdict_run_json "$lost_dir/run-second.json" 2
+second_lost_receipt=$(
+  HARN_BIN="$harn_bin" "$recover_script" \
+    --repo burin-labs/harn \
+    --run-id 7001 \
+    --run-json "$lost_dir/run-second.json" \
+    --workflow "$workflow" \
+    --logs-dir "$lost_dir/logs" \
+    --policy "$lost_dir/policy.json"
+)
+assert_receipt "$second_lost_receipt" '
+  .classification == "runner_verdict_lost"
+  and .attempt == 2
+  and .planned_action == "none_max_attempts_reached"
+'
 
 merge_dir="$tmp_root/merge-group"
 mkdir -p "$merge_dir/logs"

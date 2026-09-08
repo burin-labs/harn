@@ -7,9 +7,11 @@ import {
 } from "../ci_preemption_policy.harn"
 
 const POLICY: RecoveryPolicy = {
-  schema: "harn.ci_preemption_policy.v1",
+  schema: "harn.ci_preemption_policy.v2",
   aggregate_job_names: ["CI status"],
   timeout_completion_grace_seconds: 90,
+  lost_verdict_retry_job_names: ["Tests"],
+  rerun_failed_jobs_events: ["pull_request"],
 }
 
 fn workflow() -> dict {
@@ -55,6 +57,43 @@ fn job(
     startedAt: started_at,
     completedAt: completed_at,
     steps: [],
+  }
+}
+
+fn lost_verdict_job(id: int, name: string) -> dict {
+  return {
+    databaseId: id,
+    name: name,
+    status: "completed",
+    conclusion: "failure",
+    startedAt: "2026-09-08T05:27:56Z",
+    completedAt: "2026-09-08T05:42:57Z",
+    steps: [
+      {
+        name: "Set up job",
+        status: "completed",
+        conclusion: "success",
+        number: 1,
+        startedAt: "2026-09-08T05:27:57Z",
+        completedAt: "2026-09-08T05:28:02Z",
+      },
+      {
+        name: "Tests",
+        status: "in_progress",
+        conclusion: "",
+        number: 2,
+        startedAt: "2026-09-08T05:28:02Z",
+        completedAt: "0001-01-01T00:00:00Z",
+      },
+      {
+        name: "Cleanup",
+        status: "pending",
+        conclusion: "",
+        number: 3,
+        startedAt: "0001-01-01T00:00:00Z",
+        completedAt: "0001-01-01T00:00:00Z",
+      },
+    ],
   }
 }
 
@@ -155,6 +194,76 @@ pipeline test_missing_log_evidence_fails_closed(task: unknown) {
   assert_eq(receipt.inspected_job_count, 0)
   assert_eq(receipt.evidence_complete, false)
   assert_eq(receipt.planned_action, "none")
+}
+
+pipeline test_lost_runner_verdict_is_retried_once_from_exact_metadata(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs([lost_verdict_job(101, "Tests")]),
+    workflow(),
+    POLICY,
+    [],
+    1,
+  )
+  assert_eq(receipt.classification, "runner_verdict_lost")
+  assert_eq(receipt.inspected_job_count, 1)
+  assert_eq(receipt.retry_safe_job_count, 1)
+  assert_eq(receipt.unknown_job_count, 0)
+  assert_eq(receipt.evidence_complete, true)
+  assert_eq(receipt.jobs[0]?.kind, "runner_verdict_lost")
+  assert_eq(receipt.jobs[0]?.log_available, false)
+  assert_eq(receipt.planned_action, "rerun_failed_jobs")
+}
+
+pipeline test_unlisted_lost_verdict_job_is_known_but_not_retry_safe(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs([lost_verdict_job(101, "Publish")]),
+    workflow(),
+    POLICY,
+    [],
+    1,
+  )
+  assert_eq(receipt.classification, "runner_verdict_lost")
+  assert_eq(receipt.evidence_complete, true)
+  assert_eq(receipt.retry_safe_job_count, 0)
+  assert_eq(receipt.planned_action, "none")
+}
+
+pipeline test_missing_log_with_a_failed_step_is_never_a_lost_verdict(task: unknown) {
+  const failed = lost_verdict_job(101, "Tests")
+  failed.steps[1].status = "completed"
+  failed.steps[1].conclusion = "failure"
+  const receipt = classify_recovery(run_with_jobs([failed]), workflow(), POLICY, [], 1)
+  assert_eq(receipt.classification, "evidence_unavailable")
+  assert_eq(receipt.evidence_complete, false)
+  assert_eq(receipt.planned_action, "none")
+}
+
+pipeline test_available_failure_log_wins_over_stale_step_metadata(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs([lost_verdict_job(101, "Tests")]),
+    workflow(),
+    POLICY,
+    [log(101, "Process completed with exit code 101.")],
+    1,
+  )
+  assert_eq(receipt.classification, "job_failure")
+  assert_eq(receipt.jobs[0]?.kind, "job_failure")
+  assert_eq(receipt.planned_action, "none")
+}
+
+pipeline test_policy_can_allow_one_lost_verdict_rerun_on_push(task: unknown) {
+  const base = run_with_jobs([lost_verdict_job(101, "Tests")])
+  const push_run: GitHubRun = schema_expect(
+    {...base, event: "push", headBranch: "main"},
+    schema_of(GitHubRun),
+  )
+  const push_policy: RecoveryPolicy = {
+    ...POLICY,
+    rerun_failed_jobs_events: ["pull_request", "push"],
+  }
+  const receipt = classify_recovery(push_run, workflow(), push_policy, [], 1)
+  assert_eq(receipt.classification, "runner_verdict_lost")
+  assert_eq(receipt.planned_action, "rerun_failed_jobs")
 }
 
 pipeline test_no_failed_jobs_does_not_report_complete_evidence(task: unknown) {

@@ -1,6 +1,7 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 
 pub type RecoveryClassification = "runner_preemption" \
+  | "runner_verdict_lost" \
   | "configured_timeout" \
   | "transient_ci_failure" \
   | "job_failure" \
@@ -13,6 +14,7 @@ pub type RecoveryClassification = "runner_preemption" \
   | "run_not_failed"
 
 pub type JobFailureKind = "runner_preemption" \
+  | "runner_verdict_lost" \
   | "configured_timeout" \
   | "job_failure" \
   | "evidence_unavailable" \
@@ -26,9 +28,11 @@ pub type RecoveryAction = "none" \
   | "none_max_attempts_reached"
 
 pub type RecoveryPolicy = {
-  schema: "harn.ci_preemption_policy.v1",
+  schema: "harn.ci_preemption_policy.v2",
   aggregate_job_names: list<string>,
   timeout_completion_grace_seconds: int,
+  lost_verdict_retry_job_names: list<string>,
+  rerun_failed_jobs_events: list<string>,
 }
 
 pub type GitHubJobStep = {
@@ -71,6 +75,7 @@ pub type JobFailureReceipt = {
   conclusion: string,
   kind: JobFailureKind,
   retry_safe: bool,
+  evidence_complete: bool,
   log_available: bool,
   elapsed_seconds?: int,
   configured_timeout_minutes?: int,
@@ -192,6 +197,19 @@ fn has_runner_preemption_signature(log_text: string) -> bool {
   return shutdown && lower.contains("exit code 143")
 }
 
+fn has_runner_verdict_loss_signature(job: GitHubJob) -> bool {
+  if job.status != "completed" || job.conclusion != "failure" {
+    return false
+  }
+  const steps = job.steps ?? []
+  const active_steps = steps.filter({ step -> step.status == "in_progress" }).count
+  const failed_steps = steps.filter(
+    { step -> step.conclusion == "failure" || step.conclusion == "cancelled" },
+  ).count
+  const completed_steps = steps.filter({ step -> step.status == "completed" }).count
+  return active_steps == 1 && failed_steps == 0 && completed_steps > 0
+}
+
 fn find_log(logs: list<JobLogEvidence>, job_id: int) -> JobLogEvidence? {
   return logs.find({ evidence -> evidence.job_id == job_id })
 }
@@ -207,6 +225,22 @@ fn classify_job(
   const text = log?.text ?? ""
   const elapsed = elapsed_seconds(job)
   if !available {
+    const verdict_lost = has_runner_verdict_loss_signature(job)
+    if verdict_lost {
+      return schema_expect(
+        {
+          job_id: job.databaseId,
+          job_name: job.name,
+          conclusion: job.conclusion ?? "",
+          kind: "runner_verdict_lost",
+          retry_safe: policy.lost_verdict_retry_job_names.contains(job.name),
+          evidence_complete: true,
+          log_available: false,
+          elapsed_seconds: elapsed,
+        },
+        schema_of(JobFailureReceipt),
+      )
+    }
     return schema_expect(
       {
         job_id: job.databaseId,
@@ -214,6 +248,7 @@ fn classify_job(
         conclusion: job.conclusion ?? "",
         kind: "evidence_unavailable",
         retry_safe: false,
+        evidence_complete: false,
         log_available: false,
         elapsed_seconds: elapsed,
       },
@@ -228,6 +263,7 @@ fn classify_job(
         conclusion: job.conclusion ?? "",
         kind: "runner_preemption",
         retry_safe: true,
+        evidence_complete: true,
         log_available: true,
         elapsed_seconds: elapsed,
       },
@@ -248,6 +284,7 @@ fn classify_job(
         conclusion: job.conclusion ?? "",
         kind: "configured_timeout",
         retry_safe: true,
+        evidence_complete: true,
         log_available: true,
         elapsed_seconds: elapsed,
         configured_timeout_minutes: timeout_minutes,
@@ -263,6 +300,7 @@ fn classify_job(
         conclusion: job.conclusion ?? "",
         kind: "job_failure",
         retry_safe: false,
+        evidence_complete: true,
         log_available: true,
         elapsed_seconds: elapsed,
       },
@@ -276,6 +314,7 @@ fn classify_job(
       conclusion: job.conclusion ?? "",
       kind: "cancellation_unknown",
       retry_safe: false,
+      evidence_complete: false,
       log_available: true,
       elapsed_seconds: elapsed,
     },
@@ -289,6 +328,9 @@ fn overall_classification(jobs: list<JobFailureReceipt>) -> RecoveryClassificati
   }
   if jobs.all({ job -> job.kind == "runner_preemption" }) {
     return "runner_preemption"
+  }
+  if jobs.all({ job -> job.kind == "runner_verdict_lost" }) {
+    return "runner_verdict_lost"
   }
   if jobs.all({ job -> job.kind == "configured_timeout" }) {
     return "configured_timeout"
@@ -352,12 +394,12 @@ pub fn classify_recovery(
   if exact_transient {
     if run.attempt > max_attempts {
       action = "none_max_attempts_reached"
-    } else if run.event == "pull_request" {
-      action = "rerun_failed_jobs"
     } else if run.event == "merge_group" && pr_number != nil {
       action = "requeue_merge_queue"
     } else if run.event == "merge_group" {
       action = "manual_merge_group_recovery"
+    } else if policy.rerun_failed_jobs_events.contains(run.event) {
+      action = "rerun_failed_jobs"
     } else {
       action = "manual_recovery"
     }
@@ -374,12 +416,12 @@ pub fn classify_recovery(
       head_branch: head_branch,
       pr_number: pr_number,
       failed_job_count: receipts.count,
-      inspected_job_count: receipts.filter({ receipt -> receipt.log_available }).count,
+      inspected_job_count: receipts.filter({ receipt -> receipt.evidence_complete }).count,
       retry_safe_job_count: retry_safe_count,
       terminal_failure_job_count: terminal_failure_count,
       unknown_job_count: unknown_count,
       evidence_complete: receipts.count > 0
-        && receipts.all({ receipt -> receipt.log_available }),
+        && receipts.all({ receipt -> receipt.evidence_complete }),
       jobs: receipts,
       planned_action: action,
       run_url: run.url ?? "",

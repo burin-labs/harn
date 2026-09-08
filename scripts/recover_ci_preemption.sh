@@ -28,6 +28,7 @@ run_id=""
 input_run_json=""
 input_logs_dir=""
 input_workflow=""
+input_workflow_root=""
 input_policy=""
 apply=false
 emit_summary=false
@@ -53,6 +54,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --workflow)
       input_workflow="${2:-}"
+      shift 2
+      ;;
+    --workflow-root)
+      input_workflow_root="${2:-}"
       shift 2
       ;;
     --policy)
@@ -84,6 +89,9 @@ done
 [[ "$repo" =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]] || die "--repo must be OWNER/REPO"
 [[ "$run_id" =~ ^[1-9][0-9]*$ ]] || die "--run-id must be a positive integer"
 [[ "$max_attempts" =~ ^[0-9]+$ ]] || die "--max-attempts must be an integer"
+if [[ -n "$input_workflow" && -n "$input_workflow_root" ]]; then
+  die "--workflow and --workflow-root are mutually exclusive"
+fi
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 policy_source="${input_policy:-$repo_root/.github/ci-preemption-policy.json}"
@@ -178,12 +186,13 @@ else
   workflow_path=$(gh api "/repos/$repo/actions/runs/$run_id" --jq '.path' \
     2> "$tmp_dir/workflow-metadata.err" || true)
   workflow_path="${workflow_path%@*}"
+  workflow_root="${input_workflow_root:-$repo_root}"
   if [[ ! "$workflow_path" =~ ^\.github/workflows/[^/]+\.(yml|yaml)$ ]] \
-    || [[ ! -f "$repo_root/$workflow_path" ]]; then
+    || [[ ! -f "$workflow_root/$workflow_path" ]]; then
     metadata_unavailable
     exit 0
   fi
-  cp -- "$repo_root/$workflow_path" "$workflow"
+  cp -- "$workflow_root/$workflow_path" "$workflow"
 fi
 
 while IFS= read -r job_id; do

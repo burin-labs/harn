@@ -15,7 +15,7 @@ on:
 
 permissions:
   actions: write
-  contents: write
+  contents: read
   pull-requests: write
 
 concurrency:
@@ -26,26 +26,7 @@ jobs:
   repair:
     name: Classify and recover runner preemption
     if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Set up Harn
-        id: harn
-        uses: ./.github/actions/setup-harn
-        with:
-          version: "0.10.119"
-      - name: Classify failure and apply safe recovery
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HARN_BIN: ${{ steps.harn.outputs.path }}
-          TARGET_RUN_ID: ${{ github.event.workflow_run.id }}
-          TARGET_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          ./scripts/recover_ci_preemption.sh \
-            --repo "$TARGET_REPO" \
-            --run-id "$TARGET_RUN_ID" \
-            --apply \
-            --emit-summary
+    uses: ./.github/workflows/reusable-ci-recovery.yml
+    with:
+      target_run_id: ${{ github.event.workflow_run.id }}
+      policy_path: .github/ci-preemption-policy.json
