@@ -128,7 +128,7 @@ pub(super) async fn run_connect_registered_provider(
         );
         let mut request = oauth_request_from_provider_metadata(provider, args, &metadata)?;
         if request.client_id.is_none() {
-            if let Some(registration) = load_legacy_oauth_registration(provider).await? {
+            if let Some(registration) = Box::pin(load_legacy_oauth_registration(provider)).await? {
                 request = oauth_request_with_legacy_registration(request, registration);
                 if migrated_oauth_client_secret_required(&request) {
                     let secret = rpassword::prompt_password("OAuth client secret: ")
