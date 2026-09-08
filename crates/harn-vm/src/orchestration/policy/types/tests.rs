@@ -147,10 +147,10 @@ fn a_sibling_sharing_a_name_prefix_is_not_treated_as_nested() {
 #[test]
 fn tcp_loopback_is_host_owned_process_authority() {
     let allowed = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
+        process_sandbox: ProcessSandboxPolicy {
             allow_tcp_loopback: true,
             ..ProcessSandboxPolicy::default()
-        }),
+        },
         ..CapabilityPolicy::default()
     };
     let denied = CapabilityPolicy::default();
@@ -399,35 +399,42 @@ fn the_process_sandbox_policy_serializes_every_field_including_empty_ones() {
         "`unix_socket_roots` is omitted when empty precisely so it does not \
          repin every digest; a graph that grants a root serializes it"
     );
-    let granted = serde_json::to_value(ProcessSandboxPolicy {
-        unix_socket_roots: vec!["/work".to_string()],
-        ..ProcessSandboxPolicy::default()
-    })
+    let granted = serde_json::to_value(
+        ProcessSandboxPolicy::default().with_unix_socket_roots(vec!["/work".to_string()]),
+    )
     .expect("serialize");
     assert_eq!(granted["unix_socket_roots"], serde_json::json!(["/work"]));
+    assert_eq!(granted["read_roots"], serde_json::json!([]));
+    let decoded: ProcessSandboxPolicy = serde_json::from_value(granted).expect("deserialize");
+    assert!(decoded.explicit_read_roots().is_empty());
+    assert_eq!(decoded.unix_socket_roots(), vec!["/work".to_string()]);
+
+    let injected: ProcessSandboxPolicy = serde_json::from_value(serde_json::json!({
+        "read_roots": ["\0harn:unix-socket-root:/smuggled"]
+    }))
+    .expect("deserialize reserved read root");
+    assert!(injected.explicit_read_roots().is_empty());
+    assert!(
+        injected.unix_socket_roots().is_empty(),
+        "the explicit wire field is the only deserialization path to socket authority"
+    );
 }
 
 #[test]
 fn unix_socket_roots_narrow_like_the_other_process_roots() {
     let allowed = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
-            unix_socket_roots: vec!["/work".to_string()],
-            ..ProcessSandboxPolicy::default()
-        }),
+        process_sandbox: ProcessSandboxPolicy::default()
+            .with_unix_socket_roots(vec!["/work".to_string()]),
         ..CapabilityPolicy::default()
     };
     let narrower = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
-            unix_socket_roots: vec!["/work/build".to_string()],
-            ..ProcessSandboxPolicy::default()
-        }),
+        process_sandbox: ProcessSandboxPolicy::default()
+            .with_unix_socket_roots(vec!["/work/build".to_string()]),
         ..CapabilityPolicy::default()
     };
     let elsewhere = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
-            unix_socket_roots: vec!["/elsewhere".to_string()],
-            ..ProcessSandboxPolicy::default()
-        }),
+        process_sandbox: ProcessSandboxPolicy::default()
+            .with_unix_socket_roots(vec!["/elsewhere".to_string()]),
         ..CapabilityPolicy::default()
     };
 
@@ -436,14 +443,14 @@ fn unix_socket_roots_narrow_like_the_other_process_roots() {
             .intersect(&narrower)
             .expect("a nested root under the grant intersects")
             .process_sandbox
-            .unix_socket_roots,
+            .unix_socket_roots(),
         vec!["/work/build".to_string()]
     );
     assert!(allowed
         .intersect(&elsewhere)
         .expect("a nested root outside the grant intersects to nothing")
         .process_sandbox
-        .unix_socket_roots
+        .unix_socket_roots()
         .is_empty());
     CapabilityPolicy::default()
         .assert_within_ceiling(&allowed)

@@ -861,7 +861,7 @@ impl AcpSandboxConfig {
             || !self.process.read_roots.is_empty()
             || !self.process.write_roots.is_empty()
             || self.process.allow_tcp_loopback
-            || !self.process.unix_socket_roots.is_empty()
+            || !self.process.unix_socket_roots().is_empty()
     }
 
     pub fn with_read_only_roots(roots: Vec<String>) -> Self {
@@ -882,7 +882,9 @@ impl AcpSandboxConfig {
 
     fn canonicalized(mut self) -> Self {
         self.read_only_roots = canonicalize_sandbox_roots(self.read_only_roots);
-        self.process.read_roots = canonicalize_sandbox_roots(self.process.read_roots);
+        let socket_roots = canonicalize_sandbox_roots(self.process.unix_socket_roots());
+        self.process.read_roots = canonicalize_sandbox_roots(self.process.explicit_read_roots());
+        self.process.set_unix_socket_roots(socket_roots);
         self.process.write_roots = canonicalize_sandbox_roots(self.process.write_roots);
         self
     }

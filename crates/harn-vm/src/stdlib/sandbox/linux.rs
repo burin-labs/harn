@@ -285,7 +285,7 @@ fn profile_setup(
                 .to_string(),
         ));
     }
-    if !policy.process_sandbox.unix_socket_roots.is_empty() {
+    if !policy.process_sandbox.unix_socket_roots().is_empty() {
         // seccomp filters the syscall, not the socket path, and Landlock has
         // no access right for connecting to a socket file, so a Unix-socket
         // grant cannot be scoped to its roots here. Admitting the socket

@@ -52,10 +52,10 @@ mod tests {
     fn requires_the_developer_toolchains_authority() {
         let cache = tempfile::tempdir().expect("custom cache");
         let policy = CapabilityPolicy {
-            process_sandbox: Box::new(ProcessSandboxPolicy {
+            process_sandbox: ProcessSandboxPolicy {
                 presets: Some(Vec::new()),
                 ..ProcessSandboxPolicy::default()
-            }),
+            },
             ..CapabilityPolicy::default()
         };
 

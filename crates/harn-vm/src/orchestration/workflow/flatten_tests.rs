@@ -160,17 +160,17 @@ fn unknown_side_effect_level_ranks_fail_closed() {
 fn widening_process_sandbox_roots_is_rejected() {
     use crate::orchestration::ProcessSandboxPolicy;
     let ceiling = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
+        process_sandbox: ProcessSandboxPolicy {
             write_roots: vec!["/repo/.cache".to_string()],
             ..Default::default()
-        }),
+        },
         ..Default::default()
     };
     let widened = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
+        process_sandbox: ProcessSandboxPolicy {
             write_roots: vec!["/repo/.cache".to_string(), "/etc".to_string()],
             ..Default::default()
-        }),
+        },
         ..Default::default()
     };
     let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
@@ -196,20 +196,20 @@ fn injecting_process_sandbox_roots_into_empty_ceiling_is_rejected() {
         (
             "process_sandbox.read_roots",
             CapabilityPolicy {
-                process_sandbox: Box::new(ProcessSandboxPolicy {
+                process_sandbox: ProcessSandboxPolicy {
                     read_roots: vec!["/etc".to_string()],
                     ..Default::default()
-                }),
+                },
                 ..Default::default()
             },
         ),
         (
             "process_sandbox.write_roots",
             CapabilityPolicy {
-                process_sandbox: Box::new(ProcessSandboxPolicy {
+                process_sandbox: ProcessSandboxPolicy {
                     write_roots: vec!["/etc".to_string()],
                     ..Default::default()
-                }),
+                },
                 ..Default::default()
             },
         ),
@@ -230,20 +230,20 @@ fn injecting_process_sandbox_roots_into_empty_ceiling_is_rejected() {
 fn widening_process_sandbox_presets_is_rejected() {
     use crate::orchestration::{ProcessSandboxPolicy, ProcessSandboxPreset};
     let ceiling = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
+        process_sandbox: ProcessSandboxPolicy {
             presets: Some(vec![ProcessSandboxPreset::SystemRuntime]),
             ..Default::default()
-        }),
+        },
         ..Default::default()
     };
     let widened = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
+        process_sandbox: ProcessSandboxPolicy {
             presets: Some(vec![
                 ProcessSandboxPreset::SystemRuntime,
                 ProcessSandboxPreset::DeveloperToolchains,
             ]),
             ..Default::default()
-        }),
+        },
         ..Default::default()
     };
     let err = ceiling.assert_within_ceiling(&widened).unwrap_err();

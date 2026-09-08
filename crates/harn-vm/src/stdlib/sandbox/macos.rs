@@ -508,7 +508,7 @@ fn user_temp_roots() -> &'static [&'static str] {
 /// Socket-file roots the profile will admit: the explicit grant, plus the
 /// UserTemp write roots when that preset is on and the grant is non-empty.
 fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
-    let mut roots = policy.process_sandbox.unix_socket_roots.clone();
+    let mut roots = policy.process_sandbox.unix_socket_roots();
     if !roots.is_empty()
         && process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp)
     {

@@ -1740,7 +1740,7 @@ pub(crate) fn process_sandbox_readonly_roots(policy: &CapabilityPolicy) -> Vec<P
     target_os = "windows"
 ))]
 pub(crate) fn process_sandbox_policy_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.read_roots)
+    normalized_process_roots(&policy.process_sandbox.explicit_read_roots())
 }
 
 #[cfg(any(

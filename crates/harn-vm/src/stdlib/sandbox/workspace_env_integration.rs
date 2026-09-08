@@ -30,14 +30,14 @@ fn enter_policy_with_environment(
         workspace_roots: vec![workspace.display().to_string()],
         side_effect_level: Some(SideEffectLevel::ProcessExec.as_str().to_string()),
         sandbox_profile: SandboxProfile::Worktree,
-        process_sandbox: Box::new(ProcessSandboxPolicy {
+        process_sandbox: ProcessSandboxPolicy {
             presets: Some(vec![
                 ProcessSandboxPreset::SystemRuntime,
                 ProcessSandboxPreset::DeveloperToolchains,
                 ProcessSandboxPreset::PackageManagerConfig,
             ]),
             ..ProcessSandboxPolicy::default()
-        }),
+        },
         ..CapabilityPolicy::default()
     });
     crate::stdlib::process::set_session_environment(Some(environment));

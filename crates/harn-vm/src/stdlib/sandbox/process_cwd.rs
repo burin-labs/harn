@@ -27,7 +27,9 @@ fn process_cwd_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots = normalized_workspace_roots(policy);
     for root in normalized_read_only_roots(policy)
         .into_iter()
-        .chain(normalized_process_roots(&policy.process_sandbox.read_roots))
+        .chain(normalized_process_roots(
+            &policy.process_sandbox.explicit_read_roots(),
+        ))
         .chain(normalized_process_roots(
             &policy.process_sandbox.write_roots,
         ))

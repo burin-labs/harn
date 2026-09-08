@@ -59,11 +59,11 @@ fn case_policy(case_root: &Path) -> CapabilityPolicy {
         // reads `workspace_roots` plus these process-only roots. Without them
         // a case that shells out would be refused a working directory, since
         // the runner's cwd is deliberately not writable above.
-        process_sandbox: Box::new(ProcessSandboxPolicy {
+        process_sandbox: ProcessSandboxPolicy {
             read_roots: process_roots.clone(),
             write_roots: process_roots,
             ..ProcessSandboxPolicy::default()
-        }),
+        },
         // Confine what a case *writes*, not what it *spawns*.
         //
         // Conformance cases are first-party code in this repository, and

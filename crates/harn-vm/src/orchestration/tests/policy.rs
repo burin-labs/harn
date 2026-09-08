@@ -53,7 +53,7 @@ fn capability_intersection_narrows_read_only_roots_to_common_set() {
 #[test]
 fn capability_intersection_narrows_process_sandbox_policy() {
     let ceiling = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
+        process_sandbox: ProcessSandboxPolicy {
             presets: Some(vec![
                 ProcessSandboxPreset::SystemRuntime,
                 ProcessSandboxPreset::DeveloperToolchains,
@@ -61,11 +61,11 @@ fn capability_intersection_narrows_process_sandbox_policy() {
             read_roots: vec!["/opt/sdk".to_string()],
             write_roots: vec!["/opt/cache".to_string()],
             ..Default::default()
-        }),
+        },
         ..Default::default()
     };
     let requested = CapabilityPolicy {
-        process_sandbox: Box::new(ProcessSandboxPolicy {
+        process_sandbox: ProcessSandboxPolicy {
             presets: Some(vec![
                 ProcessSandboxPreset::DeveloperToolchains,
                 ProcessSandboxPreset::UserTemp,
@@ -73,7 +73,7 @@ fn capability_intersection_narrows_process_sandbox_policy() {
             read_roots: vec!["/opt/sdk".to_string(), "/opt/other".to_string()],
             write_roots: vec!["/opt/cache".to_string(), "/opt/other-cache".to_string()],
             ..Default::default()
-        }),
+        },
         ..Default::default()
     };
 

@@ -156,7 +156,7 @@ pub(super) fn sandboxed_output(
             "TCP loopback-only child networking is not enforceable by AppContainer capabilities",
         ));
     }
-    if !policy.process_sandbox.unix_socket_roots.is_empty() {
+    if !policy.process_sandbox.unix_socket_roots().is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "path-scoped Unix-domain sockets for child processes are not enforceable by AppContainer capabilities",
@@ -1037,10 +1037,10 @@ mod tests {
     fn implicit_default_presets_match_explicitly_named_defaults() {
         let implicit = CapabilityPolicy::default();
         let explicit = CapabilityPolicy {
-            process_sandbox: Box::new(ProcessSandboxPolicy {
+            process_sandbox: ProcessSandboxPolicy {
                 presets: Some(ProcessSandboxPreset::default_presets().to_vec()),
                 ..Default::default()
-            }),
+            },
             ..Default::default()
         };
 
@@ -1054,10 +1054,10 @@ mod tests {
     #[test]
     fn explicit_empty_presets_do_not_materialize_home_acl_roots() {
         let policy = CapabilityPolicy {
-            process_sandbox: Box::new(ProcessSandboxPolicy {
+            process_sandbox: ProcessSandboxPolicy {
                 presets: Some(Vec::new()),
                 ..Default::default()
-            }),
+            },
             ..Default::default()
         };
 
@@ -1071,13 +1071,13 @@ mod tests {
         }
 
         let policy = CapabilityPolicy {
-            process_sandbox: Box::new(ProcessSandboxPolicy {
+            process_sandbox: ProcessSandboxPolicy {
                 presets: Some(vec![
                     ProcessSandboxPreset::DeveloperToolchains,
                     ProcessSandboxPreset::PackageManagerConfig,
                 ]),
                 ..Default::default()
-            }),
+            },
             ..Default::default()
         };
 

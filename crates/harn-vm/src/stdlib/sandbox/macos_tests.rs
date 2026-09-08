@@ -1008,10 +1008,10 @@ fn package_manager_preset_policy() -> CapabilityPolicy {
     CapabilityPolicy {
         workspace_roots: vec!["/tmp/harn-workspace".to_string()],
         sandbox_profile: SandboxProfile::Worktree,
-        process_sandbox: Box::new(crate::orchestration::ProcessSandboxPolicy {
+        process_sandbox: crate::orchestration::ProcessSandboxPolicy {
             presets: Some(vec![ProcessSandboxPreset::PackageManagerConfig]),
             ..Default::default()
-        }),
+        },
         ..CapabilityPolicy::default()
     }
 }
@@ -1187,7 +1187,9 @@ fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
 #[test]
 fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
     let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
-    policy.process_sandbox.unix_socket_roots = vec!["/tmp/harn-workspace".to_string()];
+    policy
+        .process_sandbox
+        .set_unix_socket_roots(vec!["/tmp/harn-workspace".to_string()]);
 
     let profile = render_profile(&policy);
 
@@ -1220,7 +1222,9 @@ fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
 #[test]
 fn a_socket_root_is_a_subpath_filter_never_a_broad_socket_grant() {
     let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
-    policy.process_sandbox.unix_socket_roots = vec!["/tmp/harn-workspace".to_string()];
+    policy
+        .process_sandbox
+        .set_unix_socket_roots(vec!["/tmp/harn-workspace".to_string()]);
 
     let profile = render_profile(&policy);
 
@@ -1251,7 +1255,9 @@ fn a_workspace_socket_bind_succeeds_under_the_grant_and_fails_outside_it() {
     let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text"]);
     policy.workspace_roots = vec![workspace_path.display().to_string()];
     policy.process_sandbox.write_roots = vec![elsewhere_path.display().to_string()];
-    policy.process_sandbox.unix_socket_roots = vec![workspace_path.display().to_string()];
+    policy
+        .process_sandbox
+        .set_unix_socket_roots(vec![workspace_path.display().to_string()]);
     policy.process_sandbox.presets = Some(vec![
         crate::orchestration::ProcessSandboxPreset::SystemRuntime,
         crate::orchestration::ProcessSandboxPreset::DeveloperToolchains,

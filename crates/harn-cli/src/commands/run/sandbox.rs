@@ -439,7 +439,7 @@ pub(super) fn default_run_capability_policy(
             .map(|path| normalize_run_workspace_root(path.as_path()))
             .map(|path| path.display().to_string())
             .collect(),
-        process_sandbox: Box::new(harn_vm::orchestration::ProcessSandboxPolicy {
+        process_sandbox: harn_vm::orchestration::ProcessSandboxPolicy {
             presets: None,
             read_roots: process_read_roots,
             write_roots: process_write_roots
@@ -449,12 +449,14 @@ pub(super) fn default_run_capability_policy(
                 .collect(),
             read_deny_roots: Vec::new(),
             allow_tcp_loopback: allow_process_loopback,
-            unix_socket_roots: process_unix_socket_roots
+        }
+        .with_unix_socket_roots(
+            process_unix_socket_roots
                 .iter()
                 .map(|path| normalize_run_workspace_root(path.as_path()))
                 .map(|path| path.display().to_string())
                 .collect(),
-        }),
+        ),
         side_effect_level: Some(
             if allow_process_network {
                 harn_vm::tool_annotations::SideEffectLevel::Network
@@ -539,7 +541,7 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
         .collect::<Vec<_>>();
     let process_read_roots = active_policy
         .as_ref()
-        .map(|policy| render_policy_roots(&policy.process_sandbox.read_roots))
+        .map(|policy| render_policy_roots(&policy.process_sandbox.explicit_read_roots()))
         .unwrap_or_default();
     let process_write_roots = active_policy
         .as_ref()
@@ -564,7 +566,7 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
             .is_some_and(|policy| policy.process_sandbox.allow_tcp_loopback),
         "process_unix_socket_roots": active_policy
             .as_ref()
-            .map(|policy| policy.process_sandbox.unix_socket_roots.clone())
+            .map(|policy| policy.process_sandbox.unix_socket_roots())
             .unwrap_or_default(),
         "side_effect_level": side_effect_level,
         "egress": egress,

@@ -144,10 +144,10 @@ mod tests {
         let process_root = tempfile::tempdir().expect("process root");
         push_execution_policy(CapabilityPolicy {
             workspace_roots: vec!["/workspace".to_string()],
-            process_sandbox: Box::new(ProcessSandboxPolicy {
+            process_sandbox: ProcessSandboxPolicy {
                 write_roots: vec![process_root.path().display().to_string()],
                 ..Default::default()
-            }),
+            },
             sandbox_profile: SandboxProfile::Worktree,
             ..CapabilityPolicy::default()
         });
@@ -170,20 +170,20 @@ mod tests {
         let process_root = tempfile::tempdir().expect("process root");
         let nested_root = process_root.path().join("nested");
         push_execution_policy(CapabilityPolicy {
-            process_sandbox: Box::new(ProcessSandboxPolicy {
+            process_sandbox: ProcessSandboxPolicy {
                 write_roots: vec![process_root.path().display().to_string()],
                 ..Default::default()
-            }),
+            },
             ..CapabilityPolicy::default()
         });
 
         let graph = WorkflowGraph::default();
         let node = crate::orchestration::WorkflowNode {
             capability_policy: CapabilityPolicy {
-                process_sandbox: Box::new(ProcessSandboxPolicy {
+                process_sandbox: ProcessSandboxPolicy {
                     write_roots: vec![nested_root.display().to_string()],
                     ..Default::default()
-                }),
+                },
                 ..CapabilityPolicy::default()
             },
             ..Default::default()

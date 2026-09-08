@@ -776,9 +776,13 @@ fn normalize_policy(policy: &mut crate::orchestration::CapabilityPolicy) {
     for operations in policy.capabilities.values_mut() {
         sort_dedup(operations);
     }
+    let mut unix_socket_roots = policy.process_sandbox.unix_socket_roots();
+    sort_dedup(&mut unix_socket_roots);
+    policy
+        .process_sandbox
+        .set_unix_socket_roots(unix_socket_roots);
     sort_dedup(&mut policy.process_sandbox.read_roots);
     sort_dedup(&mut policy.process_sandbox.write_roots);
-    sort_dedup(&mut policy.process_sandbox.unix_socket_roots);
     if let Some(presets) = policy.process_sandbox.presets.as_mut() {
         presets.sort();
         presets.dedup();
@@ -811,9 +815,8 @@ fn policy_requirements(
     requirements.extend(
         policy
             .process_sandbox
-            .read_roots
-            .iter()
-            .cloned()
+            .explicit_read_roots()
+            .into_iter()
             .map(|root| AuthorityRequirement::ProcessReadRoot { root }),
     );
     requirements.extend(
@@ -827,9 +830,8 @@ fn policy_requirements(
     requirements.extend(
         policy
             .process_sandbox
-            .unix_socket_roots
-            .iter()
-            .cloned()
+            .unix_socket_roots()
+            .into_iter()
             .map(|root| AuthorityRequirement::ProcessUnixSocketRoot { root }),
     );
     let presets = policy.process_sandbox.effective_presets();
