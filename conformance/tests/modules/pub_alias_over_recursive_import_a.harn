@@ -1,4 +1,5 @@
-// Owning module: a recursive type alias. The recursion is what used to stop the
-// alias from lowering to a schema at all.
-
+/**
+ * Owning module: a recursive type alias. The recursion is what used to stop the
+ * alias from lowering to a schema at all.
+ */
 pub type PubAliasRecur = {op: "leaf", n: int} | {op: "node", of: list<PubAliasRecur>}
