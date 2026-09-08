@@ -99,7 +99,10 @@ pipeline bootstrap_cli_projects_resolve_install_and_action_outputs(
   const f = fixture(harness)
   harness.fs.mkdir(dirname(f.plan.metadata_path))
   harness.fs.write_text(f.plan.metadata_path, f.checksum + "  " + f.plan.asset + "\n")
-  const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  // Keep the native source directory intact. The published seed's lexical
+  // path_normalize collapses Windows verbatim roots (\\\\?\\D:) to /?/D:.
+  // Process launch owns native cwd conversion; the script resolves its root.
+  const root = harness.fs.cwd()
   const output = path_join(dirname(f.request.cache_dir), "github-output")
   const path_output = path_join(dirname(f.request.cache_dir), "github-path")
   const summary = path_join(dirname(f.request.cache_dir), "github-summary")
@@ -120,7 +123,7 @@ pipeline bootstrap_cli_projects_resolve_install_and_action_outputs(
   const resolved = harness.process.run(
     {
       program: "sh",
-      args: [path_join(root, "scripts/bootstrap-harn.sh"), "resolve"]
+      args: ["../bootstrap-harn.sh", "resolve"]
         + common
         + ["--github-output", output],
       cwd: root,
@@ -140,7 +143,7 @@ pipeline bootstrap_cli_projects_resolve_install_and_action_outputs(
   const installed = harness.process.run(
     {
       program: "sh",
-      args: [path_join(root, "scripts/bootstrap-harn.sh"), "install", "--offline"]
+      args: ["../bootstrap-harn.sh", "install", "--offline"]
         + common
         + ["--github-output", output, "--github-path", path_output, "--github-summary", summary],
       cwd: root,
@@ -167,6 +170,14 @@ pipeline bootstrap_cli_projects_resolve_install_and_action_outputs(
   }
   assert_eq(harness.fs.read_text(path_output), f.request.install_dir + "\n")
   assert(harness.fs.read_text(summary).contains("Installed checksum-verified Harn"))
+  const invalid_directory = path_join(dirname(f.request.cache_dir), "not-a-directory")
+  harness.fs.write_text(invalid_directory, "preserve this file")
+  const rejected = try {
+    install_runtime(harness, f.request + {offline: true, install_dir: invalid_directory})
+  }
+  assert(is_err(rejected), "a file must not be accepted as an install directory")
+  assert(to_string(unwrap_err(rejected)).contains(invalid_directory))
+  assert_eq(harness.fs.read_text(invalid_directory), "preserve this file")
 }
 
 @test

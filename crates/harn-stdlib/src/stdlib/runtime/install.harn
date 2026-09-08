@@ -255,12 +255,12 @@ fn run_native_installer(
   const envelope = schema_expect(json_parse(stdout), schema_of(NativeEnvelope))
   require envelope.schemaVersion == 1, "unsupported native installer schema"
   require outcome.success && envelope.ok,
-    envelope.error?.message
+    "runtime installation into " + install_dir + " failed: " + (envelope.error?.message
     ?? if failure == "" {
       "runtime installation failed"
     } else {
       failure
-    }
+    })
   require envelope.data != nil, "native installer returned no receipt"
   return envelope.data
 }
