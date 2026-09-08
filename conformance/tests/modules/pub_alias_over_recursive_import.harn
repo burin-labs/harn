@@ -5,7 +5,5 @@ import { probe_pub_alias } from "pub_alias_over_recursive_import_b"
 
 pipeline default(harness: Harness) {
   harness.stdio.println(probe_pub_alias({op: "leaf", n: 1}))
-  harness.stdio.println(
-    probe_pub_alias({op: "node", of: [{op: "leaf", n: 2}]}),
-  )
+  harness.stdio.println(probe_pub_alias({op: "node", of: [{op: "leaf", n: 2}]}))
 }
