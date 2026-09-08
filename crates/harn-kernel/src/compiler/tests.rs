@@ -155,11 +155,12 @@ pub type Recur = {op: "leaf", n: int} | {op: "node", of: list<Recur>}
 }
 
 #[test]
-fn recursive_generic_alias_terminates_and_denies_cleanly() {
+fn recursive_generic_alias_terminates() {
     // A genuinely unbounded-recursive generic must not hang or overflow the
     // stack during materialization; reaching this test's assertion at all
-    // proves termination. Because the schema cannot be materialized, the value
-    // use site denies cleanly at compile time and names the alias.
+    // proves termination. The recursive slot opens (same hole a named
+    // recursive alias uses) so `schema_of` still compiles; the wrapper shape
+    // survives.
     let source = r"
 type Box<T> = {value: T}
 type Rec = Box<Rec>
@@ -168,8 +169,17 @@ pipeline default(harness: Harness) {
   harness.stdio.println(s.type)
 }
 ";
-    let err = try_compile(source).expect_err("recursive generic must be rejected");
-    assert!(err.message.contains("Rec"), "{}", err.message);
+    let chunk = try_compile(source).expect("a recursive generic must terminate, not hang");
+    let strings = chunk
+        .constants
+        .iter()
+        .filter_map(|constant| match constant {
+            Constant::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(strings.contains(&"value"), "{strings:?}");
+    assert!(strings.contains(&"dict"), "{strings:?}");
 }
 
 #[test]
@@ -511,9 +521,11 @@ fn test_optimizer_folds_literal_collections_and_strings() {
     let disasm = chunk.disassemble("test");
     let opcodes = disasm_opcodes(&disasm);
 
-    assert!(chunk
-        .constants
-        .contains(&Constant::String("haha".to_string())));
+    assert!(
+        chunk
+            .constants
+            .contains(&Constant::String("haha".to_string()))
+    );
     assert!(!opcodes.contains(&"ADD"));
     assert!(!opcodes.contains(&"MUL"));
 }
