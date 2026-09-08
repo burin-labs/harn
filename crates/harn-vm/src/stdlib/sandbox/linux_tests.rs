@@ -586,6 +586,10 @@ fn developer_toolchain_roots_are_read_only() {
     let roots = super::super::developer_toolchain_read_roots_for_home(temp_home.path());
 
     assert!(
+        roots.iter().any(|path| path.ends_with(".local/share/pnpm")),
+        "pnpm runtimes should be part of the developer-toolchain preset"
+    );
+    assert!(
         roots.iter().any(|path| path.ends_with(".local/share/uv")),
         "uv runtimes should be part of the developer-toolchain preset"
     );
