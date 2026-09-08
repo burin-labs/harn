@@ -1476,6 +1476,7 @@ jobs:
       # Keep it ahead of Node setup and both integration sweeps so a flaky-test
       # pattern fails the head before minutes of unrelated work have elapsed.
       - name: Reject flaky test patterns
+        if: always()
         run: make lint-test-patterns
       # `make spec-lint` must run the repository's declared Redocly CLI, not
       # let npx fall back to an unrelated registry package. Keep this install
@@ -1486,80 +1487,36 @@ jobs:
           node-version: "22"
           cache-dependency-path: package-lock.json
       - run: npm ci
-      # The embedded MCP Apps host is checked as readable source in place;
-      # there is no generated frontend bundle to validate elsewhere.
-      - run: make check-app-host
-      # Pure-shell grep gate: agent-facing hostlib paths must be
-      # forward-slash-normalized on every platform (see
-      # scripts/check_agent_path_normalization.sh). Kept with the other
-      # fast Python/shell gates so it fails before the harn CLI compile.
-      - run: make lint-agent-path-normalization
-      # Structural optional-dep feature contracts (ort TLS, …). Pure Python; no
-      # Cargo. Keeps off-by-default feature sets from rotting when default CI
-      # never compiles them (#5690).
-      - run: make check-optional-dep-feature-contracts
+      # Not a Make target, so it keeps its own step. `if: always()` here and on
+      # every step below is the point of this job's shape: a step that fails
+      # must not skip the ones after it.
       - name: Run pre-warm shell gates without Cargo
+        if: always()
         run: ./scripts/tests/pr_gate_pre_warm_boundary_test.sh
-      # These targets invoke the verified artifact HARN_BIN directly.
-      - run: make test-pr-gate-post-warm-integrations
-      - name: Check OpenAPI contract
-        run: make spec-lint
-      # check-bindings also runs the published Python and Go protocol bindings
-      # against the committed JSON fixture.
-      - run: make check-bindings
-      - run: make lint-diagnostic-codes
-      # Generic embedded stdlib behavior must not acquire product-host naming;
-      # reviewed compatibility/provenance literals are held to an exact baseline.
-      - run: make check-stdlib-host-neutral
-      - run: make check-public-product-names
-      # Strict-types ratchet: no unvalidated boundary access (HARN-OWN-004) in
-      # the gated stdlib. Runs the in-repo checker through the warm HARN_BIN.
-      - run: make check-stdlib-strict-types
-      # Public stdlib return-type ratchet: no new unannotated public exports
-      # (HARN-STD-102) beyond the checked-in AST-derived baseline.
-      - run: make check-stdlib-public-return-types
-      # Zero-baseline strict gate for the std/schema facade: strict-types and
-      # strict lint must both be clean on stdlib_schema.harn and its contracts.
-      - run: make check-schema-strict
-      # Closed policy, exact-byte resolution, and bootstrap jq parity. This
-      # focused sub-second suite keeps release admission live on every PR.
-      - run: make check-binary-size-policy
-      # Sync guards. check-generated-registry is the meta-guard
-      # that keeps scripts/generated_artifacts.toml in agreement with the
-      # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the
-      # warm HARN_BIN; pure shell/Python guards stay cheap either way.
-      - run: make check-receipt-structs
-      - run: make check-portable-benchmark-schema
-      - run: make check-portable-demo-package
-      - run: make check-docs-links
-      - run: make check-agent-guidance
-      - run: make check-agent-gates
-      - run: make check-tree-sitter-keywords
-      - run: make check-grammar-fitness
-      - run: make check-vm-exposures
-      # Product turn-end check vs measurement surfaces: the seam is structural,
-      # so a grading concern cannot drift into the live loop and an eval module
-      # cannot depend on loop internals.
-      - run: make check-turn-end-boundary
-      - run: make check-generated-registry
-      # Workflow-file contracts. These are registered in `make all` but were
-      # never invoked by any workflow, so they only ran on a developer's
-      # machine. `check_runner_tier.harn` says in its own header that it is
-      # "NOT allowed to skip" because the failure it guards is silent — it
-      # was skipping entirely. `audit-scripts` is gated on the catch-all
-      # `rust` filter, which includes .github/**, so these fire on exactly
-      # the edits they police.
-      - run: make check-cargo-lock-contract
-      - run: make check-rust-test-lane-policy
-      - run: make check-ci-cache-policy
-      - run: make lint-actions-harn
-      - run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/verify_release_metadata.harn'
+      # One step, every remaining policy check. `make repository-policies` owns
+      # the list and runs each check in turn, continuing past a failure and
+      # printing one line per check. These used to be one step per check, and a
+      # failing step skipped every step after it: one red hid nine siblings for
+      # a day on main, release metadata verification among them, with nothing
+      # saying they had not run. The workflow calls the same target a developer
+      # runs, so the list cannot drift between them.
+      # Kept as its own step: the CI cache policy asserts this integration sweep
+      # is a distinct step that the cheap flaky-pattern gate precedes, so the
+      # expensive sweep cannot run before the cheap gate has had its say.
+      - name: Run post-warm integration sweep
+        if: always()
+        run: make test-pr-gate-post-warm-integrations
+      - name: Run repository policy checks
+        if: always()
+        run: make repository-policies
       - name: Check no retroactive CHANGELOG edits
+        if: always()
         # GitHub checks out PRs and merge groups as synthetic merge commits.
         # HEAD^1 is the current base, while the event payload's PR-open base
         # SHA can become stale as main advances.
         run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn -- --base HEAD^1'
       - name: Check no undeclared protocol symbol removals
+        if: always()
         # spec/protocol-artifacts/ is a downstream contract: integrators compile
         # against the exported names. check-protocol-artifacts regenerates and
         # compares, so a symbol the generator stops emitting vanishes from both

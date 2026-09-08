@@ -1367,6 +1367,80 @@ verify-tree-sitter-parse:
 	@echo "=== Verifying tree-sitter parse coverage across the positive .harn sweep ==="
 	@$(HARN_CMD) run scripts/verify_tree_sitter_parse.harn -- --strict
 
+# Every repository policy check, run as one pass that continues past a failure
+# and prints one line per check.
+#
+# The CI job of the same name runs exactly this target, so the list has one
+# owner and the two cannot drift. That is the point: these used to be one
+# workflow step per check, and a step that fails skips every step after it, so
+# a single red hid nine siblings for a day on main. Among the hidden ones were
+# release metadata verification and the generated-artifact meta-guard, and
+# nothing said they had not run.
+#
+# The names are spelled literally here rather than through a variable because
+# the generated-artifact registry's reachability guard scans recipe text for
+# known target names to decide whether a check runs in CI. A variable would
+# make every one of them read as unreachable.
+#
+# Failing output is replayed after the summary, so the one-line-per-check list
+# stays readable and the detail is still there.
+repository-policies:
+	@set -u; failures=""; passed=0; logs="$$(mktemp -d)"; \
+	for check in \
+	  lint-test-patterns \
+	  check-app-host \
+	  lint-agent-path-normalization \
+	  check-optional-dep-feature-contracts \
+	  spec-lint \
+	  check-bindings \
+	  lint-diagnostic-codes \
+	  check-stdlib-host-neutral \
+	  check-public-product-names \
+	  check-stdlib-strict-types \
+	  check-stdlib-public-return-types \
+	  check-schema-strict \
+	  check-binary-size-policy \
+	  check-receipt-structs \
+	  check-portable-benchmark-schema \
+	  check-portable-demo-package \
+	  check-docs-links \
+	  check-agent-guidance \
+	  check-agent-gates \
+	  check-tree-sitter-keywords \
+	  check-grammar-fitness \
+	  check-vm-exposures \
+	  check-turn-end-boundary \
+	  check-generated-registry \
+	  check-cargo-lock-contract \
+	  check-rust-test-lane-policy \
+	  check-ci-cache-policy \
+	  lint-actions-harn \
+	  check-run-view-fixtures \
+	  check-release-metadata \
+	; do \
+	  if $(MAKE) --no-print-directory "$$check" >"$$logs/$$check.log" 2>&1; then \
+	    printf 'PASS  %s\n' "$$check"; passed=$$((passed + 1)); \
+	  else \
+	    printf 'FAIL  %s\n' "$$check"; failures="$$failures $$check"; \
+	  fi; \
+	done; \
+	if [ -n "$$failures" ]; then \
+	  for check in $$failures; do \
+	    printf '\n=== output of failing check: %s ===\n' "$$check"; \
+	    cat "$$logs/$$check.log"; \
+	  done; \
+	  printf '\nrepository policies: %s passed, failing:%s\n' "$$passed" "$$failures"; \
+	  rm -rf "$$logs"; exit 1; \
+	fi; \
+	printf '\nrepository policies: all %s checks passed\n' "$$passed"; \
+	rm -rf "$$logs"
+
+# The release metadata guard as a named target so it can join the list above
+# instead of living only as a raw command in the workflow.
+check-release-metadata:
+	@echo "=== Checking release metadata ==="
+	@$(HARN_CMD) run scripts/verify_release_metadata.harn
+
 # Meta-guard: fail if scripts/generated_artifacts.toml (the single source
 # of truth for every gen/check drift pair) has drifted from its consumers
 # -- the Makefile `all:` recipe, the CI workflows, and the declared output
