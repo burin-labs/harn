@@ -38,6 +38,12 @@ pub(super) async fn load_legacy_oauth_registration(
 ) -> Result<Option<LegacyOAuthRegistration>, String> {
     let provider = KeyringSecretProvider::new(legacy_secret_namespace()?);
     let id = harn_vm::secrets::connector_oauth_token_id(provider_name);
+    // Migration is opportunistic. A machine without a usable OS keyring must
+    // still reach the provider's normal dynamic-registration path.
+    match provider.contains(&id).await {
+        Ok(true) => {}
+        Ok(false) | Err(_) => return Ok(None),
+    }
     load_legacy_oauth_registration_from(&provider, &id).await
 }
 
