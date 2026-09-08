@@ -280,12 +280,12 @@ async fn run_connect_inner(args: ConnectArgs) -> Result<(), String> {
         ConnectCommand::Generic(args) => run_connect_generic(&args).await,
         ConnectCommand::Provider(raw) => {
             let parsed = parse_external_provider_connect(raw, json_output)?;
-            run_connect_registered_provider(
+            Box::pin(run_connect_registered_provider(
                 &parsed.provider,
                 &parsed.oauth,
                 parsed.from_env,
                 parsed.value_file,
-            )
+            ))
             .await
         }
     }
