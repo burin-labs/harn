@@ -51,13 +51,6 @@
       },
       "type": "object"
     },
-    "permission_mode": {
-      "enum": [
-        "allow",
-        "ask",
-        "deny"
-      ]
-    },
     "provider": {
       "additionalProperties": false,
       "properties": {
@@ -172,56 +165,6 @@
       },
       "type": "object"
     },
-    "limits": {
-      "additionalProperties": false,
-      "properties": {
-        "budget_usd": {
-          "minimum": 0,
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "concurrency": {
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "filesystem": {
-          "enum": [
-            "read-write",
-            "read-only",
-            "sandboxed"
-          ]
-        },
-        "network": {
-          "enum": [
-            "allow",
-            "ask",
-            "deny",
-            "offline"
-          ]
-        },
-        "sandbox": {
-          "enum": [
-            "host",
-            "process",
-            "container",
-            "worktree"
-          ]
-        },
-        "tokens": {
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
-    },
     "logging": {
       "additionalProperties": false,
       "properties": {
@@ -300,45 +243,12 @@
       },
       "type": "object"
     },
-    "permissions": {
-      "additionalProperties": false,
-      "properties": {
-        "capabilities": {
-          "additionalProperties": {
-            "$ref": "#/$defs/permission_mode"
-          },
-          "type": "object"
-        },
-        "default": {
-          "$ref": "#/$defs/permission_mode"
-        }
-      },
-      "type": "object"
-    },
     "plugins": {
       "additionalProperties": false,
       "properties": {
         "sources": {
           "items": {
             "$ref": "#/$defs/source"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
-    "policy": {
-      "additionalProperties": false,
-      "properties": {
-        "denied_fields": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "locked_fields": {
-          "items": {
-            "type": "string"
           },
           "type": "array"
         }

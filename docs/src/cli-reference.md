@@ -587,12 +587,12 @@ harn config schema --output docs/src/schemas/harn-config.schema.json
 | Command | Description |
 |---|---|
 | `inspect` | Print the redacted merged runtime config |
-| `inspect --explain` | Include per-field provenance, shadowed candidates, and managed policy lock status |
+| `inspect --explain` | Include per-field provenance and shadowed candidates |
 | `validate` | Validate local, project, or managed overlays against the typed config shape |
 | `schema` | Print the editor JSON Schema for `harn.config.toml` |
 
 See [Layered runtime configuration](./configuration.md) for precedence, file
-locations, environment override names, and managed policy examples.
+locations, and environment override names.
 
 ## harn playground
 

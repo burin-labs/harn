@@ -289,11 +289,8 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
         "HARN_LLM_TIMEOUT"
         | "HARN_LLM_IDLE_TIMEOUT"
         | "HARN_LLM_FIRST_TOKEN_TIMEOUT"
-        | "HARN_MAX_CONCURRENCY"
         | "HARN_RETENTION_DAYS"
-        | "HARN_TOKEN_BUDGET"
         | "HARN_EVENT_LOG_QUEUE_DEPTH" => EnvironmentValueShape::UnsignedInteger,
-        "HARN_BUDGET_USD" => EnvironmentValueShape::NonNegativeNumber,
         "HARN_OTEL_SAMPLE_RATIO" => EnvironmentValueShape::UnitInterval,
         "HARN_ALLOW_TOOLCHAIN_MISMATCH"
         | "HARN_BYTECODE_CACHE"
@@ -535,6 +532,31 @@ mod tests {
         let rendered = error.to_string();
         assert!(rendered.contains("HARN_CLOUD_API_KEZ"));
         assert!(!rendered.contains(secret));
+    }
+
+    /// Dispatch refuses the retired budget names, so a run cannot treat them
+    /// as a live ceiling. Names are assembled without a `"HARN_` token so this
+    /// fixture is not a live reader.
+    #[test]
+    fn retired_limit_names_are_unknown_at_startup() {
+        for name in [
+            concat!("HARN", "_BUDGET_USD"),
+            concat!("HARN", "_TOKEN_BUDGET"),
+            concat!("HARN", "_MAX_CONCURRENCY"),
+            concat!("HARN", "_NETWORK_MODE"),
+            concat!("HARN", "_FILESYSTEM_MODE"),
+            concat!("HARN", "_SANDBOX_MODE"),
+        ] {
+            let error = validate_environment([(name, "1")]).expect_err(name);
+            assert!(
+                error.to_string().contains(name),
+                "startup must name {name}, got {error}"
+            );
+            assert!(
+                variable_spec(name).is_none(),
+                "{name} must stay unregistered"
+            );
+        }
     }
 
     #[test]
