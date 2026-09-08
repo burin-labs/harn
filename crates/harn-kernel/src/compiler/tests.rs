@@ -521,11 +521,9 @@ fn test_optimizer_folds_literal_collections_and_strings() {
     let disasm = chunk.disassemble("test");
     let opcodes = disasm_opcodes(&disasm);
 
-    assert!(
-        chunk
-            .constants
-            .contains(&Constant::String("haha".to_string()))
-    );
+    assert!(chunk
+        .constants
+        .contains(&Constant::String("haha".to_string())));
     assert!(!opcodes.contains(&"ADD"));
     assert!(!opcodes.contains(&"MUL"));
 }
