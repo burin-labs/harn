@@ -1524,7 +1524,9 @@ jobs:
         # spec/protocol-artifacts/ is a downstream contract: integrators compile
         # against the exported names. check-protocol-artifacts regenerates and
         # compares, so a symbol the generator stops emitting vanishes from both
-        # sides and stays green. Same HEAD^1 base as the CHANGELOG guard above.
+        # sides and stays green -- which is why this guard exists beside it, and
+        # why that check now runs in `repository-policies` above rather than
+        # only in the local aggregate. Same HEAD^1 base as the CHANGELOG guard.
         env:
           PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
         run: make check-protocol-symbol-removals

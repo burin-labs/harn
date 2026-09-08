@@ -1393,6 +1393,7 @@ repository-policies:
 	  check-optional-dep-feature-contracts \
 	  spec-lint \
 	  check-bindings \
+	  check-protocol-artifacts \
 	  lint-diagnostic-codes \
 	  check-stdlib-host-neutral \
 	  check-public-product-names \
