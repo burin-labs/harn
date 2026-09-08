@@ -56,11 +56,12 @@ grep -q 'reason=runner_environment_missing' "$diagnostic"
 grep -q 'runner_environment=unset' "$diagnostic"
 
 
-# The producer ceiling is a memory bound, so measurement may only lower it. A
-# large box still stops at the recorded ceiling; a small one, where the old
-# literal oversubscribed the host, now gets its own cores minus the reserve.
-[[ $(rust_resource_budget "$policy" 24 1 producer) == $'build_jobs=4\ntest_threads=23' ]]
-[[ $(rust_resource_budget "$policy" 8 1 producer) == $'build_jobs=4\ntest_threads=7' ]]
+# The producer ceiling is measured: eight concurrent compilers cost about
+# 2.4 GiB, while the single heavy crate's 8.4 GiB peak is present at every
+# setting. A large box stops at the ceiling; a small one, where the old literal
+# four oversubscribed the host, gets its own cores minus the reserve.
+[[ $(rust_resource_budget "$policy" 24 1 producer) == $'build_jobs=8\ntest_threads=23' ]]
+[[ $(rust_resource_budget "$policy" 8 1 producer) == $'build_jobs=7\ntest_threads=7' ]]
 [[ $(rust_resource_budget "$policy" 2 1 producer) == $'build_jobs=1\ntest_threads=1' ]]
 # The two profiles must not collapse into one another.
 [[ $(rust_resource_budget "$policy" 24 1 e2e) == $'build_jobs=2\ntest_threads=23' ]]

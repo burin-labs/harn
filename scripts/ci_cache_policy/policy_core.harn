@@ -188,12 +188,29 @@ pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 // empty (#5003).
 pub const CI_CACHE_WRITE_JOBS = ["package-audit", "rust-check-inputs", "rust-cache-refresh"]
 
-// Compile fan-out on the producer is measured, not typed. The ceiling is still
-// four even on the 8-vCPU producer, because the bound is a link-heavy crate's
-// memory rather than the core count, and it lives in
-// `scripts/ci/rust-resource-policy.json` with the E2E ceiling beside it. What
-// changed is the floor: a literal four also ran four compilers on a two-core
-// host. Measurement may only lower the ceiling, never raise it.
+// Compile fan-out on the producer is measured, not typed, and the ceiling now
+// rests on a measurement rather than on a fear. It lives in
+// `scripts/ci/rust-resource-policy.json` beside the E2E ceiling.
+//
+// The old ceiling of four was justified as keeping a link-heavy crate from
+// exhausting memory. Sampling a full workspace build at one-second intervals
+// says fan-out is not what drives the peak. Peak resident set across all live
+// compiler processes, by how many were running at that moment, on a 12-thread
+// 62 GB Linux host, dev profile without debug info:
+//
+//   concurrent compilers   peak total RSS   mean per process
+//   1                      8401 MiB         8401 MiB
+//   2                      9363 MiB         4681 MiB
+//   4                      2363 MiB          590 MiB
+//   8                      2425 MiB          303 MiB
+//   12                     2571 MiB          214 MiB
+//
+// One process accounts for 8.4 GiB on its own, and it is alone when it does:
+// the heavy crate sits at the end of the graph with nothing beside it. That
+// peak is present at every fan-out setting, so lowering the ceiling never
+// bought the headroom it was said to buy, while eight concurrent compilers
+// cost about 2.4 GiB in total. The ceiling is therefore eight, and the share
+// formula still lowers it on a host with fewer cores.
 //
 // An expression is more dangerous than a literal here, because a step id that
 // does not resolve expands to the empty string and an empty CARGO_BUILD_JOBS
