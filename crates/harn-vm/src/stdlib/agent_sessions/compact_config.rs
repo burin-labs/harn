@@ -63,9 +63,9 @@ pub(super) fn build_compact_config(
     if let Some(VmValue::String(strategy)) = opts.get("hard_limit_strategy") {
         config.hard_limit_strategy = crate::orchestration::parse_compact_strategy(strategy)?;
     }
-    config.custom_compactor = closure_option(opts, "custom_compactor")?;
-    config.mask_callback = closure_option(opts, "mask_callback")?;
-    config.compress_callback = closure_option(opts, "compress_callback")?;
+    config.custom_compactor = closure_option(opts, "custom_compactor", "agent_session_compact")?;
+    config.mask_callback = closure_option(opts, "mask_callback", "agent_session_compact")?;
+    config.compress_callback = closure_option(opts, "compress_callback", "agent_session_compact")?;
     config.request_provenance = crate::orchestration::CompactionRequestProvenance {
         requested_strategy: Some(
             crate::orchestration::compact_strategy_name(&config.compact_strategy).to_string(),
@@ -77,14 +77,16 @@ pub(super) fn build_compact_config(
     Ok(config)
 }
 
-fn closure_option(opts: &crate::value::DictMap, key: &str) -> Result<Option<VmValue>, VmError> {
+pub(crate) fn closure_option(
+    opts: &crate::value::DictMap,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<VmValue>, VmError> {
     let Some(value) = opts.get(key).cloned() else {
         return Ok(None);
     };
     if !matches!(value, VmValue::Closure(_)) {
-        return Err(err(format!(
-            "agent_session_compact: `{key}` must be a closure"
-        )));
+        return Err(err(format!("{builtin}: `{key}` must be a closure")));
     }
     Ok(Some(value))
 }

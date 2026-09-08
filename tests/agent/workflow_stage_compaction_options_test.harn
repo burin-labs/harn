@@ -1,0 +1,74 @@
+// Run: harn test tests/agent/workflow_stage_compaction_options_test.harn
+//
+// Workflow stage compaction crosses Rust -> Harn -> agent_loop. The flattener
+// must preserve the nested shape consumed by auto-compaction and must not emit
+// inert top-level siblings that the option surface refuses.
+import { __validate_agent_loop_option_keys } from "std/agent/options_surface"
+import { workflow_flatten_agent_loop_options } from "std/workflow/stage"
+
+fn flattened() {
+  return workflow_flatten_agent_loop_options(
+    {
+      base: {},
+      auto_compact: {
+        enabled: true,
+        token_threshold: 8000,
+        tool_output_max_chars: 2000,
+        hard_limit_tokens: 20000,
+        compact_strategy: "summary",
+        hard_limit_strategy: "truncate",
+      },
+      raw_auto_compact: {
+        keep_last: 4,
+        summarize_prompt: "summarize tersely",
+        compress_callback: { text, _max -> text },
+        mask_callback: { _messages -> [] },
+      },
+    },
+  )
+}
+
+pipeline test_stage_compaction_fields_reach_the_nested_engine_contract() {
+  const options = flattened()
+  __validate_agent_loop_option_keys(options)
+  assert_eq(options.compact_threshold, 8000)
+  assert_eq(options.compact_strategy, "summary")
+  assert_eq(options.compact_keep_last, 4)
+  assert_eq(options.auto_compact.enabled, true)
+  assert_eq(options.auto_compact.tool_output_max_chars, 2000)
+  assert_eq(options.auto_compact.hard_limit_tokens, 20000)
+  assert_eq(options.auto_compact.hard_limit_strategy, "truncate")
+  assert_eq(options.auto_compact.summarize_prompt, "summarize tersely")
+  assert_eq(type_of(options.auto_compact.compress_callback), "closure")
+  assert_eq(type_of(options.auto_compact.mask_callback), "closure")
+  for misplaced in [
+    "tool_output_max_chars",
+    "hard_limit_tokens",
+    "hard_limit_strategy",
+    "summarize_prompt",
+    "compress_callback",
+    "mask_callback",
+  ] {
+    assert(!contains(options.keys(), misplaced))
+  }
+}
+
+pipeline test_live_top_level_agent_options_are_declared() {
+  __validate_agent_loop_option_keys(
+    {tool_examples: "Use canonical JSON.", agent_await_resumption_enabled: false},
+  )
+}
+
+pipeline test_compaction_callbacks_reach_the_engine_reader(harness: Harness) {
+  const messages = [{role: "user", content: "small control transcript"}]
+  for name in ["compress_callback", "mask_callback"] {
+    const attempted = try {
+      harness.agent.transcript_auto_compact(
+        messages,
+        {token_threshold: 999999, [name]: "not a closure"},
+      )
+    }
+    assert(is_err(attempted), name + " must reach the callback type check")
+    assert(contains(to_string(attempted), name))
+  }
+}
