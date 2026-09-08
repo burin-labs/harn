@@ -99,7 +99,6 @@ jobs:
       merge_group_proven: ${{ steps.merge_group_proof.outputs.proven }}
       rust: ${{ steps.force.outputs.rust }}
       package_audit: ${{ steps.force.outputs.package_audit }}
-      rust_cache_refresh: ${{ steps.force.outputs.rust_cache_refresh }}
       portal: ${{ steps.surface_filter.outputs.portal }}
       docs_site: ${{ steps.surface_filter.outputs.docs_site }}
       docs_checks: ${{ steps.surface_filter.outputs.docs_checks }}
@@ -344,21 +343,10 @@ jobs:
           MERGE_GROUP_DOCS_ONLY_TAIL: ${{ steps.merge_group_tail.outputs.docs_only_tail }}
         run: |
           set -euo pipefail
-          rust_cache_refresh=false
           if [ "${MERGE_GROUP_PROVEN}" = "true" ]; then
             echo "::notice::changes: exact ${GITHUB_SHA} already passed this workflow on merge_group — skipping duplicate heavy push lanes"
             echo "rust=false" >> "$GITHUB_OUTPUT"
             echo "package_audit=false" >> "$GITHUB_OUTPUT"
-            # rust-cache save-if is hard-gated to refs/heads/main, and GHA cache
-            # entries are scoped to the writing ref. Exact-SHA proof reuse skips
-            # the compile lanes on main, so without a dedicated refresher the
-            # shared Linux workspace-tests / package-audit caches never receive
-            # a main-scoped write and every merge_group compiles from a cold
-            # (or missing) restore.
-            if [ "${F_RUST}" = "true" ]; then
-              rust_cache_refresh=true
-              echo "::notice::changes: scheduling main-scoped Rust cache refresh for the next merge_group"
-            fi
           elif [ "${FORCE_MERGE_GROUP}" = "true" ] && [ "${MERGE_GROUP_DOCS_ONLY_TAIL}" = "true" ]; then
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes for a proven docs-only merge-queue tail"
             echo "rust=false" >> "$GITHUB_OUTPUT"
@@ -376,7 +364,6 @@ jobs:
             echo "rust=${F_RUST}" >> "$GITHUB_OUTPUT"
             echo "package_audit=${F_PACKAGE_AUDIT}" >> "$GITHUB_OUTPUT"
           fi
-          echo "rust_cache_refresh=${rust_cache_refresh}" >> "$GITHUB_OUTPUT"
 
   fmt:
     name: Format check
@@ -586,7 +573,7 @@ jobs:
         with:
           components: clippy
       - name: Install cargo-machete
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: cargo-machete@0.9.2
       - uses: ./.github/actions/rust-cache
@@ -634,7 +621,7 @@ jobs:
     # remains ten minutes, so this recovery margin does not weaken the latency
     # SLO. scripts/ci_cache_policy/linux_checks.harn owns the arithmetic.
     runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
-    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 20 || 65 }}
+    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 20 || 70 }}
     # The GitHub-hosted fallback remains an authorized main-branch cache
     # writer; Blacksmith uses sticky sccache and never enters that step.
     permissions:
@@ -676,11 +663,11 @@ jobs:
           cache-workspace-crates: "true"
           save: "true"
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
-        timeout-minutes: 9
+        timeout-minutes: 10
         env:
           CARGO_BUILD_JOBS: "4"
         run: >-
@@ -703,7 +690,7 @@ jobs:
       # Only security binaries enter this archive; the following workspace
       # tests reuse the same profile and unified features without rebuilding.
       - name: Build security test archive
-        timeout-minutes: 12
+        timeout-minutes: 16
         env:
           CARGO_BUILD_JOBS: "4"
         run: >-
@@ -804,124 +791,6 @@ jobs:
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
 
-  # Post-merge main-scoped cache writer. merge_group builds are the required
-  # proofs but cannot populate a cache other refs can read; main push would
-  # normally save, but exact-SHA proof reuse skips those compile lanes. This
-  # matrix restores → warms → saves each Linux merge-gate key with the same
-  # Swatinem env fingerprint as its consumer lane (#5003).
-  #
-  # A generation is only produced on a restore MISS. Cargo.lock, the crate
-  # manifests and the toolchain change far less often than main advances, so
-  # most commits restore the exact key and have nothing to write; those legs
-  # short-circuit instead of recompiling a target dir that is never saved.
-  rust-cache-refresh:
-    name: Refresh Rust cache (${{ matrix.cache_key }})
-    needs: [changes]
-    if: needs.changes.outputs.rust_cache_refresh == 'true'
-    runs-on: ubuntu-latest
-    # Main CI is keyed per commit so every integration proof starts. Serialize
-    # only this mutating tail across those runs: GitHub retains the running job
-    # and the newest pending job, avoiding concurrent prune/save operations.
-    concurrency:
-      group: harn-ci-rust-cache-refresh
-      cancel-in-progress: false
-    # Serial legs: each save needs its own headroom under the 10 GiB ceiling.
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          # Match rust-check-inputs / rust-checks workspace-tests env hash.
-          - cache_key: workspace-tests
-            rustflags: "-D warnings -Clink-arg=-fuse-ld=mold"
-            install_mold: true
-            install_nextest: true
-            warm_script: ./scripts/ci/warm_rust_cache.sh
-            save_headroom_bytes: 4294967296
-          # Match package-audit: workflow RUSTFLAGS only (no mold).
-          - cache_key: package-audit
-            rustflags: "-D warnings"
-            install_mold: false
-            install_nextest: false
-            warm_script: ./scripts/ci/warm_package_audit_cache.sh
-            save_headroom_bytes: 2147483648
-    permissions:
-      contents: read
-      actions: write
-    env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      RUSTFLAGS: ${{ matrix.rustflags }}
-      HARN_RUNNER_TIER: github-hosted
-      # Do NOT set CARGO_BUILD_JOBS here. Swatinem hashes every CARGO_* env var
-      # into the cache key; consumers only set jobs on build steps, so a
-      # job-level value here makes the saved key unrestorable (#5003).
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-      - uses: ./.github/actions/free-disk-space
-      - name: Install mold linker
-        if: matrix.install_mold
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
-      - uses: ./.github/actions/rust-toolchain
-      - id: rust-cache
-        uses: ./.github/actions/rust-cache
-        continue-on-error: true
-        with:
-          shared-key: ${{ matrix.cache_key }}
-          cache-on-failure: true
-          cache-bin: false
-          cache-workspace-crates: "true"
-          save: "true"
-      # A cache miss means the immutable entry for this family is obsolete.
-      # Delete it only after restore (so its contents remain available to the
-      # local warm build), then reserve the measured per-family envelope (4 GiB
-      # workspace-tests, 2 GiB package-audit). Release compile caches yield
-      # here; the other Linux merge-gate family remains protected (#5003).
-      - name: Prepare Linux cache generation save
-        if: steps.rust-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
-          HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
-        run: |
-          ./scripts/prune_ci_cache_generations.sh --clear-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
-          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
-      - name: Install cargo-nextest
-        if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
-        with:
-          tool: nextest@0.9.132
-      # Warm only after a miss. An exact-key restore means this family's entry
-      # already holds this commit's env + lockfile fingerprint, and GitHub's
-      # cache entries are immutable: Swatinem's post step then reports
-      # "Cache up-to-date." and writes nothing, so a warm build compiles for
-      # ~10 min and is discarded with the runner. On a miss this step is
-      # unchanged and still produces the generation the post step saves.
-      - name: Warm Cargo graph
-        if: steps.rust-cache.outputs.cache-hit != 'true'
-        env:
-          CARGO_BUILD_JOBS: "4"
-        run: ${{ matrix.warm_script }}
-      - name: Report cache generation already current
-        if: steps.rust-cache.outputs.cache-hit == 'true'
-        env:
-          HARN_CACHE_FAMILY: ${{ matrix.cache_key }}
-        run: |
-          {
-            echo "### Rust cache refresh (${HARN_CACHE_FAMILY})"
-            echo
-            echo "Exact-key restore: the main-scoped generation already matches"
-            echo "this commit's Rust environment and lockfile fingerprint."
-            echo "Nothing to warm: GitHub cache entries are immutable, so a"
-            echo "rebuild would be discarded rather than saved."
-          } >> "$GITHUB_STEP_SUMMARY"
-
   # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
   # inside the warm Rust producer (see rust-check-inputs), so this job skips and
   # no multi-gigabyte archive crosses Actions artifact storage. Setting the
@@ -969,7 +838,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: nextest@0.9.132
       - name: Start workspace test archive download timer
@@ -1057,7 +926,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: nextest@0.9.132
       - name: Download security test archive
@@ -1970,7 +1839,7 @@ jobs:
         shell: bash
         run: ./scripts/ci/windows_storage_budget.sh report after_restore
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: nextest@0.9.132
       # The `burin-mini` playground fixtures shell out to `node` from inside
@@ -2129,7 +1998,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
       - name: Install pinned cross CLI
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: cross@0.2.5
           fallback: none
@@ -2519,7 +2388,7 @@ jobs:
       # availability-dependent security signal without blocking every PR or
       # merge group when the external API returns 5xx.
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
         with:
           version: "1.26.1"
           online-audits: false
@@ -2564,7 +2433,6 @@ jobs:
         rust-check-inputs,
         rust-artifacts-ready,
         security-tests-ready,
-        rust-cache-refresh,
         rust-test,
         rust-security,
         stack-frames,
@@ -2708,15 +2576,6 @@ jobs:
             echo "::error::Rust workspace test proof is missing."
             exit 1
           fi
-
-          # Post-merge cache refresh is not a behavior proof, but when the
-          # changes job schedules it a failure means the next merge_group will
-          # compile cold again. Require success whenever it was requested.
-          rust_cache_refresh_result="${{ needs['rust-cache-refresh'].result }}"
-          rust_cache_refresh_expected="${{ needs.changes.outputs.rust_cache_refresh }}"
-          echo "Rust cache refresh: $rust_cache_refresh_result (expected=$rust_cache_refresh_expected)"
-          require_result "$rust_cache_refresh_result" \
-            "Rust cache refresh failed or skipped while a main-scoped cache write was required." [ "$rust_cache_refresh_expected" != "true" ]
 
           rust_test_result="${{ needs['rust-test'].result }}"
           echo "Rust workspace tests (archive mode): $rust_test_result"

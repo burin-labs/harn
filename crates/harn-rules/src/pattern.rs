@@ -463,7 +463,7 @@ mod tests {
         let mut out = Vec::new();
         while let Some(m) = matches.next() {
             let mut per_capture: HashMap<String, Vec<String>> = HashMap::new();
-            for cap in m.captures {
+            for cap in m.captures() {
                 let name = names[cap.index as usize].to_string();
                 let text = code[cap.node.start_byte()..cap.node.end_byte()].to_string();
                 per_capture.entry(name).or_default().push(text);

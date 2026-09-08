@@ -88,6 +88,8 @@ pub(crate) enum PackageCommand {
     Check(PackageCheckArgs),
     /// Run the complete package verification contract and emit a receipt.
     Verify(PackageVerifyArgs),
+    /// Inventory package test discovery without executing tests or mutating the package.
+    TestInventory(PackageTestInventoryArgs),
     /// Verify a package registry index and its immutable identities.
     Registry(PackageRegistryArgs),
     /// Build an inspectable package artifact directory.
@@ -229,6 +231,19 @@ pub(crate) struct PackageVerifyArgs {
     #[arg(long)]
     pub strict: bool,
     /// Emit the versioned verification receipt as JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Write the versioned JSON receipt to a file.
+    #[arg(long = "receipt-out", value_name = "PATH")]
+    pub receipt_out: Option<PathBuf>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct PackageTestInventoryArgs {
+    /// Package directory, harn.toml, or file under the package to inspect.
+    #[arg(default_value = ".")]
+    pub package: String,
+    /// Emit the versioned discovery receipt as JSON.
     #[arg(long)]
     pub json: bool,
     /// Write the versioned JSON receipt to a file.

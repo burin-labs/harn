@@ -10,7 +10,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 757,
+        "line": 759,
         "reader": "agent_done_contract"
       }
     ],
@@ -28,12 +28,12 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 749,
+        "line": 751,
         "reader": "agent_done_contract"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 748,
+        "line": 750,
         "reader": "agent_done_contract"
       }
     ],
@@ -51,7 +51,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 765,
+        "line": 767,
         "reader": "agent_done_contract"
       }
     ],
@@ -69,7 +69,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 753,
+        "line": 755,
         "reader": "agent_done_contract"
       }
     ],
@@ -87,7 +87,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 761,
+        "line": 763,
         "reader": "agent_done_contract"
       }
     ],
@@ -105,7 +105,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 762,
+        "line": 764,
         "reader": "agent_done_contract"
       }
     ],
@@ -123,12 +123,12 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 694,
+        "line": 696,
         "reader": "__done_contract_judge_system"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 324,
+        "line": 326,
         "reader": "__judge_stable_prefix"
       }
     ],
@@ -146,7 +146,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 763,
+        "line": 765,
         "reader": "agent_done_contract"
       }
     ],

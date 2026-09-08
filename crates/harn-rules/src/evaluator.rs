@@ -278,7 +278,7 @@ fn seed_candidates<'t>(top: &CompiledNode, ctx: &Ctx<'_>, root: Node<'t>) -> Vec
             let mut cursor = QueryCursor::new();
             let mut it = cursor.matches(query, root, ctx.source.as_bytes());
             while let Some(m) = it.next() {
-                for cap in m.captures {
+                for cap in m.captures() {
                     if Some(cap.index) == root_index && seen.insert(cap.node.id()) {
                         out.push(cap.node);
                     }
@@ -357,14 +357,14 @@ fn atomic_match(atomic: &CompiledAtomic, node: Node<'_>, ctx: &Ctx<'_>) -> Optio
             while let Some(m) = it.next() {
                 // The pattern must match `node` itself, not a descendant.
                 let roots_here = m
-                    .captures
+                    .captures()
                     .iter()
                     .any(|c| Some(c.index) == root_index && c.node.id() == node.id());
                 if !roots_here {
                     continue;
                 }
                 let mut bindings = Bindings::new();
-                for cap in m.captures {
+                for cap in m.captures() {
                     let name = names[cap.index as usize];
                     if metavars.iter().any(|mv| mv == name) {
                         bindings.entry(name.to_string()).or_insert_with(|| {

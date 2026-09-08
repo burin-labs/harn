@@ -30,7 +30,7 @@ pub(super) struct NodePos {
 /// cast.
 pub(in crate::ast) fn children<'tree>(node: Node<'tree>) -> impl Iterator<Item = Node<'tree>> {
     let count = node.child_count();
-    (0..count).filter_map(move |i| node.child(i as u32))
+    (0..count).filter_map(move |i| node.child(i))
 }
 
 pub(super) fn point_pos(node: Node<'_>) -> NodePos {

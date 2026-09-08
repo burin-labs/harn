@@ -161,7 +161,10 @@ pub(crate) fn extract_llm_options(
     } else {
         crate::llm::inferred_provider_selection_source(&provider)
     };
-    let caps = crate::llm::capabilities::lookup(&capability_provider, &capability_model);
+    let caps = crate::llm::capabilities::lookup_for_mockable_route(
+        &capability_provider,
+        &capability_model,
+    );
     let mut api_mode = parse_api_mode_option(options.as_ref())?;
     if enforce_responses_provider_gate(api_mode, &provider) {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -201,8 +204,6 @@ pub(crate) fn extract_llm_options(
     let system_prompt_root = assembled_system.root();
     let context_manifest = assembled_system.manifest().clone();
     let system = assembled_system.system;
-    let enforce_capability_gates = !crate::llm::mock::cli_llm_mock_replay_active()
-        && !crate::llm::mock::builtin_llm_mock_active();
 
     // Apply providers.toml model_defaults as fallbacks for unspecified params
     // (e.g. presence_penalty=1.5 for Qwen to avoid repetition loops).
@@ -372,28 +373,24 @@ pub(crate) fn extract_llm_options(
         &capability_provider,
         &capability_model,
         &caps,
-        enforce_capability_gates,
     )?;
     let mut anthropic_beta_features = parse_anthropic_beta_features_option(
         options.as_ref(),
         &thinking,
         &capability_provider,
         &capability_model,
-        enforce_capability_gates,
     )?;
 
     // The single `output` contract key. Providers lower this typed value
     // directly; there is no response-format/schema mirror to drift.
     let parsed_output = parse_output_option(options.as_ref())?;
     let output_format = parsed_output.format;
-    if enforce_capability_gates {
-        validate_output_format_supported(
-            &output_format,
-            &capability_provider,
-            &capability_model,
-            &caps,
-        )?;
-    }
+    validate_output_format_supported(
+        &output_format,
+        &capability_provider,
+        &capability_model,
+        &caps,
+    )?;
     let output_schema = output_format.schema().cloned();
     let output_validation = parsed_output.validation;
     // Stream-abort defaults to true whenever a schema is in play, so callers
@@ -427,35 +424,35 @@ pub(crate) fn extract_llm_options(
     let video = option_is_enabled(options.as_ref(), "video")
         || crate::llm::content::messages_contain_videos(&messages)?;
     let uses_file_ids = crate::llm::content::messages_contain_file_ids(&messages)?;
-    if enforce_capability_gates && vision && !caps.vision_supported {
+    if vision && !caps.vision_supported {
         return Err(unsupported_option_error(
             "vision",
             &capability_provider,
             &capability_model,
         ));
     }
-    if enforce_capability_gates && audio && !caps.audio {
+    if audio && !caps.audio {
         return Err(unsupported_option_error(
             "audio",
             &capability_provider,
             &capability_model,
         ));
     }
-    if enforce_capability_gates && pdf && !caps.pdf {
+    if pdf && !caps.pdf {
         return Err(unsupported_option_error(
             "pdf",
             &capability_provider,
             &capability_model,
         ));
     }
-    if enforce_capability_gates && video && !caps.video {
+    if video && !caps.video {
         return Err(unsupported_option_error(
             "video",
             &capability_provider,
             &capability_model,
         ));
     }
-    if enforce_capability_gates && uses_file_ids && !caps.files_api_supported {
+    if uses_file_ids && !caps.files_api_supported {
         return Err(unsupported_option_error(
             "files_api",
             &capability_provider,
@@ -506,7 +503,7 @@ pub(crate) fn extract_llm_options(
     // `validate_tool_format` would pass such a combo through unchanged; on a
     // tool-bearing call that can only yield a silent empty tool stream, so name
     // the bad combo and a suggested alternative up front instead of dispatching.
-    if enforce_capability_gates && tools_val.is_some() && !force_tool_format {
+    if tools_val.is_some() && !force_tool_format {
         if let Some(message) = crate::llm::capabilities::no_viable_tool_channel_with_caps(
             &capability_provider,
             &capability_model,
@@ -517,7 +514,7 @@ pub(crate) fn extract_llm_options(
             ))));
         }
     }
-    let tool_format = if enforce_capability_gates && tools_val.is_some() && !force_tool_format {
+    let tool_format = if tools_val.is_some() && !force_tool_format {
         let decision = crate::llm::capabilities::validate_tool_format_with_caps(
             &capability_provider,
             &capability_model,
@@ -531,12 +528,7 @@ pub(crate) fn extract_llm_options(
     } else {
         requested_tool_format
     };
-    if enforce_capability_gates
-        && tools_val.is_some()
-        && tool_format == "native"
-        && !caps.native_tools
-        && !force_tool_format
-    {
+    if tools_val.is_some() && tool_format == "native" && !caps.native_tools && !force_tool_format {
         return Err(unsupported_option_error(
             "tools",
             &capability_provider,
@@ -579,7 +571,7 @@ pub(crate) fn extract_llm_options(
         &thinking,
         native_tools.as_ref().is_some_and(|tools| !tools.is_empty()),
     );
-    if enforce_capability_gates && !provider_tools.is_empty() && api_mode != LlmApiMode::Responses {
+    if !provider_tools.is_empty() && api_mode != LlmApiMode::Responses {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "provider_tools requires api_mode: \"responses\"",
         ))));
@@ -759,11 +751,7 @@ pub(crate) fn extract_llm_options(
     // forward it through. Gating only on `native_tools` blocked scripts
     // that legitimately request tool_choice on text-tool routes such as
     // `ollama/devstral-small-2:24b`.
-    if enforce_capability_gates
-        && tool_choice.is_some()
-        && !caps.native_tools
-        && !caps.text_tool_wire_format_supported
-    {
+    if tool_choice.is_some() && !caps.native_tools && !caps.text_tool_wire_format_supported {
         return Err(unsupported_option_error(
             "tool_choice",
             &capability_provider,
@@ -814,7 +802,7 @@ pub(crate) fn extract_llm_options(
     // options stay one neutral vocabulary instead of two parallel spellings.
     // The remaining four have no Interactions representation and would be
     // silently dropped, so they still require Responses.
-    if enforce_capability_gates && api_mode != LlmApiMode::Responses {
+    if api_mode != LlmApiMode::Responses {
         let stateful_route = caps
             .live_endpoint_family
             .is_some_and(crate::llm::capabilities::LiveEndpointFamily::is_stateful);
@@ -873,7 +861,7 @@ pub(crate) fn extract_llm_options(
             ))));
         }
     };
-    if fast && enforce_capability_gates {
+    if fast {
         match crate::llm::serving_tiers::fast_gate(&model) {
             crate::llm::serving_tiers::ServingTierGate::Usable => {}
             crate::llm::serving_tiers::ServingTierGate::Unsupported => {
@@ -902,7 +890,6 @@ pub(crate) fn extract_llm_options(
         opt_str(&options, "reasoning_mode").as_deref(),
         &model,
         &provider,
-        enforce_capability_gates,
     )?;
 
     let mut opts = LlmCallOptions {
@@ -1005,9 +992,7 @@ pub(crate) fn extract_llm_options(
         });
     }
 
-    if enforce_capability_gates {
-        validate_options(&opts)?;
-    }
+    validate_options(&opts)?;
     if opts
         .routing_policy
         .as_ref()

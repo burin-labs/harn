@@ -17,6 +17,10 @@ declared refresh and validation commands.
   activates its locked connector without changing that working directory.
 - Receipt schema: `harn-bump-runtime-v1` (printed to stdout; key fields also
   land as step outputs and a step-summary block).
+- Package-test compatibility: before any mutation, the target runtime writes a
+  compact `package test-inventory` receipt. The workflow retains it as an
+  artifact and embeds its exact base64 JSON plus SHA-256 in any generated bump
+  pull request, so a repair sees the discovery failure that triggered it.
 
 ## Minimal caller workflow
 
@@ -125,6 +129,12 @@ arbitrary orchestration ref.
   head before merge can be enabled. When a compatible older target predates
   the typed refresh outcome, the workflow's per-run success sentinel still
   makes validation fail closed.
+- Package test discovery: the target runtime inventories selected test files
+  before changing the repository. A zero-test file or undeclared empty suite
+  is preserved as migration evidence while the normal validation and repair
+  policy decides whether a repair pull request may be published. Targets from
+  before this command existed record `package_test_inventory_unsupported`;
+  they never report an unmeasured suite as zero.
 - Stale heads: an open bump PR with auto-merge armed is disarmed only under its
   exact PR-head and base-head leases before refresh begins. The runtime checks
   the checkout's exact base against the remote branch before refresh, after
@@ -188,12 +198,11 @@ failure part-way through a bump.
   workflow activates the exact npm, pnpm, or yarn version declared by the
   caller's `package.json#packageManager`. Undeclared managers remain a Node-only
   setup; unsupported or non-exact declarations fail before caller commands run.
-- **No package-domain logic in the shared workflow.** The reusable workflow
-  never encodes a package's code-generation or build/test knowledge. Repos
-  expose their existing owner commands through `refresh-command`,
-  `format-command`, and `validate-command`; the shared workflow only sequences
-  them. Consumers copy no orchestration, release-readiness, signing, branch, or
-  PR machinery.
+- **One package-contract owner.** The shared workflow invokes Harn's structural
+  test-discovery inventory but encodes none of a package's code-generation or
+  build/test commands. Repositories expose those owner commands through
+  `refresh-command`, `format-command`, and `validate-command`; consumers copy
+  no orchestration, release-readiness, signing, branch, or PR machinery.
 - **Sandbox posture.** The orchestration runs under `harn run --no-sandbox`
   because it must reach git, the GitHub API through the connector, and the
   caller's refresh and validation commands. It carries no secret beyond the

@@ -818,6 +818,14 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     process::exit(1);
                 }
             }
+            PackageCommand::TestInventory(inventory) => {
+                if let Err(error) =
+                    commands::package_verify::handle_package_test_inventory(inventory)
+                {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
             PackageCommand::Registry(registry) => match registry.command {
                 PackageRegistryCommand::Verify(verify) => package::verify_package_registry(
                     &verify.registry,

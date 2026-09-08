@@ -791,7 +791,13 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     let mut command = std::process::Command::new(&resolved_cmd);
     command.args(spec.args);
     if let Some(cwd) = spec.cwd {
-        command.current_dir(cwd);
+        // Every child-process seam starts the child through `child_process_cwd`
+        // so a canonicalized (verbatim-prefixed) directory from `cwd()` or
+        // `canonicalize` is a directory Windows will actually start a process
+        // in. This seam had no such step, so `process.run(cmd, {cwd: cwd()})`
+        // failed with ERROR_DIRECTORY (os error 267) on Windows while the same
+        // call through `process.exec` succeeded.
+        command.current_dir(child_process_cwd(PathBuf::from(cwd)));
     }
     if spec.env_clear || resolved_environment.is_some() {
         command.env_clear();

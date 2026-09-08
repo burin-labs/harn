@@ -241,6 +241,33 @@ else
   fi
 fi
 
+# The agent gate census, locally, on the same target CI runs.
+#
+# CI runs this one only on a push to main, so a change that moves a recorded
+# read has no pre-merge signal anywhere: main goes red on the next push and the
+# lane that caused it has already moved on. That is how the workflow stage
+# stall-diagnostics option left sixteen rows pointing at shifted line numbers.
+#
+# Deliberately outside hook_skip_no_local_build. The other Harn-backed checks
+# here go dark in the fast default because a required CI lane still gates them
+# before merge; this one has no such lane, so a version that skipped by default
+# would prove nothing. It costs about three minutes, and only on a push that
+# touches one of the files the registry records a read in.
+if ! hook_agent_gate_sources_changed "$changed" "$(git rev-parse --show-toplevel)"; then
+  echo "=== Pre-push: skipping agent gate census (no recorded reader sources changed) ==="
+else
+  echo "=== Pre-push: checking the agent gate census ==="
+  agent_gate_harn=$(hook_find_existing_harn_bin || true)
+  if [ -z "$agent_gate_harn" ]; then
+    echo "    SKIPPED: no harn binary on this machine (run 'make build' or install a release)." >&2
+    echo "    This is a skip, not a pass; the census still runs on the next push to main." >&2
+  elif ! hook_run_agent_gate_census "$agent_gate_harn"; then
+    exit 1
+  else
+    echo "    Agent gate census OK."
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Phase 2 — Rust/Harn compilation and generated-mirror rebuilds (the
 # expensive steps). Reached only once the fast validators above pass.

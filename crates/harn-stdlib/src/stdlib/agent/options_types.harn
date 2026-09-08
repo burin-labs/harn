@@ -238,6 +238,15 @@ pub type JudgeConfig = {
   provider?: string,
   model?: string,
   system?: string,
+  // The LLM tuning knobs `__judge_apply_llm_overrides` copies off this config
+  // onto the judge's own call. They were read without being declared, so the
+  // option-surface check refused keys the judge itself honours. The list is
+  // `__JUDGE_LLM_OVERRIDE_KEYS` in `std/agent/judge_internals`.
+  temperature?: float,
+  max_tokens?: int,
+  top_p?: float,
+  tool_format?: string,
+  effort?: string,
   feedback_fallback?: string,
   max_invocations?: int,
   timeout_ms?: int,
@@ -499,6 +508,10 @@ pub type AgentLifecycleSpec = {
   daemon?: bool,
   persist_path?: string,
   resume_path?: string,
+  // Embedder-registered pre-approval precheck closure. The VM reads it as
+  // `agent_loop.tool_precheck` in `agent_session_host::session_policies`; it
+  // was live but undeclared, so the option-surface check refused it.
+  tool_precheck?: any,
   wake_interval_ms?: int,
   watch_paths?: string | list<string>,
   consolidate_on_idle?: bool,

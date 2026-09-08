@@ -215,3 +215,61 @@ pipeline test_an_expired_exception_stops_admitting(harness: Harness, task: unkno
   const kinds = report.findings.map({ f -> f.kind })
   assert(contains(kinds, "expired_exception"), "an expired exception is refused")
 }
+
+/**
+ * Banking keeps the budget to the frames worth watching.
+ *
+ * The census is taken at a measurement floor well under the smallest banked
+ * budget, so it now contains ordinary frames that were invisible before. If
+ * banking wrote every measured file, one run on main would turn a budget of a
+ * hundred watched frames into a census of every frame in the workspace, and
+ * each of those rows would then be a file whose absence is a refusal.
+ *
+ * Both directions are asserted, because an filter that kept everything and one
+ * that kept nothing would each satisfy a single-sided check.
+ */
+@test
+pipeline test_banking_writes_only_frames_at_or_above_the_discovery_threshold(
+  harness: Harness,
+  task: unknown,
+) {
+  const worst = worst_frame_by_file(
+    diagnostic("watched.rs", 10, 300000)
+      + "\n"
+      + diagnostic("at-threshold.rs", 10, 100000)
+      + "\n"
+      + diagnostic("ordinary.rs", 10, 60000),
+  )
+  const files = banked_files(worst, budget("watched.rs", 300000))
+  const paths = files.map({ f -> f.path })
+  assert(contains(paths, "watched.rs"), "a watched frame is banked")
+  assert(contains(paths, "at-threshold.rs"), "the threshold itself banks, it is not exclusive")
+  assert(
+    !contains(paths, "ordinary.rs"),
+    "a frame the measurement floor newly exposes must not enter the budget",
+  )
+  assert_eq(len(files), 2, "nothing else is banked")
+}
+
+/**
+ * The tightening a shrink produces.
+ *
+ * Before the measurement floor, a budgeted frame that shrank past the
+ * collection threshold vanished from the census, and an absent budgeted file
+ * is refused, so the reward for making a frame smaller was an unmergeable
+ * pull request. Now it reports a number, passes as a shrink, and banking drops
+ * its row on main.
+ */
+@test
+pipeline test_a_frame_that_shrank_under_the_threshold_passes_and_leaves_the_budget(
+  harness: Harness,
+  task: unknown,
+) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 60000))
+  const spec = budget("a.rs", 300000)
+  const report = judge_stack_frames(worst, spec, TODAY)
+  assert_eq(report.violation_count, 0, "a measured shrink is not a refusal")
+  const kinds = report.findings.map({ f -> f.kind })
+  assert(!contains(kinds, "absent_from_census"), "a measured file is never absent")
+  assert_eq(len(banked_files(worst, spec)), 0, "banking drops the row it no longer needs")
+}

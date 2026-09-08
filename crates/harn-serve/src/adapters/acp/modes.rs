@@ -455,26 +455,26 @@ fn apply_sandbox_config(policy: &mut CapabilityPolicy, sandbox: &AcpSandboxConfi
     policy.process_sandbox.extend(&sandbox.process);
 }
 
-/// RAII guard that pushes a CapabilityPolicy on construction and pops it on
-/// drop. Explicit process confinement also installs the SSRF private-address
-/// egress guard for the turn. Read-only roots retain their file policy without
-/// changing process or network behavior.
+/// Task-scoped owner of one turn's mode capability policy and egress posture.
 ///
-/// The serve adapter runs the whole prompt turn — including the agent's model
-/// HTTP calls — on a single current-thread `LocalSet` runtime (see
-/// `crates/harn-serve/src/adapter.rs`), so a thread-local egress guard held for
-/// the turn's lifetime covers every outbound request made during that turn,
-/// the same way the thread-local execution-policy stack already does.
-pub(super) struct ModePolicyGuard {
-    pushed: bool,
-    // Held for the turn so the SSRF private-address backstop stays installed
-    // until the guard drops. `None` when the embedder supplied no sandbox
-    // config (the no-config default path).
-    _ssrf_guard: Option<harn_vm::egress::SsrfGuardScope>,
+/// The adapter runs every session on one current-thread `LocalSet`, so two
+/// prompts interleave at their `.await` points. A thread-local push/pop guard
+/// held across those awaits is therefore a SHARED stack, not a per-turn one:
+/// the second turn's push lands on top of the first's, the first turn resumes
+/// reading the second turn's policy, and each drop pops the other's entry. A
+/// session that asked for `unrestricted` could descend into its agent loop
+/// under a concurrent session's confinement, and vice versa.
+///
+/// `run` hands both policies to the VM's ambient scope instead, which swaps
+/// them in around every poll of the wrapped future. Only the currently polling
+/// turn's policy is ever installed on the thread.
+pub(super) struct ModePolicyScope {
+    policy: Option<CapabilityPolicy>,
+    require_ssrf_guard: bool,
 }
 
-impl ModePolicyGuard {
-    pub(super) fn enter(mode_id: &str, sandbox: &AcpSandboxConfig) -> Self {
+impl ModePolicyScope {
+    pub(super) fn new(mode_id: &str, sandbox: &AcpSandboxConfig) -> Self {
         // Install the SSRF guard only with explicit process confinement.
         // It blocks PRIVATE/loopback/link-local/metadata egress while leaving
         // public traffic (model APIs, web_search/web_fetch to public hosts)
@@ -483,29 +483,44 @@ impl ModePolicyGuard {
         // `harness.net.egress_policy({block_private:"off"})` hatch; the metadata endpoint
         // stays blocked regardless. With no sandbox config we install nothing,
         // so egress is byte-identical to today's default.
-        let ssrf_guard = sandbox
-            .has_process_confinement()
-            .then(harn_vm::egress::require_ssrf_guard_for_host);
-        match policy_for_mode(mode_id, sandbox) {
-            Some(policy) => {
-                harn_vm::orchestration::push_execution_policy(policy);
-                Self {
-                    pushed: true,
-                    _ssrf_guard: ssrf_guard,
-                }
-            }
-            None => Self {
-                pushed: false,
-                _ssrf_guard: ssrf_guard,
-            },
+        //
+        // `policy` and `require_ssrf_guard` cannot disagree: process
+        // confinement makes `is_configured` true, so any sandbox that arms the
+        // guard also yields a policy. That is why `run`'s `None` arm needs no
+        // guard of its own.
+        Self {
+            policy: policy_for_mode(mode_id, sandbox),
+            require_ssrf_guard: sandbox.has_process_confinement(),
         }
     }
-}
 
-impl Drop for ModePolicyGuard {
-    fn drop(&mut self) {
-        if self.pushed {
-            harn_vm::orchestration::pop_execution_policy();
+    /// Run one asynchronous span of the turn with this turn's policy installed
+    /// around every poll of `inner`, and nobody else's.
+    ///
+    /// Callable more than once per turn. Each call captures the ambient scope
+    /// as it stands, so the synchronous code between two spans runs with the
+    /// caller's own context, exactly as it did under the previous guard.
+    pub(super) async fn run<F: std::future::Future>(&self, inner: F) -> F::Output {
+        match self.policy.clone() {
+            Some(policy) => {
+                // The scope snapshot is taken eagerly by
+                // `scope_execution_policy`, and it captures every other ambient
+                // slot — the SSRF depth included, via `SubtaskAmbientState`. So
+                // arm the guard first, let the snapshot copy that depth, then
+                // drop the raw guard: the requirement now lives in the scope and
+                // is installed only while `inner` is being polled.
+                let ssrf_guard = self
+                    .require_ssrf_guard
+                    .then(harn_vm::egress::require_ssrf_guard_for_host);
+                let scoped = harn_vm::orchestration::scope_execution_policy(policy, inner);
+                drop(ssrf_guard);
+                scoped.await
+            }
+            // A mode that installs no policy of its own still needs the span to
+            // own its ambient context. The prompt body holds resource ceilings
+            // across these awaits, and on an unscoped span those live on the
+            // polling thread, where the other turn reads and restores them.
+            None => harn_vm::orchestration::scope_ambient_context(inner).await,
         }
     }
 }
@@ -923,7 +938,7 @@ mod tests {
         // embedder config (bundled pipelines + dependency roots as read-only,
         // process read roots, and NO `presets` — i.e. no ~/.burin/sandbox.json)
         // must NOT narrow the process-sandbox presets. The full run policy — the
-        // ModePolicyGuard policy intersected with the agent-loop's tools-only
+        // ModePolicyScope policy intersected with the agent-loop's tools-only
         // policy — must still carry SystemRuntime so child spawns can read
         // `/opt/homebrew` (Homebrew-installed toolchain roots such as GOROOT).
         let mut sandbox =
@@ -963,9 +978,9 @@ mod tests {
         // the SSRF private-address guard is NOT installed. Assert ownership
         // directly so a legitimate ambient HARN_EGRESS_* policy cannot change
         // this unit test's premise.
-        let guard = ModePolicyGuard::enter("code", &AcpSandboxConfig::default());
+        let scope = ModePolicyScope::new("code", &AcpSandboxConfig::default());
         assert!(
-            guard._ssrf_guard.is_none(),
+            !scope.require_ssrf_guard,
             "no-config code mode must not install an SSRF guard scope"
         );
     }
@@ -974,14 +989,16 @@ mod tests {
     fn read_only_roots_code_mode_installs_policy_without_ssrf_guard() {
         let sandbox =
             AcpSandboxConfig::with_read_only_roots(vec!["/opt/shared/prompts".to_string()]);
-        let guard = ModePolicyGuard::enter("code", &sandbox);
-        assert!(guard.pushed, "read-only roots must install a turn policy");
+        let scope = ModePolicyScope::new("code", &sandbox);
         assert!(
-            guard._ssrf_guard.is_none(),
+            scope.policy.is_some(),
+            "read-only roots must install a turn policy"
+        );
+        assert!(
+            !scope.require_ssrf_guard,
             "read-only roots must not change network behavior"
         );
-        let effective = harn_vm::orchestration::current_execution_policy()
-            .expect("turn policy must be visible");
+        let effective = scope.policy.expect("turn policy must be present");
         assert_eq!(
             effective.read_only_roots,
             vec!["/opt/shared/prompts".to_string()]
@@ -1012,11 +1029,175 @@ mod tests {
                 write_roots: Vec::new(),
                 ..Default::default()
             });
-        let guard = ModePolicyGuard::enter("code", &sandbox);
+        let scope = ModePolicyScope::new("code", &sandbox);
         assert!(
-            guard._ssrf_guard.is_some(),
+            scope.require_ssrf_guard,
             "configured code mode must retain an SSRF guard scope"
         );
+    }
+
+    /// Two prompts in flight on one adapter must each descend under their OWN
+    /// mode policy.
+    ///
+    /// The ACP adapter runs every session on one current-thread `LocalSet`, so
+    /// two turns interleave at their `.await` points. A raw thread-local
+    /// push/pop guard held across those awaits is a SHARED stack: the second
+    /// turn's push lands on top of the first's, the first turn resumes reading
+    /// the second's policy, and the drops then pop each other's entries.
+    ///
+    /// The arms assert the carrier that actually governs each turn's
+    /// `agent_loop` descent — the value a child process is checked against —
+    /// not the profile the embedder requested:
+    ///
+    /// 1. liveness: each turn descends under a real carrier, never `None`.
+    ///    Without this arm, an adapter that installed nothing at all would
+    ///    satisfy arm 3 by accident.
+    /// 2. the defect: the `unrestricted` turn still descends `Unrestricted`
+    ///    after the confined turn has interleaved.
+    /// 3. the control: the confined turn descends `Worktree`, so arm 2 is not
+    ///    passing because confinement stopped working in both directions.
+    ///
+    /// Falsifier: restore the thread-local `ModePolicyGuard` (push on enter,
+    /// pop on drop, held across the awaits in `prompt.rs`). Arm 2 fails with
+    /// the confined turn's profile, and the residue assertion fails too.
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_turns_each_descend_under_their_own_mode_policy() {
+        use harn_vm::orchestration::{
+            clear_execution_policy_stacks, current_execution_policy, enter_nested_execution_policy,
+            NestedExecutionKind, SandboxProfile,
+        };
+
+        fn requesting(profile: SandboxProfile) -> AcpSandboxConfig {
+            AcpSandboxConfig {
+                requested_profile: Some(profile),
+                ..AcpSandboxConfig::default()
+            }
+        }
+
+        /// What the turn's `agent_loop` descent would hand a child process.
+        fn descended_profile(label: &str) -> Option<SandboxProfile> {
+            let guard =
+                enter_nested_execution_policy(None, NestedExecutionKind::AgentLoop, label).ok()?;
+            let profile = current_execution_policy().map(|policy| policy.sandbox_profile);
+            drop(guard);
+            profile
+        }
+
+        clear_execution_policy_stacks();
+        let unrestricted = ModePolicyScope::new("code", &requesting(SandboxProfile::Unrestricted));
+        let confined = ModePolicyScope::new("code", &requesting(SandboxProfile::Worktree));
+
+        // The interleave is fixed, not raced: `join!` polls the two futures in
+        // order on one thread, and the extra `yield_now` in each body places
+        // the confined turn's entry between the unrestricted turn's entry and
+        // its own read.
+        let unrestricted_turn = unrestricted.run(async {
+            tokio::task::yield_now().await;
+            descended_profile("unrestricted-turn")
+        });
+        let confined_turn = confined.run(async {
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+            descended_profile("confined-turn")
+        });
+        let (unrestricted_descent, confined_descent) =
+            tokio::join!(unrestricted_turn, confined_turn);
+
+        assert!(
+            unrestricted_descent.is_some() && confined_descent.is_some(),
+            "arm 1 (liveness): each served turn must descend under a real carrier, or the \
+             remaining arms are satisfied by an adapter that installs nothing"
+        );
+        assert_eq!(
+            unrestricted_descent,
+            Some(SandboxProfile::Unrestricted),
+            "arm 2 (the defect): the embedder asked for `unrestricted`, so this turn's agent \
+             loop must still descend unrestricted after a concurrent turn interleaved"
+        );
+        assert_eq!(
+            confined_descent,
+            Some(SandboxProfile::Worktree),
+            "arm 3 (the control): the concurrent turn must keep its own confinement, so arm 2 \
+             cannot be passing because the two policies simply swapped"
+        );
+        assert!(
+            current_execution_policy().is_none(),
+            "neither turn's policy may outlive its own prompt scope"
+        );
+        clear_execution_policy_stacks();
+    }
+
+    /// Two prompts in flight must also keep their own resource ceilings.
+    ///
+    /// Same cause and same seam as the policy arms above: the prompt body
+    /// installs the turn's caps and holds them across the awaited execution, so
+    /// on an unscoped span they live on the polling thread and the other turn
+    /// reads and restores them. This arm covers the `code` mode with no
+    /// embedder sandbox config, which installs no capability policy at all and
+    /// was therefore the one span still running unscoped.
+    ///
+    /// The cap is read back through `mcp_calls_spent`, which answers `None`
+    /// when no budget is installed and `Some` once one is. Charging a call
+    /// against it first is what makes the read non-null: a probe that could
+    /// only ever report `None` would pass with no budget installed anywhere.
+    ///
+    /// Falsifier: drop the `None` arm's scope back to a bare `inner.await`.
+    /// The first turn then reads the second turn's budget.
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_turns_each_keep_their_own_resource_ceiling() {
+        use harn_vm::orchestration::clear_execution_policy_stacks;
+
+        /// `code` with no sandbox config: the mode that installs no policy.
+        fn unconfigured() -> AcpSandboxConfig {
+            AcpSandboxConfig::default()
+        }
+
+        clear_execution_policy_stacks();
+        assert!(
+            policy_for_mode("code", &unconfigured()).is_none(),
+            "this arm must exercise the span that installs no capability policy"
+        );
+
+        async fn turn(scope: &ModePolicyScope, cap: u64, extra_yields: usize) -> Option<u64> {
+            scope
+                .run(async move {
+                    let _budget = harn_vm::install_mcp_call_budget(cap);
+                    harn_vm::charge_mcp_call().expect("first charge is under every cap here");
+                    for _ in 0..=extra_yields {
+                        tokio::task::yield_now().await;
+                    }
+                    // Charge again and report the total this turn has spent.
+                    // Its own budget was charged once, so a turn that reads its
+                    // own ceiling sees 2.
+                    harn_vm::charge_mcp_call().ok();
+                    harn_vm::mcp_calls_spent()
+                })
+                .await
+        }
+
+        let first = ModePolicyScope::new("code", &unconfigured());
+        let second = ModePolicyScope::new("code", &unconfigured());
+        // The same fixed interleave as the policy arms: `join!` polls in order,
+        // and the yield counts place the second turn's install between the
+        // first turn's install and its own read.
+        let (first_spent, second_spent) = tokio::join!(turn(&first, 8, 0), turn(&second, 8, 1));
+
+        assert_eq!(
+            first_spent,
+            Some(2),
+            "the first turn must charge its OWN budget on both calls; reading anything else \
+             means the second turn's ceiling replaced it while this one was suspended"
+        );
+        assert_eq!(
+            second_spent,
+            Some(2),
+            "and the second turn must keep its own, so the pair cannot pass by simply swapping"
+        );
+        assert!(
+            harn_vm::mcp_calls_spent().is_none(),
+            "neither turn's ceiling may outlive its own prompt scope"
+        );
+        clear_execution_policy_stacks();
     }
 
     // ---- an embedder may DECLINE confinement, not only arm it --------------

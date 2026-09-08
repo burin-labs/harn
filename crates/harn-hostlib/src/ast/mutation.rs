@@ -365,7 +365,7 @@ fn collect_errors(root: tree_sitter::Node<'_>, source: &str) -> Vec<String> {
             errors.push(format!("line {line}: unexpected '{trimmed}'"));
         }
         for i in (0..node.child_count()).rev() {
-            if let Some(child) = node.child(i as u32) {
+            if let Some(child) = node.child(i) {
                 stack.push(child);
             }
         }

@@ -12,13 +12,59 @@ use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::cli::{ConnectorCheckArgs, PackageVerifyArgs};
+use crate::cli::{ConnectorCheckArgs, PackageTestInventoryArgs, PackageVerifyArgs};
 use crate::package::{self, ConnectorContractFixture, ResolvedProviderConnectorKind};
 
 mod connector_contract;
+mod test_discovery;
 use connector_contract::check_one_connector;
+use test_discovery::inspect_package_test_discovery;
+#[cfg(test)]
+use test_discovery::package_test_discovery;
 
 pub(crate) const PACKAGE_VERIFY_SCHEMA_VERSION: u32 = 2;
+pub(crate) const PACKAGE_TEST_INVENTORY_SCHEMA_VERSION: u32 = 1;
+
+pub(crate) fn handle_package_test_inventory(args: PackageTestInventoryArgs) -> Result<(), String> {
+    let package_dir = package_dir_from_anchor(&PathBuf::from(&args.package));
+    let (inventory, problems) = inspect_package_test_discovery(&package_dir);
+    let passed = problems.is_empty();
+    let envelope = if passed {
+        crate::json_envelope::JsonEnvelope::ok(PACKAGE_TEST_INVENTORY_SCHEMA_VERSION, &inventory)
+    } else {
+        crate::json_envelope::JsonEnvelope::err(
+            PACKAGE_TEST_INVENTORY_SCHEMA_VERSION,
+            "package_test_discovery_failed",
+            "package test discovery failed",
+        )
+        .with_details(json!({
+            "inventory": inventory,
+            "problems": problems,
+        }))
+    };
+    let rendered = crate::json_envelope::to_string_pretty(&envelope);
+    if args.json {
+        println!("{rendered}");
+    } else if passed {
+        println!(
+            "Package test discovery passed: {} selected file(s), {} discovered test pipeline(s).",
+            inventory.selected_file_count, inventory.discovered_test_count
+        );
+    } else {
+        eprintln!("Package test discovery failed:");
+        for problem in &problems {
+            eprintln!("- {problem}");
+        }
+    }
+    if let Some(path) = args.receipt_out.as_deref() {
+        write_receipt(path, &rendered)?;
+    }
+    if passed {
+        Ok(())
+    } else {
+        Err("package test discovery failed".to_string())
+    }
+}
 
 pub(crate) async fn handle_package_verify(args: PackageVerifyArgs) -> Result<(), String> {
     let report = verify_package(&args).await;

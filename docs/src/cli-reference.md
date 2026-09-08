@@ -4098,8 +4098,29 @@ lints, and format-checks package-owned Harn files; runs package tests; installs
 the package into a temporary consumer and checks each export; validates
 documentation and generated API docs; and dry-runs package packing. Connector
 packages also run their connector metadata and deterministic fixture contract.
-Each receipt check records whether the gate was applicable and reached, plus
-its command, result, timing, and diagnostics.
+Each schema-v2 receipt check records whether the gate was applicable and
+reached, plus its command, result, timing, and diagnostics. Package test
+discovery has a separate read-only command and receipt.
+
+## harn package test-inventory
+
+Inspect package test discovery without executing tests or changing package
+files. Release compatibility scans use this command with the candidate Harn
+runtime so a new discovery rule fails before publication reaches downstream
+bump pull requests.
+
+```bash
+harn package test-inventory .
+harn package test-inventory . --json
+harn package test-inventory . --json \
+  --receipt-out .harn/receipts/package-test-inventory.json
+```
+
+The command exits nonzero for an unreasoned empty suite, a parse or discovery
+error, or any selected file with no discoverable test pipeline. Its schema-v1
+receipt reports selected-file and discovered-test counts, the configured empty
+suite exception, and path plus SHA-256 identity for each file with no test or
+with a discovery error. It does not enumerate files that passed discovery.
 
 `--strict` makes both check and lint warnings fatal and enables strict boundary
 type checking. Schema-v2 receipts expose `strict_requested` and record the

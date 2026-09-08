@@ -13,10 +13,16 @@ type DependabotIgnore = {dependency_name: string}
  * What one package ecosystem's groups have to look like.
  *
  * `families` are the named high-risk sets that must stay reviewable on their
- * own. `catch_all_update_types` is what the catch-all group is allowed to
- * sweep up: `["minor", "patch"]` for package ecosystems, so a major keeps its
- * own PR and its own revert, and `[]` for `github-actions`, where majors are
- * runner-baseline bumps that arrive fleet-wide and are better batched.
+ * own. Keep this list short. A family holding a single package still opens its
+ * own pull request, so carving one out to reduce review size instead repeats
+ * the review, the CI run, and the rebase of everything behind it. A family
+ * earns its place only when the question it raises cannot be answered by
+ * reading a version number.
+ *
+ * `catch_all_update_types` is what the catch-all group may sweep up. `[]`
+ * means everything, majors included, which is now the rule for every
+ * ecosystem: with no released users, the standing decision is to move to
+ * current versions rather than to hold majors back one at a time.
  */
 type EcosystemPolicy = {families: dict<string, list<string>>, catch_all_update_types: list<string>}
 
@@ -63,33 +69,19 @@ pub type GroupError = {
 const POLICIES: dict<string, EcosystemPolicy> = {
   cargo: {
     families: {
-      cranelift: [
-        "cranelift-codegen",
-        "cranelift-frontend",
-        "cranelift-jit",
-        "cranelift-module",
-        "cranelift-native",
-        "cranelift-object",
-      ],
-      wasmtime: ["wasmtime", "wasmtime-wasi"],
-      opentelemetry: [
-        "opentelemetry",
-        "opentelemetry_sdk",
-        "opentelemetry-otlp",
-        "tracing-opentelemetry",
-      ],
       // The parser runtime and the grammars it loads. Listed together because
       // a runtime bump and a grammar bump change the same thing — how source
       // parses — and both are answerable only by the corpus result, not by the
-      // version number.
+      // version number. This is the one family that survives the move to a
+      // single grouped pull request per ecosystem, and it earns it twice over:
+      // a `tree-sitter-swift` bump has twice held seventeen unrelated crates
+      // hostage (#6205, #6240), and the 0.27 runtime upgrade needed a source
+      // migration across `harn-hostlib` rather than a version edit.
       "tree-sitter": ["tree-sitter", "tree-sitter-rust", "tree-sitter-swift"],
     },
-    catch_all_update_types: ["minor", "patch"],
+    catch_all_update_types: [],
   },
-  npm: {
-    families: {"react-runtime": ["react", "react-dom"]},
-    catch_all_update_types: ["minor", "patch"],
-  },
+  npm: {families: {}, catch_all_update_types: []},
   "github-actions": {families: {}, catch_all_update_types: []},
 }
 
