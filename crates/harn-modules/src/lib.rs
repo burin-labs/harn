@@ -36,7 +36,7 @@ pub use namespace_imports::NamespaceImportInfo;
 pub use namespace_signatures::NamespaceMemberSignature;
 pub use package_imports::{
     resolve_import_path, resolve_import_path_with_guard, resolve_import_path_with_snapshot,
-    PackageImport,
+    unresolved_package_alias, PackageImport,
 };
 pub use references::{index_references, RefSite, ReferenceEdge, ReferenceIndex};
 pub use standalone::build_with_standalone_source;
