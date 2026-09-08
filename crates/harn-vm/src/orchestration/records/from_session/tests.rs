@@ -1572,3 +1572,32 @@ async fn a_session_that_left_a_verdict_still_reports_it_in_both_directions() {
         );
     }
 }
+
+/// TEMPORARY INSTRUMENT — not a regression test. Projects a real captured
+/// session and prints the record so the M23 "record spans the run" line item
+/// can be read off measured data. Remove before pushing.
+#[tokio::test]
+#[ignore]
+async fn m23_project_captured_session() {
+    let path = std::env::var("M23_STORE").expect("M23_STORE");
+    let session = std::env::var("M23_SESSION").expect("M23_SESSION");
+    let store = harn_session_store::SqliteSessionStore::open_read_only(&path).expect("open store");
+    let run = project_run_record_from_session(&store, &session)
+        .await
+        .expect("project");
+    println!("M23 status        = {}", run.status);
+    println!("M23 started_at    = {:?}", run.started_at);
+    println!("M23 finished_at   = {:?}", run.finished_at);
+    println!(
+        "M23 terminal      = {}",
+        serde_json::to_string(&run.metadata.get("terminal")).unwrap_or_default()
+    );
+    println!(
+        "M23 run_clock     = {}",
+        serde_json::to_string(&run.metadata.get("run_clock")).unwrap_or_default()
+    );
+    println!(
+        "M23 terminal_cause= {}",
+        serde_json::to_string(&run.metadata.get("terminal_cause")).unwrap_or_default()
+    );
+}
