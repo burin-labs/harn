@@ -197,15 +197,28 @@ impl NativeKeyring {
     /// caller that runs several checks sees one consistent worst case.
     pub const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
-    /// Prove the credential store round-trips a probe, within a deadline.
+    /// Prove the credential store answers, without writing to it and within
+    /// a deadline.
     ///
-    /// The deadline is the whole point. On Linux the Secret Service answers a
-    /// locked collection by raising an interactive unlock prompt and blocking
-    /// until somebody types a password, so on a headless host this call used
-    /// to never return; the caller had no way to tell an unavailable store
-    /// from one that simply had not answered yet. The probe now runs on its
-    /// own thread and is abandoned when the deadline passes, which keeps the
-    /// process able to finish and report.
+    /// Two properties, both learned the hard way on a headless host whose
+    /// login collection was locked.
+    ///
+    /// It does not write. Enumerating item *attributes* is the cheapest
+    /// question a store can be asked and the only side-effect-free one, and
+    /// it is also the question least likely to summon a desktop dialog: the
+    /// same distinction [`Self::contains`] documents for macOS holds for the
+    /// Secret Service, which answers a search over a locked collection
+    /// without unlocking it. Storing a credential asks the platform to unlock
+    /// first, so the old write-read-delete probe provoked the very prompt
+    /// that hung it. What it no longer proves is that the store is
+    /// *writable*; a store that answers a search and refuses a write now
+    /// reads as healthy here and fails at the first real write.
+    ///
+    /// It has a deadline. Nothing above makes a prompt impossible, only
+    /// unlikely, and the platform reports a pending prompt as silence rather
+    /// than as an error, so a caller cannot tell an unavailable store from
+    /// one that has not answered yet. The probe runs on its own thread and is
+    /// abandoned when the deadline passes.
     ///
     /// Abandoning it leaks that thread, still parked on the prompt, for the
     /// life of the process. That is deliberate: the blocking call lives
@@ -228,8 +241,7 @@ impl NativeKeyring {
         std::thread::Builder::new()
             .name("harn-keyring-healthcheck".to_string())
             .spawn(move || {
-                let user = format!("__harn_probe__:{}", uuid::Uuid::now_v7().simple());
-                let _ = sender.send(probe.healthcheck_with_user(&user));
+                let _ = sender.send(probe.reachability_probe());
             })
             .map_err(|_| {
                 NativeKeyringError::Verification("could not start the healthcheck probe")
@@ -244,7 +256,24 @@ impl NativeKeyring {
         }
     }
 
-    fn healthcheck_with_user(&self, user: &str) -> Result<String, NativeKeyringError> {
+    /// Ask the store to enumerate this service's entries and report what
+    /// answered. Reads no secret and writes nothing.
+    fn reachability_probe(&self) -> Result<String, NativeKeyringError> {
+        let vendor = self.store()?.vendor();
+        let count = self.list()?.len();
+        Ok(format!(
+            "store '{vendor}' answered for service '{}' with {count} stored entries",
+            self.service
+        ))
+    }
+
+    /// The deeper write, read and delete verification.
+    ///
+    /// Kept as the explicit way to prove a store is writable, which
+    /// [`Self::healthcheck`] deliberately no longer does. It stores a
+    /// uniquely named probe credential and deletes it again, so it can
+    /// provoke an unlock prompt and must never be the default diagnostic.
+    fn verify_round_trip(&self, user: &str) -> Result<String, NativeKeyringError> {
         const PROBE_VALUE: &[u8] = b"harn-keyring-healthcheck";
 
         self.set(user, PROBE_VALUE)?;
@@ -489,14 +518,14 @@ mod tests {
     }
 
     #[test]
-    fn healthcheck_proves_write_read_delete_and_leaves_no_probe() {
+    fn the_round_trip_verification_proves_write_read_delete_and_leaves_no_probe() {
         let keyring = NativeKeyring::with_store(
             "harn.healthcheck-test",
             keyring_core::mock::Store::new().unwrap(),
         );
 
         let detail = keyring
-            .healthcheck_with_user("__harn_probe__:test")
+            .verify_round_trip("__harn_probe__:test")
             .expect("writable mock keyring");
 
         assert!(detail.contains("passed write, read, and delete checks"));
@@ -602,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    fn healthcheck_rejects_a_store_that_is_reachable_but_not_writable() {
+    fn the_round_trip_verification_rejects_a_store_that_is_reachable_but_not_writable() {
         let store = keyring_core::mock::Store::new().unwrap();
         let credential_store: Arc<CredentialStore> = store;
         let entry = credential_store
@@ -619,10 +648,32 @@ mod tests {
         let keyring = NativeKeyring::with_store("harn.healthcheck-read-only", credential_store);
 
         let error = keyring
-            .healthcheck_with_user("__harn_probe__:test")
+            .verify_round_trip("__harn_probe__:test")
             .expect_err("read-only store must fail the healthcheck");
 
         assert!(error.to_string().contains("mock read-only store"));
+    }
+
+    #[test]
+    fn the_healthcheck_answers_without_writing_anything() {
+        let store: Arc<CredentialStore> = keyring_core::mock::Store::new().unwrap();
+        let keyring = NativeKeyring::with_store("harn.healthcheck-read-only-probe", store);
+
+        // Force a known non-empty read first. A probe over an empty store
+        // cannot tell "wrote nothing" from "could not see anything".
+        keyring.set("existing", b"kept").expect("seed one entry");
+
+        let detail = keyring.healthcheck().expect("a reachable store passes");
+
+        assert!(
+            detail.contains("1 stored entries"),
+            "the probe must report what it actually saw: {detail}"
+        );
+        assert_eq!(
+            keyring.list().expect("list after the probe"),
+            vec!["existing".to_string()],
+            "the healthcheck must leave the store exactly as it found it"
+        );
     }
 
     #[test]
