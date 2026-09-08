@@ -480,7 +480,7 @@ pub struct FieldExplanation {
     pub candidates: Vec<FieldCandidate>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedConfig {
     #[serde(skip_serializing)]
     pub config: HarnConfig,
