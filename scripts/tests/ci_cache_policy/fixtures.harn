@@ -515,8 +515,8 @@ pub fn workflows() {
         "cold-start-budget": {
           if:
             "(github.event_name != 'workflow_dispatch' || !(startsWith(github.ref_name, 'release/v') || startsWith(github.ref_name, 'release-attempt/v')))",
-          "timeout-minutes": 30,
-          steps: [{name: "Build release harn", "timeout-minutes": 25}],
+          "timeout-minutes": 55,
+          steps: [{name: "Build release harn", "timeout-minutes": 45}],
         },
       },
     },
