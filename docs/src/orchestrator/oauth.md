@@ -159,3 +159,12 @@ GitHub App setup stores:
 Use `harn connect --list`, `harn connect --refresh <provider>`, and
 `harn connect --revoke <provider>` to inspect, refresh, or remove local
 connector credentials.
+
+Credentials written before the shared keyring namespace was introduced remain
+unavailable to connector runs. When `harn connect <provider>` needs a missing
+client id, it reads the old workspace entry once and recovers only OAuth
+registration metadata: client id, endpoints, scopes, resource, authentication
+method, and redirect URI. It never reuses the old access token, refresh token,
+or client secret; confidential clients prompt for the client secret again, and
+successful authorization writes a complete credential to the current
+namespace.

@@ -286,6 +286,49 @@ async fn absent_legacy_oauth_record_is_not_invented() {
 }
 
 #[test]
+fn explicit_oauth_registration_wins_over_every_legacy_field() {
+    let request = OAuthConnectRequest {
+        provider: "acme".to_string(),
+        resource: "https://current.example.com/".to_string(),
+        authorization_endpoint: Some("https://current.example.com/authorize".to_string()),
+        token_endpoint: Some("https://current.example.com/token".to_string()),
+        registration_endpoint: None,
+        client_id: Some("current-client".to_string()),
+        client_secret: None,
+        scopes: Some("current.read".to_string()),
+        redirect_uri: "http://127.0.0.1:49999/current".to_string(),
+        token_auth_method: Some("none".to_string()),
+        no_open: true,
+        json: false,
+    };
+    let legacy = serde_json::from_value::<LegacyOAuthRegistration>(serde_json::json!({
+        "client_id": "legacy-client",
+        "scopes": "legacy.read",
+        "authorization_endpoint": "https://legacy.example.com/authorize",
+        "token_endpoint": "https://legacy.example.com/token",
+        "token_endpoint_auth_method": "client_secret_post",
+        "redirect_uri": "http://127.0.0.1:48888/legacy",
+        "resource": "https://legacy.example.com/"
+    }))
+    .expect("legacy registration fixture");
+    let merged = oauth_request_with_legacy_registration(request, legacy);
+
+    assert_eq!(merged.client_id.as_deref(), Some("current-client"));
+    assert_eq!(merged.scopes.as_deref(), Some("current.read"));
+    assert_eq!(
+        merged.authorization_endpoint.as_deref(),
+        Some("https://current.example.com/authorize")
+    );
+    assert_eq!(
+        merged.token_endpoint.as_deref(),
+        Some("https://current.example.com/token")
+    );
+    assert_eq!(merged.token_auth_method.as_deref(), Some("none"));
+    assert_eq!(merged.redirect_uri, "http://127.0.0.1:49999/current");
+    assert_eq!(merged.resource, "https://current.example.com/");
+}
+
+#[test]
 fn registered_provider_parser_accepts_secret_safe_manual_input() {
     let parsed = parse_external_provider_connect(
         vec![
