@@ -211,23 +211,7 @@ impl Compiler {
         body: &TypeExpr,
         visiting: &mut Vec<TypeExpr>,
     ) -> Option<SchemaFragment> {
-        // A cycle-broken position lowers to no runtime constraint, the same
-        // answer `expand_alias` already gives for the same cycle. Abandoning
-        // the whole fragment instead meant a recursive alias published no
-        // schema at all, and an importing module — which registers a selective
-        // import body-less and so lowers it to a runtime load by name — found
-        // nothing to load and failed at load time as `Undefined variable` on a
-        // name that is a type.
-        //
-        // The outer shape stays constrained; only the recursive slot opens.
-        if visiting.contains(guard_key) {
-            return Some(SchemaFragment::unconstrained());
-        }
-        // The nesting cap is a different condition. It says the alias graph is
-        // too deep to lower, not that it closed a cycle, so it stays a refusal
-        // and a genuinely unmaterializable alias still fails at compile time
-        // under a message naming it.
-        if visiting.len() >= MAX_SCHEMA_ALIAS_NEST {
+        if visiting.len() >= MAX_SCHEMA_ALIAS_NEST || visiting.contains(guard_key) {
             return None;
         }
         visiting.push(guard_key.clone());
