@@ -63,6 +63,7 @@ harn run --resume .harn/workers/worker_...json
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--sandbox-write-root <path>` | Let spawned subprocesses write an extra root without granting Harn filesystem builtins access |
 | `--sandbox-read-root <path>` | Let spawned subprocesses read an extra root without granting Harn filesystem builtins access |
+| `--sandbox-unix-socket-root <path>` | Let spawned subprocesses bind and connect Unix-domain sockets whose socket file lives under this root, without opening any IP networking. Build servers (sbt, Gradle, MSBuild) need this. Supported on macOS; other local sandbox backends fail closed. |
 | `--environment-policy <inherited\|isolated\|granted>` | Choose which launch-time environment values this session and its subprocesses may read. Default: `inherited`. |
 | `--grant <spec>` | Grant one named value to this session; repeatable. Selects `granted` when the policy is omitted. See [Environment policies and grants](#environment-policies-and-grants). |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |

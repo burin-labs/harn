@@ -21,6 +21,9 @@ pub struct RunSandboxOptions {
     pub process_read_roots: Vec<PathBuf>,
     /// Extra roots writable only by spawned subprocesses.
     pub process_write_roots: Vec<PathBuf>,
+    /// Directories under which spawned subprocesses may bind and connect
+    /// Unix-domain sockets. Path-scoped; grants no IP networking.
+    pub process_unix_socket_roots: Vec<PathBuf>,
     /// Raise the direct-run side-effect ceiling to permit network-capable
     /// subprocesses without disabling filesystem or process confinement.
     pub allow_process_network: bool,
@@ -43,6 +46,7 @@ impl Default for RunSandboxOptions {
             read_only_roots: Vec::new(),
             process_read_roots: Vec::new(),
             process_write_roots: Vec::new(),
+            process_unix_socket_roots: Vec::new(),
             allow_process_network: false,
             allow_process_loopback: false,
             environment: EnvironmentPolicyConfig::default(),
@@ -124,6 +128,15 @@ impl RunSandboxOptions {
         self.process_write_roots = roots.into_iter().collect();
         self
     }
+
+    /// Add subprocess-only Unix-domain socket roots to the default sandbox policy.
+    pub fn with_process_unix_socket_roots<I>(mut self, roots: I) -> Self
+    where
+        I: IntoIterator<Item = PathBuf>,
+    {
+        self.process_unix_socket_roots = roots.into_iter().collect();
+        self
+    }
 }
 
 /// Build the run's confinement options from the shared sandbox flag block.
@@ -148,6 +161,7 @@ pub(crate) fn sandbox_options_from_args(args: &crate::cli::SandboxArgs) -> RunSa
         .with_read_only_roots(args.read_only_root.iter().cloned())
         .with_process_read_roots(args.sandbox_read_root.iter().cloned())
         .with_process_write_roots(args.sandbox_write_root.iter().cloned())
+        .with_process_unix_socket_roots(args.sandbox_unix_socket_root.iter().cloned())
         .with_environment_policy(capability)
 }
 
@@ -233,6 +247,7 @@ pub(super) fn install_run_sandbox_scope(
             &options.read_only_roots,
             &options.process_read_roots,
             &options.process_write_roots,
+            &options.process_unix_socket_roots,
             options.allow_process_network,
             options.allow_process_loopback,
         );
@@ -312,6 +327,13 @@ pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<St
     if options.allow_process_loopback {
         deltas.push("subprocess TCP loopback allowed".to_string());
     }
+    if !options.process_unix_socket_roots.is_empty() {
+        deltas.push(format!(
+            "subprocess Unix-domain sockets allowed under root{}: {}",
+            plural_suffix(options.process_unix_socket_roots.len()),
+            display_grant_roots(&options.process_unix_socket_roots),
+        ));
+    }
     if deltas.is_empty() {
         return None;
     }
@@ -369,6 +391,7 @@ pub(super) fn default_run_capability_policy(
     read_only_roots: &[PathBuf],
     process_read_roots: &[PathBuf],
     process_write_roots: &[PathBuf],
+    process_unix_socket_roots: &[PathBuf],
     allow_process_network: bool,
     allow_process_loopback: bool,
 ) -> harn_vm::orchestration::CapabilityPolicy {
@@ -416,7 +439,7 @@ pub(super) fn default_run_capability_policy(
             .map(|path| normalize_run_workspace_root(path.as_path()))
             .map(|path| path.display().to_string())
             .collect(),
-        process_sandbox: harn_vm::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(harn_vm::orchestration::ProcessSandboxPolicy {
             presets: None,
             read_roots: process_read_roots,
             write_roots: process_write_roots
@@ -426,7 +449,12 @@ pub(super) fn default_run_capability_policy(
                 .collect(),
             read_deny_roots: Vec::new(),
             allow_tcp_loopback: allow_process_loopback,
-        },
+            unix_socket_roots: process_unix_socket_roots
+                .iter()
+                .map(|path| normalize_run_workspace_root(path.as_path()))
+                .map(|path| path.display().to_string())
+                .collect(),
+        }),
         side_effect_level: Some(
             if allow_process_network {
                 harn_vm::tool_annotations::SideEffectLevel::Network
@@ -534,6 +562,10 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
         "process_loopback_enabled": active_policy
             .as_ref()
             .is_some_and(|policy| policy.process_sandbox.allow_tcp_loopback),
+        "process_unix_socket_roots": active_policy
+            .as_ref()
+            .map(|policy| policy.process_sandbox.unix_socket_roots.clone())
+            .unwrap_or_default(),
         "side_effect_level": side_effect_level,
         "egress": egress,
     })
@@ -660,6 +692,7 @@ mod tests {
             &[],
             &options.process_read_roots,
             &options.process_write_roots,
+            &[],
             false,
             false,
         );

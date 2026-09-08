@@ -352,7 +352,7 @@ SCRIPTING
     Human cheatsheet:       https://harnlang.com/scripting-cheatsheet.html
     Full docs:              https://harnlang.com/
 ")]
-    Run(RunArgs),
+    Run(Box<RunArgs>),
     /// Type-check .harn files or directories without executing them.
     Check(CheckArgs),
     /// Parse a .harn file and print its AST.

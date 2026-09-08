@@ -12,7 +12,7 @@ For how the process sandbox works overall, see
 | --- | --- |
 | Type | `Vec<String>` |
 | JSON field | `process_sandbox.read_deny_roots` |
-| Default | the twelve home-relative paths below, resolved against `$HOME` |
+| Default | the fourteen home-relative paths below, resolved against `$HOME` |
 | Scope | child processes, and Harn's own file builtins via `check_fs_path_scope` |
 | Nesting | **unions**; every other field of the policy intersects |
 
@@ -58,7 +58,16 @@ the data instead of in a comment that drifts from it.
 
 `.ssh`, `.aws`, `.gnupg`, `.netrc`, `.docker/config.json`,
 `.config/gh/hosts.yml`, `.config/gcloud`, `.kube/config`, `.npmrc`, `.pypirc`,
-`.cargo/credentials`, `.cargo/credentials.toml`.
+`.cargo/credentials`, `.cargo/credentials.toml`, `.composer/auth.json`,
+`.config/composer/auth.json`.
+
+A denied config file is not left for the tool to trip over. npm and pnpm read
+`~/.npmrc` at startup and exit on the `EPERM`, so a confined child instead gets
+`NPM_CONFIG_USERCONFIG` pointing at a stand-in under the workspace toolchain
+cache: a copy of the user's `.npmrc` with every credential line (`_authToken`,
+`_auth`, `_password`, and any other `//registry/:_key` entry) removed, so a
+private registry URL still resolves and no token is ever copied into the
+workspace.
 
 A host may add to this list through `read_deny_roots`. It cannot remove from it.
 
@@ -94,7 +103,7 @@ lead to the denial.
 - Any **other** enumeration error still refuses the spawn, so the relaxation
   cannot widen into "any error means nothing to exclude".
 - Expansion is capped at `MAX_DENY_EXPANSION_RULES` (4096). Measured cost for
-  the twelve defaults on a real home directory is 187 to 190 rules in 10 to 45
+  the twelve original defaults on a real home directory was 187 to 190 rules in 10 to 45
   ms; `report_default_denylist_expansion_cost` prints the number for the host
   you are on.
 
@@ -110,6 +119,8 @@ A refused child emits `harn.process.sandbox_refusal.v1` through
 | `cwd` | string | working directory of the spawn |
 | `backend` | string | active process-sandbox backend |
 | `operation` | `read`, `write`, or `unknown` | refused operation class when reported by the backend |
+| `mechanism` | `egress`, `local_socket`, `home_read`, `write`, or `unknown` | which sandbox boundary refused the child, inferred from its output |
+| `reason` | string | the mechanism spelled out with the grants in force (loopback, socket roots, a denylisted path) |
 | `resource` | string or null | refused resource when reported by the backend |
 | `refused_paths` | array of strings | paths implicated, when they can be determined |
 | `observability` | string | how the refusal was detected; currently only `inferred` |

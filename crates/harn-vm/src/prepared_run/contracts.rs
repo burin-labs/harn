@@ -327,6 +327,12 @@ pub enum AuthorityRequirement {
     ProcessWriteRoot {
         root: String,
     },
+    /// A directory under which confined children may bind and connect
+    /// Unix-domain sockets. Path authority like the two above, not network
+    /// authority: it grants nothing over IP.
+    ProcessUnixSocketRoot {
+        root: String,
+    },
     ProcessSandbox {
         profile: String,
         preset: String,

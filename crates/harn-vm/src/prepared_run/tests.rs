@@ -175,7 +175,7 @@ fn capability_policy() -> CapabilityPolicy {
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
         sandbox_profile: SandboxProfile::Worktree,
-        process_sandbox: ProcessSandboxPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
             presets: Some(vec![
                 ProcessSandboxPreset::SystemRuntime,
                 ProcessSandboxPreset::DeveloperToolchains,
@@ -183,7 +183,7 @@ fn capability_policy() -> CapabilityPolicy {
             read_roots: vec!["/opt/sdk".to_string()],
             write_roots: vec!["/workspace/.cache".to_string()],
             ..Default::default()
-        },
+        }),
         process_network_proxy: None,
     }
 }

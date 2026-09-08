@@ -778,6 +778,7 @@ fn normalize_policy(policy: &mut crate::orchestration::CapabilityPolicy) {
     }
     sort_dedup(&mut policy.process_sandbox.read_roots);
     sort_dedup(&mut policy.process_sandbox.write_roots);
+    sort_dedup(&mut policy.process_sandbox.unix_socket_roots);
     if let Some(presets) = policy.process_sandbox.presets.as_mut() {
         presets.sort();
         presets.dedup();
@@ -822,6 +823,14 @@ fn policy_requirements(
             .iter()
             .cloned()
             .map(|root| AuthorityRequirement::ProcessWriteRoot { root }),
+    );
+    requirements.extend(
+        policy
+            .process_sandbox
+            .unix_socket_roots
+            .iter()
+            .cloned()
+            .map(|root| AuthorityRequirement::ProcessUnixSocketRoot { root }),
     );
     let presets = policy.process_sandbox.effective_presets();
     let presets = if presets.is_empty() {
@@ -1281,6 +1290,10 @@ fn policy_request(requirement: &AuthorityRequirement) -> ToolApprovalRequest {
         AuthorityRequirement::ProcessWriteRoot { root } => (
             "prepared_run.process",
             json!({"path": root, "access": "write", "scope": "process"}),
+        ),
+        AuthorityRequirement::ProcessUnixSocketRoot { root } => (
+            "prepared_run.process",
+            json!({"path": root, "access": "unix_socket", "scope": "process"}),
         ),
         AuthorityRequirement::ProcessSandbox { profile, preset } => (
             "prepared_run.process",

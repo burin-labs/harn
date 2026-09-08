@@ -73,6 +73,15 @@ pub(crate) struct SandboxArgs {
         conflicts_with = "no_sandbox"
     )]
     pub sandbox_write_root: Vec<PathBuf>,
+    /// Directories under which subprocesses may bind and connect Unix-domain
+    /// sockets (build servers, compiler daemons). Repeatable; grants no IP
+    /// networking. Unsupported OS backends fail closed.
+    #[arg(
+        long = "sandbox-unix-socket-root",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub sandbox_unix_socket_root: Vec<PathBuf>,
     /// Session environment: `inherited` snapshots the launcher (default),
     /// `isolated` admits runtime essentials only, and `granted` adds the
     /// declared `--grant` set. This is independent of the filesystem sandbox.
