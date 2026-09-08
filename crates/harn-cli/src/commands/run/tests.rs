@@ -322,9 +322,9 @@ fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
 #[test]
 fn default_run_policy_keeps_loopback_separate_from_remote_network() {
     let workspace = Path::new("/tmp/workspace");
-    let default = default_run_capability_policy(workspace, &[], &[], &[], &[], false, false);
-    let network = default_run_capability_policy(workspace, &[], &[], &[], &[], true, false);
-    let loopback = default_run_capability_policy(workspace, &[], &[], &[], &[], false, true);
+    let default = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, false);
+    let network = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], true, false);
+    let loopback = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, true);
 
     assert_eq!(default.side_effect_level.as_deref(), Some("process_exec"));
     assert_eq!(network.side_effect_level.as_deref(), Some("network"));
@@ -358,11 +358,11 @@ fn run_sandbox_attestation_reports_effective_policy() {
             http_port: 3128,
             socks_port: 1080,
         }),
-        process_sandbox: harn_vm::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(harn_vm::orchestration::ProcessSandboxPolicy {
             read_deny_roots: Vec::new(),
             allow_tcp_loopback: true,
             ..harn_vm::orchestration::ProcessSandboxPolicy::default()
-        },
+        }),
         ..harn_vm::orchestration::CapabilityPolicy::default()
     };
     harn_vm::orchestration::push_execution_policy(policy);
@@ -614,6 +614,7 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
     let policy = default_run_capability_policy(
         workspace,
         std::slice::from_ref(&grant),
+        &[],
         &[],
         &[],
         &[],

@@ -80,6 +80,12 @@ fn profile_setup(policy: &CapabilityPolicy) -> Result<ProcessProfile, VmError> {
             "TCP loopback-only child networking is not enforceable by pledge".to_string(),
         ));
     }
+    if !policy.process_sandbox.unix_socket_roots.is_empty() {
+        return Err(sandbox_rejection(
+            "path-scoped Unix-domain sockets for child processes are not enforceable by pledge"
+                .to_string(),
+        ));
+    }
     let workspace_permissions = if policy_allows_workspace_write(policy) {
         "rwcx"
     } else {

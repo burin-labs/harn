@@ -140,6 +140,9 @@
         "capability": { "const": "process.run" },
         "backend": { "type": "string" },
         "operation": { "enum": ["read", "write", "unknown"] },
+        "mechanism": {
+          "enum": ["egress", "local_socket", "home_read", "write", "unknown"]
+        },
         "resource": { "type": ["string", "null"] },
         "command": {
           "type": "array",
@@ -162,6 +165,7 @@
         "capability",
         "backend",
         "operation",
+        "mechanism",
         "resource",
         "command",
         "cwd",

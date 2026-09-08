@@ -75,6 +75,7 @@ fn semantic_group(requirement: &AuthorityRequirement) -> &'static str {
         | AuthorityRequirement::FilesystemWrite { .. } => "filesystem",
         AuthorityRequirement::ProcessReadRoot { .. }
         | AuthorityRequirement::ProcessWriteRoot { .. }
+        | AuthorityRequirement::ProcessUnixSocketRoot { .. }
         | AuthorityRequirement::ProcessSandbox { .. }
         | AuthorityRequirement::ProcessSocket(_)
         | AuthorityRequirement::ToolchainProbe(_) => "process",
@@ -171,6 +172,10 @@ pub(super) fn requirement_attenuates(
         | (
             AuthorityRequirement::ProcessWriteRoot { root: granted },
             AuthorityRequirement::ProcessReadRoot { root: requested },
+        )
+        | (
+            AuthorityRequirement::ProcessUnixSocketRoot { root: granted },
+            AuthorityRequirement::ProcessUnixSocketRoot { root: requested },
         ) => path_is_within(requested, granted),
         (
             AuthorityRequirement::ToolchainProbe(probe),

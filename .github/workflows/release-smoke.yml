@@ -311,19 +311,12 @@ jobs:
           cache-key: release-smoke-${{ matrix.platform }}
           local-cache: "true"
           cache-size: "2G"
-      - uses: ./.github/actions/rust-cache
-        if: needs.resolve.outputs.mode == 'source'
-        continue-on-error: true
-        with:
-          # Piggy-back on the per-platform release cache key from
-          # build-release-binaries.yml whenever it lines up. Windows source
-          # smoke uses its own release-smoke key because the CI Windows job is
-          # a post-merge backstop, not a PR cache warmer.
-          shared-key: release-smoke-${{ matrix.platform }}
-          cache-on-failure: true
-          # Keep rustup's freshly-installed cargo shim authoritative.
-          # Stale cached binaries can shadow it on macOS tag runners.
-          cache-bin: false
+      # No Rust archive restore here. The key this step used to name was
+      # `release-smoke-<platform>`, which no writer produces, so it restored
+      # nothing on every run while its comment said it piggy-backed on the
+      # release build's cache. The release families carry a source fingerprint
+      # in their key, so a reader cannot match one, and the compiler cache
+      # restored above is the store that actually warms this lane.
       - name: Verify macOS Rust toolchain
         if: needs.resolve.outputs.mode == 'source' && runner.os == 'macOS'
         shell: bash

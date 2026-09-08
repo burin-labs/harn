@@ -1,0 +1,82 @@
+# Output phrases that identify WHICH sandbox boundary refused a child process.
+#
+# Data, not code: when a new build tool prints a new phrase for a refused
+# socket or an unreachable registry, adding it here is a reviewable one-line
+# diff, and nothing in the Rust module decides what the phrases are.
+#
+# Every entry is lowercase and matched by substring against the lowercased
+# child output. Classification order lives in the Rust module: writes first (a
+# refused cache write under `~` names the home path too), then home reads,
+# then egress, then local sockets.
+
+# Present in every refusal the OS sandbox produces. Gates the write and
+# home-read classes so a tool's ordinary "could not create" is not read as a
+# sandbox denial.
+permission = [
+  "operation not permitted",
+  "permission denied",
+  "access is denied",
+  "eperm",
+  "eacces",
+  "not readable",
+]
+
+# Resolver and connect failures a build tool prints when remote egress is
+# refused.
+egress = [
+  "unknownhostexception",
+  "getaddrinfo",
+  "enotfound",
+  "eai_again",
+  "eai_noname",
+  "could not resolve host",
+  "couldn't resolve host",
+  "name or service not known",
+  "nodename nor servname provided",
+  "temporary failure in name resolution",
+  "network is unreachable",
+  "no route to host",
+  "connection refused (os error",
+]
+
+# Local socket operations: Unix-domain socket libraries, the named-pipe
+# vocabulary .NET uses for them, and `socketexception` for the JVM's loopback
+# refusal.
+local_socket = [
+  "ipcsocket",
+  "unix domain socket",
+  "unixdomainsocket",
+  "unix_domain",
+  "af_unix",
+  "sockaddr_un",
+  "named pipe",
+  "namedpipe",
+  "corefxpipe",
+  "socketexception",
+  "socket.error",
+  "bind(",
+  "listen(",
+  "connect(",
+  "eaddrinuse",
+  "econnrefused",
+  "server did not start",
+  "could not connect to the daemon",
+  "unable to start the daemon",
+]
+
+# A refused write. The fix is a write root, not a read root.
+write = [
+  "read-only file system",
+  "write failed",
+  "for writing",
+  # the JVM's write path; a refused `~/.sbt/boot` lock surfaces as this
+  "fileoutputstream",
+  "could not create",
+  "cannot create",
+  "failed to create",
+  "unable to create",
+  "failed to write",
+  "cannot write",
+  "could not write",
+  "mkdir",
+]

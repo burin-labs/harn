@@ -125,6 +125,17 @@ fn profile_setup(
                 .to_string(),
         ));
     }
+    if !policy.process_sandbox.unix_socket_roots.is_empty() {
+        // seccomp filters the syscall, not the socket path, and Landlock has
+        // no access right for connecting to a socket file, so a Unix-socket
+        // grant cannot be scoped to its roots here. Admitting the socket
+        // syscalls would let a child reach any socket its user can open —
+        // a container daemon's, for one — which is an escape, not a grant.
+        return Err(sandbox_rejection(
+            "path-scoped Unix-domain sockets for child processes require a backend that filters sockets by path; the Linux backend cannot enforce that boundary"
+                .to_string(),
+        ));
+    }
     // landlock_profile() returns Err under OsHardened when Landlock is
     // unavailable (effective_fallback resolves to Enforce), so the
     // OsHardened "must engage" contract is enforced before fork rather

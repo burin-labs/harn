@@ -104,15 +104,15 @@ pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
 mod replace;
 
-// Each backend uses exactly one of these: the platform helpers call
-// `unavailable`, Linux installs confinement in `pre_exec` and warns directly.
+// Each backend uses one of these: platform helpers call `unavailable`; Linux confines in `pre_exec`.
 #[cfg(target_os = "linux")]
 pub(crate) use refusal::mechanism_skipped_warning;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use refusal::unavailable;
 pub use refusal::{
-    is_process_sandbox_signal, process_violation_error, ProcessSandboxAssessment,
-    ProcessSandboxDenialReporting, ProcessSandboxOperation, ProcessSandboxRefusal,
+    infer_process_sandbox_mechanism, is_process_sandbox_signal, process_violation_error,
+    ProcessSandboxAssessment, ProcessSandboxDenialReporting, ProcessSandboxGrants,
+    ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
     ProcessSandboxReportingContext, SandboxMechanism, SandboxMechanismAvailability,
     SandboxMechanismUnavailable, SandboxRequirement,
 };
@@ -1882,7 +1882,7 @@ pub(crate) fn process_sandbox_path_read_roots(policy: &CapabilityPolicy) -> Vec<
         .collect()
 }
 
-fn normalized_process_roots(roots: &[String]) -> Vec<PathBuf> {
+pub(crate) fn normalized_process_roots(roots: &[String]) -> Vec<PathBuf> {
     roots
         .iter()
         .map(|root| normalize_for_policy(&resolve_policy_path(root)))

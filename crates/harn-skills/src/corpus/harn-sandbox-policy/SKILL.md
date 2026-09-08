@@ -22,7 +22,10 @@ Confusing these is the most common mistake here.
    (`read_file`, `harness.fs.*`), through `check_fs_path_scope`.
 2. **`process_sandbox.{presets,read_roots,write_roots,read_deny_roots}`** scope
    *child processes only*, through the OS backend. These never widen Harn's file
-   builtins.
+   builtins. `allow_tcp_loopback` and `unix_socket_roots` are the two socket
+   grants on this axis: loopback admits IP on `localhost`, socket roots admit
+   Unix-domain sockets whose socket file lives under a root, and neither opens
+   remote egress. Both are host-owned: a nested policy cannot invent them.
 3. **`sandbox_profile`** decides whether either is enforced at all.
    `enforces_path_scope()` gates axis 1 and the toolchain-cache environment;
    `confines_processes()` gates axis 2.
@@ -85,6 +88,26 @@ Two failure shapes, and they are not both the sandbox refusing something.
 
 The distinction matters because the second shape leaves no denial to find, and
 an agent retrying it gets no diagnostic at all.
+
+When the sandbox *did* refuse something, read `mechanism` on the refusal record
+before reading the stderr. A bare `Operation not permitted` is printed
+identically for three different grants, and the egress story is the one people
+reach for every time:
+
+- `egress` — a remote host (registry, repository, update check). Warm the
+  dependency before the confined run; do not grant network for it.
+- `local_socket` — a Unix-domain socket or a loopback bind. Build servers
+  (sbt, Gradle's Kotlin daemon, MSBuild worker nodes) need
+  `unix_socket_roots` over the workspace and temp dir; a JVM loopback bind
+  needs `allow_tcp_loopback`, which on macOS also pins the JVM to IPv4.
+- `home_read` — tool config under `~` that no preset grants or the denylist
+  refuses. Point the tool at a workspace-local config through its `*_HOME` /
+  `*_CONFIG` variable rather than widening a read root.
+- `write` — a cache outside every write root; see the first shape above.
+
+The classifier is `sandbox/refusal_mechanism.rs`; its phrase vocabulary is
+`sandbox/refusal_markers.toml`. A new tool that prints a new phrase for one of
+these is a one-line addition to the TOML, not a change to the classifier.
 
 ## How to prove a change
 

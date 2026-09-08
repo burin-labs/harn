@@ -126,6 +126,26 @@ pub(super) fn resolve_local_import(current_file: &Path, import_path: &str) -> Lo
     LocalResolution::NotPackage
 }
 
+/// The package alias a failed import names, when only an installed package
+/// could ever have resolved it.
+///
+/// A bare specifier that no package provides is joined onto the importing
+/// file's directory by every fallback in this crate, so the path a reader is
+/// finally shown is a guess assembled from the relative traversal of the whole
+/// import chain. It names a file that does not exist and never could, and it
+/// points at the pipeline tree rather than at the uninstalled dependency. This
+/// hands the error site the one fact that explains it.
+///
+/// `resolve_local_import` remains the owner of the classification, so a
+/// sibling file or a standard-library module can never be reported as a
+/// missing package.
+pub fn unresolved_package_alias(current_file: &Path, import_path: &str) -> Option<String> {
+    match resolve_local_import(current_file, import_path) {
+        LocalResolution::NotPackage => package_alias_from_import(import_path),
+        LocalResolution::Resolved(_) | LocalResolution::Rejected => None,
+    }
+}
+
 /// Resolve an import string relative to the importing file.
 ///
 /// Returns the path as constructed so callers can compare it with their own
@@ -396,4 +416,75 @@ fn finalize_package_target(package_root: &Path, path: &Path) -> Option<PathBuf> 
         }
     }
     None
+}
+
+#[cfg(test)]
+mod unresolved_package_alias_tests {
+    use std::fs;
+
+    use super::unresolved_package_alias;
+
+    /// The whole point of the helper is that it fires ONLY for a specifier no
+    /// local rule could ever have resolved. A helper that answered `Some` for
+    /// a mistyped sibling would replace one misleading error with another.
+    #[test]
+    fn a_bare_specifier_names_its_package() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let importer = dir.path().join("flight-tools.harn");
+        fs::write(&importer, "").expect("write importer");
+
+        assert_eq!(
+            unresolved_package_alias(&importer, "some-connector/default"),
+            Some("some-connector".to_string()),
+            "a bare specifier that no package provides names the package"
+        );
+        assert_eq!(
+            unresolved_package_alias(&importer, "some-connector"),
+            Some("some-connector".to_string()),
+            "a bare specifier with no export path still names the package"
+        );
+    }
+
+    #[test]
+    fn a_relative_import_is_never_reported_as_a_package() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let importer = dir.path().join("flight-tools.harn");
+        fs::write(&importer, "").expect("write importer");
+        fs::write(dir.path().join("sibling.harn"), "").expect("write sibling");
+
+        assert_eq!(
+            unresolved_package_alias(&importer, "./sibling"),
+            None,
+            "a sibling that resolves is not a missing package"
+        );
+        assert_eq!(
+            unresolved_package_alias(&importer, "./typo"),
+            None,
+            "a mistyped relative import is a missing FILE and must keep the path error"
+        );
+        assert_eq!(
+            unresolved_package_alias(&importer, "../typo"),
+            None,
+            "a parent-relative miss is a missing file too"
+        );
+    }
+
+    #[test]
+    fn the_standard_library_is_never_reported_as_a_package() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let importer = dir.path().join("flight-tools.harn");
+        fs::write(&importer, "").expect("write importer");
+
+        assert_eq!(
+            unresolved_package_alias(&importer, "std/testing"),
+            None,
+            "a real stdlib module resolves locally"
+        );
+        assert_eq!(
+            unresolved_package_alias(&importer, "std/not-a-real-module"),
+            None,
+            "an unknown stdlib module must not fall through to a package name, \
+             or a package could shadow the standard library in the error text too"
+        );
+    }
 }

@@ -27,6 +27,8 @@ home_relative = [
   ".pypirc",
   ".cargo/credentials",
   ".cargo/credentials.toml",
+  ".composer/auth.json",
+  ".config/composer/auth.json",
 ]
 
 # Why each entry is here, for review. Absent keys are not an error; this table
@@ -44,3 +46,5 @@ home_relative = [
 ".pypirc" = "package index upload credentials"
 ".cargo/credentials" = "crates.io API token"
 ".cargo/credentials.toml" = "crates.io API token"
+".composer/auth.json" = "Packagist and GitHub OAuth tokens; under preset-granted ~/.composer"
+".config/composer/auth.json" = "the same tokens in Composer's XDG layout; under preset-granted ~/.config"
