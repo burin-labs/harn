@@ -105,6 +105,13 @@ mod policy;
 mod replace;
 
 // Each backend uses one of these: platform helpers call `unavailable`; Linux confines in `pre_exec`.
+/// A confinement an embedder can build here and enter in a process it re-execs.
+///
+/// Linux only, and deliberately so. This backend installs confinement from a
+/// `pre_exec` callback, which nothing can carry across a process boundary; the
+/// other backends put theirs in the spawn's argv, which survives on its own.
+#[cfg(target_os = "linux")]
+pub use linux::{transferable_confinement, TransferableConfinement};
 #[cfg(target_os = "linux")]
 pub(crate) use refusal::mechanism_skipped_warning;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
