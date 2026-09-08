@@ -8,6 +8,10 @@ pub type AgentGateEntry = {
   kind: string,
   layer: "runner" | "stop decision" | "stall handler",
   default: string,
+  // `line` is a human hint only. The checker compares file and reader symbol,
+  // never the line, because an edit anywhere above a reader moves it without
+  // changing what reads what. A refreshed registry carries current lines; a
+  // registry that has not been regenerated since an unrelated edit does not.
   readers: list<{file: string, line: int, reader: string}>,
   reachability: "yes" | "no" | "unknown",
   evidence: string,
@@ -332,6 +336,27 @@ fn cell(text: string) -> string {
 }
 
 /**
+ * The stable identity of a reader: the file it lives in and the symbol that
+ * does the reading.
+ *
+ * Deliberately excludes the line. Comparing whole reader records made this
+ * gate fail on line movement alone, and it reported dozens of stale entries
+ * while every reader was exactly where the registry said it was. A gate that
+ * fails on nothing is one people learn to skip, and this one sat in a job
+ * whose later checks a failure skips.
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+fn reader_identities(readers: list<{file: string, line: int, reader: string}>) -> list<string> {
+  let identities: list<string> = []
+  for reader in readers {
+    identities = identities + [reader.file + "::" + reader.reader]
+  }
+  return identities
+}
+
+/**
  * Generate the reviewable projection from the same typed entries the checker reads.
  * @effects: []
  * @errors: []
@@ -354,7 +379,7 @@ pub fn agent_gate_markdown(repo: string, layer: string, entries: list<AgentGateE
     }
     let readers: list<string> = []
     for reader in entry.readers {
-      readers = readers + [reader.file + ":" + to_string(reader.line) + " (" + reader.reader + ")"]
+      readers = readers + [reader.file + " (" + reader.reader + ")"]
     }
     lines = lines
       + [
@@ -584,7 +609,8 @@ pub fn agent_gate_audit(
       if expected_entry == nil || observed_entry == nil {
         throw "missing observed entry"
       }
-      if expected_entry.readers != observed_entry.readers {
+      if reader_identities(expected_entry.readers)
+        != reader_identities(observed_entry.readers) {
         failures = failures + ["stale readers " + expected_entry.name]
       }
     }
