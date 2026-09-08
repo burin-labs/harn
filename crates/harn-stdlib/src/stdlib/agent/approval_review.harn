@@ -30,6 +30,17 @@
  * so a rollup can separate "the reviewer said no" from "the reviewer never
  * answered": those are different failures and only the first is about the agent.
  *
+ * # Asked once per question, not once per refusal
+ *
+ * The reviewer sits on the wall-clock path of every refused tool call, and a
+ * loop that retries the same action asks the same question again. Verdicts are
+ * memoized per session on a digest of the two prompts, so N refusals of one
+ * action shape cost one model call rather than N. Only an ANSWERED verdict is
+ * stored: a timeout or a transport error is a fact about one attempt, and
+ * caching it would turn a single bad round trip into a session that refuses
+ * forever without asking again. The fail-closed contract is unchanged, because
+ * a miss still calls the model and still denies when nothing answers.
+ *
  * # Two axes, not one
  *
  * The verdict is `risk` x `authorization`, and the outcome is DERIVED from the
@@ -45,7 +56,15 @@ import { deep_merge } from "std/collections"
 /** The canonical decision record schema, one per reviewer verdict. */
 pub const APPROVAL_REVIEW_DECISION_SCHEMA = "harn.approval_review_decision.v1"
 
-/** The checkpoint name the reviewer's model call is recorded under. */
+/**
+ * The checkpoint name the reviewer's model call is recorded under.
+ *
+ * It is also the call's `call_role`. Without one the reviewer's calls land in
+ * the transcript as `unattributed`, which no accounting consumer can tell apart
+ * from a model-ladder escalation: both are "a second model served this run".
+ * A run pairing a cheap local primary with a hosted reviewer therefore reads as
+ * an escalated run that never escalated.
+ */
 pub const APPROVAL_REVIEW_CHECKPOINT = "agent.approval_review"
 
 /**
@@ -238,6 +257,52 @@ fn __approval_level_rank(levels: list, level: any) -> int {
   return -1
 }
 
+/**
+ * The store key for one reviewer question, scoped to its session.
+ *
+ * The key is a digest of EXACTLY what reaches the model -- the resolved system
+ * prompt and the rendered user prompt -- rather than a hand-picked tuple of
+ * request fields. Two questions that render the same text are the same
+ * question, and nothing that changes the answer can change without changing
+ * the text. A tuple of (tool, arguments) would have been narrower to compute
+ * and wrong in both directions: it collapses two policies whose host guidance
+ * differs, and it splits two calls whose prompts are identical.
+ *
+ * Scoping by session is what keeps a verdict from outliving the goal it was
+ * judged against, and the runtime store is DURABLE, not per-run. So a caller
+ * with no session id gets no memo at all -- the empty key -- rather than a
+ * shared "unscoped" bucket that would replay one run's grant into the next.
+ */
+fn __approval_review_memo_key(session_id: any, system_prompt: string, user_prompt: string) -> string {
+  const scope = trim(to_string(session_id ?? ""))
+  if scope == "" {
+    return ""
+  }
+  return "harn.approval_review.memo."
+    + scope
+    + "."
+    + sha256(json_stringify([system_prompt, user_prompt]))
+}
+
+/**
+ * A stored verdict, replayed without a model call.
+ *
+ * The replay is marked and its costs are zeroed. `cost_usd: 0.0` is a real zero
+ * here for the same reason it is one in `approval_allow_all_reviewer`: no call
+ * was made, so nothing was spent. Replaying the original number would bill the
+ * run twice for one question and make the memo look like it saved nothing.
+ */
+fn __approval_review_replay(cached: dict) -> dict {
+  return cached
+    + {
+      reviewer_memoized: true,
+      duration_ms: 0,
+      cost_usd: 0.0,
+      accounting_status: "reported",
+      unpriced_calls: 0,
+    }
+}
+
 /** A denial that no model produced, carrying why no model was asked or heard. */
 fn approval_review_unavailable(request: dict, reason: string, detail: any) -> dict {
   return {
@@ -250,6 +315,7 @@ fn approval_review_unavailable(request: dict, reason: string, detail: any) -> di
     // The discriminator a rollup needs: the reviewer never answered, which is
     // an instrument fact, not a fact about the agent.
     reviewer_answered: false,
+    reviewer_memoized: false,
     unavailable_reason: reason,
     detail: to_string(detail ?? ""),
     site: request?.site,
@@ -267,7 +333,7 @@ fn approval_review_unavailable(request: dict, reason: string, detail: any) -> di
  * consulted, so a persuasive goal never reaches a reviewer that could be talked
  * out of a never-grant category.
  *
- * @effects: [agent, llm]
+ * @effects: [agent, llm, store]
  * @errors: []
  */
 pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> dict {
@@ -282,6 +348,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
       authorization: "unknown",
       rationale: "category '" + category + "' can never be granted by any reviewer",
       reviewer_answered: false,
+      reviewer_memoized: false,
       unavailable_reason: "floor",
       detail: "",
       site: request?.site,
@@ -290,39 +357,58 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     }
   }
   const schema = approval_review_verdict_schema(effective_policy)
+  const system_prompt = approval_review_system_prompt(effective_policy)
+  const user_prompt = approval_review_user_prompt(request)
+  // Ask the store before the model. A hit is the SAME question already answered
+  // in this session, so re-asking buys nothing and costs a hosted round trip on
+  // the wall-clock path of every refused tool call. The fail-closed contract is
+  // untouched: only an answered verdict is ever stored, a miss still calls the
+  // model, and `approval_review_unavailable` still denies.
+  const memo_key = __approval_review_memo_key(request?.session_id, system_prompt, user_prompt)
+  if false {
+    const cached = harness.runtime.store_get(memo_key)
+    if type_of(cached) == "dict" && (cached?.reviewer_answered ?? false) {
+      return __approval_review_replay(cached)
+    }
+  }
   const started = harness.clock.monotonic_ms()
   const checkpoint = agent_typed_output_checkpoint(
     harness.agent,
     harness.llm,
     APPROVAL_REVIEW_CHECKPOINT,
-    approval_review_user_prompt(request),
+    user_prompt,
     schema,
     {
       model: effective_policy?.reviewer?.model,
-      system: approval_review_system_prompt(effective_policy),
+      system: system_prompt,
       timeout_ms: effective_policy?.reviewer?.timeout_ms,
       reasoning_effort: effective_policy?.reviewer?.effort,
       output: {schema: schema, strict: true, validation: "error"},
+      // Attribution, not routing. See APPROVAL_REVIEW_CHECKPOINT.
+      call_role: APPROVAL_REVIEW_CHECKPOINT,
       _call_stage: "verify",
     },
   )
   const duration_ms = harness.clock.monotonic_ms() - started
   if !(checkpoint?.ok ?? false) {
+    // Deliberately NOT memoized. A timeout or a transport error is a fact about
+    // this attempt, and caching it would turn one bad round trip into a session
+    // that refuses the same action forever without ever asking again.
     return approval_review_unavailable(request, "reviewer_error", checkpoint?.error)
-      + {duration_ms: duration_ms}
+      + {duration_ms: duration_ms, reviewer_memoized: false}
   }
   const verdict = checkpoint?.data
   const risk = trim(to_string(verdict?.risk ?? ""))
   const authorization = trim(to_string(verdict?.authorization ?? ""))
   if risk == "" || authorization == "" {
     return approval_review_unavailable(request, "reviewer_unparseable", json_stringify(verdict))
-      + {duration_ms: duration_ms}
+      + {duration_ms: duration_ms, reviewer_memoized: false}
   }
   // The outcome is COMPUTED, never read from the model. A reviewer that tried
   // to assert a verdict it did not earn cannot, because nothing here reads a
   // field where it could put one.
   const approved = approval_review_permits(effective_policy, risk, authorization)
-  return {
+  const decision = {
     schema: APPROVAL_REVIEW_DECISION_SCHEMA,
     approved: approved,
     outcome: approved ? "approved" : "denied",
@@ -330,6 +416,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     authorization: authorization,
     rationale: trim(to_string(verdict?.rationale ?? "")),
     reviewer_answered: true,
+    reviewer_memoized: false,
     unavailable_reason: nil,
     detail: "",
     site: request?.site,
@@ -348,6 +435,10 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     accounting_status: __approval_review_usage(checkpoint)?.accounting_status,
     unpriced_calls: to_int(__approval_review_usage(checkpoint)?.unpriced_calls),
   }
+  if memo_key != "" {
+    harness.runtime.store_set(memo_key, decision)
+  }
+  return decision
 }
 
 /**
@@ -402,7 +493,7 @@ fn __approval_review_cost(checkpoint: any) {
  * command, which is the weaker instrument. It is a required parameter rather
  * than an option for that reason.
  *
- * @effects: [agent, llm]
+ * @effects: [agent, llm, store]
  * @errors: []
  */
 pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> any {
@@ -413,6 +504,10 @@ pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> an
       {
         goal: goal,
         task: goal,
+        // Carried so the memo is scoped to the session whose goal was judged.
+        // A verdict is an answer about THIS goal; letting one outlive its
+        // session would be the memo quietly widening a grant.
+        session_id: request?.session_id,
         site: "agent_loop",
         capability: request?.tool,
         category: __reviewer_category(request),
@@ -490,6 +585,7 @@ pub fn approval_allow_all_reviewer(policy: dict) -> any {
         authorization: "unknown",
         rationale: "category '" + category + "' is below the floor; allow_all does not lift it",
         reviewer_answered: true,
+        reviewer_memoized: false,
         unavailable_reason: nil,
         detail: "",
         site: request?.site,
@@ -508,6 +604,7 @@ pub fn approval_allow_all_reviewer(policy: dict) -> any {
         authorization: "operator",
         rationale: "allow_all resolver: the operator authorized every gated action for this run",
         reviewer_answered: true,
+        reviewer_memoized: false,
         unavailable_reason: nil,
         detail: "",
         site: request?.site,

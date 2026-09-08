@@ -273,5 +273,97 @@ pipeline default(harness: Harness) {
     !contains(approval_review_system_prompt({}), "OPERATOR INSTRUCTIONS"),
     "absent guidance must emit no section at all",
   )
+  // 10. THE FALSIFIER FOR MEMOIZATION. The reviewer sits on the wall-clock path
+  //     of every refused call, and a loop retrying one action asks the same
+  //     question every time. Nine identical refusals must cost ONE model call.
+  //
+  //     The pair is the point. Without the tenth, differently-argued call, "one
+  //     model call" is equally consistent with "the memo works" and "the memo
+  //     answers everything from the first verdict forever", and the second is a
+  //     grant machine. The session id is fresh per run because the runtime
+  //     store is durable: a fixed one would read a previous run's verdict and
+  //     make this test pass with zero calls.
+  const memo_session = "approval-memo-" + harness.random.uuid()
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names it\"}"),
+      llm_text("{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"and this one too\"}"),
+    ],
+    { _ ->
+      const memo_reviewer = approval_reviewer_for(harness, {}, "Read the requested source file.")
+      let verdicts = []
+      let repeat = 0
+      while repeat < 9 {
+        verdicts = verdicts.appending(
+          memo_reviewer(
+            {
+              tool: "read_file",
+              category: "read_a_source_file",
+              arguments: {path: "src/main.rs"},
+              session_id: memo_session,
+            },
+          ),
+        )
+        repeat = repeat + 1
+      }
+      assert(
+        len(harness.llm.mock_calls()) == 1,
+        "9 refusals of one action shape must make 1 reviewer call, got ${len(harness.llm.mock_calls())}",
+      )
+      assert(verdicts[0].approved == true, "the first verdict must be the model's own answer")
+      assert(
+        verdicts[0].reviewer_memoized == false,
+        "the call that reached the model must not be labeled a replay",
+      )
+      assert(
+        verdicts[8].approved == true && verdicts[8].reviewer_memoized == true,
+        "the ninth must be the same verdict, labeled as a replay",
+      )
+      assert(
+        verdicts[8].cost_usd == 0.0,
+        "a replayed verdict spent nothing; billing it again would hide what the memo saved",
+      )
+      // CONTROL: a different question in the same session still reaches the
+      // model. Without this, a memo that returned its first verdict for every
+      // subsequent request would pass every assertion above.
+      const other = memo_reviewer(
+        {
+          tool: "read_file",
+          category: "read_a_source_file",
+          arguments: {path: "src/other.rs"},
+          session_id: memo_session,
+        },
+      )
+      assert(
+        len(harness.llm.mock_calls()) == 2,
+        "CONTROL: a different action shape must ask the model again",
+      )
+      assert(
+        other.reviewer_memoized == false && other.rationale == "and this one too",
+        "CONTROL: the second question must get the second answer, not a replay of the first",
+      )
+    },
+  )
+  // 11. No session id, no memo. The runtime store outlives the run, so a
+  //     verdict cached without a session would replay one run's grant into the
+  //     next. Two identical requests must therefore cost two calls.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"first\"}"),
+      llm_text("{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"second\"}"),
+    ],
+    { _ ->
+      const unscoped = approval_reviewer_for(harness, {}, "Read the requested source file.")
+      unscoped({tool: "read_file", category: "read_a_source_file"})
+      const twice = unscoped({tool: "read_file", category: "read_a_source_file"})
+      assert(
+        len(harness.llm.mock_calls()) == 2,
+        "a request carrying no session id must never be served from the memo",
+      )
+      assert(twice.reviewer_memoized == false, "an unscoped verdict must not be labeled a replay")
+    },
+  )
   harness.stdio.println("approval_reviewer_ok")
 }

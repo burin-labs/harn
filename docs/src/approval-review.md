@@ -97,6 +97,24 @@ Thresholds, the denylist, and the floor are not reachable from here. A host that
 needs different semantics changes the policy data, which is reviewable, rather
 than the prompt, which is not.
 
+### One call per question, not per refusal
+
+A verdict is memoized for the session on a digest of the two prompts the
+reviewer actually sends, so a loop retrying one action shape pays for one model
+call rather than one per attempt. A replayed decision carries
+`reviewer_memoized: true` and `cost_usd: 0.0`, because no call was made.
+
+Two things are deliberately not cached. An unanswered review — a timeout, a
+transport error, an unparseable verdict — is a fact about one attempt, so it is
+re-asked rather than turned into a session that refuses forever. And a request
+carrying no `session_id` is never memoized at all: the runtime store outlives
+the run, and an unscoped verdict would replay one run's grant into the next.
+
+The reviewer's call also carries `call_role: "agent.approval_review"`. Without
+it the call reads as `unattributed`, which accounting cannot tell apart from a
+model-ladder escalation — a cheap local run paired with a hosted reviewer would
+look like a run that escalated when it never did.
+
 ### It fails closed
 
 No reviewer, no VM context, a closure that raises, an unparseable verdict, or
