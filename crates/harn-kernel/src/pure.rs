@@ -15,6 +15,23 @@ pub use secret_scan::{
     SecretFinding,
 };
 
+/// Select existing fields without changing their values. Lookup belongs to
+/// the value adapter so records, structs, and Harness handles use one rule.
+pub fn pick_fields<'a, V>(
+    keys: impl IntoIterator<Item = &'a str>,
+    mut lookup: impl FnMut(&str) -> Option<V>,
+) -> std::collections::BTreeMap<String, V> {
+    let mut selected = std::collections::BTreeMap::new();
+    for key in keys {
+        if !selected.contains_key(key) {
+            if let Some(value) = lookup(key) {
+                selected.insert(key.to_owned(), value);
+            }
+        }
+    }
+    selected
+}
+
 pub fn hex_encode(input: &[u8]) -> String {
     hex::encode(input)
 }

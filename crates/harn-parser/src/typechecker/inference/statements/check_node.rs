@@ -63,8 +63,10 @@ impl TypeChecker {
                                 type_expr: type_expr.clone(),
                             });
                     }
+                    let has_contract =
+                        type_ann.is_some() || self.has_projection_contract(value, scope);
                     scope.define_var_mutable(name, ty);
-                    if type_ann.is_some() {
+                    if has_contract {
                         scope.mark_annotated(name);
                     }
                     if inferred_is_nil {

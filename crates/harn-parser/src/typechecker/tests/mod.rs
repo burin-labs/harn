@@ -33,6 +33,7 @@ mod ownership;
 mod pipeline_typing;
 mod reachability;
 mod record_arguments;
+mod record_projection;
 mod repair;
 mod row_merge;
 mod soundness;

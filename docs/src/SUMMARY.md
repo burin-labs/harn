@@ -86,6 +86,7 @@
 - [Error handling](./error-handling.md)
 - [Diagnostic codes catalog](./diagnostics.md)
 - [Reading shape diagnostics](./reading-shape-diagnostics.md)
+- [Pick fields from a record](./pick.md)
 - [Modules and imports](./modules.md)
 - [Concurrency](./concurrency.md)
 - [Streams](./streams.md)

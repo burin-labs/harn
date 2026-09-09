@@ -8,6 +8,57 @@ pub struct PureCase {
 
 pub const PURE_CASES: &[PureCase] = &[
     PureCase {
+        id: "typed-record-pick-rejects-invalid-runtime-values",
+        source: r#"
+            fn rejected(args: list<any>) -> bool {
+              try {
+                pick(...args)
+                return false
+              } catch error {
+                return true
+              }
+            }
+            fn project(input: any) -> list<bool> {
+              return [rejected([nil, []]), rejected([42, []]), rejected([{}, [1]]), rejected([{}]), rejected([{}, [], []]), rejected([{}, []])]
+            }
+        "#,
+        entry: "project",
+        input_json: "null",
+        expected_json: "[true,true,true,true,true,false]",
+    },
+    PureCase {
+        id: "typed-record-pick-preserves-nil-and-copies-values",
+        source: r#"
+            type Input = {name: string, age: int, absent: nil, nested: {count: int}}
+            fn project(input: Input) -> {name: string, absent: nil, original: int, copied: int} {
+              let selected = pick(input, ["name", "absent", "nested", "name"])
+              selected.nested.count = 99
+              return {name: selected.name, absent: selected.absent, original: input.nested.count, copied: selected.nested.count}
+            }
+        "#,
+        entry: "project",
+        input_json: r#"{"name":"Ada","age":37,"absent":null,"nested":{"count":1}}"#,
+        expected_json: r#"{"name":"Ada","absent":null,"original":1,"copied":99}"#,
+    },
+    PureCase {
+        id: "typed-record-pick-runtime-keys-and-missing-values",
+        source: r#"
+            fn project(input: {data: dict<string, int>, keys: list<string>}) -> dict<string, int> {
+              return pick(input.data, input.keys)
+            }
+        "#,
+        entry: "project",
+        input_json: r#"{"data":{"a":1,"b":2},"keys":["b","missing","b"]}"#,
+        expected_json: r#"{"b":2}"#,
+    },
+    PureCase {
+        id: "typed-record-pick-empty",
+        source: r#"fn project(input: {name: string}) -> {} { return pick(input, []) }"#,
+        entry: "project",
+        input_json: r#"{"name":"Ada"}"#,
+        expected_json: "{}",
+    },
+    PureCase {
         id: "named-record-reducer",
         source: r#"
             type State = {count: int, history: list<int>}
@@ -325,6 +376,18 @@ pub struct InvalidCase {
 }
 
 pub const INVALID_CASES: &[InvalidCase] = &[
+    InvalidCase {
+        id: "pick-unknown-field",
+        source: r#"fn project(input: {name: string}) { return pick(input, ["nmae"]) }"#,
+        entry: "project",
+        expected_code: "compile_frontend",
+    },
+    InvalidCase {
+        id: "pick-dynamic-fields-are-not-required",
+        source: r#"fn project(input: {name: string}, keys: list<string>) -> {name: string} { return pick(input, keys) }"#,
+        entry: "project",
+        expected_code: "compile_frontend",
+    },
     InvalidCase {
         id: "frontend-syntax-error",
         source: "fn reduce( {",

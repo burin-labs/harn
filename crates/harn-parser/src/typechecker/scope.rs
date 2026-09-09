@@ -412,6 +412,21 @@ impl TypeScope {
     }
 
     pub(super) fn define_flow_alias(&mut self, name: &str, expression: SNode) {
+        // Capture literal values at declaration time. Following their source
+        // name later would read a shadowing binding rather than this const.
+        let expression = match &expression.node {
+            Node::Identifier(source) => self
+                .get_flow_alias(source)
+                .filter(|value| {
+                    matches!(
+                        value.node,
+                        Node::StringLiteral(_) | Node::RawStringLiteral(_) | Node::ListLiteral(_)
+                    )
+                })
+                .cloned()
+                .unwrap_or(expression),
+            _ => expression,
+        };
         let is_flow_expression = matches!(
             &expression.node,
             Node::Identifier(_)
@@ -430,7 +445,9 @@ impl TypeScope {
                 | Node::SubscriptAccess { .. }
                 | Node::OptionalSubscriptAccess { .. }
         );
-        if !is_discard_name(name) && is_flow_expression {
+        let is_literal_key_list = matches!(&expression.node, Node::ListLiteral(items)
+            if items.iter().all(|item| matches!(item.node, Node::StringLiteral(_) | Node::RawStringLiteral(_))));
+        if !is_discard_name(name) && (is_flow_expression || is_literal_key_list) {
             self.flow_aliases.insert(name.to_string(), Some(expression));
         }
     }

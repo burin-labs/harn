@@ -309,10 +309,15 @@ fn register_dict_builder_builtins(vm: &mut Vm) {
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "__dict_filter_nil(d: dict) -> dict", category = "collections"
+    sig = "__dict_filter_nil(d: dict, drop_empty?: bool) -> dict", category = "collections"
 )]
 fn dict_filter_nil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    dict_filter_nil(args.first().unwrap_or(&VmValue::Nil))
+    dict_filter_nil(
+        args.first().unwrap_or(&VmValue::Nil),
+        Args::new("__dict_filter_nil", args)
+            .opt_bool(1, "drop_empty")?
+            .unwrap_or(true),
+    )
 }
 
 #[harn_builtin(
@@ -328,31 +333,42 @@ fn dict_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     )
 }
 
+/// Pick named fields into a new record, preserving nil and capability values.
+/// Literal keys preserve the selected field types; runtime keys produce
+/// optional fields. Unknown keys on a closed record fail static checking.
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "__dict_pick(d: dict, keys: list) -> dict",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_PICK,
     category = "collections"
 )]
-fn dict_pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    dict_pick(
-        args.first().unwrap_or(&VmValue::Nil),
-        args.get(1).unwrap_or(&VmValue::Nil),
-    )
-}
-
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "__dict_pick_keys(d: dict, keys: list, drop_nil?: bool) -> dict",
-    category = "collections"
-)]
-fn dict_pick_keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    dict_pick_keys(
-        args.first().unwrap_or(&VmValue::Nil),
-        args.get(1).unwrap_or(&VmValue::Nil),
-        args.get(2).map(VmValue::is_truthy).unwrap_or(false),
-    )
+fn pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let checked = Args::new("pick", args);
+    checked.arity(2, 2)?;
+    let source = &args[0];
+    let keys = checked.string_list(1, "keys")?;
+    let selected = match source {
+        VmValue::Dict(fields) => {
+            harn_kernel::pure::pick_fields(keys, |key| fields.get(key).cloned())
+        }
+        VmValue::StructInstance(_) => {
+            harn_kernel::pure::pick_fields(keys, |key| source.struct_field(key).cloned())
+        }
+        VmValue::Harness(handle) if handle.kind() == crate::harness::HarnessKind::Root => {
+            harn_kernel::pure::pick_fields(keys, |key| {
+                handle
+                    .sub_handle(key)
+                    .map(|value| VmValue::Harness(value.into()))
+            })
+        }
+        _ => {
+            return Err(VmError::TypeError(format!(
+                "pick: expected a record, dictionary, or Harness; found {}",
+                source.type_name()
+            )))
+        }
+    };
+    Ok(VmValue::dict(selected))
 }
 
 #[harn_builtin(
@@ -425,8 +441,7 @@ fn dict_from_pairs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 const DICT_BUILDER_BUILTINS: &[&VmBuiltinDef] = &[
     &DICT_FILTER_NIL_IMPL_DEF,
     &DICT_MERGE_IMPL_DEF,
-    &DICT_PICK_IMPL_DEF,
-    &DICT_PICK_KEYS_IMPL_DEF,
+    &PICK_IMPL_DEF,
     &DICT_OMIT_IMPL_DEF,
     &CLONE_IMPL_DEF,
     &DEEP_CLONE_IMPL_DEF,
@@ -584,13 +599,15 @@ fn dict_from_pairs(value: &VmValue) -> Result<VmValue, VmError> {
     Ok(VmValue::dict(out))
 }
 
-fn dict_filter_nil(value: &VmValue) -> Result<VmValue, VmError> {
+fn dict_filter_nil(value: &VmValue, drop_empty: bool) -> Result<VmValue, VmError> {
     let dict = dict_arg(value, "filter_nil")?;
-    if dict.is_empty() || dict.values().all(keep_filter_nil) {
+    let keep =
+        |value: &VmValue| !matches!(value, VmValue::Nil) && (!drop_empty || keep_filter_nil(value));
+    if dict.is_empty() || dict.values().all(keep) {
         return Ok(VmValue::Dict(dict));
     }
     let mut out = Arc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
-    out.retain(|_, value| keep_filter_nil(value));
+    out.retain(|_, value| keep(value));
     Ok(VmValue::dict(out))
 }
 
@@ -609,37 +626,6 @@ fn dict_merge(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
         Err(entries) => merged.extend(entries.iter().map(|(k, v)| (k.clone(), v.clone()))),
     }
     Ok(VmValue::dict(merged))
-}
-
-fn dict_pick(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
-    let dict = dict_arg(data, "pick")?;
-    let keys = key_list_arg(keys, "pick")?;
-    let mut out = BTreeMap::new();
-    for key in keys {
-        let key = key.display();
-        if let Some(value) = dict.get(key.as_str()) {
-            if !matches!(value, VmValue::Nil) {
-                out.insert(key, value.clone());
-            }
-        }
-    }
-    Ok(VmValue::dict(out))
-}
-
-fn dict_pick_keys(data: &VmValue, keys: &VmValue, drop_nil: bool) -> Result<VmValue, VmError> {
-    let dict = dict_arg(data, "pick_keys")?;
-    let keys = key_list_arg(keys, "pick_keys")?;
-    let mut out = BTreeMap::new();
-    for key in keys {
-        let key = key.display();
-        if let Some(value) = dict.get(key.as_str()) {
-            if drop_nil && matches!(value, VmValue::Nil) {
-                continue;
-            }
-            out.insert(key, value.clone());
-        }
-    }
-    Ok(VmValue::dict(out))
 }
 
 fn dict_omit(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
@@ -686,7 +672,7 @@ mod tests {
             ("null_string", VmValue::String(arcstr::ArcStr::from("null"))),
             ("kept_zero", VmValue::Int(0)),
         ]);
-        let result = dict_filter_nil(&input).unwrap();
+        let result = dict_filter_nil(&input, true).unwrap();
         let dict = result.as_dict().expect("dict result");
         assert_eq!(dict.len(), 2);
         assert!(dict.contains_key("keep"));
@@ -714,32 +700,21 @@ mod tests {
     }
 
     #[test]
-    fn dict_pick_drops_missing_and_nil_values() {
+    fn pick_preserves_nil_and_drops_missing_keys() {
         let data = dict(&[
             ("a", VmValue::Int(1)),
             ("b", VmValue::Nil),
             ("c", VmValue::Int(3)),
         ]);
-        let result = dict_pick(&data, &keys(&["a", "b", "missing"])).unwrap();
+        let result = pick_impl(
+            &[data, keys(&["a", "b", "missing", "a"])],
+            &mut String::new(),
+        )
+        .unwrap();
         let picked = result.as_dict().expect("dict result");
-        assert_eq!(picked.len(), 1);
+        assert_eq!(picked.len(), 2);
         assert_eq!(picked.get("a").and_then(VmValue::as_int), Some(1));
-    }
-
-    #[test]
-    fn dict_pick_keys_respects_drop_nil_flag() {
-        let data = dict(&[
-            ("a", VmValue::Int(1)),
-            ("b", VmValue::Nil),
-            ("c", VmValue::Int(3)),
-        ]);
-        let kept = dict_pick_keys(&data, &keys(&["a", "b"]), false).unwrap();
-        assert_eq!(kept.as_dict().expect("dict").len(), 2);
-
-        let dropped = dict_pick_keys(&data, &keys(&["a", "b"]), true).unwrap();
-        let dropped = dropped.as_dict().expect("dict");
-        assert_eq!(dropped.len(), 1);
-        assert!(dropped.contains_key("a"));
+        assert!(matches!(picked.get("b"), Some(VmValue::Nil)));
     }
 
     #[test]

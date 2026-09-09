@@ -409,6 +409,12 @@ pub(crate) fn infer_dot_receiver_type(
     let mut receiver_type = receiver_type?;
     for property in path.iter().skip(1) {
         receiver_type = match receiver_type {
+            TypeExpr::Shape(fields) | TypeExpr::OpenShape { fields, .. } => {
+                fields
+                    .into_iter()
+                    .find(|field| field.name == *property)?
+                    .type_expr
+            }
             TypeExpr::Named(ref name) if name == "Harness" => {
                 let capability = harn_builtin_meta::CapabilityId::from_field_name(property)?;
                 TypeExpr::Named(capability.type_name().to_string())

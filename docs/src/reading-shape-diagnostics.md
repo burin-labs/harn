@@ -115,8 +115,8 @@ the typechecker to enforce the invariant.
 
 ## Stdlib helper option errors
 
-Stdlib collection helpers — `pick_keys`, `filter_nil`, `merge`, `pick`,
-`omit` — declare typed signatures (`dict<string, V>`, typed option
+Stdlib collection helpers such as `pick_keys`, `filter_nil`, and `omit`
+declare typed signatures (`dict<string, V>`, typed option
 shapes like `PickKeysOptions = {drop_nil?: bool}`). The typechecker
 catches misuse statically against the declared contract:
 

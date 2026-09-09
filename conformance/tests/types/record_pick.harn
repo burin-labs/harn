@@ -1,0 +1,33 @@
+type Context = {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools}
+
+fn inspect_context(ctx: Context) -> bool {
+  const path = ctx.env.get_or("HARN_CONFORMANCE_PICK_MISSING", ".")
+  return ctx.fs.exists(path)
+}
+
+fn main(harness: Harness) {
+  struct Pair<A, B> {
+    first: A
+    second: B
+  }
+  const pair: Pair<int, string> = Pair {first: 1, second: "two"}
+  const projected_pair: {first: int, second: string} = pick(pair, ["first", "second"])
+  assert_eq(projected_pair, {first: 1, second: "two"})
+  const ctx = pick(harness, ["env", "fs", "tools"])
+  assert_eq(inspect_context(ctx), true)
+  const source = {name: "Ada", age: 37, absent: nil, nested: {count: 1}}
+  let selected = pick(source, ["name", "absent", "nested", "name"])
+  selected.nested.count = 99
+  assert_eq(selected.name, "Ada")
+  assert_eq(contains(selected.keys(), "absent"), true)
+  assert_eq(selected.absent, nil)
+  assert_eq(source.nested.count, 1)
+  assert_eq(selected.nested.count, 99)
+  assert_eq(contains(selected.keys(), "age"), false)
+  assert_eq(pick(source, []), {})
+  const fields = ["name", "age"]
+  const saved = fields
+  const result: {name: string, age: int} = source |> pick(_, saved)
+  assert_eq(result.age, 37)
+  harness.stdio.println("record pick: types, values, capabilities, copies, and aliases verified")
+}

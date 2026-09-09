@@ -13,8 +13,6 @@ const TY_DURATION_OR_INT: Ty = Ty::Union(&[TY_DURATION, TY_INT]);
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple("Ok", &[Param::new("value", TY_ANY)], TY_ANY),
     BuiltinSignature::simple("Err", &[Param::new("error", TY_ANY)], TY_ANY),
-    // `deep_merge`, `__dict_filter_nil`, `dict_from_pairs`,
-    // `__dict_merge`, `unique`, `__dict_omit`, `__dict_pick`,
     BuiltinSignature::simple(
         "__oauth_dynreg_build_authorization_server_metadata",
         &[

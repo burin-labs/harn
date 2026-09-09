@@ -23,7 +23,8 @@ pub fn filter_nil<V>(d: dict<string, V>) -> dict<string, V> {
 /**
  * Project a dict onto an explicit list of keys, preserving the original value
  * contract. Pass `{drop_nil: true}` to omit keys whose value resolves to nil
- * after lookup. Missing keys are silently dropped.
+ * after lookup. Missing keys are silently dropped. Invalid sources and keys
+ * fail through the builtin's argument validation.
  *
  * @effects: []
  * @errors: []
@@ -33,11 +34,11 @@ pub fn pick_keys<V>(
   selected_keys: list<string>,
   options: PickKeysOptions = {},
 ) -> dict<string, V> {
-  if type_of(d) != "dict" {
-    return {}
+  const selected = pick(d, selected_keys)
+  if options.drop_nil ?? false {
+    return __dict_filter_nil(selected, false)
   }
-  const drop_nil = options.drop_nil ?? false
-  return __dict_pick_keys(d, selected_keys, drop_nil)
+  return selected
 }
 
 /**

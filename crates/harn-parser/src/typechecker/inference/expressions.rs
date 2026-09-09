@@ -550,6 +550,15 @@ impl TypeChecker {
                         return Some(first_type);
                     }
                 }
+                if !self.name_is_imported(name)
+                    && !args.iter().any(|arg| matches!(arg.node, Node::Spread(_)))
+                {
+                    if let Some(projection) =
+                        self.lookup_builtin(name).and_then(|sig| sig.projection)
+                    {
+                        return self.infer_record_projection(projection, args, scope);
+                    }
+                }
                 if name == "llm_call" || name == "llm_completion" {
                     if let Some(result_type) = self.infer_llm_call_result_type(name, args, scope) {
                         return Some(result_type);

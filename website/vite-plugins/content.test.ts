@@ -31,6 +31,13 @@ beforeAll(() => {
 }, 120_000)
 
 describe("documentation content contract", () => {
+  it("keeps site-root links on the current origin from nested spec pages", () => {
+    const page = docs.pages.get("spec/language/19-type-annotations")
+    expect(page).toBeDefined()
+    expect(page!.html).toContain('href="/pick.html"')
+    expect(page!.html).not.toContain('href="https://harnlang.com/pick.html"')
+  })
+
   it("indexes every page and resolves every internal page and anchor link", () => {
     // loadAllDocs throws on a dangling page, link, or anchor; reaching beforeAll
     // without throwing is the assertion.
