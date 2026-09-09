@@ -4,6 +4,7 @@ pub(super) fn fixture_budget_exhausted_event() -> AgentEvent {
     AgentEvent::BudgetExhausted {
         session_id: "session-1".to_string(),
         max_iterations: 8,
+        iteration: Some(6),
         kind: Some("total_cost".to_string()),
         cost_usd: Some(0.69),
         wall_clock_ms: Some(1_500),
@@ -24,6 +25,7 @@ pub(super) fn empty_budget_exhausted_event() -> AgentEvent {
     AgentEvent::BudgetExhausted {
         session_id: "session-1".to_string(),
         max_iterations: 3,
+        iteration: None,
         kind: None,
         cost_usd: None,
         wall_clock_ms: None,

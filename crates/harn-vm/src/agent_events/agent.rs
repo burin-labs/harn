@@ -674,6 +674,11 @@ pub enum AgentEvent {
     BudgetExhausted {
         session_id: String,
         max_iterations: usize,
+        /// Iteration the loop was on when the budget stopped it. The emitter
+        /// has always sent it; without a field it was dropped, so a reader
+        /// could see the ceiling but not how much of it the run had used.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        iteration: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

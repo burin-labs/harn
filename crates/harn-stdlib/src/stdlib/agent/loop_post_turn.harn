@@ -699,8 +699,8 @@ pub fn agent_loop_post_turn_transition(
       // run did.
       //
       // `iteration` now survives the projection as well. `has_tools` and
-      // `made_tool_calls` still do not; they are kept here deliberately, as the
-      // fields a further widening would want.
+      // `made_tool_calls` did not, and were kept here for a widening that has
+      // not been asked for, so the emitter no longer claims to record them.
       agent_emit_event(
         harness.agent,
         session.session_id,
@@ -710,8 +710,6 @@ pub fn agent_loop_post_turn_transition(
           content: nudge_text,
           streak: next.turns_since_progress,
           turns_since_progress: next.turns_since_progress,
-          has_tools: has_tools,
-          made_tool_calls: made_tool_calls,
           // The receipt now names its own demotion instead of leaving a reader
           // to infer it from a missing sibling row.
           delivered: false,
