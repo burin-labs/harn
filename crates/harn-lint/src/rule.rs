@@ -100,6 +100,7 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MutableCaptureAcrossParallel),
         Box::new(ReminderLifecycle),
         Box::new(ReminderProviderCount),
+        Box::new(ToolHandlerHostCall),
         Box::new(UntypedToolHandlerResult),
         Box::new(ApiDesign),
     ];
@@ -271,6 +272,12 @@ program_rule!(
     "reminder-provider-count",
     ast,
     crate::rules::reminder_provider_count::check_reminder_provider_count
+);
+program_rule!(
+    ToolHandlerHostCall,
+    "tool-handler-host-call",
+    ast,
+    crate::rules::tool_handler_host_call::check_tool_handler_host_call
 );
 program_rule!(
     UntypedToolHandlerResult,

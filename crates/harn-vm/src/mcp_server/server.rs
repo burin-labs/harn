@@ -1,7 +1,10 @@
-use std::sync::Mutex;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc;
-
+use super::convert::{prompt_value_to_messages, vm_value_to_content, vm_value_to_json};
+use super::defs::{
+    McpCompletionSource, McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServerMetadata,
+    McpToolDef,
+};
+use super::tools_schema::McpToolSet;
+use super::uri::{match_uri_template, uri_template_variables};
 use crate::mcp_progress::{
     active_bus as active_progress_bus, install_active_bus as install_active_progress_bus,
     is_valid_progress_token, scope_context, ProgressBus, ProgressContext,
@@ -12,15 +15,9 @@ use crate::mcp_protocol::{
 use crate::stdlib::json_to_vm_value;
 use crate::value::VmError;
 use crate::vm::Vm;
-
-use super::convert::{prompt_value_to_messages, vm_value_to_content, vm_value_to_json};
-use super::defs::{
-    McpCompletionSource, McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServerMetadata,
-    McpToolDef,
-};
-use super::tools_schema::McpToolSet;
-use super::uri::{match_uri_template, uri_template_variables};
-
+use std::sync::Mutex;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::mpsc;
 /// MCP server that exposes Harn tools, resources, and prompts over MCP JSON-RPC.
 pub struct McpServer {
     server_name: String,
@@ -525,7 +522,10 @@ impl McpServer {
         let result = match crate::mcp_input::scope_input_context(
             params,
             client_capabilities(params),
-            scope_context(progress_ctx, vm.call_closure_pub(&tool.handler, &[args_vm])),
+            scope_context(
+                progress_ctx,
+                crate::tool_handler_scope::scope(vm.call_closure_pub(&tool.handler, &[args_vm])),
+            ),
         )
         .await
         {

@@ -173,6 +173,7 @@ pub mod text;
 pub mod text_diff;
 pub mod tool_annotations;
 pub mod tool_call_cancellations;
+mod tool_handler_scope;
 pub mod tool_registry;
 pub mod tool_surface;
 pub mod tracing;
