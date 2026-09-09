@@ -23,7 +23,7 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
 async fn run_tool_handler(
     mut vm: crate::vm::Vm,
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-    handler: &VmValue,
+    handler: &VmClosure,
     tool_name: &str,
     tool_args: &serde_json::Value,
     declared_failure: &mut Option<&'static str>,
@@ -594,7 +594,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 // MCP-served tools defined by the host are typically served
                 // through the host bridge today; preserve that path. A
                 // Harn-side `handler` overrides (custom MCP wrappers).
-                let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
+                let Some(vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
                     return ToolDispatchOutcome {
                         declared_failure: None,
                         result: Err(VmError::CategorizedError {
@@ -659,7 +659,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 Some(server_name) => ToolExecutor::McpServer { server_name },
                 None => ToolExecutor::HarnBuiltin,
             });
-            let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
+            let Some(vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
                 return ToolDispatchOutcome {
                     declared_failure: None,
                     result: Err(VmError::CategorizedError {
