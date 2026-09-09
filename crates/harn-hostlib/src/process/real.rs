@@ -48,7 +48,8 @@ impl ProcessSpawner for RealSpawner {
             let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
             let (mut command, request) =
                 super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
-            let mut child = match command.spawn() {
+            let mut child = match spawn_retrying_executable_busy(|| command.spawn(), thread::sleep)
+            {
                 Ok(child) => child,
                 Err(error) => {
                     harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
@@ -122,7 +123,8 @@ impl ProcessSpawner for RealSpawner {
         };
         #[cfg(not(target_os = "windows"))]
         let owner_job = None;
-        let mut child = command.spawn().map_err(map_spawn_error)?;
+        let mut child = spawn_retrying_executable_busy(|| command.spawn(), thread::sleep)
+            .map_err(map_spawn_error)?;
         if let Err(error) = harn_vm::op_interrupt::record_current_process_owner_group(child.id()) {
             let _ = harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(child.id(), 9);
             let _ = child.wait();
@@ -346,6 +348,52 @@ fn env_key_eq(key: &std::ffi::OsStr, expected: &str) -> bool {
     }
 }
 
+/// How many times a spawn is re-attempted when the kernel reports the exec
+/// target as busy, and how long the backoff may grow. Ten attempts capped at
+/// 200ms is under a second in the worst case, which is short enough that a
+/// genuinely busy binary still surfaces its error promptly.
+const EXECUTABLE_BUSY_ATTEMPTS: u32 = 10;
+const EXECUTABLE_BUSY_FIRST_BACKOFF: Duration = Duration::from_millis(5);
+const EXECUTABLE_BUSY_MAX_BACKOFF: Duration = Duration::from_millis(200);
+
+/// Retry a spawn while the kernel says the executable is busy.
+///
+/// `ETXTBSY` is a race, not a state of the program being run: exec refuses a
+/// file while ANY process holds a writable descriptor for that inode, and a
+/// process that writes an executable and then runs it can lose to a sibling
+/// spawn. The sibling's child inherits a copy of the writer's descriptor
+/// between its own fork and its exec, and that copy keeps the inode open for
+/// writing for as long as the window lasts. `O_CLOEXEC` closes the copy at the
+/// child's exec but cannot close the window itself, and an atomic
+/// write-then-rename does not help either, because the inherited descriptor
+/// follows the inode through the rename.
+///
+/// This is the same race Go documents and handles in `os/exec`
+/// (golang/go#22315), and the remedy is the same: the window is bounded by one
+/// fork-to-exec, so a bounded retry crosses it while a file that is genuinely
+/// held open still fails with its own error.
+///
+/// Only `ExecutableFileBusy` is retried. Every other error, including a
+/// sandbox denial, is returned on its first occurrence, and the error surfaced
+/// after the last attempt is the one the kernel gave, not a synthesized one.
+fn spawn_retrying_executable_busy<T>(
+    mut attempt: impl FnMut() -> io::Result<T>,
+    mut sleep: impl FnMut(Duration),
+) -> io::Result<T> {
+    let mut backoff = EXECUTABLE_BUSY_FIRST_BACKOFF;
+    for remaining in (0..EXECUTABLE_BUSY_ATTEMPTS).rev() {
+        match attempt() {
+            Ok(value) => return Ok(value),
+            Err(error) if remaining > 0 && error.kind() == io::ErrorKind::ExecutableFileBusy => {
+                sleep(backoff);
+                backoff = (backoff * 2).min(EXECUTABLE_BUSY_MAX_BACKOFF);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the last attempt returns its own result")
+}
+
 fn map_spawn_error(error: io::Error) -> ProcessError {
     if let Some(violation) = process_sandbox::process_spawn_error(&error) {
         return ProcessError::SandboxSpawn(format!("{violation:?}"));
@@ -367,7 +415,16 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
         .ok()
         .filter(|token| !token.is_empty());
     let (mut command, _cleanup_token) = prepare_command(&spec, inherited_cleanup_token)?;
-    Err(map_spawn_error(command.exec()))
+    // `exec` replaces this process on success, so the only value it can return
+    // is an error. It loses the same race for the same reason, so it crosses
+    // the window the same way.
+    Err(map_spawn_error(
+        spawn_retrying_executable_busy(
+            || Err::<std::convert::Infallible, _>(command.exec()),
+            thread::sleep,
+        )
+        .expect_err("a successful exec never returns"),
+    ))
 }
 
 struct RealProcess {
@@ -643,6 +700,93 @@ pub(crate) fn configure_background_process_group(command: &mut std::process::Com
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The race this exists for: two refusals, then the sibling's window closes
+    /// and the same file runs. Without the retry the first refusal is final.
+    #[test]
+    fn a_busy_executable_is_retried_until_the_window_closes() {
+        let mut attempts = 0;
+        let mut slept = Vec::new();
+        let outcome = spawn_retrying_executable_busy(
+            || {
+                attempts += 1;
+                if attempts <= 2 {
+                    return Err(io::Error::from(io::ErrorKind::ExecutableFileBusy));
+                }
+                Ok(attempts)
+            },
+            |delay| slept.push(delay),
+        );
+
+        assert_eq!(outcome.expect("the third attempt runs the file"), 3);
+        assert_eq!(attempts, 3);
+        // Backed off between attempts rather than spinning, and growing.
+        assert_eq!(slept.len(), 2);
+        assert!(slept[1] > slept[0], "{slept:?}");
+    }
+
+    /// THE FALSIFIER for retrying too much: only this one kind is a race. A
+    /// missing file is an answer, and answering it ten times over a second
+    /// would turn every typo into a delay.
+    #[test]
+    fn any_other_spawn_error_is_returned_on_its_first_occurrence() {
+        let mut attempts = 0;
+        let outcome = spawn_retrying_executable_busy(
+            || -> io::Result<()> {
+                attempts += 1;
+                Err(io::Error::from(io::ErrorKind::NotFound))
+            },
+            |_| panic!("a non-race error must not back off"),
+        );
+
+        assert_eq!(attempts, 1);
+        assert_eq!(
+            outcome.expect_err("a missing program is not a race").kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    /// A file something really is holding open still fails, with the kernel's
+    /// own error rather than a synthesized "gave up" one, and within a bounded
+    /// number of attempts.
+    #[test]
+    fn a_permanently_busy_executable_still_fails_with_the_kernel_error() {
+        let mut attempts = 0;
+        let mut total = Duration::ZERO;
+        let outcome = spawn_retrying_executable_busy(
+            || -> io::Result<()> {
+                attempts += 1;
+                Err(io::Error::from(io::ErrorKind::ExecutableFileBusy))
+            },
+            |delay| total += delay,
+        );
+
+        assert_eq!(attempts, EXECUTABLE_BUSY_ATTEMPTS);
+        assert_eq!(
+            outcome
+                .expect_err("a held-open file is not runnable")
+                .kind(),
+            io::ErrorKind::ExecutableFileBusy
+        );
+        assert!(total < Duration::from_secs(1), "{total:?}");
+    }
+
+    /// The normal path is unchanged: a spawn that succeeds first time neither
+    /// retries nor sleeps.
+    #[test]
+    fn an_ordinary_spawn_neither_retries_nor_sleeps() {
+        let mut attempts = 0;
+        let outcome = spawn_retrying_executable_busy(
+            || {
+                attempts += 1;
+                Ok(attempts)
+            },
+            |_| panic!("a successful spawn must not back off"),
+        );
+
+        assert_eq!(outcome.expect("the first attempt succeeds"), 1);
+        assert_eq!(attempts, 1);
+    }
 
     #[test]
     fn resolved_path_prefers_the_child_override() {
