@@ -14,6 +14,10 @@ use crate::net;
 use crate::package::{self, ConnectorSetupConfigurationField, ProviderOAuthManifest};
 
 use super::callback::{bind_loopback_listener, wait_for_oauth_response, OAuthCallbackError};
+use super::oauth_migration::{
+    load_legacy_oauth_registration, migrated_oauth_client_secret_required,
+    oauth_request_with_legacy_registration,
+};
 use super::setup_events::{
     ConnectorSetupErrorCode, ConnectorSetupFailure, ConnectorSetupInteraction,
     ConnectorSetupReporter, ConnectorSetupStage,
@@ -122,10 +126,21 @@ pub(super) async fn run_connect_registered_provider(
             registered.as_ref().and_then(|entry| entry.setup.as_ref()),
             args.client_id.as_deref(),
         );
-        return run_oauth_connect(oauth_request_from_provider_metadata(
-            provider, args, &metadata,
-        )?)
-        .await;
+        let mut request = oauth_request_from_provider_metadata(provider, args, &metadata)?;
+        if request.client_id.is_none() {
+            if let Some(registration) = load_legacy_oauth_registration(provider).await? {
+                request = oauth_request_with_legacy_registration(request, registration);
+                if migrated_oauth_client_secret_required(&request) {
+                    let secret = rpassword::prompt_password("OAuth client secret: ")
+                        .map_err(|error| format!("failed to read OAuth client secret: {error}"))?;
+                    if secret.is_empty() {
+                        return Err("OAuth client secret must not be empty".to_string());
+                    }
+                    request.client_secret = Some(secret);
+                }
+            }
+        }
+        return run_oauth_connect(request).await;
     }
     if oauth_provider_defaults(provider).is_some() {
         reject_manual_secret_options(provider, from_env.as_deref(), value_file.as_deref())?;
