@@ -98,6 +98,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "context/artifact_types" => "stdlib/context/artifact_types.harn",
     "context/maintenance" => "stdlib/context/maintenance.harn",
     "context/eval" => "stdlib/context/eval.harn",
+    "context/disclosure" => "stdlib/context/disclosure.harn",
     "eval/stats" => "stdlib/stdlib_eval_stats.harn",
     "eval/remote_fanout" => "stdlib/eval/remote_fanout.harn",
     "eval/sequential" => "stdlib/eval/sequential.harn",
