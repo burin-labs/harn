@@ -1,0 +1,24 @@
+fn main(harness: Harness) {
+  const archive = zip_create(
+    [{path: "evidence.json", content: "first"}, {path: "evidencf.json", content: "second"}],
+  )
+  const ordinary = zip_extract(archive)
+  assert_eq(len(ordinary), 2)
+  assert_eq(bytes_to_string(ordinary[0].content), "first")
+  assert_eq(bytes_to_string(ordinary[1].content), "second")
+  // Mutate the same-length name in the local and central directory records.
+  // zip_create itself refuses duplicate names; file content and CRCs stay valid.
+  const duplicate = bytes_from_hex(
+    replace(
+      bytes_to_hex(archive),
+      bytes_to_hex(bytes_from_string("evidencf.json")),
+      bytes_to_hex(bytes_from_string("evidence.json")),
+    ),
+  )
+  const result = try {
+    zip_extract(duplicate)
+  }
+  assert(is_err(result), "Duplicate members must not collapse into one observed file")
+  assert(contains(to_string(unwrap_err(result)), "duplicate members"))
+  harness.stdio.println("duplicate ZIP members refused")
+}
