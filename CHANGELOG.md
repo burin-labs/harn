@@ -9,6 +9,114 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.134
+
+### Breaking
+
+- `harn.config.toml` no longer accepts `[limits]`, `[permissions]`, or `[policy]`,
+  and the matching `HARN_BUDGET_USD`, `HARN_TOKEN_BUDGET`, `HARN_MAX_CONCURRENCY`,
+  `HARN_NETWORK_MODE`, `HARN_FILESYSTEM_MODE`, and `HARN_SANDBOX_MODE` names are
+  unregistered. Those knobs were never read by a run; spend ceilings live on the
+  typed session budget.
+
+### Added
+
+- **Confined children can use Unix-domain sockets under granted roots, and a
+  refusal now says which boundary refused it.** `process_sandbox.unix_socket_roots`
+  (`--sandbox-unix-socket-root` on `harn run`) admits bind and connect for
+  socket files under the named directories and nothing over IP, so build
+  servers that talk to themselves through a socket file (sbt, Gradle's Kotlin
+  daemon, MSBuild worker nodes) run inside the sandbox instead of dying with a
+  bare `Operation not permitted`. The grant is path-scoped and host-owned: a
+  nested policy keeps only roots the outer grant covers, and backends that
+  cannot filter sockets by path reject a non-empty grant rather than widening.
+  Every child-process refusal record now carries `mechanism` (`egress`,
+  `local_socket`, `home_read`, `write`, or `unknown`) and a `reason` naming the
+  grants in force, in the event, the handler result, and the agent-visible
+  error, so a refused socket or home-config read is no longer misread as a
+  network denial. On macOS a loopback grant also pins the JVM to the IPv4 stack
+  (`-Djava.net.preferIPv4Stack=true` in `JAVA_TOOL_OPTIONS`), because a
+  dual-stack JVM binds `127.0.0.1` as `::ffff:127.0.0.1`, which the seatbelt's
+  loopback filter refuses. A non-empty socket grant also admits sockets under
+  the UserTemp write roots (`/tmp`, `/var/folders`), because that is where
+  sbt's boot server and MSBuild worker nodes actually bind. npm and pnpm no
+  longer read the denied `~/.npmrc` at startup: `NPM_CONFIG_USERCONFIG` points
+  at a workspace stand-in with credential lines removed. Composer gets a
+  workspace `COMPOSER_HOME` that carries `config.json` and never `auth.json`.
+
+### Changed
+
+- The setup action now bootstraps exact Harn releases through the shared typed installer without requiring Node.js.
+
+### Fixed
+
+- **OAuth credential migration can reuse legacy registration metadata (#8218).**
+  Positional `harn connect <provider>` recovers the old workspace entry's
+  client id, endpoints, scopes, token authentication method, resource, and
+  redirect URI, while discarding its tokens and requiring the client secret
+  again.
+- A `pub` type alias whose body names a recursive type alias imported from another
+  module no longer fails at load. The recursive alias closed a cycle while
+  lowering to a runtime schema, and closing that cycle abandoned the whole
+  fragment, so the alias published no schema and an importing module found nothing
+  to load under a name that is a type. The error it raised, `Undefined variable`
+  naming that type, pointed at nothing the author had written. A cycle-broken slot
+  now lowers to a schema that constrains nothing, which is the answer alias
+  expansion already gave for the same cycle, and the shape around it stays
+  constrained. An alias graph too deep to lower is a different condition and still
+  fails at compile time under a message that names it.
+- An import that only an installed package could have resolved now fails with a
+  message naming the package, and pointing at `harn install` and `harn package
+  doctor`. It previously reported a filesystem path assembled from the relative
+  traversal of the whole import chain, which named a file that could not exist and
+  pointed at the importing source tree rather than at the dependency that was
+  never materialized. A relative import that misses, and a `std/` module that does
+  not exist, both keep their existing path error.
+- The grammar fitness receipt again records the tree-sitter runtime the workspace
+  resolves, so the check that compares the committed receipt with a freshly
+  generated one passes. It had been failing on every push to the main branch since
+  the runtime moved to 0.27, which also skipped the nine checks that run after it
+  in the same job.
+- A child process started through owner-death containment on Linux is now confined
+  by the active profile. The guardian re-execs this binary and rebuilds the payload
+  command from a serialized program, args, cwd and environment, and the Linux
+  backend installs its confinement from a `pre_exec` callback, which that
+  serialization cannot carry. The confinement was dropped in the handover, so the
+  payload ran unconfined while the ruleset was built, never entered, and reported
+  as enforced. The parent now populates the Landlock ruleset and hands the
+  descriptor and the compiled seccomp program to the guardian, which enters them
+  before exec and refuses to spawn if it cannot. macOS is unaffected: its backend
+  puts the sandbox in the payload's argv.
+- Workflow stages now apply their configured token limits, tier-2 strategy,
+  summary prompt, and compaction callbacks instead of silently discarding them.
+- The agent gate registry check now identifies a reader by the file and symbol
+  that does the reading rather than by its line number, so an edit anywhere above
+  a reader no longer reports it as stale. Adding or removing a real reader still
+  fails the check. The generated projection lists readers without line numbers for
+  the same reason; the registry keeps the line as a human hint that is never
+  compared.
+- Bound command-output artifact cleanup to a private Harn temp namespace so unrelated files in a large shared temp
+  directory cannot stall every shell command.
+- A host embedding the VM can move an owned `ProcessSandboxPolicy` into a
+  `CapabilityPolicy` literal with `.into()`, whatever representation the field
+  uses. An integration test pins that shape so a representation change cannot
+  break a consumer's assignment again.
+- **The process sandbox now admits standard pnpm toolchain homes (#8364).**
+  Sandboxed workflow commands can execute pnpm releases installed under the
+  macOS or Linux per-user pnpm directory while those roots remain read-only and
+  invisible to Harn filesystem builtins.
+- The development-identity bump that runs after a release now derives the next
+  version from the tag it just published, instead of from the workspace version on
+  the default branch. A release tagged by hand leaves that branch on the previous
+  development identity, which made the bump refuse and strand the branch there.
+- Protocol artifacts are now checked for staleness in continuous integration.
+  `make check-protocol-artifacts` regenerates them and compares, and it joins the
+  repository policy list that runs on every push to the default branch, so a
+  `spec/protocol-artifacts/` file that drifts from its generator is caught there
+  rather than only when someone runs the full local aggregate.
+- `process.run`, `exec_opts`, and `exec_at_opts` now start the child in a Windows verbatim-prefixed working
+  directory (the form `cwd()` and `canonicalize` return) instead of failing with os error 267, matching `process.exec`.
+
 ## v0.10.133
 
 ### Breaking
