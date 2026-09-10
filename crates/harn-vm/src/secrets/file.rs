@@ -169,8 +169,9 @@ fn owner_only(metadata: &fs::Metadata) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
+        // The low six mode bits are the group/other permissions.
         // SAFETY: geteuid has no arguments or memory-safety preconditions.
-        metadata.uid() == unsafe { libc::geteuid() } && metadata.mode() & 0o077 == 0
+        metadata.uid() == unsafe { libc::geteuid() } && metadata.mode().trailing_zeros() >= 6
     }
     #[cfg(not(unix))]
     {
