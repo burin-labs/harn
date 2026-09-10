@@ -1,5 +1,6 @@
 import "std/collections"
 import { ContextArtifact } from "std/context/artifact_types"
+import { disclosure_token_estimate } from "std/context/disclosure"
 
 /**
  * `source` mirrors the provenance source for convenient flat access.
@@ -96,7 +97,7 @@ fn __context_token_estimate(body: string?, explicit: any = nil) {
   if number != nil && number >= 0 {
     return to_int(ceil(number))
   }
-  return to_int(ceil(len(body ?? "") * 1.0 / 4.0))
+  return disclosure_token_estimate(body)
 }
 
 fn __context_scope(input: dict, opts: dict) {

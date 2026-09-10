@@ -1,0 +1,83 @@
+import {
+  disclosure_token_estimate,
+  disclosure_trailer,
+  heading_boundary_keep_count,
+  truncate_at_section_boundary,
+} from "std/context/disclosure"
+
+const RULES = "# Rules\n"
+  + "\n"
+  + "## Style\n"
+  + "\n"
+  + "- keep lines short\n"
+  + "- name the owner\n"
+  + "\n"
+  + "## Review\n"
+  + "\n"
+  + "- read the diff before the summary\n"
+  + "- prove the claim on the real path\n"
+  + "\n"
+  + "## Release\n"
+  + "\n"
+  + "- land on main before calling it shipped\n"
+
+/** Everything between "full text: " and the closing ">" of a trailer. */
+fn recovery_target(trailer: string) -> string {
+  const marker = "full text: "
+  const start = index_of(trailer, marker)
+  if start < 0 {
+    return ""
+  }
+  const rest = substring(trailer, start + len(marker))
+  const stop = index_of(rest, ">")
+  if stop < 0 {
+    return ""
+  }
+  return substring(rest, 0, stop)
+}
+
+pipeline test(harness: Harness, task: unknown) {
+  // ---- The trailer names counts and a way back, and is empty when nothing
+  // was omitted so a caller can append it unconditionally.
+  harness.stdio.println(disclosure_trailer(12, 24, "sections", "docs/rules.md"))
+  harness.stdio.println("[" + disclosure_trailer(24, 24, "sections", "docs/rules.md") + "]")
+  harness.stdio.println(disclosure_trailer(1, 3, "", "load_skill(review)"))
+  // A trailer that reports a cut without naming a way back is the defect.
+  const blank = try {
+    disclosure_trailer(1, 2, "sections", "   ")
+  }
+  harness.stdio.println(is_err(blank))
+  // ---- The boundary floor. A document with no interior boundary would put
+  // its last one at line 0 and serve a single line for any budget.
+  const no_boundary = ["- a", "- b", "- c", "- d", "- e", "- f"]
+  harness.stdio.println(heading_boundary_keep_count(no_boundary, 4))
+  const with_boundary = ["# A", "one", "", "# B", "two", "three"]
+  harness.stdio.println(heading_boundary_keep_count(with_boundary, 5))
+  // A blank line inside a fenced block is not a section boundary.
+  const fenced = ["# A", "```", "one", "", "two", "```", "", "# B"]
+  harness.stdio.println(heading_boundary_keep_count(fenced, 5))
+  // ---- Truncation reports real line counts and only claims a cut it made.
+  const whole = truncate_at_section_boundary(RULES, 4096)
+  harness.stdio.println(whole.truncated)
+  harness.stdio.println(whole.rendered == RULES)
+  const cut = truncate_at_section_boundary(RULES, 12)
+  harness.stdio.println(cut.truncated)
+  harness.stdio.println(cut.shown < cut.total)
+  harness.stdio.println(cut.total == len(split(RULES, "\n")))
+  harness.stdio.println(disclosure_token_estimate(cut.rendered) <= 12)
+  // ---- The falsifier. Parse the recovery target back OUT of the rendered
+  // trailer, read it through the harness filesystem, and require the
+  // recovered bytes to equal the untruncated source. Asserting the trailer
+  // merely contains a filename passes against a decorative pointer.
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-disclosure-" + harness.random.uuid_v7(),
+  )
+  harness.fs.mkdir(root)
+  const rules_path = path_join(root, "rules.md")
+  harness.fs.write_text(rules_path, RULES)
+  const trailer = disclosure_trailer(cut.shown, cut.total, "lines", rules_path)
+  const recovered = harness.fs.read_text(recovery_target(trailer))
+  harness.stdio.println(recovered == RULES)
+  harness.stdio.println(recovered != cut.rendered)
+}
