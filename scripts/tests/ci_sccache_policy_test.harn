@@ -5,6 +5,7 @@ import {
   e2e_elastic_capacity_errors,
   producer_admission_expression,
   producer_cache_save_reserve_minutes,
+  producer_cli_timeout_expression,
   producer_hosted_ceiling_minutes,
   producer_owned_ceiling_minutes,
   producer_runner_expression,
@@ -232,7 +233,7 @@ fn workflow() {
             BUDGET_STEP,
             {
               name: "Build portable Harn CLI",
-              "timeout-minutes": 10,
+              "timeout-minutes": producer_cli_timeout_expression(),
               run: "./scripts/ci/rust_artifact.sh build-cli cli-bundle sha",
             },
             {name: "Upload portable Harn CLI", uses: "actions/upload-artifact@pinned"},
@@ -990,15 +991,49 @@ pipeline test_rejects_a_producer_cache_guard_that_names_only_the_hosted_tier(har
 
 /**
  * The owned ceiling is derived, not chosen. It is the hosted ceiling without
- * the cache-save reserve, because the owned rung is pull-request-only and
- * `rust-cache` saves only from `main`, so it never reaches the save.
+ * the cache-save reserve and adds cold CLI margin. The owned rung is
+ * pull-request-only, so it never reaches the main-only cache save.
  */
-pipeline test_owned_ceiling_drops_only_the_cache_save_reserve(harness: Harness) {
+pipeline test_owned_ceiling_accounts_for_cold_cli_margin_without_cache_save(harness: Harness) {
   assert_eq(
     producer_owned_ceiling_minutes(),
-    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes(),
-    "the owned ceiling must be the hosted ceiling minus the save it never performs",
+    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 5,
+    "the owned ceiling must account for its own CLI margin without a cache-save reserve",
   )
+}
+
+@test
+pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-check-inputs": {
+        ...producer,
+        steps: producer.steps.map(
+          { step ->
+            if step?.name == "Build portable Harn CLI" {
+              return {...step, "timeout-minutes": 10}
+            }
+            return step
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  assert(
+    ci_linux_lane_policy_errors(invalid).contains(
+      "ci.yml:rust-check-inputs step 'Build portable Harn CLI' must carry its own "
+        + producer_cli_timeout_expression()
+        + " budget so the cache save reserve stays reserved",
+    ),
+  )
+  assert_eq(producer_hosted_ceiling_minutes(), 70)
+  assert_eq(producer_owned_ceiling_minutes(), 63)
 }
 
 pipeline test_owned_producer_requires_measured_capacity(harness: Harness) {
@@ -1054,7 +1089,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   assert(errors.contains("ci.yml:rust-check-inputs must mirror all three of its runner tiers"))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse, the 58-minute owned ceiling, and the 70-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse, the 63-minute owned ceiling, and the 70-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }

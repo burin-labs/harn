@@ -668,7 +668,7 @@ jobs:
     # a cache.
     #
     # The hosted ceiling is owned by the workload rather than chosen as a round
-    # number: it is the sum of the three step budgets below (9 + 12 + 26), plus
+    # number: it is the sum of the hosted step budgets below (10 + 16 + 26), plus
     # six minutes of setup and cache restore, plus a twelve-minute reserve for
     # this job's main-branch cache save. The save is a post step, so before the
     # reserve existed it ran inside whatever margin the tests happened to leave;
@@ -680,7 +680,7 @@ jobs:
     # SLO. scripts/ci_cache_policy/linux_checks.harn owns the arithmetic.
     #
     # The owned self-hosted rung is the same arithmetic minus the cache-save
-    # reserve, because it never saves: 6 setup + 10 + 16 + 26 = 58. It is a
+    # reserve, with extra cold CLI margin: 6 setup + 15 + 16 + 26 = 63. It is a
     # hang backstop, not a claim about host core count or improved performance.
     runs-on: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
@@ -702,7 +702,7 @@ jobs:
         && needs.runner-availability.outputs.selfhosted_disabled == ''
         && needs.runner-availability.outputs.capacity != ''
         && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
-        && 58)
+        && 63)
         || 70 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
     # Blacksmith uses sticky sccache and never enters that step, and the owned
@@ -770,7 +770,9 @@ jobs:
       # the tiers it knows turns a new tier into a silent skip: the first
       # self-hosted run would compile cold, report success, and say nothing.
       # Blacksmith has its sticky sccache above. The owned pool and hosted
-      # runners both restore this portable cache. Only the hosted rung ever
+      # runners both attempt an environment-compatible restore; differing
+      # toolchains and environment keys can still require a cold build.
+      # Only the hosted rung ever
       # writes it: `save` is restore-only off `main`, and the owned rung is
       # pull-request-only, so the authorized main-branch writer is untouched.
       - uses: ./.github/actions/rust-cache
@@ -787,7 +789,7 @@ jobs:
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
-        timeout-minutes: 10
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 15 || 10 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
