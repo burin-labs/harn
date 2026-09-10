@@ -203,9 +203,41 @@ pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 // empty (#5003).
 pub const CI_CACHE_WRITE_JOBS = ["package-audit", "rust-check-inputs", "rust-cache-refresh"]
 
-// Compile fan-out remains four even on the 8-vCPU producer so a link-heavy
-// crate cannot exhaust its memory.
-pub const HOSTED_BUILD_JOBS = "4"
+// Compile fan-out on the producer is measured, not typed, and the ceiling now
+// rests on a measurement rather than on a fear. It lives in
+// `scripts/ci/rust-resource-policy.json` beside the E2E ceiling.
+//
+// The old ceiling of four was justified as keeping a link-heavy crate from
+// exhausting memory. Sampling a full workspace build at one-second intervals
+// says fan-out is not what drives the peak. Peak resident set across all live
+// compiler processes, by how many were running at that moment, on a 12-thread
+// 62 GB Linux host, dev profile without debug info:
+//
+//   concurrent compilers   peak total RSS   mean per process
+//   1                      8401 MiB         8401 MiB
+//   2                      9363 MiB         4681 MiB
+//   4                      2363 MiB          590 MiB
+//   8                      2425 MiB          303 MiB
+//   12                     2571 MiB          214 MiB
+//
+// One process accounts for 8.4 GiB on its own, and it is alone when it does:
+// the heavy crate sits at the end of the graph with nothing beside it. That
+// peak is present at every fan-out setting, so lowering the ceiling never
+// bought the headroom it was said to buy, while eight concurrent compilers
+// cost about 2.4 GiB in total. The ceiling is therefore eight, and the share
+// formula still lowers it on a host with fewer cores.
+//
+// An expression is more dangerous than a literal here, because a step id that
+// does not resolve expands to the empty string and an empty CARGO_BUILD_JOBS
+// means "use every core", which is the opposite of the bound. The measuring
+// step is therefore required to exist, by id and by profile.
+pub const HOSTED_BUILD_JOBS = "$" + "{{ steps.resource-budget.outputs.build_jobs }}"
+
+pub const BUILD_BUDGET_STEP_ID = "resource-budget"
+
+pub const BUILD_BUDGET_COMMAND = "bash scripts/ci/rust_resource_budget.sh"
+
+pub const BUILD_BUDGET_PRODUCER_PROFILE = "producer"
 
 // Hang backstop for the archived workspace-test consumer lanes. These lanes never
 // compile (the structural checks below pin that directly: archive-only test
@@ -317,9 +349,9 @@ pub const CLI_COLD_START_JOB = "cold-start-budget"
 
 pub const CLI_COLD_START_BUILD_STEP = "Build release harn"
 
-pub const CLI_COLD_START_JOB_TIMEOUT_MINUTES = 30
+pub const CLI_COLD_START_JOB_TIMEOUT_MINUTES = 55
 
-pub const CLI_COLD_START_BUILD_TIMEOUT_MINUTES = 25
+pub const CLI_COLD_START_BUILD_TIMEOUT_MINUTES = 45
 
 // Both release head-ref shapes, matching `.github/scripts/release-ref.sh`. A
 // GitHub Actions `if:` cannot source that helper, so this constant is what
@@ -1359,7 +1391,94 @@ pub fn cache_key_inputs(
   return inputs
 }
 
-/** Return every policy violation without stopping at the first workflow. */
+/**
+ * Return every policy violation without stopping at the first workflow.
+ * The cache family a rust-cache step actually reads or writes.
+ *
+ * The local action composes the upstream shared key from three inputs, and the
+ * upstream action then appends the runner OS and architecture before any hash.
+ * That ordering is what makes this worth computing: a restore falls back to the
+ * key prefix, and the prefix ends at the architecture, so two families that
+ * differ anywhere in the shared key can never satisfy each other. A reader that
+ * names `workspace-tests` while the writer saves
+ * `workspace-tests-${WORKSPACE_CACHE_GENERATION}` restores nothing at all,
+ * which looks exactly like a cold repository and reports success either way.
+ */
+pub fn cache_family(step: dict) -> string {
+  const shared = trim(to_string(step?.with?.["shared-key"] ?? ""))
+  const source = trim(to_string(step?.with?.["source-key"] ?? ""))
+  const crates = lowercase(trim(to_string(step?.with?.["cache-workspace-crates"] ?? "false")))
+    == "true"
+  let family = shared
+  if source != "" {
+    family = family + "-" + source
+  }
+  if crates {
+    family = family + "-" + WORKSPACE_CACHE_GENERATION
+  }
+  return family
+}
+
+/** Expand a matrix-bound cache family into the families the job really writes. */
+pub fn cache_families_for_step(job_definition: dict, step: dict) -> list<string> {
+  const family = cache_family(step)
+  if !contains(family, "matrix.cache_key") {
+    return [family]
+  }
+  let families: list<string> = []
+  for entry in job_definition?.strategy?.matrix?.include ?? [] {
+    const matrix_key = trim(to_string(entry?.cache_key ?? ""))
+    if matrix_key != "" {
+      families = families + [replace(family, "$" + "{{ matrix.cache_key }}", matrix_key)]
+    }
+  }
+  return families
+}
+
+/**
+ * Refuse a restore that names a cache family nothing saves.
+ *
+ * This is the quiet half of the policy. A restore of an unwritten family never
+ * fails: it misses, the job compiles from nothing, and the only visible trace
+ * is wall time nobody attributes to it. The writers are already declared, so
+ * the answer is a comparison rather than a measurement, and the remedy is to
+ * name a maintained family or to drop a step that cannot help.
+ */
+pub fn rust_cache_reader_errors(policy: CiCachePolicy, workflows: dict) -> list<string> {
+  let written_families: list<string> = []
+  let reader_sites: list<string> = []
+  for workflow in workflows.keys().sorted() {
+    const jobs = workflows[workflow]?.jobs ?? {}
+    for job in jobs.keys().sorted() {
+      for step in jobs[job]?.steps ?? [] {
+        if step_uses(step) == policy.rust_cache_action {
+          const families = cache_families_for_step(jobs[job] ?? {}, step)
+          if save_requested(step) {
+            written_families = written_families + families
+          } else {
+            for family in families {
+              reader_sites = reader_sites + ["${workflow}:${job}:" + family]
+            }
+          }
+        }
+      }
+    }
+  }
+  let errors: list<string> = []
+  for site in reader_sites.sorted() {
+    // A step that names no family at all is a different defect, and the action
+    // already declares `shared-key` required, so it is not judged here.
+    const family = site.split(":")[-1]
+    if family != "" && !written_families.contains(family) {
+      errors = errors
+        + [
+          "${site} restores a Rust cache family no writer saves; name a maintained family or remove the step",
+        ]
+    }
+  }
+  return errors
+}
+
 pub fn ci_cache_policy_errors(
   policy: CiCachePolicy,
   action: dict,
@@ -1437,7 +1556,7 @@ pub fn ci_cache_policy_errors(
       errors = errors + ["authorized persistent cache writer is not active: " + key]
     }
   }
-  return errors
+  return errors + rust_cache_reader_errors(policy, workflows)
 }
 
 /** Keep one current pull-request proof and an executed result per main head. */
@@ -1518,10 +1637,9 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       errors = errors + ["ci.yml:${name} must use the shared elastic Linux runner switch"]
     }
   }
-  // The Rust workspace producer carries one more rung than its siblings. It is
-  // the last job to finish before the gate in most pull-request runs and two of
-  // its three heavy steps are pure compilation, so a same-repository pull
-  // request prefers the owned pool when the census says the pool has carriers.
+  // The Rust workspace producer carries one more rung than its siblings.
+  // A same-repository pull request prefers the owned pool when its census
+  // reports online carriers, including a busy pool that must queue work.
   // Merge groups and main pushes are deliberately NOT eligible: main pushes are
   // the authorized cache writer, and merge throughput must not depend on a
   // residential machine's health, which is the objection #6217 recorded when it

@@ -284,6 +284,16 @@ impl DocumentState {
         self.publish_lint_diagnostics(lint_diags);
 
         self.symbols = build_symbol_table(&program, &self.source);
+        let binding_types: std::collections::BTreeMap<_, _> = analysis
+            .binding_types
+            .into_iter()
+            .map(|binding| ((binding.span.start, binding.name), binding.type_expr))
+            .collect();
+        for symbol in &mut self.symbols {
+            if let Some(ty) = binding_types.get(&(symbol.def_span.start, symbol.name.clone())) {
+                symbol.type_info = Some(ty.clone());
+            }
+        }
         self.cached_ast = Some(program);
     }
 

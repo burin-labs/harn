@@ -18,21 +18,6 @@ fn blacksmith_runner_expression(runner: string) -> string {
     + "{{ vars.${BLACKSMITH_ENABLE_VAR} == 'true' && ${paid_event} && '${runner}' || '${HOSTED_LINUX_RUNNER}' }}"
 }
 
-/**
- * The owned rung the Rust workspace producer may prefer, as it appears inside
- * every one of that job's three routing expressions.
- *
- * Pull requests only, and the reason is the cache writer rather than caution:
- * `rust-cache` saves only from `main`, so routing main pushes onto the owned
- * pool would retire the authorized writer and leave every later hosted run
- * compiling cold. Merge groups stay hosted for the same reason #6217 removed
- * the previous ladder, which is that merge throughput must not depend on a
- * residential machine's health.
- *
- * It reads `online` rather than a per-lane boolean. Those booleans go false
- * both when the fleet is switched off and when it is merely busy, and a busy
- * fleet is a reason to queue, not a reason to downgrade the tier.
- */
 fn blacksmith_tier_expression() -> string {
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
@@ -128,8 +113,7 @@ pub fn producer_cache_save_reserve_minutes() -> int {
 /**
  * The owned rung never saves a cache, so it does not carry the save's reserve.
  * Everything else is identical: same steps, same budgets, same setup. It is a
- * hang backstop on a 24-core box rather than a performance claim, so it is not
- * sized down for the extra cores either.
+ * hang backstop rather than a claim about host core count or performance.
  */
 pub fn producer_owned_ceiling_minutes() -> int {
   return producer_hosted_ceiling_minutes() - PRODUCER_CACHE_SAVE_RESERVE_MINUTES
@@ -149,6 +133,15 @@ pub fn producer_timeout_expression() -> string {
     to_string(producer_owned_ceiling_minutes()),
     to_string(producer_hosted_ceiling_minutes()),
   )
+}
+
+/** Trusted PR producers require a measured capacity decision before dispatch. */
+pub fn producer_admission_expression() -> string {
+  return "$"
+    + "{{ !cancelled() && needs.changes.outputs.rust == 'true'"
+    + "\n  && (needs.rust-producer-capacity.result == 'success'"
+    + "\n  || github.event_name != 'pull_request'"
+    + "\n  || github.event.pull_request.head.repo.full_name != github.repository) }}"
 }
 
 fn step_named(job: dict, name: string) {
@@ -318,6 +311,11 @@ fn persistent_compile_lane_errors(
     return ["ci.yml:${job_name} must define the persistent Linux compile lane"]
   }
   let errors: list<string> = []
+  if trim(job?.if ?? "") != producer_admission_expression()
+    || !strings_of(job?.needs ?? []).contains("rust-producer-capacity") {
+    errors = errors
+      + ["ci.yml:${job_name} must require a successful capacity decision on trusted pull requests"]
+  }
   if trim(job?.["runs-on"] ?? "") != producer_runner_expression(runner) {
     errors = errors
       + [
@@ -993,6 +991,34 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   errors = errors + strict_clippy_entrypoint_errors(rust_job)
   errors = errors + early_source_policy_errors(workflow)
   const producer = workflow?.jobs?.["rust-check-inputs"]
+  // The measured budget only bounds anything if the step it reads exists and
+  // asks for this lane's ceiling. An unresolved step id expands to an empty
+  // value, which cargo reads as "every core" — a silent inversion of the bound.
+  const budget_step = (producer?.steps ?? []).filter(
+    { step -> trim(to_string(step?.id ?? "")) == BUILD_BUDGET_STEP_ID },
+  )
+    .to_list()
+  if len(budget_step) != 1
+    || trim(to_string(budget_step[0]?.run ?? "")) != BUILD_BUDGET_COMMAND
+    || trim(to_string(budget_step[0]?.env?.HARN_BUDGET_PROFILE ?? ""))
+      != BUILD_BUDGET_PRODUCER_PROFILE {
+    errors = errors
+      + [
+        "ci.yml:rust-check-inputs must measure its compile fan-out in one '${BUILD_BUDGET_STEP_ID}' step on the ${BUILD_BUDGET_PRODUCER_PROFILE} profile",
+      ]
+  }
+  // Every compiling step in this job, not just the archive builder. One step
+  // left on a literal is one box still oversubscribed, and it reads as a
+  // deliberate exception because the step beside it looks correct.
+  for step in producer?.steps ?? [] {
+    const fan_out = trim(to_string(step?.env?.CARGO_BUILD_JOBS ?? ""))
+    if fan_out != "" && fan_out != HOSTED_BUILD_JOBS {
+      errors = errors
+        + [
+          "ci.yml:rust-check-inputs step '${trim(to_string(step?.name ?? "<unnamed>"))}' sets CARGO_BUILD_JOBS to '${fan_out}'; it must read the measured budget",
+        ]
+    }
+  }
   const build_step = step_by_name(producer?.steps ?? [], "Build portable workspace test archive")
   if trim(build_step?.if ?? "")
     != "vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"

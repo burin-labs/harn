@@ -1,0 +1,164 @@
+/**
+ * std/context/disclosure - one owner for progressive-disclosure truncation.
+ *
+ * A context assembler that cuts a block owes its reader two things: the real
+ * counts, and the action that retrieves what was cut. Assemblers that invent
+ * their own omission note reliably supply the first and forget the second, so
+ * the model learns something is missing and is left to guess how to get it.
+ * A block that emits no note at all is worse: the omission is invisible.
+ *
+ * The trailer is returned rather than appended because callers differ on
+ * whether the note's own cost is pre-reserved out of the budget. The recovery
+ * action is an opaque caller-supplied string, never assumed to be a path: a
+ * body bundled inside a host's own resources is unreachable through the
+ * workspace filesystem, and its recovery action is a skill load, not a `look`.
+ */
+/** Characters per token for the estimate every disclosure decision shares. */
+const DISCLOSURE_CHARS_PER_TOKEN = 4
+
+/**
+ * One truncation decision. `shown` and `total` are LINE counts, so a caller
+ * can render the trailer in whatever unit it names its blocks by.
+ */
+pub type DisclosureTruncation = {rendered: string, shown: int, total: int, truncated: bool}
+
+/**
+ * Approximate token cost of `text`.
+ *
+ * One estimate for every disclosure decision, so a block's budget check and
+ * its trailer cannot disagree about what fit.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn disclosure_token_estimate(text: string?) -> int {
+  return to_int(ceil(len(text ?? "") * 1.0 / (DISCLOSURE_CHARS_PER_TOKEN * 1.0)))
+}
+
+/**
+ * The omission note for a truncated block, or "" when nothing was omitted.
+ *
+ * Callers append unconditionally; the empty string is the whole-block case.
+ *
+ * `recovery` names the action that retrieves the omitted text, in whatever
+ * vocabulary the caller's reader can actually act on. A blank one throws: a
+ * trailer that reports a cut without naming a way back is the defect this
+ * function exists to prevent, and accepting it would ship that defect under a
+ * shared name.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn disclosure_trailer(shown: int, total: int, unit: string, recovery: string) -> string {
+  const action = trim(recovery ?? "")
+  if action == "" {
+    throw "disclosure_trailer: `recovery` must name the action that retrieves the omitted "
+      + "text; a trailer that reports a cut without naming a way back is the defect this "
+      + "helper exists to prevent"
+  }
+  if shown >= total {
+    return ""
+  }
+  const label = if trim(unit ?? "") == "" {
+    "items"
+  } else {
+    trim(unit)
+  }
+  return "<truncated: showing "
+    + to_string(shown)
+    + " of "
+    + to_string(total)
+    + " "
+    + label
+    + "; full text: "
+    + action
+    + ">"
+}
+
+/**
+ * How many leading lines to keep so a cut of `line_keep_count` lines lands on
+ * a markdown section boundary rather than mid-bullet or mid-code-fence.
+ *
+ * A boundary is a blank line or a `#` heading outside a fenced code block.
+ * Backing up to one unconditionally is wrong: a long document with no
+ * interior blank line puts its last boundary at line 0, so any budget serves
+ * a single line. The boundary therefore wins only when it retains at least
+ * half the requested cut; otherwise the requested cut stands, because a
+ * severed list beats an empty block and the trailer reports the real counts
+ * either way.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn heading_boundary_keep_count(lines: list, line_keep_count: int) -> int {
+  const total = len(lines)
+  const requested = if line_keep_count < 0 {
+    0
+  } else if line_keep_count > total {
+    total
+  } else {
+    line_keep_count
+  }
+  if requested == 0 {
+    return 0
+  }
+  let in_fence = false
+  let heading_without_body = false
+  let boundary = 0
+  let index = 0
+  while index < requested {
+    const stripped = trim(to_string(lines[index] ?? ""))
+    if starts_with(stripped, "```") {
+      in_fence = !in_fence
+      heading_without_body = false
+    } else if !in_fence && starts_with(stripped, "#") {
+      boundary = index
+      heading_without_body = true
+    } else if !in_fence && stripped == "" {
+      if !heading_without_body {
+        boundary = index
+      }
+    } else if stripped != "" {
+      heading_without_body = false
+    }
+    index = index + 1
+  }
+  if boundary * 2 < requested {
+    return requested
+  }
+  return boundary
+}
+
+/**
+ * Truncate markdown to a token budget at a section boundary.
+ *
+ * Returns counts rather than a rendered trailer so the caller decides whether
+ * the note's own cost came out of this budget.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn truncate_at_section_boundary(text: string, budget_tokens: int) -> DisclosureTruncation {
+  const body = text ?? ""
+  const lines = split(body, "\n")
+  const total = len(lines)
+  if budget_tokens <= 0 {
+    return {rendered: "", shown: 0, total: total, truncated: total > 0}
+  }
+  if disclosure_token_estimate(body) <= budget_tokens {
+    return {rendered: body, shown: total, total: total, truncated: false}
+  }
+  const char_budget = budget_tokens * DISCLOSURE_CHARS_PER_TOKEN
+  let used = 0
+  let line_cut = 0
+  while line_cut < total {
+    const next = used + len(to_string(lines[line_cut] ?? "")) + 1
+    if next > char_budget {
+      break
+    }
+    used = next
+    line_cut = line_cut + 1
+  }
+  const shown = heading_boundary_keep_count(lines, line_cut)
+  return {rendered: join(lines[:shown], "\n"), shown: shown, total: total, truncated: shown < total}
+}

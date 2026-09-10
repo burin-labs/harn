@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 74
+      "count": 76
     },
     {
       "id": "FMT",
@@ -2476,6 +2476,30 @@
       "category": "LNT",
       "summary": "tool handler returns a freeform dict, so its outcome must be inferred from key names instead of declared by its type",
       "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-076",
+      "category": "LNT",
+      "summary": "tool handler reaches the privileged host wire",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-077",
+      "category": "LNT",
+      "summary": "record literal copies fields one by one from a value that `pick` can select",
+      "repairs": [
+        {
+          "id": "records/pick-fields",
+          "safety": "behavior-preserving",
+          "summary": "Replace the field-by-field record copy with `pick`"
+        }
+      ],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"

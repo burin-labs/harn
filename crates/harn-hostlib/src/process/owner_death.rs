@@ -78,6 +78,34 @@ where
     GuardianReexecArgsGuard { previous }
 }
 
+/// The descriptor number the populated Landlock ruleset arrives on.
+///
+/// Fixed rather than negotiated because the guardian learns it before it can
+/// read anything: the request that would carry a negotiated number arrives on
+/// stdin, and stdin is already the liveness lease.
+#[cfg(all(unix, target_os = "linux"))]
+const RULESET_FD: std::os::fd::RawFd = 3;
+
+/// The confinement the guardian must enter on the payload's behalf.
+///
+/// The rest of [`PreparedCommand`] is a lossy projection of a `Command`: it
+/// keeps what a program, its arguments, a directory and an environment can say,
+/// and drops everything else. Confinement used to be in the "everything else",
+/// because this backend installs it from a `pre_exec` callback and a callback
+/// cannot cross an `exec`. The payload then ran unconfined while every step
+/// reported success.
+///
+/// This is that missing half in a form the projection can carry: a byte string
+/// for the compiled seccomp program, and a flag saying a ruleset descriptor was
+/// handed over on [`RULESET_FD`]. `Some` is a REQUIREMENT, not a hint — a
+/// guardian that cannot enter it refuses to spawn.
+#[cfg(unix)]
+#[derive(Deserialize, Serialize)]
+struct GuardianConfinement {
+    seccomp: Vec<u8>,
+    ruleset: bool,
+}
+
 #[cfg(unix)]
 #[derive(Deserialize, Serialize)]
 struct PreparedCommand {
@@ -87,6 +115,12 @@ struct PreparedCommand {
     env_clear: bool,
     env: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     cleanup_token: String,
+    /// Absent means this run confines no child process at all, which is the
+    /// same answer the direct spawn path acts on. It never means "confinement
+    /// was wanted and could not be built": that is an error at the seam that
+    /// built it, and it is returned as one.
+    #[serde(default)]
+    confinement: Option<GuardianConfinement>,
 }
 
 #[cfg(unix)]
@@ -113,10 +147,14 @@ pub(crate) fn prepare_guardian(
         harn_vm::op_interrupt::PROCESS_OWNER_TOKEN_ENV,
         &cleanup_token,
     );
+    // Built from the SAME ambient policy the payload command was prepared
+    // under, one step earlier in this function, so the two cannot disagree.
+    let confinement = build_confinement(&payload_spec.program)?;
     let request = PreparedCommand::from_command(
         &payload,
         spec.env_mode == super::EnvMode::Replace,
         cleanup_token.clone(),
+        confinement.as_ref().map(TransferredConfinement::request),
     );
     let request = serde_json::to_vec(&request)
         .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
@@ -143,7 +181,118 @@ pub(crate) fn prepare_guardian(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
+    if let Some(confinement) = confinement {
+        confinement.hand_to(&mut guardian);
+    }
     Ok((guardian, request))
+}
+
+/// The parent's side of the handover.
+///
+/// A confinement crosses an `exec` as a descriptor plus a byte string, and only
+/// the descriptor needs help: the kernel opens a Landlock ruleset close-on-exec,
+/// so it has to be placed on an agreed number with that flag cleared, and it has
+/// to stay open until the guardian is spawned. Owning it here does both — the
+/// value lives on the guardian `Command`, which outlives the spawn.
+#[cfg(target_os = "linux")]
+struct TransferredConfinement {
+    inner: harn_vm::process_sandbox::TransferableConfinement,
+}
+
+#[cfg(target_os = "linux")]
+impl TransferredConfinement {
+    fn request(&self) -> GuardianConfinement {
+        GuardianConfinement {
+            seccomp: self.inner.seccomp_bytes(),
+            ruleset: self.inner.ruleset_fd().is_some(),
+        }
+    }
+
+    fn hand_to(self, guardian: &mut Command) {
+        let Some(ruleset) = self.inner.into_ruleset_fd() else {
+            return;
+        };
+        // SAFETY: `dup2` and `fcntl` are async-signal-safe, which is what
+        // `pre_exec` requires. The guard closes the descriptor if it is still
+        // ours when the command is dropped, so an unspawned command leaks
+        // nothing.
+        let guard = RulesetDescriptor(ruleset);
+        unsafe {
+            guardian.pre_exec(move || {
+                // `guard.raw()` and not `guard.0`. An edition-2021 closure
+                // captures the FIELDS it names, so naming the descriptor alone
+                // captures a `RawFd`, which is `Copy`, and leaves the guard
+                // itself behind to drop at the end of this function — closing
+                // the ruleset before the child that has to enter it exists. A
+                // method call captures the whole guard, which is the lifetime
+                // this handover depends on.
+                let held = guard.raw();
+                if held == RULESET_FD {
+                    // Already on the agreed number: it only needs the
+                    // close-on-exec flag cleared to survive the `exec`.
+                    if libc::fcntl(held, libc::F_SETFD, 0) < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                } else if libc::dup2(held, RULESET_FD) < 0 {
+                    // `dup2` clears close-on-exec on the new descriptor.
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+}
+
+/// Owns the ruleset descriptor for as long as the guardian command does.
+#[cfg(target_os = "linux")]
+struct RulesetDescriptor(std::os::fd::RawFd);
+
+#[cfg(target_os = "linux")]
+impl RulesetDescriptor {
+    fn raw(&self) -> std::os::fd::RawFd {
+        self.0
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for RulesetDescriptor {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.0);
+        }
+    }
+}
+
+/// Build the confinement this spawn must carry, or state that it carries none.
+///
+/// `Ok(None)` means the run confines no child. It never means confinement was
+/// wanted and could not be built: that is an error, and it is returned as one,
+/// so no caller can read a refusal as an absent request.
+#[cfg(target_os = "linux")]
+fn build_confinement(program: &str) -> Result<Option<TransferredConfinement>, ProcessError> {
+    harn_vm::process_sandbox::transferable_confinement(program)
+        .map(|inner| inner.map(|inner| TransferredConfinement { inner }))
+        .map_err(|error| ProcessError::SandboxSetup(format!("{error:?}")))
+}
+
+/// Other platforms wrap the payload's argv, and the request carries argv, so
+/// their confinement crosses the handover on its own.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn build_confinement(_program: &str) -> Result<Option<TransferredConfinement>, ProcessError> {
+    Ok(None)
+}
+
+/// The no-op the non-Linux paths type-check against.
+#[cfg(all(unix, not(target_os = "linux")))]
+struct TransferredConfinement;
+
+#[cfg(all(unix, not(target_os = "linux")))]
+impl TransferredConfinement {
+    fn request(&self) -> GuardianConfinement {
+        unreachable!("no platform but Linux builds a transferred confinement")
+    }
+
+    fn hand_to(self, _guardian: &mut Command) {}
 }
 
 #[cfg(unix)]
@@ -179,8 +328,14 @@ pub(crate) fn write_request(pipe: &mut ChildStdin, request: &[u8]) -> Result<(),
 
 #[cfg(unix)]
 impl PreparedCommand {
-    fn from_command(command: &Command, env_clear: bool, cleanup_token: String) -> Self {
+    fn from_command(
+        command: &Command,
+        env_clear: bool,
+        cleanup_token: String,
+        confinement: Option<GuardianConfinement>,
+    ) -> Self {
         Self {
+            confinement,
             program: os_bytes(command.get_program()),
             args: command.get_args().map(os_bytes).collect(),
             cwd: command
@@ -195,7 +350,7 @@ impl PreparedCommand {
         }
     }
 
-    fn into_command(self) -> (Command, String) {
+    fn into_command(self) -> io::Result<(Command, String)> {
         let mut command = Command::new(OsString::from_vec(self.program));
         command.args(self.args.into_iter().map(OsString::from_vec));
         if let Some(cwd) = self.cwd {
@@ -220,8 +375,56 @@ impl PreparedCommand {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        (command, self.cleanup_token)
+        apply_confinement(&mut command, self.confinement)?;
+        Ok((command, self.cleanup_token))
     }
+}
+
+/// Attach the transferred confinement to the payload spawn, or refuse.
+///
+/// Built here, before the fork, because rebuilding allocates and the `pre_exec`
+/// side may not. The closure is then two raw syscalls.
+///
+/// Fail-closed by construction: every path that cannot install what it was
+/// handed returns an error, and the guardian answers the startup handshake with
+/// it instead of spawning. A confinement that could not be applied must never
+/// come out as a payload that merely ran.
+#[cfg(target_os = "linux")]
+fn apply_confinement(
+    command: &mut Command,
+    confinement: Option<GuardianConfinement>,
+) -> io::Result<()> {
+    let Some(confinement) = confinement else {
+        return Ok(());
+    };
+    let ruleset = confinement.ruleset.then_some(RULESET_FD);
+    let transferable = harn_vm::process_sandbox::TransferableConfinement::from_parts(
+        ruleset,
+        &confinement.seccomp,
+    )?;
+    // SAFETY: `enter` is two raw syscalls for Landlock and one for seccomp,
+    // with no allocation, locking, or I/O, which is what `pre_exec` requires.
+    unsafe {
+        command.pre_exec(move || transferable.enter());
+    }
+    Ok(())
+}
+
+/// Every other platform puts its confinement in the spawn's argv, which the
+/// request already carries, so there is nothing to reattach here. Being handed
+/// one anyway means the two sides disagree about who confines, and the safe
+/// reading of that is a refusal rather than an unconfined payload.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn apply_confinement(
+    _command: &mut Command,
+    confinement: Option<GuardianConfinement>,
+) -> io::Result<()> {
+    if confinement.is_some() {
+        return Err(io::Error::other(
+            "guardian was handed a transferred confinement on a platform whose backend carries its own",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -291,7 +494,18 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let raw = read_request()?;
     let request: PreparedCommand = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let (mut payload_command, cleanup_token) = request.into_command();
+    let (mut payload_command, cleanup_token) = match request.into_command() {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            write_startup(StartupMessage {
+                ok: false,
+                error: Some(format!("guardian could not confine the payload: {error}")),
+                guardian_pid: None,
+                pid: None,
+            })?;
+            return Err(error);
+        }
+    };
     let _journal_cleanup = OwnerJournalCleanup(cleanup_token.clone());
     configure_child_reaper()?;
     let mut payload = match payload_command.spawn() {

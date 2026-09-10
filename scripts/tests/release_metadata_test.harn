@@ -8,6 +8,7 @@ import {
   package_names_for_manifests,
   release_metadata_plan,
   rewrite_local_dependency_versions,
+  stable_release_version,
   stable_version_from_development,
   verify_changelog_top,
   workspace_package_manifests,
@@ -541,4 +542,39 @@ pipeline test_changelog_top_validation(harness: Harness, task: unknown) {
     { -> verify_changelog_top("# Changelog\n", "1.2.4") },
     "CHANGELOG.md has no '## vX.Y.Z' heading",
   )
+}
+
+/**
+ * The published release, not the workspace, decides the next development
+ * identity when the caller knows what it published.
+ *
+ * On the normal path the release pull request merges first and the workspace
+ * already carries the stable version, so both readings agree. A hand-cut tag
+ * never merges that pull request, so the workspace is still on the previous
+ * development identity; deriving from it refuses and leaves main stranded
+ * there, which is what happened after v0.10.133 and blocked the next cut.
+ */
+@test
+pipeline test_the_published_release_decides_the_next_development_identity(
+  harness: Harness,
+  task: unknown,
+) {
+  // A tag and a bare version are the same answer.
+  assert_eq(stable_release_version("v0.10.133"), "0.10.133")
+  assert_eq(stable_release_version("0.10.133"), "0.10.133")
+  assert_eq(development_version_from_stable(stable_release_version("v0.10.133")), "0.10.134-dev")
+  // The exact stranding: the workspace still says 0.10.133-dev and refuses,
+  // while the published tag answers without ambiguity.
+  assert_throws_eq(
+    { -> development_version_from_stable("0.10.133-dev") },
+    "development version requires stable release SemVer: 0.10.133-dev",
+  )
+  // Nothing but an exact stable release is accepted in the trusted position,
+  // or the value this exists to reject comes back through it.
+  for bad in ["0.10.133-dev", "v0.10.133-dev", "0.10.133-rc.1", "latest", "", "v"] {
+    assert_throws_eq(
+      { -> stable_release_version(bad) },
+      "released version must be an exact stable release SemVer: " + bad,
+    )
+  }
 }

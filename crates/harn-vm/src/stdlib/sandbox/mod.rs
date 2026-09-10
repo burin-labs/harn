@@ -54,8 +54,7 @@ use std::process::{Command, Output};
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::orchestration::ProcessSandboxPreset;
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
-use crate::value::{environment_io_error_thrown, ErrorCategory, VmError, VmValue};
-use crate::vm::Vm;
+use crate::value::{environment_io_error_thrown, ErrorCategory, VmError};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use read_roots::developer_toolchain_cache_write_roots_for_home;
@@ -73,6 +72,7 @@ mod backend;
 #[cfg(all(test, target_os = "linux"))]
 mod enforcement_report;
 mod handler_env;
+mod introspection;
 #[cfg(target_os = "linux")]
 mod linux;
 mod locked_append;
@@ -104,15 +104,22 @@ pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
 mod replace;
 
-// Each backend uses exactly one of these: the platform helpers call
-// `unavailable`, Linux installs confinement in `pre_exec` and warns directly.
+// Each backend uses one of these: platform helpers call `unavailable`; Linux confines in `pre_exec`.
+/// A confinement an embedder can build here and enter in a process it re-execs.
+///
+/// Linux only, and deliberately so. This backend installs confinement from a
+/// `pre_exec` callback, which nothing can carry across a process boundary; the
+/// other backends put theirs in the spawn's argv, which survives on its own.
+#[cfg(target_os = "linux")]
+pub use linux::{transferable_confinement, TransferableConfinement};
 #[cfg(target_os = "linux")]
 pub(crate) use refusal::mechanism_skipped_warning;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use refusal::unavailable;
 pub use refusal::{
-    is_process_sandbox_signal, process_violation_error, ProcessSandboxAssessment,
-    ProcessSandboxDenialReporting, ProcessSandboxOperation, ProcessSandboxRefusal,
+    infer_process_sandbox_mechanism, is_process_sandbox_signal, process_violation_error,
+    ProcessSandboxAssessment, ProcessSandboxDenialReporting, ProcessSandboxGrants,
+    ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
     ProcessSandboxReportingContext, SandboxMechanism, SandboxMechanismAvailability,
     SandboxMechanismUnavailable, SandboxRequirement,
 };
@@ -130,6 +137,7 @@ mod workspace_env_integration;
 pub(crate) use handler_env::effective_fallback;
 #[cfg(test)]
 pub(crate) use handler_env::handler_sandbox_test_guard;
+pub use introspection::register_sandbox_builtins;
 pub(crate) use locked_append::AppendLockOptions;
 pub(crate) use policy::allows_network as policy_allows_network;
 pub(crate) use replace::{
@@ -188,73 +196,6 @@ pub(crate) enum SandboxFallback {
 
 pub(crate) fn reset_sandbox_state() {
     WARNED_KEYS.with(|keys| keys.borrow_mut().clear());
-}
-
-/// Register Harn-callable introspection builtins for the sandbox.
-/// Intended for diagnostics, `harn doctor`, and conformance fixtures —
-/// not as a way to mutate runtime sandbox behavior from a script.
-pub fn register_sandbox_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
-    use harn_builtin_meta::CapabilityId;
-    vm.register_capability_method(
-        CapabilityId::System,
-        "sandbox_active_backend",
-        sandbox_active_backend_impl,
-    );
-    vm.register_capability_method(
-        CapabilityId::System,
-        "sandbox_backend_available",
-        sandbox_backend_available_impl,
-    );
-    vm.register_capability_method(
-        CapabilityId::System,
-        "sandbox_active_profile",
-        sandbox_active_profile_impl,
-    );
-}
-
-pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
-    &SANDBOX_ACTIVE_BACKEND_IMPL_DEF,
-    &SANDBOX_BACKEND_AVAILABLE_IMPL_DEF,
-    &SANDBOX_ACTIVE_PROFILE_IMPL_DEF,
-];
-
-#[crate::stdlib::macros::harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "sandbox_active_backend() -> string",
-    category = "sandbox"
-)]
-fn sandbox_active_backend_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(active_backend_name())))
-}
-
-#[crate::stdlib::macros::harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "sandbox_backend_available() -> bool",
-    category = "sandbox"
-)]
-fn sandbox_backend_available_impl(
-    _args: &[VmValue],
-    _out: &mut String,
-) -> Result<VmValue, VmError> {
-    Ok(VmValue::Bool(active_backend_available()))
-}
-
-#[crate::stdlib::macros::harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "sandbox_active_profile() -> string",
-    category = "sandbox"
-)]
-fn sandbox_active_profile_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let profile = crate::orchestration::current_execution_policy()
-        .map(|policy| policy.sandbox_profile)
-        .unwrap_or(SandboxProfile::Unrestricted);
-    Ok(VmValue::String(arcstr::ArcStr::from(profile.as_str())))
 }
 
 /// A workspace-root scope violation: a path that resolved outside every
@@ -1882,7 +1823,7 @@ pub(crate) fn process_sandbox_path_read_roots(policy: &CapabilityPolicy) -> Vec<
         .collect()
 }
 
-fn normalized_process_roots(roots: &[String]) -> Vec<PathBuf> {
+pub(crate) fn normalized_process_roots(roots: &[String]) -> Vec<PathBuf> {
     roots
         .iter()
         .map(|root| normalize_for_policy(&resolve_policy_path(root)))

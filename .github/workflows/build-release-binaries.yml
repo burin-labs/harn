@@ -2412,6 +2412,10 @@ jobs:
         id: development-bump
         env:
           EXPECTED_DEVELOPMENT_VERSION: ${{ steps.development.outputs.version }}
+          # The tag this run just published, so the next development identity is
+          # derived from what shipped rather than from whatever main happens to
+          # carry. A hand-cut tag leaves main on the old development version.
+          RELEASE_PUBLISHED_VERSION: ${{ needs.setup.outputs.ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail

@@ -119,7 +119,7 @@ Sets are iterable with `for ... in` and support `len()`.
 | `tar_create(entries)` | Creates an in-memory tar archive from `[{path, content, mode?}]` and returns `bytes`; `content` may be bytes or string |
 | `tar_extract(bytes)` | Extracts an in-memory tar archive into `[{path, content: bytes, mode}]` |
 | `zip_create(entries)` | Creates an in-memory deflated zip archive from `[{path, content}]` and returns `bytes`; `content` may be bytes or string |
-| `zip_extract(bytes)` | Extracts an in-memory zip archive into `[{path, content: bytes}]` |
+| `zip_extract(bytes)` | Extracts an in-memory zip archive into `[{path, content: bytes}]`; rejects duplicate member names |
 | `multipart_parse(body, content_type, opts?)` | Parses a buffered `multipart/form-data` body from bytes/string plus `Content-Type`; `opts` supports `max_total_bytes`, `max_field_bytes`, and `max_fields` |
 | `multipart_field_bytes(field)` | Returns a parsed multipart field's raw bytes |
 | `multipart_field_text(field)` | Decodes a parsed multipart field's bytes as UTF-8, throwing on invalid text |

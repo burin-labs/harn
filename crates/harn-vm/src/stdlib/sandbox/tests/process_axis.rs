@@ -15,10 +15,10 @@ fn a_process_only_root_is_launchable_without_becoming_writable() {
 
     let policy = CapabilityPolicy {
         workspace_roots: vec![workspace.display().to_string()],
-        process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(crate::orchestration::ProcessSandboxPolicy {
             read_roots: vec![elsewhere.display().to_string()],
             ..Default::default()
-        },
+        }),
         sandbox_profile: SandboxProfile::Worktree,
         ..CapabilityPolicy::default()
     };

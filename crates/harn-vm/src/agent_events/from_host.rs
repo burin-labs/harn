@@ -229,7 +229,7 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event_folding(
         "tool_call_blank_name_dropped",
         None,
-        &["message", "text", "dropped_count"],
+        &["message", "text", "dropped_count", "dispatched_count"],
     ),
     host_event_folding(
         "llm_auto_continue",
@@ -241,6 +241,7 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
             "raised_max_tokens",
             "attempt",
             "max_continuations",
+            "stop_reason",
         ],
     ),
     host_event_folding(
@@ -252,6 +253,7 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
             "attempt",
             "max_recoveries",
             "archived_messages",
+            "provider_error",
         ],
     ),
 ];
@@ -412,7 +414,10 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
         kind: kind.to_string(),
         content,
         streak: None,
-        iteration: None,
+        // Every emitter on this path sends the turn it fired on; reading it
+        // here is what stops the receipt from being untieable to that turn,
+        // and what stops the key from being lost at this boundary.
+        iteration: obj_opt_usize(payload, "iteration"),
         tool_name: None,
         turn_claimed_for_repair: None,
         delivered: obj_opt_bool(payload, "delivered"),
@@ -602,30 +607,63 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
         ),
         "tool_call_blank_name_dropped" => feedback(
             "tool_call_blank_name_dropped",
-            feedback_content(obj_usize(payload, "dropped_count").to_string()),
+            feedback_content(format!(
+                "{} dropped, {} dispatched",
+                obj_usize(payload, "dropped_count"),
+                obj_usize(payload, "dispatched_count"),
+            )),
         ),
         "llm_auto_continue" => feedback(
             "llm_auto_continue",
             feedback_content(format!(
-                "{}->{} (attempt {}/{})",
+                "{}->{} (attempt {}/{}){}",
                 obj_usize(payload, "previous_max_tokens"),
                 obj_usize(payload, "raised_max_tokens"),
                 obj_usize(payload, "attempt"),
                 obj_usize(payload, "max_continuations"),
+                match first_non_empty_string(payload, &["stop_reason"]) {
+                    Some(reason) => format!(" after stop `{reason}`"),
+                    None => String::new(),
+                },
             )),
         ),
         "context_overflow_recovery" => feedback(
             "context_overflow_recovery",
             feedback_content(format!(
-                "attempt {}/{} archived {} messages",
+                "attempt {}/{} archived {} messages after {}",
                 obj_usize(payload, "attempt"),
                 obj_usize(payload, "max_recoveries"),
                 obj_usize(payload, "archived_messages"),
+                compact_provider_error(payload),
             )),
         ),
         _ => return None,
     };
     Some(event)
+}
+
+/// The provider error that triggered a context-overflow recovery, rendered
+/// short enough to sit inside a feedback line.
+///
+/// The recovery emitter has always carried this and the projection had no
+/// field for it, so the reason a run compacted itself mid-turn was recorded
+/// nowhere once the recovery succeeded.
+fn compact_provider_error(payload: &Value) -> String {
+    let error = payload.get("provider_error").unwrap_or(&Value::Null);
+    let rendered = match error {
+        Value::Null => String::new(),
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    };
+    let trimmed = rendered.trim();
+    if trimmed.is_empty() {
+        return "an unreported provider error".to_string();
+    }
+    let mut short: String = trimmed.chars().take(160).collect();
+    if short.chars().count() < trimmed.chars().count() {
+        short.push('…');
+    }
+    short
 }
 
 fn first_non_empty_string(payload: &Value, keys: &[&str]) -> Option<String> {

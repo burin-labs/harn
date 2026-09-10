@@ -1160,7 +1160,9 @@ fn developer_toolchain_roots_cover_common_home_managed_runtimes() {
         Path::new(".pyenv"),
         Path::new(".nvm"),
         Path::new(".volta"),
+        Path::new(".local/share/pnpm"),
         Path::new(".local/share/uv"),
+        Path::new("Library/pnpm"),
         Path::new("go"),
     ] {
         assert!(
@@ -1394,12 +1396,12 @@ fn sandbox_denial_classifies_default_toolchain_cache_as_environment() {
         // Explicitly WITHOUT DeveloperToolchains, so the default caches are not
         // jail roots (the default `presets: None` would enable it and put the
         // caches inside the jail, suppressing the fallback under test).
-        process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(crate::orchestration::ProcessSandboxPolicy {
             presets: Some(vec![
                 crate::orchestration::ProcessSandboxPreset::SystemRuntime,
             ]),
             ..Default::default()
-        },
+        }),
         ..Default::default()
     };
     let home = sandbox_user_home_dir().expect("absolute home for default cache roots");

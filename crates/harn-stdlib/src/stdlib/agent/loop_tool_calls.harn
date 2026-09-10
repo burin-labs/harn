@@ -1204,11 +1204,9 @@ pub fn __maybe_inject_blank_name_feedback(
     harness.agent,
     session_id,
     "tool_call_blank_name_dropped",
-    {
-      dropped_count: dropped,
-      dispatched_count: dispatched_count,
-      has_partial_success: has_partial_success,
-    },
+    // `has_partial_success` is `dispatched_count > 0` a few lines above, so the
+    // receipt carries the count and lets a reader derive the rest.
+    {dropped_count: dropped, dispatched_count: dispatched_count},
   )
   return true
 }

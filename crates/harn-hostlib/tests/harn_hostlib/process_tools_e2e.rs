@@ -44,7 +44,10 @@ fn registry() -> BuiltinRegistry {
     registry
 }
 
-fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
+pub(super) fn call(
+    builtin: &str,
+    request: harn_vm::value::DictMap,
+) -> Result<VmValue, HostlibError> {
     let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
         "process_tools_e2e::owner_death_guardian_fixture",
@@ -58,15 +61,15 @@ fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, Host
     (entry.handler)(&[arg])
 }
 
-fn dict() -> harn_vm::value::DictMap {
+pub(super) fn dict() -> harn_vm::value::DictMap {
     harn_vm::value::DictMap::new()
 }
 
-fn vstr(value: &str) -> VmValue {
+pub(super) fn vstr(value: &str) -> VmValue {
     VmValue::String(arcstr::ArcStr::from(value))
 }
 
-fn vlist_str(values: &[&str]) -> VmValue {
+pub(super) fn vlist_str(values: &[&str]) -> VmValue {
     VmValue::List(Arc::new(values.iter().map(|s| vstr(s)).collect()))
 }
 
@@ -84,21 +87,21 @@ fn python3() -> Option<String> {
     status.success().then_some(candidate)
 }
 
-fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
+pub(super) fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
     match value {
         VmValue::Dict(map) => (*map).clone(),
         other => panic!("expected dict response, got {other:?}"),
     }
 }
 
-fn require_int(map: &harn_vm::value::DictMap, key: &str) -> i64 {
+pub(super) fn require_int(map: &harn_vm::value::DictMap, key: &str) -> i64 {
     match map.get(key) {
         Some(VmValue::Int(i)) => *i,
         other => panic!("expected int at {key}, got {other:?}"),
     }
 }
 
-fn require_str(map: &harn_vm::value::DictMap, key: &str) -> String {
+pub(super) fn require_str(map: &harn_vm::value::DictMap, key: &str) -> String {
     match map.get(key) {
         Some(VmValue::String(s)) => s.to_string(),
         other => panic!("expected string at {key}, got {other:?}"),

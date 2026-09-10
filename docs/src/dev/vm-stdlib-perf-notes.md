@@ -54,22 +54,20 @@ per-call closure dispatch in `filter_nil`. Every connector wrapper
 `std/graphql`, the agents stdlib, and the workflow scaffolding leans on
 these helpers.
 
-Five new builtins under `crates/harn-vm/src/stdlib/collections.rs`
-handle the work in one allocation:
+Native builtins under `crates/harn-vm/src/stdlib/collections.rs` avoid
+per-entry Harn dispatch:
 
 - `__dict_filter_nil(d)` — drop `nil`, `""`, and the literal string
   `"null"`; returns the original `Rc` when nothing changes.
 - `__dict_merge(a, b)` — `Rc::try_unwrap(a)` + `BTreeMap::extend`.
-- `__dict_pick(data, keys)` — match `std/json::pick` semantics
-  (drop missing + `nil`).
-- `__dict_pick_keys(d, keys, drop_nil)` — match
-  `std/collections::pick_keys` (preserve `nil` unless `drop_nil` is set).
+- `pick(source, keys)` selects fields through the shared native/portable
+  projection primitive and preserves `nil`.
 - `__dict_omit(d, keys)` — `Rc::try_unwrap(d)` + `BTreeMap::retain`.
 
-The Harn-level `pub fn`s in `stdlib_collections.harn` and
-`stdlib_json.harn` now thin-wrap these so every existing
-`import { filter_nil } from "std/collections"` consumer transparently
-picks them up; the public API is unchanged.
+`std/collections.pick_keys` composes `pick` with
+`__dict_filter_nil(selected, false)` when `drop_nil` is enabled. Passing
+`false` preserves empty strings and the string `"null"`. The remaining
+collection wrappers use the same native helpers.
 
 Effect on `filter_nil_loop` (4,000 iterations of
 `filter_nil(merge(config, overlay))` plus a `pick_keys` projection — the

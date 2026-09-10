@@ -1,8 +1,6 @@
-//! Tests for `AgentEvent::from_host_payload` — typed host-emit deserialization.
-//!
-//! These pin the accept/reject boundary and the per-field defaults that the
-//! retired hand-written `build_agent_event` match applied, so the serde path
-//! stays behavior-identical.
+//! Host-event decoding, defaults, and field preservation.
+
+mod repaired_emitters;
 
 use super::*;
 use serde_json::json;
@@ -1447,9 +1445,10 @@ fn a_key_folded_into_a_differently_named_field_is_not_a_drop() {
 }
 
 #[test]
-fn the_no_progress_emitter_reports_its_two_known_strays() {
-    // harn#8217 names these two: kept in the emitter deliberately, as the
-    // fields a later widening would want, and invisible until now.
+fn a_stray_key_the_no_progress_emitter_no_longer_sends_is_still_reported() {
+    // harn#8217 named these two. The emitter no longer sends them, so this is
+    // the direction control: the reporter must still fire for a key nothing
+    // reads, or every assertion of silence below passes vacuously.
     let details = dropped_key_details(
         "drop-5",
         "no_progress_streak_nudge",

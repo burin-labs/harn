@@ -510,6 +510,7 @@
         "limit": "total_cost",
         "limitValue": 1.25,
         "maxIterations": 8,
+        "iteration": 6,
         "model": "gpt-5.6-sol",
         "headroomUsd": 0.56,
         "projectedCostUsd": 0.75,

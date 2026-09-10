@@ -160,17 +160,17 @@ fn unknown_side_effect_level_ranks_fail_closed() {
 fn widening_process_sandbox_roots_is_rejected() {
     use crate::orchestration::ProcessSandboxPolicy;
     let ceiling = CapabilityPolicy {
-        process_sandbox: ProcessSandboxPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
             write_roots: vec!["/repo/.cache".to_string()],
             ..Default::default()
-        },
+        }),
         ..Default::default()
     };
     let widened = CapabilityPolicy {
-        process_sandbox: ProcessSandboxPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
             write_roots: vec!["/repo/.cache".to_string(), "/etc".to_string()],
             ..Default::default()
-        },
+        }),
         ..Default::default()
     };
     let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
@@ -196,20 +196,20 @@ fn injecting_process_sandbox_roots_into_empty_ceiling_is_rejected() {
         (
             "process_sandbox.read_roots",
             CapabilityPolicy {
-                process_sandbox: ProcessSandboxPolicy {
+                process_sandbox: Box::new(ProcessSandboxPolicy {
                     read_roots: vec!["/etc".to_string()],
                     ..Default::default()
-                },
+                }),
                 ..Default::default()
             },
         ),
         (
             "process_sandbox.write_roots",
             CapabilityPolicy {
-                process_sandbox: ProcessSandboxPolicy {
+                process_sandbox: Box::new(ProcessSandboxPolicy {
                     write_roots: vec!["/etc".to_string()],
                     ..Default::default()
-                },
+                }),
                 ..Default::default()
             },
         ),
@@ -230,20 +230,20 @@ fn injecting_process_sandbox_roots_into_empty_ceiling_is_rejected() {
 fn widening_process_sandbox_presets_is_rejected() {
     use crate::orchestration::{ProcessSandboxPolicy, ProcessSandboxPreset};
     let ceiling = CapabilityPolicy {
-        process_sandbox: ProcessSandboxPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
             presets: Some(vec![ProcessSandboxPreset::SystemRuntime]),
             ..Default::default()
-        },
+        }),
         ..Default::default()
     };
     let widened = CapabilityPolicy {
-        process_sandbox: ProcessSandboxPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
             presets: Some(vec![
                 ProcessSandboxPreset::SystemRuntime,
                 ProcessSandboxPreset::DeveloperToolchains,
             ]),
             ..Default::default()
-        },
+        }),
         ..Default::default()
     };
     let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
@@ -328,11 +328,10 @@ fn weakening_tool_annotation_is_rejected() {
     assert!(ceiling.assert_within_ceiling(&narrowed_tools).is_ok());
 }
 
-/// The pinned pre-move Rust flattening algorithm (the deleted
-/// `workflow_stage_agent_loop_options` body + helpers), preserved verbatim
-/// as the parity oracle. `flatten_matches_pre_move_rust` asserts the Harn
-/// flattener reproduces it dict-for-dict.
-fn legacy_flatten_reference(
+/// The complete expected stage contract at the Rust/Harn boundary. Keeping the
+/// expected dictionary here catches dropped host fields in addition to the
+/// focused Harn regression for nested compaction options.
+fn expected_flatten_contract(
     node: &WorkflowNode,
     session_id: &str,
     tool_format: &str,
@@ -368,10 +367,8 @@ fn legacy_flatten_reference(
             VmValue::Bool(false),
         );
     } else {
-        options.insert(
-            crate::value::intern_key("auto_compact"),
-            VmValue::Bool(true),
-        );
+        let mut compact = crate::value::DictMap::new();
+        compact.insert(crate::value::intern_key("enabled"), VmValue::Bool(true));
         if let Some(v) = node.auto_compact.token_threshold {
             options.insert(
                 crate::value::intern_key("compact_threshold"),
@@ -379,13 +376,13 @@ fn legacy_flatten_reference(
             );
         }
         if let Some(v) = node.auto_compact.tool_output_max_chars {
-            options.insert(
+            compact.insert(
                 crate::value::intern_key("tool_output_max_chars"),
                 VmValue::Int(v as i64),
             );
         }
         if let Some(v) = node.auto_compact.hard_limit_tokens {
-            options.insert(
+            compact.insert(
                 crate::value::intern_key("hard_limit_tokens"),
                 VmValue::Int(v as i64),
             );
@@ -394,7 +391,7 @@ fn legacy_flatten_reference(
             options.put_str("compact_strategy", s.clone());
         }
         if let Some(s) = node.auto_compact.hard_limit_strategy.as_ref() {
-            options.put_str("hard_limit_strategy", s.clone());
+            compact.put_str("hard_limit_strategy", s.clone());
         }
         let raw = node.raw_auto_compact.as_ref().and_then(|v| v.as_dict());
         let keep = raw
@@ -419,18 +416,22 @@ fn legacy_flatten_reference(
                 _ => None,
             })
         {
-            options.put_str("summarize_prompt", p);
+            compact.put_str("summarize_prompt", p);
         }
         if let Some(d) = raw {
             for key in ["compress_callback", "mask_callback"] {
                 if let Some(cb) = d.get(key) {
-                    options.insert(crate::value::intern_key(key), cb.clone());
+                    compact.insert(crate::value::intern_key(key), cb.clone());
                 }
             }
             if let Some(cb) = d.get("custom_compactor") {
                 options.insert(crate::value::intern_key("compact_callback"), cb.clone());
             }
         }
+        options.insert(
+            crate::value::intern_key("auto_compact"),
+            VmValue::dict(compact),
+        );
     }
     if !tool_names.is_empty() {
         if let Some(v) = tools_value.clone() {
@@ -501,7 +502,7 @@ fn representative_node() -> WorkflowNode {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn flatten_matches_pre_move_rust() {
+async fn flatten_matches_expected_stage_contract() {
     crate::reset_thread_local_state();
     let node = representative_node();
     let session_id = "session-parity";
@@ -542,7 +543,7 @@ async fn flatten_matches_pre_move_rust() {
     .await
     .expect("harn flatten succeeds");
 
-    let expected = legacy_flatten_reference(
+    let expected = expected_flatten_contract(
         &node,
         session_id,
         tool_format,
@@ -555,6 +556,6 @@ async fn flatten_matches_pre_move_rust() {
     let expected_json = vm_value_to_json(&VmValue::dict(expected));
     assert_eq!(
         flattened_json, expected_json,
-        "Harn flatten must be dict-equal to the pre-move Rust flatten"
+        "Harn flatten must be dict-equal to the complete stage contract"
     );
 }

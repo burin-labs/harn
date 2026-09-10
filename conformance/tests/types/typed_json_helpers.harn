@@ -2,7 +2,7 @@
 // projection. `merge` is row-polymorphic, so merging two record literals
 // infers the precise merged shape (no explicit type arguments needed); `pick`
 // and `omit` preserve the `dict<string, V>` value contract.
-import { merge, omit, pick } from "std/json"
+import { merge, omit } from "std/json"
 
 pipeline default(harness: Harness, task: unknown) {
   const scores: dict<string, int> = {alice: 1, bob: 2}

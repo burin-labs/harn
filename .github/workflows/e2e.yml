@@ -118,7 +118,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Measure the E2E CPU and compiler memory budget
         id: resource-budget
-        run: bash scripts/ci/e2e_resource_budget.sh
+        run: bash scripts/ci/rust_resource_budget.sh
         env:
           RUNNER_ENVIRONMENT: ${{ runner.environment }}
       - uses: ./.github/actions/rust-toolchain
@@ -134,7 +134,11 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          shared-key: e2e
+          shared-key: workspace-tests
+          # The maintained Linux archive keeps workspace-member artifacts, and the
+          # suffix that records it is part of the key. A reader without it restores
+          # nothing at all rather than restoring a thinner archive.
+          cache-workspace-crates: "true"
           cache-bin: false
       - name: Install cargo-nextest
         uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2

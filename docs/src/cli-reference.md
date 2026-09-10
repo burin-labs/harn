@@ -63,6 +63,7 @@ harn run --resume .harn/workers/worker_...json
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--sandbox-write-root <path>` | Let spawned subprocesses write an extra root without granting Harn filesystem builtins access |
 | `--sandbox-read-root <path>` | Let spawned subprocesses read an extra root without granting Harn filesystem builtins access |
+| `--sandbox-unix-socket-root <path>` | Let spawned subprocesses bind and connect Unix-domain sockets whose socket file lives under this root, without opening any IP networking. Build servers (sbt, Gradle, MSBuild) need this. Supported on macOS; other local sandbox backends fail closed. |
 | `--environment-policy <inherited\|isolated\|granted>` | Choose which launch-time environment values this session and its subprocesses may read. Default: `inherited`. |
 | `--grant <spec>` | Grant one named value to this session; repeatable. Selects `granted` when the policy is omitted. See [Environment policies and grants](#environment-policies-and-grants). |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
@@ -586,12 +587,12 @@ harn config schema --output docs/src/schemas/harn-config.schema.json
 | Command | Description |
 |---|---|
 | `inspect` | Print the redacted merged runtime config |
-| `inspect --explain` | Include per-field provenance, shadowed candidates, and managed policy lock status |
+| `inspect --explain` | Include per-field provenance and shadowed candidates |
 | `validate` | Validate local, project, or managed overlays against the typed config shape |
 | `schema` | Print the editor JSON Schema for `harn.config.toml` |
 
 See [Layered runtime configuration](./configuration.md) for precedence, file
-locations, environment override names, and managed policy examples.
+locations, and environment override names.
 
 ## harn playground
 
@@ -1326,6 +1327,15 @@ wrappers or unnecessary parentheses around single values):
 ```bash
 harn lint --fix main.harn
 ```
+
+`HARN-LNT-077` replaces record literals such as
+`{env: harness.env, fs: harness.fs}` with `pick(harness, ["env", "fs"])`.
+The checker must prove that every copied field is present. Literals with
+comments, renamed keys, or calls in the source expression are left unchanged.
+See [Pick fields from a record](./pick.md) for the resulting types.
+
+Both `lint --fix` and `fix --apply` preserve project formatting when the
+original file is formatted. They leave surrounding lines alone otherwise.
 
 The Harn LSP also exposes these autofixes as quick-fix code actions
 (Cmd+./Ctrl+. in most editors) and as a bulk `source.fixAll.harn`

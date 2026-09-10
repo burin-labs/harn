@@ -43,8 +43,11 @@ jobs:
       (github.event_name != 'workflow_dispatch' || !(startsWith(github.ref_name, 'release/v') || startsWith(github.ref_name, 'release-attempt/v')))
     # This advisory workflow can run on GitHub-hosted runners before it is part
     # of the required CI aggregate. Keep an explicit ceiling so a wedged release
-    # build does not burn the platform default timeout.
-    timeout-minutes: 30
+    # build does not burn the platform default timeout. The ceiling has to clear
+    # the build step below plus the five-minute bench, not merely equal them: at
+    # 30 it was the same number as 25 + 5, so a build that fit its own step could
+    # still lose the bench to the job ceiling.
+    timeout-minutes: 55
     # Bench is wall-clock sensitive, so runner noise is the main threat
     # to the budget. This repo runs CI on hosted runners only (public
     # repo: hosted minutes are free, and self-hosted routing contends
@@ -63,14 +66,27 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          shared-key: cli-cold-start-budget
+          shared-key: workspace-tests
+          # The maintained Linux archive keeps workspace-member artifacts, and the
+          # suffix that records it is part of the key. A reader without it restores
+          # nothing at all rather than restoring a thinner archive.
+          cache-workspace-crates: "true"
           cache-bin: false
       - name: Build release harn
-        # This is benchmark setup, not the startup-performance budget. Hosted
-        # cold builds now sit just beyond 20 minutes, so keep enough bounded
-        # headroom for compilation while the measured bench retains its
-        # separate five-minute ceiling below.
-        timeout-minutes: 25
+        # This is benchmark setup, not the startup-performance budget, so its
+        # ceiling exists to bound a wedged build rather than to police build
+        # time. It was sized against an estimate of "just beyond 20 minutes"
+        # and had drifted to no margin at all: the last green run spent 24m32s
+        # here against a 25-minute ceiling, 28 seconds of headroom, and the two
+        # scheduled runs after it were killed mid-build. The measurement this
+        # lane exists for never ran on either.
+        #
+        # The rust-cache step above is best-effort and reports "No cache found"
+        # on this lane in both the green and the red runs, so this is always a
+        # cold full release build. Sized against the 24m32s measurement rather
+        # than against an estimate; the bench keeps its separate five-minute
+        # ceiling below.
+        timeout-minutes: 45
         run: cargo build --locked --release --bin harn
       - name: Run cold-start bench
         timeout-minutes: 5

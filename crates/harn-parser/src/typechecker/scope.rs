@@ -139,6 +139,13 @@ pub(super) type ScopeMap<V> = imbl::OrdMap<String, V>;
 /// Ordered set counterpart of [`ScopeMap`].
 pub(super) type ScopeSet = imbl::OrdSet<String>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RecordContract {
+    Inferred,
+    Annotated,
+    Projected,
+}
+
 /// Scope for tracking variable types.
 #[derive(Debug, Clone)]
 pub(super) struct TypeScope {
@@ -196,14 +203,10 @@ pub(super) struct TypeScope {
     /// `unknown`-typed variable. Drives the exhaustive-narrowing warning at
     /// `unreachable()` / `throw` / `never`-returning calls.
     pub(super) unknown_ruled_out: ScopeMap<Vec<String>>,
-    /// Variables whose type came from a user-written annotation (let/const
-    /// `: T`, fn param `: T`, fn return type, struct field). Variables in
-    /// this set carry an explicit contract, so a property access against a
-    /// `Shape` or named struct type is checked strictly. Variables whose
-    /// type was *inferred* from a dict literal stay lenient: their `Shape`
-    /// type is a best-effort guess, and historical scripts treat them like
-    /// loose dicts.
-    pub(super) annotated_vars: ScopeSet,
+    /// An annotation or a projection makes missing-field access strict.
+    /// Inferred records stay lenient. The origin belongs to the binding,
+    /// so aliases capture it before another declaration shadows the name.
+    pub(super) record_contracts: ScopeMap<RecordContract>,
     /// Variables reassigned inside a nested closure within the current callable.
     /// Post-#4479 closures capture by reference, so calling such a closure can
     /// reassign the variable — which makes any flow-narrowing on it unsound to
@@ -268,7 +271,7 @@ impl TypeScope {
             schema_bindings: ScopeMap::new(),
             untyped_sources: ScopeMap::new(),
             unknown_ruled_out: ScopeMap::new(),
-            annotated_vars: ScopeSet::new(),
+            record_contracts: ScopeMap::new(),
             closure_mutated_vars: ScopeSet::new(),
             parent: None,
         };
@@ -386,7 +389,7 @@ impl TypeScope {
             schema_bindings: ScopeMap::new(),
             untyped_sources: ScopeMap::new(),
             unknown_ruled_out: ScopeMap::new(),
-            annotated_vars: ScopeSet::new(),
+            record_contracts: ScopeMap::new(),
             closure_mutated_vars: ScopeSet::new(),
             parent: Some(parent),
         }
@@ -412,6 +415,21 @@ impl TypeScope {
     }
 
     pub(super) fn define_flow_alias(&mut self, name: &str, expression: SNode) {
+        // Capture literal values at declaration time. Following their source
+        // name later would read a shadowing binding rather than this const.
+        let expression = match &expression.node {
+            Node::Identifier(source) => self
+                .get_flow_alias(source)
+                .filter(|value| {
+                    matches!(
+                        value.node,
+                        Node::StringLiteral(_) | Node::RawStringLiteral(_) | Node::ListLiteral(_)
+                    )
+                })
+                .cloned()
+                .unwrap_or(expression),
+            _ => expression,
+        };
         let is_flow_expression = matches!(
             &expression.node,
             Node::Identifier(_)
@@ -430,7 +448,9 @@ impl TypeScope {
                 | Node::SubscriptAccess { .. }
                 | Node::OptionalSubscriptAccess { .. }
         );
-        if !is_discard_name(name) && is_flow_expression {
+        let is_literal_key_list = matches!(&expression.node, Node::ListLiteral(items)
+            if items.iter().all(|item| matches!(item.node, Node::StringLiteral(_) | Node::RawStringLiteral(_))));
+        if !is_discard_name(name) && (is_flow_expression || is_literal_key_list) {
             self.flow_aliases.insert(name.to_string(), Some(expression));
         }
     }
@@ -688,6 +708,17 @@ impl TypeScope {
         }
         self.vars.insert(name.to_string(), ty);
         self.flow_aliases.insert(name.to_string(), None);
+        self.record_contracts
+            .insert(name.to_string(), RecordContract::Inferred);
+    }
+
+    /// Refining or assigning an existing binding keeps its field contract.
+    pub(super) fn update_var(&mut self, name: &str, ty: InferredType) {
+        let contract = self.record_contract(name);
+        self.define_var(name, ty);
+        if !is_discard_name(name) {
+            self.record_contracts.insert(name.to_string(), contract);
+        }
     }
 
     /// Bind `_` as the contextual value inside a pipe expression. Ordinary
@@ -770,8 +801,7 @@ impl TypeScope {
         if is_discard_name(name) {
             return;
         }
-        self.vars.insert(name.to_string(), ty);
-        self.flow_aliases.insert(name.to_string(), None);
+        self.define_var(name, ty);
         self.mutable_vars.insert(name.to_string());
     }
 
@@ -784,17 +814,33 @@ impl TypeScope {
         if is_discard_name(name) {
             return;
         }
-        self.annotated_vars.insert(name.to_string());
+        self.record_contracts
+            .insert(name.to_string(), RecordContract::Annotated);
     }
 
-    pub(super) fn is_annotated(&self, name: &str) -> bool {
-        if self.annotated_vars.contains(name) {
-            return true;
+    pub(super) fn mark_projected(&mut self, name: &str) {
+        if !is_discard_name(name) {
+            self.record_contracts
+                .insert(name.to_string(), RecordContract::Projected);
         }
-        self.parent
-            .as_ref()
-            .map(|parent| parent.is_annotated(name))
-            .unwrap_or(false)
+    }
+
+    fn record_contract(&self, name: &str) -> RecordContract {
+        self.record_contracts.get(name).copied().unwrap_or_else(|| {
+            self.parent
+                .as_ref()
+                .map_or(RecordContract::Inferred, |parent| {
+                    parent.record_contract(name)
+                })
+        })
+    }
+
+    pub(super) fn has_record_contract(&self, name: &str) -> bool {
+        self.record_contract(name) != RecordContract::Inferred
+    }
+
+    pub(super) fn is_projected(&self, name: &str) -> bool {
+        self.record_contract(name) == RecordContract::Projected
     }
 
     /// Mark `name` as reassigned by a nested closure, so its flow-narrowing is

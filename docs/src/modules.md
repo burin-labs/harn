@@ -896,6 +896,9 @@ harness.stdio.log(structured.tokens[0]?.bbox?.left)
 
 ### std/json
 
+Field selection is the global [`pick(source, keys)`](pick.md)
+builtin. It preserves field types and stored `nil` values and needs no import.
+
 JSON utility patterns:
 
 | Function | Description |
@@ -904,8 +907,7 @@ JSON utility patterns:
 | `JsonParseFailure` | Closed error contract returned by bare `try { json_parse(text) }` when JSON is malformed or over-depth; valid JSON `null` is `Ok(nil)` |
 | `stream_validator(schema)` | Incrementally validate JSON string or bytes chunks against a schema; `feed(chunk)` returns `Pending`, `Valid`, or `Invalid({reason_kind, reason, path})`, and `value()` returns the parsed JSON once valid |
 | `stream_validate_create(schema)` / `stream_validate_chunk(handle, chunk)` / `stream_validate_finalize(handle)` | Standalone partial-JSON validation: each call returns a plain-dict verdict `{verdict: "pending"\|"valid"\|"invalid", reason_kind?, reason?, path?}` so streaming agents (SSE chunks, WebSocket frames) can dispatch on string verdicts without pattern-matching enum variants. `stream_validate()` returns a namespace record exposing the same trio as `create`/`chunk`/`finalize` keys |
-| `merge<V>(a: dict<string, V>, b: dict<string, V>)` | Shallow-merge two dicts (keys in b override); preserves the value type |
-| `pick<V>(data: dict<string, V>, keys)` | Pick specific keys from a dict, dropping nil values; preserves the value type |
+| `merge<R1, R2>(a: {...R1}, b: {...R2})` | Shallow-merge records; fields in `b` override matching fields in `a`, preserving each field's type |
 | `omit<V>(data: dict<string, V>, keys)` | Omit specific keys from a dict; preserves the value type |
 
 ```harn
@@ -1130,6 +1132,12 @@ Markdown, and otherwise the renderer falls back to plain text. Explicit
 selection. The Burin adapter keeps generated digest compatibility during
 migration by wrapping existing `.burin/context-digests/*.md` content instead of
 requiring hosts to rewrite those files.
+
+### std/context/disclosure
+
+Cut Markdown to an estimated token budget and render an omission note with
+a recovery action. See [Context truncation](./stdlib/context-disclosure.md)
+for the functions, return type, and boundary rules.
 
 ### std/context/maintenance
 

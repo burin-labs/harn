@@ -50,10 +50,13 @@ jobs:
           # The same key the gate lane uses. Both build the workspace under the
           # lowered clippy threshold, and giving them separate keys would have
           # each evicting the other's artifacts every week.
-          shared-key: stack-frames
+          shared-key: workspace-tests
+          # The maintained Linux archive keeps workspace-member artifacts, and the
+          # suffix that records it is part of the key. A reader without it restores
+          # nothing at all rather than restoring a thinner archive.
+          cache-workspace-crates: "true"
           cache-on-failure: true
           cache-bin: false
-          cache-workspace-crates: "true"
       # This job runs on its own schedule, so there is no CI run publishing a
       # shared Harn binary for it to download. It builds the one it needs.
       - name: Build the Harn CLI

@@ -171,7 +171,7 @@ fn main(harness: Harness) {
   for seed in seeds {
     const composed = __compose(seed, 1 + seed % 5)
     for pin in PINS {
-      __check({agent: harness.agent, llm: harness.llm}, pin, seed, composed)
+      __check(pick(harness, ["agent", "llm"]), pin, seed, composed)
     }
   }
   // Property 2, the sharp end: narration alone must never manufacture a call,

@@ -54,15 +54,10 @@ jobs:
   # admission: once queue admission widened, five speculative merge groups
   # started on hosted runners within seconds (#6017).
   #
-  # One job is exempt, and the exemption answers that objection rather than
-  # ignoring it. `rust-check-inputs` is the last job to finish before the gate
-  # in 70.5% of pull-request runs, with a p90 of 31.5 minutes, and two of its
-  # three heavy steps are pure compilation on two cores. The gain there is
-  # cores, not admission latency, which is the thing #6017 measured and found
-  # absent. Merge throughput is still never gated on the owned pool: the rung
-  # is pull-request-only, so merge groups and main pushes keep hosted capacity
-  # unconditionally, and a busy or absent pool falls back to hosted on the same
-  # run (#8334).
+  # `rust-check-inputs` may use the owned pool on same-repository pull requests.
+  # A measured online pool queues work even when busy; zero online carriers or
+  # retired owned routing selects hosted capacity. An unreadable census blocks
+  # dispatch. Merge groups and main pushes retain their hosted routing (#8334).
 
   # Decide whether the heavy Linux Rust lanes (rust-checks, audit-scripts) need
   # to run at all.
@@ -178,8 +173,12 @@ jobs:
             setup_action:
               - '.github/actions/setup-harn/**'
               - '.github/workflows/ci.yml'
-              - 'scripts/bootstrap_harn.mjs'
-              - 'scripts/tests/bootstrap_harn.test.mjs'
+              - '.github/workflows/setup-harn-contract.yml'
+              - 'scripts/bootstrap-harn.*'
+              - 'scripts/tests/bootstrap_harn_seed_test.sh'
+              - 'scripts/tests/runtime_install_test.harn'
+              - 'crates/harn-stdlib/src/stdlib/runtime/**'
+              - '.harn-bootstrap-version'
             # Everything that can move release semantics out of agreement with
             # the orchestrator that drives cuts. A release pull request always
             # touches `Cargo.toml` and `CHANGELOG.md`, so this fires on every
@@ -641,10 +640,8 @@ jobs:
         run: bash scripts/ci/runner_capacity.sh
         env:
           CAPACITY_LABEL: RUST_PRODUCER_CAPACITY
-          # The inverse of the E2E suite's choice, deliberately. That suite
-          # routes main pushes because nothing is waiting on them; this job is
-          # the last to finish before the gate in most pull-request runs, and
-          # pull requests are what the fleet is idle during.
+          # The inverse of the E2E suite's choice: this producer routes trusted
+          # pull requests while retaining the hosted main-branch cache writer.
           CAPACITY_ROUTED_EVENT: pull_request
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
@@ -657,11 +654,14 @@ jobs:
   rust-check-inputs:
     name: Rust workspace tests
     needs: [changes, runner-availability, rust-producer-capacity]
-    # `!cancelled()` rather than the bare condition: the two capacity jobs
-    # above are skipped on fork pull requests and on every non-pull-request
-    # event, and a skipped dependency would otherwise skip this job too. A
-    # failed `changes` still blocks, because its output is then empty.
-    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
+    # Forks and non-PR events intentionally skip capacity measurement. Trusted
+    # PRs require its successful decision before dispatch, including hosted
+    # fallbacks; an absent or failed measurement must not start the producer.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.rust == 'true'
+        && (needs.rust-producer-capacity.result == 'success'
+        || github.event_name != 'pull_request'
+        || github.event.pull_request.head.repo.full_name != github.repository) }}
     # Public-repository CI defaults to GitHub-hosted capacity, which is free.
     # Paid capacity requires the explicit repository opt-in below. At $0.016/min
     # every paid run has a hard 20-minute/$0.32 fuse, and Blacksmith never saves
@@ -681,8 +681,7 @@ jobs:
     #
     # The owned self-hosted rung is the same arithmetic minus the cache-save
     # reserve, because it never saves: 6 setup + 10 + 16 + 26 = 58. It is a
-    # hang backstop on a 24-core box, not a performance claim, so it is not
-    # sized down for the extra cores.
+    # hang backstop, not a claim about host core count or improved performance.
     runs-on: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
@@ -738,6 +737,23 @@ jobs:
         with:
           fetch-depth: 1
       - uses: ./.github/actions/free-disk-space
+      # How many rustc processes this box may start, measured here rather than
+      # typed. A literal is right for the runner someone had in mind and wrong
+      # for every other one: it oversubscribes a small hosted box and leaves a
+      # larger one idle. `scripts/ci/rust_resource_budget.sh` is the single
+      # owner of that arithmetic and refuses by name when it cannot measure.
+      - name: Measure the compile budget
+        id: resource-budget
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          # `runner.environment` reports a vendor VM and one of our own boxes
+          # identically, and the two answer the census question differently: a
+          # vendor VM runs this job alone, an owned box shares its cores with
+          # every listener on it. The tier this job already declares is the
+          # honest source, and an owned rung added to the ladder has to declare
+          # itself there before it can reach this budget.
+          RUNNER_ENVIRONMENT: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'self-hosted' || 'github-hosted' }}
+          HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
@@ -773,7 +789,7 @@ jobs:
       - name: Build portable Harn CLI
         timeout-minutes: 10
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-cli
           "$RUNNER_TEMP/harn-cli.tar.zst"
@@ -796,7 +812,7 @@ jobs:
       - name: Build security test archive
         timeout-minutes: 16
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-security
           "$RUNNER_TEMP/harn-security.tar.zst"
@@ -814,7 +830,7 @@ jobs:
       - name: Build portable workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
@@ -824,7 +840,7 @@ jobs:
         id: release-audit-rust-test
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
         env:
-          CARGO_BUILD_JOBS: "4"
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
         run: >-
           set -euo pipefail;
@@ -1263,8 +1279,8 @@ jobs:
         # re-raise the ratchet's.
         run: |
           set -uo pipefail
-          make check-source-file-lengths > "$RUNNER_TEMP/ratchet.txt" 2>&1
-          status=$?
+          status=0
+          make check-source-file-lengths > "$RUNNER_TEMP/ratchet.txt" 2>&1 || status=$?
           {
             echo '### Source file-length ratchet'
             echo
@@ -1438,13 +1454,17 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          # Its own key: this lane's artifacts are fingerprinted under a
-          # different clippy config than the lint lane's and would otherwise
-          # evict them.
-          shared-key: stack-frames
+          # Reads the maintained lane archive. This job compiles under a
+          # different clippy config, so the restore is partial, and it saves
+          # nothing, so it cannot evict what it borrows from. Its own key was
+          # written by no one and restored nothing at all.
+          shared-key: workspace-tests
+          # The maintained Linux archive keeps workspace-member artifacts, and the
+          # suffix that records it is part of the key. A reader without it restores
+          # nothing at all rather than restoring a thinner archive.
+          cache-workspace-crates: "true"
           cache-on-failure: true
           cache-bin: false
-          cache-workspace-crates: "true"
       # The census depends on nothing any other job produces, so it runs before
       # this lane waits for the shared CLI. The wait then overlaps a compile
       # that would otherwise have delayed the job's start.
@@ -1584,6 +1604,7 @@ jobs:
       # Keep it ahead of Node setup and both integration sweeps so a flaky-test
       # pattern fails the head before minutes of unrelated work have elapsed.
       - name: Reject flaky test patterns
+        if: always()
         run: make lint-test-patterns
       # `make spec-lint` must run the repository's declared Redocly CLI, not
       # let npx fall back to an unrelated registry package. Keep this install
@@ -1594,84 +1615,42 @@ jobs:
           node-version: "22"
           cache-dependency-path: package-lock.json
       - run: npm ci
-      # The embedded MCP Apps host is checked as readable source in place;
-      # there is no generated frontend bundle to validate elsewhere.
-      - run: make check-app-host
-      # Pure-shell grep gate: agent-facing hostlib paths must be
-      # forward-slash-normalized on every platform (see
-      # scripts/check_agent_path_normalization.sh). Kept with the other
-      # fast Python/shell gates so it fails before the harn CLI compile.
-      - run: make lint-agent-path-normalization
-      # Structural optional-dep feature contracts (ort TLS, …). Pure Python; no
-      # Cargo. Keeps off-by-default feature sets from rotting when default CI
-      # never compiles them (#5690).
-      - run: make check-optional-dep-feature-contracts
+      # Not a Make target, so it keeps its own step. `if: always()` here and on
+      # every step below is the point of this job's shape: a step that fails
+      # must not skip the ones after it.
       - name: Run pre-warm shell gates without Cargo
+        if: always()
         run: ./scripts/tests/pr_gate_pre_warm_boundary_test.sh
-      # These targets invoke the verified artifact HARN_BIN directly.
-      - run: make test-pr-gate-post-warm-integrations
-      - name: Check OpenAPI contract
-        run: make spec-lint
-      # check-bindings also runs the published Python and Go protocol bindings
-      # against the committed JSON fixture.
-      - run: make check-bindings
-      - run: make lint-diagnostic-codes
-      # Generic embedded stdlib behavior must not acquire product-host naming;
-      # reviewed compatibility/provenance literals are held to an exact baseline.
-      - run: make check-stdlib-host-neutral
-      - run: make check-public-product-names
-      # Strict-types ratchet: no unvalidated boundary access (HARN-OWN-004) in
-      # the gated stdlib. Runs the in-repo checker through the warm HARN_BIN.
-      - run: make check-stdlib-strict-types
-      # Public stdlib return-type ratchet: no new unannotated public exports
-      # (HARN-STD-102) beyond the checked-in AST-derived baseline.
-      - run: make check-stdlib-public-return-types
-      # Zero-baseline strict gate for the std/schema facade: strict-types and
-      # strict lint must both be clean on stdlib_schema.harn and its contracts.
-      - run: make check-schema-strict
-      # Closed policy, exact-byte resolution, and bootstrap jq parity. This
-      # focused sub-second suite keeps release admission live on every PR.
-      - run: make check-binary-size-policy
-      # Sync guards. check-generated-registry is the meta-guard
-      # that keeps scripts/generated_artifacts.toml in agreement with the
-      # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the
-      # warm HARN_BIN; pure shell/Python guards stay cheap either way.
-      - run: make check-receipt-structs
-      - run: make check-portable-benchmark-schema
-      - run: make check-portable-demo-package
-      - run: make check-docs-links
-      - run: make check-agent-guidance
-      - run: make check-agent-gates
-      - run: make check-tree-sitter-keywords
-      - run: make check-grammar-fitness
-      - run: make check-vm-exposures
-      # Product turn-end check vs measurement surfaces: the seam is structural,
-      # so a grading concern cannot drift into the live loop and an eval module
-      # cannot depend on loop internals.
-      - run: make check-turn-end-boundary
-      - run: make check-generated-registry
-      # Workflow-file contracts. These are registered in `make all` but were
-      # never invoked by any workflow, so they only ran on a developer's
-      # machine. `check_runner_tier.harn` says in its own header that it is
-      # "NOT allowed to skip" because the failure it guards is silent — it
-      # was skipping entirely. `audit-scripts` is gated on the catch-all
-      # `rust` filter, which includes .github/**, so these fire on exactly
-      # the edits they police.
-      - run: make check-cargo-lock-contract
-      - run: make check-rust-test-lane-policy
-      - run: make check-ci-cache-policy
-      - run: make lint-actions-harn
-      - run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/verify_release_metadata.harn'
+      # One step, every remaining policy check. `make repository-policies` owns
+      # the list and runs each check in turn, continuing past a failure and
+      # printing one line per check. These used to be one step per check, and a
+      # failing step skipped every step after it: one red hid nine siblings for
+      # a day on main, release metadata verification among them, with nothing
+      # saying they had not run. The workflow calls the same target a developer
+      # runs, so the list cannot drift between them.
+      # Kept as its own step: the CI cache policy asserts this integration sweep
+      # is a distinct step that the cheap flaky-pattern gate precedes, so the
+      # expensive sweep cannot run before the cheap gate has had its say.
+      - name: Run post-warm integration sweep
+        if: always()
+        run: make test-pr-gate-post-warm-integrations
+      - name: Run repository policy checks
+        if: always()
+        run: make repository-policies
       - name: Check no retroactive CHANGELOG edits
+        if: always()
         # GitHub checks out PRs and merge groups as synthetic merge commits.
         # HEAD^1 is the current base, while the event payload's PR-open base
         # SHA can become stale as main advances.
         run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn -- --base HEAD^1'
       - name: Check no undeclared protocol symbol removals
+        if: always()
         # spec/protocol-artifacts/ is a downstream contract: integrators compile
         # against the exported names. check-protocol-artifacts regenerates and
         # compares, so a symbol the generator stops emitting vanishes from both
-        # sides and stays green. Same HEAD^1 base as the CHANGELOG guard above.
+        # sides and stays green -- which is why this guard exists beside it, and
+        # why that check now runs in `repository-policies` above rather than
+        # only in the local aggregate. Same HEAD^1 base as the CHANGELOG guard.
         env:
           PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
         run: make check-protocol-symbol-removals
@@ -2066,10 +2045,8 @@ jobs:
           fi
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           "$harn_bin" run smoke.harn
-          node --input-type=module - "$harn_bin" <<'NODE'
-          import { installMulticallAliases } from "./scripts/bootstrap_harn.mjs";
-          installMulticallAliases(process.argv[2], "x86_64-pc-windows-msvc");
-          NODE
+          cp "$harn_bin" "$target_dir/debug/harn-lsp.exe"
+          cp "$harn_bin" "$target_dir/debug/harn-dap.exe"
           "$target_dir/debug/harn-lsp.exe" --version | grep '^harn-lsp '
           "$target_dir/debug/harn-dap.exe" --version | grep '^harn-dap '
           printf 'windows_native_test_to_smoke_seconds=%s\n' \
@@ -2111,7 +2088,11 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          shared-key: windows-cross-check
+          shared-key: workspace-tests
+          # The maintained Linux archive keeps workspace-member artifacts, and the
+          # suffix that records it is part of the key. A reader without it restores
+          # nothing at all rather than restoring a thinner archive.
+          cache-workspace-crates: "true"
           cache-on-failure: true
       - name: cargo check (x86_64-pc-windows-gnu)
         env:
@@ -2511,33 +2492,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Run deterministic setup-action tests
-        if: runner.os == 'Linux'
-        run: node --test scripts/tests/bootstrap_harn.test.mjs
-      - name: Install a published Harn release
-        id: harn
-        uses: ./.github/actions/setup-harn
-        with:
-          version: 0.10.28
-          max-attempts: "3"
-          retry-delay-seconds: "1"
-      - name: Verify installed release and receipt outputs
-        shell: bash
-        env:
-          HARN_PATH: ${{ steps.harn.outputs.path }}
-          HARN_VERSION: ${{ steps.harn.outputs.version }}
-          HARN_CHECKSUM: ${{ steps.harn.outputs.checksum }}
-          HARN_RECEIPT: ${{ steps.harn.outputs.receipt }}
-        run: |
-          set -euo pipefail
-          test "$HARN_VERSION" = "0.10.28"
-          [[ "$HARN_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]
-          test -x "$HARN_PATH" || [[ "$RUNNER_OS" = "Windows" && -f "$HARN_PATH" ]]
-          node -e 'const r = JSON.parse(process.env.HARN_RECEIPT); if (r.schema_version !== "harn-bootstrap-v1" || r.binary_path !== process.env.HARN_PATH) process.exit(1)'
-          harn --version
+    uses: ./.github/workflows/setup-harn-contract.yml
+    with:
+      os: ${{ matrix.os }}
 
   # The Slow E2E suite lives in its own workflow (`.github/workflows/e2e.yml`),
   # which owns the main-push trigger, the nightly schedule, the `e2e`-label PR

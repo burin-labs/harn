@@ -969,7 +969,9 @@ function rehypeRewriteLinks(sourceRel: string) {
       if (href.startsWith("#")) return
       const [path, anchor] = href.split("#")
       if (!/\.(md|html)$/.test(path)) return
-      const targetRepoRel = posix.normalize(posix.join(dir, path))
+      const targetRepoRel = posix.normalize(
+        path.startsWith("/") ? posix.join("docs/src", path) : posix.join(dir, path),
+      )
       if (!targetRepoRel.startsWith("docs/src/")) {
         node.properties.href = GITHUB_BLOB_BASE + targetRepoRel + (anchor ? "#" + anchor : "")
         node.properties.target = "_blank"

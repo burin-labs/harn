@@ -507,8 +507,9 @@ fn __classify_missing_tool_call(
     harness.agent,
     session.session_id,
     "missing_tool_call_verdict",
-    result
-      + {iteration: iteration, visible_text_prefix: visible_text_excerpt(text)},
+    // The verdict already carries the classifier's own `evidence`; a second
+    // excerpt of the same turn text has no field to land in and was discarded.
+    result + {iteration: iteration},
   )
   const tool_name = result?.tool_name ?? ""
   if result?.action == "tool_call_intended" && tool_name != ""
@@ -664,7 +665,7 @@ fn __maybe_inject_action_nudge(
       harness.agent,
       session.session_id,
       "fenced_call_attempt_nudge",
-      {iteration: iteration, fence: fenced, visible_text_prefix: visible_text_excerpt(text)},
+      {iteration: iteration, fence: fenced},
     )
     // The fence nudge claims the turn without naming one call, so the claim
     // carries no tool.
@@ -694,7 +695,7 @@ fn __maybe_inject_action_nudge(
       harness.agent,
       session.session_id,
       "malformed_call_markup_nudge",
-      {iteration: iteration, marker: malformed, visible_text_prefix: visible_text_excerpt(text)},
+      {iteration: iteration, marker: malformed},
     )
     // Like the fence nudge above, this claims the turn on the shape of the
     // text without reading a call out of it, so the claim names no tool.
@@ -737,14 +738,10 @@ fn __maybe_inject_action_nudge(
       harness.agent,
       session.session_id,
       "missing_tool_call_nudge",
-      {
-        iteration: iteration,
-        tool: tool_name,
-        classifier_action: missing?.action,
-        classifier_confidence: missing?.confidence,
-        classifier_kind: missing?.classifier_kind,
-        visible_text_prefix: visible_text_excerpt(text),
-      },
+      // The classifier's own action, confidence, and kind are already the
+      // `missing_tool_call_verdict` emitted just above on this path, and the
+      // nudge has no field for them, so repeating them here recorded nothing.
+      {iteration: iteration, tool: tool_name},
     )
     return {tool: to_string(tool_name)}
   }

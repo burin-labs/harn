@@ -232,11 +232,10 @@ pub(crate) fn lint_fix_file(
         return outcome_from_diagnostics(&path_str, &source, &diagnostics);
     }
 
-    // Drop overlaps and splice right-to-left via the shared FixEdit policy, so
-    // the result is byte-for-byte what `harn fmt` and the LSP on-save fixer
-    // produce.
     let applied = harn_lexer::FixEdit::dedupe_overlapping(&edits).len();
     let result = harn_lexer::FixEdit::apply_all(&source, &edits);
+    let result =
+        crate::commands::source_formatting::keep_canonical_formatting(path, &source, result);
     std::fs::write(path, &result).unwrap_or_else(|e| {
         eprintln!("Failed to write {path_str}: {e}");
         process::exit(1);

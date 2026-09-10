@@ -12,6 +12,7 @@ mod callback;
 mod github;
 mod linear;
 mod oauth;
+mod oauth_migration;
 pub(crate) mod setup_events;
 pub(crate) mod status;
 pub(crate) mod store;
@@ -27,12 +28,13 @@ use self::status::{run_connect_setup_plan, run_connect_status};
 use self::store::{run_connect_api_key, run_connect_list, run_connect_revoke};
 
 #[cfg(test)]
-use self::{callback::*, github::*, linear::*, oauth::*, status::*};
+use self::{callback::*, github::*, linear::*, oauth::*, oauth_migration::*, status::*};
 
 const DEFAULT_LINEAR_API_BASE_URL: &str = "https://api.linear.app/graphql";
 const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_mins(5);
 const CONNECT_INDEX_NAMESPACE: &str = "connect";
 const CONNECT_INDEX_NAME: &str = "index";
+const DEFAULT_OAUTH_REDIRECT_URI: &str = "http://127.0.0.1:0/oauth/callback";
 
 #[derive(Clone, Debug)]
 struct OAuthProviderDefaults {
@@ -278,12 +280,12 @@ async fn run_connect_inner(args: ConnectArgs) -> Result<(), String> {
         ConnectCommand::Generic(args) => run_connect_generic(&args).await,
         ConnectCommand::Provider(raw) => {
             let parsed = parse_external_provider_connect(raw, json_output)?;
-            run_connect_registered_provider(
+            Box::pin(run_connect_registered_provider(
                 &parsed.provider,
                 &parsed.oauth,
                 parsed.from_env,
                 parsed.value_file,
-            )
+            ))
             .await
         }
     }

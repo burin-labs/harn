@@ -309,6 +309,8 @@ agent yields control.
 - [Docs book](https://harnlang.com/) · [CLI reference](https://harnlang.com/cli-reference.html) ·
   [Builtin reference](https://harnlang.com/builtins.html)
 - [LLM quick reference](https://harnlang.com/docs/llm/harn-quickref.html)
+- [Pick fields from a record](docs/src/pick.md): `pick(harness, ["env", "fs", "tools"])`
+  preserves selected field types and capability handles.
 - [Workflow runtime guide](https://harnlang.com/workflow-runtime.html) ·
   [LLM calls and agent loops](https://harnlang.com/llm-and-agents.html)
 - [MCP, ACP, and A2A integration](https://harnlang.com/mcp-and-acp.html) ·

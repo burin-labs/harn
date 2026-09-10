@@ -12,6 +12,15 @@ pipeline default(harness: Harness) {
   harness.stdio.println(picked.c)
   harness.stdio.println(contains(picked.keys(), "missing"))
   harness.stdio.println(contains(picked.keys(), "b"))
+  const values = {empty: "", text: "null", absent: nil, zero: 0, no: false}
+  const kept = pick_keys(values, ["empty", "text", "absent", "zero", "no"])
+  const filtered = pick_keys(values, ["empty", "text", "absent", "zero", "no"], {drop_nil: true})
+  assert_eq(contains(kept.keys(), "absent"), true)
+  assert_eq(contains(filtered.keys(), "absent"), false)
+  assert_eq(filtered.empty, "")
+  assert_eq(filtered.text, "null")
+  assert_eq(filtered.zero, 0)
+  assert_eq(filtered.no, false)
   const rows = [
     {tokens: 3, ok: true},
     nil,

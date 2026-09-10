@@ -305,6 +305,8 @@ fn run_command_projects_mid_run_sandbox_assessment_without_collapsing_coverage()
     assert_eq!(require_str(&denial, "gate"), "process_sandbox");
     assert!(!require_str(&denial, "backend").is_empty());
     assert_eq!(require_str(&denial, "operation"), "unknown");
+    assert_eq!(require_str(&denial, "mechanism"), "write");
+    assert!(require_str(&denial, "reason").contains("write root"));
     require_nil(&denial, "resource");
     assert_eq!(require_list(&denial, "command").len(), 2);
     assert_eq!(

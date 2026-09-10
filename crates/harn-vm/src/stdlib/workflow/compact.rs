@@ -230,6 +230,18 @@ pub(super) async fn transcript_auto_compact_builtin(
             config.policy_strategy = "custom".to_string();
         }
     }
+    if let Some(options) = options.as_ref() {
+        config.mask_callback = crate::stdlib::agent_sessions::compact_config::closure_option(
+            options,
+            "mask_callback",
+            "transcript_auto_compact",
+        )?;
+        config.compress_callback = crate::stdlib::agent_sessions::compact_config::closure_option(
+            options,
+            "compress_callback",
+            "transcript_auto_compact",
+        )?;
+    }
     let llm_opts = if config.compact_strategy == crate::orchestration::CompactStrategy::Llm {
         let projected = options
             .as_ref()

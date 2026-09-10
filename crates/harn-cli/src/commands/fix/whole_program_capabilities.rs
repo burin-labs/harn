@@ -454,6 +454,7 @@ pub(super) fn plan(
     };
 
     let mut edits_by_file: BTreeMap<usize, Vec<FixEdit>> = BTreeMap::new();
+    let mut receiver_edits_by_file: BTreeMap<usize, Vec<FixEdit>> = BTreeMap::new();
     for (file_idx, edits) in wrap_edits_by_file {
         edits_by_file.entry(file_idx).or_default().extend(edits);
     }
@@ -470,7 +471,7 @@ pub(super) fn plan(
                     callable,
                     desired,
                 )?);
-            edits_by_file
+            receiver_edits_by_file
                 .entry(callable.file_idx)
                 .or_default()
                 .extend(receiver_projection_edits(callable, desired));
@@ -479,9 +480,13 @@ pub(super) fn plan(
             edits_by_file.entry(callable.file_idx).or_default().push(
                 split_capability_signature_edit(callable, &added_capabilities[idx])?,
             );
-            edits_by_file.entry(callable.file_idx).or_default().extend(
-                split_capability_receiver_edits(callable, &added_capabilities[idx]),
-            );
+            receiver_edits_by_file
+                .entry(callable.file_idx)
+                .or_default()
+                .extend(split_capability_receiver_edits(
+                    callable,
+                    &added_capabilities[idx],
+                ));
         }
         edits_by_file
             .entry(callable.file_idx)
@@ -661,6 +666,23 @@ pub(super) fn plan(
             .expect("split extension index is bounded by the observed call arity");
             edits_by_file.entry(caller.file_idx).or_default().push(edit);
         }
+    }
+    for (file_idx, receivers) in receiver_edits_by_file {
+        let edits = edits_by_file.entry(file_idx).or_default();
+        // A complete argument replacement already uses the final carrier.
+        // Receiver accesses inside its old source no longer need rewriting.
+        let remaining = receivers
+            .into_iter()
+            .filter(|receiver| {
+                !edits.iter().any(|edit| {
+                    edit.span.start <= receiver.span.start
+                        && receiver.span.end <= edit.span.end
+                        && (edit.span.start < receiver.span.start
+                            || receiver.span.end < edit.span.end)
+                })
+            })
+            .collect::<Vec<_>>();
+        edits.extend(remaining);
     }
     let mut planned = Vec::new();
     for (file_idx, edits) in edits_by_file {

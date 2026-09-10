@@ -3,6 +3,7 @@ pub import {
   cache_refresh_trigger_errors,
   cache_refresh_workflow_errors,
   ci_linux_lane_policy_errors,
+  producer_admission_expression,
   producer_cache_save_reserve_minutes,
   producer_hosted_ceiling_minutes,
   producer_owned_ceiling_minutes,

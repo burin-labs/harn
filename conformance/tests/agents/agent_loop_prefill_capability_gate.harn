@@ -80,7 +80,7 @@ fn run_after_tool_prefill(harness: Harness, model: string, arm_prefill: bool, ex
           "Inspect app.txt.",
           nil,
           options(
-            {agent: harness.agent, llm: harness.llm, runtime: harness.runtime},
+            pick(harness, ["agent", "llm", "runtime"]),
             session,
             model,
             route_observation,

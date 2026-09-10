@@ -9,6 +9,319 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.134
+
+### Breaking
+
+- `harn.config.toml` no longer accepts `[limits]`, `[permissions]`, or `[policy]`,
+  and the matching `HARN_BUDGET_USD`, `HARN_TOKEN_BUDGET`, `HARN_MAX_CONCURRENCY`,
+  `HARN_NETWORK_MODE`, `HARN_FILESYSTEM_MODE`, and `HARN_SANDBOX_MODE` names are
+  unregistered. Those knobs were never read by a run; spend ceilings live on the
+  typed session budget.
+
+### Added
+
+- **Confined children can use Unix-domain sockets under granted roots, and a
+  refusal now says which boundary refused it.** `process_sandbox.unix_socket_roots`
+  (`--sandbox-unix-socket-root` on `harn run`) admits bind and connect for
+  socket files under the named directories and nothing over IP, so build
+  servers that talk to themselves through a socket file (sbt, Gradle's Kotlin
+  daemon, MSBuild worker nodes) run inside the sandbox instead of dying with a
+  bare `Operation not permitted`. The grant is path-scoped and host-owned: a
+  nested policy keeps only roots the outer grant covers, and backends that
+  cannot filter sockets by path reject a non-empty grant rather than widening.
+  Every child-process refusal record now carries `mechanism` (`egress`,
+  `local_socket`, `home_read`, `write`, or `unknown`) and a `reason` naming the
+  grants in force, in the event, the handler result, and the agent-visible
+  error, so a refused socket or home-config read is no longer misread as a
+  network denial. On macOS a loopback grant also pins the JVM to the IPv4 stack
+  (`-Djava.net.preferIPv4Stack=true` in `JAVA_TOOL_OPTIONS`), because a
+  dual-stack JVM binds `127.0.0.1` as `::ffff:127.0.0.1`, which the seatbelt's
+  loopback filter refuses. A non-empty socket grant also admits sockets under
+  the UserTemp write roots (`/tmp`, `/var/folders`), because that is where
+  sbt's boot server and MSBuild worker nodes actually bind. npm and pnpm no
+  longer read the denied `~/.npmrc` at startup: `NPM_CONFIG_USERCONFIG` points
+  at a workspace stand-in with credential lines removed. Composer gets a
+  workspace `COMPOSER_HOME` that carries `config.json` and never `auth.json`.
+
+### Changed
+
+- The setup action now bootstraps exact Harn releases through the shared typed installer without requiring Node.js.
+
+### Fixed
+
+- **OAuth credential migration can reuse legacy registration metadata (#8218).**
+  Positional `harn connect <provider>` recovers the old workspace entry's
+  client id, endpoints, scopes, token authentication method, resource, and
+  redirect URI, while discarding its tokens and requiring the client secret
+  again.
+- A `pub` type alias whose body names a recursive type alias imported from another
+  module no longer fails at load. The recursive alias closed a cycle while
+  lowering to a runtime schema, and closing that cycle abandoned the whole
+  fragment, so the alias published no schema and an importing module found nothing
+  to load under a name that is a type. The error it raised, `Undefined variable`
+  naming that type, pointed at nothing the author had written. A cycle-broken slot
+  now lowers to a schema that constrains nothing, which is the answer alias
+  expansion already gave for the same cycle, and the shape around it stays
+  constrained. An alias graph too deep to lower is a different condition and still
+  fails at compile time under a message that names it.
+- An import that only an installed package could have resolved now fails with a
+  message naming the package, and pointing at `harn install` and `harn package
+  doctor`. It previously reported a filesystem path assembled from the relative
+  traversal of the whole import chain, which named a file that could not exist and
+  pointed at the importing source tree rather than at the dependency that was
+  never materialized. A relative import that misses, and a `std/` module that does
+  not exist, both keep their existing path error.
+- The grammar fitness receipt again records the tree-sitter runtime the workspace
+  resolves, so the check that compares the committed receipt with a freshly
+  generated one passes. It had been failing on every push to the main branch since
+  the runtime moved to 0.27, which also skipped the nine checks that run after it
+  in the same job.
+- A child process started through owner-death containment on Linux is now confined
+  by the active profile. The guardian re-execs this binary and rebuilds the payload
+  command from a serialized program, args, cwd and environment, and the Linux
+  backend installs its confinement from a `pre_exec` callback, which that
+  serialization cannot carry. The confinement was dropped in the handover, so the
+  payload ran unconfined while the ruleset was built, never entered, and reported
+  as enforced. The parent now populates the Landlock ruleset and hands the
+  descriptor and the compiled seccomp program to the guardian, which enters them
+  before exec and refuses to spawn if it cannot. macOS is unaffected: its backend
+  puts the sandbox in the payload's argv.
+- Workflow stages now apply their configured token limits, tier-2 strategy,
+  summary prompt, and compaction callbacks instead of silently discarding them.
+- The agent gate registry check now identifies a reader by the file and symbol
+  that does the reading rather than by its line number, so an edit anywhere above
+  a reader no longer reports it as stale. Adding or removing a real reader still
+  fails the check. The generated projection lists readers without line numbers for
+  the same reason; the registry keeps the line as a human hint that is never
+  compared.
+- Bound command-output artifact cleanup to a private Harn temp namespace so unrelated files in a large shared temp
+  directory cannot stall every shell command.
+- A host embedding the VM can move an owned `ProcessSandboxPolicy` into a
+  `CapabilityPolicy` literal with `.into()`, whatever representation the field
+  uses. An integration test pins that shape so a representation change cannot
+  break a consumer's assignment again.
+- **The process sandbox now admits standard pnpm toolchain homes (#8364).**
+  Sandboxed workflow commands can execute pnpm releases installed under the
+  macOS or Linux per-user pnpm directory while those roots remain read-only and
+  invisible to Harn filesystem builtins.
+- The development-identity bump that runs after a release now derives the next
+  version from the tag it just published, instead of from the workspace version on
+  the default branch. A release tagged by hand leaves that branch on the previous
+  development identity, which made the bump refuse and strand the branch there.
+- Protocol artifacts are now checked for staleness in continuous integration.
+  `make check-protocol-artifacts` regenerates them and compares, and it joins the
+  repository policy list that runs on every push to the default branch, so a
+  `spec/protocol-artifacts/` file that drifts from its generator is caught there
+  rather than only when someone runs the full local aggregate.
+- `process.run`, `exec_opts`, and `exec_at_opts` now start the child in a Windows verbatim-prefixed working
+  directory (the form `cwd()` and `canonicalize` return) instead of failing with os error 267, matching `process.exec`.
+
+## v0.10.133
+
+### Breaking
+
+- Agent options now use one spelling for scratchpad settings, skill configuration,
+  compaction policy, resume events, and structured initial content. Use
+  `scratchpad.recite`, `scratchpad.reorganize_every`, `scratchpad.schema_retries`,
+  `scratchpad.reorganizer`, `skills`, `skill_match.catalog_limit`,
+  `skill_match.catalog_budget`, `skill_match.catalog_always`, `compaction.strategy`,
+  `compaction.keep_last_n`, `auto_compact.policy`, `resume_event_topic`, and
+  `initial_user_content`. Retired aliases no longer affect execution.
+- Completion gates accept a declared requirement contract with typed assessments
+  and evidence from the host facts callback. Missing or unsupported requirements
+  block completion independently of a passing verifier. The `veto_combine`
+  callback is removed; all supplied verifier results must pass.
+
+### Added
+
+- Budget cut rules can now land a run softly instead of only cutting it dead.
+  `std/agent/run_meter` owns one typed run meter whose observations are `exact`,
+  `bounded`, or `unavailable`, and which keeps cumulative actual usage separate
+  from the upper bound projected for the next model call; a projection can never
+  be charged into actual spend. `std/agent/cut_predicates` evaluates a closed
+  `at_least`/`all`/`any` predicate grammar over registered meter fields and
+  answers `matched`, `not_matched`, or `indeterminate`, so missing provider usage
+  can no longer read as a satisfied threshold. `std/agent/cut_landing` adds a
+  latched `running -> landing -> stopped` machine: a soft cap can finish the
+  current turn or the current task inside a bounded grace envelope, another model
+  call is admitted only when its projected bound fits the remaining grace, and a
+  terminal tool stays admitted for the whole landing window so a mode can force
+  one final emit. Every tick writes a `harn.cut_rules_tick.v1` receipt carrying
+  rule counts, matched and indeterminate rule names, meter and registry digests,
+  the fields read with their provenance, the state transition, and the full cause
+  chain. A forced stop cannot report completion without a verifier-issued
+  completion count.
+- Add a typed configuration registry and structural audit for the runner, stop
+  decision, and stall handler, with generated reader locations and explicit
+  reachability evidence.
+
+### Changed
+
+- CI and release checks now read the host-bound Linux sandbox test filter from one shared source, preventing
+  coverage drift between producer and security jobs.
+- Parsing no longer allocates copies of line and block comments that it discards.
+- Formatter and batch CLI regressions share expensive setup while retaining corpus,
+  provider, and tamper coverage. The default-stack stop regression also proves that
+  the worker entered its tool and returned the requested graceful-stop reason.
+- Reuse immutable standard-library bindings when initializing independent VMs on the same thread,
+  reducing repeated multi-script server startup work while keeping execution state and host overrides isolated.
+- Upgraded the `tree-sitter` dependency from 0.26 to 0.27. This is a breaking
+  change in the parser library's own API, so a downstream crate that pins
+  `tree-sitter` 0.26 alongside Harn will need the same upgrade. Harn's parsing
+  and query behavior is unchanged.
+- **`harn init` no longer scaffolds a test with an unused input.**
+  The generated connector test was `pipeline test_provider_id(_task: unknown)`,
+  a slot nothing reads. The test runner derives one argument per declared
+  non-`Harness` parameter, so the generated test runs the same without it, and
+  every new package started by teaching the pattern to whoever read it next.
+- **An unused private pipeline input is now removable on a `test_*`
+  declaration.**
+  `HARN-LNT-074` exempted any declaration named `test_*`, on the belief that
+  the test runner requires a trailing input slot. It does not: the runner
+  derives one argument per declared non-`Harness` parameter, so a test pipeline
+  runs identically at arity two, one, or zero, and the slot was never part of
+  its contract. Consumers accumulated thousands of vestigial `_task` parameters
+  that the linter would not offer to remove. An attributed declaration is
+  unchanged: `@test(cases: ...)` rows and `@test(fixture: ...)` count the slot,
+  so only a bare `@test` allows removal, and a slot any caller passes is still
+  kept.
+
+### Fixed
+
+- `harn package test-inventory` reports, for one package and without running its
+  tests or changing any file, how many test files the target selected and how many
+  test pipelines were discovered in them. Its schema-v1 receipt names every
+  selected file that discovered nothing, by path and SHA-256 digest, keeps files it
+  could not parse separate from files that parsed and held no test, and exits
+  nonzero when a selected file has no discoverable test pipeline. A package that
+  intentionally ships without tests declares that in its own `harn.toml` with a
+  reason. Runtime bump pull requests retain the exact pre-mutation receipt.
+- The data-controls wire contract now pins the field Azure OpenAI sends for
+  the strictest posture. It was the one provider declaring a per-request
+  control without a test reading the request body it produces.
+- **A capped inline stdout or stderr now says it is a prefix (#7675).**
+  A subprocess result whose captured output exceeded `max_inline_bytes`
+  (50,000 by default) returned the leading bytes as `stdout` with no error and
+  no flag, so a shorter answer was indistinguishable from a genuinely shorter
+  one. Command output is usually sorted, so the prefix reads as a complete
+  answer about a smaller world: one observed enumeration returned the first
+  831 of 7,493 entries with `exit_code: 0` and no diagnostic. Process results
+  now carry `stdout_truncated` and `stderr_truncated` beside the existing
+  `byte_count`, set whenever the returned text omits bytes the process wrote,
+  on completed results, background snapshots, and running progress payloads
+  alike. An output of exactly the cap reports the flags clear, and a stream
+  the caller did not ask to capture is not reported as truncated.
+- Conformance cases now keep their memory event log and vector cache inside
+  the case's own state directory. Memory resolves relative to the running
+  script rather than under the state directory, so a case that used memory
+  previously wrote into the fixture tree and could be read by a later case.
+- The workspace lockfile no longer resolves a yanked chacha20 release. It
+  reached the graph through rand, a direct dependency of the VM crate.
+- Pattern-learning migration now stops when its marker cannot be inspected instead of treating a denied path as
+  an absent marker and rerunning migration.
+- Capability gates now run while an LLM mock is serving a call. Every gate was
+  previously switched off whenever a mock was active, so a test asserting that an
+  unsupported option is refused passed whether the gate worked or not. A mocked
+  route the capability registry does not recognise borrows the capable `mock` row
+  instead of skipping the check, so replays keep working and a refusal assertion
+  means something.
+- Workflow stages now expose the agent loop's typed `stall_diagnostics` policy
+  directly. Stages that omit it deliberately inherit the generic loop default
+  instead of installing undocumented workflow-only thresholds.
+- A sub-agent run whose child loop is refused before it starts now fails its
+  parent instead of returning a successful envelope. Configuration refusals and
+  engine errors propagate; a child that ran and then failed still returns a
+  per-child envelope, so fan-out still reports every child's outcome.
+- CI cache summaries distinguish failed measurements and unused caches from measured misses,
+  and report cold Rust compilation without stopping shared cache servers.
+- Reuse parsed imports across equivalent file paths and concurrent checker workers.
+- A shell redirect in a workspace with no Git repository is no longer refused by the never-approvable floor just
+  because the target already exists, so a command that wrote a file is not blocked the second time it runs. A
+  Git-tracked file, and a target that cannot be resolved at all, still hold the floor.
+- `path_normalize` keeps a Windows extended-length prefix instead of collapsing
+  `\\?\C:\x` to `/?/C:/x`, which is neither a verbatim path nor a drive-absolute
+  one. Scripts reach a repository root by normalizing `harness.fs.cwd()`, and on
+  Windows that cwd is canonicalized, so the corrupted result was handed to
+  `harness.process.run` as a working directory and rejected. A spawn that fails
+  on its working directory now names the directory it could not use rather than
+  reporting only the platform's message.
+- Keep each served session's sandbox profile scoped to its own prompt. Two turns
+  interleaving on the adapter's shared executor could previously read one
+  another's capability policy, so a session that asked for an unrestricted run
+  could descend into its agent loop under a concurrent session's confinement.
+- Declare the six agent-loop and judge options the runtime already reads (temperature, max_tokens, top_p, tool_format, effort, tool_precheck) so the option-surface check no longer refuses keys the runtime honours.
+- The capable `mock` provider route now declares `logprobs` and `logit_bias`, so a
+  scripted mock response carrying token logprobs reaches the caller instead of
+  being refused by option admission. The deliberately restricted `mock-minimal`
+  route still declares neither, which is what keeps its typed
+  `option ... is not supported by ...` refusal provable.
+- `agent_loop` now refuses an option key nothing on its surface declares, instead
+  of accepting it in silence. A misspelled key and a real key at a depth where
+  nothing reads it were both accepted, and the run then reported exactly what a
+  correctly configured run without that option would report. The two outcomes
+  were indistinguishable, so a probe written to catch a missing mechanism could
+  measure its absence and pass.
+
+  The rejection names where the key is read when it is read somewhere else, which
+  is the case a caller cannot debug from a refusal alone: learning that
+  `requirement_contract` is not a top-level option does not tell you it belongs on
+  the judge config.
+
+  The allowed keys are derived from the type that declares the option surface
+  rather than listed beside the validators, so they cannot drift from the
+  declaration the way the per-validator field reads already had.
+
+  Turning the check on found options the loop reads that the type never declared,
+  now declared, and a handful of keys nothing reads at all, now removed: a
+  workflow stage set three loop-detection values that no code anywhere consumes,
+  and two conformance tests disabled a judge under a name that was renamed away.
+  `done_judge` now refuses with its replacement named, `turn_end_condition`,
+  rather than falling through to the generic "no option reads this".
+- The agent-gate census that checks every declared `agent_loop` option key is
+  inventoried now asks the whole registry, through the registry's own list of
+  entry files, instead of two filenames repeated inside the check.
+
+  Entry names share one flat namespace and the registry refuses duplicates, so a
+  declared key is filed under whichever entry file owns its theme. Asking only
+  two of those files made a correctly filed key indistinguishable from a missing
+  one, and made a newly declared key impossible to satisfy: filing it in the
+  model file duplicated the existing entry and the audit threw.
+
+  The reverse direction still asks only the files that own the model shape, so an
+  entry naming a key the shape no longer declares is still reported as stale. A
+  failure now names the offending key rather than reporting every element of a
+  shifted sorted list.
+- `harn fmt` now keeps a comment written between two call arguments inside the
+  call, above the argument it was written against. It used to move the comment to
+  the end of the file.
+
+  The comment was never lost, so a check that counts tokens could not see it. It
+  was simply claimed by nothing: call arguments were rendered through the plain
+  comma-sequence path, which has no notion of comments, and the end-of-file sweep
+  re-emitted every unclaimed comment after the last top-level item. A comment
+  explaining one argument silently came to sit at the bottom of the file.
+
+  Call arguments now go through the same claiming path that list and dict
+  literals already used, so any interior comment forces the call multiline and is
+  emitted in place. A call with no interior comments still collapses exactly as
+  before.
+- The CLI regression suite now renders the package and connector templates and
+  strict-lints their generated sources. This catches lint regressions hidden in
+  template strings before a newly scaffolded package fails strict verification.
+- **Post-release development bumps now recognize squash-merged release commits.**
+  Publishing a certified release whose pull request was squash-merged into
+  `main` now advances the workspace to the next `-dev` version instead of
+  incorrectly treating the release tag as unrelated history.
+- Session-backed run records preserve the completion owner's receipt from durable
+  session attributes, including after re-projection. Records explicitly report
+  `metadata.completion_receipt: null` when no receipt was recorded.
+- Completion decisions retain requirements from the deterministic gate and both model judges.
+  A scheduled but unassessed requirement prevents completion, and unverified terminal receipts
+  retain pending requirements.
+- Keep structural Harn parsing aligned with the language parser for line-leading
+  division, remainder expressions, contextual identifiers, and hashed raw strings.
+
 ## v0.10.132
 
 ### Breaking

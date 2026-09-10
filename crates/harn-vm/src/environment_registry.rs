@@ -289,11 +289,8 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
         "HARN_LLM_TIMEOUT"
         | "HARN_LLM_IDLE_TIMEOUT"
         | "HARN_LLM_FIRST_TOKEN_TIMEOUT"
-        | "HARN_MAX_CONCURRENCY"
         | "HARN_RETENTION_DAYS"
-        | "HARN_TOKEN_BUDGET"
         | "HARN_EVENT_LOG_QUEUE_DEPTH" => EnvironmentValueShape::UnsignedInteger,
-        "HARN_BUDGET_USD" => EnvironmentValueShape::NonNegativeNumber,
         "HARN_OTEL_SAMPLE_RATIO" => EnvironmentValueShape::UnitInterval,
         "HARN_ALLOW_TOOLCHAIN_MISMATCH"
         | "HARN_BYTECODE_CACHE"
@@ -537,6 +534,31 @@ mod tests {
         assert!(!rendered.contains(secret));
     }
 
+    /// Dispatch refuses the retired budget names, so a run cannot treat them
+    /// as a live ceiling. Names are assembled without a `"HARN_` token so this
+    /// fixture is not a live reader.
+    #[test]
+    fn retired_limit_names_are_unknown_at_startup() {
+        for name in [
+            concat!("HARN", "_BUDGET_USD"),
+            concat!("HARN", "_TOKEN_BUDGET"),
+            concat!("HARN", "_MAX_CONCURRENCY"),
+            concat!("HARN", "_NETWORK_MODE"),
+            concat!("HARN", "_FILESYSTEM_MODE"),
+            concat!("HARN", "_SANDBOX_MODE"),
+        ] {
+            let error = validate_environment([(name, "1")]).expect_err(name);
+            assert!(
+                error.to_string().contains(name),
+                "startup must name {name}, got {error}"
+            );
+            assert!(
+                variable_spec(name).is_none(),
+                "{name} must stay unregistered"
+            );
+        }
+    }
+
     #[test]
     fn registry_is_sorted_unique_and_contains_metadata() {
         let names = registered_names();
@@ -640,12 +662,18 @@ mod tests {
             {
                 let source = std::fs::read_to_string(entry.path()).expect("read Harn source");
                 for token in harn_name_tokens(&source) {
+                    // Bare prefixes, not names. Each is a literal that a script
+                    // concatenates a suffix onto, so the scanner sees the
+                    // prefix alone and cannot resolve the name that is actually
+                    // read. The names those expressions produce are registered
+                    // individually; only the unresolvable fragment is excused.
                     if variable_spec(token).is_none()
                         && !protocol_symbols.contains(token)
                         && !matches!(
                             token,
                             "HARN_AGENT"
                                 | "HARN_AGENT_"
+                                | "HARN_BOOTSTRAP_"
                                 | "HARN_LLM"
                                 | "HARN_LLM_"
                                 | "HARN_PLANNER"

@@ -335,6 +335,7 @@ impl<'a> Parser<'a> {
                 type_params: &[#(#tp_lits),*],
                 has_rest: #has_rest,
                 where_clauses: &[#(#wc_lits),*],
+                projection: None,
             }
         };
         Ok(out)

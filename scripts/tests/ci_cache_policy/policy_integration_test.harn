@@ -412,12 +412,12 @@ pub pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness
   )
   assert(
     errors.contains(
-      "cli-cold-start-budget.yml:cold-start-budget must cap total runtime at 30 minutes",
+      "cli-cold-start-budget.yml:cold-start-budget must cap total runtime at 55 minutes",
     ),
   )
   assert(
     errors.contains(
-      "cli-cold-start-budget.yml:cold-start-budget release build step must cap runtime at 25 minutes",
+      "cli-cold-start-budget.yml:cold-start-budget release build step must cap runtime at 45 minutes",
     ),
   )
 }

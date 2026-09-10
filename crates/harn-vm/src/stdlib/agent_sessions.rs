@@ -15,7 +15,7 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 #[path = "agent_sessions_close_status.rs"]
 mod close_status;
 use close_status::close_status_arg;
-mod compact_config;
+pub(crate) mod compact_config;
 use compact_config::build_compact_config;
 
 /// Sessions raise catchable errors (callers may `try`/`recover`).

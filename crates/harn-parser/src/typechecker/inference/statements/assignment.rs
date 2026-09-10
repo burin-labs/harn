@@ -101,13 +101,13 @@ impl TypeChecker {
                 .or_else(|| scope.narrowed_original(name).cloned());
             if let Some(original) = original {
                 if let Some(widened) = widened_slot_type.as_ref() {
-                    scope.define_var(name, Some(widened.clone()));
+                    scope.update_var(name, Some(widened.clone()));
                 } else {
-                    scope.define_var(name, original);
+                    scope.update_var(name, original);
                 }
             }
             if let Some(widened) = widened_slot_type {
-                scope.define_var(name, Some(widened));
+                scope.update_var(name, Some(widened));
                 scope.clear_nil_widenable(name);
             }
             scope.define_schema_binding(name, None);
@@ -192,7 +192,7 @@ impl TypeChecker {
                 }
                 if let Some(narrowed) = without_nil(&resolved) {
                     let original = slot_ty.clone();
-                    scope.define_var(name, Some(narrowed));
+                    scope.update_var(name, Some(narrowed));
                     scope.narrowed_vars.insert(name.clone(), Some(original));
                 }
             }

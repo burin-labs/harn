@@ -25,7 +25,9 @@ const DEFAULT_MAX_DIRS: usize = 512;
 const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
 const ACTIVE_LEASE_FILE: &str = ".active.lock";
-const NAMESPACE_LEASE_PREFIX: &str = ".harn-command-artifacts";
+const ARTIFACT_NAMESPACE_PREFIX: &str = "harn-command-artifacts";
+const LEGACY_NAMESPACE_LEASE_PREFIX: &str = ".harn-command-artifacts";
+const NAMESPACE_LEASE_FILE: &str = ".namespace.lock";
 const RUN_COMMAND_BUILTIN: &str = "hostlib_tools_run_command";
 const READ_COMMAND_OUTPUT_BUILTIN: &str = "hostlib_tools_read_command_output";
 // Command IDs are unique. Contention therefore indicates a stale process or
@@ -108,7 +110,6 @@ pub(crate) fn persist_artifacts(
     stderr: &[u8],
     handle_id: Option<&str>,
 ) -> Result<CommandArtifacts, HostlibError> {
-    maybe_sweep_stale_artifacts(None);
     let artifacts = planned_artifact_paths(command_id);
     create_and_mark_artifacts_active(&artifacts)?;
     let active_lease = ActiveArtifactLeaseGuard::new(&artifacts);
@@ -148,7 +149,6 @@ pub(crate) fn register_live_artifacts(
     command_id: &str,
     handle_id: Option<&str>,
 ) -> Result<CommandArtifacts, HostlibError> {
-    maybe_sweep_stale_artifacts(None);
     let artifacts = planned_artifact_paths(command_id);
     create_and_mark_artifacts_active(&artifacts)?;
     let active_lease = ActiveArtifactLeaseGuard::new(&artifacts);
@@ -176,7 +176,7 @@ pub(crate) fn register_live_artifacts(
 }
 
 pub(crate) fn planned_artifact_paths(command_id: &str) -> CommandArtifacts {
-    let dir = std::env::temp_dir().join(format!("harn-command-{command_id}"));
+    let dir = command_artifact_root().join(format!("harn-command-{command_id}"));
     CommandArtifacts {
         output_path: dir.join("combined.txt"),
         stdout_path: dir.join("stdout.txt"),
@@ -544,6 +544,7 @@ fn create_and_mark_artifacts_active_with_timeout(
         return Ok(());
     };
     let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
+    ensure_artifact_namespace(temp_dir)?;
     with_artifact_namespace_lock(
         temp_dir,
         timeout,
@@ -718,11 +719,71 @@ enum NamespaceLockCreation {
 }
 
 fn artifact_namespace_lease_path(temp_dir: &Path) -> PathBuf {
+    if temp_dir.file_name().and_then(|name| name.to_str())
+        == Some(artifact_namespace_dir_name().as_str())
+    {
+        return temp_dir.join(NAMESPACE_LEASE_FILE);
+    }
+    temp_dir.join(format!(
+        "{LEGACY_NAMESPACE_LEASE_PREFIX}-{}.lock",
+        artifact_owner_suffix()
+    ))
+}
+
+fn artifact_owner_suffix() -> String {
     #[cfg(unix)]
     let suffix = unsafe { libc::geteuid() }.to_string();
     #[cfg(not(unix))]
     let suffix = "user".to_string();
-    temp_dir.join(format!("{NAMESPACE_LEASE_PREFIX}-{suffix}.lock"))
+    suffix
+}
+
+fn artifact_namespace_dir_name() -> String {
+    format!("{ARTIFACT_NAMESPACE_PREFIX}-{}", artifact_owner_suffix())
+}
+
+fn command_artifact_root() -> PathBuf {
+    std::env::temp_dir().join(artifact_namespace_dir_name())
+}
+
+fn ensure_artifact_namespace(namespace: &Path) -> Result<(), HostlibError> {
+    match std::fs::create_dir(namespace) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => {
+            return Err(HostlibError::Backend {
+                builtin: RUN_COMMAND_BUILTIN,
+                message: format!("failed to create command artifact namespace: {error}"),
+            });
+        }
+    }
+    let metadata = std::fs::symlink_metadata(namespace).map_err(|error| HostlibError::Backend {
+        builtin: RUN_COMMAND_BUILTIN,
+        message: format!("failed to inspect command artifact namespace: {error}"),
+    })?;
+    if !metadata.file_type().is_dir() {
+        return Err(HostlibError::Backend {
+            builtin: RUN_COMMAND_BUILTIN,
+            message: "command artifact namespace must be a real directory".to_string(),
+        });
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(HostlibError::Backend {
+                builtin: RUN_COMMAND_BUILTIN,
+                message: "command artifact namespace is not owned by the current user".to_string(),
+            });
+        }
+        std::fs::set_permissions(namespace, std::fs::Permissions::from_mode(0o700)).map_err(
+            |error| HostlibError::Backend {
+                builtin: RUN_COMMAND_BUILTIN,
+                message: format!("failed to secure command artifact namespace: {error}"),
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn lookup_artifacts(command_id: Option<&str>, handle_id: Option<&str>) -> Option<CommandArtifacts> {
@@ -737,7 +798,7 @@ fn maybe_sweep_stale_artifacts(current_dir: Option<&Path>) {
     let Some(retention) = retention_duration() else {
         return;
     };
-    let temp_dir = std::env::temp_dir();
+    let temp_dir = command_artifact_root();
     let max_dirs = max_artifact_dirs();
     let now = Instant::now();
     {

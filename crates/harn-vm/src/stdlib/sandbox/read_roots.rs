@@ -42,6 +42,7 @@ pub(crate) fn developer_toolchain_read_roots_for_home(home: &Path) -> Vec<PathBu
         ".juliaup",
         ".local/bin",
         ".local/share/mise",
+        ".local/share/pnpm",
         ".local/share/uv",
         ".nvm",
         ".pyenv",
@@ -50,6 +51,7 @@ pub(crate) fn developer_toolchain_read_roots_for_home(home: &Path) -> Vec<PathBu
         ".sdkman",
         ".swiftly",
         ".volta",
+        "Library/pnpm",
         "go",
     ]
     .into_iter()
@@ -148,6 +150,13 @@ pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<Pat
         ".cache",
         ".pip",
         ".pypirc",
+        // Composer's macOS home (`COMPOSER_HOME` default). `config.json` and
+        // the global `composer.json` are configuration; `auth.json` inside it
+        // is on the credential denylist, which beats this grant.
+        ".composer",
+        // pnpm's global rc on macOS (`env-paths` config dir). A registry or
+        // store-dir setting, never a token: those live in `.npmrc`.
+        "Library/Preferences/pnpm",
         ".cargo/config",
         ".cargo/config.toml",
         ".cargo/credentials",

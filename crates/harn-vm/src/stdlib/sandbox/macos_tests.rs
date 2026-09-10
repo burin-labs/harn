@@ -412,6 +412,12 @@ fn sandbox_profile_allows_home_toolchain_roots_read_only() {
         .expect("uv root")
         .display()
         .to_string();
+    let pnpm_path = toolchain_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new("Library/pnpm")))
+        .expect("pnpm root")
+        .display()
+        .to_string();
     let rustup_path = toolchain_roots
         .iter()
         .find(|path| path.ends_with(std::path::Path::new(".rustup")))
@@ -425,7 +431,7 @@ fn sandbox_profile_allows_home_toolchain_roots_read_only() {
         &[],
     );
 
-    for path in [uv_path, rustup_path] {
+    for path in [pnpm_path, uv_path, rustup_path] {
         let escaped = sandbox_profile_escape(&path);
         assert!(
             profile.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
@@ -436,6 +442,67 @@ fn sandbox_profile_allows_home_toolchain_roots_read_only() {
             "home toolchain root must stay read-only: {profile}"
         );
     }
+}
+
+#[test]
+fn a_live_confined_child_reads_the_pnpm_home_without_opening_the_whole_home() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let home = tempfile::tempdir().expect("home");
+    let home_path = home.path().canonicalize().expect("canonical home");
+    let pnpm_root = home_path.join("Library/pnpm");
+    std::fs::create_dir_all(&pnpm_root).expect("pnpm root");
+    let pnpm_runtime = pnpm_root.join("runtime.txt");
+    std::fs::write(&pnpm_runtime, "PNPM-RUNTIME-READABLE").expect("pnpm runtime");
+    let unrelated = home_path.join("unrelated.txt");
+    std::fs::write(&unrelated, "MUST-STAY-CLOSED").expect("unrelated home file");
+
+    let previous_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &home_path);
+    let workspace = tempfile::tempdir().expect("workspace");
+    let workspace_path = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.workspace_roots = vec![workspace_path.display().to_string()];
+    policy.process_sandbox.presets = Some(vec![
+        crate::orchestration::ProcessSandboxPreset::SystemRuntime,
+        crate::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+    ]);
+    let profile = render_profile(&policy);
+    let profile_path = workspace_path.join("profile.sb");
+    std::fs::write(&profile_path, profile).expect("sandbox profile");
+    let read = |path: &Path| {
+        std::process::Command::new(SANDBOX_EXEC_PATH)
+            .args(["-f"])
+            .arg(&profile_path)
+            .arg("/bin/cat")
+            .arg(path)
+            .output()
+            .expect("sandboxed cat")
+    };
+    let admitted = read(&pnpm_runtime);
+    let refused = read(&unrelated);
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+
+    assert!(
+        admitted.status.success()
+            && String::from_utf8_lossy(&admitted.stdout).contains("PNPM-RUNTIME-READABLE"),
+        "the child must read the standard pnpm runtime root: {admitted:?}"
+    );
+    assert!(
+        !refused.status.success()
+            && !String::from_utf8_lossy(&refused.stdout).contains("MUST-STAY-CLOSED"),
+        "the adjacent home file must remain outside the jail: {refused:?}"
+    );
 }
 
 #[test]
@@ -1008,10 +1075,10 @@ fn package_manager_preset_policy() -> CapabilityPolicy {
     CapabilityPolicy {
         workspace_roots: vec!["/tmp/harn-workspace".to_string()],
         sandbox_profile: SandboxProfile::Worktree,
-        process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(crate::orchestration::ProcessSandboxPolicy {
             presets: Some(vec![ProcessSandboxPreset::PackageManagerConfig]),
             ..Default::default()
-        },
+        }),
         ..CapabilityPolicy::default()
     }
 }
@@ -1182,4 +1249,119 @@ fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
              the refusal was the denylist and not an unrelated accident: {}",
         String::from_utf8_lossy(&ungated.stderr)
     );
+}
+
+#[test]
+fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.process_sandbox.unix_socket_roots = vec!["/tmp/harn-workspace".to_string()];
+
+    let profile = render_profile(&policy);
+
+    for operation in ["network-bind", "network-inbound", "network-outbound"] {
+        assert!(
+            profile.contains(&format!(
+                "(allow {operation} (subpath \"/tmp/harn-workspace\"))"
+            )),
+            "{operation} missing:\n{profile}"
+        );
+        // `/tmp` resolves through `/private/tmp` at bind time; both spellings
+        // must be present or the socket is refused under the alias.
+        assert!(
+            profile.contains(&format!(
+                "(allow {operation} (subpath \"/private/tmp/harn-workspace\"))"
+            )),
+            "{operation} alias missing:\n{profile}"
+        );
+    }
+    assert!(!profile.contains("(allow network*)"), "{profile}");
+    assert!(!profile.contains("localhost:*"), "{profile}");
+    // Default presets include UserTemp, so a non-empty grant also admits
+    // sockets under the platform temp dirs. sbt binds `/tmp/bsbt/...`.
+    assert!(
+        profile.contains("(allow network-bind (subpath \"/tmp\"))"),
+        "UserTemp pairing missing:\n{profile}"
+    );
+}
+
+#[test]
+fn a_socket_root_is_a_subpath_filter_never_a_broad_socket_grant() {
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.process_sandbox.unix_socket_roots = vec!["/tmp/harn-workspace".to_string()];
+
+    let profile = render_profile(&policy);
+
+    for line in profile.lines().filter(|line| line.contains("network-")) {
+        assert!(
+            line.contains("(subpath \"") || line.starts_with(";;"),
+            "unscoped socket rule: {line}"
+        );
+    }
+}
+
+#[test]
+fn a_workspace_socket_bind_succeeds_under_the_grant_and_fails_outside_it() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    let workspace = tempfile::tempdir().expect("workspace");
+    let workspace_path = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
+    let elsewhere = tempfile::tempdir().expect("elsewhere");
+    let elsewhere_path = elsewhere
+        .path()
+        .canonicalize()
+        .expect("canonical elsewhere");
+
+    let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text"]);
+    policy.workspace_roots = vec![workspace_path.display().to_string()];
+    policy.process_sandbox.write_roots = vec![elsewhere_path.display().to_string()];
+    policy.process_sandbox.unix_socket_roots = vec![workspace_path.display().to_string()];
+    policy.process_sandbox.presets = Some(vec![
+        crate::orchestration::ProcessSandboxPreset::SystemRuntime,
+        crate::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+    ]);
+    let profile = render_profile(&policy);
+    let profile_file = workspace_path.join("profile.sb");
+    std::fs::write(&profile_file, &profile).expect("write profile");
+
+    // perl is a real binary on macOS; /usr/bin/python3 is an xcrun shim that
+    // needs a cache under /var/folders the profile does not grant.
+    let bind = |socket: &Path| -> std::process::Output {
+        std::process::Command::new(SANDBOX_EXEC_PATH)
+            .arg("-f")
+            .arg(&profile_file)
+            .arg("/usr/bin/perl")
+            .arg("-MSocket")
+            .arg("-e")
+            .arg(
+                "socket(S, PF_UNIX, SOCK_STREAM, 0) or die \"socket: $!\"; \
+                 bind(S, sockaddr_un($ARGV[0])) or die \"bind: $!\"; print \"bound\\n\"",
+            )
+            .arg(socket)
+            .current_dir(&workspace_path)
+            .output()
+            .expect("spawn sandbox-exec")
+    };
+
+    let inside = bind(&workspace_path.join("build.sock"));
+    assert!(
+        inside.status.success(),
+        "socket under the granted root must bind:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&inside.stdout),
+        String::from_utf8_lossy(&inside.stderr)
+    );
+
+    // Writable, but not a socket root: the write grant alone must not admit
+    // the bind, or "a socket file is a file" would have widened silently.
+    let outside = bind(&elsewhere_path.join("build.sock"));
+    assert!(
+        !outside.status.success(),
+        "socket outside every socket root must be refused:\nstdout={}",
+        String::from_utf8_lossy(&outside.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&outside.stderr);
+    assert!(stderr.contains("bind: Operation not permitted"), "{stderr}");
 }

@@ -3,6 +3,7 @@ import {
   cache_refresh_workflow_errors,
   ci_linux_lane_policy_errors,
   e2e_elastic_capacity_errors,
+  producer_admission_expression,
   producer_cache_save_reserve_minutes,
   producer_hosted_ceiling_minutes,
   producer_owned_ceiling_minutes,
@@ -23,6 +24,18 @@ import {
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
+}
+
+// The producer's compile fan-out is measured by a step rather than typed, so
+// the fixture carries the same expression the workflow does. A literal here
+// would make the fixture describe a producer the policy now refuses.
+const MEASURED_BUILD_JOBS = "$" + "{{ steps.resource-budget.outputs.build_jobs }}"
+
+const BUDGET_STEP = {
+  name: "Measure the compile budget",
+  id: "resource-budget",
+  run: "bash scripts/ci/rust_resource_budget.sh",
+  env: {HARN_BUDGET_PROFILE: "producer"},
 }
 
 const E2E_SWITCH_ROUTE =
@@ -97,10 +110,10 @@ fn persistent_lane(
   write_cache: bool = false,
 ) {
   const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
-  const paid_event =
-    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   let lane = {
     "runs-on": producer_runner_expression(runner),
+    needs: ["changes", "runner-availability", "rust-producer-capacity"],
+    if: producer_admission_expression(),
     "timeout-minutes": producer_timeout_expression(),
     env: {HARN_RUNNER_TIER: producer_tier_expression(), SCCACHE_CACHE_SIZE: "15G"},
     steps: [
@@ -216,6 +229,7 @@ fn workflow() {
         env: {...producer.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
         steps: producer.steps
           + [
+            BUDGET_STEP,
             {
               name: "Build portable Harn CLI",
               "timeout-minutes": 10,
@@ -231,7 +245,7 @@ fn workflow() {
             {
               name: "Build portable workspace test archive",
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
-              env: {CARGO_BUILD_JOBS: "4"},
+              env: {CARGO_BUILD_JOBS: MEASURED_BUILD_JOBS},
               run: "./scripts/ci/rust_artifact.sh build-tests bundle sha",
             },
             {
@@ -985,6 +999,25 @@ pipeline test_owned_ceiling_drops_only_the_cache_save_reserve(harness: Harness) 
     producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes(),
     "the owned ceiling must be the hosted ceiling minus the save it never performs",
   )
+}
+
+pipeline test_owned_producer_requires_measured_capacity(harness: Harness) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  for broken in [
+    {...producer, if: gha_expression("!cancelled() && needs.changes.outputs.rust == 'true'")},
+    {...producer, needs: ["changes", "runner-availability"]},
+  ] {
+    const errors = ci_linux_lane_policy_errors(
+      {...valid, jobs: {...valid.jobs, "rust-check-inputs": broken}},
+    )
+    assert(
+      errors.contains(
+        "ci.yml:rust-check-inputs must require a successful capacity decision on trusted pull requests",
+      ),
+    )
+  }
 }
 
 pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(

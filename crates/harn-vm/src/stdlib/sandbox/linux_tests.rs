@@ -586,6 +586,10 @@ fn developer_toolchain_roots_are_read_only() {
     let roots = super::super::developer_toolchain_read_roots_for_home(temp_home.path());
 
     assert!(
+        roots.iter().any(|path| path.ends_with(".local/share/pnpm")),
+        "pnpm runtimes should be part of the developer-toolchain preset"
+    );
+    assert!(
         roots.iter().any(|path| path.ends_with(".local/share/uv")),
         "uv runtimes should be part of the developer-toolchain preset"
     );
@@ -607,10 +611,10 @@ fn developer_toolchain_roots_are_read_only() {
 #[test]
 fn developer_toolchains_admit_linux_vendor_installations() {
     let enabled = CapabilityPolicy {
-        process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(crate::orchestration::ProcessSandboxPolicy {
             presets: Some(vec![ProcessSandboxPreset::DeveloperToolchains]),
             ..Default::default()
-        },
+        }),
         ..Default::default()
     };
     assert_eq!(
@@ -619,10 +623,10 @@ fn developer_toolchains_admit_linux_vendor_installations() {
     );
 
     let disabled = CapabilityPolicy {
-        process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+        process_sandbox: Box::new(crate::orchestration::ProcessSandboxPolicy {
             presets: Some(Vec::new()),
             ..Default::default()
-        },
+        }),
         ..Default::default()
     };
     assert!(developer_toolchain_system_read_roots(&disabled).is_empty());
@@ -963,10 +967,10 @@ fn a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling() {
         let policy = CapabilityPolicy {
             workspace_roots: vec![home_path.display().to_string()],
             sandbox_profile: SandboxProfile::Worktree,
-            process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+            process_sandbox: Box::new(crate::orchestration::ProcessSandboxPolicy {
                 read_deny_roots: deny.to_vec(),
                 ..Default::default()
-            },
+            }),
             ..CapabilityPolicy::default()
         };
         crate::orchestration::push_execution_policy(policy);

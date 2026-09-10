@@ -73,6 +73,10 @@ jobs:
           # with ci.yml:rust-checks so this focused lane cannot mint a parallel,
           # drift-prone cache generation.
           shared-key: workspace-tests
+          # The maintained Linux archive keeps workspace-member artifacts, and the
+          # suffix that records it is part of the key. A reader without it restores
+          # nothing at all rather than restoring a thinner archive.
+          cache-workspace-crates: "true"
           cache-bin: false
           save: false
       - name: Install pinned browser build tool

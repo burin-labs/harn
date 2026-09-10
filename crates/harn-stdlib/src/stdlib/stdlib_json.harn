@@ -41,18 +41,6 @@ pub fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
 }
 
 /**
- * Pick the listed keys from `data`, dropping entries whose stored value is
- * `nil`. Generic over the value type — when called with a `dict<string, V>`
- * the projection keeps the same V.
- *
- * @effects: []
- * @errors: []
- */
-pub fn pick<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
-  return __dict_pick(data ?? {}, keys ?? [])
-}
-
-/**
  * Drop the listed keys from `data`. Generic over the value type — the
  * resulting dict keeps the same value contract as the input.
  *

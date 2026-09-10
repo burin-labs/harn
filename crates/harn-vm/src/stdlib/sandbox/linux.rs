@@ -5,7 +5,7 @@
 //! mapping table.
 
 use std::io;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -102,10 +102,170 @@ struct LandlockRule {
 
 impl Drop for LandlockProfile {
     fn drop(&mut self) {
-        unsafe {
-            libc::close(self.ruleset_fd);
+        // A negative descriptor means ownership was handed to a
+        // `TransferableConfinement`; closing it here would shut the ruleset
+        // before the process that has to enter it ever sees it.
+        if self.ruleset_fd >= 0 {
+            unsafe {
+                libc::close(self.ruleset_fd);
+            }
         }
     }
+}
+
+impl LandlockProfile {
+    /// Hand the populated ruleset over, leaving the rule descriptors to close.
+    fn take_ruleset(mut self) -> OwnedFd {
+        let fd = self.ruleset_fd;
+        self.ruleset_fd = -1;
+        drop(self);
+        // SAFETY: `fd` came from `landlock_create_ruleset` and this is the only
+        // remaining owner, because `drop` above was told to skip it.
+        unsafe { OwnedFd::from_raw_fd(fd) }
+    }
+}
+
+/// A confinement built in one process and entered in another.
+///
+/// # Why this exists
+///
+/// The owner-death guardian re-execs this binary and rebuilds the payload
+/// command from a serialized program, args, cwd and environment. A `pre_exec`
+/// closure has no representation in that projection, so this backend's
+/// confinement was dropped in the handover and the payload ran completely
+/// unconfined while the run's receipt still reported the profile as enforced.
+/// macOS never showed it because its backend puts the sandbox in argv, which
+/// the same projection preserves.
+///
+/// What does survive being handed to another process is a descriptor and a byte
+/// string. A Landlock ruleset is exactly that once its rules are added, and a
+/// compiled seccomp program is already a byte string. So the side that has the
+/// policy, the open directory descriptors and an allocator does all of that
+/// work, and the side that will `exec` the payload is left with two
+/// async-signal-safe syscalls it can make from `pre_exec`.
+pub struct TransferableConfinement {
+    ruleset: Option<OwnedFd>,
+    seccomp: BpfProgram,
+}
+
+/// One `sock_filter` on the wire: code, jt, jf, k, little-endian.
+const SECCOMP_INSTRUCTION_BYTES: usize = 8;
+
+impl TransferableConfinement {
+    /// The ruleset descriptor, or `None` on a host with no Landlock where the
+    /// resolved fallback allows the run to proceed without it.
+    pub fn ruleset_fd(&self) -> Option<RawFd> {
+        self.ruleset.as_ref().map(AsRawFd::as_raw_fd)
+    }
+
+    /// The compiled seccomp program, flattened for transport.
+    pub fn seccomp_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.seccomp.len() * SECCOMP_INSTRUCTION_BYTES);
+        for instruction in &self.seccomp {
+            bytes.extend_from_slice(&instruction.code.to_le_bytes());
+            bytes.push(instruction.jt);
+            bytes.push(instruction.jf);
+            bytes.extend_from_slice(&instruction.k.to_le_bytes());
+        }
+        bytes
+    }
+
+    /// Rebuild on the far side of a handover. Takes ownership of `ruleset_fd`.
+    ///
+    /// Call this BEFORE forking the payload: it allocates, and [`Self::enter`]
+    /// must not.
+    pub fn from_parts(ruleset_fd: Option<RawFd>, seccomp: &[u8]) -> io::Result<Self> {
+        if !seccomp.len().is_multiple_of(SECCOMP_INSTRUCTION_BYTES) {
+            return Err(io::Error::other(
+                "transferred seccomp program is not a whole number of instructions",
+            ));
+        }
+        let program = seccomp
+            .chunks_exact(SECCOMP_INSTRUCTION_BYTES)
+            .map(|chunk| seccompiler::sock_filter {
+                code: u16::from_le_bytes([chunk[0], chunk[1]]),
+                jt: chunk[2],
+                jf: chunk[3],
+                k: u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]),
+            })
+            .collect();
+        Ok(Self {
+            // SAFETY: the caller states this descriptor was inherited for this
+            // purpose and is not owned elsewhere in this process.
+            ruleset: ruleset_fd.map(|fd| unsafe { OwnedFd::from_raw_fd(fd) }),
+            seccomp: program,
+        })
+    }
+
+    /// Confine the calling process. Async-signal-safe, so it is legal from
+    /// `pre_exec`: two raw syscalls for Landlock and one for seccomp, with no
+    /// allocation, locking, or I/O.
+    pub fn enter(&self) -> io::Result<()> {
+        if let Some(ruleset) = self.ruleset.as_ref() {
+            enter_landlock_ruleset(ruleset.as_raw_fd())?;
+            confirm_filesystem_boundary_holds()?;
+        }
+        seccompiler::apply_filter(&self.seccomp)
+            .map_err(|err| io::Error::other(format!("failed to install the seccomp filter: {err}")))
+    }
+
+    /// Release the ruleset descriptor so it can be sent across an `exec`.
+    pub fn into_ruleset_fd(self) -> Option<RawFd> {
+        self.ruleset.map(IntoRawFd::into_raw_fd)
+    }
+}
+
+/// Confirm the boundary is real, in the process that just entered it.
+///
+/// A syscall returning zero says the kernel accepted the request, not that the
+/// request is doing anything. Every layer above reads "enforced" off that
+/// acceptance, which is how a confinement that was built and never applied could
+/// be reported as holding for as long as it was.
+///
+/// The filesystem root is the one probe that needs no knowledge of the grants:
+/// it always exists, so a denial cannot be confused with an absence, and it can
+/// never be granted, because a root that broad is refused when the policy is
+/// built. Opening it after `restrict_self` therefore has exactly one meaning.
+///
+/// Async-signal-safe: one `open` and at most one `close`, no allocation.
+///
+/// A failed open is the expected answer and needs no distinguishing: any error
+/// means the process could not read the root, which is the property being
+/// confirmed.
+fn confirm_filesystem_boundary_holds() -> io::Result<()> {
+    let root = unsafe { libc::open(c"/".as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) };
+    if root < 0 {
+        return Ok(());
+    }
+    unsafe {
+        libc::close(root);
+    }
+    Err(io::Error::other(
+        "the Landlock ruleset was entered but the filesystem boundary is not holding: the root \
+         directory is still readable, so this process is not confined",
+    ))
+}
+
+/// Build a confinement for `program` under the ambient policy, ready to hand to
+/// whatever process will actually `exec` it.
+///
+/// `None` means this run installs no child confinement at all, which is the
+/// same answer [`super::std_command_for`] acts on. It is NOT "confinement was
+/// requested and could not be built": that is an error, and it is returned as
+/// one, so a caller can never mistake a refusal for an absent request.
+pub fn transferable_confinement(program: &str) -> Result<Option<TransferableConfinement>, VmError> {
+    let Some((policy, profile)) = super::active_sandbox_policy() else {
+        return Ok(None);
+    };
+    // Resolve exactly as the direct spawn path does. The resolved path is what
+    // the ruleset grants read and execute on, so a bare name here would build a
+    // ruleset that refuses the very program it was built for.
+    let resolved = crate::stdlib::process::resolve_program_path_for_spawn(program);
+    let prepared = profile_setup(&resolved, &policy, profile)?;
+    Ok(Some(TransferableConfinement {
+        ruleset: prepared.landlock.map(LandlockProfile::take_ruleset),
+        seccomp: prepared.seccomp,
+    }))
 }
 
 fn profile_setup(
@@ -125,19 +285,38 @@ fn profile_setup(
                 .to_string(),
         ));
     }
+    if !policy.process_sandbox.unix_socket_roots.is_empty() {
+        // seccomp filters the syscall, not the socket path, and Landlock has
+        // no access right for connecting to a socket file, so a Unix-socket
+        // grant cannot be scoped to its roots here. Admitting the socket
+        // syscalls would let a child reach any socket its user can open —
+        // a container daemon's, for one — which is an escape, not a grant.
+        return Err(sandbox_rejection(
+            "path-scoped Unix-domain sockets for child processes require a backend that filters sockets by path; the Linux backend cannot enforce that boundary"
+                .to_string(),
+        ));
+    }
     // landlock_profile() returns Err under OsHardened when Landlock is
     // unavailable (effective_fallback resolves to Enforce), so the
     // OsHardened "must engage" contract is enforced before fork rather
     // than racing the pre_exec callback.
+    let landlock = landlock_profile(program, policy, profile)?;
+    if let Some(landlock) = landlock.as_ref() {
+        add_landlock_rules(landlock).map_err(|error| {
+            sandbox_rejection(format!(
+                "failed to populate the Linux Landlock ruleset: {error}"
+            ))
+        })?;
+    }
     Ok(ProcessProfile {
-        landlock: landlock_profile(program, policy, profile)?,
+        landlock,
         seccomp: compile_seccomp_program(&allowed_syscalls(policy))?,
     })
 }
 
 fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
     if let Some(landlock) = &profile.landlock {
-        install_landlock_ruleset(landlock)?;
+        enter_landlock_ruleset(landlock.ruleset_fd)?;
     }
     // Once seccomp is default-deny, the child should not retain sandbox-setup
     // powers. Install Landlock first, then drop to the runtime syscall ceiling.
@@ -574,7 +753,14 @@ fn push_rule_exact(
     Ok(())
 }
 
-fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
+/// Populate the ruleset with this profile's grants.
+///
+/// Runs in the PARENT, before fork. Adding rules needs the open directory
+/// descriptors the profile holds and a `Vec` walk, neither of which belongs on
+/// the `pre_exec` side; and a populated ruleset is a self-contained object that
+/// a descriptor alone can carry, which is what lets a confinement survive being
+/// handed to another process (see [`transferable_confinement`]).
+fn add_landlock_rules(profile: &LandlockProfile) -> io::Result<()> {
     for rule in &profile.rules {
         let path_beneath = LandlockPathBeneathAttr {
             allowed_access: rule.allowed_access,
@@ -593,11 +779,22 @@ fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
     }
+    Ok(())
+}
+
+/// Enter an already-populated ruleset. Async-signal-safe: two raw syscalls,
+/// no allocation, no locking, so it is legal on the `pre_exec` side of a fork.
+///
+/// This is the step that actually confines, and it must run in the process that
+/// will `exec` the payload. Nothing before it restricts anything: a ruleset that
+/// is created, populated, and never entered leaves the child completely
+/// unconfined while every earlier step reports success.
+fn enter_landlock_ruleset(ruleset_fd: libc::c_int) -> io::Result<()> {
     unsafe {
         if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
             return Err(io::Error::last_os_error());
         }
-        let result = libc::syscall(libc::SYS_landlock_restrict_self, profile.ruleset_fd, 0);
+        let result = libc::syscall(libc::SYS_landlock_restrict_self, ruleset_fd, 0);
         if result < 0 {
             return Err(io::Error::last_os_error());
         }

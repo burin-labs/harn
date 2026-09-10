@@ -354,6 +354,8 @@ diagnostic_codes! {
     LintCapabilityParameterName, "HARN-LNT-073", Lnt, "parameter carrying a narrow capability handle is not named for that capability";
     LintUnusedPipelineInput, "HARN-LNT-074", Lnt, "explicitly unused private pipeline input can be removed";
     LintUntypedToolHandlerResult, "HARN-LNT-075", Lnt, "tool handler returns a freeform dict, so its outcome must be inferred from key names instead of declared by its type";
+    LintToolHandlerHostCall, "HARN-LNT-076", Lnt, "tool handler reaches the privileged host wire";
+    LintPreferPick, "HARN-LNT-077", Lnt, "record literal copies fields one by one from a value that `pick` can select";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";

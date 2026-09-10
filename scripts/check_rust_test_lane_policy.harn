@@ -156,7 +156,7 @@ pub fn workflow_violations(workflow: string, document: dict) -> list<LaneViolati
         e2e_consumers = e2e_consumers + 1
       }
       if step?.id == "resource-budget"
-        && step?.run == "bash scripts/ci/e2e_resource_budget.sh"
+        && step?.run == "bash scripts/ci/rust_resource_budget.sh"
         && step?.["if"] == nil
         && step?.["continue-on-error"] == nil
         && step?.env?.RUNNER_ENVIRONMENT == "$" + "{{ runner.environment }}" {

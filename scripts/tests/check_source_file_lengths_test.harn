@@ -1,6 +1,41 @@
 import { with_temp_dir } from "std/testing"
 import "../check_source_file_lengths.harn"
 
+type SourceLengthWorkflow = {jobs: dict<string, {steps?: list<{name?: string, run?: string}>}>}
+
+@test
+pipeline test_ci_report_preserves_failure_output_under_errexit(harness: Harness, task: unknown) {
+  const workflow = schema_expect(
+    yaml_parse(harness.fs.read_text("../../.github/workflows/ci.yml")),
+    schema_of(SourceLengthWorkflow),
+  )
+  let script = ""
+  for step in workflow.jobs["source-length-ratchet"]?.steps ?? [] {
+    if step.name == "Check source file lengths" {
+      script = step.run ?? ""
+    }
+  }
+  assert(script != "")
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      for code in [0, 7] {
+        const summary = path_join(root, "summary-${code}.txt")
+        const result = harness.process.run(
+          {
+            program: "bash",
+            args: ["-e", "-c", "make() { echo ratchet-evidence; return ${code}; }\n" + script],
+            env: {RUNNER_TEMP: root, GITHUB_STEP_SUMMARY: summary},
+          },
+        )
+        assert_eq(result.exit_code, code)
+        assert(result.stdout.contains("ratchet-evidence"))
+        assert(harness.fs.read_text(summary).contains("ratchet-evidence"))
+      }
+    },
+  )
+}
+
 fn mkdirs(harness: Harness, path: string) -> nil {
   if path == "" || path == "." || harness.fs.exists(path) {
     return nil
