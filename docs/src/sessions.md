@@ -248,6 +248,12 @@ Inside those callbacks, `harness.agent.current_id()` resolves to the
 session currently being driven by the agent loop. Outside any active
 session, it returns `nil`.
 
+A callback uses the execution policy active when it was registered.
+Registration inside a restricted policy keeps those limits on future events.
+Harn restores the emitter's policy after the callback returns or throws.
+The current session, filesystem sandbox, and approval context still apply;
+temporary trusted host-call exemptions don't pass to callbacks.
+
 `harness.agent.actor_chain(id?)` returns the session's RFC 8693 actor chain.
 When `id` is omitted, it reads the current active session. Hosts bind the
 originating principal at session entry, and child agent sessions push their
