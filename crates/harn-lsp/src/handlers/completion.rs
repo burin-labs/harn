@@ -620,6 +620,34 @@ mod tests {
     }
 
     #[test]
+    fn dot_completion_uses_checked_pick_field_types() {
+        let source = r#"fn main(harness: Harness) {
+  const selected = pick(harness, ["env", "fs"])
+  selected.env
+  selected.fs.read_text("unused")
+}"#;
+        let items = completion_items_at(source, "selected.");
+        assert!(
+            items
+                .iter()
+                .any(|(name, ty)| name == "env" && ty.as_deref() == Some("HarnessEnv")),
+            "{items:?}"
+        );
+        assert!(
+            items
+                .iter()
+                .any(|(name, ty)| name == "fs" && ty.as_deref() == Some("HarnessFs")),
+            "{items:?}"
+        );
+        assert!(!items.iter().any(|(name, _)| name == "tools"), "{items:?}");
+        let methods = completion_items_at(source, "selected.fs.");
+        assert!(
+            methods.iter().any(|(name, _)| name == "read_text"),
+            "{methods:?}"
+        );
+    }
+
+    #[test]
     fn dot_completion_prefers_shape_fields() {
         let items = completion_items_at(
             r#"pipeline test() {

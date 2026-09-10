@@ -397,7 +397,8 @@ mod browser_tests {
     fn browser_worker_matches_native_suspend_resume_and_denial() {
         const SOURCE: &str = r#"
             fn greet(harness: Harness, input: string) {
-                return harness.interaction.ask(input)
+                const ctx = pick(harness, ["interaction"])
+                return ctx.interaction.ask(input)
             }
         "#;
         let compiled = compile(SOURCE, "greet", "function");

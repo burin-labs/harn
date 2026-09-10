@@ -1328,6 +1328,15 @@ wrappers or unnecessary parentheses around single values):
 harn lint --fix main.harn
 ```
 
+`HARN-LNT-077` replaces record literals such as
+`{env: harness.env, fs: harness.fs}` with `pick(harness, ["env", "fs"])`.
+The checker must prove that every copied field is present. Literals with
+comments, renamed keys, or calls in the source expression are left unchanged.
+See [Pick fields from a record](./pick.md) for the resulting types.
+
+Both `lint --fix` and `fix --apply` preserve project formatting when the
+original file is formatted. They leave surrounding lines alone otherwise.
+
 The Harn LSP also exposes these autofixes as quick-fix code actions
 (Cmd+./Ctrl+. in most editors) and as a bulk `source.fixAll.harn`
 action that VS Code can run on save:

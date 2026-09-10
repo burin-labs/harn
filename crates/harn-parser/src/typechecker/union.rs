@@ -550,6 +550,6 @@ pub(super) fn apply_refinements(scope: &mut TypeScope, refinements: &[(String, I
                 scope.narrowed_vars.insert(var_name.clone(), original);
             }
         }
-        scope.define_var(var_name, narrowed_type.clone());
+        scope.update_var(var_name, narrowed_type.clone());
     }
 }

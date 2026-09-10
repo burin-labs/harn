@@ -103,14 +103,23 @@ pub fn heading_boundary_keep_count(lines: list, line_keep_count: int) -> int {
     return 0
   }
   let in_fence = false
+  let heading_without_body = false
   let boundary = 0
   let index = 0
   while index < requested {
     const stripped = trim(to_string(lines[index] ?? ""))
     if starts_with(stripped, "```") {
       in_fence = !in_fence
-    } else if !in_fence && (stripped == "" || starts_with(stripped, "#")) {
+      heading_without_body = false
+    } else if !in_fence && starts_with(stripped, "#") {
       boundary = index
+      heading_without_body = true
+    } else if !in_fence && stripped == "" {
+      if !heading_without_body {
+        boundary = index
+      }
+    } else if stripped != "" {
+      heading_without_body = false
     }
     index = index + 1
   }

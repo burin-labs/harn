@@ -756,6 +756,11 @@ impl TypeChecker {
             definition_span: None,
         };
         self.check_call_signature_arguments(check_sig, type_args, args, has_spread, scope, span);
+        if !has_spread {
+            if let Some(projection) = sig.projection {
+                self.check_record_projection(name, projection, args, scope);
+            }
+        }
     }
 
     pub(in crate::typechecker) fn check_harness_method_call(
@@ -1404,7 +1409,7 @@ impl TypeChecker {
     /// Whether `name` was brought into scope by an `import` in the
     /// resolved cross-module mode (`with_imported_names`). Outside that
     /// mode there is no import set, so builtins are never shadowed.
-    fn name_is_imported(&self, name: &str) -> bool {
+    pub(super) fn name_is_imported(&self, name: &str) -> bool {
         self.imported_names
             .as_ref()
             .is_some_and(|names| names.contains(name))

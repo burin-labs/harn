@@ -285,6 +285,7 @@ impl Code {
             | Code::LintComparisonToBool
             | Code::LintPointlessComparison
             | Code::LintConstantLogicalOperand => Some(&REPAIR_EXPRESSION_SIMPLIFY),
+            Code::LintPreferPick => Some(&REPAIR_RECORDS_PICK_FIELDS),
             Code::LintUnnecessaryCast => Some(&REPAIR_CASTS_REMOVE_REDUNDANT),
             Code::LintRedundantClone => Some(&REPAIR_CLONE_REMOVE_REDUNDANT),
             Code::LintEagerCollectionConversion => Some(&REPAIR_COLLECTION_PREFER_LAZY),
@@ -544,6 +545,12 @@ const REPAIR_EXPRESSION_SIMPLIFY: RepairTemplate = RepairTemplate {
     safety: RepairSafety::BehaviorPreserving,
 };
 
+const REPAIR_RECORDS_PICK_FIELDS: RepairTemplate = RepairTemplate {
+    id: "records/pick-fields",
+    summary: "Replace the field-by-field record copy with `pick`",
+    safety: RepairSafety::BehaviorPreserving,
+};
+
 const REPAIR_CLONE_REMOVE_REDUNDANT: RepairTemplate = RepairTemplate {
     id: "clones/remove-redundant",
     summary: "Remove the redundant clone",
@@ -706,6 +713,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BLOCK_REMOVE_EMPTY,
     &REPAIR_CONTROL_FLOW_FLATTEN,
     &REPAIR_EXPRESSION_SIMPLIFY,
+    &REPAIR_RECORDS_PICK_FIELDS,
     &REPAIR_CLONE_REMOVE_REDUNDANT,
     &REPAIR_COLLECTION_PREFER_LAZY,
     &REPAIR_DEAD_CODE_REMOVE,

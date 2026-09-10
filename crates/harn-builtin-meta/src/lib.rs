@@ -49,12 +49,27 @@ pub struct BuiltinSignature {
     /// `where T: Foo` constraints. Each entry binds a generic type
     /// parameter name to the name of an interface it must implement.
     pub where_clauses: &'static [(&'static str, &'static str)],
+    /// Call-site record projection, when the result depends on selected keys.
+    /// `returns` remains the conservative contract for an indirect call.
+    pub projection: Option<RecordProjection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordProjection {
+    Pick { source: usize, keys: usize },
 }
 
 impl BuiltinSignature {
     /// Reuse a canonical signature shape under a projected source name.
     pub const fn with_name(self, name: &'static str) -> Self {
         Self { name, ..self }
+    }
+
+    pub const fn with_projection(self, projection: RecordProjection) -> Self {
+        Self {
+            projection: Some(projection),
+            ..self
+        }
     }
 }
 
@@ -280,6 +295,7 @@ impl BuiltinSignature {
             type_params: &[],
             has_rest: false,
             where_clauses: &[],
+            projection: None,
         }
     }
 
@@ -293,6 +309,7 @@ impl BuiltinSignature {
             type_params: &[],
             has_rest: true,
             where_clauses: &[],
+            projection: None,
         }
     }
 
@@ -312,6 +329,7 @@ impl BuiltinSignature {
             type_params,
             has_rest: false,
             where_clauses: &[],
+            projection: None,
         }
     }
 
@@ -542,6 +560,7 @@ mod tests {
             type_params: &[],
             has_rest: true,
             where_clauses: &[],
+            projection: None,
         };
         assert_eq!(
             format!("{sig}"),
@@ -565,6 +584,7 @@ mod tests {
             type_params: &["T"],
             has_rest: false,
             where_clauses: &[("T", "Decode")],
+            projection: None,
         };
         assert_eq!(
             format!("{sig}"),

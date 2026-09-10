@@ -361,15 +361,18 @@ fn __keyed_models_spec(
               json_api_adapter(
                 adapter_harness,
                 adapter_env,
-                {
-                  id: config.id,
-                  provider: config.provider,
-                  source_url: config.source_url,
-                  source_owner: config.source_owner,
-                  confidence: config.confidence,
-                  terms_notes: config.terms_notes,
-                  mapper: config.mapper,
-                },
+                pick(
+                  config,
+                  [
+                    "id",
+                    "provider",
+                    "source_url",
+                    "source_owner",
+                    "confidence",
+                    "terms_notes",
+                    "mapper",
+                  ],
+                ),
               )
             },
           },

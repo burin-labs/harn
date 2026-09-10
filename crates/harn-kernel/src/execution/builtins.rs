@@ -213,6 +213,47 @@ impl Machine<'_> {
                     Err(diagnostic) => OpStep::Error(diagnostic),
                 }
             }
+            (PortableBuiltin::Pick, args) => {
+                let [source, keys] = args else {
+                    return OpStep::Error(diagnostic(
+                        "builtin_type",
+                        format!("pick: expected 2 arguments, found {}", args.len()),
+                    ));
+                };
+                if !matches!(source, RuntimeValue::Record(_))
+                    && !matches!(source, RuntimeValue::Harness(name) if name == "root")
+                {
+                    return OpStep::Error(diagnostic(
+                        "builtin_type",
+                        "pick: expected a dict, struct, or Harness",
+                    ));
+                }
+                let RuntimeValue::List(keys) = keys else {
+                    return OpStep::Error(diagnostic(
+                        "builtin_type",
+                        "pick: keys must be a list<string>",
+                    ));
+                };
+                let mut names = Vec::with_capacity(keys.len());
+                for key in keys.iter() {
+                    let RuntimeValue::String(name) = key else {
+                        return OpStep::Error(diagnostic(
+                            "builtin_type",
+                            "pick: keys must be a list<string>",
+                        ));
+                    };
+                    names.push(name.as_ref());
+                }
+                let fields = crate::pure::pick_fields(names, |name| {
+                    if matches!(source, RuntimeValue::Harness(_))
+                        && harn_builtin_meta::CapabilityId::from_field_name(name).is_none()
+                    {
+                        return None;
+                    }
+                    get_property(source, name)
+                });
+                self.push_charged(RuntimeValue::Record(Rc::new(fields)))
+            }
             (PortableBuiltin::PathJoin, values) => {
                 let mut segments = Vec::with_capacity(values.len());
                 for value in values {
@@ -225,10 +266,18 @@ impl Machine<'_> {
                     crate::pure::join_path_segments(&segments),
                 )))
             }
-            (PortableBuiltin::DictFilterNil, [RuntimeValue::Record(values)]) => {
+            (PortableBuiltin::DictFilterNil, [RuntimeValue::Record(values)])
+            | (
+                PortableBuiltin::DictFilterNil,
+                [RuntimeValue::Record(values), RuntimeValue::Bool(_) | RuntimeValue::Nil],
+            ) => {
+                let drop_empty = !matches!(args.get(1), Some(RuntimeValue::Bool(false)));
                 let filtered = values
                     .iter()
-                    .filter(|(_, value)| !is_filter_nil_value(value))
+                    .filter(|(_, value)| {
+                        !matches!(value, RuntimeValue::Nil)
+                            && (!drop_empty || !is_filter_nil_value(value))
+                    })
                     .map(|(key, value)| (key.clone(), value.clone()))
                     .collect();
                 self.push_charged(RuntimeValue::Record(Rc::new(filtered)))

@@ -52,6 +52,7 @@ macro_rules! define_portable_builtins {
 
 define_portable_builtins! {
     source {
+        Pick => harn_builtin_meta::signatures::PORTABLE_PICK,
         Len => harn_builtin_meta::signatures::PORTABLE_LEN,
         ToString => harn_builtin_meta::signatures::PORTABLE_TO_STRING,
         HexEncode => harn_builtin_meta::signatures::PORTABLE_HEX_ENCODE,

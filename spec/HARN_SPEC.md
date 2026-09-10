@@ -4791,6 +4791,38 @@ Rules:
   Precision is monotone: you never get a more precise result than the inputs
   justify.
 
+### Picking fields with `pick`
+
+`pick(source, keys)` builds a new record from the named top-level fields of a
+record, dictionary, struct value, or root `Harness`. It's a global builtin.
+`keys` is a list of strings:
+
+```harn
+fn main(harness: Harness) {
+  const context = pick(harness, ["env", "fs", "tools"])
+  const fs: HarnessFs = context.fs
+}
+```
+
+The checker types the result from the fields it can prove were picked:
+
+- A list literal, or a `const` that holds one, keeps each picked field's type
+  and optionality.
+- A list only known at runtime makes every possible field optional, because
+  the list may be empty.
+- Fields that come from a dictionary or an open record tail are optional,
+  because their presence is unknown.
+- A union source is picked branch by branch, so related fields stay related.
+- A literal key the source type doesn't have is a type error. So is reading a
+  field that wasn't picked.
+
+At runtime, `pick` keeps stored `nil` values, skips keys the source doesn't
+have, folds duplicate keys into one field, and returns `{}` for an empty
+list. It doesn't change the source. Values follow normal Harn value rules, so
+capability handles stay shared. A source of any other kind, or a key that
+isn't a string, is a runtime error. See
+[Pick fields from a record](/pick.html) for the full contract.
+
 ### Union types
 
 ```harn

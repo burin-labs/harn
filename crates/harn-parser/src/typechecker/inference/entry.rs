@@ -223,7 +223,7 @@ impl TypeChecker {
                         nil_widenable_vars,
                         schema_bindings,
                         untyped_sources,
-                        annotated_vars,
+                        record_contracts,
                         ..
                     } = scope;
                     let root = Rc::make_mut(&mut self.scope);
@@ -234,7 +234,7 @@ impl TypeChecker {
                     root.nil_widenable_vars.extend(nil_widenable_vars);
                     root.schema_bindings.extend(schema_bindings);
                     root.untyped_sources.extend(untyped_sources);
-                    root.annotated_vars.extend(annotated_vars);
+                    root.record_contracts.extend(record_contracts);
                 }
             }
         }

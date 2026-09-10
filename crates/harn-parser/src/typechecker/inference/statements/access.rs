@@ -231,7 +231,7 @@ impl TypeChecker {
     ) -> bool {
         match &object.node {
             Node::Identifier(name) => {
-                scope.is_annotated(name)
+                scope.has_record_contract(name)
                     || matches!(raw, TypeExpr::Tuple(_))
                     || self.is_named_contract_type(raw, scope)
             }

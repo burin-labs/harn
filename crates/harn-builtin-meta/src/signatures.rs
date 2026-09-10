@@ -45,6 +45,15 @@ pub const PORTABLE_LEN: BuiltinSignature = BuiltinSignature::simple(
     )],
     TY_INT,
 );
+pub const PORTABLE_PICK: BuiltinSignature = BuiltinSignature::simple(
+    "pick",
+    &[
+        Param::new("source", TY_ANY),
+        Param::new("keys", Ty::Apply("list", &[TY_STRING])),
+    ],
+    Ty::Apply("dict", &[TY_STRING, Ty::Named("unknown")]),
+)
+.with_projection(crate::RecordProjection::Pick { source: 0, keys: 1 });
 pub const PORTABLE_TO_STRING: BuiltinSignature =
     BuiltinSignature::variadic("to_string", &[Param::new("args", TY_ANY)], TY_STRING);
 pub const PORTABLE_HEX_ENCODE: BuiltinSignature = BuiltinSignature::simple(
@@ -126,6 +135,7 @@ pub const PORTABLE_PATH_JOIN: BuiltinSignature =
     BuiltinSignature::variadic("path_join", &[Param::new("args", TY_ANY)], TY_STRING);
 
 pub const PORTABLE_SOURCE_BUILTINS: &[BuiltinSignature] = &[
+    PORTABLE_PICK,
     PORTABLE_LEN,
     PORTABLE_TO_STRING,
     PORTABLE_HEX_ENCODE,

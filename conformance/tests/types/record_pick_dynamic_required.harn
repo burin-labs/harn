@@ -1,0 +1,7 @@
+fn project_person(person: {name: string}, keys: list<string>) -> {name: string} {
+  return pick(person, keys)
+}
+
+fn main(harness: Harness) {
+  project_person({name: "Ada"}, [])
+}

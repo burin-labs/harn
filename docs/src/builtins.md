@@ -587,6 +587,7 @@ line-, token-, or pattern-oriented scan suffices.
 | `partition(list, fn)` | list: list, fn: closure | dict | Split into `{match, no_match}` lists |
 | `dedup_by(list, fn)` | list: list, fn: closure | list | Keep the first item for each callback-derived key |
 | `flat_map(list, fn)` | list: list, fn: closure | list | Map then flatten one level |
+| `pick(source, keys)` | source: record, dict, struct, or Harness; keys: `list<string>` | record | Build a record from the named fields, keeping each field's type and `nil` values. A runtime key list makes every field optional. See [Pick fields from a record](pick.md) |
 | `clone(value)` | value: any | any | Shallow copy. Dicts and lists become fresh allocations independent of the source; primitives return by value |
 | `deep_clone(value)` | value: any | any | Recursive deep copy. Nested dicts/lists are duplicated top-to-bottom |
 | `deep_merge(a, b)` | a: dict, b: dict | dict | Recursive merge — when both sides have a dict at the same key the dicts merge; otherwise right wins |

@@ -1,0 +1,4 @@
+fn main(harness: Harness) {
+  const selected = pick(harness, ["env"])
+  selected.fs
+}

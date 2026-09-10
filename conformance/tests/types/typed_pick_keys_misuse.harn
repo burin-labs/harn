@@ -1,16 +1,4 @@
-// Misusing PickKeysOptions catches the bad option key at the call site
-// instead of letting it surface as a silent runtime no-op. Mirrors the typed
-// helper signatures in std/collections so the contract is enforced wherever
-// it is dogfooded.
-type PickKeysOptions = {drop_nil?: bool}
-
-fn pick_keys<V>(
-  d: dict<string, V>,
-  keys: list<string>,
-  options: PickKeysOptions = {},
-) -> dict<string, V> {
-  return d
-}
+import { pick_keys } from "std/collections"
 
 pipeline test(harness: Harness, task: unknown) {
   const counts = {a: 1, b: 2}

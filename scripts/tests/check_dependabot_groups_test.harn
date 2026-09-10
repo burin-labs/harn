@@ -198,11 +198,7 @@ pipeline test_missing_group_is_rejected(harness: Harness, task: unknown) {
 @test
 pipeline test_a_missing_catch_all_is_rejected(harness: Harness, task: unknown) {
   const all = valid_groups()
-  const groups = {
-    cranelift: all.cranelift,
-    wasmtime: all.wasmtime,
-    opentelemetry: all.opentelemetry,
-  }
+  const groups = pick(all, ["cranelift", "wasmtime", "opentelemetry"])
   const errors = ecosystem_errors(entry("cargo", groups), cargo_policy())
   assert_eq(
     errors,

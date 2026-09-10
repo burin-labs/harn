@@ -51,6 +51,16 @@ fn conflict_detection_marks_overlapping_edits() {
 }
 
 #[test]
+fn conflict_detection_marks_overlaps_within_one_repair() {
+    let mut conflicting = candidate("a.harn", 0, 5);
+    conflicting.edits.extend(candidate("a.harn", 1, 4).edits);
+    let mut duplicate = candidate("a.harn", 6, 8);
+    duplicate.edits.extend(candidate("a.harn", 6, 8).edits);
+    let conflicts = detect_conflicts(&[conflicting, duplicate]);
+    assert_eq!(conflicts, [vec![0], vec![]]);
+}
+
+#[test]
 fn file_edits_compose_projection_before_same_offset_insertion() {
     let temp = tempfile::NamedTempFile::new().unwrap();
     fs::write(temp.path(), "call(harness, value)\n").unwrap();
@@ -136,11 +146,7 @@ fn capability_edits_validate_the_complete_candidate_before_writing() {
         }],
     )
     .expect_err("malformed migration output must be rejected");
-    assert!(
-        error.contains("failed to format capability migration output")
-            || error.contains("capability migration produced invalid syntax"),
-        "{error}"
-    );
+    assert!(error.contains("HARN-FMT-001"), "{error}");
     assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
 }
 

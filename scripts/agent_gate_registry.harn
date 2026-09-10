@@ -5,7 +5,7 @@ fn main(harness: Harness) {
     throw "usage: agent_gate_registry.harn <registry.json> [--write]"
   }
   const report = agent_gate_audit(
-    {fs: harness.fs, ast: harness.ast, process: harness.process},
+    pick(harness, ["fs", "ast", "process"]),
     argv[0],
     contains(argv, "--write"),
   )

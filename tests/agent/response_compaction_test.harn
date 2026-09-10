@@ -13,13 +13,7 @@ type DynamicResponse = dict
 type Summary = {summary: string, critical_facts: list<string>}
 
 fn __caps(harness: Harness) {
-  return {
-    fs: harness.fs,
-    llm: harness.llm,
-    runtime: harness.runtime,
-    clock: harness.clock,
-    random: harness.random,
-  }
+  return pick(harness, ["fs", "llm", "runtime", "clock", "random"])
 }
 
 fn __options(namespace: string, fallback: Summary, threshold: int = 1) {
@@ -723,7 +717,7 @@ pipeline test_schema_valid_exact_content_tamper_fails_digest_verification(
   const ref = result.receipt.exact_ref
   const store = fs_cache(
     path_join(harness.fs.workspace_temp_dir(), "harn-response-compaction"),
-    {namespace: ref.namespace, ttl_seconds: ref.ttl_seconds, max_entries: ref.max_entries},
+    pick(ref, ["namespace", "ttl_seconds", "max_entries"]),
   )
   cache_put(harness.llm, ref.key, {text: "schema-valid mutation", facts: ["keep"]}, {store: store})
   const read = response_compaction_read_exact(__caps(harness), ref, schema_of(ExactResponse))

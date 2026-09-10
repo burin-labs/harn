@@ -1,11 +1,7 @@
 # Scripting cheatsheet
 
-A compact, prose-friendly tour of everything you need to write real
-Harn scripts. The companion one-page LLM reference is at
-[`docs/llm/harn-quickref.md`](https://harnlang.com/docs/llm/harn-quickref.html)
-(published in the mdBook) — they cover the same
-ground with different shapes, and should stay in lockstep. Agents that
-can fetch URLs should prefer the quickref.
+A compact reference for writing Harn scripts. For the one-page agent
+reference, see [Harn quick reference](docs/llm/harn-quickref.md).
 
 ## Strings
 
@@ -79,6 +75,21 @@ while i < cs.count {
   i = i + 1
 }
 ```
+
+## Selecting record fields
+
+Use `pick` to build a record from named fields without repeating each value:
+
+```harn
+fn main(harness: Harness) {
+  const ctx = pick(harness, ["env", "fs"])
+  const path = ctx.env.get_or("APP_CONFIG", "harn.toml")
+  harness.stdio.println(ctx.fs.exists(path))
+}
+```
+
+`pick` needs no import. It preserves field types and stored `nil` values.
+Runtime key lists produce optional fields. See [Pick fields from a record](pick.md).
 
 ## `if` is an expression
 

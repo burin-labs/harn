@@ -110,6 +110,11 @@ need to supply the handle.
 
 Keep root `Harness` at entrypoints and at boundaries that genuinely coordinate
 several capabilities. Elsewhere pass the narrowest handle the function needs.
+When a helper takes a record of capabilities, build it with
+`pick(harness, ["env", "fs", "tools"])`. `pick` is a global builtin. It keeps
+each field's type and keeps `nil` values. A list literal, or a `const` holding
+one, gives the result exact field types. A list only known at runtime makes
+every field optional. See [Pick fields from a record](../src/pick.md).
 `capability-attenuation` warns when a helper takes root but uses only one
 sub-handle, and suggests a named record when it uses exactly two. The
 surface-changing fixer updates the signatures and call sites it can prove are

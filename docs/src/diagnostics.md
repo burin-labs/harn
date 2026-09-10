@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 75 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 76 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -326,6 +326,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-074`](#harn-lnt-074) | explicitly unused private pipeline input can be removed | `bindings/remove-unused-pipeline-input` | `surface-changing` |
 | [`HARN-LNT-075`](#harn-lnt-075) | tool handler returns a freeform dict, so its outcome must be inferred from key names instead of declared by its type | — | — |
 | [`HARN-LNT-076`](#harn-lnt-076) | tool handler reaches the privileged host wire | — | — |
+| [`HARN-LNT-077`](#harn-lnt-077) | record literal copies fields one by one from a value that `pick` can select | `records/pick-fields` | `behavior-preserving` |
 
 ## FMT — Formatter
 
@@ -4090,6 +4091,50 @@ Read the host-owned value before registering the handler and pass it through a
 closure or an explicit typed capability. At runtime, reaching `host_call` from
 a handler raises an error that names the unavailable operation; it never falls
 through to a standalone default that can be mistaken for an empty host answer.
+
+### `HARN-LNT-077`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+record literal copies fields one by one from a value that `pick` can select
+
+- **Repair:** `records/pick-fields` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
+- Replace the field-by-field record copy with `pick`
+
+#### What it means
+
+A record literal repeats every field name twice to copy fields from one
+value:
+
+```harn,ignore
+const ctx = {env: harness.env, fs: harness.fs, tools: harness.tools}
+```
+
+`pick` does the same job in one call and keeps each field's type:
+
+```harn,ignore
+const ctx = pick(harness, ["env", "fs", "tools"])
+```
+
+The rule fires only when the rewrite can't change behavior: the literal has
+two or more entries, every entry copies a field of the same name from one
+value, and each field is one the checker knows is present. That covers the
+root `Harness`, a parameter or binding with a record type, and a struct value.
+A dictionary key or an optional field stays as it is, because a missing key
+gives `nil` in the literal but is left out by `pick`.
+
+#### How to fix
+
+Replace the literal with `pick` and the field names in the same order:
+
+```harn
+fn main(harness: Harness) {
+  const ctx = pick(harness, ["env", "fs"])
+  harness.stdio.println(ctx.fs.exists(ctx.env.get_or("APP_CONFIG", ".")))
+}
+```
+
+`harn lint --fix` and `harn fix --apply` make this change automatically.
 
 ### `HARN-FMT-001`
 
