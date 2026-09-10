@@ -99,9 +99,9 @@ mod replay_bench;
 pub use replay_bench::*;
 
 mod policy;
-#[cfg(test)]
-pub(crate) use policy::swap_execution_policy_stack;
 pub use policy::*;
+#[cfg(test)]
+pub(crate) use policy::{is_policy_machinery_consent_call, swap_execution_policy_stack};
 
 mod ambient_scope;
 pub use ambient_scope::blocking::run_blocking_with_ambient;

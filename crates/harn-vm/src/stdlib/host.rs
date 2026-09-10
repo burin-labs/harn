@@ -1128,7 +1128,9 @@ async fn host_call_builtin(
             "host_call: unsupported operation name '{name}'"
         )));
     };
-    if crate::tool_handler_scope::is_active() {
+    if crate::tool_handler_scope::is_active()
+        && !crate::orchestration::is_policy_machinery_consent_call(capability, operation)
+    {
         return Err(VmError::Runtime(format!(
             "host_call {capability}.{operation} is unavailable inside a tool handler; read host input at the trusted entry boundary and pass the value into the handler"
         )));

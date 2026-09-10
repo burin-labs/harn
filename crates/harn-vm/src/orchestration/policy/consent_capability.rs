@@ -31,6 +31,6 @@ const CONSENT_CAPABILITY: (&str, &str) = ("permission", "request");
 ///
 /// False for the same call made by a tool directly, which keeps that refused by
 /// the tool's own ceiling.
-pub(super) fn is_policy_machinery_consent_call(capability: &str, operation: &str) -> bool {
+pub(crate) fn is_policy_machinery_consent_call(capability: &str, operation: &str) -> bool {
     (capability, operation) == CONSENT_CAPABILITY && command_policy_hook_depth() > 0
 }
