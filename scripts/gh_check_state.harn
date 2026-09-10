@@ -650,10 +650,7 @@ fn main(harness: Harness) {
   if len(explicit_expected) > 0 {
     expectation_source = "explicit"
   }
-  const workflow = read_workflow(
-    {fs: harness.fs, stdio: harness.stdio},
-    to_string(parsed?.workflow ?? ""),
-  )
+  const workflow = read_workflow(pick(harness, ["fs", "stdio"]), to_string(parsed?.workflow ?? ""))
   if workflow != nil {
     const filters = workflow_surface_filters(workflow, "surface_filter")
     const diff = changed_paths(harness.process, harness.clock, repo, base, sha)

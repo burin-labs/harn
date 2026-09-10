@@ -14,12 +14,7 @@ fn test_wait_for_ready(testing: HarnessTesting, tools: HarnessTools) {
     tools,
     {handle_id: "hto-test-1", command_id: "cmd-test-1"},
     REQUEST.pattern,
-    {
-      source: REQUEST.source,
-      regex: REQUEST.regex,
-      from_offset: REQUEST.from_offset,
-      timeout_ms: REQUEST.timeout_ms,
-    },
+    pick(REQUEST, ["source", "regex", "from_offset", "timeout_ms"]),
   )
   const calls = testing.calls()
   require len(calls) == 1

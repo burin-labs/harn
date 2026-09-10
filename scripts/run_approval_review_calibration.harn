@@ -44,7 +44,7 @@ fn main(harness: Harness) {
     build_revision: __flag_value(argv, "--build-revision", ""),
     build_marker: __flag_value(argv, "--build-marker", ""),
   }
-  const policy_doc = read_toml_or_fail({fs: harness.fs, stdio: harness.stdio}, POLICY_PATH)
+  const policy_doc = read_toml_or_fail(pick(harness, ["fs", "stdio"]), POLICY_PATH)
   const policy = if trim(to_string(args.model)) != "" {
     policy_doc + {reviewer: (policy_doc?.reviewer ?? {}) + {model: trim(to_string(args.model))}}
   } else {

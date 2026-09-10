@@ -1,0 +1,22 @@
+import { heading_boundary_keep_count, truncate_at_section_boundary } from "std/context/disclosure"
+
+pipeline test(harness: Harness, task: unknown) {
+  const lines = ["# Title", "", "Introduction", "", "## Next", "", "", "- first", "- second"]
+  assert(
+    heading_boundary_keep_count(lines, 7) == 4,
+    "blank lines must not detach a heading from its body",
+  )
+  assert(
+    heading_boundary_keep_count(["# Title", "Introduction", "", "more"], 3) == 2,
+    "a blank line after body text must remain a boundary",
+  )
+  const text =
+    "# Title\n\nIntro paragraph that sets up the document.\n\n## Alpha\n\n- alpha one\n- alpha two\n- alpha three\n\n## Beta\n\n- beta one\n"
+  const cut = truncate_at_section_boundary(text, 20)
+  assert(cut.truncated && cut.shown == 4, "the budget must cut before Alpha")
+  assert(
+    trim(cut.rendered) == "# Title\n\nIntro paragraph that sets up the document.",
+    "the cut must retain the introduction without an orphan heading",
+  )
+  harness.stdio.println("ok")
+}

@@ -41,7 +41,7 @@ fn outcome(
 
 fn assert_parity(harness: Harness, label: string, text: string, expected: string) -> nil {
   const tools = registry()
-  const capabilities = {agent: harness.agent, llm: harness.llm}
+  const capabilities = pick(harness, ["agent", "llm"])
   const json = outcome(capabilities, text, "json", tools)
   const tagged = outcome(capabilities, text, "text", tools)
   require json.kind == tagged.kind,

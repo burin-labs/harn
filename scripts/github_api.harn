@@ -92,12 +92,7 @@ pub fn github_api_json_result(
   const adapters: GitHubApiAdapters = {
     request: { requested_path ->
       const result = process.run({program: "gh", args: ["api", requested_path], timeout_ms: 30000})
-      return {
-        success: result.success,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        timed_out: result.timed_out,
-      }
+      return pick(result, ["success", "stdout", "stderr", "timed_out"])
     },
     wait: { delay_ms -> clock.sleep_ms(delay_ms) },
   }

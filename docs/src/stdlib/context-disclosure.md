@@ -51,7 +51,8 @@ A boundary is a blank line or a line starting with `#`, after trimming
 whitespace. Boundaries inside triple-backtick fences are ignored. The cut
 backs up to the last boundary only when doing so retains at least half the
 requested lines. Otherwise it keeps the requested cut, which can end inside
-a list or code block. A heading at the boundary is omitted with its section.
+a list or code block. A heading at the boundary is omitted with its section;
+blank lines between that heading and its body do not advance the boundary.
 
 ## Omission notes
 

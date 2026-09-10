@@ -69,7 +69,7 @@ fn mock_publication_branch(harness: Harness, attempts: int) -> dict {
   if attempts != 1 && attempts != 2 {
     throw "publication fixture supports one or two attempts"
   }
-  const fixture = publication_repo({fs: harness.fs, process: harness.process})
+  const fixture = publication_repo(pick(harness, ["fs", "process"]))
   const ref_url = API
     + "/repos/octo-org/octo-repo/git/ref/heads/automation/bump-harn-runtime"
   const reference = {
