@@ -142,6 +142,7 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
         AgentEvent::BudgetExhausted {
             session_id,
             max_iterations,
+            iteration,
             kind,
             cost_usd,
             wall_clock_ms,
@@ -158,6 +159,7 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
         } => {
             let mut payload = serde_json::json!({
                 "maxIterations": max_iterations,
+                "iteration": iteration,
                 "budgetKind": kind,
                 "costUsd": cost_usd,
                 "wallClockMs": wall_clock_ms,
