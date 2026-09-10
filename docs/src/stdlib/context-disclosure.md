@@ -9,9 +9,11 @@ import {
 } from "std/context/disclosure"
 
 fn main(harness: Harness) {
-  const text = "# Rules\n\nRead the project instructions before editing.\n"
+  const text = harness.fs.read_text("AGENTS.md")
   const cut = truncate_at_section_boundary(text, 8)
-  const note = disclosure_trailer(cut.shown, cut.total, "lines", "read AGENTS.md")
+  const note = disclosure_trailer(
+    cut.shown, cut.total, "lines", "read AGENTS.md",
+  )
   harness.stdio.println(cut.rendered + "\n" + note)
 }
 ```
