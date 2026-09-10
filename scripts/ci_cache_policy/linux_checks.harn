@@ -62,12 +62,14 @@ const PRODUCER_STEP_BUDGETS: list<{name: string, minutes: int, cold_seconds: int
   {name: "Run Rust workspace tests", minutes: 26, cold_seconds: 496},
 ]
 
-// The first owned run had one measured compiler slot and no cache match. Its
-// CLI build was still compiling at the 600s cancellation, so 600 is a lower
-// bound, not a completed cold-build measurement. Keep hosted budgets unchanged.
-const PRODUCER_OWNED_CLI_MINUTES = 15
+// Owned CI attempts with one compiler and no restored target timed out at
+// 600s and 900s. A separate private-target, one-compiler build completed in
+// 679s with compiler-cache hits unmeasured; that does not replace the slower
+// canonical observation. This bounded retry clears the 900s lower bound by
+// the policy margin. It is not proof of completed cold CI or portable replay.
+const PRODUCER_OWNED_CLI_MINUTES = 20
 
-const PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS = 600
+const PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS = 900
 
 pub fn producer_cli_timeout_expression() -> string {
   return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 10 }}"

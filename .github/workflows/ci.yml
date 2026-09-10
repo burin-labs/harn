@@ -31,6 +31,7 @@ env:
   # the barrier jobs add scheduling and API headroom above it.
   HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
   HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
+  HARN_ARTIFACT_PRODUCER_JOB: "Rust workspace tests"
   # Incremental fights the within-job sccache wrapper. Cross-run reuse is
   # owned by each lane's persistent compiler-object cache. Do not persist a
   # shared target/: independent PR and merge-group builds overlap, and Cargo
@@ -680,7 +681,7 @@ jobs:
     # SLO. scripts/ci_cache_policy/linux_checks.harn owns the arithmetic.
     #
     # The owned self-hosted rung is the same arithmetic minus the cache-save
-    # reserve, with extra cold CLI margin: 6 setup + 15 + 16 + 26 = 63. It is a
+    # reserve, with a bounded CLI retry: 6 setup + 20 + 16 + 26 = 68. It is a
     # hang backstop, not a claim about host core count or improved performance.
     runs-on: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
@@ -702,7 +703,7 @@ jobs:
         && needs.runner-availability.outputs.selfhosted_disabled == ''
         && needs.runner-availability.outputs.capacity != ''
         && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
-        && 63)
+        && 68)
         || 70 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
     # Blacksmith uses sticky sccache and never enters that step, and the owned
@@ -789,7 +790,7 @@ jobs:
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
-        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 15 || 10 }}
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 20 || 10 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-

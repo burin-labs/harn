@@ -997,7 +997,7 @@ pipeline test_rejects_a_producer_cache_guard_that_names_only_the_hosted_tier(har
 pipeline test_owned_ceiling_accounts_for_cold_cli_margin_without_cache_save(harness: Harness) {
   assert_eq(
     producer_owned_ceiling_minutes(),
-    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 5,
+    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 10,
     "the owned ceiling must account for its own CLI margin without a cache-save reserve",
   )
 }
@@ -1033,7 +1033,7 @@ pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
     ),
   )
   assert_eq(producer_hosted_ceiling_minutes(), 70)
-  assert_eq(producer_owned_ceiling_minutes(), 63)
+  assert_eq(producer_owned_ceiling_minutes(), 68)
 }
 
 pipeline test_owned_producer_requires_measured_capacity(harness: Harness) {
@@ -1089,7 +1089,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   assert(errors.contains("ci.yml:rust-check-inputs must mirror all three of its runner tiers"))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse, the 63-minute owned ceiling, and the 70-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse, the 68-minute owned ceiling, and the 70-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }
