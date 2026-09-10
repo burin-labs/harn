@@ -1,13 +1,18 @@
 import { with_temp_dir } from "std/testing"
 import "../check_source_file_lengths.harn"
 
+type SourceLengthWorkflow = {jobs: dict<string, {steps?: list<{name?: string, run?: string}>}>}
+
 @test
 pipeline test_ci_report_preserves_failure_output_under_errexit(harness: Harness, task: unknown) {
-  const workflow = yaml_parse(harness.fs.read_text("../../.github/workflows/ci.yml"))
+  const workflow = schema_expect(
+    yaml_parse(harness.fs.read_text("../../.github/workflows/ci.yml")),
+    schema_of(SourceLengthWorkflow),
+  )
   let script = ""
-  for step in workflow?.jobs?.["source-length-ratchet"]?.steps ?? [] {
-    if step?.name == "Check source file lengths" {
-      script = to_string(step?.run ?? "")
+  for step in workflow.jobs["source-length-ratchet"]?.steps ?? [] {
+    if step.name == "Check source file lengths" {
+      script = step.run ?? ""
     }
   }
   assert(script != "")
