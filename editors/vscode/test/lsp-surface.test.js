@@ -3,8 +3,6 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
-const { EventEmitter } = require("node:events");
-const { PassThrough } = require("node:stream");
 const test = require("node:test");
 const { pathToFileURL } = require("node:url");
 
@@ -31,7 +29,7 @@ class LspClient {
     });
     server.on("exit", (code, signal) => {
       const error = new Error(
-        `harn-lsp exited code=${code} signal=${signal}: ${this.stderr}`
+        `harn-lsp exited code=${code} signal=${signal}: ${this.stderr}`,
       );
       this.exitError = error;
       for (const { reject, timeout } of this.pending.values()) {
@@ -42,14 +40,8 @@ class LspClient {
     });
   }
 
-  // A budget for a request the server has already been warmed for. It is not
-  // a budget for first-request work: see `warmUp` below.
+  // Bound an unresponsive server; this is not a performance assertion.
   static REQUEST_TIMEOUT_MS = 15_000;
-
-  // The warm-up's own budget. Generous enough that indexing a large workspace
-  // on a slow runner never fails it, but not unbounded: a server that never
-  // answers must fail this suite rather than hang it.
-  static WARM_UP_TIMEOUT_MS = 120_000;
 
   request(method, params, { timeoutMs = LspClient.REQUEST_TIMEOUT_MS } = {}) {
     if (this.exitError) {
@@ -63,42 +55,12 @@ class LspClient {
           ? undefined
           : setTimeout(() => {
               this.pending.delete(id);
-              reject(new Error(`timed out waiting for ${method}: ${this.stderr}`));
+              reject(
+                new Error(`timed out waiting for ${method}: ${this.stderr}`),
+              );
             }, timeoutMs);
       this.pending.set(id, { resolve, reject, timeout });
     });
-  }
-
-  /**
-   * Force the work the timed requests must not be charged for, with no budget
-   * at all.
-   *
-   * `callHierarchy/incomingCalls` is the first request that makes the server
-   * index the whole workspace for callers, and this suite points it at the
-   * repository root. Timing that request meant the budget covered one-time
-   * indexing on top of the call itself, so on a loaded runner it failed on
-   * machine speed rather than on the language server: exactly the shape it
-   * failed in when it timed out after the in-test release build had already
-   * consumed most of the job. Any error here is the warm-up's, not a result,
-   * so it is discarded — the timed assertions below are what judge the server.
-   */
-  async warmUp(params, { timeoutMs = LspClient.WARM_UP_TIMEOUT_MS } = {}) {
-    try {
-      const prepared = await this.request(
-        "textDocument/prepareCallHierarchy",
-        params,
-        { timeoutMs }
-      );
-      if (Array.isArray(prepared) && prepared[0]) {
-        await this.request(
-          "callHierarchy/incomingCalls",
-          { item: prepared[0] },
-          { timeoutMs }
-        );
-      }
-    } catch {
-      // Fall through to the timed requests, which report the real failure.
-    }
   }
 
   notify(method, params) {
@@ -107,10 +69,7 @@ class LspClient {
 
   write(message) {
     const body = Buffer.from(JSON.stringify(message), "utf8");
-    this.server.stdin.write(
-      `Content-Length: ${body.length}\r\n\r\n`,
-      "ascii"
-    );
+    this.server.stdin.write(`Content-Length: ${body.length}\r\n\r\n`, "ascii");
     this.server.stdin.write(body);
   }
 
@@ -131,7 +90,7 @@ class LspClient {
         return;
       }
       const message = JSON.parse(
-        this.buffer.slice(messageStart, messageEnd).toString("utf8")
+        this.buffer.slice(messageStart, messageEnd).toString("utf8"),
       );
       this.buffer = this.buffer.slice(messageEnd);
       if (Object.prototype.hasOwnProperty.call(message, "id")) {
@@ -171,39 +130,42 @@ function fileUri(filePath) {
 }
 
 function buildLspBinary(root) {
-  if (process.env.HARN_LSP_BIN) {
+  const suppliedBinary = process.env.HARN_LSP_BIN || process.env.HARN_BIN;
+  if (suppliedBinary) {
     assert.ok(
-      fs.existsSync(process.env.HARN_LSP_BIN),
-      `HARN_LSP_BIN does not exist: ${process.env.HARN_LSP_BIN}`
+      fs.existsSync(suppliedBinary),
+      `LSP binary does not exist: ${suppliedBinary}`,
     );
-    return { binary: process.env.HARN_LSP_BIN, targetDir: undefined };
+    return suppliedBinary;
   }
 
-  const targetDir = process.env.CARGO_TARGET_DIR
-    ? process.env.CARGO_TARGET_DIR
-    : fs.mkdtempSync(path.join(os.tmpdir(), "harn-lsp-target-"));
+  const cargo = path.join(root, "scripts/cargo_with_worktree_build_dir.sh");
   const env = {
     ...process.env,
-    CARGO_TARGET_DIR: targetDir,
     HARN_LLM_CALLS_DISABLED: "1",
   };
+  const options = { cwd: root, env, encoding: "utf8" };
+  const metadata = spawnSync(
+    "bash",
+    [cargo, "metadata", "--no-deps", "--format-version", "1"],
+    options,
+  );
+  assert.equal(metadata.status, 0, `Cargo metadata failed: ${metadata.stderr}`);
+  const targetDir = JSON.parse(metadata.stdout).target_directory;
+  assert.equal(typeof targetDir, "string");
   const build = spawnSync(
-    "cargo",
-    ["build", "--quiet", "-p", "harn-lsp", "--bin", "harn-lsp"],
-    {
-      cwd: root,
-      env,
-      encoding: "utf8",
-    }
+    "bash",
+    [cargo, "build", "--quiet", "-p", "harn-lsp", "--bin", "harn-lsp"],
+    options,
   );
   assert.equal(
     build.status,
     0,
-    `cargo build failed\nstdout:\n${build.stdout}\nstderr:\n${build.stderr}`
+    `cargo build failed\nstdout:\n${build.stdout}\nstderr:\n${build.stderr}`,
   );
 
   const exe = process.platform === "win32" ? "harn-lsp.exe" : "harn-lsp";
-  return { binary: path.join(targetDir, "debug", exe), targetDir };
+  return path.join(targetDir, "debug", exe);
 }
 
 function positionOf(source, needle) {
@@ -219,8 +181,10 @@ function positionOf(source, needle) {
 
 test("VS Code-facing LSP surface supports on-type formatting, folding, and call hierarchy", async (t) => {
   const root = repoRoot();
-  const { binary: lspBinary, targetDir } = buildLspBinary(root);
+  const lspBinary = buildLspBinary(root);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "harn-lsp-"));
   const server = spawn(lspBinary, [], {
+    argv0: "harn-lsp",
     cwd: root,
     env: { ...process.env, HARN_LLM_CALLS_DISABLED: "1" },
     stdio: ["pipe", "pipe", "pipe"],
@@ -228,14 +192,12 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
   const client = new LspClient(server);
   t.after(async () => {
     await client.stop();
-    if (targetDir && !process.env.CARGO_TARGET_DIR) {
-      fs.rmSync(targetDir, { recursive: true, force: true });
-    }
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   const initialize = await client.request("initialize", {
     processId: process.pid,
-    rootUri: fileUri(root),
+    rootUri: fileUri(dir),
     capabilities: {},
   });
   const capabilities = initialize.capabilities;
@@ -248,7 +210,7 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
   client.notify("initialized", {});
 
   const source = [
-    "fn callee(value){",
+    "pub fn callee(value){",
     "return value;",
     "}",
     "",
@@ -272,9 +234,16 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
     "",
   ].join("\n");
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "harn-lsp-"));
   const file = path.join(dir, "surface.harn");
   fs.writeFileSync(file, source);
+  const sibling = path.join(dir, "caller.harn");
+  const siblingSource =
+    'import { callee } from "./surface"\nfn external(value) { return callee(value) }\n';
+  fs.writeFileSync(sibling, siblingSource);
+  const decoy = path.join(dir, "decoy.harn");
+  const decoySource =
+    "fn callee(value) { return value }\nfn unrelated(value) { return callee(value) }\n";
+  fs.writeFileSync(decoy, decoySource);
   const uri = fileUri(file);
 
   client.notify("textDocument/didOpen", {
@@ -285,11 +254,19 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
       text: source,
     },
   });
-
-  await client.warmUp({
-    textDocument: { uri },
-    position: positionOf(source, "callee(value){"),
-  });
+  for (const [filePath, text] of [
+    [sibling, siblingSource],
+    [decoy, decoySource],
+  ]) {
+    client.notify("textDocument/didOpen", {
+      textDocument: {
+        uri: fileUri(filePath),
+        languageId: "harn",
+        version: 1,
+        text,
+      },
+    });
+  }
 
   const edits = await client.request("textDocument/onTypeFormatting", {
     textDocument: { uri },
@@ -306,15 +283,15 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
   });
   assert.ok(
     folds.some((range) => range.startLine === 8 && range.endLine === 20),
-    `expected main pipeline fold: ${JSON.stringify(folds)}`
+    `expected main pipeline fold: ${JSON.stringify(folds)}`,
   );
   assert.ok(
     folds.some((range) => range.startLine === 9 && range.endLine === 12),
-    `expected multiline string fold: ${JSON.stringify(folds)}`
+    `expected multiline string fold: ${JSON.stringify(folds)}`,
   );
   assert.ok(
     folds.some((range) => range.startLine === 14 && range.endLine === 16),
-    `expected multiline match arm fold: ${JSON.stringify(folds)}`
+    `expected multiline match arm fold: ${JSON.stringify(folds)}`,
   );
 
   const prepared = await client.request("textDocument/prepareCallHierarchy", {
@@ -328,11 +305,22 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
   });
   assert.ok(
     incoming.some((call) => call.from.name === "helper"),
-    `expected helper incoming call: ${JSON.stringify(incoming)}`
+    `expected helper incoming call: ${JSON.stringify(incoming)}`,
   );
   assert.ok(
     incoming.some((call) => call.from.name === "main"),
-    `expected main incoming call: ${JSON.stringify(incoming)}`
+    `expected main incoming call: ${JSON.stringify(incoming)}`,
+  );
+  assert.ok(
+    incoming.some(
+      (call) =>
+        call.from.name === "external" && call.from.uri === fileUri(sibling),
+    ),
+    `expected a caller from the imported workspace module: ${JSON.stringify(incoming)}`,
+  );
+  assert.ok(
+    !incoming.some((call) => call.from.name === "unrelated"),
+    `a same-named function in another module is not this callee: ${JSON.stringify(incoming)}`,
   );
 
   const main = await client.request("textDocument/prepareCallHierarchy", {
@@ -344,140 +332,10 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
   });
   assert.ok(
     outgoing.some((call) => call.to.name === "helper"),
-    `expected helper outgoing call: ${JSON.stringify(outgoing)}`
+    `expected helper outgoing call: ${JSON.stringify(outgoing)}`,
   );
   assert.ok(
     outgoing.some((call) => call.to.name === "callee"),
-    `expected callee outgoing call: ${JSON.stringify(outgoing)}`
-  );
-});
-
-/**
- * A server that answers on a schedule, so the timing policy above can be
- * judged without a language server or the five-minute build that precedes one.
- *
- * `firstDelayMs` models the one-time workspace indexing the real server does
- * on its first call-hierarchy request; `laterDelayMs` models every request
- * after that.
- */
-class ScriptedServer extends EventEmitter {
-  constructor({ firstDelayMs = 0, laterDelayMs = 0, answer = true } = {}) {
-    super();
-    this.stdout = new PassThrough();
-    this.stderr = new PassThrough();
-    this.stdin = new PassThrough();
-    this.killed = false;
-    this.buffer = Buffer.alloc(0);
-    this.timers = [];
-    this.served = 0;
-    this.firstDelayMs = firstDelayMs;
-    this.laterDelayMs = laterDelayMs;
-    this.answer = answer;
-    this.stdin.on("data", (chunk) => this.consume(chunk));
-  }
-
-  consume(chunk) {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    while (true) {
-      const headerEnd = this.buffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) {
-        return;
-      }
-      const header = this.buffer.slice(0, headerEnd).toString("ascii");
-      const match = /Content-Length: (\d+)/i.exec(header);
-      if (!match) {
-        return;
-      }
-      const start = headerEnd + 4;
-      const end = start + Number(match[1]);
-      if (this.buffer.length < end) {
-        return;
-      }
-      const message = JSON.parse(this.buffer.slice(start, end).toString("utf8"));
-      this.buffer = this.buffer.slice(end);
-      if (message.id === undefined) {
-        continue;
-      }
-      if (message.method === "textDocument/prepareCallHierarchy") {
-        this.timers.push(setTimeout(() => this.reply(message, [{ name: "callee" }]), 0));
-        continue;
-      }
-      if (!this.answer) {
-        continue;
-      }
-      const delay = this.served === 0 ? this.firstDelayMs : this.laterDelayMs;
-      this.served += 1;
-      this.timers.push(setTimeout(() => this.reply(message, []), delay));
-    }
-  }
-
-  reply(message, result) {
-    const body = Buffer.from(
-      JSON.stringify({ jsonrpc: "2.0", id: message.id, result }),
-      "utf8"
-    );
-    this.stdout.write(`Content-Length: ${body.length}\r\n\r\n`, "ascii");
-    this.stdout.write(body);
-  }
-
-  kill() {
-    this.killed = true;
-  }
-
-  close() {
-    for (const timer of this.timers) {
-      clearTimeout(timer);
-    }
-    this.stdin.end();
-    this.stdout.end();
-    this.stderr.end();
-  }
-}
-
-const CALL_HIERARCHY = "callHierarchy/incomingCalls";
-const PREPARE = "textDocument/prepareCallHierarchy";
-
-// Falsifier: a first call-hierarchy request slower than the timed budget must
-// not fail the suite. That is one-time workspace indexing, not the behaviour
-// under test, and charging the budget for it is what made the job fail on
-// runner speed after its in-test build had eaten most of the wall clock.
-test("a slow first call hierarchy does not fail the timed requests", async (t) => {
-  const budgetMs = 150;
-  const server = new ScriptedServer({ firstDelayMs: budgetMs * 4, laterDelayMs: 0 });
-  t.after(() => server.close());
-  const client = new LspClient(server);
-
-  await client.warmUp({});
-  const incoming = await client.request(CALL_HIERARCHY, {}, { timeoutMs: budgetMs });
-  assert.deepEqual(incoming, []);
-});
-
-// Without the warm-up the same server fails, so the warm-up is doing the work
-// and the budget is still real.
-test("the same slow first call hierarchy fails without the warm-up", async (t) => {
-  const budgetMs = 150;
-  const server = new ScriptedServer({ firstDelayMs: budgetMs * 4, laterDelayMs: 0 });
-  t.after(() => server.close());
-  const client = new LspClient(server);
-
-  await client.request(PREPARE, {}, { timeoutMs: budgetMs });
-  await assert.rejects(
-    () => client.request(CALL_HIERARCHY, {}, { timeoutMs: budgetMs }),
-    /timed out waiting for callHierarchy\/incomingCalls/
-  );
-});
-
-// Direction control: a call hierarchy that is slow every time, not just the
-// first, still fails. A warm-up that swallowed this would be a check that
-// cannot fail.
-test("a call hierarchy that never answers still fails the timed request", async (t) => {
-  const server = new ScriptedServer({ answer: false });
-  t.after(() => server.close());
-  const client = new LspClient(server);
-
-  await client.warmUp({}, { timeoutMs: 150 });
-  await assert.rejects(
-    () => client.request(CALL_HIERARCHY, {}, { timeoutMs: 150 }),
-    /timed out waiting for callHierarchy\/incomingCalls/
+    `expected callee outgoing call: ${JSON.stringify(outgoing)}`,
   );
 });
