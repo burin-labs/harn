@@ -9,10 +9,12 @@ use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
 mod env;
+mod file;
 mod keyring;
 mod memory;
 
 pub use env::EnvSecretProvider;
+pub use file::{FileSecretProvider, SECRET_FILE_PATH_ENV};
 pub use keyring::{
     KeyringSecretProvider, NativeKeyring, NativeKeyringError, NativeKeyringUnavailable,
 };
@@ -837,12 +839,28 @@ impl SecretProvider for ChainSecretProvider {
                 })
                 .await
             {
-                Ok(()) | Err(SecretError::NotFound { .. }) => any_ok = true,
+                Ok(()) => any_ok = true,
+                Err(error) if error.is_not_found() => any_ok = true,
+                Err(
+                    error @ SecretError::Unsupported {
+                        operation: "delete",
+                        ..
+                    },
+                ) => {
+                    // A read-only source is harmless only when it proves this
+                    // ID absent. Otherwise a later lookup could resurrect the
+                    // value after another provider successfully removed it.
+                    match provider.contains(&request.id).await {
+                        Ok(false) => any_ok = true,
+                        Ok(true) => errors.push(error),
+                        Err(error) => errors.push(error),
+                    }
+                }
                 Err(error) => errors.push(error),
             }
         }
 
-        if any_ok {
+        if any_ok && errors.is_empty() {
             Ok(())
         } else {
             Err(SecretError::All(errors))
@@ -893,9 +911,17 @@ pub fn configured_default_chain(
         match provider_name {
             "env" => providers.push(Arc::new(EnvSecretProvider::new(namespace.clone()))),
             "keyring" => providers.push(Arc::new(KeyringSecretProvider::new(namespace.clone()))),
+            "file" => {
+                let path = std::env::var_os(SECRET_FILE_PATH_ENV)
+                    .filter(|path| !path.is_empty())
+                    .ok_or_else(|| SecretError::InvalidConfig(format!(
+                        "the file secret provider requires {SECRET_FILE_PATH_ENV}"
+                    )))?;
+                providers.push(Arc::new(FileSecretProvider::new(path)?));
+            }
             other => {
                 return Err(SecretError::InvalidConfig(format!(
-                    "unsupported secret provider '{other}' in {SECRET_PROVIDER_CHAIN_ENV}; expected a comma-separated list of env,keyring"
+                    "unsupported secret provider '{other}' in {SECRET_PROVIDER_CHAIN_ENV}; expected a comma-separated list of env,keyring,file"
                 )))
             }
         }

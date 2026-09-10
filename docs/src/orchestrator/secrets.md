@@ -3,10 +3,11 @@
 Reactive Harn features need a single way to fetch secrets without
 sprinkling provider-specific code across connectors, OAuth flows, and
 future orchestrator runtime surfaces. The secret layer lives in
-`harn_vm::secrets` and currently ships with two concrete providers:
+`harn_vm::secrets` and includes these concrete storage providers:
 
 - `EnvSecretProvider`
 - `KeyringSecretProvider`
+- `FileSecretProvider` (explicit Unix configuration)
 
 The default chain is:
 
@@ -131,6 +132,35 @@ export HARN_SECRET_NAMESPACE="harn/my-workspace"
 
 The override applies process-wide. Set it for `harn connect` and for the run
 that consumes the credential, or the two will not meet.
+
+## Explicit file provider
+
+On Unix, an application can select durable file storage explicitly:
+
+```bash
+export HARN_SECRET_PROVIDERS=file
+export HARN_SECRET_FILE_PATH="$HOME/.private-app/secrets.json"
+```
+
+The default remains `env,keyring`. The path must be absolute, and its directory
+must be private to the current user. New directories use mode `0700`; files use
+mode `0600`. Existing exposed files and directories are refused. This provider
+does not encrypt values at rest. Platforms without the private-file permission
+adapter report an unsupported operation.
+
+CLI configuration and `FileSecretProvider` injected through
+`Harness::with_secret_provider` use the same format. It is a flat JSON object
+whose values are base64 bytes. Keys percent-encode the namespace and name; a
+slash separates them, slashes inside names remain literal, and exact versions
+use `#vN`. Latest and exact-version entries are separate; automatic rotation
+and TTL writes are unsupported.
+
+Writers serialize through `<path>.lock.sqlite3` using SQLite's DELETE journal
+and an immediate transaction, compatible with the existing Swift host writer.
+The provider waits at most three seconds for a transaction lock and replaces
+the data file atomically. A corrupt or inaccessible store reports an error
+instead of becoming an empty store. Configure the same path for the process
+that writes a credential and every process that reads or revokes it.
 
 ## Environment provider
 
