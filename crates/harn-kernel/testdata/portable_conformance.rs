@@ -8,25 +8,6 @@ pub struct PureCase {
 
 pub const PURE_CASES: &[PureCase] = &[
     PureCase {
-        id: "typed-record-pick-rejects-invalid-runtime-values",
-        source: r#"
-            fn rejected(args: list<any>) -> bool {
-              try {
-                pick(...args)
-                return false
-              } catch error {
-                return true
-              }
-            }
-            fn project(input: any) -> list<bool> {
-              return [rejected([nil, []]), rejected([42, []]), rejected([{}, [1]]), rejected([{}]), rejected([{}, [], []]), rejected([{}, []])]
-            }
-        "#,
-        entry: "project",
-        input_json: "null",
-        expected_json: "[true,true,true,true,true,false]",
-    },
-    PureCase {
         id: "typed-record-pick-preserves-nil-and-copies-values",
         source: r#"
             type Input = {name: string, age: int, absent: nil, nested: {count: int}}
@@ -42,18 +23,18 @@ pub const PURE_CASES: &[PureCase] = &[
     },
     PureCase {
         id: "typed-record-pick-runtime-keys-and-missing-values",
-        source: r#"
+        source: r"
             fn project(input: {data: dict<string, int>, keys: list<string>}) -> dict<string, int> {
               return pick(input.data, input.keys)
             }
-        "#,
+        ",
         entry: "project",
         input_json: r#"{"data":{"a":1,"b":2},"keys":["b","missing","b"]}"#,
         expected_json: r#"{"b":2}"#,
     },
     PureCase {
         id: "typed-record-pick-empty",
-        source: r#"fn project(input: {name: string}) -> {} { return pick(input, []) }"#,
+        source: r"fn project(input: {name: string}) -> {} { return pick(input, []) }",
         entry: "project",
         input_json: r#"{"name":"Ada"}"#,
         expected_json: "{}",
@@ -355,6 +336,27 @@ pub struct RuntimeFailureCase {
 
 pub const RUNTIME_FAILURE_CASES: &[RuntimeFailureCase] = &[
     RuntimeFailureCase {
+        id: "pick-rejects-non-record-source",
+        source: r#"fn project(input: any) { return pick(input, ["name"]) }"#,
+        entry: "project",
+        input_json: "42",
+        expected_code: "builtin_type",
+    },
+    RuntimeFailureCase {
+        id: "pick-rejects-non-string-key",
+        source: r"fn project(input: {name: string, keys: list<any>}) { return pick(input, input.keys) }",
+        entry: "project",
+        input_json: r#"{"name":"Ada","keys":[1]}"#,
+        expected_code: "builtin_type",
+    },
+    RuntimeFailureCase {
+        id: "pick-rejects-wrong-arity",
+        source: r"fn project(args: list<any>) { return pick(...args) }",
+        entry: "project",
+        input_json: r#"[{"name":"Ada"}]"#,
+        expected_code: "builtin_type",
+    },
+    RuntimeFailureCase {
         id: "int-param-rejects-float",
         source: r"
             fn takes_int(n: int) -> int { return n }
@@ -384,7 +386,7 @@ pub const INVALID_CASES: &[InvalidCase] = &[
     },
     InvalidCase {
         id: "pick-dynamic-fields-are-not-required",
-        source: r#"fn project(input: {name: string}, keys: list<string>) -> {name: string} { return pick(input, keys) }"#,
+        source: r"fn project(input: {name: string}, keys: list<string>) -> {name: string} { return pick(input, keys) }",
         entry: "project",
         expected_code: "compile_frontend",
     },

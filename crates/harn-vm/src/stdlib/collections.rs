@@ -718,6 +718,27 @@ mod tests {
     }
 
     #[test]
+    fn pick_rejects_invalid_source_keys_and_arity() {
+        let record = dict(&[("a", VmValue::Int(1))]);
+        for args in [
+            vec![VmValue::Int(42), keys(&["a"])],
+            vec![VmValue::Nil, keys(&["a"])],
+            vec![
+                record.clone(),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1)])),
+            ],
+            vec![record.clone()],
+            vec![record.clone(), keys(&["a"]), keys(&["a"])],
+        ] {
+            assert!(
+                pick_impl(&args, &mut String::new()).is_err(),
+                "must reject {args:?}"
+            );
+        }
+        assert!(pick_impl(&[record, keys(&["a"])], &mut String::new()).is_ok());
+    }
+
+    #[test]
     fn dict_omit_excludes_listed_keys() {
         let data = dict(&[
             ("a", VmValue::Int(1)),

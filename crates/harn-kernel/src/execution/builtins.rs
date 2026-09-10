@@ -213,7 +213,13 @@ impl Machine<'_> {
                     Err(diagnostic) => OpStep::Error(diagnostic),
                 }
             }
-            (PortableBuiltin::Pick, [source, RuntimeValue::List(keys)]) => {
+            (PortableBuiltin::Pick, args) => {
+                let [source, keys] = args else {
+                    return OpStep::Error(diagnostic(
+                        "builtin_type",
+                        format!("pick: expected 2 arguments, found {}", args.len()),
+                    ));
+                };
                 if !matches!(source, RuntimeValue::Record(_))
                     && !matches!(source, RuntimeValue::Harness(name) if name == "root")
                 {
@@ -222,6 +228,12 @@ impl Machine<'_> {
                         "pick: expected a record, dictionary, or Harness",
                     ));
                 }
+                let RuntimeValue::List(keys) = keys else {
+                    return OpStep::Error(diagnostic(
+                        "builtin_type",
+                        "pick: keys must be a list<string>",
+                    ));
+                };
                 let mut names = Vec::with_capacity(keys.len());
                 for key in keys.iter() {
                     let RuntimeValue::String(name) = key else {

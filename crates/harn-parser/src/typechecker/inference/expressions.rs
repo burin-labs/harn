@@ -543,21 +543,10 @@ impl TypeChecker {
                     }
                     return None;
                 }
-                if Self::builtin_preserves_first_arg_type(name) {
-                    if let Some(first_type) =
-                        args.first().and_then(|arg| self.infer_type(arg, scope))
-                    {
-                        return Some(first_type);
-                    }
-                }
-                if !self.name_is_imported(name)
-                    && !args.iter().any(|arg| matches!(arg.node, Node::Spread(_)))
+                if let std::ops::ControlFlow::Break(decided) =
+                    self.infer_builtin_shape_call(name, args, scope)
                 {
-                    if let Some(projection) =
-                        self.lookup_builtin(name).and_then(|sig| sig.projection)
-                    {
-                        return self.infer_record_projection(projection, args, scope);
-                    }
+                    return decided;
                 }
                 if name == "llm_call" || name == "llm_completion" {
                     if let Some(result_type) = self.infer_llm_call_result_type(name, args, scope) {
@@ -1508,7 +1497,7 @@ impl TypeChecker {
         })
     }
 
-    fn builtin_preserves_first_arg_type(name: &str) -> bool {
+    pub(super) fn builtin_preserves_first_arg_type(name: &str) -> bool {
         matches!(
             name,
             "add_assistant" | "add_message" | "add_system" | "add_tool_result" | "add_user"

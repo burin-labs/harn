@@ -1,6 +1,7 @@
 //! Key-dependent record results and their call-site validation.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::ControlFlow;
 
 use harn_builtin_meta::{CapabilityId, RecordProjection};
 
@@ -59,6 +60,33 @@ impl TypeChecker {
                 self.has_projection_contract(right, scope)
             }
             _ => false,
+        }
+    }
+
+    /// The result type of a builtin call whose shape follows from its
+    /// arguments: a builtin that returns its first argument's type, or a
+    /// key-dependent projection. `Break(decided)` means this branch owns the
+    /// answer, including a `None` for a projection it cannot type.
+    pub(super) fn infer_builtin_shape_call(
+        &self,
+        name: &str,
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> ControlFlow<Option<TypeExpr>> {
+        if Self::builtin_preserves_first_arg_type(name) {
+            if let Some(first_type) = args.first().and_then(|arg| self.infer_type(arg, scope)) {
+                return ControlFlow::Break(Some(first_type));
+            }
+        }
+        if self.name_is_imported(name) || args.iter().any(|arg| matches!(arg.node, Node::Spread(_)))
+        {
+            return ControlFlow::Continue(());
+        }
+        match self.lookup_builtin(name).and_then(|sig| sig.projection) {
+            Some(projection) => {
+                ControlFlow::Break(self.infer_record_projection(projection, args, scope))
+            }
+            None => ControlFlow::Continue(()),
         }
     }
 
