@@ -1176,8 +1176,8 @@ jobs:
         # re-raise the ratchet's.
         run: |
           set -uo pipefail
-          make check-source-file-lengths > "$RUNNER_TEMP/ratchet.txt" 2>&1
-          status=$?
+          status=0
+          make check-source-file-lengths > "$RUNNER_TEMP/ratchet.txt" 2>&1 || status=$?
           {
             echo '### Source file-length ratchet'
             echo
