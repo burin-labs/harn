@@ -72,7 +72,7 @@ fn project_person(person: Person, keys: list<string>) {
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     for body in [
-        r#"const bad: {name: string} = pick(person, keys)"#,
+        "const bad: {name: string} = pick(person, keys)",
         r#"const bad: {age: int} = pick(person, ["age"])"#,
     ] {
         let diagnostics = errors(&format!("type Person = {{name: string, age?: int}}\nfn project_person(person: Person, keys: list<string>) {{ {body} }}"));
@@ -142,16 +142,16 @@ fn pick_rejects_invalid_sources_keys_and_arity() {
 #[test]
 fn pick_spread_arguments_do_not_invent_field_types() {
     let diagnostics = errors(
-        r#"fn project(args: list<any>) {
+        r"fn project(args: list<any>) {
   const selected: dict<string, unknown> = pick(...args)
-}"#,
+}",
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let diagnostics = errors(
-        r#"fn project(args: list<any>) {
+        r"fn project(args: list<any>) {
   const selected = pick(...args)
   const name: string = selected.name
-}"#,
+}",
     );
     assert!(
         !diagnostics.is_empty(),
@@ -223,4 +223,66 @@ fn pick_key_alias_captures_the_original_literal_across_shadowing() {
 }"#,
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn pick_result_aliases_capture_the_contract_before_shadowing() {
+    let source = r#"
+fn main(harness: Harness) {
+  const selected = pick(harness, ["env"])
+  if true {
+    const saved = selected
+    const selected = saved
+    const final_copy = selected
+    const env: HarnessEnv = final_copy.env
+  }
+}
+"#;
+    assert!(errors(source).is_empty());
+    let invalid = source.replace("const env: HarnessEnv = final_copy.env", "final_copy.fs");
+    let diagnostics = errors(&invalid);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|error| error.contains("fs") && error.contains("does not exist")),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn projected_contract_does_not_follow_an_unrelated_shadowing_binding() {
+    let source = r#"
+fn main(harness: Harness) {
+  const selected = pick(harness, ["env"])
+  if true {
+    const selected = {name: "Ada"}
+    const absent = selected.missing
+  }
+}
+"#;
+    let diagnostics = errors(source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn mutable_pick_aliases_and_narrowed_records_keep_their_contract() {
+    for source in [
+        r#"fn main(harness: Harness) {
+  let selected = pick(harness, ["env"])
+  const alias = selected
+  alias.fs
+}"#,
+        r#"fn use(input: {kind: "a", name: string} | {kind: "b", age: int}) {
+  const selected = pick(input, ["kind"])
+  if selected.kind == "a" { selected.missing }
+}"#,
+    ] {
+        let diagnostics = errors(source);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|error| error.contains("does not exist")),
+            "{source}\n{diagnostics:?}"
+        );
+    }
 }

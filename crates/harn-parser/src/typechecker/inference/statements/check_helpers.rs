@@ -54,10 +54,12 @@ impl TypeChecker {
                     type_expr: type_expr.clone(),
                 });
         }
-        let has_contract = type_ann.is_some() || self.has_projection_contract(value, scope);
+        let projected = self.has_projection_contract(value, scope);
         scope.define_var(name, ty);
         scope.define_flow_alias(name, value.clone());
-        if has_contract {
+        if projected {
+            scope.mark_projected(name);
+        } else if type_ann.is_some() {
             scope.mark_annotated(name);
         }
         scope.clear_nil_widenable(name);

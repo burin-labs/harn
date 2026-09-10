@@ -45,9 +45,7 @@ impl TypeChecker {
         scope: &TypeScope,
     ) -> bool {
         match &value.node {
-            Node::Identifier(name) => scope
-                .get_flow_alias(name)
-                .is_some_and(|alias| self.has_projection_contract(alias, scope)),
+            Node::Identifier(name) => scope.is_projected(name),
             Node::FunctionCall { name, .. } => {
                 scope.get_var_before_fn(name).is_none()
                     && scope.get_fn(name).is_none()

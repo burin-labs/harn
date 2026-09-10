@@ -348,7 +348,7 @@ impl TypeChecker {
         for name in assigned_var_names(body) {
             if let Some(original) = scope.narrowed_original(&name).cloned() {
                 scope.narrowed_vars.remove(&name);
-                scope.define_var(&name, original);
+                scope.update_var(&name, original);
             }
             scope.clear_narrowed_paths_rooted_at(&name);
             scope.clear_unknown_ruled_out_paths_rooted_at(&name);
@@ -1123,7 +1123,7 @@ impl TypeChecker {
                     None => None,
                 };
                 if let Some(narrowed) = narrowed {
-                    scope.define_var(name, Some(narrowed));
+                    scope.update_var(name, Some(narrowed));
                 }
             }
             _ => {

@@ -1,0 +1,10 @@
+fn main(harness: Harness) {
+  const selected = pick(harness, ["env"])
+  if true {
+    const saved = selected
+    const selected = saved
+    const final_copy = selected
+    assert_eq(final_copy.env.get_or("HARN_PICK_ALIAS_MISSING", "present"), "present")
+  }
+  harness.stdio.println("record pick: aliases keep the original field contract")
+}

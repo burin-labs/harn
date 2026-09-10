@@ -1133,6 +1133,12 @@ selection. The Burin adapter keeps generated digest compatibility during
 migration by wrapping existing `.burin/context-digests/*.md` content instead of
 requiring hosts to rewrite those files.
 
+### std/context/disclosure
+
+Cut Markdown to an estimated token budget and render an omission note with
+a recovery action. See [Context truncation](./stdlib/context-disclosure.md)
+for the functions, return type, and boundary rules.
+
 ### std/context/maintenance
 
 Portable receipts for host-owned background context jobs:

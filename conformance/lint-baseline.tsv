@@ -146,6 +146,8 @@
 2	types/interface_basic.harn	HARN-LNT-020
 1	types/local_shadows_function.harn	HARN-LNT-012
 1	types/public_generic_declarations.harn	HARN-LNT-020
+1	types/record_pick_alias_shadowing.harn	HARN-LNT-009
+1	types/record_pick_alias_shadowing.harn	HARN-LNT-031
 1	types/recursive_type_param_annotation.harn	HARN-LNT-049
 1	types/schema_as_type_llm.harn	HARN-LNT-020
 1	types/schema_as_type_narrow_data.harn	HARN-LNT-020

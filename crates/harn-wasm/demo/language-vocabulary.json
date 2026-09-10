@@ -630,6 +630,7 @@
     "pg_transaction",
     "pg_try_advisory_xact_lock",
     "pg_with_advisory_lock",
+    "pick",
     "pid",
     "pipeline_lifecycle_audit_log_snapshot",
     "pipeline_lifecycle_audit_log_take",

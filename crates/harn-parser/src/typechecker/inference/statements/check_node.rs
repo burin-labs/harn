@@ -63,10 +63,11 @@ impl TypeChecker {
                                 type_expr: type_expr.clone(),
                             });
                     }
-                    let has_contract =
-                        type_ann.is_some() || self.has_projection_contract(value, scope);
+                    let projected = self.has_projection_contract(value, scope);
                     scope.define_var_mutable(name, ty);
-                    if has_contract {
+                    if projected {
+                        scope.mark_projected(name);
+                    } else if type_ann.is_some() {
                         scope.mark_annotated(name);
                     }
                     if inferred_is_nil {
@@ -606,7 +607,7 @@ impl TypeChecker {
                         if let Some(Some(TypeExpr::Union(members))) = scope.get_var(var_name) {
                             let narrowed = narrow_union_by_arm_pattern(&arm.pattern, members);
                             if let Some(narrowed_type) = narrowed {
-                                arm_scope.define_var(var_name, Some(narrowed_type));
+                                arm_scope.update_var(var_name, Some(narrowed_type));
                             }
                         }
                     }
@@ -632,7 +633,7 @@ impl TypeChecker {
                                             property,
                                         );
                                         if let Some(t) = narrowed {
-                                            arm_scope.define_var(obj_var, Some(t));
+                                            arm_scope.update_var(obj_var, Some(t));
                                         }
                                     }
                                 }
