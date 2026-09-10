@@ -71,6 +71,26 @@ const PRODUCER_OWNED_CLI_MINUTES = 20
 
 const PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS = 900
 
+// The canonical owned producer reached the workspace test graph but timed out
+// at 960s before archiving it. Filtering archive contents still compiles the
+// full workspace. Record this lower bound, not a completed cold measurement.
+const PRODUCER_OWNED_SECURITY_MINUTES = 24
+
+const PRODUCER_OWNED_SECURITY_COLD_LOWER_BOUND_SECONDS = 960
+
+pub fn producer_security_timeout_expression() -> string {
+  return "$"
+    + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_SECURITY_MINUTES} || 16 }}"
+}
+
+// Cover setup and both sequential builds, plus five minutes for dispatch and
+// upload. The job has another five minutes for checkout and terminal cleanup.
+pub fn security_wait_minutes() -> int {
+  return PRODUCER_SETUP_OVERHEAD_MINUTES + PRODUCER_OWNED_CLI_MINUTES
+    + PRODUCER_OWNED_SECURITY_MINUTES
+    + 5
+}
+
 pub fn producer_cli_timeout_expression() -> string {
   return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 10 }}"
 }
@@ -114,6 +134,11 @@ pub fn producer_step_budget_margin_errors() -> list<string> {
           minutes: PRODUCER_OWNED_CLI_MINUTES,
           cold_seconds: PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS,
         },
+        {
+          name: "Owned security test archive",
+          minutes: PRODUCER_OWNED_SECURITY_MINUTES,
+          cold_seconds: PRODUCER_OWNED_SECURITY_COLD_LOWER_BOUND_SECONDS,
+        },
       ],
     )
 }
@@ -134,7 +159,7 @@ pub fn producer_cache_save_reserve_minutes() -> int {
 
 /**
  * The owned rung never saves a cache, so it does not carry the save's reserve.
- * Its CLI allowance includes the measured cold-build timeout on shared capacity.
+ * CLI and security allowances include observed timeouts on shared capacity.
  * This is a hang backstop, not a completed-build or performance claim.
  */
 pub fn producer_owned_ceiling_minutes() -> int {
@@ -143,6 +168,8 @@ pub fn producer_owned_ceiling_minutes() -> int {
     total = total
       + if budget.name == "Build portable Harn CLI" {
         PRODUCER_OWNED_CLI_MINUTES
+      } else if budget.name == "Build security test archive" {
+        PRODUCER_OWNED_SECURITY_MINUTES
       } else {
         budget.minutes
       }
@@ -195,6 +222,8 @@ fn producer_step_budget_errors(job: dict, job_name: string) -> list<string> {
     const name = budget.name
     const expected = if name == "Build portable Harn CLI" {
       producer_cli_timeout_expression()
+    } else if name == "Build security test archive" {
+      producer_security_timeout_expression()
     } else {
       to_string(budget.minutes)
     }
@@ -739,7 +768,9 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
   const ready_command = trim(ready_step?.run ?? "")
   if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
-      != ARTIFACT_READY_TIMEOUT_MINUTES
+      != to_string(security_wait_minutes() + 5)
+    || trim(ready_step?.env?.HARN_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
+      != to_string(security_wait_minutes() * 6)
     || ready_needs != ["changes"]
     || trim(ready_job?.permissions?.actions ?? "") != "read"
     || trim(ready_job?.permissions?.contents ?? "")

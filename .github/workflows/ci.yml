@@ -681,7 +681,7 @@ jobs:
     # SLO. scripts/ci_cache_policy/linux_checks.harn owns the arithmetic.
     #
     # The owned self-hosted rung is the same arithmetic minus the cache-save
-    # reserve, with a bounded CLI retry: 6 setup + 20 + 16 + 26 = 68. It is a
+    # reserve, with bounded cold retries: 6 setup + 20 + 24 + 26 = 76. It is a
     # hang backstop, not a claim about host core count or improved performance.
     runs-on: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
@@ -703,7 +703,7 @@ jobs:
         && needs.runner-availability.outputs.selfhosted_disabled == ''
         && needs.runner-availability.outputs.capacity != ''
         && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
-        && 68)
+        && 76)
         || 70 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
     # Blacksmith uses sticky sccache and never enters that step, and the owned
@@ -813,7 +813,7 @@ jobs:
       # Only security binaries enter this archive; the following workspace
       # tests reuse the same profile and unified features without rebuilding.
       - name: Build security test archive
-        timeout-minutes: 16
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 16 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
@@ -899,7 +899,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
     permissions:
       actions: read
       contents: read
@@ -910,6 +910,8 @@ jobs:
       - name: Wait for Linux security tests
         env:
           GH_TOKEN: ${{ github.token }}
+          # Six minutes setup + 20 CLI + 24 workspace archive + five dispatch/upload.
+          HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "330"
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
