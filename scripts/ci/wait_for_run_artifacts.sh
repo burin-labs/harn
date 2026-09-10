@@ -14,7 +14,7 @@ fi
 
 repository="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must name owner/repo}"
 run_id="${GITHUB_RUN_ID:?GITHUB_RUN_ID must identify the current workflow run}"
-producer_job="${HARN_ARTIFACT_PRODUCER_JOB:?HARN_ARTIFACT_PRODUCER_JOB must name the producing job}"
+producer_job="${HARN_EXT_ARTIFACT_PRODUCER_JOB:?HARN_EXT_ARTIFACT_PRODUCER_JOB must name the producing job}"
 run_attempt="${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT must identify the current attempt}"
 max_attempts="${HARN_ARTIFACT_WAIT_MAX_ATTEMPTS:-66}"
 interval_seconds="${HARN_ARTIFACT_WAIT_INTERVAL_SECONDS:-10}"

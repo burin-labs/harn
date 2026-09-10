@@ -31,7 +31,7 @@ env:
   # the barrier jobs add scheduling and API headroom above it.
   HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
   HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
-  HARN_ARTIFACT_PRODUCER_JOB: "Rust workspace tests"
+  HARN_EXT_ARTIFACT_PRODUCER_JOB: "Rust workspace tests"
   # Incremental fights the within-job sccache wrapper. Cross-run reuse is
   # owned by each lane's persistent compiler-object cache. Do not persist a
   # shared target/: independent PR and merge-group builds overlap, and Cargo

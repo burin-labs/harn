@@ -66,7 +66,7 @@ else:
         env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}",
                    FIXTURE_SCENARIO=scenario, FIXTURE_ROOT=str(root),
                    GITHUB_REPOSITORY="burin-labs/harn", GITHUB_RUN_ID="123",
-                   GITHUB_RUN_ATTEMPT="2", HARN_ARTIFACT_PRODUCER_JOB="Rust workspace tests",
+                   GITHUB_RUN_ATTEMPT="2", HARN_EXT_ARTIFACT_PRODUCER_JOB="Rust workspace tests",
                    HARN_ARTIFACT_WAIT_MAX_ATTEMPTS="3", HARN_ARTIFACT_WAIT_INTERVAL_SECONDS="0")
         result = subprocess.run([sys.argv[1], *artifacts], env=env,
                                 capture_output=True, text=True, timeout=10)
