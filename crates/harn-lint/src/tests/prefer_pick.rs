@@ -90,16 +90,16 @@ fn stays_silent_when_a_missing_key_would_change_the_result() {
     for source in [
         // A dictionary may not hold the key: the literal reads `nil`, `pick`
         // omits the field.
-        r#"
+        r"
 fn copy(settings: dict<string, int>) -> dict<string, int> {
   return {retries: settings.retries, timeout: settings.timeout}
 }
-"#,
+",
         // An optional field behaves the same way.
-        r#"
+        r"
 type Person = {name: string, age?: int}
 fn copy(person: Person) { return {name: person.name, age: person.age} }
-"#,
+",
         // A type the file cannot see is not proven to be a record.
         r#"
 import { Settings } from "./settings"
@@ -115,22 +115,22 @@ fn copy(settings: Settings) { return {a: settings.a, b: settings.b} }
 fn stays_silent_when_the_literal_is_not_a_plain_projection() {
     for source in [
         // One field gains nothing from `pick`.
-        r#"fn main(harness: Harness) { const ctx = {env: harness.env} }"#,
+        "fn main(harness: Harness) { const ctx = {env: harness.env} }",
         // A renamed field is not a projection.
-        r#"fn main(harness: Harness) { const ctx = {environment: harness.env, fs: harness.fs} }"#,
+        "fn main(harness: Harness) { const ctx = {environment: harness.env, fs: harness.fs} }",
         // Two different sources.
-        r#"fn main(harness: Harness, other: Harness) { const ctx = {env: harness.env, fs: other.fs} }"#,
+        "fn main(harness: Harness, other: Harness) { const ctx = {env: harness.env, fs: other.fs} }",
         // An extra computed entry.
-        r#"fn main(harness: Harness) { const ctx = {env: harness.env, fs: harness.fs, n: 1} }"#,
+        "fn main(harness: Harness) { const ctx = {env: harness.env, fs: harness.fs, n: 1} }",
         // Optional chaining is not a plain field read.
-        r#"
+        r"
 type Person = {name: string, age: int}
 fn copy(person: Person?) { return {name: person?.name, age: person?.age} }
-"#,
+",
         // A capability that does not exist cannot be picked.
-        r#"fn main(harness: Harness) { const ctx = {env: harness.env, nope: harness.nope} }"#,
+        "fn main(harness: Harness) { const ctx = {env: harness.env, nope: harness.nope} }",
         // A local `harness` that is not the host handle is untyped.
-        r#"fn helper(harness: any) { return {env: harness.env, fs: harness.fs} }"#,
+        "fn helper(harness: any) { return {env: harness.env, fs: harness.fs} }",
     ] {
         let diagnostics = lint_source(source);
         assert!(!has_rule(&diagnostics, RULE), "{source}\n{diagnostics:?}");
@@ -139,20 +139,20 @@ fn copy(person: Person?) { return {name: person?.name, age: person?.age} }
 
 #[test]
 fn stays_silent_when_pick_is_shadowed() {
-    let source = r#"
+    let source = r"
 fn pick(value: int) -> int { return value }
 fn main(harness: Harness) {
   const ctx = {env: harness.env, fs: harness.fs}
   harness.stdio.println(pick(1))
 }
-"#;
+";
     let diagnostics = lint_source(source);
     assert!(!has_rule(&diagnostics, RULE), "{diagnostics:?}");
 }
 
 #[test]
 fn repair_is_behavior_preserving_and_machine_applicable() {
-    let source = r#"fn main(harness: Harness) { const ctx = {env: harness.env, fs: harness.fs} }"#;
+    let source = "fn main(harness: Harness) { const ctx = {env: harness.env, fs: harness.fs} }";
     let diagnostics = lint_source(source);
     let diagnostic = diagnostics
         .iter()
