@@ -222,3 +222,71 @@ fn lint_and_fix_preserve_public_module_bindings() {
         "--fix must not rename an externally reachable API to the discard binding"
     );
 }
+
+#[test]
+fn pick_repairs_preserve_behavior_and_project_line_width() {
+    for command in [
+        vec!["lint", "--fix", "main.harn"],
+        vec![
+            "fix",
+            "--apply",
+            "--safety",
+            "behavior-preserving",
+            "--code",
+            "HARN-LNT-077",
+            "main.harn",
+        ],
+    ] {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("main.harn");
+        std::fs::write(dir.path().join("harn.toml"), "[fmt]\nline_width = 50\n").unwrap();
+        std::fs::write(&path, r#"
+type Settings = {first_long_name: string, second_long_name: string, third_long_name: string}
+
+fn copy_settings(settings: Settings) -> Settings {
+  return {first_long_name: settings.first_long_name, second_long_name: settings.second_long_name, third_long_name: settings.third_long_name}
+}
+
+fn main(harness: Harness) {
+  const settings = {first_long_name: "a", second_long_name: "b", third_long_name: "c"}
+  assert_eq(copy_settings(settings), settings)
+  harness.stdio.println("pass")
+}
+"#).unwrap();
+        let (_, stderr, code) = run(dir.path(), &["fmt", "main.harn"]);
+        assert_eq!(code, 0, "{stderr}");
+        let original = std::fs::read_to_string(&path).unwrap();
+        assert!(!original.contains("pick("));
+        let (stdout, stderr, code) = run(dir.path(), &["run", "main.harn"]);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout.trim(), "pass");
+
+        let (_, stderr, code) = run(dir.path(), &command);
+        assert_eq!(code, 0, "{command:?}: {stderr}");
+        let updated = std::fs::read_to_string(&path).unwrap();
+        assert!(updated.contains("pick("), "{updated}");
+        assert!(
+            updated.contains("\"first_long_name\",\n"),
+            "keys should wrap: {updated}"
+        );
+        let (_, stderr, code) = run(dir.path(), &["fmt", "--check", "main.harn"]);
+        assert_eq!(code, 0, "{stderr}");
+        let (stdout, stderr, code) = run(dir.path(), &["run", "main.harn"]);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout.trim(), "pass");
+    }
+}
+
+#[test]
+fn lint_pick_fix_preserves_unformatted_surroundings() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("main.harn");
+    let source = "pub fn copy(value: {a: int, b: int}) { return {a: value.a, b: value.b} }\n";
+    std::fs::write(&path, source).unwrap();
+    let (_, stderr, code) = run(dir.path(), &["lint", "--fix", "main.harn"]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "pub fn copy(value: {a: int, b: int}) { return pick(value, [\"a\", \"b\"]) }\n"
+    );
+}

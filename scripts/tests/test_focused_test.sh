@@ -28,7 +28,7 @@ HARN_NEXTEST_FILTER="$filter" \
   NEXTEST_ARGS_LOG="$args_log" \
   make -s -C "$repo_root" test-focused
 printf '%s\0' \
-  nextest run --package harn-cli --test harn_cli_fast -E "$filter" \
+  nextest run --package harn-cli --test harn_cli_fast --ignore-default-filter -E "$filter" \
   > "$tmp_root/expected-args.log"
 if ! cmp -s "$tmp_root/expected-args.log" "$args_log"; then
   echo "focused nextest arguments were not preserved byte-for-byte" >&2
@@ -43,7 +43,7 @@ HARN_NEXTEST_FILTER='test(unit_case)' \
   HARN_NEXTEST_CARGO_RUNNER="$fake_cargo" \
   NEXTEST_ARGS_LOG="$args_log" \
   "$repo_root/scripts/test_focused.sh"
-printf '%s\0' nextest run --workspace -E 'test(unit_case)' \
+printf '%s\0' nextest run --workspace --ignore-default-filter -E 'test(unit_case)' \
   > "$tmp_root/expected-workspace-args.log"
 if ! cmp -s "$tmp_root/expected-workspace-args.log" "$args_log"; then
   echo "focused nextest workspace selector was not preserved" >&2

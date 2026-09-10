@@ -84,6 +84,7 @@ pub(crate) mod provider_report;
 pub(crate) mod provider_support;
 pub(crate) mod provider_tool_calibrate;
 pub(crate) mod providers;
+mod source_formatting;
 pub(crate) use provider_tool_calibrate::run as run_tool_calibrate;
 pub(crate) mod quickstart;
 pub(crate) mod repl;

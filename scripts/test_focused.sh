@@ -11,7 +11,8 @@ Optional selectors:
   HARN_NEXTEST_BINARY=<integration-test-binary>  # requires PACKAGE
 
 Runs a focused cargo-nextest expression through an argv boundary. The filter
-is never evaluated by Make or a shell parser.
+is never evaluated by Make or a shell parser. Explicit selection overrides
+the profile's default test exclusions.
 EOF
 }
 
@@ -50,4 +51,4 @@ while IFS= read -r variable; do
   unset "$variable"
 done < <(compgen -A variable HARN_NEXTEST_)
 
-exec "$cargo_runner" nextest run "${selector[@]}" -E "$filter"
+exec "$cargo_runner" nextest run "${selector[@]}" --ignore-default-filter -E "$filter"

@@ -43,12 +43,14 @@ impl TypeChecker {
             return false;
         };
         if self.check_contextual_tuple_literal(snode, expected, scope) {
+            self.check_prefer_pick(snode, scope);
             return true;
         }
         if self.check_contextual_closure(snode, expected, scope) {
             return true;
         }
         if self.check_compound_node_with_expected(snode, expected, scope) {
+            self.check_prefer_pick(snode, scope);
             return false;
         }
         self.check_node(snode, scope);

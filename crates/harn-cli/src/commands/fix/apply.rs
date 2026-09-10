@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::source_formatting::{format_project_source, keep_canonical_formatting};
 
 #[cfg(test)]
 pub(super) fn apply_repairs(
@@ -184,7 +185,7 @@ pub(super) fn render_capability_migration_pass(
         let path_ref = Path::new(path);
         let candidate = (|| {
             let edited = edited_source(path_ref, &edits)?;
-            let candidate = format_capability_candidate(path_ref, &edited.edited)?;
+            let candidate = format_project_source(path_ref, &edited.edited)?;
             harn_parser::parse_source(&candidate)
                 .map_err(|errors| format!("invalid Harn syntax: {errors:?}"))?;
             Ok::<_, String>(candidate)
@@ -253,7 +254,7 @@ pub(super) fn format_edited_files(paths: &BTreeSet<String>) -> Result<(), String
     for path in paths {
         let source = std::fs::read_to_string(path)
             .map_err(|error| format!("failed to read {path} before formatting: {error}"))?;
-        let formatted = format_capability_candidate(Path::new(path), &source)?;
+        let formatted = format_project_source(Path::new(path), &source)?;
         if source != formatted {
             std::fs::write(path, formatted).map_err(|error| {
                 format!("failed to write formatted migration output {path}: {error}")
@@ -319,28 +320,6 @@ pub(super) fn apply_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<(),
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
-/// Format `edited` when — and only when — `original` was already in canonical
-/// form.
-///
-/// A repair changes line lengths, so a shortened name can leave a canonically
-/// formatted file failing `harn fmt --check`, which is how a rename landed a
-/// package in a state its own CI rejects. Formatting unconditionally is the
-/// wrong cure: it would reformat every untouched line of a project that does
-/// not use `harn fmt`, turning a three-line repair into a whole-file diff.
-///
-/// Conditioning on the file's existing state gives both: a formatted file stays
-/// formatted, and an unformatted one is left exactly as its author keeps it.
-/// A file that cannot be formatted is not an error here — the repair itself is
-/// still valid, and the parse check in the caller already ran.
-fn keep_canonical_formatting(path: &Path, original: &str, edited: String) -> String {
-    let was_canonical =
-        format_capability_candidate(path, original).is_ok_and(|formatted| formatted == original);
-    if !was_canonical {
-        return edited;
-    }
-    format_capability_candidate(path, &edited).unwrap_or(edited)
-}
-
 /// Render the edits of a rejected pass so the offending span is legible.
 fn describe_edits(edited: &str, edits: &[FixEditWire]) -> String {
     let mut sorted = edits.to_vec();
@@ -373,7 +352,7 @@ pub(super) fn apply_capability_file_edits(
         return Ok(());
     }
     let edited = edited_source(path, edits)?;
-    let candidate = format_capability_candidate(path, &edited.edited)?;
+    let candidate = format_project_source(path, &edited.edited)?;
     harn_parser::parse_source(&candidate).map_err(|error| {
         format!(
             "capability migration produced invalid syntax for {}: {error}",
@@ -382,32 +361,6 @@ pub(super) fn apply_capability_file_edits(
     })?;
     std::fs::write(path, candidate)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
-}
-
-fn format_capability_candidate(path: &Path, source: &str) -> Result<String, String> {
-    let config = match harn_modules::project_config::load_for_path(path) {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!(
-                "warning: failed to load formatter config for {}: {error}; using defaults",
-                path.display()
-            );
-            harn_modules::project_config::HarnConfig::default()
-        }
-    };
-    let mut options = harn_fmt::FmtOptions::default();
-    if let Some(line_width) = config.fmt.line_width {
-        options.line_width = line_width;
-    }
-    if let Some(separator_width) = config.fmt.separator_width {
-        options.separator_width = separator_width;
-    }
-    harn_fmt::format_source_opts(source, &options).map_err(|error| {
-        format!(
-            "failed to format capability migration output {}: {error}",
-            path.display()
-        )
-    })
 }
 
 /// One file's source before and after a pass's edits.

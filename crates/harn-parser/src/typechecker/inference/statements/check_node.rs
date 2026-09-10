@@ -1139,6 +1139,7 @@ impl TypeChecker {
             }
 
             Node::DictLiteral(entries) => {
+                self.check_prefer_pick(snode, scope);
                 for entry in entries {
                     self.check_dict_key(&entry.key, scope);
                     self.check_node(&entry.value, scope);

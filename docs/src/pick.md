@@ -118,6 +118,13 @@ fn main(harness: Harness) {
 }
 ```
 
+## Automatic repairs
+
+The `prefer-pick` lint (`HARN-LNT-077`) recognizes copies of two or more
+fields from the same source when all fields are known to exist.
+`harn lint --fix` or `harn fix --apply --code HARN-LNT-077` replaces those
+copies with `pick`. Optional fields and literals with comments stay unchanged.
+
 ## Related helpers
 
 - [`pick_keys(data, keys, {drop_nil: true})`](modules.md#stdcollections) picks

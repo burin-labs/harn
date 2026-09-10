@@ -1,5 +1,7 @@
 //! Key-dependent record results and their call-site validation.
 
+mod prefer_pick;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
