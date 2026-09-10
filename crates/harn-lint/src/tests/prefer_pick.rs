@@ -17,7 +17,7 @@ fn harness_capability_record_becomes_pick_and_keeps_behavior() {
 type Context = {env: HarnessEnv, fs: HarnessFs}
 
 fn config_exists(ctx: Context) -> bool {
-  return ctx.fs.exists(ctx.env.get_or("HARN_PREFER_PICK_MISSING", "."))
+  return ctx.fs.exists(ctx.env.get_or("PREFER_PICK_TEST_MISSING", "."))
 }
 
 fn main(harness: Harness) {

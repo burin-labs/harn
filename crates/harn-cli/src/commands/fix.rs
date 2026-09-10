@@ -1312,6 +1312,14 @@ fn detect_conflicts(candidates: &[RepairCandidate]) -> Vec<Vec<usize>> {
         .collect::<Vec<_>>();
     let mut conflicts = vec![Vec::new(); candidates.len()];
     for left in 0..candidates.len() {
+        let edits = &candidates[left].edits;
+        if edits.iter().enumerate().any(|(index, edit)| {
+            edits[index + 1..]
+                .iter()
+                .any(|other| edits_conflict(edit, other))
+        }) {
+            conflicts[left].push(left);
+        }
         for right in (left + 1)..candidates.len() {
             if keys[left] == keys[right]
                 && candidates_overlap(&candidates[left], &candidates[right])
@@ -1336,16 +1344,28 @@ fn candidates_overlap(left: &RepairCandidate, right: &RepairCandidate) -> bool {
 }
 
 fn edits_conflict(left: &FixEdit, right: &FixEdit) -> bool {
-    if left.span == right.span && left.replacement == right.replacement {
+    edit_ranges_conflict(
+        left.span.start..left.span.end,
+        &left.replacement,
+        right.span.start..right.span.end,
+        &right.replacement,
+    )
+}
+
+fn edit_ranges_conflict(
+    left: std::ops::Range<usize>,
+    left_replacement: &str,
+    right: std::ops::Range<usize>,
+    right_replacement: &str,
+) -> bool {
+    if left == right && left_replacement == right_replacement {
         return false;
     }
-    let same_zero_width = left.span.start == left.span.end
-        && right.span.start == right.span.end
-        && left.span.start == right.span.start;
+    let same_zero_width = left.is_empty() && right.is_empty() && left.start == right.start;
     if same_zero_width {
-        return left.replacement != right.replacement;
+        return left_replacement != right_replacement;
     }
-    left.span.start < right.span.end && left.span.end > right.span.start
+    left.start < right.end && left.end > right.start
 }
 
 fn severity_label(severity: DiagnosticSeverity) -> &'static str {

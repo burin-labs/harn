@@ -418,22 +418,12 @@ fn edited_source(path: &Path, edits: &[FixEditWire]) -> Result<EditedSource, Str
 pub(super) fn validate_edit_composition(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {
     for (index, edit) in edits.iter().enumerate() {
         for other in &edits[index + 1..] {
-            let edit_inserts = edit.span.start == edit.span.end;
-            let other_inserts = other.span.start == other.span.end;
-            let distinct_insertions_same_offset = edit_inserts
-                && other_inserts
-                && edit.span.start == other.span.start
-                && edit.replacement != other.replacement;
-            let insertion_strictly_inside = (edit_inserts
-                && other.span.start < edit.span.start
-                && edit.span.start < other.span.end)
-                || (other_inserts
-                    && edit.span.start < other.span.start
-                    && other.span.start < edit.span.end);
-            let replacement_overlap = !edit_inserts
-                && !other_inserts
-                && edit.span.start.max(other.span.start) < edit.span.end.min(other.span.end);
-            if distinct_insertions_same_offset || insertion_strictly_inside || replacement_overlap {
+            if edit_ranges_conflict(
+                edit.span.start..edit.span.end,
+                &edit.replacement,
+                other.span.start..other.span.end,
+                &other.replacement,
+            ) {
                 return Err(format!(
                     "repair edits overlap in {} at {}..{} ({:?}) and {}..{} ({:?}); refusing to write an ambiguous candidate",
                     path.display(),

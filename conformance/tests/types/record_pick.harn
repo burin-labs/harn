@@ -1,7 +1,7 @@
 type Context = {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools}
 
 fn inspect_context(ctx: Context) -> bool {
-  const path = ctx.env.get_or("HARN_CONFORMANCE_PICK_MISSING", ".")
+  const path = ctx.env.get_or("CONFORMANCE_PICK_TEST_MISSING", ".")
   return ctx.fs.exists(path)
 }
 

@@ -363,7 +363,7 @@ fn pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
         }
         _ => {
             return Err(VmError::TypeError(format!(
-                "pick: expected a record, dictionary, or Harness; found {}",
+                "pick: expected a dict, struct, or Harness; found {}",
                 source.type_name()
             )))
         }

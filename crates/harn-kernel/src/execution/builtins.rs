@@ -225,7 +225,7 @@ impl Machine<'_> {
                 {
                     return OpStep::Error(diagnostic(
                         "builtin_type",
-                        "pick: expected a record, dictionary, or Harness",
+                        "pick: expected a dict, struct, or Harness",
                     ));
                 }
                 let RuntimeValue::List(keys) = keys else {

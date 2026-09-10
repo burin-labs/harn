@@ -5,7 +5,7 @@ fn pick_preserves_heterogeneous_fields_and_capabilities() {
     let diagnostics = errors(
         r#"
 type Context = {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools}
-fn consume(ctx: Context) -> string? { return ctx.env.get("HARN_PICK_TEST") }
+fn consume(ctx: Context) -> string? { return ctx.env.get("PICK_TEST_VALUE") }
 fn main(harness: Harness) {
   consume(pick(harness, ["env", "fs", "tools"]))
   const row = pick({name: "Ada", age: 37, absent: nil}, ["name", "age", "absent"])
