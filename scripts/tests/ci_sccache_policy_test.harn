@@ -756,7 +756,7 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task: u
 }
 
 @test
-pipeline test_source_length_budget_starts_after_cli_readiness(_harness: Harness, _task: unknown) {
+pipeline test_source_length_budget_starts_after_cli_readiness() {
   const valid = workflow()
   assert_eq(ci_linux_lane_policy_errors(valid), [])
   const invalid = {
