@@ -693,7 +693,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 1349,
+        "line": 1347,
         "reader": "__detect_native_fallback"
       }
     ],

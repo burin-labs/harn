@@ -392,7 +392,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 992,
+        "line": 989,
         "reader": "__arbitrate_stalled_toolless_turn"
       },
       {
@@ -445,7 +445,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 795,
+        "line": 792,
         "reader": "__completion_result"
       }
     ],
@@ -538,7 +538,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 795,
+        "line": 792,
         "reader": "__completion_result"
       }
     ],
