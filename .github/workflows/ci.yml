@@ -1234,8 +1234,9 @@ jobs:
   # nothing else.
   source-length-ratchet:
     name: Check source file lengths
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    # The execution budget starts after the shared CLI is actually available.
+    needs: [changes, rust-artifacts-ready]
+    if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -1251,10 +1252,6 @@ jobs:
           # unreadable include. The ratchet reconciles its walk against
           # `git ls-files`, so it would lose that cross-check and still pass.
           persist-credentials: false
-      - name: Wait for shared Harn binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
       - name: Download shared Harn binary
         uses: ./.github/actions/download-artifact-with-retry
         with:
