@@ -1616,10 +1616,12 @@ jobs:
       # in the already-required audit lane, where the snapshot check can reuse
       # the warmed Harn binary below rather than creating another Rust job.
       - uses: ./.github/actions/node-cache
+        if: ${{ !cancelled() }}
         with:
           node-version: "22"
           cache-dependency-path: package-lock.json
       - run: npm ci
+        if: ${{ !cancelled() }}
       # Not a Make target, so it keeps its own step. `if: always()` here and on
       # every step below is the point of this job's shape: a step that fails
       # must not skip the ones after it.
