@@ -1419,7 +1419,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 1344,
+        "line": 1342,
         "reader": "__detect_native_fallback"
       },
       {
@@ -1479,12 +1479,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 918,
+        "line": 915,
         "reader": "agent_extract_tool_calls"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 1065,
+        "line": 1062,
         "reader": "agent_compute_post_turn"
       },
       {
@@ -1640,7 +1640,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 911,
+        "line": 908,
         "reader": "agent_extract_tool_calls"
       },
       {
@@ -1650,17 +1650,17 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 917,
+        "line": 914,
         "reader": "agent_extract_tool_calls"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 1060,
+        "line": 1057,
         "reader": "agent_compute_post_turn"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 722,
+        "line": 723,
         "reader": "__maybe_inject_action_nudge"
       },
       {

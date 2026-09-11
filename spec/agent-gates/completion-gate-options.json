@@ -322,7 +322,7 @@
   },
   {
     "default": "absent; no additional task requirements",
-    "evidence": "completion_gate normalizes the declared contract and evaluates the facts callback's assessments and evidence through completion_requirement_report. Canonical loop verification is tracked by conformance/tests/agents/stop_decision_requirements.harn; reachability remains unknown until the candidate is exercised.",
+    "evidence": "completion_gate normalizes the declared contract and evaluates the facts callback's assessments and evidence through completion_requirement_report. Canonical loop verification is tracked by conformance/tests/mechanisms/stop_decision_requirements.contract.harn; reachability remains unknown until the candidate is exercised.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
