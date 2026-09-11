@@ -170,6 +170,21 @@ pub const HOSTED_RUNNER_TIER = "github-hosted"
 
 pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
+/**
+ * The org's own Linux pool. Named as its own tier rather than folded into the
+ * hosted one because every `${RUNNER_TIER_ENV} ==` guard has to answer for it:
+ * a guard that lists only the tiers it knows turns a new tier into a silent
+ * skip, and the first owned run would then compile cold, report success, and
+ * say nothing about the cache step it never entered (#8334).
+ */
+pub const SELFHOSTED_RUNNER_TIER = "self-hosted"
+
+/** The owned Linux label set the Rust workspace producer may prefer. */
+pub const SELFHOSTED_LINUX_BIG_RUNNER = "[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]"
+
+/** The census pool that answers for that label set. */
+pub const SELFHOSTED_LINUX_BIG_POOL = "linux_big"
+
 pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
 
 /** The step that names where the slow E2E suite is about to land. */
@@ -1562,6 +1577,50 @@ pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
   return errors
 }
 
+pub fn owned_producer_condition() -> string {
+  return "(github.event_name == 'pull_request'"
+    + "\n  && github.event.pull_request.head.repo.full_name == github.repository"
+    + "\n  && needs.runner-availability.outputs.selfhosted_disabled == ''"
+    + "\n  && needs.runner-availability.outputs.capacity != ''"
+    + "\n  && fromJSON(needs.runner-availability.outputs.capacity).${SELFHOSTED_LINUX_BIG_POOL}.online > 0"
+}
+
+pub fn paid_producer_condition() -> string {
+  return "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
+}
+
+/**
+ * Three rungs, one shape, used for `runs-on`, `timeout-minutes` and the tier
+ * mirror. They are generated from one function so the three can never disagree
+ * about which events reach which capacity: a mirror that drifted from its
+ * `runs-on` is how a tier guard starts naming a route the job never took.
+ */
+pub fn producer_rung_expression(paid: string, owned: string, hosted: string) -> string {
+  return "$"
+    + "{{ (vars.${BLACKSMITH_ENABLE_VAR} == 'true'"
+    + "\n  && ${paid_producer_condition()}"
+    + "\n  && ${paid})"
+    + "\n  || ${owned_producer_condition()}"
+    + "\n  && ${owned})"
+    + "\n  || ${hosted} }}"
+}
+
+pub fn producer_runner_expression(runner: string) -> string {
+  return producer_rung_expression(
+    "'${runner}'",
+    "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')",
+    "'${HOSTED_LINUX_RUNNER}'",
+  )
+}
+
+pub fn producer_tier_expression() -> string {
+  return producer_rung_expression(
+    "'${BLACKSMITH_RUNNER_TIER}'",
+    "'${SELFHOSTED_RUNNER_TIER}'",
+    "'${HOSTED_RUNNER_TIER}'",
+  )
+}
+
 /** Keep integration ratchets and publication tails off pull-request runners. */
 pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   let errors: list<string> = []
@@ -1573,10 +1632,24 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       errors = errors + ["ci.yml:${name} must use GitHub-hosted ubuntu-latest"]
     }
   }
-  for name in ["rust-checks", "rust-check-inputs", "harn-audit"] {
+  for name in ["rust-checks", "harn-audit"] {
     if trim(jobs[name]?.["runs-on"] ?? "") != elastic_runner {
       errors = errors + ["ci.yml:${name} must use the shared elastic Linux runner switch"]
     }
+  }
+  // The Rust workspace producer carries one more rung than its siblings.
+  // A same-repository pull request prefers the owned pool when its census
+  // reports online carriers, including a busy pool that must queue work.
+  // Merge groups and main pushes are deliberately NOT eligible: main pushes are
+  // the authorized cache writer, and merge throughput must not depend on a
+  // residential machine's health, which is the objection #6217 recorded when it
+  // removed the previous ladder.
+  if trim(jobs["rust-check-inputs"]?.["runs-on"] ?? "")
+    != producer_runner_expression(BLACKSMITH_8CPU_RUNNER) {
+    errors = errors
+      + [
+        "ci.yml:rust-check-inputs must ladder the elastic switch, the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then GitHub-hosted",
+      ]
   }
   if trim(jobs["audit-scripts"]?.if ?? "") != MAIN_ONLY_POLICY_IF {
     errors = errors + ["ci.yml:audit-scripts must run on Rust-changing main pushes only"]

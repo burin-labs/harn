@@ -84,6 +84,7 @@
     "critical_path_allowance_ms": 600000,
     "jobs": {
       "changes": { "budget_ms": 30000 },
+      "rust-producer-capacity": { "budget_ms": 30000 },
       "fmt": { "budget_ms": 60000 },
       "package-audit": { "budget_ms": 590000 },
       "lint-md": { "budget_ms": 30000 },

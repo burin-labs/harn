@@ -31,6 +31,7 @@ env:
   # the barrier jobs add scheduling and API headroom above it.
   HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
   HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
+  HARN_EXT_ARTIFACT_PRODUCER_JOB: "Rust workspace tests"
   # Incremental fights the within-job sccache wrapper. Cross-run reuse is
   # owned by each lane's persistent compiler-object cache. Do not persist a
   # shared target/: independent PR and merge-group builds overlap, and Cargo
@@ -46,13 +47,18 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  # Linux CI runs on GitHub-hosted runners. This repository is public, so
-  # hosted minutes are free, and routing to the org's residential self-hosted
-  # pool made local machine health a merge-throughput dependency for no gain.
-  # The 2026-08-02 merge-queue incident measured the real critical path as
-  # compilation plus conformance/audit work (~22 minutes), not runner
+  # Linux CI runs on GitHub-hosted runners by default. This repository is
+  # public, so hosted minutes are free, and #6217 removed a self-hosted ladder
+  # that had made local machine health a merge-throughput dependency for no
+  # gain. The 2026-08-02 merge-queue incident measured the real critical path
+  # as compilation plus conformance/audit work (~22 minutes), not runner
   # admission: once queue admission widened, five speculative merge groups
   # started on hosted runners within seconds (#6017).
+  #
+  # `rust-check-inputs` may use the owned pool on same-repository pull requests.
+  # A measured online pool queues work even when busy; zero online carriers or
+  # retired owned routing selects hosted capacity. An unreadable census blocks
+  # dispatch. Merge groups and main pushes retain their hosted routing (#8334).
 
   # Decide whether the heavy Linux Rust lanes (rust-checks, audit-scripts) need
   # to run at all.
@@ -600,17 +606,70 @@ jobs:
   # It builds the exact CLI/security artifacts consumed by GitHub Ubuntu, then
   # executes every compatible workspace test without recompiling on another
   # runner. Host-bound Linux sandbox proofs remain explicitly GitHub-owned below.
+  # Where the Rust workspace producer is allowed to land. Read for its
+  # `capacity` counts rather than its per-lane booleans: those booleans go
+  # false both when the fleet is switched off and when it is merely busy, and a
+  # busy fleet is a reason to queue, not a reason to send this job somewhere
+  # else.
+  #
+  # Same-repository pull requests only. Fork pull requests cannot read the
+  # release-app credentials this probe needs, and they are not eligible for
+  # owned capacity anyway, so the probe is skipped rather than failed for them.
+  runner-availability:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d924b47e5f445468454904f2bb32c6f9b4f050eb
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+  # Say where the producer is about to land, and refuse when that cannot be
+  # measured. The routing expression below can only choose; it cannot report,
+  # and it reads an unreadable census exactly like a census that reported no
+  # capacity. Both fall through to a hosted runner and silently downgrade the
+  # tier, leaving nothing to attribute the downgrade to.
+  rust-producer-capacity:
+    name: Name the Rust producer runner capacity decision
+    needs: runner-availability
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - name: Decide where the Rust workspace producer lands
+        run: bash scripts/ci/runner_capacity.sh
+        env:
+          CAPACITY_LABEL: RUST_PRODUCER_CAPACITY
+          # The inverse of the E2E suite's choice: this producer routes trusted
+          # pull requests while retaining the hosted main-branch cache writer.
+          CAPACITY_ROUTED_EVENT: pull_request
+          EVENT_NAME: ${{ github.event_name }}
+          SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
+          RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
+          # The same switch the routing expression below reads. Without it here
+          # this step would report the owned census while the job ran on
+          # elastic paid capacity.
+          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
+
   rust-check-inputs:
     name: Rust workspace tests
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    needs: [changes, runner-availability, rust-producer-capacity]
+    # Forks and non-PR events intentionally skip capacity measurement. Trusted
+    # PRs require its successful decision before dispatch, including hosted
+    # fallbacks; an absent or failed measurement must not start the producer.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.rust == 'true'
+        && (needs.rust-producer-capacity.result == 'success'
+        || github.event_name != 'pull_request'
+        || github.event.pull_request.head.repo.full_name != github.repository) }}
     # Public-repository CI defaults to GitHub-hosted capacity, which is free.
     # Paid capacity requires the explicit repository opt-in below. At $0.016/min
     # every paid run has a hard 20-minute/$0.32 fuse, and Blacksmith never saves
     # a cache.
     #
     # The hosted ceiling is owned by the workload rather than chosen as a round
-    # number: it is the sum of the three step budgets below (9 + 12 + 26), plus
+    # number: it is the sum of the hosted step budgets below (10 + 16 + 26), plus
     # six minutes of setup and cache restore, plus a twelve-minute reserve for
     # this job's main-branch cache save. The save is a post step, so before the
     # reserve existed it ran inside whatever margin the tests happened to leave;
@@ -620,10 +679,38 @@ jobs:
     # spending the save's reserve. The machine-readable performance budget
     # remains ten minutes, so this recovery margin does not weaken the latency
     # SLO. scripts/ci_cache_policy/linux_checks.harn owns the arithmetic.
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
-    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 20 || 70 }}
-    # The GitHub-hosted fallback remains an authorized main-branch cache
-    # writer; Blacksmith uses sticky sccache and never enters that step.
+    #
+    # The owned self-hosted rung is the same arithmetic minus the cache-save
+    # reserve, with bounded cold retries: 6 setup + 20 + 24 + 26 = 76. It is a
+    # hang backstop, not a claim about host core count or improved performance.
+    runs-on: >-
+      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
+        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        && 'blacksmith-8vcpu-ubuntu-2404')
+        || (github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && needs.runner-availability.outputs.selfhosted_disabled == ''
+        && needs.runner-availability.outputs.capacity != ''
+        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+        || 'ubuntu-latest' }}
+    timeout-minutes: >-
+      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
+        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        && 20)
+        || (github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && needs.runner-availability.outputs.selfhosted_disabled == ''
+        && needs.runner-availability.outputs.capacity != ''
+        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        && 76)
+        || 70 }}
+    # The GitHub-hosted rung remains the authorized main-branch cache writer;
+    # Blacksmith uses sticky sccache and never enters that step, and the owned
+    # self-hosted rung is pull-request-only so it never reaches the write
+    # either. That is the reason the owned rung is scoped to pull requests
+    # rather than to every event: routing main pushes there would retire the
+    # writer, and every later hosted run would pay a cold cache.
     permissions:
       contents: read
       actions: write
@@ -635,7 +722,17 @@ jobs:
       # The producer is the only sticky-cache writer. Fifteen GiB covered the
       # previously measured workspace graph and caps storage near $7.50/month.
       SCCACHE_CACHE_SIZE: 15G
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted' }}
+      HARN_RUNNER_TIER: >-
+        ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
+          && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+          && 'blacksmith')
+          || (github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && needs.runner-availability.outputs.selfhosted_disabled == ''
+          && needs.runner-availability.outputs.capacity != ''
+          && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+          && 'self-hosted')
+          || 'github-hosted' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -670,8 +767,17 @@ jobs:
         with:
           cache-key: workspace-tests
           sticky: "true"
+      # Every tier gets an explicit answer, because a guard that names only
+      # the tiers it knows turns a new tier into a silent skip: the first
+      # self-hosted run would compile cold, report success, and say nothing.
+      # Blacksmith has its sticky sccache above. The owned pool and hosted
+      # runners both attempt an environment-compatible restore; differing
+      # toolchains and environment keys can still require a cold build.
+      # Only the hosted rung ever
+      # writes it: `save` is restore-only off `main`, and the owned rung is
+      # pull-request-only, so the authorized main-branch writer is untouched.
       - uses: ./.github/actions/rust-cache
-        if: env.HARN_RUNNER_TIER == 'github-hosted'
+        if: env.HARN_RUNNER_TIER != 'blacksmith'
         continue-on-error: true
         with:
           shared-key: workspace-tests
@@ -684,7 +790,7 @@ jobs:
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
-        timeout-minutes: 10
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 20 || 10 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
@@ -707,7 +813,7 @@ jobs:
       # Only security binaries enter this archive; the following workspace
       # tests reuse the same profile and unified features without rebuilding.
       - name: Build security test archive
-        timeout-minutes: 16
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 16 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
@@ -793,7 +899,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
     permissions:
       actions: read
       contents: read
@@ -804,6 +910,8 @@ jobs:
       - name: Wait for Linux security tests
         env:
           GH_TOKEN: ${{ github.token }}
+          # Six minutes setup + 20 CLI + 24 workspace archive + five dispatch/upload.
+          HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "330"
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
@@ -2414,6 +2522,7 @@ jobs:
         lint-md,
         release-contract,
         rust-checks,
+        rust-producer-capacity,
         rust-check-inputs,
         rust-artifacts-ready,
         security-tests-ready,
@@ -2533,6 +2642,20 @@ jobs:
           require_result "$stack_frames_result" "Stack frame budget failed." true
           if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$stack_frames_ok" != "true" ]; then
             echo "::error::Stack frame proof is missing."
+            exit 1
+          fi
+
+          # The capacity decision is fail-closed on the runs that can make it.
+          # It refuses by name when the fleet census cannot be read, and a
+          # refusal that only warned would let the producer fall through to a
+          # hosted runner with nothing to attribute the downgrade to. It is
+          # skipped on fork pull requests and on every non-pull-request event,
+          # which is not a failure.
+          rust_producer_capacity_result="${{ needs['rust-producer-capacity'].result }}"
+          echo "Rust producer capacity decision: $rust_producer_capacity_result"
+          if [ "$rust_producer_capacity_result" != "success" ] \
+            && [ "$rust_producer_capacity_result" != "skipped" ]; then
+            echo "::error::The Rust producer runner capacity decision did not complete."
             exit 1
           fi
 
