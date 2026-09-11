@@ -83,8 +83,10 @@ pub fn producer_security_timeout_expression() -> string {
     + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_SECURITY_MINUTES} || 16 }}"
 }
 
-// Cover setup and both sequential builds, plus five minutes for dispatch and
-// upload. The job has another five minutes for checkout and terminal cleanup.
+/**
+ * Cover setup and both sequential builds, plus five minutes for dispatch and
+ * upload. The job has another five minutes for checkout and terminal cleanup.
+ */
 pub fn security_wait_minutes() -> int {
   return PRODUCER_SETUP_OVERHEAD_MINUTES + PRODUCER_OWNED_CLI_MINUTES
     + PRODUCER_OWNED_SECURITY_MINUTES
