@@ -28,6 +28,8 @@ mod check_cli;
 mod crystallize_cli;
 mod demo_cli;
 mod eval_prompt_cli;
+#[cfg(unix)]
+mod file_secrets;
 mod flow_ship_cli;
 mod harnpack_run;
 mod imported_parameter_diagnostic;
