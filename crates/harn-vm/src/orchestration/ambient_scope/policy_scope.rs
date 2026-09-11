@@ -6,11 +6,32 @@
 //! swap machinery.
 
 use std::future::Future;
+use std::sync::Arc;
 
 use super::{scope_ambient, AmbientExecutionScope, Scoped};
 use crate::autonomy::AutonomyPolicy;
 use crate::llm::permissions::DynamicPermissionPolicy;
 use crate::orchestration::{CapabilityPolicy, CommandPolicy, ToolApprovalPolicy};
+
+/// The execution policy owned by a deferred callback's registering caller.
+#[derive(Clone, Debug)]
+pub(crate) struct RegisteredExecutionPolicy(Option<Arc<CapabilityPolicy>>);
+
+impl RegisteredExecutionPolicy {
+    pub(crate) fn capture() -> Self {
+        Self(crate::orchestration::current_execution_policy().map(Arc::new))
+    }
+
+    pub(crate) fn scope<F: Future>(&self, inner: F) -> Scoped<F> {
+        let policy = self.0.as_deref().cloned();
+        scope_modified(inner, |scope| {
+            scope.execution = policy.into_iter().collect();
+            // A host hook's temporary exemption cannot grant authority to a
+            // separately registered listener. Its own policy still applies.
+            scope.trusted_depth = 0;
+        })
+    }
+}
 
 fn scope_modified<F: Future>(
     inner: F,
@@ -103,5 +124,58 @@ mod tests {
             vec!["outer".to_string()]
         );
         clear_execution_policy_stacks();
+    }
+
+    #[tokio::test]
+    async fn registered_policy_survives_yield_and_restores_emitter_trust_after_error() {
+        use crate::orchestration::{
+            allow_trusted_bridge_calls, enforce_current_policy_for_capability, pop_execution_policy,
+        };
+
+        clear_execution_policy_stacks();
+        let mut registered = policy_named("listener");
+        registered.side_effect_level = Some("read_only".into());
+        push_execution_policy(registered.clone());
+        let captured = RegisteredExecutionPolicy::capture();
+        pop_execution_policy();
+        let mut emitter = policy_named("emitter");
+        emitter.side_effect_level = Some("read_only".into());
+        push_execution_policy(emitter.clone());
+        let trusted = allow_trusted_bridge_calls();
+        let state_write = || {
+            enforce_current_policy_for_capability(
+                harn_builtin_meta::CapabilityId::Runtime,
+                "store_set",
+                &[],
+            )
+        };
+
+        let result = captured
+            .scope(async {
+                assert_eq!(current_execution_policy(), Some(registered.clone()));
+                assert!(
+                    state_write().is_err(),
+                    "emitter trust must not bypass the listener policy"
+                );
+                tokio::task::yield_now().await;
+                assert_eq!(current_execution_policy(), Some(registered));
+                assert!(state_write().is_err());
+                Err::<(), _>("listener failed")
+            })
+            .await;
+
+        assert_eq!(result, Err("listener failed"));
+        assert_eq!(current_execution_policy(), Some(emitter));
+        assert!(
+            state_write().is_ok(),
+            "the emitter's trusted scope must be restored"
+        );
+        drop(trusted);
+        assert!(
+            state_write().is_err(),
+            "the restored trust guard must still unwind"
+        );
+        pop_execution_policy();
+        assert!(current_execution_policy().is_none());
     }
 }

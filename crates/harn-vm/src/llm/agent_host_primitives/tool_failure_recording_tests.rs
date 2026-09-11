@@ -14,12 +14,28 @@
 //! dispatches, so a regression anywhere between classification and the
 //! recorded tool-result envelope fails here.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::host_agent_dispatch_tool_call;
 use crate::value::{DictMap, VmClosure, VmEnv, VmValue};
 
 struct PipelineInputBridge;
+
+struct ConsentBridge(Arc<AtomicUsize>);
+
+impl crate::HostCallBridge for ConsentBridge {
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        _params: &'a DictMap,
+    ) -> crate::HostCallDispatchFuture<'a> {
+        assert_eq!((capability, operation), ("permission", "request"));
+        self.0.fetch_add(1, Ordering::SeqCst);
+        crate::host_call_ready(Ok(Some(VmValue::dict([("approved", VmValue::Bool(true))]))))
+    }
+}
 
 impl crate::HostCallBridge for PipelineInputBridge {
     fn dispatch<'a>(
@@ -220,4 +236,52 @@ async fn host_call_inside_tool_handler_fails_loudly_while_pipeline_call_remains_
             .is_some_and(|text| text.contains("unavailable inside a tool handler")),
         "the refusal must distinguish an unserviceable host call from an empty host answer: {result}"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn command_hook_consent_reaches_the_host_without_opening_other_handler_calls() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let _bridge = crate::install_host_call_bridge(Arc::new(ConsentBridge(calls.clone())));
+    let source = r#"fn handler(request: dict) {
+        const response = host_call("permission.request", {})
+        return {ok: response.approved}
+    }"#;
+
+    let direct = dispatch_trusted("direct_consent", source).await;
+    assert_eq!(
+        direct["ok"], false,
+        "a tool cannot ask on the policy's behalf: {direct}"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    {
+        let _hook = crate::orchestration::enter_command_policy_hook();
+        let consent = dispatch_trusted("policy_consent", source).await;
+        assert_eq!(
+            consent["ok"], true,
+            "the policy's consent call must reach the host: {consent}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let unrelated = dispatch_trusted(
+            "pipeline_input",
+            r#"fn handler(request: dict) { return host_call("runtime.pipeline_input", {}) }"#,
+        )
+        .await;
+        assert_eq!(unrelated["ok"], false, "{unrelated}");
+        assert!(
+            unrelated["observation"]
+                .as_str()
+                .is_some_and(|text| text.contains("unavailable inside a tool handler")),
+            "{unrelated}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    let after = dispatch_trusted("direct_consent_after_hook", source).await;
+    assert_eq!(
+        after["ok"], false,
+        "the hook's consent access must unwind: {after}"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }

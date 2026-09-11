@@ -461,6 +461,7 @@ mod policy_scope;
 pub use policy_scope::{scope_ambient_context, scope_execution_policy};
 pub(crate) use policy_scope::{
     scope_approval_policy, scope_autonomy_policy, scope_command_policy, scope_dynamic_permissions,
+    RegisteredExecutionPolicy,
 };
 
 /// Run `inner` with the exact provider and capability overlays supplied by an

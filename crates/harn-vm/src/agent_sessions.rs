@@ -48,11 +48,14 @@ pub use changed_paths::{
     session_changed_paths, take_session_changed_paths,
 };
 mod journal;
+mod subscribers;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
 pub(crate) use journal::{
     claim_journal_task, clear_journal, install_journal, journal_owns_session,
     journal_sessions_for_task, next_journal_event, record_persisted_journal_event,
 };
+pub(crate) use subscribers::registered_subscribers_for;
+pub use subscribers::{append_subscriber, subscriber_count, subscribers_for, SessionSubscriber};
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
 const LIVE_CLIENT_PERMISSION_EVENT_KIND: &str = "live_session_permission_route";
 
@@ -177,7 +180,7 @@ impl Default for SessionTranscriptBudgetPolicy {
 pub struct SessionState {
     pub id: String,
     pub transcript: VmValue,
-    pub subscribers: Vec<VmValue>,
+    pub subscribers: Vec<SessionSubscriber>,
     pub created_at: String,
     pub last_accessed: Instant,
     pub parent_id: Option<String>,
@@ -1447,35 +1450,6 @@ pub fn replace_messages_with_summary(
             source_event_ids,
         );
         Ok(())
-    })
-}
-
-pub fn append_subscriber(id: &str, callback: VmValue) -> Result<(), SessionOpenError> {
-    open_or_create(Some(id.to_string()))?;
-    SESSIONS.with(|s| {
-        if let Some(state) = s.borrow_mut().get_mut(id) {
-            state.subscribers.push(callback);
-            state.touch();
-        }
-    });
-    Ok(())
-}
-
-pub fn subscribers_for(id: &str) -> Vec<VmValue> {
-    SESSIONS.with(|s| {
-        s.borrow()
-            .get(id)
-            .map(|state| state.subscribers.clone())
-            .unwrap_or_default()
-    })
-}
-
-pub fn subscriber_count(id: &str) -> usize {
-    SESSIONS.with(|s| {
-        s.borrow()
-            .get(id)
-            .map(|state| state.subscribers.len())
-            .unwrap_or(0)
     })
 }
 
