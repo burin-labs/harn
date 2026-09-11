@@ -6,6 +6,7 @@ mod approval_review_config;
 mod approval_rules;
 mod capability_lattice;
 mod consent_capability;
+pub(crate) use consent_capability::is_policy_machinery_consent_call;
 mod effect_call_cache;
 mod effects;
 mod nested_budget;

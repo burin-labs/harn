@@ -21,6 +21,7 @@ pub(super) fn is_capability_migration_repair_id(id: &str) -> bool {
                 | "bindings/attenuate-harness"
                 | "bindings/attenuate-capability-argument"
                 | "bindings/attenuate-capability-bundle-argument"
+                | "bindings/replace-capability-projection-argument"
                 // Attenuation reuses the parameter's existing name, so the
                 // migration's own output can leave a narrowed parameter still
                 // called `harness`. That is work this migration created, and
@@ -52,6 +53,7 @@ pub(super) fn defers_to_whole_program_pass(id: &str) -> bool {
             // called, so naming it before the pass settles its type names it
             // after a capability it is about to stop carrying.
             | "bindings/name-capability-parameter"
+            | "bindings/replace-capability-projection-argument"
     )
 }
 

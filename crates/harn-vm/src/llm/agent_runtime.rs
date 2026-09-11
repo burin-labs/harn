@@ -330,14 +330,14 @@ pub(crate) async fn emit_agent_event_with_ctx(
         }
     }
 
-    let subscribers = crate::agent_sessions::subscribers_for(event.session_id());
+    let subscribers = crate::agent_sessions::registered_subscribers_for(event.session_id());
     if subscribers.is_empty() {
         return;
     }
     let payload = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
     let arg = crate::stdlib::json_to_vm_value(&payload);
-    for closure in subscribers {
-        let VmValue::Closure(closure) = closure else {
+    for subscriber in subscribers {
+        let VmValue::Closure(closure) = subscriber.callback else {
             continue;
         };
         let Some(ctx) = ctx else {
@@ -346,7 +346,10 @@ pub(crate) async fn emit_agent_event_with_ctx(
         let mut vm = ctx.child_vm();
         // Log but don't propagate: one broken subscriber must not tear
         // down the agent loop.
-        let result = vm.call_closure_pub(&closure, &[arg.clone()]).await;
+        let result = subscriber
+            .execution_policy
+            .scope(vm.call_closure_pub(&closure, &[arg.clone()]))
+            .await;
         ctx.forward_output(&vm.take_output());
         if let Err(err) = result {
             crate::events::log_warn(

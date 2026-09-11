@@ -22,6 +22,8 @@ mod alias_widening;
 mod capability_arguments;
 #[path = "fix/capability_migrations.rs"]
 mod capability_migrations;
+#[path = "fix/capability_projection_arguments.rs"]
+mod capability_projection_arguments;
 mod implicit_any_compatibility;
 #[path = "fix/lint_context.rs"]
 mod lint_context;
@@ -770,6 +772,9 @@ fn collect_file_candidates(
     let imported_type_declarations = module_graph
         .imported_type_declarations_for_file(file)
         .unwrap_or_default();
+    let imported_callables = module_graph
+        .imported_callable_declarations_for_file(file)
+        .unwrap_or_default();
     let deferred_capability_mismatches = if options.capability_migrations_only {
         deferred_capability_mismatch_spans(
             &output.diagnostics,
@@ -860,6 +865,30 @@ fn collect_file_candidates(
             }
             if diag.code != Code::ArgumentTypeMismatch {
                 return None;
+            }
+            match capability_projection_arguments::existing_projection(
+                &source,
+                &program,
+                &imported_callables,
+                diag.span?,
+                expected_type.as_ref()?,
+                actual_type.as_ref()?,
+            ) {
+                capability_projection_arguments::ArgumentRepair::Replace(edit) => {
+                    return Some((
+                        Repair {
+                            id: harn_parser::RepairId::from_owned(
+                                "bindings/replace-capability-projection-argument".into(),
+                            ),
+                            summary: "Replace the existing capability projection in place".into(),
+                            safety: RepairSafety::SurfaceChanging,
+                        },
+                        vec![edit],
+                        RepairImpactWire::local_ambient("replace-capability-projection-argument"),
+                    ));
+                }
+                capability_projection_arguments::ArgumentRepair::Preserve => return None,
+                capability_projection_arguments::ArgumentRepair::Missing => {}
             }
             if matches!(expected_type.as_ref(), Some(TypeExpr::Named(expected)) if expected == "Harness") {
                 return synthesize_missing_root_argument_repair(

@@ -49,3 +49,68 @@ fn main(harness: Harness) {
         [vec![Some("harness.runtime".into())]]
     );
 }
+
+#[test]
+fn capability_apply_replaces_existing_projection_for_a_root_parameter() {
+    for projection in [
+        "pick(harness, [\"env\", \"runtime\"])",
+        "{env: harness.env, runtime: harness.runtime}",
+        "harness.runtime",
+    ] {
+        let (result, updated) = apply_single(&format!(
+            "import {{ with_scenario }} from \"std/testing\"\n\nfn main(harness: Harness) {{\n  with_scenario({projection}, {{}}, {{ _ -> \"ok\" }})\n}}\n"
+        ));
+        assert!(!result.applied.is_empty(), "the migration must run");
+        assert_eq!(
+            result.post_apply_diagnostics_count, 0,
+            "{result:#?}\n{updated}"
+        );
+        assert_eq!(
+            call_argument_paths(&updated, "with_scenario"),
+            [vec![Some("harness".into()), None, None]],
+            "an existing carrier must be replaced rather than shifted: {updated}"
+        );
+    }
+}
+
+#[test]
+fn capability_apply_replaces_existing_bundle_for_a_narrow_parameter() {
+    for projection in ["pick(harness, [\"fs\"])", "{fs: harness.fs}"] {
+        let (result, updated) = apply_single(&format!(
+            "import {{ with_temp_dir }} from \"std/testing\"\n\nfn main(harness: Harness) {{\n  with_temp_dir({projection}, {{ dir -> harness.stdio.println(dir) }})\n}}\n"
+        ));
+        assert!(!result.applied.is_empty(), "the migration must run");
+        assert_eq!(
+            result.post_apply_diagnostics_count, 0,
+            "{result:#?}\n{updated}"
+        );
+        assert_eq!(
+            call_argument_paths(&updated, "with_temp_dir"),
+            [vec![Some("harness.fs".into()), None]],
+            "an existing carrier must be replaced rather than shifted: {updated}"
+        );
+    }
+}
+
+#[test]
+fn capability_apply_preserves_opaque_or_ambiguous_projection_arguments() {
+    for projection in [
+        "get_runtime(harness.runtime)",
+        "{runtime: get_runtime(harness.runtime)}",
+        "{env: harness.env, runtime: other.runtime}",
+        "pick(harness, [/* retain this explanation */ \"runtime\"])",
+    ] {
+        let source = format!(
+            "import {{ with_scenario }} from \"std/testing\"\n\nfn get_runtime(runtime: HarnessRuntime) -> HarnessRuntime {{\n  runtime.store_set(\"observed\", true)\n  return runtime\n}}\n\nfn main(harness: Harness, other: Harness) {{\n  with_scenario({projection}, {{}}, {{ _ -> \"ok\" }})\n}}\n"
+        );
+        let (result, updated) = apply_single(&source);
+        assert!(
+            updated.contains(&format!("with_scenario({projection}, {{}}")),
+            "an ambiguous or observable expression must not be dropped or shifted: {updated}"
+        );
+        assert!(
+            result.post_apply_diagnostics_count > 0,
+            "the unresolved argument must remain visible: {result:#?}"
+        );
+    }
+}

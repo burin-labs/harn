@@ -99,9 +99,9 @@ mod replay_bench;
 pub use replay_bench::*;
 
 mod policy;
-#[cfg(test)]
-pub(crate) use policy::swap_execution_policy_stack;
 pub use policy::*;
+#[cfg(test)]
+pub(crate) use policy::{is_policy_machinery_consent_call, swap_execution_policy_stack};
 
 mod ambient_scope;
 pub use ambient_scope::blocking::run_blocking_with_ambient;
@@ -109,6 +109,7 @@ pub(crate) use ambient_scope::{
     scope_agent_session, scope_ambient, scope_ambient_transaction, scope_approval_policy,
     scope_autonomy_policy, scope_command_policy, scope_dynamic_permissions, scope_inline_subtask,
     scope_run_event_sink, scope_spawned_source_dir, AmbientExecutionScope,
+    RegisteredExecutionPolicy,
 };
 pub use ambient_scope::{
     scope_ambient_context, scope_execution_policy, scope_fresh_run_runtime,

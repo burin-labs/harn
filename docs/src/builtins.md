@@ -1770,6 +1770,11 @@ spawning. The consent closure receives the command context enriched with
 may call `harness.interaction.request_approval` /
 `harness.interaction.ask_user` to block on a human.
 
+An embedder's privileged command-policy hook may also call
+`host_call("permission.request", ...)` while a tool is running. This consent
+operation uses the policy hook's authority; direct tool-handler calls and other
+host operations remain restricted.
+
 The never-approvable command floor runs before consent. It blocks fork bombs;
 `git reset --hard`, `git clean -fd`, and force-pushes; recursive deletion of the
 project or paths outside it; `dd of=…`; filesystem formatting;

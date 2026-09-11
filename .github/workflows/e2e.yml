@@ -69,8 +69,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Decide where the slow E2E suite lands
-        run: bash scripts/ci/e2e_runner_capacity.sh
+        run: bash scripts/ci/runner_capacity.sh
         env:
+          CAPACITY_LABEL: E2E_RUNNER_CAPACITY
+          CAPACITY_ROUTED_EVENT: push
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
