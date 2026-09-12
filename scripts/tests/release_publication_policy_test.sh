@@ -80,6 +80,9 @@ grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$LATEST_TAG"' \
 if grep -Fq 'permission-contents: write' "$publish_workflow"; then
   fail "read-only crate publication retains a contents-write credential"
 fi
+if grep -Eq 'bump-fleet\.yml|permission-actions: write' "$publish_workflow"; then
+  fail "crate publication can bypass the hosted release owner's convergence decision"
+fi
 grep -Fq "needs.release.result == 'success'" "$binary_workflow" \
   || fail "development bump can run before release publication succeeds"
 grep -Fq "needs.setup.outputs.is_prerelease == 'false'" "$binary_workflow" \
