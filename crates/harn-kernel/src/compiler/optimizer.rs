@@ -27,7 +27,7 @@ fn is_constant_fold_candidate(node: &Node) -> bool {
     )
 }
 
-fn constant_value(expr: &SNode) -> Option<VmValue> {
+pub(super) fn constant_value(expr: &SNode) -> Option<VmValue> {
     match &expr.node {
         Node::IntLiteral(value) => Some(VmValue::Int(*value)),
         Node::FloatLiteral(value) => Some(VmValue::Float(*value)),

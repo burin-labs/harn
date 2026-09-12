@@ -1,0 +1,86 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+pipeline test(harness: Harness) {
+  const prefix = "captured:"
+  tool describe(value: string, count: int = 2, suffix: string = "!") -> string {
+    return prefix + value + ":" + to_string(count) + suffix
+  }
+  const supplied = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "describe", arguments: {value: "hello", count: 3, suffix: "?"}},
+    describe,
+  )
+  assert(supplied.status == "ok")
+  assert(supplied.result == "captured:hello:3?")
+  const omitted = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "describe", arguments: {value: "hello", suffix: "?"}},
+    describe,
+  )
+  assert(omitted.status == "ok")
+  assert(omitted.result == "captured:hello:2?")
+
+  tool read_fixture(request: {path: string}) -> string {
+    return harness.fs.read_text(request.path)
+  }
+  const path = harness.fs.workspace_temp_dir() + "/declared-tool.txt"
+  harness.fs.write_text(path, "capability canary")
+  const read = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "read_fixture", arguments: {request: {path: path}}},
+    read_fixture,
+  )
+  assert(read.status == "ok")
+  assert(read.result == "capability canary")
+
+  for arguments in [{value: 7}, {value: "hello", count: nil}, {}] {
+    const invalid = agent_dispatch_tool_call(
+      harness.tools,
+      {name: "describe", arguments: arguments},
+      describe,
+    )
+    assert(invalid.status == "error", "invalid arguments must not reach the body")
+  }
+  const ordinary = tool_define(
+    tool_registry(),
+    "ordinary",
+    "A programmatically registered dictionary handler",
+    {parameters: {value: {type: "string"}}, handler: { args -> args.value }},
+  )
+  const ordinary_result = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "ordinary", arguments: {value: "dictionary canary"}},
+    ordinary,
+  )
+  assert(ordinary_result.status == "ok")
+  assert(ordinary_result.result == "dictionary canary")
+
+  tool extend(value: int, next: int = value + 1) -> int {
+    return next
+  }
+  const extended = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "extend", arguments: {value: 4}},
+    extend,
+  )
+  assert(extended.status == "ok")
+  assert(extended.result == "5")
+
+  tool count(...values: int) -> int {
+    return len(values)
+  }
+  const count_schema = tool_find(count, "count")
+  assert(count_schema.parameters.values.type == "array")
+  assert(count_schema.parameters.values.items.type == "integer")
+  assert(count_schema.parameters.values.required == false)
+  for arguments in [{values: [1, 2]}, {}] {
+    const counted = agent_dispatch_tool_call(
+      harness.tools,
+      {name: "count", arguments: arguments},
+      count,
+    )
+    assert(counted.status == "ok")
+    assert(counted.result == if arguments.has("values") { "2" } else { "0" })
+  }
+  harness.stdio.println("declared tool dispatch passed")
+}

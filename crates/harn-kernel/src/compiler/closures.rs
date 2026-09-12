@@ -83,17 +83,14 @@ impl Compiler {
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
-        fn_compiler.declare_param_slots(params);
-        fn_compiler.record_param_types(params);
-        fn_compiler.emit_default_preamble(params)?;
-        fn_compiler.emit_type_checks(params);
+        let handler_params = fn_compiler.emit_tool_parameter_bindings(params)?;
         fn_compiler.seed_captured_idents(body);
         fn_compiler.compile_block(body)?;
         // Run pending defers before implicit return
         fn_compiler.drain_finallys_to_floor(0)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
 
-        let param_slots = fn_compiler.compile_param_slots(params);
+        let param_slots = fn_compiler.compile_param_slots(&handler_params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         super::ensure_chunk_addressable(&fn_compiler.chunk, &format!("fn `{name}`"), self.line)?;
@@ -102,11 +99,11 @@ impl Compiler {
             type_params: Vec::new(),
             nominal_type_names: fn_compiler.nominal_type_names(),
             params: param_slots,
-            default_start: TypedParam::default_start(params),
+            default_start: None,
             chunk: Arc::new(fn_compiler.chunk),
             is_generator: false,
             is_stream: false,
-            has_rest_param: params.last().is_some_and(|p| p.rest),
+            has_rest_param: false,
             has_runtime_type_checks,
         };
         let fn_idx = self.chunk.functions.len();
@@ -134,8 +131,16 @@ impl Compiler {
             let pn_idx = self.string_constant(&p.name);
             self.chunk.emit_u16(Op::Constant, pn_idx, self.line);
 
-            let base_schema = p
-                .type_expr
+            let value_type = if p.rest {
+                Some(harn_parser::TypeExpr::List(Box::new(
+                    p.type_expr
+                        .clone()
+                        .unwrap_or_else(|| harn_parser::TypeExpr::Named("unknown".into())),
+                )))
+            } else {
+                p.type_expr.clone()
+            };
+            let base_schema = value_type
                 .as_ref()
                 .and_then(Self::type_expr_to_schema_value)
                 .unwrap_or_else(|| {
@@ -159,16 +164,23 @@ impl Compiler {
                 _ => crate::value::DictMap::new(),
             };
 
-            if p.default_value.is_some() {
+            if p.default_value.is_some() || p.rest {
                 param_schema.insert(crate::value::intern_key("required"), VmValue::Bool(false));
             }
 
             self.emit_vm_value_literal(&VmValue::dict(param_schema));
 
-            if let Some(default_value) = p.default_value.as_ref() {
+            // Schema metadata must not execute a default expression at
+            // declaration time. Nonconstant defaults can capture capabilities
+            // or refer to earlier arguments, and belong to handler invocation.
+            if let Some(default_value) = p
+                .default_value
+                .as_deref()
+                .and_then(super::optimizer::constant_value)
+            {
                 let default_key = self.string_constant("default");
                 self.chunk.emit_u16(Op::Constant, default_key, self.line);
-                self.compile_node(default_value)?;
+                self.emit_vm_value_literal(&default_value);
                 self.chunk.emit_u16(Op::BuildDict, 1, self.line);
                 self.chunk.emit(Op::Add, self.line);
             }
