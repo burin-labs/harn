@@ -21,6 +21,8 @@
 // `--strict`: a template that does not parse is an error and fails, while the
 // style rules (vendor-identity branching, branch explosion) stay advisory. Doc
 // prose often illustrates exactly the shape a style rule discourages.
+// Repository path rules in .harn-docs.toml set formatting, lint, validation,
+// and rendered code width. Diagnostic and ignored fences retain their intent.
 //
 // Every ```harn / ```harn,check block is additionally scanned for a call whose
 // first two positional arguments are the same bare identifier. Harn accepts
@@ -35,8 +37,9 @@
 //
 // A fence may be indented — blocks nested under a list item are checked
 // like any other, with the opening fence's indent stripped from the body.
-// The info string itself is still matched exactly: a trailing word or space
-// does not open a checked block. A fence may also use more than three
+// Unknown Harn fence options fail explicitly; surrounding whitespace is allowed.
+// Fences inside another language's fenced example are not Harn source.
+// A fence may also use more than three
 // backticks, which is how a block whose body contains ``` is written; the
 // closing fence must then be at least as long as the opening one.
 //
@@ -45,30 +48,14 @@
 //
 // Usage:
 //   harn run scripts/check_docs_snippets.harn
+import { parse, parser } from "std/cli/argparse"
+import {
+  SnippetConfig,
+  SnippetPolicy,
+  apply_snippet_rule,
+  parse_snippet_config,
+} from "./docs_snippet_policy.harn"
 import { require_scanned } from "./path_visibility.harn"
-
-const DOCS_GLOBS = [
-  "docs/src/**/*.md",
-  "docs/llm/*.md",
-  "README.md",
-  "CONTRIBUTING.md",
-  "website/*.md",
-]
-
-const DIAGNOSTIC_EXAMPLES_PATH = "docs/diagnostic-examples.json"
-
-// The reading budget for published Harn code, in columns. Measured on the
-// rendered page rather than derived from taste — and specifically not from
-// the prose measure: `website/src/index.css` deliberately leaves code,
-// tables, and diagrams uncapped by `--prose-measure`, so a code block is
-// sized by the article column instead. `website/src/pages/DocPage.tsx`
-// renders the article at `lg:max-w-3xl lg:px-10`: 768px - 80px of article
-// padding - 32px of `pre` padding - 2px of border = 654px of code text. Docs
-// code sets JetBrains Mono at 13.6px, whose character advance is 8.734px, so
-// 654 / 8.734 = 74 columns fit. That is the best case, not a typical one: the
-// article is width-capped, so it never gets wider, and a narrower window
-// still scrolls. A line past 74 columns scrolls even on a wide desktop.
-pub const MAX_SNIPPET_COLUMNS: int = 74
 
 /** Count of leading space/tab characters in `line`. */
 pub fn leading_ws_len(line: string) -> int {
@@ -123,7 +110,7 @@ pub fn backtick_run_len(s: string) -> int {
  * a new language means adding one arm here plus its `mode_*` arms below.
  */
 pub fn fence_mode(info: string) -> string {
-  const bare = fence_strip_title(info)
+  const bare = fence_strip_title(info.trim())
   if bare == "harn" {
     return "parse"
   }
@@ -167,13 +154,17 @@ pub fn fence_strip_title(info: string) -> string {
 
 /** Whether this info string opens a block the author asked to skip. */
 pub fn fence_is_ignored(info: string) -> bool {
-  const bare = fence_strip_title(info)
+  const bare = fence_strip_title(info.trim())
   return bare == "harn,ignore" || bare == "harn-prompt,ignore"
 }
 
 /** Whether this info string opens a block this checker tracks at all. */
 pub fn fence_is_owned(info: string) -> bool {
-  return fence_mode(info) != "" || fence_is_ignored(info)
+  const bare = info.trim()
+  return bare == "harn" || bare.starts_with("harn,") || bare.starts_with("harn ")
+    || bare == "harn-prompt"
+    || bare.starts_with("harn-prompt,")
+    || bare.starts_with("harn-prompt ")
 }
 
 /** Temp-file suffix a block of `mode` must be written to. */
@@ -376,6 +367,8 @@ pub fn extract_blocks(text: string) -> list {
   let open_line = 0
   let indent = 0
   let open_ticks = 0
+  let foreign_ticks = 0
+  let block_info = ""
   let body: list<string> = []
   let line_no = 0
   for line in text.lines() {
@@ -389,7 +382,17 @@ pub fn extract_blocks(text: string) -> list {
     } else {
       ""
     }
-    if is_fence && fence_is_owned(info) {
+    if foreign_ticks > 0 {
+      if is_fence && ticks >= foreign_ticks && info.trim() == "" {
+        foreign_ticks = 0
+      }
+      continue
+    }
+    if is_fence && !in_block && !fence_is_owned(info) && info.trim() != "" && !info.contains("`") {
+      foreign_ticks = ticks
+      continue
+    }
+    if is_fence && fence_is_owned(info) && (!in_block || ticks >= open_ticks) {
       if in_block {
         // Nested or unclosed fence — markdown is malformed. Surface the
         // line where the previous fence opened so the author can find it.
@@ -398,6 +401,7 @@ pub fn extract_blocks(text: string) -> list {
       in_block = true
       skip = fence_is_ignored(info)
       block_mode = fence_mode(info)
+      block_info = info
       idx = idx + 1
       open_line = line_no
       indent = ws
@@ -411,11 +415,22 @@ pub fn extract_blocks(text: string) -> list {
       in_block = false
       const kind = if skip {
         "skip"
+      } else if block_mode == "" {
+        "invalid"
       } else {
         "block"
       }
       events = events
-        + [{kind: kind, idx: idx, mode: block_mode, content: body.join("\n") + "\n"}]
+        + [
+          {
+            kind: kind,
+            idx: idx,
+            mode: block_mode,
+            content: body.join("\n") + "\n",
+            info: block_info,
+            open_line: open_line,
+          },
+        ]
       continue
     }
     if in_block {
@@ -507,18 +522,146 @@ pub fn resolve_harn_bin(harness: Harness) -> string {
   return bin
 }
 
-pipeline main(harness: Harness, task: unknown) {
-  const harn_bin = resolve_harn_bin(harness)
-  let md_files: list<string> = []
-  for docs_glob in DOCS_GLOBS {
-    // scan-refused: require_scanned on md_files below.
-    for g in harness.fs.glob(docs_glob) {
-      md_files = md_files + [rel_path(g)]
+/** Discover each file once and apply ordered rules through the filesystem glob owner. */
+pub fn snippet_file_policies(fs: HarnessFs, config: SnippetConfig) -> dict<string, SnippetPolicy> {
+  let files: dict<string, SnippetPolicy> = {}
+  for pattern in config.include {
+    // scan-refused: require_scanned on the combined file set below.
+    for path in fs.glob(pattern) {
+      files[rel_path(path)] = config.defaults
     }
   }
-  // Zero documentation files is the instrument failing, not a clean corpus.
-  require_scanned("check-docs-snippets", "documentation file(s)", len(md_files))
-  md_files = md_files.sorted()
+  require_scanned("check-docs-snippets", "documentation file(s)", len(files))
+  for rule in config.rules ?? [] {
+    let matched: dict<string, bool> = {}
+    for pattern in rule.include {
+      // scan-refused: require_scanned on the selected rule files below.
+      for path in fs.glob(pattern) {
+        const relative = rel_path(path)
+        if files.has(relative) {
+          matched[relative] = true
+        }
+      }
+    }
+    require_scanned("snippet rule ${rule.include}", "selected file(s)", len(matched))
+    for path in matched.keys() {
+      files[path] = apply_snippet_rule(required_snippet_policy(files, path), rule)
+    }
+  }
+  return files
+}
+
+fn required_snippet_policy(files: dict<string, SnippetPolicy>, path: string) -> SnippetPolicy {
+  const policy = files[path]
+  if policy != nil {
+    return policy
+  }
+  throw "no snippet policy was resolved for ${path}"
+}
+
+type StyleCheckResult = {formatting_checked: int, lint_checked: int, failures: int}
+
+fn check_snippet_style(
+  harness: {process: HarnessProcess, stdio: HarnessStdio},
+  binary: string,
+  policy: SnippetPolicy,
+  mode: string,
+  path: string,
+  label: string,
+) -> StyleCheckResult {
+  let result: StyleCheckResult = {formatting_checked: 0, lint_checked: 0, failures: 0}
+  if mode != "parse" && mode != "check" {
+    return result
+  }
+  let checks: list<{kind: string, args: list<string>}> = []
+  if policy.format {
+    result.formatting_checked = 1
+    checks = checks
+      + [
+        {
+          kind: "formatting",
+          args: ["fmt", "--check", "--line-width", to_string(policy.line_width), path],
+        },
+      ]
+  }
+  if policy.lint != "off" {
+    result.lint_checked = 1
+    const args = if policy.lint == "strict" {
+      ["lint", "--strict", path]
+    } else {
+      ["lint", path]
+    }
+    checks = checks + [{kind: "lint", args: args}]
+  }
+  for check in checks {
+    const outcome = harness.process.run({program: binary, args: check.args})
+    if !outcome.success {
+      result.failures = result.failures + 1
+      harness.stdio.println("FAIL: ${label} (${check.kind})")
+      for line in indent_output(outcome.stdout + outcome.stderr) {
+        harness.stdio.println(line)
+      }
+    }
+  }
+  return result
+}
+
+fn check_diagnostic_projection(
+  harness: {fs: HarnessFs, stdio: HarnessStdio},
+  path: string,
+  examples: list,
+  write: bool,
+) -> int {
+  if path == "" {
+    return 0
+  }
+  const projection = json_stringify_pretty({schemaVersion: 1, examples: examples}) + "\n"
+  if write {
+    harness.fs.write_text(path, projection)
+    harness.stdio.println("updated ${path} (${examples.count} examples)")
+    return 0
+  }
+  const committed = if harness.fs.exists(path) {
+    harness.fs.read_text(path)
+  } else {
+    ""
+  }
+  if committed == projection {
+    return 0
+  }
+  harness.stdio.println("FAIL: ${path} is stale relative to diagnostic fences")
+  harness.stdio.println("      rerun this checker with --write-diagnostics")
+  return 1
+}
+
+fn main(harness: Harness) {
+  const options = unwrap(
+    parse(
+      parser(
+        {
+          name: "check-docs-snippets",
+          args: [
+            {kind: "flag", name: "config", long: "--config", default: ".harn-docs.toml"},
+            {
+              kind: "switch",
+              name: "write_diagnostics",
+              long: "--write-diagnostics",
+              default: false,
+            },
+          ],
+        },
+      ),
+      argv,
+    ),
+  ).options
+  const config = parse_snippet_config(toml_parse(harness.fs.read_text(options.config)))
+  const file_policies = snippet_file_policies(harness.fs, config)
+  const md_files = file_policies.keys().sorted()
+  const diagnostic_path = config.diagnostic_examples ?? ""
+  if options.write_diagnostics && diagnostic_path == "" {
+    throw "--write-diagnostics requires diagnostic_examples in the snippet configuration"
+  }
+  const harn_bin = resolve_harn_bin(harness)
   /* The runtime sandbox only permits writes inside the workspace, so the
    * snippet scratch directory lives there rather than under the system temp
    * dir the bash version used. `mkdtemp_in_workspace` puts it under the
@@ -535,12 +678,15 @@ pipeline main(harness: Harness, task: unknown) {
     harness.process.run({program: "rm", args: ["-rf", tmp_dir]})
   }
   let checked = 0
+  let formatting_checked = 0
+  let lint_checked = 0
   let skipped = 0
   let failures = 0
   let width_counts: dict = {}
   let diagnostic_examples: list = []
   let file_no = 0
   for md_file in md_files {
+    const policy = required_snippet_policy(file_policies, md_file)
     file_no = file_no + 1
     // Unlike the bash version, the temp prefix carries a per-file counter
     // so same-named docs (index.md, README.md) cannot collide.
@@ -555,9 +701,16 @@ pipeline main(harness: Harness, task: unknown) {
         harness.stdio.println("      hint: the next fenced block opens before this one closes.")
         continue
       }
+      if event.kind == "invalid" {
+        failures = failures + 1
+        harness.stdio.println(
+          "FAIL: ${md_file}:${event.open_line}: unknown Harn fence options `${event.info}`",
+        )
+        continue
+      }
       // Width is a property of the rendered page, not of the type checker,
       // so an ignored block is measured like any other.
-      for wide in overlong_lines(event.content, MAX_SNIPPET_COLUMNS) {
+      for wide in overlong_lines(event.content, policy.line_width) {
         width_counts[md_file] = (width_counts[md_file] ?? 0) + 1
         harness.stdio.println(
           "WIDE: ${md_file} (${mode_label(event.mode)} block #${event.idx}, line ${wide.line}) ${wide.width} cols",
@@ -583,7 +736,23 @@ pipeline main(harness: Harness, task: unknown) {
       }
       const block_path = "${prefix}_${event.idx}${mode_extension(event.mode)}"
       harness.fs.write_text(block_path, event.content)
-      const res = harness.process.run({program: harn_bin, args: mode_argv(event.mode, block_path)})
+      const style = check_snippet_style(
+        pick(harness, ["process", "stdio"]),
+        harn_bin,
+        policy,
+        event.mode,
+        block_path,
+        "${md_file} block #${event.idx}",
+      )
+      formatting_checked = formatting_checked + style.formatting_checked
+      lint_checked = lint_checked + style.lint_checked
+      failures = failures + style.failures
+      const validation = if event.mode == "parse" {
+        policy.validation
+      } else {
+        event.mode
+      }
+      const res = harness.process.run({program: harn_bin, args: mode_argv(validation, block_path)})
       if mode_is_diagnostic(event.mode) {
         const decoded = decode_example_diagnostic(res.stdout, event.content)
         if !decoded.ok {
@@ -636,39 +805,15 @@ pipeline main(harness: Harness, task: unknown) {
       }
     }
   }
-  const diagnostic_projection = json_stringify_pretty(
-    {schemaVersion: 1, examples: diagnostic_examples},
-  )
-    + "\n"
-  if failures == 0 {
-    if argv.contains("--write-diagnostics") {
-      harness.fs.write_text(DIAGNOSTIC_EXAMPLES_PATH, diagnostic_projection)
-      harness.stdio.println(
-        "updated ${DIAGNOSTIC_EXAMPLES_PATH} (${diagnostic_examples.count()} examples)",
-      )
-    } else {
-      const committed = if harness.fs.exists(DIAGNOSTIC_EXAMPLES_PATH) {
-        harness.fs.read_text(DIAGNOSTIC_EXAMPLES_PATH)
-      } else {
-        ""
-      }
-      if committed != diagnostic_projection {
-        failures = failures + 1
-        harness.stdio.println("")
-        harness.stdio.println(
-          "FAIL: ${DIAGNOSTIC_EXAMPLES_PATH} is stale relative to diagnostic fences",
-        )
-        harness.stdio.println("      hint: run `make sync-docs-diagnostics`")
-      }
-    }
-  }
+  require_scanned("check-docs-snippets", "validated snippet(s)", checked)
   // Every over-budget line was reported above as WIDE. The tree is at zero, so
   // the budget is a plain limit with no allowance list to keep in sync.
   for path in width_counts.keys().sorted() {
+    const policy = required_snippet_policy(file_policies, path)
     failures = failures + 1
     harness.stdio.println("")
     harness.stdio.println(
-      "FAIL: ${path} has ${width_counts[path]} line(s) over ${MAX_SNIPPET_COLUMNS} columns",
+      "FAIL: ${path} has ${width_counts[path]} line(s) over ${policy.line_width} columns",
     )
     harness.stdio.println(
       "      Docs render in a reading measure, so a longer line costs a horizontal scroll.",
@@ -677,9 +822,17 @@ pipeline main(harness: Harness, task: unknown) {
       "      Break the arguments across lines, or move a trailing comment above the code.",
     )
   }
+  if failures == 0 {
+    failures = check_diagnostic_projection(
+      pick(harness, ["fs", "stdio"]),
+      diagnostic_path,
+      diagnostic_examples,
+      options.write_diagnostics,
+    )
+  }
   harness.stdio.println("")
   harness.stdio.println(
-    "docs snippets: ${checked} checked, ${skipped} skipped (,ignore), ${failures} failed",
+    "docs snippets: ${checked} checked, ${skipped} skipped (,ignore), ${failures} failed; ${formatting_checked} formatting checked; ${lint_checked} lint checked",
   )
   if failures > 0 {
     harness.stdio.println("")

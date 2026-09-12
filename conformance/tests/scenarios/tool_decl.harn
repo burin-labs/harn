@@ -19,9 +19,9 @@ pipeline test(harness: Harness, task: unknown) {
   assert(rf.description == "Read a file from the filesystem", "description should match")
   assert(rf.parameters.path.type == "string", "path param type should be string")
   assert(rf.parameters._encoding.type == "string", "encoding param type should be string")
-  // Test 3: tool handler is callable (takes individual params, not a dict)
+  // Test 3: the handler uses the same argument dictionary as every tool executor.
   const handler = rf.handler
-  const result = handler("test.txt", "utf-8")
+  const result = handler({path: "test.txt", _encoding: "utf-8"})
   assert(result == "content of test.txt", "handler should execute tool body")
   // Test 4: tool with int parameter type
   tool add(a: int, b: int) -> int {
@@ -53,7 +53,7 @@ pipeline test(harness: Harness, task: unknown) {
   assert(search_tool.parameters.file_glob.default == "*.py", "string defaults should be preserved")
   assert(search_tool.parameters.max_results.default == 20, "int defaults should be preserved")
   const search_handler = search_tool.handler
-  const default_result = search_handler("needle")
+  const default_result = search_handler({query: "needle"})
   assert(default_result == "needle:*.py:20", "handler should still honor defaulted params")
   harness.stdio.log("tool_decl tests passed")
 }

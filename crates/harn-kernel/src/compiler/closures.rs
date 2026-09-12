@@ -109,8 +109,12 @@ impl Compiler {
             has_rest_param: params.last().is_some_and(|p| p.rest),
             has_runtime_type_checks,
         };
+        let body = Arc::new(func);
+        let handler = self.compile_tool_argument_adapter(name, params, Arc::clone(&body))?;
+        let body_idx = self.chunk.functions.len();
+        self.chunk.functions.push(body);
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(Arc::new(func));
+        self.chunk.functions.push(handler);
 
         let define_name = self.string_constant("tool_define");
         self.chunk.emit_u16(Op::Constant, define_name, self.line);
@@ -134,8 +138,16 @@ impl Compiler {
             let pn_idx = self.string_constant(&p.name);
             self.chunk.emit_u16(Op::Constant, pn_idx, self.line);
 
-            let base_schema = p
-                .type_expr
+            let value_type = if p.rest {
+                Some(harn_parser::TypeExpr::List(Box::new(
+                    p.type_expr
+                        .clone()
+                        .unwrap_or_else(|| harn_parser::TypeExpr::Named("unknown".into())),
+                )))
+            } else {
+                p.type_expr.clone()
+            };
+            let base_schema = value_type
                 .as_ref()
                 .and_then(Self::type_expr_to_schema_value)
                 .unwrap_or_else(|| {
@@ -159,16 +171,23 @@ impl Compiler {
                 _ => crate::value::DictMap::new(),
             };
 
-            if p.default_value.is_some() {
+            if p.default_value.is_some() || p.rest {
                 param_schema.insert(crate::value::intern_key("required"), VmValue::Bool(false));
             }
 
             self.emit_vm_value_literal(&VmValue::dict(param_schema));
 
-            if let Some(default_value) = p.default_value.as_ref() {
+            // Schema metadata must not execute a default expression at
+            // declaration time. Nonconstant defaults can capture capabilities
+            // or refer to earlier arguments, and belong to handler invocation.
+            if let Some(default_value) = p
+                .default_value
+                .as_deref()
+                .and_then(super::optimizer::constant_value)
+            {
                 let default_key = self.string_constant("default");
                 self.chunk.emit_u16(Op::Constant, default_key, self.line);
-                self.compile_node(default_value)?;
+                self.emit_vm_value_literal(&default_value);
                 self.chunk.emit_u16(Op::BuildDict, 1, self.line);
                 self.chunk.emit(Op::Add, self.line);
             }
@@ -185,7 +204,14 @@ impl Compiler {
         self.chunk.emit_u16(Op::Constant, handler_key, self.line);
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
 
-        let mut config_entries = 2u16;
+        // The registry dispatches named arguments. Calling the tool value in
+        // Harn keeps ordinary positional function semantics around the same body.
+        let call_handler_key = self.string_constant("_call_handler");
+        self.chunk
+            .emit_u16(Op::Constant, call_handler_key, self.line);
+        self.chunk.emit_u16(Op::Closure, body_idx as u16, self.line);
+
+        let mut config_entries = 3u16;
         if let Some(return_type) = return_type
             .as_ref()
             .and_then(Self::type_expr_to_schema_value)

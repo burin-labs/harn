@@ -1,6 +1,241 @@
+import { assert_throws, with_temp_dir } from "std/testing"
 // Tests for scripts/check_docs_snippets.harn — drive the pure fence
 // state machine and formatting helpers on synthetic markdown.
 import "../check_docs_snippets.harn"
+import { parse_snippet_config } from "../docs_snippet_policy.harn"
+
+pipeline test_readme_snippet_formatting_uses_formatter(harness: Harness) {
+  const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const checker = path_join(root, "scripts/check_docs_snippets.harn")
+  const harn_bin = resolve_harn_bin(harness)
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      harness.fs.mkdir(path_join(dir, "docs"))
+      harness.fs.write_text(
+        path_join(dir, ".harn-docs.toml"),
+        "version = 1\ninclude = [\"*.md\"]\ndiagnostic_examples = \"docs/diagnostic-examples.json\"\n[defaults]\nvalidation = \"parse\"\nformat = true\nlint = \"off\"\nline_width = 74\n",
+      )
+      const readme = path_join(dir, "README.md")
+      harness.fs.write_text(readme, "# Example\n\n```harn\nconst answer=42\n```\n")
+      const rejected = harness.process.run(
+        {
+          program: harn_bin,
+          args: ["run", "--standalone", checker, "--", "--write-diagnostics"],
+          cwd: dir,
+          env: {HARN_BIN: harn_bin},
+        },
+      )
+      assert(rejected.exit_code != 0, "unformatted README source must fail the real docs gate")
+      assert(rejected.stdout.contains("formatting"), rejected.stdout + rejected.stderr)
+      harness.fs.write_text(readme, "# Example\n\n```harn\nconst answer = 42\n```\n")
+      const accepted = harness.process.run(
+        {
+          program: harn_bin,
+          args: ["run", "--standalone", checker, "--", "--write-diagnostics"],
+          cwd: dir,
+          env: {HARN_BIN: harn_bin},
+        },
+      )
+      assert(accepted.success, accepted.stdout + accepted.stderr)
+      assert(accepted.stdout.contains("1 checked"), "the corrected example must be measured")
+      assert(accepted.stdout.contains("1 formatting checked"), "the formatter must actually run")
+    },
+  )
+}
+
+pipeline test_readme_agent_executes_its_declared_tool(harness: Harness) {
+  assert_readme_agent_execution(harness, false)
+}
+
+pipeline test_readme_agent_repairs_rejected_tool_before_done(harness: Harness) {
+  assert_readme_agent_execution(harness, true)
+}
+
+fn assert_readme_agent_execution(harness: Harness, reject_first: bool) {
+  const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const examples = extract_blocks(harness.fs.read_text(path_join(root, "README.md"))).filter(
+    { event -> event.kind == "block" && event.mode == "check" },
+  )
+  assert_eq(
+    examples.count,
+    1,
+    "execute the exact introductory example, without a second source copy",
+  )
+  const binary = resolve_harn_bin(harness)
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      const source = path_join(dir, "main.harn")
+      const tape = path_join(dir, "responses.jsonl")
+      const canary = "README_DOC_PROBE_CANARY"
+      harness.fs.write_text(source, examples[0].content)
+      harness.fs.write_text(
+        path_join(dir, "README.md"),
+        "# Task tracker\nA small task tracker. ${canary}\n",
+      )
+      const rejected_turn = if reject_first {
+        json_stringify(
+          {
+            text:
+              "Read it.```tool\n{\"name\":\"read_project_file\",\"args\":{\"path\":\"README.md\"}}\n```Done. ##DONE##",
+            model: "readme-fixture",
+            provider: "demo",
+          },
+        )
+          + "\n"
+      } else {
+        ""
+      }
+      harness.fs.write_text(
+        tape,
+        rejected_turn
+          + json_stringify(
+            {
+              tool_calls: [{name: "read_project_file", args: {path: "README.md"}}],
+              model: "readme-fixture",
+              provider: "demo",
+            },
+          )
+          + "\n"
+          + json_stringify(
+            {
+              match: "*${canary}*",
+              consume_match: true,
+              text: "README.md describes a small task tracker. [${canary}]\n##DONE##",
+              model: "readme-fixture",
+              provider: "demo",
+            },
+          )
+          + "\n",
+      )
+      const outcome = harness.process.run(
+        {
+          program: binary,
+          args: ["run", "--standalone", "--json", "--llm-mock", tape, source],
+          cwd: dir,
+          timeout_ms: 30000,
+        },
+      )
+      assert(outcome.success, outcome.stdout + outcome.stderr)
+      const events = outcome.stdout.lines().filter({ line -> line.trim() != "" }).map(
+        { line -> json_parse(line) },
+      )
+      const results = events.filter(
+        { event ->
+          event?.data?.event_type == "transcript" && event?.data?.kind == "message"
+            && event?.data?.payload?.message?._harn?.kind == "tool_result"
+            && event?.data?.payload?.message?._harn?.tool_name == "read_project_file"
+        },
+      )
+      assert_eq(results.count, 1, "the README tool must actually fire exactly once")
+      const message = results[0].data.payload.message
+      assert_eq(
+        message._harn.outcome,
+        "ok",
+        "the declared tool must accept its arguments and finish",
+      )
+      assert(message.content.contains(canary), "the tool must read the fixture file")
+      const output = events.filter({ event -> event?.data?.event_type == "stdout" }).map(
+        { event -> event.data.payload },
+      )
+        .join("")
+      assert(
+        output.starts_with("done\n"),
+        "the agent must finish, not merely exit the script: ${output}",
+      )
+      assert(output.contains("README.md describes a small task tracker."), output)
+      const requests = events.filter({ event -> event?.data?.kind == "provider_call_request" })
+      assert_eq(
+        requests.count,
+        if reject_first {
+          3
+        } else {
+          2
+        },
+        "the fixture must reach both the tool request and grounded response",
+      )
+    },
+  )
+}
+
+pipeline test_snippet_config_rejects_invalid_policy(harness: Harness) {
+  const valid = {
+    version: 1,
+    include: ["*.md"],
+    defaults: {validation: "parse", format: false, lint: "off", line_width: 74},
+  }
+  assert_eq(parse_snippet_config(valid).defaults.line_width, 74)
+  assert_throws({ -> parse_snippet_config(valid + {typo: true}) })
+  assert_throws({ -> parse_snippet_config(valid + {include: []}) })
+  assert_throws({ -> parse_snippet_config(valid + {version: 2}) })
+  assert_throws({ -> parse_snippet_config(valid + {defaults: valid.defaults + {format: "true"}}) })
+  assert_throws({ -> parse_snippet_config(valid + {rules: [{include: ["*.md"], line_width: 0}]}) })
+  assert_throws({ -> parse_snippet_config(valid + {rules: [{include: ["*.md"]}]}) })
+  assert_throws({ -> parse_snippet_config(valid + {rules: [{include: ["*.md"], fomrat: true}]}) })
+}
+
+pipeline test_snippet_glob_rule_controls_real_validation(harness: Harness) {
+  const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const checker = path_join(root, "scripts/check_docs_snippets.harn")
+  const binary = resolve_harn_bin(harness)
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      harness.fs.mkdir(path_join(dir, "guides"))
+      harness.fs.write_text(path_join(dir, "README.md"), "```harn\nmissing_name()\n```\n")
+      const guide = path_join(dir, "guides/start.md")
+      harness.fs.write_text(guide, "```harn\npub fn answer()->int{return 42}\n```\n")
+      const config = path_join(dir, "custom.toml")
+      const policy =
+        "version = 1\ninclude = [\"*.md\", \"guides/*.md\"]\n[defaults]\nvalidation = \"parse\"\nformat = false\nlint = \"off\"\nline_width = 74\n[[rules]]\ninclude = [\"guides/*.md\"]\nvalidation = \"check\"\nformat = true\nlint = \"strict\"\nline_width = 40\n"
+      harness.fs.write_text(config, policy)
+      const invocation = {
+        program: binary,
+        args: ["run", "--standalone", checker, "--", "--config", config],
+        cwd: dir,
+        env: {HARN_BIN: binary},
+      }
+      const unformatted = harness.process.run(invocation)
+      assert(!unformatted.success, "a matched non-README file must receive its formatting rule")
+      assert(
+        unformatted.stdout.contains("guides/start.md block #1 (formatting)"),
+        unformatted.stdout,
+      )
+      harness.fs.write_text(guide, "```harn\npub fn answer() -> int {\n  return 42\n}\n```\n")
+      const accepted = harness.process.run(invocation)
+      assert(accepted.success, accepted.stdout + accepted.stderr)
+      assert(accepted.stdout.contains("2 checked"), accepted.stdout)
+      assert(accepted.stdout.contains("1 formatting checked; 1 lint checked"), accepted.stdout)
+      harness.fs.write_text(guide, "```harn\nmissing_name()\n```\n")
+      const invalid = harness.process.run(invocation)
+      assert(
+        !invalid.success,
+        "the guide's check rule must reject an unresolved name that parse accepts",
+      )
+      assert(
+        (invalid.stdout + invalid.stderr).contains("missing_name"),
+        invalid.stdout + invalid.stderr,
+      )
+      harness.fs.write_text(config, policy.replace("guides/*.md", "missing/*.md"))
+      const unmatched = harness.process.run(invocation)
+      assert(!unmatched.success, "a rule selecting no included files must not pass")
+      assert(
+        (unmatched.stdout + unmatched.stderr).contains("selected file(s)"),
+        unmatched.stdout + unmatched.stderr,
+      )
+      harness.fs.write_text(config, policy)
+      harness.fs.write_text(guide, "# No code\n")
+      harness.fs.write_text(path_join(dir, "README.md"), "# No code\n")
+      const empty = harness.process.run(invocation)
+      assert(!empty.success, "documents without checked snippets are not a passing run")
+      assert(
+        (empty.stdout + empty.stderr).contains("validated snippet(s)"),
+        empty.stdout + empty.stderr,
+      )
+    },
+  )
+}
 
 // --- extract_blocks ---------------------------------------------------------
 @test
@@ -58,9 +293,10 @@ pipeline test_extract_other_fences_ignored(harness: Harness, task: unknown) {
 
 @test
 pipeline test_extract_info_string_must_be_exact(harness: Harness, task: unknown) {
-  // ```harn extra or trailing spaces do not open a checked block.
-  assert_eq(extract_blocks("```harn foo\nx\n```\n"), [])
-  assert_eq(extract_blocks("```harn \nx\n```\n"), [])
+  // Unknown options cannot silently opt a Harn fence out of verification.
+  assert_eq(extract_blocks("```harn foo\nx\n```\n")[0].kind, "invalid")
+  assert_eq(extract_blocks("```harn,chekc\nx\n```\n")[0].kind, "invalid")
+  assert_eq(extract_blocks("```harn \nx\n```\n")[0].kind, "block")
 }
 
 @test
@@ -160,8 +396,26 @@ pipeline test_extract_prompt_and_harn_share_one_index(harness: Harness, task: un
 
 @test
 pipeline test_extract_prompt_info_string_must_be_exact(harness: Harness, task: unknown) {
-  assert_eq(extract_blocks("```harn-prompt extra\nx\n```\n"), [])
+  assert_eq(extract_blocks("```harn-prompt extra\nx\n```\n")[0].kind, "invalid")
   assert_eq(extract_blocks("```text\n{{ x }}\n```\n"), [])
+}
+
+pipeline test_extract_does_not_check_markdown_inside_a_foreign_fence(harness: Harness) {
+  const source =
+    "````markdown\n```harn,not-an-example\ntext\n```\n````\n```harn\nconst x = 1\n```\n"
+  const events = extract_blocks(source)
+  assert_eq(events.count, 1)
+  assert_eq(events[0].kind, "block")
+  assert_eq(events[0].content, "const x = 1\n")
+}
+
+pipeline test_extract_backticks_in_prose_do_not_open_a_foreign_fence(harness: Harness) {
+  const source =
+    "  - Read ```harn /\n    ``` fenced blocks with `extract_fenced: true`.\n\n```harn\nconst x = 1\n```\n"
+  const events = extract_blocks(source)
+  assert_eq(events.count, 1)
+  assert_eq(events[0].kind, "block")
+  assert_eq(events[0].content, "const x = 1\n")
 }
 
 // --- longer fences ----------------------------------------------------------
@@ -447,11 +701,15 @@ pipeline test_overlong_lines_pins_the_repo_budget(harness: Harness, task: unknow
   // The published budget is 74 columns, derived from the rendered article
   // column (max-w-3xl minus padding and border = 654px of code text, at
   // JetBrains Mono 13.6px whose advance is 8.734px). A 74-column line must
-  // pass and a 75-column line must fail; if the constant drifts without the
+  // pass and a 75-column line must fail; if the policy drifts without the
   // derivation being redone, this fails.
-  assert_eq(MAX_SNIPPET_COLUMNS, 74)
-  assert_eq(overlong_lines("x".repeat(74) + "\n", MAX_SNIPPET_COLUMNS), [])
-  const over = overlong_lines("x".repeat(75) + "\n", MAX_SNIPPET_COLUMNS)
+  const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const config = parse_snippet_config(
+    toml_parse(harness.fs.read_text(path_join(root, ".harn-docs.toml"))),
+  )
+  assert_eq(config.defaults.line_width, 74)
+  assert_eq(overlong_lines("x".repeat(74) + "\n", config.defaults.line_width), [])
+  const over = overlong_lines("x".repeat(75) + "\n", config.defaults.line_width)
   assert_eq(over.count, 1)
   assert_eq(over[0].width, 75)
 }

@@ -254,8 +254,8 @@ fn __native_tool_text_completion(opts: any, has_tool_calls: bool, text: string?)
   // Live failure: in a native session qwen3.6 emitted a `<function=edit>`
   // call as plain text on its final turn; the native path ignored the text,
   // the turn read as a natural completion, and the run ended with the edit
-  // lost. An explicit done sentinel still wins (it is an intentional host
-  // contract); this only stops the implicit prose-means-done read.
+  // lost. The shared toolless-turn arbiter also keeps this rejected attempt
+  // ahead of a completion marker from the same response.
   if opts?._turn_tool_call_feedback ?? false {
     return false
   }
@@ -985,6 +985,13 @@ fn __arbitrate_stalled_toolless_turn(
       return stop_result
     }
   }
+  // Parsing or dispatch already rejected this turn's attempted call and queued
+  // its correction. No completion marker or second model classifier can turn
+  // that failed attempt into completed work. The outer loop owns the bound.
+  if opts?._turn_tool_call_feedback ?? false {
+    return {kind: "continue", turn_end_judge_due: false, nudged_this_turn: true}
+      + __verdict_option_changes(verdict)
+  }
   const {loop_until_done = false, daemon = false} = opts ?? {}
   const has_judge = agent_has_turn_end_condition(opts?.turn_end_condition)
   // These contracts already own completion for this turn. A second model call
@@ -1097,7 +1104,9 @@ pub fn agent_compute_post_turn(
   const verdict = __post_turn_callback_verdict(opts, payload)
   // Tool attempts take precedence over a completion marker from the same
   // turn: the next model turn must see the dispatch result before completion.
-  if !has_tool_calls && __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
+  const rejected_tool_attempt = opts?._turn_tool_call_feedback ?? false
+  if !has_tool_calls && !rejected_tool_attempt
+    && __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
     return __post_turn_with_narrowing(
       __completion_result(opts, payload, "sentinel", verdict),
       narrowing,
@@ -1111,7 +1120,7 @@ pub fn agent_compute_post_turn(
   }
   // Every claimant for a stalled toolless turn is arbitrated in one place, so
   // this shape must not be adjudicated anywhere below.
-  if !has_tool_calls && trim(text) != "" {
+  if !has_tool_calls && (trim(text) != "" || rejected_tool_attempt) {
     return __post_turn_with_narrowing(
       __arbitrate_stalled_toolless_turn(harness, session, opts, payload, verdict, text, iteration),
       narrowing,

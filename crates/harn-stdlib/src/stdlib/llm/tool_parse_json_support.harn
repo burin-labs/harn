@@ -484,6 +484,28 @@ fn __tool_parse_tool_fence_info(marker: string, info: string) -> dict {
   return {tool: false, warning: nil}
 }
 
+// Bare JSON is also ordinary answer data. Only envelope fields establish a
+// call attempt; explicit tool fences retain their stricter body contract.
+fn __tool_parse_bare_json_is_call(text: string) -> bool {
+  const value = try {
+    json_parse(text)
+  } catch (_error) {
+    // Keep the existing repair path for incomplete or malformed envelopes.
+    return true
+  }
+  const rows = type_of(value) == "list" ? value : [value]
+  for row in rows {
+    if type_of(row) == "dict" {
+      for key in NAME_ALIASES + ARGUMENT_ALIASES + ["function"] {
+        if keys(row).contains(key) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
 /**
  * Split a response into JSON tool-fence bodies, visible prose, and drift warnings.
  * @effects: []
@@ -600,7 +622,8 @@ pub fn json_chunks(text: string) -> dict {
     }
   }
   const outside = trim(prose.join("\n"))
-  if len(bodies) == 0 && (starts_with(outside, "{") || starts_with(outside, "[")) {
+  if len(bodies) == 0 && (starts_with(outside, "{") || starts_with(outside, "["))
+    && __tool_parse_bare_json_is_call(outside) {
     bodies = bodies.appending(outside)
     prose = []
     violations = violations.appending(

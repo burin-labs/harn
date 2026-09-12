@@ -1,0 +1,86 @@
+import "std/schema"
+
+pub type SnippetPolicy = {
+  validation: "parse" | "check",
+  format: bool,
+  lint: "off" | "advisory" | "strict",
+  line_width: int,
+}
+
+pub type SnippetRule = {
+  include: list<string>,
+  validation?: "parse" | "check",
+  format?: bool,
+  lint?: "off" | "advisory" | "strict",
+  line_width?: int,
+}
+
+pub type SnippetConfig = {
+  version: 1,
+  include: list<string>,
+  defaults: SnippetPolicy,
+  rules?: list<SnippetRule>,
+  diagnostic_examples?: string,
+}
+
+/** Validate external configuration once, before discovering any files. */
+pub fn parse_snippet_config(raw: unknown) -> SnippetConfig {
+  const base = schema_of(SnippetConfig)
+  const shape = schema_json(base)
+  // Derive the allowed fields from the types; configuration typos must fail
+  // even though ordinary structural type checks allow additional fields.
+  const closed = shape
+    + {
+      additionalProperties: false,
+      properties: shape.properties
+        + {
+          defaults: schema_json(schema_of(SnippetPolicy)) + {additionalProperties: false},
+          rules: {
+            type: "array",
+            items: schema_json(schema_of(SnippetRule)) + {additionalProperties: false},
+          },
+        },
+    }
+  const config = unwrap(schema_check(raw, schema_refine(base, closed)))
+  if config.include.count == 0 {
+    throw "snippet configuration must include at least one path pattern"
+  }
+  if config.defaults.line_width < 1 {
+    throw "snippet line_width must be positive"
+  }
+  for pattern in config.include {
+    if pattern.trim() == "" {
+      throw "snippet include patterns must not be empty"
+    }
+  }
+  for rule in config.rules ?? [] {
+    if rule.include.count == 0 {
+      throw "snippet rules must include at least one path pattern"
+    }
+    for pattern in rule.include {
+      if pattern.trim() == "" {
+        throw "snippet rule include patterns must not be empty"
+      }
+    }
+    if rule.line_width != nil && rule.line_width < 1 {
+      throw "snippet rule line_width must be positive"
+    }
+    if rule.validation == nil && rule.format == nil && rule.lint == nil && rule.line_width == nil {
+      throw "snippet rules must change at least one policy field"
+    }
+  }
+  if config.diagnostic_examples != nil && config.diagnostic_examples.trim() == "" {
+    throw "snippet diagnostic_examples must not be empty"
+  }
+  return config
+}
+
+/** Matching rules apply in file order; omitted fields retain their values. */
+pub fn apply_snippet_rule(policy: SnippetPolicy, rule: SnippetRule) -> SnippetPolicy {
+  return {
+    validation: rule.validation ?? policy.validation,
+    format: rule.format ?? policy.format,
+    lint: rule.lint ?? policy.lint,
+    line_width: rule.line_width ?? policy.line_width,
+  }
+}
