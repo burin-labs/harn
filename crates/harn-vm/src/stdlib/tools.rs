@@ -241,7 +241,7 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         if let VmValue::Dict(entry) = tool {
             let mut desc = crate::value::DictMap::new();
             for (key, value) in entry.iter() {
-                if key.as_str() == "handler" {
+                if matches!(key.as_str(), "handler" | "_call_handler") {
                     continue;
                 }
                 desc.insert(key.clone(), value.clone());
@@ -1025,7 +1025,7 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     if let Some(entry) = vm_find_tool_entry(registry, &name) {
         let mut desc = crate::value::DictMap::new();
         for (key, value) in entry.iter() {
-            if key.as_str() == "handler" {
+            if matches!(key.as_str(), "handler" | "_call_handler") {
                 continue;
             }
             desc.insert(key.clone(), value.clone());

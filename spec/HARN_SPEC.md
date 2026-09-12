@@ -3242,6 +3242,12 @@ value of `tool_define`). Multiple `tool` declarations accumulate into
 separate registries; use `tool_registry()` and `tool_define(...)` for
 multi-tool registries.
 
+A declared tool value is also callable with positional arguments, like an
+ordinary function: `search_files("needle")`. Direct calls, pipes, spread calls,
+and callbacks invoke the same body as the registry handler and keep the declared
+defaults, rest parameters, and captured bindings. The registry handler itself
+continues to receive one dictionary of named arguments.
+
 Like `fn`, `tool` may be prefixed with `pub`.
 
 #### Tool execution backend (`executor`)

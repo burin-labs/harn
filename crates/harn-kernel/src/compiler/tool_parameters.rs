@@ -1,6 +1,7 @@
 use harn_parser::{BindingPattern, ShapeField, TypeExpr, TypedParam};
+use std::sync::Arc;
 
-use crate::chunk::Op;
+use crate::chunk::{CompiledFunction, Op};
 
 use super::{CompileError, Compiler};
 
@@ -9,6 +10,61 @@ use super::{CompileError, Compiler};
 const TOOL_ARGUMENTS: &str = "<tool arguments>";
 
 impl Compiler {
+    /// Registry calls use named arguments; language calls use the original
+    /// positional body. Compile that body once and invoke it from this adapter.
+    pub(super) fn compile_tool_argument_adapter(
+        &self,
+        name: &str,
+        params: &[TypedParam],
+        body: Arc<CompiledFunction>,
+    ) -> Result<Arc<CompiledFunction>, CompileError> {
+        let mut adapter = self.nested_body();
+        adapter.enum_names = self.enum_names.clone();
+        adapter.enum_variant_owners = self.enum_variant_owners.clone();
+        adapter.imported_enum_candidates = self.imported_enum_candidates.clone();
+        adapter.imported_enum_candidates_authoritative =
+            self.imported_enum_candidates_authoritative;
+        adapter.interface_methods = self.interface_methods.clone();
+        adapter.type_aliases = self.type_aliases.clone();
+        adapter.struct_layouts = self.struct_layouts.clone();
+        let handler_params = adapter.emit_tool_parameter_bindings(params)?;
+        // Default expressions may have already compiled nested closures.
+        let body_idx = adapter.chunk.functions.len();
+        adapter.chunk.functions.push(body);
+        adapter
+            .chunk
+            .emit_u16(Op::Closure, body_idx as u16, self.line);
+        let fixed_count = params.len() - usize::from(params.last().is_some_and(|p| p.rest));
+        for param in &params[..fixed_count] {
+            adapter.emit_get_binding(&param.name);
+        }
+        adapter
+            .chunk
+            .emit_u16(Op::BuildList, fixed_count as u16, self.line);
+        if let Some(rest) = params.last().filter(|p| p.rest) {
+            adapter.emit_get_binding(&rest.name);
+            adapter.chunk.emit(Op::Add, self.line);
+        }
+        adapter.chunk.emit(Op::CallSpread, self.line);
+        adapter.chunk.emit(Op::Return, self.line);
+        let param_slots = adapter.compile_param_slots(&handler_params);
+        let has_runtime_type_checks =
+            CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
+        super::ensure_chunk_addressable(&adapter.chunk, &format!("tool `{name}`"), self.line)?;
+        Ok(Arc::new(CompiledFunction {
+            name: name.to_string(),
+            type_params: Vec::new(),
+            nominal_type_names: adapter.nominal_type_names(),
+            params: param_slots,
+            default_start: None,
+            chunk: Arc::new(adapter.chunk),
+            is_generator: false,
+            is_stream: false,
+            has_rest_param: false,
+            has_runtime_type_checks,
+        }))
+    }
+
     /// Every registry consumer invokes a handler with one dictionary. Lower
     /// declared parameters at the compiler boundary, before the original body,
     /// so agent, CLI, and MCP execution share that invocation contract.

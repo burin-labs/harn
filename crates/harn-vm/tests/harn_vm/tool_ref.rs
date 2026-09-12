@@ -108,6 +108,56 @@ pipeline main(harness: Harness, task: unknown) {
 }
 
 #[test]
+fn tool_decl_positional_and_named_calls_share_defaults_rest_and_capture() {
+    let lines = out(r#"
+pipeline main(harness: Harness, task: unknown) {
+  let calls = 0
+  tool greet(name: string = "Ada", ...extras: string) -> string {
+    calls = calls + 1
+    return name + ":" + extras.join(",") + ":" + to_string(calls)
+  }
+  harness.stdio.log(greet())
+  harness.stdio.log(greet.tools[0].handler({}))
+  harness.stdio.log(greet("Bee", "C", "D"))
+  harness.stdio.log(greet.tools[0].handler({name: "E", extras: ["F"]}))
+  tool_bind(greet)
+  assert(!tool_def("greet").has("_call_handler"))
+  assert(!tool_list(greet)[0].has("_call_handler"))
+}
+"#);
+    assert_eq!(lines, vec!["Ada::1", "Ada::2", "Bee:C,D:3", "E:F:4"]);
+}
+
+#[test]
+fn tool_decl_named_call_keeps_body_after_default_expression_closures() {
+    let lines = out(r#"
+pipeline main(harness: Harness, task: unknown) {
+  tool greet(name: string = ["Ada"].map({ value -> value })[0] ?? "fallback") -> string {
+    return "Hello, " + name
+  }
+  harness.stdio.log(greet())
+  harness.stdio.log(greet.tools[0].handler({}))
+  harness.stdio.log(greet.tools[0].handler({name: "Grace"}))
+}
+"#);
+    assert_eq!(lines, vec!["Hello, Ada", "Hello, Ada", "Hello, Grace"]);
+}
+
+#[test]
+fn tool_decl_dictionary_parameter_keeps_both_call_conventions() {
+    let lines = out(r#"
+pipeline main(harness: Harness, task: unknown) {
+  tool name(payload: dict) -> string {
+    return payload.name
+  }
+  harness.stdio.log(name({name: "direct"}))
+  harness.stdio.log(name.tools[0].handler({payload: {name: "named"}}))
+}
+"#);
+    assert_eq!(lines, vec!["direct", "named"]);
+}
+
+#[test]
 fn tool_ref_returns_name_when_registered() {
     let lines = out(r#"
 pipeline main(harness: Harness, task: unknown) {

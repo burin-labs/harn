@@ -83,14 +83,17 @@ impl Compiler {
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
-        let handler_params = fn_compiler.emit_tool_parameter_bindings(params)?;
+        fn_compiler.declare_param_slots(params);
+        fn_compiler.record_param_types(params);
+        fn_compiler.emit_default_preamble(params)?;
+        fn_compiler.emit_type_checks(params);
         fn_compiler.seed_captured_idents(body);
         fn_compiler.compile_block(body)?;
         // Run pending defers before implicit return
         fn_compiler.drain_finallys_to_floor(0)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
 
-        let param_slots = fn_compiler.compile_param_slots(&handler_params);
+        let param_slots = fn_compiler.compile_param_slots(params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         super::ensure_chunk_addressable(&fn_compiler.chunk, &format!("fn `{name}`"), self.line)?;
@@ -99,15 +102,19 @@ impl Compiler {
             type_params: Vec::new(),
             nominal_type_names: fn_compiler.nominal_type_names(),
             params: param_slots,
-            default_start: None,
+            default_start: TypedParam::default_start(params),
             chunk: Arc::new(fn_compiler.chunk),
             is_generator: false,
             is_stream: false,
-            has_rest_param: false,
+            has_rest_param: params.last().is_some_and(|p| p.rest),
             has_runtime_type_checks,
         };
+        let body = Arc::new(func);
+        let handler = self.compile_tool_argument_adapter(name, params, Arc::clone(&body))?;
+        let body_idx = self.chunk.functions.len();
+        self.chunk.functions.push(body);
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(Arc::new(func));
+        self.chunk.functions.push(handler);
 
         let define_name = self.string_constant("tool_define");
         self.chunk.emit_u16(Op::Constant, define_name, self.line);
@@ -197,7 +204,14 @@ impl Compiler {
         self.chunk.emit_u16(Op::Constant, handler_key, self.line);
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
 
-        let mut config_entries = 2u16;
+        // The registry dispatches named arguments. Calling the tool value in
+        // Harn keeps ordinary positional function semantics around the same body.
+        let call_handler_key = self.string_constant("_call_handler");
+        self.chunk
+            .emit_u16(Op::Constant, call_handler_key, self.line);
+        self.chunk.emit_u16(Op::Closure, body_idx as u16, self.line);
+
+        let mut config_entries = 3u16;
         if let Some(return_type) = return_type
             .as_ref()
             .and_then(Self::type_expr_to_schema_value)
