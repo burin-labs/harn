@@ -45,6 +45,14 @@ pipeline test_readme_snippet_formatting_uses_formatter(harness: Harness) {
 }
 
 pipeline test_readme_agent_executes_its_declared_tool(harness: Harness) {
+  assert_readme_agent_execution(harness, false)
+}
+
+pipeline test_readme_agent_repairs_rejected_tool_before_done(harness: Harness) {
+  assert_readme_agent_execution(harness, true)
+}
+
+fn assert_readme_agent_execution(harness: Harness, reject_first: bool) {
   const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
   const examples = extract_blocks(harness.fs.read_text(path_join(root, "README.md"))).filter(
     { event -> event.kind == "block" && event.mode == "check" },
@@ -66,15 +74,29 @@ pipeline test_readme_agent_executes_its_declared_tool(harness: Harness) {
         path_join(dir, "README.md"),
         "# Task tracker\nA small task tracker. ${canary}\n",
       )
-      harness.fs.write_text(
-        tape,
+      const rejected_turn = if reject_first {
         json_stringify(
           {
-            tool_calls: [{name: "read_project_file", args: {path: "README.md"}}],
+            text:
+              "Read it.```tool\n{\"name\":\"read_project_file\",\"args\":{\"path\":\"README.md\"}}\n```Done. ##DONE##",
             model: "readme-fixture",
             provider: "demo",
           },
         )
+          + "\n"
+      } else {
+        ""
+      }
+      harness.fs.write_text(
+        tape,
+        rejected_turn
+          + json_stringify(
+            {
+              tool_calls: [{name: "read_project_file", args: {path: "README.md"}}],
+              model: "readme-fixture",
+              provider: "demo",
+            },
+          )
           + "\n"
           + json_stringify(
             {
@@ -126,7 +148,11 @@ pipeline test_readme_agent_executes_its_declared_tool(harness: Harness) {
       const requests = events.filter({ event -> event?.data?.kind == "provider_call_request" })
       assert_eq(
         requests.count,
-        2,
+        if reject_first {
+          3
+        } else {
+          2
+        },
         "the fixture must reach both the tool request and grounded response",
       )
     },
