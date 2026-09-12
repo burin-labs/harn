@@ -9,6 +9,39 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.136
+
+### Changed
+
+- Introduce Harn with a plain-language README, an application diagram, and a checked
+  agent example whose task matches its tools. Documentation snippet checks now use
+  validated TOML path rules for formatting, lint, type checks, and reading width.
+  Unknown Harn fence options and runs with no checked snippets fail explicitly.
+
+### Fixed
+
+- Declared tools now accept the argument dictionary used by agent, CLI, and MCP
+  dispatch. Typed parameters, defaults, and captured capabilities are bound before
+  the tool body runs. Direct calls to a declared tool's registry handler also use
+  a dictionary; programmatically registered handlers keep that same contract.
+- Calling a declared tool value inside Harn keeps positional arguments, including
+  pipes, spread calls, and callbacks, while sharing its body and captured state
+  with named-argument registry dispatch.
+- Defaults that depend on earlier arguments or captured values run at invocation,
+  rather than while generating the tool schema. Rest parameters advertise arrays
+  and use an empty list when omitted.
+- Agent loops repair rejected tool syntax before accepting a completion marker
+  from the same response. Explicit host stops remain authoritative, and repair
+  does not spend another model request on classifying the rejected attempt.
+- Bare JSON answer data without tool-envelope fields stays available to terminal
+  output validation instead of triggering tool-call repair.
+- Keep downstream runtime updates under the hosted release controller so disabling
+  fleet convergence does not still dispatch updates from the crate publisher.
+  Publication and the regular fleet update schedule retain their existing roles.
+- Reject unknown background command handles instead of reporting them as running
+  or waiting on unrelated session feedback. Valid running commands and retained
+  completion receipts keep their existing lifecycle and repeat-read behavior.
+
 ## v0.10.135
 
 ### Breaking
