@@ -1094,40 +1094,56 @@ pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions
     }
 }
 
+/// A command can be running only while its handle is registered.
+#[derive(Debug)]
+pub(crate) enum BackgroundWaitOutcome {
+    Unknown,
+    Running,
+    Completed(VmValue),
+}
+
+fn current_wait_outcome(handle_id: &str) -> BackgroundWaitOutcome {
+    let store = HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned");
+    if let Some(result) = store.terminal_result(handle_id) {
+        BackgroundWaitOutcome::Completed(result)
+    } else if store.entries.contains_key(handle_id) {
+        BackgroundWaitOutcome::Running
+    } else {
+        BackgroundWaitOutcome::Unknown
+    }
+}
+
 /// Wait for a live long-running handle to finalize and return its result.
 ///
 /// Replays a retained terminal receipt when the handle already completed, and
-/// returns `None` when the handle is unknown or the timeout elapses. The result
+/// distinguishes an unknown handle from a live command whose wait expired. The result
 /// is also published through the session inbox for normal agent-loop delivery;
 /// callers that use this direct synchronizer should drain the matching inbox
 /// item after receiving the value if they are consuming it.
-pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> Option<VmValue> {
+pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> BackgroundWaitOutcome {
     let rx = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
         if let Some(result) = store.terminal_result(handle_id) {
-            return Some(result);
+            return BackgroundWaitOutcome::Completed(result);
         }
+        let Some(entry) = store.entries.get_mut(handle_id) else {
+            return BackgroundWaitOutcome::Unknown;
+        };
         if timeout.is_zero() {
-            return None;
+            return BackgroundWaitOutcome::Running;
         }
-        let entry = store.entries.get_mut(handle_id)?;
         let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
         entry.result_txs.push(tx);
         rx
     };
-    rx.recv_timeout(timeout)
-        .ok()
-        .or_else(|| terminal_result_for_handle(handle_id))
-}
-
-/// Return the immutable terminal receipt retained for a completed handle.
-pub(crate) fn terminal_result_for_handle(handle_id: &str) -> Option<VmValue> {
-    HANDLE_STORE
-        .lock()
-        .expect("long-running handle store poisoned")
-        .terminal_result(handle_id)
+    match rx.recv_timeout(timeout) {
+        Ok(result) => BackgroundWaitOutcome::Completed(result),
+        Err(_) => current_wait_outcome(handle_id),
+    }
 }
 
 /// Atomically consume feedback for one long-running handle while leaving all
