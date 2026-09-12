@@ -255,6 +255,7 @@ type_expr          ::= IDENTIFIER
                      | type_expr '?'
                      | STRING_LITERAL
                      | INT_LITERAL
+```
 
 Postfix `?` is sugar for `T | nil`: `int?` is identical to `int | nil`,
 including narrowing rules. `?` binds tighter than `&` and `|`, so

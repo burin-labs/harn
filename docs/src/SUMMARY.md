@@ -393,6 +393,7 @@
 - [Merge overrides](./dev/merge-overrides.md)
 - [Agent shell guard](./dev/agent-shell-guard.md)
 - [Deterministic test patterns](./dev/testing.md)
+- [Check documentation examples](./dev/check-docs-snippets.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
 - [Windows CI speed experiments](./dev/windows-ci-experiments.md)
 - [Testbench mode](./dev/testbench.md)

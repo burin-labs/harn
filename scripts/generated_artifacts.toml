@@ -286,7 +286,7 @@ description = "Checked documentation diagnostic examples projected from real com
 gen = "sync-docs-diagnostics"
 check = "check-docs-snippets"
 outputs = ["docs/diagnostic-examples.json"]
-sources = ["docs/src/**/*.md", "scripts/check_docs_snippets.harn", "crates/harn-parser/src/diagnostic_codes.rs", "crates/harn-parser/src/diagnostic_codes/"]
+sources = ["docs/src/**/*.md", ".harn-docs.toml", "scripts/check_docs_snippets.harn", "scripts/docs_snippet_policy.harn", "crates/harn-parser/src/diagnostic_codes.rs", "crates/harn-parser/src/diagnostic_codes/"]
 ci = true
 make_all = true
 

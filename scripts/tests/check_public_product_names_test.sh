@@ -98,6 +98,26 @@ fi
 git -C "$fixture_root" reset -q
 rm -f "$fixture_root/CHANGELOG.md"
 
+# Public README examples are allowed; private infrastructure is still rejected.
+printf 'Example: https://github.com/example/%s-code\n' "$product" >"$fixture_root/README.md"
+git -C "$fixture_root" add README.md scripts/
+if ! "$fixture_root/scripts/check_public_product_names.sh"; then
+  echo "error: public application examples must pass in the README" >&2
+  exit 1
+fi
+printf 'connect to %s\n' "$fixture_token" >>"$fixture_root/README.md"
+captured="$fixture_root/readme-captured.txt"
+if "$fixture_root/scripts/check_public_product_names.sh" >"$captured" 2>&1; then
+  echo "error: the README must still reject private infrastructure" >&2
+  exit 1
+fi
+if ! grep -q '^README.md:2: sha256:' "$captured" || grep -qF "$fixture_token" "$captured"; then
+  echo "error: the README privacy scan must report only the safe location" >&2
+  exit 1
+fi
+git -C "$fixture_root" reset -q
+rm -f "$fixture_root/README.md"
+
 # --- Arm 2: a planted denylisted token must fail, WITHOUT echoing it ----------
 printf 'connect to %s today\n' "$fixture_token" >"$fixture_root/docs/infra.md"
 git -C "$fixture_root" add docs/infra.md scripts/
