@@ -331,10 +331,8 @@ pub fn agent_loop_post_turn_transition(
       _consecutive_text_only: next.consecutive_text_only,
       _turn_end_judge_invocations: next.turn_end_judge_invocations,
       _turn_end_judge_loop_state: cadence_loop_state,
-      // Without registered tools, JSON-like text belongs to terminal output
-      // validation; a parser hint must not turn it into a tool-repair loop.
-      _turn_tool_call_feedback: len(context.turn_opts?.tools?.tools ?? []) > 0
-        && ((context.fallback_triggered && !context.fallback_accepted) || context.had_parse_errors),
+      _turn_tool_call_feedback: (context.fallback_triggered && !context.fallback_accepted)
+        || context.had_parse_errors,
     }
   if completion_claim.kind == "valid" {
     post_turn_opts = post_turn_opts + {_completion_claim: completion_claim.claim}

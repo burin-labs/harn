@@ -3,9 +3,11 @@ import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract.harn"
 
-// Trigger: rejected tool syntax, with or without a completion marker.
-// Effect: the next turn repairs and executes the tool within the iteration bound.
-// Negative: an explicit host stop does not request repair.
+/**
+ * Trigger: rejected tool syntax, with or without a completion marker.
+ * Effect: the next turn repairs and executes the tool within the iteration bound.
+ * Negative: an explicit host stop does not request repair.
+ */
 pipeline default(harness: Harness) {
   const marker = harness.fs.workspace_temp_dir() + "/rejected-tool-completion"
   tool read_project_file(path: string) -> string {
