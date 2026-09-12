@@ -9,6 +9,85 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.135
+
+### Breaking
+
+- `pick(source, keys)` is now a global builtin. The result keeps each picked
+  field's type, optionality, and `nil` value, and works the same in native and
+  portable execution. It replaces `std/json.pick`: drop `pick` from the import
+  and call it directly. The old helper dropped `nil` values and returned `{}`
+  for a bad source; the builtin keeps `nil` and rejects a bad source. Use
+  `pick_keys(data, keys, {drop_nil: true})` from `std/collections` to drop
+  `nil`. See [Migrating to 0.10](https://harnlang.com/migrations/v0.10.html#stdjsonpick-is-now-the-global-pick).
+- An optional record field no longer satisfies a required field of the same
+  name. `{name?: string}` is not assignable to `{name: string}`.
+
+### Added
+
+- Add `std/context/disclosure`, one owner for progressive-disclosure truncation:
+  `disclosure_trailer` renders an omission note that must name the action that
+  retrieves the omitted text, `heading_boundary_keep_count` backs a cut up to a
+  markdown section boundary without letting a boundary-poor document collapse to
+  one line, and `truncate_at_section_boundary` returns the rendered text with the
+  real line counts so callers decide whether the note's cost came out of the
+  budget.
+- Added an explicitly configured private-file secret provider for Unix CLI and
+  embedded Harness callers, with compatible cross-process transaction locking.
+
+### Changed
+
+- The Rust workspace test job now prefers the owned Linux pool on same-repository pull requests.
+  A busy online pool queues work; zero online carriers or retired owned routing selects GitHub-hosted capacity.
+  An unreadable capacity decision blocks dispatch. Merge groups and main pushes retain their existing routing.
+  Artifact consumers now report a completed producer that cannot provide their required input,
+  instead of waiting out the full artifact polling budget.
+- `harn lint --fix` and `harn fix --apply` replace safe copies of two or more
+  record fields with typed `pick` calls. Repairs keep already-formatted files
+  consistent with project line width and preserve untouched lines in unformatted
+  files. Explicit `make test-focused` selections now include tests excluded by
+  the default profile. Capability migrations now replace complete bundle arguments
+  without conflicting with edits to receivers inside those arguments.
+
+### Fixed
+
+- **Tool handlers fail clearly when they reach the privileged host wire
+  (#8137).** `harn check` flags direct and same-module transitive `host_call`
+  uses from tool handlers, and dynamic calls raise an explicit boundary error
+  instead of falling through to a value that looks absent.
+- Reject duplicate ZIP members before extraction instead of silently returning only the last file with that name.
+- Retry a spawn that the kernel refuses with `ETXTBSY` instead of failing, so a freshly written executable still runs
+  when a sibling spawn briefly holds a writable descriptor for it.
+- Context truncation keeps blank lines between a Markdown heading and its body
+  from advancing the section boundary and leaving the heading without its text.
+- Agent event listeners retain the execution policy active at registration.
+  Restricted tools no longer disable listener bookkeeping, and listeners cannot
+  borrow a more permissive emitter's authority.
+- Command-policy hooks can request host approval while a tool handler is active.
+  Direct tool-handler host calls remain restricted.
+- Register native file-provider process tests with repository policy and keep audit dependencies available after
+  an earlier failed check. Start the source-length execution budget after the shared CLI is available.
+- Point the completion-requirement evidence record and generated review table to the actual conformance
+  contract fixture, preserving the recorded reachability qualification.
+- Repair the agent-loop emitters that wrote host event payload keys no reader
+  could see. The budget stop now records the iteration it happened on; the
+  auto-continue, overflow-recovery and blank-tool-name receipts name the stop
+  reason, provider error and dispatch count that caused them; every synthesized
+  feedback receipt keeps the turn it fired on; and the emitters that repeated a
+  sibling event's facts stop claiming to record them.
+- Capability autofix replaces an existing capability projection when a helper
+  expects the root harness or a single grant, preserving the positions of its
+  other arguments. Ambiguous projections and expressions with side effects
+  remain unchanged.
+
+### Security
+
+- Update development dependencies to patched `smol-toml`, `js-yaml`, and `qs`
+  versions. VS Code's LSP surface test now reuses a supplied Harn binary or the
+  configured Cargo build directory instead of creating a fresh build each run.
+  Its workspace is limited to the fixture modules, avoiding unrelated repository
+  indexing and call-hierarchy timeouts.
+
 ## v0.10.134
 
 ### Breaking
