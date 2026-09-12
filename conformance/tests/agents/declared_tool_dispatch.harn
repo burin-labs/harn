@@ -19,7 +19,6 @@ pipeline test(harness: Harness) {
   )
   assert(omitted.status == "ok")
   assert(omitted.result == "captured:hello:2?")
-
   tool read_fixture(request: {path: string}) -> string {
     return harness.fs.read_text(request.path)
   }
@@ -32,7 +31,6 @@ pipeline test(harness: Harness) {
   )
   assert(read.status == "ok")
   assert(read.result == "capability canary")
-
   for arguments in [{value: 7}, {value: "hello", count: nil}, {}] {
     const invalid = agent_dispatch_tool_call(
       harness.tools,
@@ -54,7 +52,6 @@ pipeline test(harness: Harness) {
   )
   assert(ordinary_result.status == "ok")
   assert(ordinary_result.result == "dictionary canary")
-
   tool extend(value: int, next: int = value + 1) -> int {
     return next
   }
@@ -65,7 +62,6 @@ pipeline test(harness: Harness) {
   )
   assert(extended.status == "ok")
   assert(extended.result == "5")
-
   tool count(...values: int) -> int {
     return len(values)
   }
@@ -80,7 +76,13 @@ pipeline test(harness: Harness) {
       count,
     )
     assert(counted.status == "ok")
-    assert(counted.result == if arguments.has("values") { "2" } else { "0" })
+    assert(
+      counted.result == if arguments.has("values") {
+        "2"
+      } else {
+        "0"
+      },
+    )
   }
   harness.stdio.println("declared tool dispatch passed")
 }
