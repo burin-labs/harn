@@ -1,0 +1,42 @@
+import { report } from "std/llm/cache_conformance"
+
+pipeline test(harness: Harness) {
+  const warm = report(
+    harness.llm,
+    "anthropic",
+    "claude-sonnet-4-6",
+    [
+      {
+        input_tokens: 40,
+        cache_read_input_tokens: 5000,
+        cache_creation_input_tokens: 0,
+        output_tokens: 8,
+      },
+    ],
+  )
+  assert_eq(warm.schema_version, 2)
+  assert_eq(len(warm.runs), 1)
+  assert_eq(warm.runs[0].usage.input_tokens, 5040)
+  assert_eq(warm.runs[0].usage.fresh_input_tokens, 40)
+  assert_eq(warm.runs[0].classification, "cache_effective")
+  assert_eq(warm.bucket_counts.cache_effective, 1)
+  const missing = report(harness.llm, "anthropic", "claude-sonnet-4-6", [{}])
+  assert_eq(missing.verdict, "usage_unreported")
+  assert_eq(missing.dogfood_failure, true)
+  assert_eq(missing.bucket_counts.usage_unreported, 1)
+  assert_eq(len(missing.runs[0].usage.missing_fields ?? []) > 0, true)
+  const invalid = report(
+    harness.llm,
+    "anthropic",
+    "claude-sonnet-4-6",
+    [{input_tokens: 10, cache_read_tokens: 20, cache_write_tokens: 0, output_tokens: 1}],
+  )
+  assert_eq(invalid.verdict, "provider_field_inconsistent")
+  assert_eq(invalid.dogfood_failure, true)
+  assert_eq(invalid.bucket_counts.provider_field_inconsistent, 1)
+  const empty = report(harness.llm, "anthropic", "claude-sonnet-4-6", [])
+  assert_eq(len(empty.runs), 0)
+  assert_eq(empty.verdict, "insufficient_runs")
+  assert_eq(empty.bucket_counts.cache_effective, 0)
+  harness.stdio.log("llm_cache_conformance passed")
+}

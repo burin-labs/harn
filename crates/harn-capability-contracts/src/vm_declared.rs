@@ -77,6 +77,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("llm", "apply_reasoning_policy"),
     ("llm", "available_providers"),
     ("llm", "cache_clear"),
+    ("llm", "cache_conformance"),
     ("llm", "cache_get"),
     ("llm", "cache_put"),
     ("llm", "cache_stats"),

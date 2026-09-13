@@ -199,6 +199,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/options" => "stdlib/llm/options.harn",
     "llm/provider_names" => "stdlib/llm/provider_names.harn",
     "llm/catalog" => "stdlib/llm/catalog.harn",
+    "llm/cache_conformance" => "stdlib/llm/cache_conformance.harn",
     "llm/safe" => "stdlib/llm/safe.harn",
     "llm/envelope" => "stdlib/llm/envelope.harn",
     "llm/speed" => "stdlib/llm/speed.harn",

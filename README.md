@@ -154,7 +154,8 @@ See [the mental model](docs/src/concepts/mental-model.md) for the design, and
   [MCP, ACP, and A2A](docs/src/mcp-and-acp.md), and
   [deployment on Fly.io](docs/src/deploy/fly.md).
 - **Look up an API:** [language basics](docs/src/language-basics.md),
-  [CLI reference](docs/src/cli-reference.md), and
+  [CLI reference](docs/src/cli-reference.md),
+  [prompt-cache reports](docs/src/llm/cache-conformance.md), and
   [builtins](docs/src/builtins.md).
 - **Explore the design:** [why Harn](docs/src/why-harn.md),
   [workflow execution](docs/src/workflow-runtime.md), and

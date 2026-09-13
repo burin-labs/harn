@@ -1,0 +1,73 @@
+import { get_typed_value } from "std/schema"
+
+// @harn-entrypoint-category llm.stdlib
+pub type CacheUsage = {
+  input_tokens: int,
+  fresh_input_tokens: int,
+  cache_read_tokens: int,
+  cache_write_tokens: int,
+  output_tokens: int,
+  cache_supported: bool,
+  missing_fields?: list<string>,
+}
+
+pub type CacheRun = {
+  run_index: int,
+  usage: CacheUsage,
+  classification: string,
+  inconsistency_reason?: string,
+  elapsed_ms?: int,
+  request?: {
+    task?: string,
+    prefix_sha256?: string,
+    prefix_tokens_estimate?: int,
+    tool_schema_sha256?: string,
+    settings_sha256?: string,
+  },
+  raw_usage?: unknown,
+}
+
+pub type CacheReport = {
+  schema_version: int,
+  provider: string,
+  model: string,
+  support: {
+    status: string,
+    supported: bool?,
+    cache_tier?: string,
+    resolved_provider: string,
+    resolved_model: string,
+    source: string,
+    profile: {
+      prompt_caching: bool,
+      cache_breakpoint_style: string,
+      min_useful_prefix_tokens: int?,
+      ttl_notes: string?,
+      supported_ttls: list<string>,
+      cache_read_usage_field: string,
+      cache_write_usage_field: string,
+    },
+  },
+  runs: list<CacheRun>,
+  bucket_counts: dict<string, int>,
+  verdict: string,
+  dogfood_failure: bool,
+}
+
+/**
+ * Classify saved usage through the same runtime owner as the cache probe CLI.
+ * Pass each captured usage object unchanged, or wrap it as {usage, request?,
+ * elapsed_ms?}. Missing fields remain evidence of an unreported measurement.
+ * This function reads route capabilities and makes no provider requests.
+ *
+ * @effects: ["llm.read@dynamic"]
+ * @errors: ["llm_cache_conformance: invalid report"]
+ */
+pub fn report(
+  llm: HarnessLlm,
+  provider: string,
+  model: string,
+  runs: list<unknown>,
+) -> CacheReport {
+  return get_typed_value(llm.cache_conformance(provider, model, runs), schema_of(CacheReport))
+}
