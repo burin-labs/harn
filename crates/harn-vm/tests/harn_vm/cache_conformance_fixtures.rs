@@ -37,8 +37,10 @@ fn anthropic_repeat_run_reads_from_cache() {
     assert_eq!(report.bucket_counts.cache_effective, 1);
     // Fresh vs cache-read stay separate on the warm run.
     let warm = &report.runs[1];
+    assert_eq!(warm.usage.input_tokens, 3840);
     assert_eq!(warm.usage.cache_read_tokens, 3800);
     assert_eq!(warm.usage.fresh_input_tokens, 40);
+    assert_eq!(warm.raw_usage.as_ref().unwrap()["input_tokens"], 40);
 }
 
 #[test]
