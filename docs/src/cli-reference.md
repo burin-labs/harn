@@ -440,7 +440,14 @@ targets produce a static error and the VM is never started — the same
 `call target ... is not defined or imported` message you see from
 `harn check`.
 
-The inline `-e <code>` form is wrapped in `pipeline main(harness: Harness, task) { ... }`
+A complete `fn main` or pipeline program passed with `-e <code>` executes as
+written, with the same entrypoint behavior as a file. For example:
+
+```sh
+harn run -e 'fn main(harness: Harness) { harness.stdio.println("hello") }'
+```
+
+An inline body snippet is wrapped in `pipeline main(harness: Harness, task) { ... }`
 and run as a temp file in the current directory, so:
 
 - Leading `import "..."` (and `pub import { ... } from "..."`) lines

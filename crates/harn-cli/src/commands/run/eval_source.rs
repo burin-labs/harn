@@ -28,7 +28,11 @@ fn eval_code_parses_as_program(code: &str) -> bool {
         .map(|program| {
             program.iter().any(|node| {
                 let (_, inner) = harn_parser::peel_attributes(node);
-                matches!(&inner.node, harn_parser::Node::Pipeline { .. })
+                match &inner.node {
+                    harn_parser::Node::Pipeline { .. } => true,
+                    harn_parser::Node::FnDecl { name, .. } => name == "main",
+                    _ => false,
+                }
             })
         })
         .unwrap_or(false)
