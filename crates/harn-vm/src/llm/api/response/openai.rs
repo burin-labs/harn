@@ -419,8 +419,8 @@ pub(crate) fn parse_openai_responses_response(
         .or_else(|| usage["completion_tokens"].as_i64());
     let input_tokens = reported_input_tokens.unwrap_or(0);
     let output_tokens = reported_output_tokens.unwrap_or(0);
-    let cache_read_tokens = extract_cache_read_tokens(usage);
-    let cache_write_tokens = extract_cache_write_tokens(usage);
+    let cache_read_tokens = extract_cache_read_tokens(usage)?;
+    let cache_write_tokens = extract_cache_write_tokens(usage)?;
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
     let telemetry = ProviderTelemetry::from_openai_response(json, request_id);
     let served_fast = crate::llm::serving_tiers::served_fast(model, json);
@@ -651,8 +651,8 @@ pub(super) fn parse_chat_completions_response(
     let reported_output_tokens = json["usage"]["completion_tokens"].as_i64();
     let input_tokens = reported_input_tokens.unwrap_or(0);
     let output_tokens = reported_output_tokens.unwrap_or(0);
-    let cache_read_tokens = extract_cache_read_tokens(&json["usage"]);
-    let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
+    let cache_read_tokens = extract_cache_read_tokens(&json["usage"])?;
+    let cache_write_tokens = extract_cache_write_tokens(&json["usage"])?;
     let stop_reason = finish_reason.map(|s| s.to_string());
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
     let telemetry = ProviderTelemetry::from_openai_response(json, request_id);

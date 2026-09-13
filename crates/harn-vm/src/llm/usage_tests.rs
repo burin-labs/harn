@@ -38,11 +38,11 @@ fn accounted_result() -> LlmResult {
             rate_limited: 1,
             empty_completion: 1,
             other: 0,
-            completed_retry_usage: vec![super::LlmUsage::from_probe_counts(
+            completed_retry_usage: vec![super::LlmUsage::from_provider_receipt(
                 "anthropic",
                 "claude-sonnet-4-20250514",
-                250,
-                10,
+                &ProviderUsageReceipt::new(Some(250), Some(10), None, false)
+                    .with_cache(0, 0, None, false),
             )],
         },
     }
@@ -161,8 +161,7 @@ fn partial_provider_error_receipt_stays_explicitly_unknown() {
         Some(3)
     );
 
-    let usage =
-        LlmUsage::from_provider_error_receipt("anthropic", "claude-sonnet-4-20250514", &receipt);
+    let usage = LlmUsage::from_provider_receipt("anthropic", "claude-sonnet-4-20250514", &receipt);
 
     assert_eq!(usage.input_tokens, 9);
     assert_eq!(usage.output_tokens, 0);
@@ -588,6 +587,85 @@ fn extracts_bedrock_usage_tokens() {
 
     assert_eq!(usage.input_tokens, Some(17));
     assert_eq!(usage.output_tokens, Some(23));
+}
+
+#[test]
+fn saved_anthropic_probes_normalize_input_and_preserve_cache_pricing() {
+    for fresh in [40, 6000] {
+        let expected = (fresh as f64 + 500.0 + 125.0 + 40.0) / 1_000_000.0;
+        for raw in [
+            json!({"input_tokens": fresh, "output_tokens": 8, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 100}),
+            json!({"input_tokens": fresh + 5100, "output_tokens": 8, "cache_read_tokens": 5000, "cache_write_tokens": 100}),
+            json!({"prompt_tokens": fresh + 5100, "completion_tokens": 8, "prompt_tokens_details": {"cached_tokens": 5000, "cache_write_tokens": 100}}),
+        ] {
+            let usage = extract_probe_usage(
+                "anthropic",
+                "claude-haiku-4-5-20251001",
+                &json!({"usage": raw}),
+            )
+            .unwrap();
+            assert_eq!(usage.input_tokens, Some(fresh + 5100));
+            assert_eq!(usage.output_tokens, Some(8));
+            assert!((usage.cost_usd.unwrap() - expected).abs() < 1e-10);
+        }
+    }
+}
+
+#[test]
+fn saved_bedrock_and_gemini_cache_usage_have_comparable_totals() {
+    for raw in [
+        json!({"usage": {"inputTokens": 40, "outputTokens": 8, "cacheReadInputTokens": 5000, "cacheWriteInputTokens": 0}}),
+        json!({"usageMetadata": {"promptTokenCount": 5040, "candidatesTokenCount": 8, "cachedContentTokenCount": 5000}}),
+    ] {
+        let usage = extract_probe_usage("unknown", "unknown", &raw).unwrap();
+        assert_eq!(usage.input_tokens, Some(5040));
+        assert_eq!(usage.output_tokens, Some(8));
+    }
+}
+
+#[test]
+fn saved_anthropic_stream_merges_partial_cumulative_usage() {
+    let response = json!({"frames": [
+        {"type": "message_start", "message": {"usage": {
+            "input_tokens": 40, "output_tokens": 0, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 100,
+        }}},
+        {"type": "message_delta", "usage": {"output_tokens": 8, "cache_creation_input_tokens": 200}},
+        {"type": "message_stop"},
+    ]});
+    let usage = extract_probe_usage("anthropic", "claude-haiku-4-5-20251001", &response).unwrap();
+    assert_eq!(usage.input_tokens, Some(5240));
+    assert_eq!(usage.output_tokens, Some(8));
+    assert!((usage.cost_usd.unwrap() - 0.00083).abs() < 1e-10);
+}
+
+#[test]
+fn saved_probe_missing_and_invalid_usage_cannot_become_a_priced_zero() {
+    assert!(extract_probe_usage("anthropic", "claude-haiku-4-5-20251001", &json!({})).is_none());
+    for raw in [
+        json!({"output_tokens": 8, "cache_read_input_tokens": 5000}),
+        json!({"input_tokens": -1, "output_tokens": 8, "cache_read_input_tokens": 5000}),
+        json!({"input_tokens": 40, "output_tokens": 8, "cache_read_tokens": 5000}),
+        json!({"input_tokens": 5040, "output_tokens": 8, "cache_read_tokens": 5000, "cache_supported": false}),
+    ] {
+        let usage = extract_probe_usage(
+            "anthropic",
+            "claude-haiku-4-5-20251001",
+            &json!({"usage": raw}),
+        )
+        .unwrap();
+        assert_eq!(usage.input_tokens, None);
+        assert_eq!(usage.cost_usd, None);
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
+    }
+    let zero = extract_probe_usage(
+        "anthropic",
+        "claude-haiku-4-5-20251001",
+        &json!({"usage": {"input_tokens": 0, "output_tokens": 0}}),
+    )
+    .unwrap();
+    assert_eq!(zero.input_tokens, Some(0));
+    assert_eq!(zero.cost_usd, Some(0.0));
+    assert_eq!(zero.accounting_status, UsageAccountingStatus::Reported);
 }
 
 #[test]

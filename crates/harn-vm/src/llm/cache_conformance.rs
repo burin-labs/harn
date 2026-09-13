@@ -28,10 +28,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::llm::capabilities::{self, Capabilities, WireDialect};
+use crate::llm::usage::ReportedTokenUsage;
 
 /// Wire-format version of [`CacheConformanceReport`]. Bump on a breaking shape
 /// change so Burin/Cloud consumers can gate on the contract they parse.
-pub const CACHE_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
+pub const CACHE_CONFORMANCE_SCHEMA_VERSION: u32 = 2;
 
 /// Cache-control requirements for a `(provider, model)` route, derived from the
 /// single provider capability path. This is the self-describing capability the
@@ -236,11 +237,10 @@ pub fn prompt_cache_support(provider: &str, model: &str) -> PromptCacheSupport {
 /// read as "no support".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NormalizedCacheUsage {
-    /// Total prompt tokens as the provider reported them (cache-read tokens are
-    /// included here on providers that count them toward the prompt total).
+    /// Total prompt tokens, including cache reads and writes on every provider.
     pub input_tokens: i64,
-    /// Prompt tokens billed as fresh (non-cached) input: `input - read - write`,
-    /// clamped at 0.
+    /// Prompt tokens billed as fresh (non-cached) input. A negative value marks
+    /// invalid accounting that cannot be normalized.
     pub fresh_input_tokens: i64,
     /// Prompt tokens served from the provider cache.
     pub cache_read_tokens: i64,
@@ -256,15 +256,6 @@ pub struct NormalizedCacheUsage {
     pub missing_fields: Vec<String>,
 }
 
-fn usage_i64(usage: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i64> {
-    for key in keys {
-        if let Some(found) = usage.get(*key).and_then(Value::as_i64) {
-            return Some(found);
-        }
-    }
-    None
-}
-
 impl NormalizedCacheUsage {
     /// Normalize a usage object that may be Harn's own usage dict shape or a raw
     /// provider usage object. Accepts the provider aliases Harn already reads in
@@ -273,7 +264,7 @@ impl NormalizedCacheUsage {
     /// `prompt_tokens_details.cached_tokens`), so a fixture can be a saved
     /// provider response or a normalized transcript usage entry.
     pub fn from_usage_value(usage: &Value) -> Self {
-        let Some(object) = usage.as_object() else {
+        let Some(_) = usage.as_object() else {
             return Self {
                 input_tokens: 0,
                 fresh_input_tokens: 0,
@@ -286,34 +277,25 @@ impl NormalizedCacheUsage {
         };
         let mut missing_fields = Vec::new();
 
-        let input_tokens =
-            usage_i64(object, &["input_tokens", "prompt_tokens"]).unwrap_or_else(|| {
-                missing_fields.push("input_tokens".to_string());
-                0
-            });
-        let output_tokens = usage_i64(object, &["output_tokens", "completion_tokens"])
-            .unwrap_or_else(|| {
-                missing_fields.push("output_tokens".to_string());
-                0
-            });
+        let reported = ReportedTokenUsage::from_value(usage);
+        if reported.cache_unreported {
+            missing_fields.push("cache_accounting".to_string());
+        }
+        let reported_input_tokens = reported.input_tokens.unwrap_or_else(|| {
+            missing_fields.push("input_tokens".to_string());
+            0
+        });
+        let output_tokens = reported.output_tokens.unwrap_or_else(|| {
+            missing_fields.push("output_tokens".to_string());
+            0
+        });
 
         // A provider "reports cache accounting" when it carries an explicit
         // read/write field OR an explicit cache_supported flag. Native local
         // runtimes carry neither, so a 0 there is unknown, not a real miss.
-        let explicit_supported = object.get("cache_supported").and_then(Value::as_bool);
-        let cache_read = usage_i64(
-            object,
-            &[
-                "cache_read_tokens",
-                "cache_read_input_tokens",
-                "cached_tokens",
-            ],
-        )
-        .or_else(|| nested_cached_tokens(object));
-        let cache_write = usage_i64(
-            object,
-            &["cache_write_tokens", "cache_creation_input_tokens"],
-        );
+        let explicit_supported = reported.cache_supported;
+        let cache_read = reported.cache_read_tokens;
+        let cache_write = reported.cache_write_tokens;
         if cache_read.is_none() {
             missing_fields.push("cache_read_tokens".to_string());
         }
@@ -326,7 +308,11 @@ impl NormalizedCacheUsage {
             Some(flag) => flag,
             None => cache_read.is_some() || cache_write.is_some(),
         };
-        let fresh_input_tokens = (input_tokens - cache_read_tokens - cache_write_tokens).max(0);
+        let (input_tokens, fresh_input_tokens) = match reported.prompt_counts() {
+            Ok(Some(counts)) => (counts.total, counts.fresh),
+            Ok(None) => (0, 0),
+            Err(_) => (reported_input_tokens, -1),
+        };
         Self {
             input_tokens,
             fresh_input_tokens,
@@ -339,20 +325,14 @@ impl NormalizedCacheUsage {
     }
 }
 
-fn nested_cached_tokens(object: &serde_json::Map<String, Value>) -> Option<i64> {
-    object
-        .get("prompt_tokens_details")
-        .and_then(Value::as_object)
-        .and_then(|details| details.get("cached_tokens"))
-        .and_then(Value::as_i64)
-}
-
 /// The stable observation bucket for one repeat run. `ProviderFieldInconsistent`
 /// flags a response whose own usage fields contradict each other so a consumer
 /// never trusts a cache verdict built on bad numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheConformanceClassification {
+    /// Required prompt or cache-read evidence was not reported.
+    UsageUnreported,
     /// Cache-read tokens > 0: the cache served part of the prefix.
     CacheEffective,
     /// Capability says the route caches, but this run read 0 from cache.
@@ -371,6 +351,7 @@ pub enum CacheConformanceClassification {
 impl CacheConformanceClassification {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::UsageUnreported => "usage_unreported",
             Self::CacheEffective => "cache_effective",
             Self::CacheSupportedMiss => "cache_supported_miss",
             Self::UnsupportedZero => "unsupported_zero",
@@ -392,13 +373,26 @@ fn field_inconsistency(usage: &NormalizedCacheUsage) -> Option<String> {
         return Some("negative token count".to_string());
     }
     // A read with no prompt at all can't have come from this prompt's cache.
-    if usage.input_tokens <= 0 && (usage.cache_read_tokens > 0 || usage.cache_write_tokens > 0) {
+    let input_reported = !usage
+        .missing_fields
+        .iter()
+        .any(|field| field == "input_tokens" || field == "usage");
+    if input_reported
+        && usage.input_tokens <= 0
+        && (usage.cache_read_tokens > 0 || usage.cache_write_tokens > 0)
+    {
         return Some("cache tokens reported with zero prompt tokens".to_string());
     }
     if usage.input_tokens > 0
-        && usage.cache_read_tokens + usage.cache_write_tokens > usage.input_tokens
+        && usage
+            .cache_read_tokens
+            .saturating_add(usage.cache_write_tokens)
+            > usage.input_tokens
     {
         return Some("cache-read + cache-write exceed prompt tokens".to_string());
+    }
+    if usage.fresh_input_tokens < 0 {
+        return Some("prompt token counts could not be normalized".to_string());
     }
     // Provider both flagged "no cache accounting" AND reported cache tokens.
     if !usage.cache_supported && (usage.cache_read_tokens > 0 || usage.cache_write_tokens > 0) {
@@ -418,11 +412,26 @@ pub fn classify_cache_run(
     if field_inconsistency(usage).is_some() {
         return CacheConformanceClassification::ProviderFieldInconsistent;
     }
+    if usage
+        .missing_fields
+        .iter()
+        .any(|field| field == "input_tokens" || field == "usage")
+    {
+        return CacheConformanceClassification::UsageUnreported;
+    }
     if usage.input_tokens <= 0 {
         return CacheConformanceClassification::NoPromptTokens;
     }
     if usage.cache_read_tokens > 0 {
         return CacheConformanceClassification::CacheEffective;
+    }
+    if support.status != PromptCacheSupportStatus::CacheUnsupported
+        && usage
+            .missing_fields
+            .iter()
+            .any(|field| field == "cache_read_tokens" || field == "cache_accounting")
+    {
+        return CacheConformanceClassification::UsageUnreported;
     }
     match support.status {
         PromptCacheSupportStatus::CacheSupported => {
@@ -478,6 +487,8 @@ pub struct CacheConformanceRun {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheVerdict {
+    /// A run omitted the evidence needed to measure cache behavior.
+    UsageUnreported,
     /// A run after the first read from cache: repeat caching works.
     CacheEffective,
     /// Route caches per capability, but no repeat run read from cache.
@@ -497,6 +508,7 @@ pub enum CacheVerdict {
 impl CacheVerdict {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::UsageUnreported => "usage_unreported",
             Self::CacheEffective => "cache_effective",
             Self::CacheSupportedMiss => "cache_supported_miss",
             Self::UnsupportedZero => "unsupported_zero",
@@ -514,7 +526,7 @@ impl CacheVerdict {
     pub fn is_dogfood_failure(self) -> bool {
         matches!(
             self,
-            Self::CacheSupportedMiss | Self::ProviderFieldInconsistent
+            Self::CacheSupportedMiss | Self::ProviderFieldInconsistent | Self::UsageUnreported
         )
     }
 }
@@ -523,6 +535,7 @@ impl CacheVerdict {
 /// `prompt_cache_observation_bucket_counts`, now Harn-owned.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheConformanceBucketCounts {
+    pub usage_unreported: usize,
     pub cache_effective: usize,
     pub cache_supported_miss: usize,
     pub unsupported_zero: usize,
@@ -536,6 +549,7 @@ impl CacheConformanceBucketCounts {
         let mut counts = Self::default();
         for run in runs {
             match run.classification {
+                CacheConformanceClassification::UsageUnreported => counts.usage_unreported += 1,
                 CacheConformanceClassification::CacheEffective => counts.cache_effective += 1,
                 CacheConformanceClassification::CacheSupportedMiss => {
                     counts.cache_supported_miss += 1;
@@ -578,6 +592,12 @@ fn aggregate_verdict(runs: &[CacheConformanceRun], support: &PromptCacheSupport)
         .any(|run| run.classification == CacheConformanceClassification::ProviderFieldInconsistent)
     {
         return CacheVerdict::ProviderFieldInconsistent;
+    }
+    if runs
+        .iter()
+        .any(|run| run.classification == CacheConformanceClassification::UsageUnreported)
+    {
+        return CacheVerdict::UsageUnreported;
     }
     // A repeat run (index > 0) reading from cache is the positive signal; a
     // first-run read alone can't prove repeat caching.
@@ -825,8 +845,65 @@ mod tests {
             .contains(&"cache_read_tokens".to_string()));
         assert_eq!(
             classify_cache_run(&normalized, &unknown()),
-            CacheConformanceClassification::SupportUnknownZero
+            CacheConformanceClassification::UsageUnreported
         );
+    }
+
+    #[test]
+    fn missing_and_malformed_usage_cannot_be_measured_as_zero() {
+        for raw in [
+            json!({"output_tokens": 8}),
+            json!({"input_tokens": 5040, "output_tokens": 8}),
+            json!({"input_tokens": 5040, "cache_read_tokens": 0, "cache_write_tokens": 0, "cache_visibility": "undeclared"}),
+            json!({"input_tokens": 5040, "cache_read_tokens": 0, "cache_accounting_declared": null}),
+        ] {
+            let usage = NormalizedCacheUsage::from_usage_value(&raw);
+            assert_eq!(
+                classify_cache_run(&usage, &supported()),
+                CacheConformanceClassification::UsageUnreported,
+                "{raw}"
+            );
+        }
+        for raw in [
+            json!({"input_tokens": "bad", "prompt_tokens": 5040, "cache_read_tokens": 0}),
+            json!({"input_tokens": 5040, "cache_read_tokens": "bad"}),
+            json!({"input_tokens": 5040, "cache_read_tokens": 0, "cache_read_input_tokens": "bad"}),
+            json!({"input_tokens": 5040, "cache_read_tokens": 0, "cache_read_input_tokens": 1}),
+        ] {
+            let usage = NormalizedCacheUsage::from_usage_value(&raw);
+            assert_eq!(
+                classify_cache_run(&usage, &supported()),
+                CacheConformanceClassification::ProviderFieldInconsistent,
+                "{raw}"
+            );
+        }
+        let measured_zero = NormalizedCacheUsage::from_usage_value(
+            &json!({"input_tokens": 5040, "cache_read_tokens": 0}),
+        );
+        assert_eq!(
+            classify_cache_run(&measured_zero, &supported()),
+            CacheConformanceClassification::CacheSupportedMiss
+        );
+        let measured_read = NormalizedCacheUsage::from_usage_value(
+            &json!({"input_tokens": 5040, "cache_read_tokens": 5000}),
+        );
+        assert_eq!(
+            classify_cache_run(&measured_read, &supported()),
+            CacheConformanceClassification::CacheEffective
+        );
+        let report = classify_cache_conformance_fixture(
+            "anthropic",
+            "claude-sonnet-4-6",
+            &json!({"runs": [
+                {"usage": {"input_tokens": 5040, "cache_read_tokens": 5000}},
+                {"usage": {"input_tokens": 5040}}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(report.verdict, CacheVerdict::UsageUnreported);
+        assert_eq!(report.bucket_counts.usage_unreported, 1);
+        assert!(report.dogfood_failure);
     }
 
     #[test]
@@ -868,7 +945,8 @@ mod tests {
         let normalized = NormalizedCacheUsage::from_usage_value(&raw);
         assert_eq!(normalized.cache_read_tokens, 3500);
         assert_eq!(normalized.cache_write_tokens, 500);
-        assert_eq!(normalized.fresh_input_tokens, 0);
+        assert_eq!(normalized.input_tokens, 8000);
+        assert_eq!(normalized.fresh_input_tokens, 4000);
         assert!(normalized.cache_supported);
         assert!(normalized.missing_fields.is_empty());
     }
@@ -884,6 +962,87 @@ mod tests {
         assert_eq!(normalized.input_tokens, 3000);
         assert_eq!(normalized.cache_read_tokens, 2048);
         assert_eq!(normalized.fresh_input_tokens, 952);
+    }
+
+    #[test]
+    fn raw_anthropic_and_normalized_runs_have_identical_cache_accounting() {
+        for (fresh, read, write) in [(40, 0, 5000), (40, 5000, 0), (6000, 5000, 100)] {
+            let raw = NormalizedCacheUsage::from_usage_value(&json!({
+                "input_tokens": fresh, "output_tokens": 8,
+                "cache_read_input_tokens": read, "cache_creation_input_tokens": write,
+            }));
+            let normalized = NormalizedCacheUsage::from_usage_value(&json!({
+                "input_tokens": fresh + read + write, "output_tokens": 8,
+                "cache_read_tokens": read, "cache_write_tokens": write,
+            }));
+            assert_eq!(raw, normalized);
+            assert_eq!(raw.fresh_input_tokens, fresh);
+            assert_eq!(raw.input_tokens, fresh + read + write);
+            assert_ne!(
+                classify_cache_run(&raw, &supported()),
+                CacheConformanceClassification::ProviderFieldInconsistent
+            );
+        }
+    }
+
+    #[test]
+    fn gateway_cache_aliases_keep_inclusive_prompt_totals() {
+        for fields in [
+            json!({"cache_read_input_tokens": 5000, "cache_creation_input_tokens": 100}),
+            json!({"prompt_tokens_details": {"cached_tokens": 5000, "cache_write_tokens": 100}}),
+            json!({"input_tokens_details": {"cached_tokens": 5000, "cache_creation_input_tokens": 100}}),
+            json!({"cache": {"read_input_tokens": 5000, "write_input_tokens": 100}}),
+        ] {
+            let mut raw = fields;
+            raw["prompt_tokens"] = json!(5140);
+            raw["completion_tokens"] = json!(8);
+            let normalized = NormalizedCacheUsage::from_usage_value(&raw);
+            assert_eq!(normalized.input_tokens, 5140);
+            assert_eq!(normalized.fresh_input_tokens, 40);
+            assert!(normalized.missing_fields.is_empty());
+        }
+    }
+
+    #[test]
+    fn bedrock_and_gemini_cache_fixtures_normalize_at_the_shared_usage_boundary() {
+        let bedrock = NormalizedCacheUsage::from_usage_value(&json!({
+            "inputTokens": 40, "outputTokens": 8, "cacheReadInputTokens": 5000, "cacheWriteInputTokens": 100,
+        }));
+        assert_eq!(bedrock.input_tokens, 5140);
+        assert_eq!(bedrock.fresh_input_tokens, 40);
+        assert!(bedrock.missing_fields.is_empty());
+        let gemini = NormalizedCacheUsage::from_usage_value(&json!({
+            "promptTokenCount": 5040, "candidatesTokenCount": 8, "cachedContentTokenCount": 5000,
+        }));
+        assert_eq!(gemini.input_tokens, 5040);
+        assert_eq!(gemini.fresh_input_tokens, 40);
+    }
+
+    #[test]
+    fn invalid_normalized_usage_is_not_repaired_as_raw_anthropic() {
+        for raw in [
+            json!({"input_tokens": 40, "cache_read_tokens": 5000, "cache_write_tokens": 0}),
+            json!({"input_tokens": -1, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 0}),
+            json!({"input_tokens": i64::MAX, "cache_read_input_tokens": 1, "cache_creation_input_tokens": 0}),
+            json!({"input_tokens": 40, "cache_read_input_tokens": -1, "cache_creation_input_tokens": 0}),
+        ] {
+            let usage = NormalizedCacheUsage::from_usage_value(&raw);
+            assert_eq!(
+                classify_cache_run(&usage, &supported()),
+                CacheConformanceClassification::ProviderFieldInconsistent
+            );
+        }
+        let missing = NormalizedCacheUsage::from_usage_value(&json!({"output_tokens": 8}));
+        assert!(missing.missing_fields.contains(&"input_tokens".to_string()));
+        assert!(missing
+            .missing_fields
+            .contains(&"cache_read_tokens".to_string()));
+        assert!(!missing.cache_supported);
+        let zero = NormalizedCacheUsage::from_usage_value(&json!({
+            "input_tokens": 40, "output_tokens": 8, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+        }));
+        assert!(zero.cache_supported);
+        assert!(zero.missing_fields.is_empty());
     }
 
     #[test]
@@ -926,8 +1085,8 @@ mod tests {
             "provider": "anthropic",
             "model": "claude-sonnet-4-6",
             "runs": [
-                { "usage": { "input_tokens": 4000, "output_tokens": 80, "cache_creation_input_tokens": 3800 } },
-                { "usage": { "input_tokens": 4000, "output_tokens": 80, "cache_creation_input_tokens": 3800 } }
+                { "usage": { "input_tokens": 4000, "output_tokens": 80, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 3800 } },
+                { "usage": { "input_tokens": 4000, "output_tokens": 80, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 3800 } }
             ]
         });
         let report =

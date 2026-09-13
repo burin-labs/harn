@@ -12,7 +12,14 @@ use crate::value::{VmDictExt, VmValue};
 
 use super::api::{LlmResult, ProviderAttempts};
 
+mod cache_fields;
+mod prompt_tokens;
 mod receipt;
+pub(crate) use cache_fields::{
+    extract_cache_read_tokens, extract_cache_write_tokens, reported_cache_read_tokens,
+    reported_cache_write_tokens,
+};
+pub(crate) use prompt_tokens::{InputTokenBasis, PromptTokenCounts, ReportedTokenUsage};
 pub(crate) use receipt::ProviderUsageReceipt;
 
 /// The normalized accounting facts for one completed provider call.
@@ -114,6 +121,7 @@ impl UnpricedReason {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmUsage {
+    /// Full prompt size, including cache reads and writes, on every provider.
     pub input_tokens: i64,
     pub output_tokens: i64,
     /// Provider-reported whole-call token count when available. This remains
@@ -381,15 +389,8 @@ impl LlmUsage {
             cache_write_tokens,
             cache_supported,
             cache_accounting_declared,
-            cache_hit_ratio: (cache_accounting_declared == Some(true) && cache_supported).then(
-                || {
-                    super::cost::cache_hit_ratio(
-                        input_tokens,
-                        cache_read_tokens,
-                        cache_write_tokens,
-                    )
-                },
-            ),
+            cache_hit_ratio: (cache_accounting_declared == Some(true) && cache_supported)
+                .then(|| super::cost::cache_hit_ratio(input_tokens, cache_read_tokens)),
             cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
             cache_hit: usages.iter().any(|usage| usage.cache_hit),
             served_fast: usages.iter().any(|usage| usage.served_fast),
@@ -546,13 +547,7 @@ impl LlmUsage {
         let (unpriced_reason, projected_cost_usd) = unpriced_projection(cost_usd, table_cost);
         let cache_hit_ratio = (result.telemetry.cache_accounting_declared == Some(true)
             && result.cache_supported)
-            .then(|| {
-                super::cost::cache_hit_ratio(
-                    result.input_tokens,
-                    result.cache_read_tokens,
-                    result.cache_write_tokens,
-                )
-            });
+            .then(|| super::cost::cache_hit_ratio(result.input_tokens, result.cache_read_tokens));
         Self {
             input_tokens: result.input_tokens,
             output_tokens: result.output_tokens,
@@ -589,47 +584,11 @@ impl LlmUsage {
         }
     }
 
-    fn from_probe_counts(
-        provider: &str,
-        model: &str,
-        input_tokens: i64,
-        output_tokens: i64,
-    ) -> Self {
-        let cost_usd =
-            super::cost::pricing_aware_call_cost(provider, model, input_tokens, output_tokens);
-        Self {
-            input_tokens,
-            output_tokens,
-            reported_total_tokens: None,
-            cost_usd,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            cache_supported: false,
-            cache_accounting_declared: None,
-            cache_hit_ratio: None,
-            cache_savings_usd: 0.0,
-            cache_hit: false,
-            served_fast: false,
-            accounting_status: UsageAccountingStatus::Reported,
-            known_cost_usd: cost_usd.unwrap_or(0.0),
-            provider_call_count: 1,
-            unpriced_calls: i64::from(cost_usd.is_none()),
-            usage_unknown_calls: 0,
-            // A probe reports its own counts, so an unpriced probe is unpriced
-            // because the route has no price table, which has no bound.
-            unpriced: unpriced_facts(
-                unpriced_token_count(cost_usd, input_tokens, output_tokens),
-                cost_usd.is_none().then_some(UnpricedReason::PricingUnknown),
-                None,
-            ),
-        }
-    }
-
-    /// Normalize the accounting carried by a typed parser error. Complete
+    /// Normalize accounting from a provider receipt or saved probe. Complete
     /// token counts earn the same catalog pricing as a completed response;
     /// partial receipts retain their measured fields but remain explicitly
     /// unknown rather than turning absence into a free zero.
-    pub(crate) fn from_provider_error_receipt(
+    pub(crate) fn from_provider_receipt(
         provider: &str,
         model: &str,
         receipt: &ProviderUsageReceipt,
@@ -670,13 +629,7 @@ impl LlmUsage {
             cache_accounting_declared: receipt.cache_accounting_declared,
             cache_hit_ratio: (receipt.cache_accounting_declared == Some(true)
                 && receipt.cache_supported)
-                .then(|| {
-                    super::cost::cache_hit_ratio(
-                        input_tokens,
-                        receipt.cache_read_tokens,
-                        receipt.cache_write_tokens,
-                    )
-                }),
+                .then(|| super::cost::cache_hit_ratio(input_tokens, receipt.cache_read_tokens)),
             cache_savings_usd: super::cost::cache_savings_usd_for_provider(
                 provider,
                 model,
@@ -982,18 +935,26 @@ impl ToolProbeUsage {
         Self::from_usage(LlmUsage::from_result(result))
     }
 
-    fn from_totals(provider: &str, model: &str, totals: UsageTotals) -> Self {
-        if let Some((input_tokens, output_tokens)) = totals.input_tokens.zip(totals.output_tokens) {
-            return Self::from_usage(LlmUsage::from_probe_counts(
-                provider,
-                model,
-                input_tokens,
-                output_tokens,
-            ));
+    fn from_reported(provider: &str, model: &str, reported: ReportedTokenUsage) -> Self {
+        let input_tokens = reported
+            .prompt_counts()
+            .ok()
+            .flatten()
+            .map(|counts| counts.total);
+        let output_tokens = reported.output_tokens.filter(|tokens| *tokens >= 0);
+        if input_tokens.is_some() && output_tokens.is_some() {
+            let receipt = ProviderUsageReceipt::new(input_tokens, output_tokens, None, false)
+                .with_cache(
+                    reported.cache_read_tokens.unwrap_or(0),
+                    reported.cache_write_tokens.unwrap_or(0),
+                    None,
+                    reported.cache_read_tokens.is_some() || reported.cache_write_tokens.is_some(),
+                );
+            return Self::from_usage(LlmUsage::from_provider_receipt(provider, model, &receipt));
         }
         Self {
-            input_tokens: totals.input_tokens,
-            output_tokens: totals.output_tokens,
+            input_tokens,
+            output_tokens,
             reported_total_tokens: None,
             cost_usd: None,
             accounting_status: UsageAccountingStatus::Unknown,
@@ -1011,108 +972,42 @@ impl ToolProbeUsage {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct UsageTotals {
-    input_tokens: Option<i64>,
-    output_tokens: Option<i64>,
-}
-
-impl UsageTotals {
-    fn has_any(self) -> bool {
-        self.input_tokens.is_some() || self.output_tokens.is_some()
-    }
-
-    fn add_input(&mut self, value: i64) {
-        self.input_tokens = Some(self.input_tokens.unwrap_or(0).saturating_add(value.max(0)));
-    }
-
-    fn add_output(&mut self, value: i64) {
-        self.output_tokens = Some(self.output_tokens.unwrap_or(0).saturating_add(value.max(0)));
-    }
-}
-
 pub(crate) fn extract_probe_usage(
     provider: &str,
     model: &str,
     response: &Value,
 ) -> Option<ToolProbeUsage> {
-    let totals = usage_totals_from_response(response)?;
-    Some(ToolProbeUsage::from_totals(provider, model, totals))
+    let reported = reported_usage_from_response(response)?;
+    Some(ToolProbeUsage::from_reported(provider, model, reported))
 }
 
-fn usage_totals_from_response(response: &Value) -> Option<UsageTotals> {
-    let root_totals = usage_totals_from_envelope(response);
-    if root_totals.has_any() {
-        return Some(root_totals);
-    }
-    let frame_totals = last_stream_frame_usage(response);
-    frame_totals.has_any().then_some(frame_totals)
-}
-
-fn last_stream_frame_usage(response: &Value) -> UsageTotals {
-    let mut final_totals = UsageTotals::default();
-    let Some(frames) = response.get("frames").and_then(Value::as_array) else {
-        return final_totals;
-    };
-    for frame in frames {
-        let frame_totals = usage_totals_from_envelope(frame);
-        if frame_totals.has_any() {
-            final_totals = frame_totals;
+fn reported_usage_from_response(response: &Value) -> Option<ReportedTokenUsage> {
+    let mut reported = ReportedTokenUsage::default();
+    if let Some(frames) = response.get("frames").and_then(Value::as_array) {
+        for frame in frames {
+            reported.merge_reported(reported_usage_from_envelope(frame));
         }
     }
-    final_totals
+    // A saved response can contain both the terminal usage and copied frames.
+    // Its reported root components win without counting any component twice.
+    reported.merge_reported(reported_usage_from_envelope(response));
+    reported.has_any().then_some(reported)
 }
 
-fn usage_totals_from_envelope(envelope: &Value) -> UsageTotals {
-    let mut totals = UsageTotals::default();
-    accumulate_usage_object(envelope.get("usage"), &mut totals);
-    accumulate_usage_object(envelope.pointer("/message/usage"), &mut totals);
-    accumulate_usage_object(envelope.get("usageMetadata"), &mut totals);
-    accumulate_usage_object(envelope.pointer("/message/usageMetadata"), &mut totals);
-    totals
-}
-
-fn accumulate_usage_object(usage: Option<&Value>, totals: &mut UsageTotals) {
-    let Some(usage) = usage else {
-        return;
-    };
-    if let Some(value) = first_i64_field(
-        usage,
-        &[
-            "input_tokens",
-            "prompt_tokens",
-            "promptTokenCount",
-            "prompt_token_count",
-            "inputTokens",
-        ],
-    ) {
-        totals.add_input(value);
+fn reported_usage_from_envelope(envelope: &Value) -> ReportedTokenUsage {
+    let mut reported = ReportedTokenUsage::default();
+    for usage in [
+        envelope.get("usage"),
+        envelope.pointer("/message/usage"),
+        envelope.get("usageMetadata"),
+        envelope.pointer("/message/usageMetadata"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        reported.merge_reported(ReportedTokenUsage::from_value(usage));
     }
-
-    let output_tokens = first_i64_field(
-        usage,
-        &[
-            "output_tokens",
-            "completion_tokens",
-            "candidatesTokenCount",
-            "completion_token_count",
-            "outputTokenCount",
-            "outputTokens",
-        ],
-    );
-    let thoughts_tokens = first_i64_field(usage, &["thoughtsTokenCount", "thought_tokens"]);
-    match (output_tokens, thoughts_tokens) {
-        (Some(output), Some(thoughts)) => totals.add_output(output.saturating_add(thoughts)),
-        (Some(output), None) => totals.add_output(output),
-        (None, Some(thoughts)) => totals.add_output(thoughts),
-        (None, None) => {}
-    }
-}
-
-fn first_i64_field(value: &Value, names: &[&str]) -> Option<i64> {
-    names
-        .iter()
-        .find_map(|name| value.get(*name).and_then(Value::as_i64))
+    reported
 }
 
 #[cfg(test)]

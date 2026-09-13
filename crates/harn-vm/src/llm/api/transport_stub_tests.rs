@@ -1488,3 +1488,5 @@ fn streaming_path_classifies_opaque_500_as_http_error() {
     assert!(err.contains("[http_error]"), "err was: {err}");
     assert!(err.contains("upstream exploded"), "err was: {err}");
 }
+
+mod prompt_accounting;

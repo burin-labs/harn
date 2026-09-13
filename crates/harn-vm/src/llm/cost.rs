@@ -383,17 +383,11 @@ pub(crate) fn project_llm_call_cost(
     let (costed_output_tokens, projected_cost_usd, basis) = match observed.mean_output_tokens() {
         Some(mean_output_tokens) => {
             let costed_output_tokens = mean_output_tokens.clamp(0, output_budget_tokens);
-            let ratio = cache_hit_ratio(
-                observed.input_tokens,
-                observed.cache_read_tokens,
-                observed.cache_write_tokens,
-            )
-            .clamp(0.0, 1.0);
+            let ratio =
+                cache_hit_ratio(observed.input_tokens, observed.cache_read_tokens).clamp(0.0, 1.0);
             let cache_read_tokens = (projected_input_tokens.max(0) as f64 * ratio).round() as i64;
-            // `pricing_aware_call_cost_with_cache` treats a cache count
-            // that fits inside `input_tokens` as a subset of it, so the
-            // uncached remainder is priced at the input rate and the
-            // cached share at the cache-read rate.
+            // Input is the full prompt; the uncached remainder is priced at
+            // the input rate and the cached share at the cache-read rate.
             let cost = pricing_aware_call_cost_with_cache(
                 &opts.provider,
                 &opts.model,
@@ -812,24 +806,11 @@ pub fn pricing_aware_call_cost(
     )
 }
 
-pub(crate) fn cache_hit_ratio(
-    input_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-) -> f64 {
-    let input_tokens = input_tokens.max(0);
-    let cache_read_tokens = cache_read_tokens.max(0);
-    let cache_write_tokens = cache_write_tokens.max(0);
-    let reported_cache_tokens = cache_read_tokens.saturating_add(cache_write_tokens);
-    let total_prompt_tokens = if reported_cache_tokens <= input_tokens {
-        input_tokens
-    } else {
-        input_tokens.saturating_add(reported_cache_tokens)
-    };
-    if total_prompt_tokens == 0 {
+pub(crate) fn cache_hit_ratio(input_tokens: i64, cache_read_tokens: i64) -> f64 {
+    if input_tokens <= 0 {
         0.0
     } else {
-        cache_read_tokens as f64 / total_prompt_tokens as f64
+        cache_read_tokens.max(0) as f64 / input_tokens as f64
     }
 }
 
@@ -1401,20 +1382,10 @@ pub(crate) fn project_call_cost(
 ) -> f64 {
     let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
     let cache_write_rate = detail.cache_write_per_1k.unwrap_or(detail.input_per_1k);
-    // Providers report cache tokens under two conventions. OpenAI folds cached
-    // tokens into `input_tokens`, so cached counts must be subtracted to avoid
-    // double-billing. Anthropic (and OpenRouter-Anthropic) report `input_tokens`
-    // already excluding cache, with cache counts in separate fields, so the raw
-    // input is the non-cached remainder. Normalize the same way `cache_hit_ratio`
-    // does: if the cache total fits within input, treat cache as a subset;
-    // otherwise treat input as already exclusive of cache.
+    // Provider adapters normalize input to the full prompt before pricing.
+    // Counts cannot reveal whether a provider's wire input included cache.
     let cache_total = cache_read_tokens.saturating_add(cache_write_tokens);
-    let billable_input = if cache_total <= input_tokens {
-        input_tokens - cache_total
-    } else {
-        input_tokens
-    }
-    .max(0);
+    let billable_input = input_tokens.saturating_sub(cache_total).max(0);
     (billable_input as f64 * detail.input_per_1k
         + output_tokens as f64 * detail.output_per_1k
         + cache_read_tokens as f64 * cache_read_rate
