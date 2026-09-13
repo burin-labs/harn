@@ -4,6 +4,7 @@ use crate::llm::cache_conformance::classify_cache_conformance_fixture;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
+/// Classify saved cache usage with the canonical provider capability and accounting contract.
 #[harn_builtin(
     exposure = "harness.llm.cache_conformance",
     effects = ["llm.read@dynamic"],
