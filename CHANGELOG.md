@@ -9,6 +9,30 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.137
+
+### Added
+
+- Harn scripts can inspect saved prompt-cache usage through `std/llm/cache_conformance`,
+  using the same normalization, missing-field evidence, classifications, and report
+  verdict as the cache probe CLI.
+  Reports distinguish an observed first-request cache read from repeat-cache
+  evidence, and empty reports remain insufficient on every route.
+
+### Fixed
+
+- Normalize Anthropic and Bedrock input tokens to the full prompt across JSON responses,
+  streamed responses, failed-call receipts, and cache probes. Preserve the raw
+  provider counter separately and price fresh input, cache reads, and cache writes
+  without guessing the provider's accounting convention from their sizes.
+  Cache conformance schema v2 distinguishes unreported usage from measured zero
+  and rejects malformed or conflicting saved counters. Saved tool probes use the
+  same cache-aware pricing as runtime calls.
+- Release publication retries explicit HTTP 500, 502, 503, and 504 registry failures within its existing retry budget,
+  while preserving completed uploads and failing closed on unknown errors.
+- Execute complete function entrypoints supplied to `harn run -e` instead of silently nesting and skipping their bodies.
+  Inline snippets and explicit pipeline programs retain their existing execution paths.
+
 ## v0.10.136
 
 ### Changed
