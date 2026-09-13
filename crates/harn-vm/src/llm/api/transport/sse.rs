@@ -1,6 +1,6 @@
 use super::blocks::append_coalesced_text_block;
 use super::*;
-use crate::llm::usage::ProviderUsageReceipt;
+use crate::llm::usage::{InputTokenBasis, ProviderUsageReceipt};
 
 /// Consume an SSE streaming response from an already-sent request.
 /// Parses `data: {...}` lines from the response body, then defers to
@@ -782,11 +782,11 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                     }
                     served_fast |= crate::llm::serving_tiers::served_fast(model, &json["message"]);
                     let usage = &json["message"]["usage"];
-                    let cr = extract_cache_read_tokens(usage);
+                    let cr = extract_cache_read_tokens(usage)?;
                     if cr > 0 {
                         cache_read_tokens = cr;
                     }
-                    let cw = extract_cache_write_tokens(usage);
+                    let cw = extract_cache_write_tokens(usage)?;
                     if cw > 0 {
                         cache_write_tokens = cw;
                     }
@@ -977,11 +977,11 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                         reported_output_tokens = Some(n);
                     }
                     let usage = &json["usage"];
-                    let cr = extract_cache_read_tokens(usage);
+                    let cr = extract_cache_read_tokens(usage)?;
                     if cr > 0 {
                         cache_read_tokens = cr;
                     }
-                    let cw = extract_cache_write_tokens(usage);
+                    let cw = extract_cache_write_tokens(usage)?;
                     if cw > 0 {
                         cache_write_tokens = cw;
                     }
@@ -1167,11 +1167,11 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                     output_tokens = n;
                     reported_output_tokens = Some(n);
                 }
-                let cr = extract_cache_read_tokens(usage);
+                let cr = extract_cache_read_tokens(usage)?;
                 if cr > 0 {
                     cache_read_tokens = cr;
                 }
-                let cw = extract_cache_write_tokens(usage);
+                let cw = extract_cache_write_tokens(usage)?;
                 if cw > 0 {
                     cache_write_tokens = cw;
                 }
@@ -1353,6 +1353,13 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         telemetry.cache_accounting_declared,
         true,
     );
+    let provider_usage = if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
+        let receipt = provider_usage.with_input_basis(InputTokenBasis::Fresh)?;
+        input_tokens = receipt.input_tokens().unwrap_or(0);
+        receipt
+    } else {
+        provider_usage
+    };
     if text.is_empty()
         && thinking_text.is_empty()
         && output_tokens > 0
@@ -1411,7 +1418,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         && (input_tokens > 0 || output_tokens > 0)
     {
         let usage = serde_json::json!({
-            "input_tokens": input_tokens,
+            "input_tokens": reported_input_tokens,
             "output_tokens": output_tokens,
         });
         telemetry = ProviderTelemetry::from_anthropic_usage(&usage, anth_request_id.as_deref());

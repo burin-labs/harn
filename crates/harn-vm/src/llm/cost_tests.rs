@@ -384,24 +384,26 @@ fn project_call_cost_openai_subset_convention_subtracts_cache() {
 }
 
 #[test]
-fn project_call_cost_anthropic_separate_convention_bills_full_input() {
-    // Anthropic reports `input_tokens` already excluding cache, with cache in
-    // separate fields (cache_read > input). The 200 real non-cached input
-    // tokens must be billed at the full input rate, not zeroed out.
+fn project_call_cost_normalized_anthropic_bills_fresh_read_and_write() {
     let detail = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
     let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
-    let got = project_call_cost(&detail, 200, 500, 10_000, 0);
-    let expected =
-        (200.0 * detail.input_per_1k + 500.0 * detail.output_per_1k + 10_000.0 * cache_read_rate)
+    let cache_write_rate = detail.cache_write_per_1k.unwrap_or(detail.input_per_1k);
+    for fresh in [200, 20_000] {
+        let counts = crate::llm::usage::PromptTokenCounts::from_reported(
+            fresh,
+            10_000,
+            100,
+            crate::llm::usage::InputTokenBasis::Fresh,
+        )
+        .unwrap();
+        let got = project_call_cost(&detail, counts.total, 500, 10_000, 100);
+        let expected = (fresh as f64 * detail.input_per_1k
+            + 500.0 * detail.output_per_1k
+            + 10_000.0 * cache_read_rate
+            + 100.0 * cache_write_rate)
             / 1000.0;
-    assert!((got - expected).abs() < 1e-9);
-    // Regression guard for the pre-fix bug: the old code computed billable
-    // input as (input - cache_read - cache_write).max(0), which for
-    // input=200, cache_read=10000 clamped to 0 — dropping the real input
-    // term entirely. That buggy cost omits the 200*input_per_1k the correct
-    // cost includes, so the fixed result must exceed it.
-    let buggy = (500.0 * detail.output_per_1k + 10_000.0 * cache_read_rate) / 1000.0;
-    assert!(got > buggy);
+        assert!((got - expected).abs() < 1e-9);
+    }
 }
 
 #[test]
@@ -421,10 +423,10 @@ fn cache_savings_uses_catalog_cache_pricing() {
 }
 
 #[test]
-fn cache_hit_ratio_handles_subset_and_separate_anthropic_counts() {
-    assert!((cache_hit_ratio(1000, 250, 0) - 0.25).abs() < f64::EPSILON);
-    assert!((cache_hit_ratio(100, 900, 0) - 0.9).abs() < f64::EPSILON);
-    assert_eq!(cache_hit_ratio(0, 0, 0), 0.0);
+fn cache_hit_ratio_uses_full_prompt_totals() {
+    assert!((cache_hit_ratio(1000, 250) - 0.25).abs() < f64::EPSILON);
+    assert!((cache_hit_ratio(1000, 900) - 0.9).abs() < f64::EPSILON);
+    assert_eq!(cache_hit_ratio(0, 0), 0.0);
 }
 
 #[test]
@@ -588,7 +590,7 @@ fn cached_call_result() -> crate::llm::api::LlmResult {
         text: "ok".to_string(),
         tool_calls: Vec::new(),
         raw_tool_calls: Vec::new(),
-        input_tokens: 91,
+        input_tokens: 30_969,
         output_tokens: 470,
         cache_read_tokens: 28_410,
         cache_write_tokens: 2_468,
@@ -601,7 +603,10 @@ fn cached_call_result() -> crate::llm::api::LlmResult {
         served_fast: false,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: crate::llm::api::ProviderTelemetry::default(),
+        telemetry: crate::llm::api::ProviderTelemetry {
+            server_prompt_tokens: Some(91),
+            ..Default::default()
+        },
     }
 }
 

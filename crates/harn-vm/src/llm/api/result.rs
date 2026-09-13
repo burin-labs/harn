@@ -90,6 +90,8 @@ pub(crate) struct LlmResult {
     /// forensics; dispatch must keep using `tool_calls`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub raw_tool_calls: Vec<RawProviderToolCall>,
+    /// Full prompt size, including cache reads and writes on every provider.
+    /// The unmodified wire counter remains in `telemetry.server_prompt_tokens`.
     pub input_tokens: i64,
     pub output_tokens: i64,
     /// Prompt tokens served from the provider's cache (when supported).

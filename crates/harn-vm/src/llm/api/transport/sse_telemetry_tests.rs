@@ -27,6 +27,104 @@ use std::time::Duration;
 const OBSERVED_BUILD: &str = "b9994-14d3ba45f";
 const OTHER_BUILD: &str = "b10360-48d22e295";
 
+#[tokio::test(flavor = "current_thread")]
+async fn invalid_cache_counters_fail_json_and_stream_parsers() {
+    use serde_json::json;
+    for cache in [
+        json!({"cache_read_input_tokens": "bad"}),
+        json!({"cache_read_input_tokens": 5000, "cache_read_tokens": 0}),
+        json!({"cache_creation_input_tokens": -1}),
+    ] {
+        let mut usage = cache;
+        usage["input_tokens"] = json!(40);
+        usage["output_tokens"] = json!(8);
+        let response = json!({"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": usage});
+        let error = crate::llm::api::parse_llm_response_for_provider(
+            &response,
+            "anthropic",
+            "claude-haiku-4-5-20251001",
+            WireDialect::Anthropic,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("invalid provider cache usage"));
+        let frame = json!({"type": "message_start", "message": response});
+        let body = format!("data: {frame}\n\n");
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let error = consume_sse_lines(
+            tokio::io::BufReader::new(body.as_bytes()),
+            "anthropic",
+            "claude-haiku-4-5-20251001",
+            DialectContract::new(WireDialect::Anthropic, None),
+            tx,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("invalid provider cache usage"));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn anthropic_json_and_stream_failures_preserve_normalized_and_raw_input() {
+    let raw_usage = serde_json::json!({
+        "input_tokens": 6000, "output_tokens": 8,
+        "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 100,
+    });
+    let json_error = crate::llm::api::parse_llm_response_for_provider(
+        &serde_json::json!({"content": [], "stop_reason": "end_turn", "usage": raw_usage}),
+        "anthropic",
+        "claude-haiku-4-5-20251001",
+        WireDialect::Anthropic,
+        false,
+    )
+    .expect_err("empty billed response");
+    let body = sse_body(&[
+        serde_json::json!({"type": "message_start", "message": {"usage": raw_usage}}),
+        serde_json::json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 8}}),
+        serde_json::json!({"type": "message_stop"}),
+    ]);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let stream_error = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "anthropic",
+        "claude-haiku-4-5-20251001",
+        DialectContract::new(WireDialect::Anthropic, None),
+        tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect_err("empty billed stream");
+    for error in [json_error, stream_error] {
+        let receipt = ProviderUsageReceipt::from_error(&error).expect("retained billed usage");
+        assert_eq!(receipt.input_tokens(), Some(11100));
+        let value = receipt.to_vm_value();
+        let VmValue::Dict(fields) = &value else {
+            panic!("receipt dict")
+        };
+        assert_eq!(
+            fields
+                .get("reported_input_tokens")
+                .and_then(VmValue::as_int),
+            Some(6000)
+        );
+        let decoded = ProviderUsageReceipt::from_vm_value(&value).expect("receipt round trip");
+        assert_eq!(decoded, receipt);
+        let usage = crate::llm::usage::LlmUsage::from_provider_receipt(
+            "anthropic",
+            "claude-haiku-4-5-20251001",
+            &receipt,
+        );
+        assert_eq!(usage.input_tokens, 11100);
+        assert_eq!(usage.usage_unknown_calls, 0);
+        assert!(usage.cost_usd.is_some());
+    }
+}
+
 /// One content chunk, optionally announcing the backend build.
 fn content_chunk(fingerprint: Option<&str>) -> serde_json::Value {
     let mut frame = serde_json::json!({

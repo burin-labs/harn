@@ -1126,7 +1126,7 @@ pub(crate) async fn observed_llm_call(
                 let event_retryable = can_retry || (status == "error" && retryable);
                 let error_usage =
                     crate::llm::usage::ProviderUsageReceipt::from_error(&error).map(|receipt| {
-                        crate::llm::usage::LlmUsage::from_provider_error_receipt(
+                        crate::llm::usage::LlmUsage::from_provider_receipt(
                             &opts.provider,
                             &opts.model,
                             &receipt,

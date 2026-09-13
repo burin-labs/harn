@@ -158,7 +158,7 @@ or derive cache behavior independently.
 
 | Field | Type | Description |
 |---|---|---|
-| `input_tokens` | int | Input/prompt token count |
+| `input_tokens` | int | Full prompt token count, including cache reads and cache writes, on every provider |
 | `output_tokens` | int | Output/completion token count |
 | `reported_total_tokens` | int \| nil | Whole-call token count reported directly by the provider. This preserves total-only receipts without assigning tokens to an unknown input/output component. |
 | `cost_usd` | float \| nil | Cache- and serving-tier-adjusted catalog price for this response; `nil` (not `0`) when pricing is unknown |
@@ -176,6 +176,30 @@ or derive cache behavior independently.
 | `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
 | `provider_telemetry` | dict | Raw provider-reported usage/telemetry, passed through when present |
 | `provider_attempts` | dict | How many provider requests this one logical call took, and why the extra ones happened (see below) |
+
+Anthropic's wire `input_tokens` and Bedrock Converse's `inputTokens` count fresh
+input only. Harn adds the provider's
+cache-read and cache-write counts before recording `usage.input_tokens`. For
+example, 40 fresh tokens, 5,000 cache reads, and 100 cache writes become 5,140
+input tokens. The unmodified counter remains in
+`usage.provider_telemetry.server_prompt_tokens`; Anthropic failed-response receipts retain
+it as `reported_input_tokens`. OpenAI-compatible prompt totals already include
+cache and are not increased. Historical Anthropic and Bedrock records produced before this
+normalization can still contain fresh-only input counts.
+
+`harn provider cache-probe --usage-fixture <file>` applies the same accounting
+to saved usage. Raw Anthropic fixtures use `cache_read_input_tokens` and
+`cache_creation_input_tokens`; normalized Harn fixtures use `cache_read_tokens`
+and `cache_write_tokens` with an inclusive `input_tokens`. Inconsistent
+normalized counts remain errors. An omitted cache counter remains missing,
+distinct from a reported zero.
+
+Cache conformance reports use schema version 2. Missing prompt or cache-read
+evidence yields `usage_unreported`, including canonical usage whose
+`cache_visibility` is `undeclared`. The report counts those runs and fails the
+dogfood gate rather than claiming a measured miss. Malformed or conflicting
+counter aliases yield `provider_field_inconsistent`. A positive cache read does
+not require an output or cache-write counter.
 
 For llama.cpp calls, `usage.provider_telemetry` also separates prompt size from
 prompt work:

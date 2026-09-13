@@ -12,6 +12,8 @@ use crate::value::VmValue;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct ProviderUsageReceipt {
     pub(super) input_tokens: Option<i64>,
+    /// Unmodified input counter retained before conversion to the full prompt.
+    pub(super) reported_input_tokens: Option<i64>,
     pub(super) output_tokens: Option<i64>,
     pub(super) reported_total_tokens: Option<i64>,
     pub(super) cache_read_tokens: i64,
@@ -31,6 +33,7 @@ impl ProviderUsageReceipt {
     ) -> Self {
         Self {
             input_tokens: input_tokens.filter(|tokens| *tokens >= 0),
+            reported_input_tokens: input_tokens.filter(|tokens| *tokens >= 0),
             output_tokens: output_tokens.filter(|tokens| *tokens >= 0),
             reported_total_tokens: None,
             cache_read_tokens: 0,
@@ -62,6 +65,31 @@ impl ProviderUsageReceipt {
     pub(crate) fn with_reported_total(mut self, total_tokens: Option<i64>) -> Self {
         self.reported_total_tokens = total_tokens.filter(|tokens| *tokens >= 0);
         self
+    }
+
+    /// Convert after cache counters have arrived, including streamed failures.
+    pub(crate) fn with_input_basis(
+        mut self,
+        basis: super::InputTokenBasis,
+    ) -> Result<Self, crate::value::VmError> {
+        self.input_tokens = self
+            .input_tokens
+            .map(|input| {
+                super::PromptTokenCounts::from_reported(
+                    input,
+                    self.cache_read_tokens,
+                    self.cache_write_tokens,
+                    basis,
+                )
+                .map(|counts| counts.total)
+                .map_err(|reason| {
+                    crate::value::VmError::Runtime(format!(
+                        "invalid provider prompt usage: {reason}"
+                    ))
+                })
+            })
+            .transpose()?;
+        Ok(self)
     }
 
     pub(crate) fn has_any_reported_token_count(&self) -> bool {
@@ -103,6 +131,11 @@ impl ProviderUsageReceipt {
             (
                 crate::value::intern_key("input_tokens"),
                 self.input_tokens.map_or(VmValue::Nil, VmValue::Int),
+            ),
+            (
+                crate::value::intern_key("reported_input_tokens"),
+                self.reported_input_tokens
+                    .map_or(VmValue::Nil, VmValue::Int),
             ),
             (
                 crate::value::intern_key("output_tokens"),
@@ -159,6 +192,8 @@ impl ProviderUsageReceipt {
             return None;
         };
         let input_tokens = optional_non_negative_int(fields, "input_tokens").ok()?;
+        let reported_input_tokens =
+            optional_non_negative_int_if_present(fields, "reported_input_tokens").ok()?;
         let output_tokens = optional_non_negative_int(fields, "output_tokens").ok()?;
         let reported_total_tokens =
             optional_non_negative_int_if_present(fields, "reported_total_tokens").ok()?;
@@ -174,6 +209,7 @@ impl ProviderUsageReceipt {
         };
         Some(Self {
             input_tokens,
+            reported_input_tokens,
             output_tokens,
             reported_total_tokens,
             cache_read_tokens,

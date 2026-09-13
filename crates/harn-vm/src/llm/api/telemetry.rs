@@ -37,6 +37,8 @@ pub mod source {
     pub const LLAMACPP_TIMINGS: &str = "llamacpp_timings";
     /// Anthropic Messages API — usage counts only; no timings.
     pub const ANTHROPIC_USAGE: &str = "anthropic_usage";
+    /// Amazon Bedrock Converse usage counters.
+    pub const BEDROCK_USAGE: &str = "bedrock_usage";
     /// Google Gemini `usageMetadata` block from `generateContent`.
     pub const GEMINI_USAGE: &str = "gemini_usage";
     /// Google Gemini `usage` block from the Interactions API. Named apart from
@@ -125,9 +127,9 @@ pub struct ProviderTelemetry {
     /// Generation/decode time (Ollama `eval_duration`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_generation_ms: Option<u64>,
-    /// Total prompt tokens reported by the provider's usage counter. Distinct
-    /// from `LlmResult::input_tokens` because hosted providers frequently bill
-    /// different token boundaries than the on-device tokenizer reports.
+    /// Unmodified provider input counter. Anthropic reports fresh input here;
+    /// OpenAI-compatible routes report the full prompt. Use the normalized
+    /// `LlmResult::input_tokens` for comparable prompt totals.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_prompt_tokens: Option<i64>,
     /// Prompt tokens the server actually evaluated rather than reading from a
