@@ -23,12 +23,12 @@ workbench.
 flowchart TD
     accTitle: How Harn connects an application to models and tools
     accDescr: Your application supplies a Harn program. The runtime exchanges requests and results with models and tools and saves the run history.
-    App["Your application<br/>a game, coding tool, or service"]
-    Program["Your Harn program<br/>task, prompts, tools, and rules"]
-    Runtime["Harn runtime<br/>agent loop and permissions"]
+    App["Your application<br/>game, coding tool,<br/>or service"]
+    Program["Your Harn program<br/>task and prompts,<br/>tools and rules"]
+    Runtime["Harn runtime<br/>agent loop<br/>and permissions"]
     Models["Language models<br/>local or hosted"]
-    Tools["Your tools<br/>files, APIs, and databases"]
-    History["Saved run history<br/>inspect, replay, and evaluate"]
+    Tools["Your tools<br/>files, APIs,<br/>and databases"]
+    History["Saved run history<br/>inspect, replay,<br/>and evaluate"]
     App --> Program
     Program --> Runtime
     Runtime <--> Models
@@ -79,6 +79,11 @@ Save the example as `main.harn` in a project with a README. After
 Hosted models need the provider's credentials and may incur charges.
 The [agent-loop guide](docs/src/llm/agent_loop.md) covers tools, limits, and
 longer conversations.
+
+Tool annotations can describe whether a tool only reads data or interacts with
+external systems. These hints describe intent; capability permissions enforce
+access. See the [annotated tool example](docs/src/tutorial-mcp-server.md#1-register-tools)
+and [annotation reference](docs/src/spec/language/13-functions-and-closures.md#tool-declarations).
 
 ## Try Harn
 
