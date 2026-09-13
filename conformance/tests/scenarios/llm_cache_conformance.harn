@@ -16,15 +16,31 @@ pipeline test(harness: Harness) {
   )
   assert_eq(warm.schema_version, 2)
   assert_eq(len(warm.runs), 1)
-  assert_eq(warm.runs[0].usage.input_tokens, 5040)
-  assert_eq(warm.runs[0].usage.fresh_input_tokens, 40)
-  assert_eq(warm.runs[0].classification, "cache_effective")
+  const warm_run = warm.runs[0]
+  if warm_run == nil {
+    throw "warm run missing"
+  }
+  assert_eq(warm_run.usage.input_tokens, 5040)
+  assert_eq(warm_run.usage.fresh_input_tokens, 40)
+  assert_eq(warm_run.classification, "cache_effective")
   assert_eq(warm.bucket_counts.cache_effective, 1)
+  assert_eq(warm.verdict, "cache_read_observed")
+
+  const local = report(harness.llm, "llamacpp", "local-model", [
+    {input_tokens: 2000, output_tokens: 8, cache_read_tokens: 500},
+  ])
+  assert_eq(local.support.supported, false)
+  assert_eq(local.verdict, "cache_read_observed")
+  assert_eq(local.bucket_counts.cache_effective, 1)
   const missing = report(harness.llm, "anthropic", "claude-sonnet-4-6", [{}])
   assert_eq(missing.verdict, "usage_unreported")
   assert_eq(missing.dogfood_failure, true)
   assert_eq(missing.bucket_counts.usage_unreported, 1)
-  assert_eq(len(missing.runs[0].usage.missing_fields ?? []) > 0, true)
+  const missing_run = missing.runs[0]
+  if missing_run == nil {
+    throw "missing-usage run missing"
+  }
+  assert_eq(len(missing_run.usage.missing_fields ?? []) > 0, true)
   const invalid = report(
     harness.llm,
     "anthropic",
@@ -38,5 +54,7 @@ pipeline test(harness: Harness) {
   assert_eq(len(empty.runs), 0)
   assert_eq(empty.verdict, "insufficient_runs")
   assert_eq(empty.bucket_counts.cache_effective, 0)
+  const empty_local = report(harness.llm, "llamacpp", "local-model", [])
+  assert_eq(empty_local.verdict, "insufficient_runs")
   harness.stdio.log("llm_cache_conformance passed")
 }

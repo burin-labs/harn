@@ -19,18 +19,24 @@ uncached portion. Each run retains its raw usage and missing-field evidence.
 
 Missing measurements produce `usage_unreported`; contradictory counters
 produce `provider_field_inconsistent`. Neither is a measured cache miss.
-An empty supported-route report produces `insufficient_runs`. Inspect the run
-count alongside the verdict. A single warm run proves an observed cache read,
-not repeat-run reliability.
+An empty report produces `insufficient_runs` on every route. Inspect the run
+count alongside the verdict. A first-request cache read produces
+`cache_read_observed`, including on local routes without provider prompt-cache
+controls. A later cache read produces `cache_effective`; a first-request read
+alone does not prove repeat-run reliability.
 
 ```harn
 import { report } from "std/llm/cache_conformance"
 
 fn main(harness: Harness) {
-  const result = report(harness.llm, "anthropic", "claude-sonnet-4-6", [
+  const result = report(harness.llm, "anthropic", "claude-sonnet-5", [
     {input_tokens: 40, cache_read_input_tokens: 5000, output_tokens: 8},
   ])
-  assert_eq(result.runs[0].usage.input_tokens, 5040)
-  assert_eq(result.runs[0].classification, "cache_effective")
+  const run = result.runs[0]
+  if run == nil {
+    throw "expected one measured run"
+  }
+  assert_eq(run.usage.input_tokens, 5040)
+  assert_eq(run.classification, "cache_effective")
 }
 ```

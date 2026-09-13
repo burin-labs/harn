@@ -1,6 +1,6 @@
 import { get_typed_value } from "std/schema"
 
-// @harn-entrypoint-category llm.stdlib
+/** @harn-entrypoint-category llm.stdlib */
 pub type CacheUsage = {
   input_tokens: int,
   fresh_input_tokens: int,
