@@ -120,6 +120,25 @@ fn wait_until_visible(
   }
 }
 
+/** Match explicit HTTP status lines, not numbers in package versions or diagnostics. */
+fn transient_registry_http_failure(text: string) -> bool {
+  for raw_line in text.split("\n") {
+    const line = raw_line.trim()
+    for status in [500, 502, 503, 504] {
+      if line == "failed to get a 200 ok response, got ${status}" {
+        return true
+      }
+      for protocol in ["http/1.1", "http/2", "http/3"] {
+        const prefix = "${protocol} ${status}"
+        if line == prefix || line.starts_with(prefix + " ") {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
 /** Classify Cargo publication output without treating unknown failures as retryable. */
 pub fn publish_failure_category(output: string) -> PublishFailureCategory {
   const text = output.lower()
@@ -131,7 +150,8 @@ pub fn publish_failure_category(output: string) -> PublishFailureCategory {
   if text.contains("429") || text.contains("too many requests") {
     return "rate_limited"
   }
-  if text.contains("ssl connect error")
+  if transient_registry_http_failure(text)
+    || text.contains("ssl connect error")
     || text.contains("connection reset by peer")
     || text.contains("recv failure")
     || text.contains("could not resolve host")
