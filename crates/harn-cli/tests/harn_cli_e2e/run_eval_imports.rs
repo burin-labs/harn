@@ -113,3 +113,51 @@ fn eval_pipeline_return_sets_exit_code() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
+fn eval_function_entrypoint_executes_imported_body() {
+    let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("lib.harn"),
+        "pub fn answer() -> int { return 42 }",
+    )
+    .unwrap();
+    let out = harn_e2e_command()
+        .current_dir(temp.path())
+        .args([
+            "run", "-e",
+            "import { answer } from \"./lib\"\nfn main(harness: Harness) { harness.stdio.println(answer()) }",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "42");
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
+fn eval_function_entrypoint_failure_matches_file_execution() {
+    let temp = TempDir::new().unwrap();
+    let source = "fn main(harness: Harness) { throw \"entry body reached\" }";
+    fs::write(temp.path().join("main.harn"), source).unwrap();
+    for args in [vec!["run", "main.harn"], vec!["run", "-e", source]] {
+        let out = harn_e2e_command()
+            .current_dir(temp.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "stdout={}, stderr={}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(String::from_utf8_lossy(&out.stderr).contains("entry body reached"));
+    }
+}

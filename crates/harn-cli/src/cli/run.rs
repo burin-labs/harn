@@ -107,7 +107,9 @@ pub(crate) struct RunArgs {
         conflicts_with = "as_job"
     )]
     pub timeout: Option<Duration>,
-    /// Evaluate inline Harn code instead of a file.
+    /// Evaluate an inline body snippet or complete Harn entrypoint instead of a file.
+    /// Complete `fn main` and pipeline programs execute as written; body snippets
+    /// receive an implicit pipeline wrapper with a `harness` parameter.
     #[arg(short = 'e')]
     pub eval: Option<String>,
     /// Resume a suspended top-level agent from a worker handle or snapshot path.

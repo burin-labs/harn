@@ -56,7 +56,10 @@ logs and progress always go to stderr.
     body).
   - Bare script with top-level statements for tiny one-off files.
 - Run: `harn run script.harn`.
-- Inline: `harn run -e 'harness.stdio.log("hi")'`. The snippet is wrapped in
+- Complete function and pipeline programs also work inline, for example
+  `harn run -e 'fn main(harness: Harness) { harness.stdio.println("hi") }'`.
+  Their entrypoint executes as it does in a file, including thrown failures.
+- Inline body snippet: `harn run -e 'harness.stdio.log("hi")'`. The snippet is wrapped in
   `pipeline main(harness: Harness) { ... }`; leading `import "..."` /
   `import { x } from "..."` / `import * as ns from "..."` /
   `pub import { x } from "..."` lines are
