@@ -491,6 +491,8 @@ pub enum CacheVerdict {
     UsageUnreported,
     /// A run after the first read from cache: repeat caching works.
     CacheEffective,
+    /// Cache served the first observed request, without a later cache read.
+    CacheReadObserved,
     /// Route caches per capability, but no repeat run read from cache.
     CacheSupportedMiss,
     /// Route does not cache per capability; zero reads are expected.
@@ -510,6 +512,7 @@ impl CacheVerdict {
         match self {
             Self::UsageUnreported => "usage_unreported",
             Self::CacheEffective => "cache_effective",
+            Self::CacheReadObserved => "cache_read_observed",
             Self::CacheSupportedMiss => "cache_supported_miss",
             Self::UnsupportedZero => "unsupported_zero",
             Self::SupportUnknownZero => "support_unknown_zero",
@@ -587,6 +590,9 @@ pub struct CacheConformanceReport {
 }
 
 fn aggregate_verdict(runs: &[CacheConformanceRun], support: &PromptCacheSupport) -> CacheVerdict {
+    if runs.is_empty() {
+        return CacheVerdict::InsufficientRuns;
+    }
     if runs
         .iter()
         .any(|run| run.classification == CacheConformanceClassification::ProviderFieldInconsistent)
@@ -612,6 +618,18 @@ fn aggregate_verdict(runs: &[CacheConformanceRun], support: &PromptCacheSupport)
     let any_cache_read = runs
         .iter()
         .any(|run| run.classification == CacheConformanceClassification::CacheEffective);
+    if any_cache_read {
+        // Preserve a measured repeat miss on a supported route. The initial
+        // read remains visible in its run and bucket, but cannot satisfy the
+        // repeat probe. A no-prompt follow-up is not a measured cache miss.
+        if runs.iter().any(|run| {
+            run.run_index > 0
+                && run.classification == CacheConformanceClassification::CacheSupportedMiss
+        }) {
+            return CacheVerdict::CacheSupportedMiss;
+        }
+        return CacheVerdict::CacheReadObserved;
+    }
     let all_no_prompt = !runs.is_empty()
         && runs
             .iter()
@@ -623,14 +641,7 @@ fn aggregate_verdict(runs: &[CacheConformanceRun], support: &PromptCacheSupport)
         PromptCacheSupportStatus::CacheUnsupported => CacheVerdict::UnsupportedZero,
         PromptCacheSupportStatus::CacheSupportUnknown => CacheVerdict::SupportUnknownZero,
         PromptCacheSupportStatus::CacheSupported => {
-            if any_cache_read {
-                // Only a first-run read observed; need a repeat to confirm.
-                if runs.len() < 2 {
-                    CacheVerdict::InsufficientRuns
-                } else {
-                    CacheVerdict::CacheSupportedMiss
-                }
-            } else if runs.len() < 2 {
+            if runs.len() < 2 {
                 CacheVerdict::InsufficientRuns
             } else {
                 CacheVerdict::CacheSupportedMiss
@@ -1043,6 +1054,66 @@ mod tests {
         }));
         assert!(zero.cache_supported);
         assert!(zero.missing_fields.is_empty());
+    }
+
+    #[test]
+    fn aggregate_preserves_observed_reads_and_empty_evidence_on_every_route() {
+        for (provider, model) in [
+            ("anthropic", "claude-sonnet-4-6"),
+            ("llamacpp", "local-model"),
+            ("", ""),
+        ] {
+            let empty = classify_cache_conformance_fixture(provider, model, "[]").unwrap();
+            assert_eq!(empty.verdict, CacheVerdict::InsufficientRuns);
+            assert!(empty.runs.is_empty());
+
+            let first_read = json!([
+                {"input_tokens": 2000, "output_tokens": 8, "cache_read_tokens": 500},
+            ]);
+            let observed =
+                classify_cache_conformance_fixture(provider, model, &first_read.to_string())
+                    .unwrap();
+            assert_eq!(observed.verdict, CacheVerdict::CacheReadObserved);
+            assert_eq!(observed.bucket_counts.cache_effective, 1);
+
+            let repeat_read = json!([
+                {"input_tokens": 2000, "output_tokens": 8, "cache_read_tokens": 0},
+                {"input_tokens": 2000, "output_tokens": 8, "cache_read_tokens": 500},
+            ]);
+            let repeated =
+                classify_cache_conformance_fixture(provider, model, &repeat_read.to_string())
+                    .unwrap();
+            assert_eq!(repeated.verdict, CacheVerdict::CacheEffective);
+            assert_eq!(repeated.runs.len(), 2);
+        }
+    }
+
+    #[test]
+    fn first_read_does_not_hide_a_measured_repeat_miss() {
+        let warm = json!({"input_tokens": 2000, "output_tokens": 8, "cache_read_tokens": 500});
+        for (next, expected, failure) in [
+            (
+                json!({"input_tokens": 2000, "output_tokens": 8, "cache_read_tokens": 0}),
+                CacheVerdict::CacheSupportedMiss,
+                true,
+            ),
+            (
+                json!({"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}),
+                CacheVerdict::CacheReadObserved,
+                false,
+            ),
+            (json!({}), CacheVerdict::UsageUnreported, true),
+        ] {
+            let report = classify_cache_conformance_fixture(
+                "anthropic",
+                "claude-sonnet-4-6",
+                &json!([warm, next]).to_string(),
+            )
+            .unwrap();
+            assert_eq!(report.verdict, expected);
+            assert_eq!(report.dogfood_failure, failure);
+            assert_eq!(report.bucket_counts.cache_effective, 1);
+        }
     }
 
     #[test]
