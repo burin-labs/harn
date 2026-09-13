@@ -25,10 +25,34 @@ pipeline test(harness: Harness) {
   assert_eq(warm_run.classification, "cache_effective")
   assert_eq(warm.bucket_counts.cache_effective, 1)
   assert_eq(warm.verdict, "cache_read_observed")
-
-  const local = report(harness.llm, "llamacpp", "local-model", [
-    {input_tokens: 2000, output_tokens: 8, cache_read_tokens: 500},
-  ])
+  const warm_then_miss = report(
+    harness.llm,
+    "anthropic",
+    "claude-sonnet-4-6",
+    [
+      {input_tokens: 2000, output_tokens: 8, cache_read_tokens: 500},
+      {input_tokens: 2000, output_tokens: 8, cache_read_tokens: 0},
+    ],
+  )
+  assert_eq(warm_then_miss.verdict, "cache_supported_miss")
+  assert_eq(warm_then_miss.dogfood_failure, true)
+  assert_eq(warm_then_miss.bucket_counts.cache_effective, 1)
+  const warm_then_no_prompt = report(
+    harness.llm,
+    "anthropic",
+    "claude-sonnet-4-6",
+    [
+      {input_tokens: 2000, output_tokens: 8, cache_read_tokens: 500},
+      {input_tokens: 0, output_tokens: 0, cache_read_tokens: 0},
+    ],
+  )
+  assert_eq(warm_then_no_prompt.verdict, "cache_read_observed")
+  const local = report(
+    harness.llm,
+    "llamacpp",
+    "local-model",
+    [{input_tokens: 2000, output_tokens: 8, cache_read_tokens: 500}],
+  )
   assert_eq(local.support.supported, false)
   assert_eq(local.verdict, "cache_read_observed")
   assert_eq(local.bucket_counts.cache_effective, 1)

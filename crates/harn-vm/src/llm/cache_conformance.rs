@@ -619,6 +619,15 @@ fn aggregate_verdict(runs: &[CacheConformanceRun], support: &PromptCacheSupport)
         .iter()
         .any(|run| run.classification == CacheConformanceClassification::CacheEffective);
     if any_cache_read {
+        // Preserve a measured repeat miss on a supported route. The initial
+        // read remains visible in its run and bucket, but cannot satisfy the
+        // repeat probe. A no-prompt follow-up is not a measured cache miss.
+        if runs.iter().any(|run| {
+            run.run_index > 0
+                && run.classification == CacheConformanceClassification::CacheSupportedMiss
+        }) {
+            return CacheVerdict::CacheSupportedMiss;
+        }
         return CacheVerdict::CacheReadObserved;
     }
     let all_no_prompt = !runs.is_empty()
@@ -1076,6 +1085,34 @@ mod tests {
                     .unwrap();
             assert_eq!(repeated.verdict, CacheVerdict::CacheEffective);
             assert_eq!(repeated.runs.len(), 2);
+        }
+    }
+
+    #[test]
+    fn first_read_does_not_hide_a_measured_repeat_miss() {
+        let warm = json!({"input_tokens": 2000, "output_tokens": 8, "cache_read_tokens": 500});
+        for (next, expected, failure) in [
+            (
+                json!({"input_tokens": 2000, "output_tokens": 8, "cache_read_tokens": 0}),
+                CacheVerdict::CacheSupportedMiss,
+                true,
+            ),
+            (
+                json!({"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}),
+                CacheVerdict::CacheReadObserved,
+                false,
+            ),
+            (json!({}), CacheVerdict::UsageUnreported, true),
+        ] {
+            let report = classify_cache_conformance_fixture(
+                "anthropic",
+                "claude-sonnet-4-6",
+                &json!([warm, next]).to_string(),
+            )
+            .unwrap();
+            assert_eq!(report.verdict, expected);
+            assert_eq!(report.dogfood_failure, failure);
+            assert_eq!(report.bucket_counts.cache_effective, 1);
         }
     }
 

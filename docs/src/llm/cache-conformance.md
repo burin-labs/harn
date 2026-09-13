@@ -23,7 +23,9 @@ An empty report produces `insufficient_runs` on every route. Inspect the run
 count alongside the verdict. A first-request cache read produces
 `cache_read_observed`, including on local routes without provider prompt-cache
 controls. A later cache read produces `cache_effective`; a first-request read
-alone does not prove repeat-run reliability.
+alone does not prove repeat-run reliability. If a supported route then reports
+a prompt-bearing repeat with zero reads, the verdict remains
+`cache_supported_miss`; the initial read stays visible in its run and bucket.
 
 ```harn
 import { report } from "std/llm/cache_conformance"
