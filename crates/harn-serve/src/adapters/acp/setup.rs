@@ -509,6 +509,8 @@ impl AcpServer {
                 advertised_commands: Vec::new(),
                 current_mode_id: modes::DEFAULT_MODE_ID.to_string(),
                 budget: SessionBudget::Inherit,
+                admission: None,
+                admission_unavailable: false,
                 profile_turn: 0,
                 environment_policy: harn_vm::security::SessionEnvironment::inherited(),
             },

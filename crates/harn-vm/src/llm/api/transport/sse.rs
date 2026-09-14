@@ -664,6 +664,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     let mut stop_reason: Option<String> = None;
     let mut cache_read_tokens: i64 = 0;
     let mut cache_write_tokens: i64 = 0;
+    let mut anthropic_cache_usage = Box::<crate::llm::usage::ReportedCacheUsage>::default();
     // Counter for fallback streaming-tool-call ids when a provider sent
     // an empty id on the first tool_use block. Kept stable across the
     // stream so the coalesced updates reuse the same id the dispatcher
@@ -782,14 +783,9 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                     }
                     served_fast |= crate::llm::serving_tiers::served_fast(model, &json["message"]);
                     let usage = &json["message"]["usage"];
-                    let cr = extract_cache_read_tokens(usage)?;
-                    if cr > 0 {
-                        cache_read_tokens = cr;
-                    }
-                    let cw = extract_cache_write_tokens(usage)?;
-                    if cw > 0 {
-                        cache_write_tokens = cw;
-                    }
+                    anthropic_cache_usage.merge_value(usage)?;
+                    cache_read_tokens = anthropic_cache_usage.read_tokens.unwrap_or(0);
+                    cache_write_tokens = anthropic_cache_usage.write_tokens.unwrap_or(0);
                     if let Some(rid) = json["message"]["id"].as_str() {
                         if !rid.is_empty() {
                             anth_request_id = Some(rid.to_string());
@@ -977,14 +973,9 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                         reported_output_tokens = Some(n);
                     }
                     let usage = &json["usage"];
-                    let cr = extract_cache_read_tokens(usage)?;
-                    if cr > 0 {
-                        cache_read_tokens = cr;
-                    }
-                    let cw = extract_cache_write_tokens(usage)?;
-                    if cw > 0 {
-                        cache_write_tokens = cw;
-                    }
+                    anthropic_cache_usage.merge_value(usage)?;
+                    cache_read_tokens = anthropic_cache_usage.read_tokens.unwrap_or(0);
+                    cache_write_tokens = anthropic_cache_usage.write_tokens.unwrap_or(0);
                     if let Some(sr) = json["delta"]["stop_reason"].as_str() {
                         stop_reason = Some(sr.to_string());
                     }
@@ -1415,13 +1406,17 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     };
     if telemetry.is_empty()
         && dialect.stream_protocol() == StreamProtocol::AnthropicSse
-        && (input_tokens > 0 || output_tokens > 0)
+        && (reported_input_tokens.is_some() || reported_output_tokens.is_some())
     {
         let usage = serde_json::json!({
             "input_tokens": reported_input_tokens,
-            "output_tokens": output_tokens,
+            "output_tokens": reported_output_tokens,
         });
         telemetry = ProviderTelemetry::from_anthropic_usage(&usage, anth_request_id.as_deref());
+    }
+    if dialect.stream_protocol() == StreamProtocol::AnthropicSse && anthropic_cache_usage.has_any()
+    {
+        telemetry.reported_cache_usage = Some(anthropic_cache_usage);
     }
     telemetry.capture_request_id(provider_request_id);
     // Written after the loop, never inside it: the usage frame replaces

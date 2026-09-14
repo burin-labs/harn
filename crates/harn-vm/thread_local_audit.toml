@@ -45,6 +45,7 @@ captured = [
   "CURRENT_LOOP_SINKS",
   "CURRENT_SESSION_STACK",
   "LLM_CONFIG_OVERRIDES_CONTEXT",
+  "SCOPE",
   "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
   "LLM_CAPABILITY_OVERRIDES_CONTEXT",
   "LLM_MOCK_CONTEXT",
@@ -255,6 +256,12 @@ path = "src/llm/cache.rs"
 statics = ["METRICS"]
 category = "thread_private"
 plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/admission.rs"
+statics = ["SCOPE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/call.rs"

@@ -3,6 +3,10 @@ use std::sync::Arc;
 use super::{AmbientExecutionScope, LlmMockContext};
 
 impl AmbientExecutionScope {
+    pub(crate) fn set_llm_admission(&mut self, scope: crate::llm::admission::AdmissionScope) {
+        self.llm_admission = scope;
+    }
+
     /// Capture the full ambient context and typed owners for one top-level VM
     /// run. Interleaved executions cannot observe each other's state.
     pub(crate) fn capture_for_top_level_execution(
@@ -31,6 +35,9 @@ impl AmbientExecutionScope {
         scope
             .subtask
             .set_agent_host_session_runtime(agent_host_session_runtime);
+        if scope.execution_scope.is_empty() && !scope.llm_admission.host_owned {
+            scope.llm_admission = crate::llm::admission::AdmissionScope::default();
+        }
         scope.execution_scope.push(owner);
         scope.llm_mock = llm_mock;
         scope

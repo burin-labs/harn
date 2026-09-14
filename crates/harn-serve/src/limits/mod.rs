@@ -182,6 +182,7 @@ impl RouteLimits {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BudgetSpec {
     pub llm_cost_usd: Option<f64>,
+    pub llm_admission: Option<harn_vm::llm::AdmissionMode>,
     pub llm_tokens: Option<u64>,
     pub pg_queries: Option<u64>,
     pub mcp_calls: Option<u64>,
@@ -190,9 +191,60 @@ pub struct BudgetSpec {
 impl BudgetSpec {
     pub fn is_empty(&self) -> bool {
         self.llm_cost_usd.is_none()
+            && self.llm_admission.is_none()
             && self.llm_tokens.is_none()
             && self.pg_queries.is_none()
             && self.mcp_calls.is_none()
+    }
+
+    /// Validate the opt-in before any adapter can load user code. Legacy
+    /// budgets keep their existing normalization; conservative ceilings do not.
+    pub(crate) fn conservative_ceiling(&self) -> Result<Option<f64>, String> {
+        if self.llm_admission.is_none() {
+            return Ok(None);
+        }
+        self.llm_cost_usd
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(Some)
+            .ok_or_else(|| {
+                "conservative admission requires a finite non-negative llm_cost_usd".to_string()
+            })
+    }
+
+    pub(crate) fn admission_budget(
+        &self,
+    ) -> Result<Option<harn_vm::llm::ConservativeLlmBudget>, crate::DispatchError> {
+        self.conservative_ceiling()
+            .map_err(crate::DispatchError::Validation)?
+            .map(harn_vm::llm::ConservativeLlmBudget::new)
+            .transpose()
+            .map_err(|error| crate::DispatchError::Execution(error.to_string()))
+    }
+
+    // Erase the dispatch body before composing ambient wrappers; embedding
+    // each adapter's full future makes downstream layout queries recursive.
+    pub(crate) async fn scope_dispatch<T>(
+        budget: Option<Self>,
+        inner: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<T, crate::DispatchError>> + '_>,
+        >,
+    ) -> Result<T, crate::DispatchError> {
+        let admission = budget
+            .as_ref()
+            .map(Self::admission_budget)
+            .transpose()?
+            .flatten();
+        let inner = async {
+            let _legacy = budget.as_ref().and_then(Self::install);
+            inner.await
+        };
+        match admission {
+            Some(admission) => admission
+                .scope(inner)
+                .await
+                .map_err(|error| crate::DispatchError::Execution(error.to_string()))?,
+            None => harn_vm::orchestration::scope_ambient_context(inner).await,
+        }
     }
 
     /// Install the resource ceilings represented by this budget on the

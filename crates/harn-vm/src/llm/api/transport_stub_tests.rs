@@ -12,6 +12,8 @@ use super::{
 };
 use crate::llm::env_guard;
 
+mod admission;
+mod anthropic_admission;
 mod anthropic_egress;
 #[path = "transport_stub_tests/gemini_generate_content.rs"]
 mod gemini_generate_content;

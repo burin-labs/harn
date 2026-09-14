@@ -497,6 +497,9 @@ fn nonnegative_usize_param(
 
 fn budget_config_value(spec: &BudgetSpec) -> String {
     let mut value = serde_json::Map::new();
+    if let Some(mode) = spec.llm_admission {
+        value.insert("llm_admission".to_string(), serde_json::json!(mode));
+    }
     if let Some(cost) = spec.llm_cost_usd {
         value.insert("llm_cost_usd".to_string(), serde_json::json!(cost));
     }
@@ -513,9 +516,11 @@ fn budget_config_value(spec: &BudgetSpec) -> String {
 }
 
 fn normalize_budget_spec(mut spec: BudgetSpec) -> Option<BudgetSpec> {
-    spec.llm_cost_usd = spec
-        .llm_cost_usd
-        .and_then(|value| value.is_finite().then_some(value.max(0.0)));
+    if spec.llm_admission.is_none() {
+        spec.llm_cost_usd = spec
+            .llm_cost_usd
+            .and_then(|value| value.is_finite().then_some(value.max(0.0)));
+    }
     (!spec.is_empty()).then_some(spec)
 }
 
@@ -583,6 +588,12 @@ fn parse_budget_config_value(raw: &str) -> Result<SessionBudget, String> {
         );
     };
     let spec = BudgetSpec {
+        llm_admission: budget_field(object, &["llm_admission", "llmAdmission"])
+            .map(|value| {
+                serde_json::from_value(value.clone())
+                    .map_err(|_| "invalid_budget: llm_admission must be conservative".to_string())
+            })
+            .transpose()?,
         llm_cost_usd: parse_budget_cost_field(
             object,
             &["llm_cost_usd", "llmCostUsd"],
@@ -595,6 +606,8 @@ fn parse_budget_config_value(raw: &str) -> Result<SessionBudget, String> {
     if spec.is_empty() {
         return Err("invalid_budget: budget object must include at least one limit".to_string());
     }
+    spec.conservative_ceiling()
+        .map_err(|error| format!("invalid_budget: {error}"))?;
     Ok(SessionBudget::Custom(spec))
 }
 

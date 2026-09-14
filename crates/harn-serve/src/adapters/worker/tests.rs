@@ -1,6 +1,31 @@
 use super::test_support::{write_script, ScopedEnvVar, ENV_LOCK};
 use super::*;
 
+#[tokio::test(flavor = "current_thread")]
+async fn conservative_worker_refuses_before_configuring_or_loading_user_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_script(
+        dir.path(),
+        r#"
+import "std/triggers"
+@job("scan")
+@budget(llm_admission: "conservative", llm_cost_usd: 0.6)
+pub fn scan(harness: Harness, event: TriggerEvent) -> dict { return {} }
+"#,
+    )
+    .await;
+    let mut configured = false;
+    let result = run_job_once_with(&path, "scan", serde_json::json!({}), |_| {
+        configured = true;
+    })
+    .await;
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("conservative admission is not supported for durable workers"));
+    assert!(!configured);
+}
+
 async fn wait_for_log_event(
     event_log: Arc<AnyEventLog>,
     topic_name: &str,

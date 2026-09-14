@@ -19,6 +19,7 @@ async fn llm_healthcheck_builtin(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
+    crate::llm::admission::check_auxiliary(None, "provider healthcheck or warm-up")?;
     let (provider_name, api_key) = parse_healthcheck_args(&args);
 
     // Ollama-specific readiness probe (issue #675): supports `model`,
