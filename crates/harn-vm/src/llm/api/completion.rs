@@ -40,6 +40,7 @@ pub(crate) async fn vm_call_completion_full(
     prefix: &str,
     suffix: Option<&str>,
 ) -> Result<LlmResult, VmError> {
+    crate::llm::admission::check_auxiliary(opts.budget.as_ref(), "fill-in-the-middle completion")?;
     if opts.provider == "mock" {
         return Ok(mock_completion_response(prefix, suffix));
     }

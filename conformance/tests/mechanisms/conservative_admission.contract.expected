@@ -1,0 +1,7 @@
+negative_default_mode_not_admitted=true
+openai_attempt_refused=true
+openai_policy_budget_stop=true
+openai_separate_reservation_receipt=true
+anthropic_attempt_refused=true
+anthropic_policy_budget_stop=true
+anthropic_separate_reservation_receipt=true

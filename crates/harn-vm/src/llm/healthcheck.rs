@@ -53,6 +53,14 @@ pub async fn run_provider_healthcheck_with_options(
     provider: &str,
     options: ProviderHealthcheckOptions,
 ) -> ProviderHealthcheckResult {
+    if let Err(error) = super::admission::check_auxiliary(None, "provider healthcheck") {
+        return ProviderHealthcheckResult::new(
+            provider,
+            false,
+            error.to_string(),
+            base_metadata("conservative_admission_refused"),
+        );
+    }
     let provider = if provider.trim().is_empty() {
         "anthropic"
     } else {

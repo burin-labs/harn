@@ -1,0 +1,119 @@
+// Native probes use isolated processes with dummy credentials and disabled
+// transport. A mock supplies only the default-mode negative control.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { command_run } from "std/command"
+import { llm_text, with_llm_script } from "std/testing"
+import { resolve_harn_bin } from "../_common"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn native_probe(harness: Harness, provider: string) {
+  const session = "conservative-admission-contract-" + provider + "-" + harness.random.uuid_v7()
+  const tools = tool_define(
+    tool_registry(),
+    "read_note",
+    "Read a note.",
+    {
+      handler: { args -> "note" },
+      parameters: {cache_control: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "Read a note.",
+      nil,
+      {
+        provider: provider,
+        model: if provider == "anthropic" {
+          "claude-haiku-4-5-20251001"
+        } else {
+          "gpt-5.6-luna"
+        },
+        tools: tools,
+        tool_format: "native",
+        max_tokens: 16,
+        max_iterations: 1,
+        final_wrapup: false,
+        session_id: session,
+        budget: {admission: "conservative", total_budget_usd: 0.01},
+      },
+    ) },
+  )
+  harness.stdio.println(
+    json_stringify({captured: captured, receipt: harness.llm.session_cost()?.admission}),
+  )
+}
+
+pipeline default(harness: Harness) {
+  const probe_provider = harness.env.get("HARN_ADMISSION_CONTRACT_PROVIDER")
+  if probe_provider != nil {
+    native_probe(harness, probe_provider)
+  } else {
+    with_llm_script(
+      harness.llm,
+      [llm_text("ok")],
+      { ->
+        const ordinary = agent_loop(
+          harness,
+          "Reply briefly.",
+          nil,
+          {provider: "mock", model: "mock", max_iterations: 1, final_wrapup: false},
+        )
+        contract_negative(
+          harness.stdio,
+          "negative_default_mode_not_admitted",
+          harness.llm.session_cost()?.admission != nil || ordinary.status == "budget_exhausted",
+        )
+      },
+    )
+    const root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+    const binary = resolve_harn_bin(harness, root)
+    const script = path_join(
+      root,
+      "conformance/tests/mechanisms/conservative_admission.contract.harn",
+    )
+    for provider in ["openai", "anthropic"] {
+      const child = command_run(
+        harness.tools,
+        [binary, "run", script],
+        {
+          env: {
+            HARN_ADMISSION_CONTRACT_PROVIDER: provider,
+            OPENAI_API_KEY: "admission-fixture-only",
+            ANTHROPIC_API_KEY: "admission-fixture-only",
+            HARN_LLM_CALLS_DISABLED: "1",
+            HARN_EGRESS_DEFAULT: "deny",
+          },
+          capture: {max_inline_bytes: 32768},
+        },
+      )
+      require child.success, child.stderr
+      const proof = json_parse(child.stdout)
+      const captured = proof.captured
+      const receipt = proof.receipt
+      contract_effect(
+        harness.stdio,
+        provider + "_attempt_refused",
+        captured.result.error?.admission_reason == "insufficient_allowance"
+          && captured.result.provider_call_count == 0,
+      )
+      contract_effect(
+        harness.stdio,
+        provider + "_policy_budget_stop",
+        captured.result.status == "budget_exhausted"
+          && captured.result.terminal.owner == "policy"
+          && len(captured.events.filter({ event -> event.type == "budget_exhausted" })) == 1,
+      )
+      contract_effect(
+        harness.stdio,
+        provider + "_separate_reservation_receipt",
+        receipt?.denied_attempts == 1 && to_string(receipt?.in_flight_usd) == "0"
+          && to_string(receipt?.uncertain_usd) == "0",
+      )
+    }
+  }
+}

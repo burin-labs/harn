@@ -22,6 +22,7 @@ import { TokenBias } from "std/llm/tokenizer"
  * Rust twin: `LlmBudgetEnvelope` in `crates/harn-vm/src/llm/cost.rs`.
  */
 pub type LlmBudget = {
+  admission?: "conservative",
   max_cost_usd?: float,
   max_input_tokens?: int,
   max_output_tokens?: int,

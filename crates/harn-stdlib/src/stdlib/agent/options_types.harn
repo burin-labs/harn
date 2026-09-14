@@ -5,8 +5,11 @@ import { AgentStallCheckpoint } from "std/agent/stall_types"
 // `crates/harn-vm/src/orchestration/policy/types.rs` (`TurnPolicy`) and
 // `crates/harn-vm/src/orchestration/compaction.rs` (`CompactionPolicy`); key
 // parity is pinned by `crates/harn-vm/src/orchestration/typed_options_parity.rs`.
-import { Logprobs, Mirostat, PredictedOutput } from "std/llm/options"
+import { LlmBudget, Logprobs, Mirostat, PredictedOutput } from "std/llm/options"
 import { TokenBias } from "std/llm/tokenizer"
+
+/** The shared provider budget plus the agent loop's aggregate token limit. */
+pub type AgentLlmBudget = LlmBudget & {max_total_tokens?: int}
 
 /** Failure streak that can terminate or pause an adaptive iteration budget. */
 pub type ConsecutiveFailureBudget = {max: int, kinds?: list<string>, paused_for_ms?: int}
@@ -340,14 +343,7 @@ pub type AgentModelSpec = {
   truncation?: string,
   compact?: bool,
   include?: list,
-  budget?: float \
-    | {
-    max_cost_usd?: float,
-    max_input_tokens?: int,
-    max_output_tokens?: int,
-    max_total_tokens?: int,
-    total_budget_usd?: float,
-  },
+  budget?: float | AgentLlmBudget,
   cache?: bool | dict,
   prompt_cache_ttl?: "5m" | "1h",
   speed?: "standard" | "fast",

@@ -955,6 +955,74 @@ reason: "budget_exceeded", projected_cost_usd: ...})`.
 `total_budget_usd` is an aggregate loop budget and exits gracefully with
 `status: "budget_exhausted"` before starting a turn that would exceed it.
 
+### Conservative admission
+
+The default budget uses request estimates and observed output/cache usage. For
+before-transport monetary admission, opt in on the first call of an execution:
+
+```harn
+import { LlmBudget } from "std/llm/options"
+
+const bounded: LlmBudget = {
+  admission: "conservative", total_budget_usd: 0.60,
+}
+const answer = try {
+  harness.llm.call("Return one word", nil, {
+    provider: "openai", model: "gpt-5.6-luna",
+    max_tokens: 64, budget: bounded,
+  })
+}
+const admission = harness.llm.session_cost().admission
+```
+
+This mode reserves the full catalog context at the highest applicable input
+and cache rates, plus the requested output limit at the highest output rate.
+It does not use a tokenizer estimate, past short completions, or cache hits to
+reduce the next reservation. A known-price attempt that cannot fit is refused
+before provider transport. An explicit `max_cost_usd` also limits each attempt.
+
+One execution and its inherited inline/spawned work share the reservation
+ledger. The first conservative call fixes the ceiling; later calls may tighten
+it but cannot widen it or disable it by omitting `budget`. Activation after an
+unreserved attempt is refused. Independent top-level executions have separate
+ledgers. Allocate disjoint budgets to separate processes: for an experiment,
+actor and grader allocations across both arms must sum to the whole allowance.
+The runtime does not turn separate process budgets into a shared batch cap.
+
+Full, streaming, offthread, retry, and fallback attempts use the same admission
+boundary. Complete, consistent provider token counters release only the unused
+part of the reservation, at conservative rates without cache discounts. Errors,
+cancellation, and missing usage retain the full amount as uncertain, including
+failures that might have occurred before sending. They are never free retries.
+
+Supported billing shapes are direct OpenAI text and direct Anthropic text with
+ordinary five-minute caching, exact catalog pricing, a context limit, and a
+positive output cap. Anthropic keeps the full input-context bound after each
+response and releases only unused output allowance: its response object does
+not retain presence for both cache counters, so missing cache categories must
+not be treated as known zero. This can exhaust an allowance well before actual
+spend; read the separate admission receipt. One-hour caching is refused even
+when requested in an inline cache-control block. Premium serving, media,
+hosted provider tools, opaque provider overrides, expiring promotional rates,
+and unpriced or other provider routes are refused. Fill-in-the-middle
+completion, provider conformance probes, and healthcheck/warm-up operations
+also refuse an active conservative scope; run any required preflight separately
+under its own allocation before starting the bounded execution. Generic HTTP,
+connector and subprocess charges are outside `LlmBudget`. Ordinary function tools are
+supported. This is enforcement against the catalog's provider contract, not an
+invoice guarantee: if reported usage exceeds the reserved bound, Harn records
+it, reports a contract violation, and refuses subsequent attempts.
+
+`harness.llm.session_cost().admission` is absent in default mode. When active it
+contains `mode`, `ceiling_usd`, `settled_upper_usd`, `in_flight_usd`,
+`uncertain_usd`, and `denied_attempts`. Monetary fields are exact decimal strings.
+Denials retain the terminal `budget_exceeded` contract and add a typed
+`admission_reason`, such as `unknown_pricing`, `unsupported_billing_shape`, or
+`insufficient_allowance`.
+
+These are reservation facts, separate from the existing actual-usage totals
+and their unknown-usage indicators; `settled_upper_usd` is not billed spend.
+
 | Function | Description |
 |---|---|
 | `llm_cost(model, input_tokens, output_tokens)` | Estimate USD cost from embedded pricing table |

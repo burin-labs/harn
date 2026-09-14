@@ -31,6 +31,9 @@ impl AmbientExecutionScope {
         scope
             .subtask
             .set_agent_host_session_runtime(agent_host_session_runtime);
+        if scope.execution_scope.is_empty() {
+            scope.llm_admission = crate::llm::admission::AdmissionScope::default();
+        }
         scope.execution_scope.push(owner);
         scope.llm_mock = llm_mock;
         scope

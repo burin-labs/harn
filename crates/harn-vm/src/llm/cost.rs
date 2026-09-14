@@ -73,6 +73,7 @@ fn record_observed_session_usage(usage: &crate::llm::usage::LlmUsage) {
 
 /// Reset thread-local cost state. Call between test runs to avoid leaking.
 pub(crate) fn reset_cost_state() {
+    super::admission::swap_scope(super::admission::AdmissionScope::default());
     LLM_BUDGET.with(|b| *b.borrow_mut() = None);
     LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
     LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = None);
@@ -198,6 +199,7 @@ pub fn peek_llm_token_budget() -> Option<u64> {
 // with `LlmBudget` in `std/llm/options.harn`.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub(crate) struct LlmBudgetEnvelope {
+    pub admission: Option<super::admission::AdmissionMode>,
     pub max_cost_usd: Option<f64>,
     pub total_budget_usd: Option<f64>,
     pub max_input_tokens: Option<i64>,
@@ -206,7 +208,8 @@ pub(crate) struct LlmBudgetEnvelope {
 
 impl LlmBudgetEnvelope {
     pub(crate) fn is_empty(&self) -> bool {
-        self.max_cost_usd.is_none()
+        self.admission.is_none()
+            && self.max_cost_usd.is_none()
             && self.total_budget_usd.is_none()
             && self.max_input_tokens.is_none()
             && self.max_output_tokens.is_none()
@@ -313,6 +316,20 @@ fn parse_budget_fields(
     fields: &crate::value::DictMap,
     envelope: &mut LlmBudgetEnvelope,
 ) -> Result<(), VmError> {
+    if let Some(value) = fields.get("admission") {
+        match value {
+            VmValue::Nil => {}
+            VmValue::String(mode) if mode.as_str() == "conservative" => {
+                envelope.admission = Some(super::admission::AdmissionMode::Conservative);
+            }
+            _ => {
+                return Err(categorized_error(
+                    "budget.admission: expected conservative",
+                    ErrorCategory::BudgetExceeded,
+                ))
+            }
+        }
+    }
     if let Some(value) = fields.get("max_cost_usd") {
         envelope.max_cost_usd = Some(numeric_value(value, "max_cost_usd")?);
     }
@@ -348,6 +365,12 @@ pub(crate) fn parse_budget(
                 ))));
             }
         }
+    }
+    if envelope.admission.is_some() && envelope.total_budget_usd.is_none() {
+        return Err(categorized_error(
+            "budget.admission conservative requires total_budget_usd",
+            ErrorCategory::BudgetExceeded,
+        ));
     }
     Ok((!envelope.is_empty()).then_some(envelope))
 }
@@ -925,6 +948,9 @@ fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
     let (total_input, total_output, _duration, call_count) = super::trace::peek_trace_summary();
     let total_cost = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
     let mut result = BTreeMap::new();
+    if let Some(admission) = super::admission::receipt() {
+        result.insert("admission".to_string(), admission);
+    }
     result.insert("total_cost".to_string(), VmValue::Float(total_cost));
     result.insert("input_tokens".to_string(), VmValue::Int(total_input));
     result.insert("output_tokens".to_string(), VmValue::Int(total_output));

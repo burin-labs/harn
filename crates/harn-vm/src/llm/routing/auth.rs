@@ -30,11 +30,22 @@ pub(super) fn link_options(
     }
     if let Some(envelope) = policy.budget.envelope() {
         let mut merged = opts.budget.clone().unwrap_or_default();
-        if envelope.max_cost_usd.is_some() {
-            merged.max_cost_usd = envelope.max_cost_usd;
+        // The first reservation has not latched the caller's ceiling yet.
+        // A routing policy may tighten conservative limits, never widen them.
+        // Adaptive mode retains its existing policy-over-caller precedence.
+        let conservative = merged.admission.is_some();
+        let limit = |caller: Option<f64>, policy: f64| {
+            if conservative {
+                caller.map_or(policy, |caller| caller.min(policy))
+            } else {
+                policy
+            }
+        };
+        if let Some(policy) = envelope.max_cost_usd {
+            merged.max_cost_usd = Some(limit(merged.max_cost_usd, policy));
         }
-        if envelope.total_budget_usd.is_some() {
-            merged.total_budget_usd = envelope.total_budget_usd;
+        if let Some(policy) = envelope.total_budget_usd {
+            merged.total_budget_usd = Some(limit(merged.total_budget_usd, policy));
         }
         opts.budget = Some(merged);
     }

@@ -1,7 +1,7 @@
 [
   {
     "default": "nil; no envelope cost ceiling",
-    "evidence": "agent_budget_post_call_stop_reason checks measured or conservatively projected cost after each call. The native pre-call projection currently returns false without inspecting the envelope.",
+    "evidence": "Adaptive mode checks measured cost after each call. Explicit conservative admission reserves a full-context bound before native provider transport and shares its ceiling across child execution scopes.",
     "expiry": "2026-09-13",
     "kind": "option",
     "layer": "runner",
@@ -10,7 +10,7 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/cost.rs",
-        "line": 319,
+        "line": 336,
         "reader": "get"
       },
       {
@@ -58,6 +58,24 @@
       }
     ],
     "reason": "A caller-selected run resource ceiling.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "nil; adaptive accounting without pre-call reservation",
+    "evidence": "The native agent-loop mechanism contract refuses an unaffordable call before transport; omission cannot escape an activated conservative scope.",
+    "expiry": "2026-10-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentBudget.admission",
+    "reachability": "yes",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cost.rs",
+        "line": 319,
+        "reader": "get"
+      }
+    ],
+    "reason": "Conservative admission deliberately refuses unsupported billing shapes; retain explicit opt-in until supported caller coverage justifies a default change.",
     "verdict": "KEEP-with-expiry"
   }
 ]
