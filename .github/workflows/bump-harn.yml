@@ -294,11 +294,11 @@ jobs:
           # they are what keeps a bump compiling. Formatting is likewise an
           # unconditional version migration, not an optional repair pass.
           # shellcheck disable=SC2016 # expand in the child shell, not here
-          refresh_caller='eval "$HARN_BUMP_REFRESH_COMMAND"; '
+          refresh_caller='set -euo pipefail; eval "$HARN_BUMP_REFRESH_COMMAND"; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
-          refresh_implicit_any='set -euo pipefail; harn fix --apply --safety behavior-preserving --preserve-implicit-any --json .; '
+          refresh_implicit_any='harn fix --apply --safety behavior-preserving --preserve-implicit-any --json .; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
-          refresh_migrations='set -euo pipefail; harn fix --apply --safety surface-changing --capability-migrations-only .; '
+          refresh_migrations='harn fix --apply --safety surface-changing --capability-migrations-only .; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_behavior_preserving='harn fix --apply --safety behavior-preserving .; '
           # Callers with intentional invalid fixtures own the valid-source

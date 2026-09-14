@@ -227,3 +227,74 @@ pipeline test_reusable_bump_workflow_preserves_refresh_and_workspace_boundaries(
   const text = harness.fs.read_text(path)
   assert_eq(bump_workflow_errors(read_yaml(harness.fs, path), text), [])
 }
+
+fn assert_refresh_execution(harness: Harness, caller_ok: bool) {
+  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
+  const workflow = read_yaml(harness.fs, path)
+  const step = workflow.jobs.bump.steps.find({ entry -> entry.name == "Run bump orchestration" })
+  assert(step != nil, "the real workflow must expose its refresh composition")
+  for repairs in ["true", "false"] {
+    const root = path_join(harness.fs.workspace_temp_dir(), harness.random.uuid_v7())
+    harness.fs.mkdir(root)
+    const phases = path_join(root, "phases")
+    const sentinel = path_join(root, "refresh.ok")
+    harness.fs.write_text(phases, "")
+    // Only the Harn executable is replaced. The shell composition comes from
+    // the shipped workflow, and its callback runs in a fresh child shell.
+    const adapter = [
+      "harn() {",
+      "  case \"$1\" in",
+      "    run) bash -c \"$HARN_BUMP_REFRESH\" ;;",
+      "    fix) printf 'migration\\n' >> \"$PHASES\" ;;",
+      "    --version) : ;;",
+      "    *) return 64 ;;",
+      "  esac",
+      "}",
+      "export -f harn",
+    ]
+      .join("\n")
+    const result = harness.process.run(
+      {
+        program: "bash",
+        args: ["-c", adapter + "\n" + step.run],
+        env: {
+          PHASES: phases,
+          HARN_BUMP_REFRESH_COMMAND: "printf 'caller\\n' >> \"$PHASES\"; "
+            + if caller_ok {
+              "true"
+            } else {
+              "false"
+            },
+          HARN_BUMP_FORMAT_COMMAND: "printf 'format\\n' >> \"$PHASES\"",
+          HARN_BUMP_REFRESH_SENTINEL: sentinel,
+          HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES: repairs,
+        },
+      },
+    )
+    assert_eq(result.success, caller_ok, result.stderr)
+    const observed = harness.fs.read_text(phases)
+    const expected = if caller_ok {
+      "caller\nmigration\nmigration\n"
+        + if repairs == "true" {
+          "migration\nformat\n"
+        } else {
+          "format\n"
+        }
+    } else {
+      "caller\n"
+    }
+    assert_eq(observed, expected)
+    assert_eq(harness.fs.exists(sentinel), caller_ok)
+    if caller_ok {
+      assert_eq(harness.fs.read_text(sentinel), "ok\n")
+    }
+  }
+}
+
+pipeline test_failed_caller_stops_refresh_before_migrations_and_sentinel(harness: Harness) {
+  assert_refresh_execution(harness, false)
+}
+
+pipeline test_successful_caller_reaches_format_and_sentinel(harness: Harness) {
+  assert_refresh_execution(harness, true)
+}
