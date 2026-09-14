@@ -73,7 +73,7 @@ fn record_observed_session_usage(usage: &crate::llm::usage::LlmUsage) {
 
 /// Reset thread-local cost state. Call between test runs to avoid leaking.
 pub(crate) fn reset_cost_state() {
-    super::admission::swap_scope(super::admission::AdmissionScope::default());
+    super::admission::reset_unscoped_state();
     LLM_BUDGET.with(|b| *b.borrow_mut() = None);
     LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
     LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = None);

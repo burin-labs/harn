@@ -405,6 +405,10 @@ impl AcpServer {
             self.send_error(id, -32602, "Missing session_id");
             return;
         };
+        if let Err(error) = self.prompt_admission(&src_id) {
+            self.send_error(id, -32602, &error);
+            return;
+        }
         let Some(src_cwd) = self
             .sessions
             .get(&src_id)
@@ -531,6 +535,14 @@ impl AcpServer {
             .get(&src_id)
             .map(|session| session.budget.clone())
             .unwrap_or_default();
+        let parent_admission = self
+            .sessions
+            .get(&src_id)
+            .and_then(|session| session.admission.clone());
+        let admission_unavailable = self
+            .sessions
+            .get(&src_id)
+            .is_none_or(|session| session.admission_unavailable);
         // A fork is the same session lineage: it inherits the parent's
         // environment policy (and thus its grants), not a fresh legacy env.
         let cancellation = self.register_session_cancellation(&new_session_id);
@@ -555,6 +567,8 @@ impl AcpServer {
                 advertised_commands: Vec::new(),
                 current_mode_id: parent_mode_id.clone(),
                 budget: parent_budget,
+                admission: parent_admission,
+                admission_unavailable,
                 profile_turn: 0,
                 environment_policy: child_environment,
             },

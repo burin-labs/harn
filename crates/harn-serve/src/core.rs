@@ -558,58 +558,65 @@ impl DispatchCore {
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
-                harn_vm::llm::scope_agent_event_sink(agent_event_sink, async move {
-                    let _event_log = install_scoped_event_log(self.event_log.clone());
-                    let _session_guard = match agent_session_id.as_deref() {
-                        Some(session_id) => {
-                            harn_vm::agent_sessions::open_or_create_with_actor_chain(
-                                Some(session_id.to_string()),
-                                actor_chain.clone(),
+                harn_vm::llm::scope_agent_event_sink(
+                    agent_event_sink,
+                    BudgetSpec::scope_dispatch(
+                        budget,
+                        Box::pin(async move {
+                            let _event_log = install_scoped_event_log(self.event_log.clone());
+                            let _session_guard = match agent_session_id.as_deref() {
+                                Some(session_id) => {
+                                    harn_vm::agent_sessions::open_or_create_with_actor_chain(
+                                        Some(session_id.to_string()),
+                                        actor_chain.clone(),
+                                    )
+                                    .map_err(|error| DispatchError::Execution(error.to_string()))?;
+                                    Some(harn_vm::agent_sessions::enter_current_session(
+                                        session_id.to_string(),
+                                    ))
+                                }
+                                None => None,
+                            };
+                            let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
+                            let _request_id_guard = request_id.map(harn_vm::enter_request_id);
+                            let _auth_context_guard = auth_context.map(crate::enter_auth_context);
+                            let _auth_principal_guard =
+                                auth_principal.map(harn_vm::enter_auth_principal);
+
+                            let mut vm = self.generation.instantiate(cancel_token);
+                            self.config.vm_configurator.configure(&mut vm)?;
+
+                            let exports = vm
+                                .load_prepared_module_exports_from_source(
+                                    &script_path,
+                                    self.generation.source(),
+                                )
+                                .await
+                                .map_err(classify_vm_error)?;
+                            let Some(closure) = exports.get(&request.function) else {
+                                return Err(DispatchError::MissingExport(format!(
+                                    "function '{}' is not exported by {}",
+                                    request.function,
+                                    script_path.display()
+                                )));
+                            };
+                            let mut args = inject_leading_authority(
+                                &vm,
+                                closure,
+                                &[],
+                                &format!("serve export `{}`", request.function),
                             )
-                            .map_err(|error| DispatchError::Execution(error.to_string()))?;
-                            Some(harn_vm::agent_sessions::enter_current_session(
-                                session_id.to_string(),
-                            ))
-                        }
-                        None => None,
-                    };
-                    let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
-                    let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
-                    let _request_id_guard = request_id.map(harn_vm::enter_request_id);
-                    let _auth_context_guard = auth_context.map(crate::enter_auth_context);
-                    let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
+                            .map_err(classify_vm_error)?;
+                            let user_args = build_vm_args(&request.arguments, function)?;
+                            args.extend(user_args);
+                            let result = vm.call_closure_pub(closure, &args).await;
 
-                    let mut vm = self.generation.instantiate(cancel_token);
-                    self.config.vm_configurator.configure(&mut vm)?;
-
-                    let exports = vm
-                        .load_prepared_module_exports_from_source(
-                            &script_path,
-                            self.generation.source(),
-                        )
-                        .await
-                        .map_err(classify_vm_error)?;
-                    let Some(closure) = exports.get(&request.function) else {
-                        return Err(DispatchError::MissingExport(format!(
-                            "function '{}' is not exported by {}",
-                            request.function,
-                            script_path.display()
-                        )));
-                    };
-                    let mut args = inject_leading_authority(
-                        &vm,
-                        closure,
-                        &[],
-                        &format!("serve export `{}`", request.function),
-                    )
-                    .map_err(classify_vm_error)?;
-                    let user_args = build_vm_args(&request.arguments, function)?;
-                    args.extend(user_args);
-                    let result = vm.call_closure_pub(closure, &args).await;
-
-                    let (_, json) = self.tools.classify_result(&request.function, result)?;
-                    Ok((json, vm.output().to_string()))
-                })
+                            let (_, json) =
+                                self.tools.classify_result(&request.function, result)?;
+                            Ok((json, vm.output().to_string()))
+                        }),
+                    ),
+                )
                 .await
             }))
             .await
@@ -641,54 +648,67 @@ impl DispatchCore {
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
-                harn_vm::llm::scope_agent_event_sink(agent_event_sink, async move {
-                    let _event_log = install_scoped_event_log(self.event_log.clone());
-                    let _session_guard = match agent_session_id.as_deref() {
-                        Some(session_id) => {
-                            harn_vm::agent_sessions::open_or_create_with_actor_chain(
-                                Some(session_id.to_string()),
-                                actor_chain.clone(),
+                harn_vm::llm::scope_agent_event_sink(
+                    agent_event_sink,
+                    BudgetSpec::scope_dispatch(
+                        budget,
+                        Box::pin(async move {
+                            let _event_log = install_scoped_event_log(self.event_log.clone());
+                            let _session_guard = match agent_session_id.as_deref() {
+                                Some(session_id) => {
+                                    harn_vm::agent_sessions::open_or_create_with_actor_chain(
+                                        Some(session_id.to_string()),
+                                        actor_chain.clone(),
+                                    )
+                                    .map_err(|error| DispatchError::Execution(error.to_string()))?;
+                                    Some(harn_vm::agent_sessions::enter_current_session(
+                                        session_id.to_string(),
+                                    ))
+                                }
+                                None => None,
+                            };
+                            let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
+                            let _request_id_guard = request_id.map(harn_vm::enter_request_id);
+                            let _auth_context_guard = auth_context.map(crate::enter_auth_context);
+                            let _auth_principal_guard =
+                                auth_principal.map(harn_vm::enter_auth_principal);
+
+                            let mut vm = self.generation.instantiate(cancel_token);
+                            self.config.vm_configurator.configure(&mut vm)?;
+                            let closure = vm
+                                .load_module_callable_from_source(
+                                    &script_path,
+                                    source,
+                                    &function.name,
+                                )
+                                .await
+                                .map_err(classify_vm_error)?;
+                            let closure = closure.ok_or_else(|| {
+                                DispatchError::MissingExport(function.name.clone())
+                            })?;
+                            let mut args = inject_leading_authority(
+                                &vm,
+                                &closure,
+                                &[],
+                                &format!("serve pipeline `{}`", function.name),
                             )
-                            .map_err(|error| DispatchError::Execution(error.to_string()))?;
-                            Some(harn_vm::agent_sessions::enter_current_session(
-                                session_id.to_string(),
-                            ))
-                        }
-                        None => None,
-                    };
-                    let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
-                    let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
-                    let _request_id_guard = request_id.map(harn_vm::enter_request_id);
-                    let _auth_context_guard = auth_context.map(crate::enter_auth_context);
-                    let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
+                            .map_err(classify_vm_error)?;
+                            let user_args = build_vm_args(&arguments, &function)?;
+                            args.extend(user_args);
+                            let result = vm.call_closure_pub(&closure, &args).await;
 
-                    let mut vm = self.generation.instantiate(cancel_token);
-                    self.config.vm_configurator.configure(&mut vm)?;
-                    let closure = vm
-                        .load_module_callable_from_source(&script_path, source, &function.name)
-                        .await
-                        .map_err(classify_vm_error)?;
-                    let closure = closure
-                        .ok_or_else(|| DispatchError::MissingExport(function.name.clone()))?;
-                    let mut args = inject_leading_authority(
-                        &vm,
-                        &closure,
-                        &[],
-                        &format!("serve pipeline `{}`", function.name),
-                    )
-                    .map_err(classify_vm_error)?;
-                    let user_args = build_vm_args(&arguments, &function)?;
-                    args.extend(user_args);
-                    let result = vm.call_closure_pub(&closure, &args).await;
-
-                    match result {
-                        Ok(_) => {
-                            let output = vm.output().to_string();
-                            Ok((serde_json::Value::String(output.clone()), output))
-                        }
-                        Err(error) => Err(self.tools.classify_failure(&function.name, error)),
-                    }
-                })
+                            match result {
+                                Ok(_) => {
+                                    let output = vm.output().to_string();
+                                    Ok((serde_json::Value::String(output.clone()), output))
+                                }
+                                Err(error) => {
+                                    Err(self.tools.classify_failure(&function.name, error))
+                                }
+                            }
+                        }),
+                    ),
+                )
                 .await
             }))
             .await

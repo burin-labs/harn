@@ -507,6 +507,11 @@ pub(super) struct Session {
     pub(super) current_mode_id: String,
     /// Session-level budget override applied to subsequent prompt turns.
     pub(super) budget: SessionBudget,
+    /// Live execution allowance. Forks share it and later prompt turns retain it.
+    pub(super) admission: Option<harn_vm::llm::ConservativeLlmBudget>,
+    /// A cold restore or a prompt without admission cannot later acquire a
+    /// fresh allowance that would omit earlier provider work.
+    pub(super) admission_unavailable: bool,
     /// Prompt executions emitted to profile output for this ACP session.
     pub(super) profile_turn: u64,
     /// The environment policy this session launched under, resolved once at

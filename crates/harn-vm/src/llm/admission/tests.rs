@@ -36,7 +36,7 @@ fn reservation_retains_uncertain_attempt_and_cannot_be_disabled_or_widened() {
         "in-flight reservation is shared"
     );
     drop(first);
-    let mut widened = opts.clone();
+    let mut widened = opts;
     widened.budget.as_mut().unwrap().total_budget_usd = Some(10.0);
     assert!(reserve(&widened, &request).is_err());
     widened.budget = None;
@@ -45,7 +45,7 @@ fn reservation_retains_uncertain_attempt_and_cannot_be_disabled_or_widened() {
         "omission cannot escape a latched scope"
     );
     let scope = SCOPE.with(|slot| slot.borrow().clone());
-    let ledger = scope.0.lock().unwrap();
+    let ledger = scope.ledger.lock().unwrap();
     assert_eq!(ledger.in_flight, Decimal::ZERO);
     assert!(ledger.uncertain > Decimal::ZERO);
     assert_eq!(ledger.ceiling, Some(money(0.6).unwrap()));
@@ -76,7 +76,7 @@ fn unknown_pricing_media_and_premium_requests_fail_closed() {
             "media" => {
                 opts.messages = vec![
                     serde_json::json!({"role":"user", "content":[{"type":"input_image","image_url":"https://invalid.example/image"}]}),
-                ]
+                ];
             }
             "premium" => opts.fast = true,
             _ => opts.provider_tools = vec![serde_json::json!({"type":"web_search"})],
@@ -162,7 +162,7 @@ fn provider_contract_violation_is_accounted_and_stops_further_attempts() {
     assert!(reservation.settle(&result(2_000_000, 100)).is_err());
     assert!(reserve(&opts, &request).is_err());
     let scope = SCOPE.with(|slot| slot.borrow().clone());
-    let ledger = scope.0.lock().unwrap();
+    let ledger = scope.ledger.lock().unwrap();
     assert!(ledger.settled_upper > Decimal::ZERO);
     assert_eq!(ledger.in_flight, Decimal::ZERO);
 }
@@ -221,7 +221,7 @@ fn an_unexpected_premium_response_stops_the_scope_and_retains_uncertainty() {
     assert!(reservation.settle(&response).is_err());
     assert!(reserve(&opts, &request).is_err());
     let scope = SCOPE.with(|slot| slot.borrow().clone());
-    let ledger = scope.0.lock().unwrap();
+    let ledger = scope.ledger.lock().unwrap();
     assert!(ledger.uncertain > Decimal::ZERO);
     assert_eq!(ledger.in_flight, Decimal::ZERO);
 }
@@ -235,7 +235,7 @@ fn preflight_refusal_latches_ceiling_without_reserving_an_attempt() {
     assert!(reserve(&opts, &request).is_err());
     let scope = SCOPE.with(|slot| slot.borrow().clone());
     {
-        let ledger = scope.0.lock().unwrap();
+        let ledger = scope.ledger.lock().unwrap();
         assert_eq!(ledger.ceiling, Some(money(0.01).unwrap()));
         assert_eq!(ledger.in_flight, Decimal::ZERO);
         assert_eq!(ledger.uncertain, Decimal::ZERO);
@@ -260,4 +260,177 @@ fn a_provider_ignoring_the_output_limit_stops_future_admission() {
         "an output-limit violation matters even below the aggregate monetary bound"
     );
     assert!(reserve(&opts, &request).is_err());
+}
+
+#[test]
+fn partial_usage_cannot_hide_a_known_output_limit_violation() {
+    swap_scope(AdmissionScope::default());
+    let mut opts = opts(10.0);
+    opts.max_tokens = 16;
+    let request = LlmRequestPayload::from(&opts);
+    let reservation = reserve(&opts, &request).unwrap().unwrap();
+    let mut response = result(0, 17);
+    response.telemetry.server_prompt_tokens = None;
+    assert!(reservation.settle(&response).is_err());
+    assert!(reserve(&opts, &request).is_err());
+    let scope = SCOPE.with(|slot| slot.borrow().clone());
+    let ledger = scope.ledger.lock().unwrap();
+    assert!(ledger.uncertain > Decimal::ZERO);
+    assert_eq!(ledger.in_flight, Decimal::ZERO);
+}
+
+#[test]
+fn an_unadmitted_response_model_retains_uncertainty_and_stops_the_scope() {
+    swap_scope(AdmissionScope::default());
+    let options = opts(10.0);
+    let request = LlmRequestPayload::from(&options);
+    let reservation = reserve(&options, &request).unwrap().unwrap();
+    let mut response = result(1, 1);
+    response.model = "unrequested-model".to_string();
+    assert!(reservation.settle(&response).is_err());
+    assert!(reserve(&options, &request).is_err());
+    let snapshot = SCOPE.with(|slot| slot.borrow().receipt().unwrap());
+    assert!(snapshot.contract_broken);
+    assert!(snapshot.uncertain_usd > Decimal::ZERO);
+    assert_eq!(snapshot.in_flight_usd, Decimal::ZERO);
+}
+
+#[test]
+fn host_allowance_survives_multiple_vm_entries_and_host_spans() {
+    swap_scope(AdmissionScope::default());
+    let budget = ConservativeLlmBudget::new(0.6).unwrap();
+    let independent = ConservativeLlmBudget::new(0.6).unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            budget
+                .scope(async {
+                    crate::llm::cost::reset_cost_state();
+                    crate::orchestration::scope_ambient(top_level_scope(), async {
+                        let mut options = opts(0.6);
+                        options.budget = None;
+                        let request = LlmRequestPayload::from(&options);
+                        drop(reserve(&options, &request).unwrap().unwrap());
+                    })
+                    .await;
+                    crate::orchestration::scope_ambient(top_level_scope(), async {
+                        let options = opts(10.0);
+                        assert!(reserve(&options, &LlmRequestPayload::from(&options)).is_err());
+                    })
+                    .await;
+                })
+                .await
+                .unwrap();
+            budget
+                .scope(async {
+                    let options = opts(10.0);
+                    assert!(reserve(&options, &LlmRequestPayload::from(&options)).is_err());
+                })
+                .await
+                .unwrap();
+            independent
+                .scope(async {
+                    let options = opts(0.6);
+                    assert!(reserve(&options, &LlmRequestPayload::from(&options)).is_ok());
+                })
+                .await
+                .unwrap();
+        });
+}
+
+#[test]
+fn host_allowances_are_poll_scoped_and_nested_handles_cannot_replace_them() {
+    swap_scope(AdmissionScope::default());
+    let left = ConservativeLlmBudget::new(0.6).unwrap();
+    let right = ConservativeLlmBudget::new(0.0).unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let a = left.scope(async {
+                tokio::task::yield_now().await;
+                assert!(right.scope(async {}).await.is_err());
+                let nested = ConservativeLlmBudget::new(10.0).unwrap();
+                nested
+                    .scope(async {
+                        let options = opts(0.6);
+                        assert!(reserve(&options, &LlmRequestPayload::from(&options)).is_ok());
+                    })
+                    .await
+                    .unwrap();
+            });
+            let b = right.scope(async {
+                tokio::task::yield_now().await;
+                let options = opts(10.0);
+                assert!(reserve(&options, &LlmRequestPayload::from(&options)).is_err());
+            });
+            let (a, b) = tokio::join!(a, b);
+            a.unwrap();
+            b.unwrap();
+        });
+    for invalid in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(ConservativeLlmBudget::new(invalid).is_err());
+    }
+}
+
+#[test]
+fn host_allowance_preconstructed_future_cannot_replace_a_parent() {
+    swap_scope(AdmissionScope::default());
+    let parent = ConservativeLlmBudget::new(0.0).unwrap();
+    let independent = ConservativeLlmBudget::new(0.6).unwrap();
+    let entered = std::cell::Cell::new(false);
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let child = independent.scope(async {
+                entered.set(true);
+            });
+            parent
+                .scope(async {
+                    assert!(child.await.is_err());
+                })
+                .await
+                .unwrap();
+        });
+    assert!(
+        !entered.get(),
+        "a preconstructed future replaced the parent allowance"
+    );
+}
+
+#[test]
+fn host_allowance_suspended_future_cannot_replace_a_parent() {
+    use std::future::Future as _;
+    swap_scope(AdmissionScope::default());
+    let parent = ConservativeLlmBudget::new(0.0).unwrap();
+    let independent = ConservativeLlmBudget::new(0.6).unwrap();
+    let resumed = std::cell::Cell::new(false);
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let child = independent.scope(async {
+                tokio::task::yield_now().await;
+                resumed.set(true);
+            });
+            let mut child = std::pin::pin!(child);
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(child.as_mut().poll(&mut context).is_pending());
+            parent
+                .scope(async {
+                    assert!(child.await.is_err());
+                })
+                .await
+                .unwrap();
+        });
+    assert!(
+        !resumed.get(),
+        "a suspended future replaced the parent allowance"
+    );
 }

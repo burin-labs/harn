@@ -1,7 +1,80 @@
 use super::*;
 
 impl AcpServer {
+    pub(super) fn prompt_admission(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Option<harn_vm::llm::ConservativeLlmBudget>, String> {
+        let default_ceiling = self
+            .default_budget
+            .as_ref()
+            .map(BudgetSpec::conservative_ceiling)
+            .transpose()?
+            .flatten();
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return Ok(None);
+        };
+        let requested_ceiling = match &session.budget {
+            SessionBudget::Custom(spec) => spec.conservative_ceiling()?,
+            _ => None,
+        };
+        let ceiling = match (default_ceiling, requested_ceiling) {
+            (Some(default), Some(requested)) => Some(default.min(requested)),
+            (default, requested) => default.or(requested),
+        };
+        if let Some(ceiling) = ceiling {
+            if session.admission_unavailable {
+                return Err("conservative admission must be configured before the first prompt; cold-restored sessions need a new independently allocated run".to_string());
+            }
+            match &session.admission {
+                Some(budget) => budget.tighten(ceiling).map_err(|error| error.to_string())?,
+                None => {
+                    session.admission = Some(
+                        harn_vm::llm::ConservativeLlmBudget::new(ceiling)
+                            .map_err(|error| error.to_string())?,
+                    )
+                }
+            }
+        }
+        if session.admission.is_none() {
+            session.admission_unavailable = true;
+        }
+        Ok(session.admission.clone())
+    }
+
     pub(super) async fn handle_session_prompt(
+        &mut self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let admission = match params.get("sessionId").and_then(|value| value.as_str()) {
+            Some(session_id) => match self.prompt_admission(session_id) {
+                Ok(admission) => admission,
+                Err(error) => {
+                    self.send_prompt_error(id, &error);
+                    return;
+                }
+            },
+            None => None,
+        };
+        let inner = Box::pin(self.handle_session_prompt_scoped(id, params));
+        let scope_error = match admission {
+            Some(budget) => budget
+                .scope(inner)
+                .await
+                .err()
+                .map(|error| error.to_string()),
+            None => {
+                inner.await;
+                None
+            }
+        };
+        if let Some(error) = scope_error {
+            self.send_prompt_error(id, &error);
+        }
+    }
+
+    async fn handle_session_prompt_scoped(
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,

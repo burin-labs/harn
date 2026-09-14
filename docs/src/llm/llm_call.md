@@ -1015,13 +1015,39 @@ it, reports a contract violation, and refuses subsequent attempts.
 
 `harness.llm.session_cost().admission` is absent in default mode. When active it
 contains `mode`, `ceiling_usd`, `settled_upper_usd`, `in_flight_usd`,
-`uncertain_usd`, and `denied_attempts`. Monetary fields are exact decimal strings.
+`uncertain_usd`, `denied_attempts`, and `contract_broken`. Monetary fields are
+exact decimal strings. A known output-limit or route violation stops further
+admission even when missing usage prevents complete settlement.
 Denials retain the terminal `budget_exceeded` contract and add a typed
 `admission_reason`, such as `unknown_pricing`, `unsupported_billing_shape`, or
 `insufficient_allowance`.
 
 These are reservation facts, separate from the existing actual-usage totals
 and their unknown-usage indicators; `settled_upper_usd` is not billed spend.
+
+### Native host budgets
+
+Rust embedders can retain one `harn_vm::llm::ConservativeLlmBudget` handle and
+wrap their futures with `scope`. Its `receipt` exposes the same reservation
+facts. Cloning a handle shares its ledger. Module initialization and later VM
+entries within that scope consume one allowance; asynchronous suspension does
+not expose it to another host task. A nested handle may tighten the parent but
+cannot replace it with a different allowance.
+
+Served calls opt in with
+`@budget(llm_admission: "conservative", llm_cost_usd: 0.6)`. The scope starts
+before loading module code and covers the handler. Each independent served call
+gets a separate allowance, so callers must allocate across calls themselves.
+
+An ACP embedder sets `BudgetSpec.llm_admission` to
+`Some(AdmissionMode::Conservative)` alongside `llm_cost_usd`. The live session
+retains its ledger across prompt turns and shares it with session forks.
+Changing the session budget cannot raise or remove an activated ceiling.
+Configure this before the first prompt: cold-restored sessions cannot prove
+their prior reservation state and refuse conservative admission. Start a new
+independently allocated run instead. Durable worker declarations currently
+refuse this mode before module execution; their persisted grant lifecycle is
+not yet supported. These host scopes still do not allocate across processes.
 
 | Function | Description |
 |---|---|

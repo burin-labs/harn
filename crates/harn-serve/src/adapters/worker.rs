@@ -368,6 +368,14 @@ async fn prepare_job_runtime(
     let catalog = ExportCatalog::from_path(script_path)?;
     crate::emit_export_diagnostics(catalog.diagnostics());
     validate_unique_job_names(&catalog)?;
+    if catalog.functions.values().any(|function| {
+        function
+            .budget
+            .as_ref()
+            .is_some_and(|budget| budget.llm_admission.is_some())
+    }) {
+        return Err(DispatchError::Validation("conservative admission is not supported for durable workers; no module code was executed".to_string()));
+    }
 
     let base_dir = script_path
         .parent()

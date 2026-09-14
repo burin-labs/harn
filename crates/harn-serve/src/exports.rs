@@ -331,7 +331,8 @@ impl ExportCatalog {
 
             let scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
             let policy = policy_from_attributes(attrs, name, &mut diagnostics);
-            let (limits, budget) = limits_and_budget_from_attributes(attrs);
+            let (limits, budget) =
+                limits_and_budget_from_attributes(attrs).map_err(DispatchError::Validation)?;
             let route = route_from_attributes(attrs, name, &mut diagnostics);
             let stream = stream_from_attributes(attrs, name, route.as_ref(), &mut diagnostics);
             let raw = raw_from_attributes(attrs, name, route.as_ref(), stream, &mut diagnostics);
@@ -395,7 +396,8 @@ impl ExportCatalog {
             }
             let scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
             let policy = policy_from_attributes(attrs, name, &mut diagnostics);
-            let (limits, budget) = limits_and_budget_from_attributes(attrs);
+            let (limits, budget) =
+                limits_and_budget_from_attributes(attrs).map_err(DispatchError::Validation)?;
             // Pipelines never carry a route, so a `@stream` / `@raw` on
             // one is inert — diagnose it the same way as on an unrouted fn.
             let stream = stream_from_attributes(attrs, name, None, &mut diagnostics);

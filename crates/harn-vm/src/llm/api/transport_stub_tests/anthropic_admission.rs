@@ -130,13 +130,13 @@ fn conservative_admission_anthropic_refuses_one_hour_cache_before_http() {
                 "content" => {
                     opts.messages = vec![serde_json::json!({"role":"user", "content":[{
                         "type":"text", "text":"hello", "cache_control":control
-                    }]})]
+                    }]})];
                 }
                 "message" => opts.messages[0]["cache_control"] = control,
                 "tool" => opts.native_tools.as_mut().unwrap()[0]["cache_control"] = control,
                 "server_tool" => {
                     opts.native_tools.as_mut().unwrap()[0]["type"] =
-                        serde_json::json!("web_search_20250305")
+                        serde_json::json!("web_search_20250305");
                 }
                 _ => opts.prompt_cache_ttl = Some(PromptCacheTtl::OneHour),
             }

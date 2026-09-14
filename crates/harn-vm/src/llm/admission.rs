@@ -9,16 +9,21 @@ use super::api::{LlmCallOptions, LlmRequestPayload, LlmResult};
 use crate::value::{VmError, VmValue};
 
 mod bound;
+mod host;
 use bound::AttemptBound;
+pub use host::ConservativeLlmBudget;
 
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum AdmissionMode {
+pub enum AdmissionMode {
     Conservative,
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct AdmissionScope(Arc<Mutex<Ledger>>);
+pub(crate) struct AdmissionScope {
+    ledger: Arc<Mutex<Ledger>>,
+    pub(crate) host_owned: bool,
+}
 
 #[derive(Default)]
 struct Ledger {
@@ -97,7 +102,7 @@ pub(crate) struct AttemptReservation {
 impl Drop for AttemptReservation {
     fn drop(&mut self) {
         if self.pending {
-            let mut ledger = self.scope.0.lock().unwrap_or_else(|e| e.into_inner());
+            let mut ledger = self.scope.ledger.lock().unwrap_or_else(|e| e.into_inner());
             ledger.in_flight -= self.bound.total();
             ledger.uncertain += self.bound.total();
         }
@@ -108,7 +113,7 @@ impl AttemptReservation {
     pub(crate) fn settle(mut self, result: &LlmResult) -> Result<(), VmError> {
         if result.served_fast {
             self.scope
-                .0
+                .ledger
                 .lock()
                 .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?
                 .contract_broken = true;
@@ -118,13 +123,24 @@ impl AttemptReservation {
             ));
         }
         let Some((upper, token_limit_violated)) = self.bound.observed_upper(result) else {
+            if self.bound.known_contract_violation(result) {
+                self.scope
+                    .ledger
+                    .lock()
+                    .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?
+                    .contract_broken = true;
+                return Err(error(
+                    DenialKind::ProviderContractViolation,
+                    "partial provider usage or route violated the admitted contract",
+                ));
+            }
             // Drop retains the reservation, including a successful response
             // without both usage counters. This is not reported as zero cost.
             return Ok(());
         };
         let mut ledger = self
             .scope
-            .0
+            .ledger
             .lock()
             .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
         ledger.in_flight -= self.bound.total();
@@ -175,7 +191,7 @@ pub(crate) fn check_auxiliary(
 ) -> Result<(), VmError> {
     let scope = SCOPE.with(|slot| slot.borrow().clone());
     let mut ledger = scope
-        .0
+        .ledger
         .lock()
         .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
     activate(&mut ledger, budget)?;
@@ -196,7 +212,7 @@ pub(crate) fn reserve(
 ) -> Result<Option<AttemptReservation>, VmError> {
     let scope = SCOPE.with(|slot| slot.borrow().clone());
     let mut ledger = scope
-        .0
+        .ledger
         .lock()
         .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
     activate(&mut ledger, opts.budget.as_ref())?;
@@ -246,31 +262,47 @@ pub(crate) fn reserve(
 }
 
 /// Upper accounting is deliberately named apart from the actual-usage ledger.
-#[derive(serde::Serialize)]
-struct AdmissionReceipt {
-    mode: AdmissionMode,
-    ceiling_usd: Decimal,
-    settled_upper_usd: Decimal,
-    in_flight_usd: Decimal,
-    uncertain_usd: Decimal,
-    denied_attempts: u64,
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct AdmissionReceipt {
+    pub mode: AdmissionMode,
+    pub ceiling_usd: Decimal,
+    pub settled_upper_usd: Decimal,
+    pub in_flight_usd: Decimal,
+    pub uncertain_usd: Decimal,
+    pub denied_attempts: u64,
+    pub contract_broken: bool,
 }
 
-pub(crate) fn receipt() -> Option<VmValue> {
-    SCOPE.with(|slot| {
-        let scope = slot.borrow();
-        let ledger = scope.0.lock().ok()?;
-        let receipt = AdmissionReceipt {
+impl AdmissionScope {
+    fn receipt(&self) -> Option<AdmissionReceipt> {
+        let ledger = self.ledger.lock().ok()?;
+        Some(AdmissionReceipt {
             mode: AdmissionMode::Conservative,
             ceiling_usd: ledger.ceiling?,
             settled_upper_usd: ledger.settled_upper,
             in_flight_usd: ledger.in_flight,
             uncertain_usd: ledger.uncertain,
             denied_attempts: ledger.denied,
-        };
-        let json = serde_json::to_value(receipt).ok()?;
-        Some(crate::schema::json_to_vm_value(&json))
+            contract_broken: ledger.contract_broken,
+        })
+    }
+}
+
+pub(crate) fn receipt() -> Option<VmValue> {
+    SCOPE.with(|slot| {
+        let receipt = slot.borrow().receipt()?;
+        Some(crate::schema::json_to_vm_value(
+            &serde_json::to_value(receipt).ok()?,
+        ))
     })
+}
+
+pub(crate) fn reset_unscoped_state() {
+    SCOPE.with(|slot| {
+        if !slot.borrow().host_owned {
+            slot.replace(AdmissionScope::default());
+        }
+    });
 }
 
 #[cfg(test)]

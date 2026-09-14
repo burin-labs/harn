@@ -133,6 +133,20 @@ impl AttemptBound {
         self.cost(self.input_limit, self.output_limit)
     }
 
+    pub(super) fn known_contract_violation(&self, result: &LlmResult) -> bool {
+        crate::llm_config::model_catalog_id_for_route(&result.provider, &result.model).as_deref()
+            != Some(self.catalog_id.as_str())
+            || result
+                .telemetry
+                .server_prompt_tokens
+                .is_some_and(|input| input > self.input_limit)
+            || result
+                .telemetry
+                .server_output_tokens
+                .is_some_and(|output| output > self.output_limit)
+            || (self.retain_full_input && result.input_tokens > self.input_limit)
+    }
+
     /// Settle at the conservative rates, without claiming a billing receipt or
     /// applying cache discounts. Missing or inconsistent wire usage keeps the
     /// full reservation. Native OpenAI counters include reasoning output.
