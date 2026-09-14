@@ -15,12 +15,14 @@ use super::api::{LlmResult, ProviderAttempts};
 mod cache_fields;
 mod prompt_tokens;
 mod receipt;
+mod reported_cache;
 pub(crate) use cache_fields::{
     extract_cache_read_tokens, extract_cache_write_tokens, reported_cache_read_tokens,
     reported_cache_write_tokens,
 };
 pub(crate) use prompt_tokens::{InputTokenBasis, PromptTokenCounts, ReportedTokenUsage};
 pub(crate) use receipt::ProviderUsageReceipt;
+pub use reported_cache::ReportedCacheUsage;
 
 /// The normalized accounting facts for one completed provider call.
 ///

@@ -132,6 +132,10 @@ pub struct ProviderTelemetry {
     /// `LlmResult::input_tokens` for comparable prompt totals.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_prompt_tokens: Option<i64>,
+    /// Validated cache-category presence, distinct from zero-filled usage totals.
+    /// Boxed to keep the shared telemetry envelope small in nested VM futures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_cache_usage: Option<Box<crate::llm::usage::ReportedCacheUsage>>,
     /// Prompt tokens the server actually evaluated rather than reading from a
     /// cache. llama.cpp reports this as `timings.prompt_n`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -251,6 +255,7 @@ impl ProviderTelemetry {
             server_prompt_eval_ms,
             server_generation_ms,
             server_prompt_tokens,
+            reported_cache_usage,
             server_uncached_prompt_tokens,
             server_cached_prompt_tokens,
             server_output_tokens,
@@ -277,6 +282,7 @@ impl ProviderTelemetry {
             && server_prompt_eval_ms.is_none()
             && server_generation_ms.is_none()
             && server_prompt_tokens.is_none()
+            && reported_cache_usage.is_none()
             && server_uncached_prompt_tokens.is_none()
             && server_cached_prompt_tokens.is_none()
             && server_output_tokens.is_none()
@@ -405,6 +411,10 @@ impl ProviderTelemetry {
     /// carries.
     pub fn from_anthropic_usage(usage: &serde_json::Value, request_id: Option<&str>) -> Self {
         let mut telemetry = Self::new(source::ANTHROPIC_USAGE);
+        telemetry.reported_cache_usage = crate::llm::usage::ReportedCacheUsage::from_value(usage)
+            .ok()
+            .filter(|usage| usage.has_any())
+            .map(Box::new);
         telemetry.server_prompt_tokens = usage
             .get("input_tokens")
             .and_then(serde_json::Value::as_i64);
@@ -548,6 +558,12 @@ impl ProviderTelemetry {
         );
         insert_opt_u64(&mut dict, "server_generation_ms", self.server_generation_ms);
         insert_opt_i64(&mut dict, "server_prompt_tokens", self.server_prompt_tokens);
+        if let Some(cache) = &self.reported_cache_usage {
+            dict.put(
+                "reported_cache_usage",
+                crate::stdlib::json_to_vm_value(&serde_json::json!(cache)),
+            );
+        }
         insert_opt_i64(
             &mut dict,
             "server_uncached_prompt_tokens",
@@ -998,6 +1014,10 @@ mod tests {
             server_prompt_eval_ms: Some(2),
             server_generation_ms: Some(3),
             server_prompt_tokens: Some(4),
+            reported_cache_usage: Some(Box::new(crate::llm::usage::ReportedCacheUsage {
+                read_tokens: Some(2),
+                write_tokens: Some(0),
+            })),
             server_uncached_prompt_tokens: Some(2),
             server_cached_prompt_tokens: Some(2),
             server_output_tokens: Some(5),
@@ -1046,7 +1066,7 @@ mod tests {
         // silently excused from the check above.
         assert_eq!(
             encoded.len(),
-            24,
+            25,
             "every ProviderTelemetry field must be populated for the census to \
              cover it; update this count when the struct gains a field"
         );

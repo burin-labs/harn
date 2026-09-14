@@ -15,7 +15,6 @@
     "crates/harn-serve/src/adapters/acp/tests/modes.rs",
     "crates/harn-serve/src/adapters/acp/tests/sessions.rs",
     "crates/harn-serve/src/core.rs",
-    "crates/harn-serve/src/exports.rs",
     "crates/harn-vm/src/bridge.rs",
     "crates/harn-vm/src/channels/mod.rs",
     "crates/harn-vm/src/connectors/harn_module.rs",

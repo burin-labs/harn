@@ -32,7 +32,7 @@ impl AcpServer {
                     session.admission = Some(
                         harn_vm::llm::ConservativeLlmBudget::new(ceiling)
                             .map_err(|error| error.to_string())?,
-                    )
+                    );
                 }
             }
         }

@@ -1,5 +1,5 @@
-//! Native Anthropic cache accounting is preserved while admission retains a
-//! conservative input reservation whose cache-counter presence is unknown.
+//! Native Anthropic settlement releases input allowance only with complete
+//! cache-category presence from the actual JSON or streaming response.
 use super::*;
 use crate::llm::admission::AdmissionMode;
 use crate::llm::api::{LlmCallOptions, PromptCacheTtl};
@@ -54,7 +54,7 @@ impl Drop for Cleanup {
 }
 
 #[test]
-fn conservative_admission_anthropic_preserves_cache_usage_and_retains_full_input() {
+fn conservative_admission_anthropic_settles_complete_cache_usage() {
     let _env = env_guard();
     let _transport = allow_stubbed_llm_transport();
     let _cleanup = Cleanup;
@@ -63,7 +63,7 @@ fn conservative_admission_anthropic_preserves_cache_usage_and_retains_full_input
         .build()
         .unwrap();
     runtime.block_on(async {
-        for streaming in [false, true] {
+        for (streaming, missing) in [(false, ""), (true, ""), (false, "cache_read_input_tokens"), (true, "cache_read_input_tokens"), (false, "cache_creation_input_tokens"), (true, "cache_creation_input_tokens")] {
             crate::llm::cost::reset_cost_state();
             let count = Arc::new(AtomicUsize::new(0));
             let calls = count.clone();
@@ -74,8 +74,9 @@ fn conservative_admission_anthropic_preserves_cache_usage_and_retains_full_input
                 let n = stream.read(&mut bytes).unwrap();
                 assert!(String::from_utf8_lossy(&bytes[..n]).starts_with("POST /messages "));
                 let (read, write) = if attempt == 0 { (20, 40) } else { (60, 0) };
-                let usage = serde_json::json!({"input_tokens":3, "output_tokens":2,
+                let mut usage = serde_json::json!({"input_tokens":3, "output_tokens":2,
                     "cache_read_input_tokens":read,"cache_creation_input_tokens":write});
+                if !missing.is_empty() { usage.as_object_mut().unwrap().remove(missing); }
                 let message = serde_json::json!({"id":"local", "type":"message", "role":"assistant",
                     "model":"claude-haiku-4-5-20251001", "content":[{"type":"text","text":"ok"}],
                     "stop_reason":"end_turn","usage":usage});
@@ -90,16 +91,22 @@ fn conservative_admission_anthropic_preserves_cache_usage_and_retains_full_input
             install(server.addr());
             let opts = options(streaming);
             let first = vm_call_llm_full(&opts).await.unwrap();
-            assert_eq!(first.input_tokens, 63);
-            assert_eq!(first.cache_write_tokens, 40);
             let second = vm_call_llm_full(&opts).await.unwrap();
-            assert_eq!(second.input_tokens, 63);
-            assert_eq!(second.cache_read_tokens, 60);
-            assert_eq!(second.cache_write_tokens, 0);
-            assert!(second.usage().cost_usd.unwrap() < first.usage().cost_usd.unwrap());
-            let error = vm_call_llm_full(&opts).await.unwrap_err();
-            assert!(error.to_string().contains("insufficient_allowance"), "{error}");
-            assert_eq!(count.load(Ordering::SeqCst), 2);
+            if missing.is_empty() {
+                assert_eq!(first.input_tokens, 63);
+                assert_eq!(first.cache_write_tokens, 40);
+                assert_eq!(second.input_tokens, 63);
+                assert_eq!(second.cache_read_tokens, 60);
+                assert_eq!(second.cache_write_tokens, 0);
+                assert!(second.usage().cost_usd.unwrap() < first.usage().cost_usd.unwrap());
+                let third = vm_call_llm_full(&opts).await.expect("complete wire usage releases the unused input reservation");
+                assert_eq!(third.input_tokens, 63);
+                assert_eq!(count.load(Ordering::SeqCst), 3);
+            } else {
+                let error = vm_call_llm_full(&opts).await.unwrap_err();
+                assert!(error.to_string().contains("insufficient_allowance"), "{error}");
+                assert_eq!(count.load(Ordering::SeqCst), 2, "missing {missing}, streaming={streaming}");
+            }
             crate::llm_config::clear_user_overrides();
         }
     });

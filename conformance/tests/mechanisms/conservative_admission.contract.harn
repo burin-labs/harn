@@ -14,7 +14,7 @@ fn native_probe(harness: Harness, provider: string) {
     "read_note",
     "Read a note.",
     {
-      handler: { args -> "note" },
+      handler: { _args -> "note" },
       parameters: {cache_control: {type: "string"}},
       returns: {type: "string"},
     },

@@ -68,7 +68,13 @@ fn observed_short_cached_output_never_reduces_the_next_bound() {
 
 #[test]
 fn unknown_pricing_media_and_premium_requests_fail_closed() {
-    for kind in ["unknown", "media", "premium", "hosted_tool"] {
+    for kind in [
+        "unknown",
+        "media",
+        "premium",
+        "reasoning_mode",
+        "hosted_tool",
+    ] {
         swap_scope(AdmissionScope::default());
         let mut opts = opts(10.0);
         match kind {
@@ -79,13 +85,30 @@ fn unknown_pricing_media_and_premium_requests_fail_closed() {
                 ];
             }
             "premium" => opts.fast = true,
+            "reasoning_mode" => {
+                opts.model = "gpt-5.6-sol".into();
+                opts.reasoning_mode = Some("pro".into());
+            }
             _ => opts.provider_tools = vec![serde_json::json!({"type":"web_search"})],
         }
-        assert!(
-            reserve(&opts, &LlmRequestPayload::from(&opts)).is_err(),
-            "{kind}"
-        );
+        let denied = reserve(&opts, &LlmRequestPayload::from(&opts))
+            .err()
+            .expect(kind);
+        if kind == "reasoning_mode" {
+            assert!(
+                denied.to_string().contains("unsupported_billing_shape"),
+                "{denied}"
+            );
+        }
     }
+}
+
+#[test]
+fn explicit_standard_reasoning_mode_remains_supported() {
+    swap_scope(AdmissionScope::default());
+    let mut options = opts(0.6);
+    options.reasoning_mode = Some(crate::llm::reasoning_modes::STANDARD_MODE_ID.into());
+    assert!(reserve(&options, &LlmRequestPayload::from(&options)).is_ok());
 }
 
 #[test]

@@ -12,7 +12,7 @@ pub(super) struct AttemptBound {
     output_limit: i64,
     input_rate: Decimal,
     output_rate: Decimal,
-    retain_full_input: bool,
+    fresh_input_basis: bool,
 }
 
 impl AttemptBound {
@@ -20,6 +20,10 @@ impl AttemptBound {
         let anthropic = request.provider == "anthropic";
         if !(request.provider == "openai" || anthropic)
             || request.fast
+            || request
+                .reasoning_mode
+                .as_deref()
+                .is_some_and(|mode| mode != crate::llm::reasoning_modes::STANDARD_MODE_ID)
             || request.vision
             || !request.provider_tools.is_empty()
             || request.provider_overrides.is_some()
@@ -120,7 +124,7 @@ impl AttemptBound {
             output_limit: request.max_tokens,
             input_rate,
             output_rate,
-            retain_full_input: anthropic,
+            fresh_input_basis: anthropic,
         })
     }
 
@@ -144,7 +148,7 @@ impl AttemptBound {
                 .telemetry
                 .server_output_tokens
                 .is_some_and(|output| output > self.output_limit)
-            || (self.retain_full_input && result.input_tokens > self.input_limit)
+            || (self.fresh_input_basis && result.input_tokens > self.input_limit)
     }
 
     /// Settle at the conservative rates, without claiming a billing receipt or
@@ -159,17 +163,27 @@ impl AttemptBound {
             || result.served_fast
             || input < 0
             || output < 0
-            || (!self.retain_full_input && input != result.input_tokens)
+            || (!self.fresh_input_basis && input != result.input_tokens)
             || output != result.output_tokens
         {
             return None;
         }
-        // Anthropic's wire input counter is fresh input, not the full prompt.
-        // The result does not retain presence for both cache counters. Keep
-        // the full input reservation instead of treating an omitted category
-        // as known zero. Output-only release still has an authoritative bound.
-        let input_upper = if self.retain_full_input {
-            self.input_limit.max(result.input_tokens).max(input)
+        // Anthropic's wire counter is fresh input. Only complete, consistent
+        // cache categories can release the unused input reservation.
+        let input_upper = if self.fresh_input_basis {
+            match result.telemetry.reported_cache_usage.as_deref() {
+                Some(cache) if cache.read_tokens.is_some() && cache.write_tokens.is_some() => {
+                    let total = cache.complete_prompt_tokens(input)?;
+                    if total != result.input_tokens
+                        || cache.read_tokens != Some(result.cache_read_tokens)
+                        || cache.write_tokens != Some(result.cache_write_tokens)
+                    {
+                        return None;
+                    }
+                    total
+                }
+                _ => self.input_limit.max(result.input_tokens).max(input),
+            }
         } else {
             input
         };

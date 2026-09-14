@@ -997,11 +997,11 @@ failures that might have occurred before sending. They are never free retries.
 
 Supported billing shapes are direct OpenAI text and direct Anthropic text with
 ordinary five-minute caching, exact catalog pricing, a context limit, and a
-positive output cap. Anthropic keeps the full input-context bound after each
-response and releases only unused output allowance: its response object does
-not retain presence for both cache counters, so missing cache categories must
-not be treated as known zero. This can exhaust an allowance well before actual
-spend; read the separate admission receipt. One-hour caching is refused even
+positive output cap. Complete Anthropic fresh-input, cache-read, cache-write,
+and output counters settle at conservative rates. Missing cache categories
+retain the full input-context bound and release only unused output allowance;
+missing categories are never treated as known zero. This can exhaust an
+allowance well before actual spend; read the separate admission receipt. One-hour caching is refused even
 when requested in an inline cache-control block. Premium serving, media,
 hosted provider tools, opaque provider overrides, expiring promotional rates,
 and unpriced or other provider routes are refused. Fill-in-the-middle

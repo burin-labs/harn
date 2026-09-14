@@ -26,6 +26,8 @@ use crate::{BudgetSpec, DispatchError, ExportedCallableKind};
 mod arguments;
 mod config;
 mod error_classification;
+mod event_log;
+use event_log::install_scoped_event_log;
 mod prepared_generation;
 mod prepared_tools;
 #[cfg(test)]
@@ -38,29 +40,6 @@ use error_classification::classify_vm_error;
 use prepared_generation::PreparedDispatchGeneration;
 pub use prepared_generation::{DispatchCallReceipt, DispatchGenerationReceipt};
 use prepared_tools::PreparedTools;
-
-struct ActiveEventLogGuard {
-    previous: Option<Arc<AnyEventLog>>,
-}
-
-impl Drop for ActiveEventLogGuard {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(log) => {
-                install_active_event_log(log);
-            }
-            None => {
-                harn_vm::event_log::reset_active_event_log();
-            }
-        }
-    }
-}
-
-fn install_scoped_event_log(log: Arc<AnyEventLog>) -> ActiveEventLogGuard {
-    let previous = active_event_log();
-    install_active_event_log(log);
-    ActiveEventLogGuard { previous }
-}
 
 fn install_dispatch_vm_runtime(
     vm: &mut Vm,
