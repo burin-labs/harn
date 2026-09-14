@@ -117,7 +117,7 @@ impl AttemptReservation {
                 "provider reported an unadmitted premium serving tier",
             ));
         }
-        let Some(upper) = self.bound.observed_upper(result) else {
+        let Some((upper, token_limit_violated)) = self.bound.observed_upper(result) else {
             // Drop retains the reservation, including a successful response
             // without both usage counters. This is not reported as zero cost.
             return Ok(());
@@ -130,13 +130,13 @@ impl AttemptReservation {
         ledger.in_flight -= self.bound.total();
         ledger.settled_upper += upper;
         self.pending = false;
-        if upper > self.bound.total() {
+        if token_limit_violated || upper > self.bound.total() {
             // A provider/catalog contract violation cannot be undone; account
             // the evidence, then fail closed on this and all subsequent calls.
             ledger.contract_broken = true;
             return Err(error(
                 DenialKind::ProviderContractViolation,
-                "provider usage exceeded the admitted catalog bound",
+                "provider usage exceeded an admitted token or cost bound",
             ));
         }
         Ok(())
@@ -200,6 +200,9 @@ pub(crate) fn reserve(
         .lock()
         .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
     activate(&mut ledger, opts.budget.as_ref())?;
+    // Latch the execution ceiling even when the adaptive preflight refuses.
+    // Such a refusal precedes transport, so it consumes no reservation.
+    super::cost::check_llm_preflight_budget(opts)?;
     let Some(ceiling) = ledger.ceiling else {
         ledger.prior_unreserved_attempt = true;
         return Ok(None);

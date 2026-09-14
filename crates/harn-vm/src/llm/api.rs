@@ -260,7 +260,6 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
-    super::cost::check_llm_preflight_budget(opts)?;
     let reservation = super::admission::reserve(opts, request)?;
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
@@ -320,7 +319,6 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
     request: &LlmRequestPayload,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
-    super::cost::check_llm_preflight_budget(opts)?;
     let reservation = super::admission::reserve(opts, request)?;
     let result = vm_call_llm_full_inner_request(observed, request, Some(delta_tx)).await?;
     let admission_result = reservation
@@ -361,7 +359,6 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
     request: LlmRequestPayload,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
-    super::cost::check_llm_preflight_budget(opts)?;
     let reservation = super::admission::reserve(opts, &request)?;
     let cached = super::trigger_predicate::lookup_cached_result(&request).is_some();
     let intercepted = crate::llm::providers::MockProvider::should_intercept_request(&request)

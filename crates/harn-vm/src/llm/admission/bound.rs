@@ -136,7 +136,7 @@ impl AttemptBound {
     /// Settle at the conservative rates, without claiming a billing receipt or
     /// applying cache discounts. Missing or inconsistent wire usage keeps the
     /// full reservation. Native OpenAI counters include reasoning output.
-    pub(super) fn observed_upper(&self, result: &LlmResult) -> Option<Decimal> {
+    pub(super) fn observed_upper(&self, result: &LlmResult) -> Option<(Decimal, bool)> {
         let input = result.telemetry.server_prompt_tokens?;
         let output = result.telemetry.server_output_tokens?;
         let route = crate::llm_config::model_catalog_id_for_route(&result.provider, &result.model)?;
@@ -159,7 +159,10 @@ impl AttemptBound {
         } else {
             input
         };
-        Some(self.cost(input_upper, output))
+        Some((
+            self.cost(input_upper, output),
+            input_upper > self.input_limit || output > self.output_limit,
+        ))
     }
 }
 

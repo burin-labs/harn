@@ -225,3 +225,39 @@ fn an_unexpected_premium_response_stops_the_scope_and_retains_uncertainty() {
     assert!(ledger.uncertain > Decimal::ZERO);
     assert_eq!(ledger.in_flight, Decimal::ZERO);
 }
+
+#[test]
+fn preflight_refusal_latches_ceiling_without_reserving_an_attempt() {
+    swap_scope(AdmissionScope::default());
+    let mut opts = opts(0.01);
+    opts.budget.as_mut().unwrap().max_cost_usd = Some(0.0);
+    let request = LlmRequestPayload::from(&opts);
+    assert!(reserve(&opts, &request).is_err());
+    let scope = SCOPE.with(|slot| slot.borrow().clone());
+    {
+        let ledger = scope.0.lock().unwrap();
+        assert_eq!(ledger.ceiling, Some(money(0.01).unwrap()));
+        assert_eq!(ledger.in_flight, Decimal::ZERO);
+        assert_eq!(ledger.uncertain, Decimal::ZERO);
+        assert!(!ledger.prior_unreserved_attempt);
+    }
+    opts.budget = None;
+    assert!(
+        reserve(&opts, &request).is_err(),
+        "omitting budget cannot escape the refused call's ceiling"
+    );
+}
+
+#[test]
+fn a_provider_ignoring_the_output_limit_stops_future_admission() {
+    swap_scope(AdmissionScope::default());
+    let mut opts = opts(0.6);
+    opts.max_tokens = 16;
+    let request = LlmRequestPayload::from(&opts);
+    let reservation = reserve(&opts, &request).unwrap().unwrap();
+    assert!(
+        reservation.settle(&result(0, 17)).is_err(),
+        "an output-limit violation matters even below the aggregate monetary bound"
+    );
+    assert!(reserve(&opts, &request).is_err());
+}
