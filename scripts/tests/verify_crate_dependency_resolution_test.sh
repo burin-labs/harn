@@ -35,6 +35,22 @@ if [[ "$resolved" != "3.1.4" ]]; then
   exit 1
 fi
 
+# Cargo normalizes dependency names (including renamed dependencies) to Rust
+# identifiers in resolve.nodes[].deps[].name.
+for dependency_name in aws-smithy-types renamed-smithy-types; do
+  jq --arg dependency_name "$dependency_name" '
+    .packages[1] = {"id":"registry+smithy","name":"aws-smithy-types","version":"1.6.2"}
+    | .resolve.nodes[0].deps = [{"name":($dependency_name | gsub("-"; "_")),"pkg":"registry+smithy"}]
+    | .resolve.nodes[1].id = "registry+smithy"
+  ' "$tmp/metadata.json" >"$tmp/hyphenated.json"
+  resolved="$(jq -er --arg package harn-vm --arg package_version 1.2.3 \
+    --arg resolution_name "$dependency_name" -f "$filter" "$tmp/hyphenated.json")"
+  if [[ "$resolved" != "1.6.2" ]]; then
+    echo "hyphenated dependency did not resolve to 1.6.2: $dependency_name" >&2
+    exit 1
+  fi
+done
+
 jq '.packages += [{"id":"path+duplicate","name":"harn-vm","version":"1.2.3"}]' \
   "$tmp/metadata.json" >"$tmp/duplicate.json"
 if jq -er \
