@@ -9,6 +9,21 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.138
+
+### Added
+
+- Add opt-in conservative LLM admission with shared execution reservations,
+  explicit refusals for unsupported billing shapes, and separate uncertain-attempt accounting.
+  Native hosts can retain the same allowance across VM entries and live ACP turns
+  and forks; unsupported cold restores and durable workers refuse the opt-in.
+
+### Fixed
+
+- Runtime updates now stop when the caller's refresh command fails, preventing later migrations from masking the failure
+  or writing a success receipt.
+- Keep fresh AWS-enabled builds on compatible Smithy dependencies after the upstream Document API change.
+
 ## v0.10.137
 
 ### Added
