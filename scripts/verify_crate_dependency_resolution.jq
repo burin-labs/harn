@@ -11,7 +11,7 @@ def exactly_one($label):
 | ([$metadata.resolve.nodes[]
     | select(.id == $source_id)
     | .deps[]
-    | select(.name == $resolution_name)
+    | select(.name == ($resolution_name | gsub("-"; "_")))
     | .pkg]
     | exactly_one("dependency resolution edge")) as $dependency_id
 | ([$metadata.packages[] | select(.id == $dependency_id) | .version]
