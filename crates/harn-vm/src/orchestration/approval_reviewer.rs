@@ -44,6 +44,13 @@ use std::sync::Arc;
 
 use crate::value::{VmClosure, VmError, VmValue};
 
+/// No reviewer was installed to reconsider a refusal.
+///
+/// One owner for the string because two seams record it: the review runner,
+/// which reports it as an outcome, and the grant seam, which stamps it onto the
+/// decision receipt without running a review at all.
+pub const NO_REVIEWER_INSTALLED: &str = "no_reviewer_installed";
+
 thread_local! {
     static APPROVAL_REVIEWER_STACK: RefCell<Vec<Arc<VmClosure>>> = const { RefCell::new(Vec::new()) };
     /// Re-entrancy depth. The reviewer session dispatches its own tool calls;
@@ -198,7 +205,7 @@ pub async fn run_approval_review(
     session_id: &str,
 ) -> ApprovalReviewOutcome {
     let Some(reviewer) = current_approval_reviewer() else {
-        return ApprovalReviewOutcome::unavailable("no_reviewer_installed");
+        return ApprovalReviewOutcome::unavailable(NO_REVIEWER_INSTALLED);
     };
     if APPROVAL_REVIEWER_DEPTH.with(|depth| *depth.borrow()) > 0 {
         return ApprovalReviewOutcome::unavailable("reviewer_reentrant");
@@ -361,6 +368,36 @@ pub async fn maybe_grant_side_effect_by_auto_review(
     Some(granted)
 }
 
+/// Record that this seam was reached for a refusal and did NOT grant it.
+///
+/// The counterpart to [`PolicyEvaluation::grant_by_auto_review`], which lives
+/// on the decision because a grant rewrites it. A decline changes nothing about
+/// the decision and only annotates its receipt, so it belongs to the seam that
+/// declined rather than to the policy type.
+///
+/// `reviewer_answered` separates the two cases a reader must not confuse:
+/// `true` means a reviewer ran and said no, `false` means no verdict was
+/// obtained and `unavailable_reason` says which decline path fired.
+fn record_decline(
+    decision: &mut crate::orchestration::PolicyEvaluation,
+    reviewer_answered: bool,
+    rationale: &str,
+    unavailable_reason: Option<&str>,
+) {
+    if let Some(map) = decision.receipt.as_object_mut() {
+        map.insert(
+            "auto_review".to_string(),
+            serde_json::json!({
+                "approved": false,
+                "reviewer_answered": reviewer_answered,
+                "rationale": rationale,
+                "unavailable_reason": unavailable_reason,
+                "decider": "auto_reviewer",
+            }),
+        );
+    }
+}
+
 /// Offer one refused decision to the reviewer, rewriting it in place on a grant.
 ///
 /// Returns whether the decision was granted, so the caller can record the
@@ -379,13 +416,22 @@ pub async fn maybe_grant_by_auto_review(
     tool_args: &serde_json::Value,
     session_id: &str,
 ) -> bool {
-    if !approval_reviewer_active() {
-        return false;
-    }
     let Some(decision) = decision else {
         return false;
     };
+    // Only a refusal is offered; an `Allow` is not this seam's business and
+    // must not be annotated as though a reviewer had weighed in on it.
     if !decision.is_deny() && !decision.is_ask() {
+        return false;
+    }
+    // A reviewer that is not installed is recorded, not skipped. This used to
+    // return here in silence, which is what made the two runs that matter
+    // indistinguishable: one whose reviewer refused, and one whose reviewer was
+    // never installed at all. The second then reached the host, and a host with
+    // nobody to ask produced a bare `host_rejected` -- a record naming the last
+    // layer to say no rather than the layer that was supposed to answer.
+    if !approval_reviewer_active() {
+        record_decline(decision, false, "", Some(NO_REVIEWER_INSTALLED));
         return false;
     }
     let request = serde_json::json!({
@@ -399,6 +445,16 @@ pub async fn maybe_grant_by_auto_review(
     });
     let outcome = run_approval_review(ctx, request, session_id).await;
     if !outcome.approved {
+        // Either a reviewer answered and said no, or the seam could not obtain
+        // a verdict and `unavailable_reason` says which of its decline paths
+        // fired. Both are recorded; neither is inferred from the absence of a
+        // grant.
+        record_decline(
+            decision,
+            outcome.reviewer_answered,
+            &outcome.rationale,
+            outcome.unavailable_reason.as_deref(),
+        );
         return false;
     }
     decision.grant_by_auto_review(&outcome.rationale);
