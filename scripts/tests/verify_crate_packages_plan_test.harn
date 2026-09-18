@@ -152,11 +152,7 @@ pipeline test_dependency_contract_without_minimum_renders_an_absent_token(
         { package ->
           if package.name == "harn-vm" {
             return package
-              + {
-                metadata: {
-                  harn: {package_verify: {dependency_contracts: [{name: "rmcp"}]}},
-                },
-              }
+              + {metadata: {harn: {package_verify: {dependency_contracts: [{name: "rmcp"}]}}}}
           }
           return package
         },
@@ -164,12 +160,11 @@ pipeline test_dependency_contract_without_minimum_renders_an_absent_token(
     }
   const contracts = package_dependency_contracts_from_metadata(meta)
   assert_eq(len(contracts), 1)
-  assert_eq(contracts[0].minimum, "none")
-
+  assert_eq(contracts[0]?.minimum ?? "", "none")
   const rows = verify_crate_packages_plan_rows(meta, "/repo")
   const contract_rows = rows.filter({ row -> row.starts_with("dependency_contract\t") })
   assert_eq(len(contract_rows), 1)
-  const fields = contract_rows[0].split("\t")
+  const fields = to_string(contract_rows[0] ?? "").split("\t")
   // kind, package, package_version, dependency, requirement, minimum,
   // resolution_name. Seven fields, none of them empty.
   assert_eq(len(fields), 7)
