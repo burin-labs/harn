@@ -1,5 +1,17 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 
+/**
+ * The token a row carries where a field has no value.
+ *
+ * A row is read back with `IFS=$'\t' read -r ...`, and tab is IFS whitespace,
+ * so the shell collapses a run of tabs into one separator. An empty field in
+ * the middle of a row therefore does not arrive empty: it disappears, and
+ * every later field shifts one position left, silently. The reader still
+ * succeeds, which is what makes it dangerous — the damage surfaces far away
+ * as a wrong value, not as a parse error.
+ */
+const ROW_FIELD_ABSENT = "none"
+
 type PublishablePackage = {dir: string, manifest_path: string, name: string, version: string}
 
 type PackageDependencyContract = {
@@ -102,7 +114,12 @@ pub fn package_dependency_contracts_from_metadata(meta: dict) -> list<PackageDep
       // floors on their own schedule, and the pin conflicts with whichever one
       // moved last. Such a contract still emits its resolver-latest receipt;
       // it just has no declared-minimum build to prove.
-      const minimum = to_string(declared?.minimum ?? "")
+      const declared_minimum = to_string(declared?.minimum ?? "")
+      const minimum = if declared_minimum == "" {
+        ROW_FIELD_ABSENT
+      } else {
+        declared_minimum
+      }
       if seen.contains(dependency) {
         throw package_name + " contains duplicate dependency contract: " + dependency
       }
@@ -138,6 +155,11 @@ pub fn package_dependency_contracts_from_metadata(meta: dict) -> list<PackageDep
 fn ensure_no_tabs(value: string, field: string) -> nil {
   if value.contains("\t") || value.contains("\n") {
     throw field + " contains a tab or newline, cannot render shell row safely"
+  }
+  // Refuse the empty field structurally rather than trusting each call site
+  // to remember the collapse above. Absent is spelled `none`, never "".
+  if value == "" {
+    throw field + " is empty; a row field must be non-empty, use " + ROW_FIELD_ABSENT
   }
   return nil
 }
