@@ -24,7 +24,13 @@ ignored = ["md-5", "aws-smithy-types"]
 # packaged crate at this minimum and at Cargo's latest admitted resolution.
 dependency_contracts = [
     { name = "rmcp", minimum = "3.1.4" },
-    { name = "aws-smithy-types", minimum = "1.6.2" },
+    # No minimum: the Smithy constraint is a ceiling, not a floor. Pinning a
+    # floor here is a treadmill, because the other AWS crates in the same
+    # published graph raise their own floors independently — `aws-config`
+    # 1.12.0 requires `^1.6.3` and `aws-sigv4` 1.5.3 requires `^1.6.4`, so any
+    # minimum we name conflicts with whichever sibling moved last. The
+    # resolver-latest build against the newest admitted graph is the proof.
+    { name = "aws-smithy-types" },
 ]
 
 [features]
@@ -110,7 +116,20 @@ aws-sigv4 = { version = "1.5.1", optional = true }
 # Smithy JSON 0.63 cannot compile against the Document API in types 1.7.
 # Keep this constraint in the published AWS feature so fresh consumers receive
 # the compatible graph too. Remove when the SDK supports the new Document API.
-aws-smithy-types = { version = "=1.6.2", optional = true }
+#
+# The bound is a range rather than a single point release because that is what
+# the incompatibility actually says: every 1.6.x patch is admissible and only
+# 1.7 and later are not. An exact pin also desynchronizes from the
+# `dependency_contracts` minimum above, which no dependency bot can see: a
+# proposed patch rewrites the requirement here, leaves the minimum behind, and
+# `Verify publishable crates` fails in its declared-minimum phase because
+# `cargo update --precise <minimum>` cannot satisfy an exact pin on a later
+# version (#8436).
+#
+# `<1.7.0` is the whole constraint. The lower bound only keeps the range from
+# admitting ancient releases; the sibling AWS crates raise the effective floor
+# on their own, which is why the contract above declares no minimum.
+aws-smithy-types = { version = ">=1.6.3, <1.7.0", optional = true }
 postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 quick_cache = "0.7"
 # Persistent (immutable, structurally shared) collections backing VmValue's

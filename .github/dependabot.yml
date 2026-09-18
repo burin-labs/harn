@@ -48,10 +48,25 @@ updates:
     # Scoped to the one bad version rather than the package, so a future
     # 0.7.4 that fixes the regression still arrives as a normal update.
     # Removing this entry is step 2 of #6227.
+    #
+    # `rmcp` is held at exactly 3.1.4 for the same kind of reason. The MCP
+    # elicitation adapter reads an ordered-schema extension that exists in
+    # 3.1.4 and not in 3.2.0, so the `=` pin in `crates/harn-vm/Cargo.toml` is
+    # the constraint rather than a preference. A proposal that rewrites it
+    # cannot go green: the pin is paired with a `dependency_contracts` minimum
+    # the bot does not see, and `Verify publishable crates` pins that minimum
+    # in its declared-minimum phase, which an exact requirement on a later
+    # version rejects (#8436).
+    #
+    # Scoped to the one release that dropped the field, so a 3.1.5 or a later
+    # version that restores it still arrives as a normal update for review.
     ignore:
       - dependency-name: "tree-sitter-swift"
         versions:
           - "0.7.3"
+      - dependency-name: "rmcp"
+        versions:
+          - "3.2.0"
     cooldown:
       default-days: 7
 

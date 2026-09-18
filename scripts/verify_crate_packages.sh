@@ -148,12 +148,18 @@ emit_dependency_resolution_receipts() {
     IFS=$'\t' read -r package package_version dependency requirement minimum resolution_name <<<"$row"
     resolved="$(resolved_dependency_version \
       "$metadata_path" "$package" "$package_version" "$resolution_name")"
-    if [[ "$require_minimum" == "1" && "$resolved" != "$minimum" ]]; then
+    # A contract with no declared minimum has no floor to assert. It is a
+    # ceiling: the requirement names the first version that breaks, and the
+    # resolver-latest build is its whole proof. Keep emitting its receipt so
+    # the resolved version stays visible in both phases. `none` is the plan's
+    # absent-field token; the row never carries an empty field, because tab is
+    # IFS whitespace and an empty one would shift every later field left.
+    if [[ "$require_minimum" == "1" && "$minimum" != "none" && "$resolved" != "$minimum" ]]; then
       echo "error: $phase resolved $package dependency $dependency to $resolved, expected minimum $minimum" >&2
       return 1
     fi
-    printf 'dependency_resolution phase=%s package=%s@%s dependency=%s requirement=%s resolved=%s\n' \
-      "$phase" "$package" "$package_version" "$dependency" "$requirement" "$resolved"
+    printf 'dependency_resolution phase=%s package=%s@%s dependency=%s requirement=%s minimum=%s resolved=%s\n' \
+      "$phase" "$package" "$package_version" "$dependency" "$requirement" "$minimum" "$resolved"
   done
 }
 
@@ -163,6 +169,10 @@ select_dependency_minimums() {
   local entry selected_dependency selected_minimum found
   for row in "${dependency_contract_rows[@]}"; do
     IFS=$'\t' read -r _package _package_version dependency _requirement minimum _resolution_name <<<"$row"
+    # No declared minimum means no declared-minimum pin for this dependency.
+    if [[ "$minimum" == "none" ]]; then
+      continue
+    fi
     found=0
     for entry in "${selected[@]}"; do
       IFS=$'\t' read -r selected_dependency selected_minimum <<<"$entry"
