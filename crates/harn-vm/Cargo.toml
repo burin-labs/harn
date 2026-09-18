@@ -24,7 +24,13 @@ ignored = ["md-5", "aws-smithy-types"]
 # packaged crate at this minimum and at Cargo's latest admitted resolution.
 dependency_contracts = [
     { name = "rmcp", minimum = "3.1.4" },
-    { name = "aws-smithy-types", minimum = "1.6.3" },
+    # No minimum: the Smithy constraint is a ceiling, not a floor. Pinning a
+    # floor here is a treadmill, because the other AWS crates in the same
+    # published graph raise their own floors independently — `aws-config`
+    # 1.12.0 requires `^1.6.3` and `aws-sigv4` 1.5.3 requires `^1.6.4`, so any
+    # minimum we name conflicts with whichever sibling moved last. The
+    # resolver-latest build against the newest admitted graph is the proof.
+    { name = "aws-smithy-types" },
 ]
 
 [features]
@@ -120,10 +126,9 @@ aws-sigv4 = { version = "1.5.1", optional = true }
 # `cargo update --precise <minimum>` cannot satisfy an exact pin on a later
 # version (#8436).
 #
-# The floor is 1.6.3 rather than 1.6.2 because `aws-config` 1.12.0 requires
-# `^1.6.3` itself, so a fresh AWS graph cannot resolve a lower one. Keep this
-# floor and the `dependency_contracts` minimum equal: the declared-minimum
-# phase pins that minimum, so a floor below what the SDK admits fails there.
+# `<1.7.0` is the whole constraint. The lower bound only keeps the range from
+# admitting ancient releases; the sibling AWS crates raise the effective floor
+# on their own, which is why the contract above declares no minimum.
 aws-smithy-types = { version = ">=1.6.3, <1.7.0", optional = true }
 postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 quick_cache = "0.7"

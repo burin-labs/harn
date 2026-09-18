@@ -95,10 +95,14 @@ pub fn package_dependency_contracts_from_metadata(meta: dict) -> list<PackageDep
     let seen: list<string> = []
     for declared in package?.metadata?.harn?.package_verify?.dependency_contracts ?? [] {
       const dependency = require_string(declared?.name, package_name + " dependency contract name")
-      const minimum = require_string(
-        declared?.minimum,
-        package_name + " dependency contract " + dependency + " minimum",
-      )
+      // A contract may declare no minimum. That is the shape a ceiling takes:
+      // the constraint names the first version that breaks rather than the
+      // oldest that works, so there is no floor to pin. Pinning one anyway is
+      // a treadmill — sibling crates in the same published SDK raise their own
+      // floors on their own schedule, and the pin conflicts with whichever one
+      // moved last. Such a contract still emits its resolver-latest receipt;
+      // it just has no declared-minimum build to prove.
+      const minimum = to_string(declared?.minimum ?? "")
       if seen.contains(dependency) {
         throw package_name + " contains duplicate dependency contract: " + dependency
       }
