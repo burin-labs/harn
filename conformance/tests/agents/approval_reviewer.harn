@@ -123,15 +123,18 @@ pipeline default(harness: Harness) {
     unreviewed.ok == false,
     "CONTROL: with no reviewer the ask must die unanswered, or this whole test is vacuous",
   )
-  // The exact gate is the runtime's business and differs by posture: an ask
-  // with no bridge lands on `approval_unavailable`, while a posture that
-  // already collapsed the ask lands on `approval_policy`. Both are "refused
-  // with nobody to ask", which is what the seam answers. Pinning one would make
-  // this test fail on a posture change that broke nothing.
+  // This refusal is NOT an approval decision, and the disjunction that used to
+  // stand here said it was. The call reads `.env`, so the deny-by-default
+  // sensitive-path guard refuses it before any approval rule is consulted and
+  // before the ask could reach a bridge. Every deny used to be reported as
+  // `approval_policy` regardless of which rule decided, which is what made the
+  // old expectation look right. Now that a refusal names its own rule the gate
+  // is exact, so this control pins it instead of accepting a family: a posture
+  // change cannot move a decision that posture never took part in, and a
+  // change that DID route this through approval would now be caught here.
   assert(
-    unreviewed.denial.gate == "approval_unavailable"
-      || unreviewed.denial.gate == "approval_policy",
-    "CONTROL: refusal must come from an approval gate, got: ${unreviewed.denial.gate}",
+    unreviewed.denial.gate == "sensitive_path",
+    "CONTROL: the sensitive-path guard must be what refused, got: ${unreviewed.denial.gate}",
   )
   // 1. The same call, the same policy, WITH a granting reviewer: it proceeds.
   //    Paired against the control above, this isolates the reviewer as the only
