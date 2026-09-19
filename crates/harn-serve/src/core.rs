@@ -247,6 +247,28 @@ pub struct DispatchCore {
     generation: PreparedDispatchGeneration,
 }
 
+/// Declares the environment a dispatched function's subprocesses run under.
+///
+/// See the note in [`DispatchCore::dispatch`]. `inherited` keeps this
+/// surface's long-standing behaviour; the value of stating it is that the
+/// process host can now tell a declaration apart from an omission.
+struct InheritedDispatchEnvironment;
+
+impl InheritedDispatchEnvironment {
+    fn install() -> Self {
+        harn_vm::stdlib::process::set_session_environment(Some(
+            harn_vm::security::SessionEnvironment::inherited(),
+        ));
+        Self
+    }
+}
+
+impl Drop for InheritedDispatchEnvironment {
+    fn drop(&mut self) {
+        harn_vm::stdlib::process::set_session_environment(None);
+    }
+}
+
 impl DispatchCore {
     pub fn new(config: DispatchCoreConfig) -> Result<Self, DispatchError> {
         let tools = PreparedTools::prepare(&config.script_path)?;
@@ -274,6 +296,20 @@ impl DispatchCore {
     }
 
     pub async fn dispatch(&self, mut request: CallRequest) -> Result<CallResponse, DispatchError> {
+        // This surface has no way for a caller to declare an environment
+        // policy, the way an ACP session does on `session/new`. Until it
+        // does, a dispatched function's subprocesses inherit this server's
+        // environment, which is what they have always done. What changes is
+        // that the inheriting is now SAID rather than obtained by saying
+        // nothing: since harn#8477 the process host refuses an inheriting
+        // spawn with no policy behind it, because a seam cannot tell a
+        // deliberate inherit apart from a forgotten one.
+        //
+        // The declaration is deliberately the permissive one, so this change
+        // alters no behaviour here. Giving this surface a real policy to
+        // declare is its own decision and its own change, and leaving the
+        // call named makes that gap findable instead of implicit.
+        let _environment = InheritedDispatchEnvironment::install();
         let trace_id = request.trace_id.clone().unwrap_or_default();
         let function_scopes = self
             .catalog()

@@ -9,6 +9,13 @@ use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
 
 fn call(request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
+    // This test is about toolchain-wrapper neutralization, not credential
+    // scope, and it inherits on purpose. Since harn#8477 an inheriting spawn
+    // has to say so, so it says so here rather than relying on the absence of
+    // a policy, which now refuses.
+    harn_vm::stdlib::process::set_session_environment(Some(
+        harn_vm::security::SessionEnvironment::inherited(),
+    ));
     let mut registry = BuiltinRegistry::new();
     ToolsCapability.register_builtins(&mut registry);
     let entry = registry
