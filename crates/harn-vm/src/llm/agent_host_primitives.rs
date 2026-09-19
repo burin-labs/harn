@@ -1158,12 +1158,8 @@ pub(super) async fn host_agent_dispatch_tool_call(
         }
         Some(decision) if decision.is_deny() => {
             emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
-            // The gate comes from the rule that decided, not from the
-            // evaluator that ran it: the built-in path guards refuse ahead of
-            // every configured rule and are not approval decisions, so
-            // pinning one gate here told a person whose approval setting was
-            // off that approval had refused them. This seam no longer names a
-            // gate at all; the decision carries its own.
+            // No gate is named here on purpose: the decision carries the one
+            // its deciding rule chose. See `PolicyEvaluation::terminal_denial`.
             let denial = decision.terminal_denial();
             return Ok(deny_tool_call_value(
                 Some(&ctx),
