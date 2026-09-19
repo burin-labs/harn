@@ -76,7 +76,7 @@ mod enforcement_report;
 mod handler_env;
 mod introspection;
 #[cfg(target_os = "linux")]
-mod linux;
+pub(crate) mod linux;
 mod locked_append;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -126,9 +126,7 @@ mod replace;
 /// `pre_exec` callback, which nothing can carry across a process boundary; the
 /// other backends put theirs in the spawn's argv, which survives on its own.
 #[cfg(target_os = "linux")]
-pub use linux::{
-    decode_seccomp_hex, keep_ruleset_across_exec, transferable_confinement, TransferableConfinement,
-};
+pub use linux::{decode_seccomp_hex, transferable_confinement, TransferableConfinement};
 #[cfg(target_os = "linux")]
 pub(crate) use refusal::mechanism_skipped_warning;
 #[cfg(any(target_os = "macos", target_os = "windows"))]

@@ -53,6 +53,15 @@ pub const NETNS_RULESET_FD_FLAG: &str = "--ruleset-fd";
 /// Flag carrying the compiled seccomp program, hex-encoded.
 pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 
+/// The hook that carries the ruleset descriptor across that `exec`, without
+/// which the helper enters no ruleset while the layer above still reports the
+/// filesystem boundary as enforced.
+///
+/// Re-exported straight from the backend that owns it. The sandbox module's
+/// own export list is a length-ratcheted legacy file, and widening it by one
+/// name costs two lines there for no benefit to a reader.
+#[cfg(target_os = "linux")]
+pub use crate::stdlib::sandbox::linux::keep_ruleset_across_exec;
 /// Confinement an embedder builds here and enters in a process it re-execs.
 ///
 /// An embedder that spawns the payload directly never needs this: `pre_exec`
@@ -62,7 +71,7 @@ pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 /// success.
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::{
-    decode_seccomp_hex, keep_ruleset_across_exec, transferable_confinement, TransferableConfinement,
+    decode_seccomp_hex, transferable_confinement, TransferableConfinement,
 };
 
 /// Push a transient execution policy with `sandbox_profile` replaced by the
