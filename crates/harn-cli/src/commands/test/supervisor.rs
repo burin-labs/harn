@@ -43,7 +43,14 @@ fn run_current_invocation_blocking() -> Result<i32, String> {
         cwd: std::env::current_dir().ok(),
         env,
         env_remove: Vec::new(),
-        env_mode: EnvMode::Patch,
+        // `env` above is already the complete environment for the child: it
+        // is this process's own, re-exec'ing itself with one marker added.
+        // `Replace` says that, and says it precisely — the child's
+        // environment is supplied, not inherited, so no session policy has
+        // to stand behind it (harn#8477). The resulting environment is
+        // unchanged: under `Patch` the explicit map was applied after the
+        // denylist pass and put every name back anyway.
+        env_mode: EnvMode::Replace,
         use_stdin: false,
         configure_process_group: true,
         owner_death: OwnerDeathPolicy::KillContainment,

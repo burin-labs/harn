@@ -2,6 +2,7 @@ use super::*;
 use crate::{execute_with_skill_dirs_and_options, SourceExecutionOptions};
 
 mod case_config;
+mod case_environment;
 mod empty_run;
 mod lint;
 mod parallel;
@@ -334,6 +335,8 @@ async fn execute_conformance_source(
         None
     };
 
+    // Declared, not omitted; see `case_environment` for why.
+    let _environment = case_environment::declare();
     let start = std::time::Instant::now();
     let result = tokio::time::timeout(
         std::time::Duration::from_millis(timeout_ms),

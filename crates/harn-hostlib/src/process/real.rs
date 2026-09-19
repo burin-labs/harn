@@ -193,15 +193,48 @@ pub(crate) fn prepare_command(
         EnvMode::Replace => {
             command.env_clear();
         }
-        // `InheritClean`/`Patch` inherit the full parent environment. Strip
-        // secret-bearing variables (provider `*_API_KEY`s, `GITHUB_TOKEN`,
-        // `HARN_CLOUD_API_KEY`, etc.) so build/test commands — and the model
-        // that reads their stdout as the tool result — never see them.
-        // Caller-supplied `env` below is applied afterward and is an
-        // explicit opt-in, so it is intentionally not filtered here.
+        // The inheriting modes. `std_command_for` above has already closed the
+        // environment against the session policy when one is installed: it
+        // cleared the child's environment and repopulated it from the policy's
+        // allowlist plus the session's declared grants. What is left to do here
+        // is decide what happens when no policy is installed, and to keep the
+        // name denylist as a second layer over the set the policy admitted.
         EnvMode::InheritClean | EnvMode::Patch => {
+            let mode = match spec.env_mode {
+                EnvMode::InheritClean => "inherit_clean",
+                EnvMode::Patch => "patch",
+                EnvMode::Replace => unreachable!("handled by the arm above"),
+            };
+            // Absence is refused, not honored. Without a policy the closing
+            // step above is a no-op, so the child would receive the calling
+            // process's whole environment with only the name denylist between
+            // it and a credential. A denylist cannot be that boundary: it
+            // matches an explicit list, a set of prefixes, and seven suffixes,
+            // and every credential named outside those walks through. Refusing
+            // is what stops a missing policy from reading as a permissive one
+            // (harn#8477).
+            let Some(session) = harn_vm::stdlib::process::current_session_environment() else {
+                return Err(ProcessError::SessionEnvironmentMissing {
+                    builtin: spec.builtin,
+                    mode,
+                });
+            };
+            // Defence in depth over what the policy admitted, never over what
+            // the session deliberately granted. A run that grants a provider
+            // credential has stated that this child needs it, and a name-shaped
+            // guess must not overrule a declaration: doing so would strip the
+            // credential back out and leave the run failing to authenticate
+            // with nothing naming the cause.
+            let granted: std::collections::BTreeSet<String> = session
+                .receipts()
+                .into_iter()
+                .filter_map(|receipt| receipt.exposed_as_env)
+                .collect();
             for (key, _) in std::env::vars_os() {
                 if let Some(name) = key.to_str() {
+                    if granted.contains(name) {
+                        continue;
+                    }
                     if super::handle::is_sensitive_env_name(name) {
                         command.env_remove(&key);
                     }

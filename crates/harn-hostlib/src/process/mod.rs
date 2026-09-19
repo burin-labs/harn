@@ -10,6 +10,7 @@ pub mod handle;
 pub mod mock;
 pub mod owner_death;
 pub mod real;
+
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -24,3 +25,23 @@ pub use real::default_spawner;
 pub use real::replace_current_process;
 #[cfg(target_os = "windows")]
 pub use windows::KillOnCloseJob;
+
+/// Shared by this crate's tests only.
+///
+/// Gated on `unix` to match its callers. Both of them are `#[cfg(unix)]`
+/// tests, so on Windows this module would be dead code, and the workspace
+/// denies warnings there — a break invisible on a macOS or Linux run.
+#[cfg(all(test, unix))]
+pub(crate) mod test_support {
+    /// Declares that a test's spawns inherit this process's environment.
+    ///
+    /// Since harn#8477 an inheriting spawn refuses when no session
+    /// environment is installed, because absence used to read as permission.
+    /// A test whose subject is spawning rather than credential scope holds
+    /// this and keeps asserting what it is about.
+    pub(crate) fn declare_inherited() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
+        harn_vm::stdlib::process::declare_session_environment_if_absent(
+            harn_vm::security::SessionEnvironment::inherited(),
+        )
+    }
+}

@@ -854,6 +854,11 @@ mod tests {
 
     #[test]
     fn guardian_request_keeps_explicit_credentials_out_of_argv_and_env() {
+        // What this asserts is that an explicit credential travels over the
+        // private pipe rather than through argv or the environment. It
+        // inherits otherwise, and since harn#8477 an inheriting spawn states
+        // that rather than getting it from the absence of a policy.
+        let _environment = crate::process::test_support::declare_inherited();
         let canary = "guardian-request-pipe-canary";
         let spec = SpawnSpec {
             builtin: "guardian_request_test",

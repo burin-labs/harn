@@ -231,6 +231,18 @@ async fn execute_compiled(
     let local = tokio::task::LocalSet::new();
     let file_display = case.file.display().to_string();
     let setup_start = Instant::now();
+    // Declare the environment this case's subprocesses run under. A test
+    // that shells out inherits the runner's environment, which is what it
+    // has always done and what a conformance case needs in order to find a
+    // toolchain at all. Since harn#8477 an inheriting spawn has to have a
+    // policy behind it, because the process host cannot otherwise tell a
+    // deliberate inherit apart from a forgotten one.
+    //
+    // Installed INSIDE the task below, not here. The policy lives in a
+    // thread-local, and the awaits between here and the case body can move
+    // the task to another worker thread, which would leave the install on a
+    // thread the spawn never runs on. An install that silently misses is
+    // worse than none: the refusal is the only thing that would report it.
     let mut vm = harn_vm::Vm::new();
     if case.trusted_host_dispatch {
         vm.enable_trusted_host_dispatch()
@@ -239,6 +251,9 @@ async fn execute_compiled(
     let module_phase_recorder = vm.enable_module_phase_timing();
     let result = local
         .run_until(async {
+            let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+                harn_vm::security::SessionEnvironment::inherited(),
+            );
             vm.set_prepared_module_cache(prepared_module_cache.clone());
             harn_vm::register_vm_stdlib(&mut vm);
             crate::install_default_hostlib(&mut vm);
