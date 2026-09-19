@@ -310,6 +310,7 @@ impl DispatchProcessContextGuard {
                     cleanup: None,
                     environment_policy: Default::default(),
                     grants: Vec::new(),
+                    admitted_environment: Vec::new(),
                 })
             }
             None => None,
@@ -351,6 +352,7 @@ mod tests {
             cleanup: None,
             environment_policy: Default::default(),
             grants: Vec::new(),
+            admitted_environment: Vec::new(),
         }
     }
 

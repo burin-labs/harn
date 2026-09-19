@@ -15,7 +15,7 @@ impl AcpServer {
         // Resolve the declared environment policy at the launch
         // boundary, snapshotting the server environment for env-source grants.
         // A malformed config or rejected launch fails the session loudly.
-        let environment_policy = match self.resolve_session_environment(params) {
+        let environment_policy = match Self::resolve_session_environment(params) {
             Ok(environment) => environment,
             Err((message, data)) => {
                 self.send_error_with_data(id, -32602, &message, data);
@@ -49,14 +49,29 @@ impl AcpServer {
     }
 
     /// Parse and launch the `environmentPolicy` block of a `session/new`
-    /// request. Omission selects `inherited`. Env-source grants are snapshotted
+    /// request. Omission selects `isolated`. Env-source grants are snapshotted
     /// from the server environment here, at the launch boundary.
+    ///
+    /// Omission used to select `inherited`, which returns the launcher
+    /// snapshot whole and skips [`ENV_ALLOWLIST`] entirely. That is the wrong
+    /// default for this surface specifically: an ACP session runs an agent,
+    /// and the child processes it spawns execute model-authored tool calls.
+    /// An operator shell routinely carries credential-shaped variables for
+    /// services the agent's task has nothing to do with, and a denied egress
+    /// does not stop a child from reading its own environment and writing a
+    /// value into the workspace or a transcript.
+    ///
+    /// `inherited` stays reachable, but a client now has to ask for it by
+    /// name, which is the point: inheriting the operator's whole environment
+    /// is a decision worth stating rather than the thing that happens when a
+    /// client says nothing.
+    ///
+    /// [`ENV_ALLOWLIST`]: harn_vm::security::ENV_ALLOWLIST
     fn resolve_session_environment(
-        &self,
         params: &serde_json::Value,
     ) -> Result<harn_vm::security::SessionEnvironment, (String, serde_json::Value)> {
         let Some(raw) = params.get("environmentPolicy") else {
-            return Ok(harn_vm::security::SessionEnvironment::inherited());
+            return Ok(harn_vm::security::SessionEnvironment::isolated());
         };
         let config: AcpSessionEnvironmentConfig =
             serde_json::from_value(raw.clone()).map_err(|error| {
@@ -692,4 +707,111 @@ pub(super) fn session_info_update_params(
         "sessionId": session_id,
         "update": update,
     })
+}
+
+#[cfg(test)]
+mod environment_policy_default_tests {
+    use super::*;
+    use harn_vm::security::{EnvironmentPolicyKind, SessionEnvironment};
+    use std::collections::BTreeMap;
+
+    /// A synthetic name, deliberately not any variable this project or its
+    /// operators actually use. A test that names a real credential variable
+    /// publishes the thing it is meant to protect.
+    const CANARY: &str = "HARN_PROBE_FAKE_API_KEY";
+    const CANARY_VALUE: &str = "probe-must-not-cross";
+
+    fn kind_for(params: serde_json::Value) -> EnvironmentPolicyKind {
+        AcpServer::resolve_session_environment(&params)
+            .expect("the policy must resolve")
+            .kind()
+    }
+
+    /// The defect: a client that says nothing about the environment used to
+    /// get the operator's whole shell, credentials included, in every child
+    /// that runs a model-authored tool call.
+    #[test]
+    fn omitting_the_policy_selects_the_filtered_default() {
+        assert_eq!(
+            kind_for(serde_json::json!({"cwd": "/tmp"})),
+            EnvironmentPolicyKind::Isolated,
+        );
+    }
+
+    /// Inheriting the operator's environment stays possible. It just has to
+    /// be asked for, which is the whole change.
+    #[test]
+    fn inheriting_remains_available_as_an_explicit_choice() {
+        assert_eq!(
+            kind_for(serde_json::json!({"environmentPolicy": {"kind": "inherited"}})),
+            EnvironmentPolicyKind::Inherited,
+        );
+    }
+
+    /// The consequence the default now buys, proven on the same map that
+    /// becomes the child environment. Built from an explicit snapshot rather
+    /// than the process environment so the assertion cannot depend on what
+    /// else happens to be exported while the suite runs.
+    #[test]
+    fn the_default_policy_keeps_a_credential_shaped_name_out_of_a_child() {
+        let mut snapshot = BTreeMap::new();
+        snapshot.insert("PATH".to_string(), "/usr/bin".to_string());
+        snapshot.insert(CANARY.to_string(), CANARY_VALUE.to_string());
+
+        let environment = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Isolated,
+            Vec::new(),
+            snapshot.clone(),
+            &|name| snapshot.get(name).cloned(),
+        )
+        .expect("an isolated policy with no grants must launch");
+
+        let child_env = harn_vm::security::resolve_env_for_command(
+            &environment,
+            "bash",
+            &|name| snapshot.get(name).cloned(),
+            &|_, _| None,
+        )
+        .expect("the child environment must resolve");
+
+        assert!(
+            !child_env.contains_key(CANARY),
+            "the credential-shaped variable reached the child environment",
+        );
+        assert!(
+            child_env.contains_key("PATH"),
+            "the allowlist must still admit the variables a tool call needs",
+        );
+    }
+
+    /// The negative control. Under the old default the same snapshot carries
+    /// the canary straight through, so the assertion above is measuring the
+    /// policy rather than an empty map.
+    #[test]
+    fn the_inherited_policy_does_carry_it_through() {
+        let mut snapshot = BTreeMap::new();
+        snapshot.insert("PATH".to_string(), "/usr/bin".to_string());
+        snapshot.insert(CANARY.to_string(), CANARY_VALUE.to_string());
+
+        let environment = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Inherited,
+            Vec::new(),
+            snapshot.clone(),
+            &|name| snapshot.get(name).cloned(),
+        )
+        .expect("the inherited policy must launch");
+
+        let child_env = harn_vm::security::resolve_env_for_command(
+            &environment,
+            "bash",
+            &|name| snapshot.get(name).cloned(),
+            &|_, _| None,
+        )
+        .expect("the child environment must resolve");
+
+        assert!(
+            child_env.contains_key(CANARY),
+            "the probe is wrong: inherited must carry the variable through",
+        );
+    }
 }

@@ -1295,6 +1295,12 @@ pub struct RunExecutionRecord {
     /// [`crate::security::GrantReceipt`]. `#[serde(default)]` on the struct
     /// loads pre-grants records with an empty vec.
     pub grants: Vec<crate::security::GrantReceipt>,
+    /// Every environment variable name this run's child processes could see.
+    /// Names only, never values. The policy kind says how the set was chosen;
+    /// this says what it actually was, which is the part a reader auditing a
+    /// run needs. `#[serde(default)]` on the struct loads older records with
+    /// an empty vec, which reads as unrecorded rather than as empty.
+    pub admitted_environment: Vec<String>,
 }
 
 #[cfg(test)]
