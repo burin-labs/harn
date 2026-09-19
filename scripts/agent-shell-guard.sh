@@ -101,7 +101,15 @@ resolve_harn() {
 
 resolved_harn="$(resolve_harn)"
 IFS=$'\t' read -r harn_mode harn_runner <<<"$resolved_harn"
-[[ -n "$harn_runner" && -x "$harn_runner" ]] || exit 0
+# No interpreter means no policy, and the command is allowed so the very setup
+# that installs the interpreter stays runnable. Say so on stderr: an allow
+# nobody can see is the same silence this adapter was fixed to stop emitting,
+# and an operator whose guard is off should learn it from the guard rather than
+# from whatever it failed to stop.
+if [[ -z "$harn_runner" || ! -x "$harn_runner" ]]; then
+  printf '%s\n' "agent shell guard is OFF: no usable policy interpreter at ${harn_runner:-<none found>}; every command is allowed until one is installed" >&2
+  exit 0
+fi
 
 # The policy uses core data functions, stdin/stdout, and Harn's deterministic
 # command parser. That parser is the only non-core builtin allowed here; the

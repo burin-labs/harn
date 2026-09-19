@@ -293,15 +293,23 @@ if [[ "$throw_output" != *"deliberate top-of-decision fault"* ]]; then
   exit 1
 fi
 
+# The one surviving fail-open. It stays an allow so the setup that installs the
+# interpreter is still runnable, but it must be audible: an allow that says
+# nothing is the same silence the fault path above was fixed to stop emitting.
 unavailable_output="$(
   printf '%s' "$payload" \
     | env -u HARN_BIN PATH=/usr/bin:/bin \
       AGENT_SHELL_GUARD_HARN_BIN="$fixture_root/missing-harn" \
-      "$fixture_root/scripts/agent-shell-guard.sh"
+      "$fixture_root/scripts/agent-shell-guard.sh" 2>"$fixture_root/unavailable.err"
 )"
 if [[ -n "$unavailable_output" ]]; then
   echo "adapter did not fail open when no interpreter was available" >&2
   printf '%s\n' "$unavailable_output" >&2
+  exit 1
+fi
+if ! grep -Fq "agent shell guard is OFF" "$fixture_root/unavailable.err"; then
+  echo "adapter allowed silently when no interpreter was available" >&2
+  cat "$fixture_root/unavailable.err" >&2
   exit 1
 fi
 

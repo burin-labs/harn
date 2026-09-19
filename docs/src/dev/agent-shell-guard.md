@@ -127,7 +127,9 @@ other non-zero exit denies as well, naming the failure: the interpreter ran and
 the evaluation produced no verdict, so no rule was applied. A missing or
 non-executable interpreter is the one remaining fail-open, decided before the
 policy runs, so a broken local installation cannot lock the agent out of
-recovery. Policy output is published only after a successful interpreter exit;
+recovery; that allow prints one stderr line saying the guard is off and which
+interpreter path was missing, so it is never silent. Policy output is published
+only after a successful interpreter exit;
 partial output from a crash or timeout is discarded instead of becoming a
 malformed host decision.
 
@@ -163,8 +165,9 @@ printf '%s' '{"tool_name":"Bash","tool_input":{"command":"cargo test"}}' \
 ```
 
 The adapter deliberately ignores an invalid executable path and remains
-fail-open, because no policy ran. Once one does run, a failure denies. Debug
-mode preserves Harn startup and policy errors on stderr.
+fail-open, because no policy ran, announcing on stderr that the guard is off.
+Once a policy does run, a failure denies. Debug mode preserves Harn startup and
+policy errors on stderr.
 
 ## Reuse the policy in another repository
 
