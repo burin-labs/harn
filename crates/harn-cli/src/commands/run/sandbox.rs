@@ -35,7 +35,14 @@ pub struct RunSandboxOptions {
     /// namespace for a confined child. Required by `allow_process_loopback`
     /// on backends that render loopback that way; the grant is refused rather
     /// than weakened when it is missing.
-    pub netns_launcher_path: Option<String>,
+    ///
+    /// Behind a pointer because of where this struct travels. It is held
+    /// across awaits in most of the command futures in this crate, and those
+    /// futures each carry it many times over, so the stack-frame gate reads a
+    /// plain `Option<String>` here as about 3.5 KB of growth in the widest of
+    /// them. A rarely populated host fact does not get to charge that to
+    /// every command, and the pointer keeps the field inline at one word.
+    pub netns_launcher_path: Option<Box<String>>,
     /// Session environment policy for this run. Always present: the default
     /// captures the launcher environment at launch.
     ///
@@ -88,7 +95,7 @@ impl RunSandboxOptions {
     /// asks for one without the other must be refused rather than silently
     /// downgraded.
     pub fn with_netns_launcher(mut self, path: Option<String>) -> Self {
-        self.netns_launcher_path = path;
+        self.netns_launcher_path = path.map(Box::new);
         self
     }
 
@@ -279,7 +286,7 @@ pub(super) fn install_run_sandbox_scope(
                 network: options.allow_process_network,
                 loopback: options.allow_process_loopback,
                 self_introspection: options.allow_process_self_introspection,
-                netns_launcher: options.netns_launcher_path.clone(),
+                netns_launcher: options.netns_launcher_path.as_deref().cloned(),
             },
         );
         policy.process_network_proxy = process_proxy.as_ref().map(|proxy| proxy.endpoints());
