@@ -72,9 +72,9 @@ pub use self::reporting::{
     RunJsonSinkTarget, RunPhaseOptions, RunRusageOptions, RunSummaryOptions,
     RUN_PHASE_SCHEMA_VERSION, RUN_RUSAGE_SCHEMA_VERSION, RUN_SUMMARY_SCHEMA_VERSION,
 };
-#[cfg(test)]
-use self::sandbox::default_run_capability_policy;
 pub use self::sandbox::RunSandboxOptions;
+#[cfg(test)]
+use self::sandbox::{default_run_capability_policy, RunProcessGrants};
 use self::sandbox::{
     default_run_workspace_root, install_run_sandbox_scope, run_sandbox_attestation,
 };

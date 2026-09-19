@@ -258,9 +258,11 @@ pub(super) fn install_run_sandbox_scope(
             &options.process_read_roots,
             &options.process_write_roots,
             &options.process_unix_socket_roots,
-            options.allow_process_network,
-            options.allow_process_loopback,
-            options.allow_process_self_introspection,
+            RunProcessGrants {
+                network: options.allow_process_network,
+                loopback: options.allow_process_loopback,
+                self_introspection: options.allow_process_self_introspection,
+            },
         );
         policy.process_network_proxy = process_proxy.as_ref().map(|proxy| proxy.endpoints());
         harn_vm::orchestration::push_execution_policy(policy);
@@ -396,6 +398,20 @@ fn plural_suffix(count: usize) -> &'static str {
     }
 }
 
+/// The non-path grants a run may add to the default process sandbox. These
+/// travel together because they are decided together by one caller and read
+/// together by the policy; passing them as a run of bare booleans invites a
+/// silent transposition at a call site the type checker cannot catch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct RunProcessGrants {
+    /// General outbound networking for child processes.
+    pub network: bool,
+    /// TCP to loopback only, for child processes that talk to a local daemon.
+    pub loopback: bool,
+    /// Reading `/proc` entries belonging to the sandboxed task itself.
+    pub self_introspection: bool,
+}
+
 pub(super) fn default_run_capability_policy(
     workspace_root: &Path,
     write_roots: &[PathBuf],
@@ -403,9 +419,7 @@ pub(super) fn default_run_capability_policy(
     process_read_roots: &[PathBuf],
     process_write_roots: &[PathBuf],
     process_unix_socket_roots: &[PathBuf],
-    allow_process_network: bool,
-    allow_process_loopback: bool,
-    allow_process_self_introspection: bool,
+    grants: RunProcessGrants,
 ) -> harn_vm::orchestration::CapabilityPolicy {
     let mut workspace_roots = Vec::with_capacity(1 + write_roots.len());
     workspace_roots.push(
@@ -460,16 +474,16 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| path.display().to_string())
                 .collect(),
             read_deny_roots: Vec::new(),
-            allow_tcp_loopback: allow_process_loopback,
+            allow_tcp_loopback: grants.loopback,
             unix_socket_roots: process_unix_socket_roots
                 .iter()
                 .map(|path| normalize_run_workspace_root(path.as_path()))
                 .map(|path| path.display().to_string())
                 .collect(),
-            allow_process_self_introspection,
+            allow_process_self_introspection: grants.self_introspection,
         }),
         side_effect_level: Some(
-            if allow_process_network {
+            if grants.network {
                 harn_vm::tool_annotations::SideEffectLevel::Network
             } else {
                 harn_vm::tool_annotations::SideEffectLevel::ProcessExec
@@ -586,7 +600,7 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
         // platform.
         "process_unix_socket_enforcement": active_policy
             .as_ref()
-            .map(|policy| harn_vm::unix_socket_enforcement(policy)),
+            .map(harn_vm::unix_socket_enforcement),
         "side_effect_level": side_effect_level,
         "egress": egress,
     })
@@ -714,9 +728,7 @@ mod tests {
             &options.process_read_roots,
             &options.process_write_roots,
             &[],
-            false,
-            false,
-            false,
+            RunProcessGrants::default(),
         );
 
         assert_eq!(
