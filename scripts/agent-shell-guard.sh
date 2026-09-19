@@ -121,11 +121,62 @@ guard_command+=(--allow=command_risk_scan "$script_dir/agent_shell_guard.harn")
 # second and allows on the first. Keep the path in step with
 # WORKTREE_ADMISSION_POLICY in agent_shell_guard_policy.harn; the guard refuses
 # by name if the two ever disagree.
+# One row per repository the command could mean, not one answer for this
+# installation. Measuring only our own root answered for the wrong repository
+# whenever a command pointed elsewhere, and named an admission command that
+# does not exist there. The guard owns argv and picks the row; this owns the
+# filesystem and measures every plausible root. Keep the path and the walk in
+# step with WORKTREE_ADMISSION_POLICY in agent_shell_guard_policy.harn; the
+# guard refuses by name if the two ever disagree.
 guard_repo_root="$(cd "$script_dir/.." && pwd -P)"
-HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION=""
-if [[ -f "$guard_repo_root/scripts/fleet-worktree-admit.ts" ]]; then
-  HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION="scripts/fleet-worktree-admit.ts"
-fi
+
+# Walk up from a directory to the nearest repository root, bounded.
+guard_repository_root_of() {
+  local directory="$1" depth=0
+  [[ -d "$directory" ]] || return 1
+  directory="$(cd "$directory" 2>/dev/null && pwd -P)" || return 1
+  while ((depth < 12)); do
+    if [[ -e "$directory/.git" ]]; then
+      printf '%s\n' "$directory"
+      return 0
+    fi
+    [[ "$directory" == "/" ]] && return 1
+    directory="$(dirname "$directory")"
+    ((depth += 1))
+  done
+  return 1
+}
+
+# The admission command a root owns, empty when it owns none. The row is keyed
+# by the spelling the caller used, not by the resolved path: the guard matches
+# the directory as it appears in the command, and on macOS a resolved root
+# routinely differs from it by a /private prefix, which would leave every
+# target looking unmeasured.
+guard_admission_row() {
+  local key="$1" root="$2"
+  if [[ -f "$root/scripts/fleet-worktree-admit.ts" ]]; then
+    printf '%s\t%s\n' "$key" "scripts/fleet-worktree-admit.ts"
+  else
+    printf '%s\t\n' "$key"
+  fi
+}
+
+# Our own root first: it is the answer when the command names no directory.
+guard_admission_rows="$(guard_admission_row "$guard_repo_root" "$guard_repo_root")"
+# Then every absolute path token in the command, keyed by the token itself and
+# answered from the repository it sits in. Tokenisation only, so the semantic
+# decision about which one the command targets stays in the guard.
+while IFS= read -r guard_token; do
+  [[ -n "$guard_token" ]] || continue
+  guard_candidate="$(guard_repository_root_of "$guard_token" || true)"
+  [[ -n "$guard_candidate" ]] || continue
+  case $'\n'"$guard_admission_rows"$'\n' in
+    *$'\n'"$guard_token"$'\t'*) continue ;;
+  esac
+  guard_admission_rows+=$'\n'"$(guard_admission_row "$guard_token" "$guard_candidate")"
+done < <(tr -c '[:alnum:]/._@+~-' '\n' <"$payload_file" | grep '^/' | sort -u)
+
+HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION="$guard_admission_rows"
 export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION
 export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION_CHECKED=1
 
