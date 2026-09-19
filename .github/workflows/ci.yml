@@ -721,6 +721,10 @@ jobs:
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       # The producer is the only sticky-cache writer. Fifteen GiB covered the
       # previously measured workspace graph and caps storage near $7.50/month.
+      # The owned pool's store is a host-wide directory a supervised server
+      # already owns, and a client cannot resize a running server's cache, so
+      # this figure binds the vendor rung only. The owned pool's ceiling lives
+      # with the host unit that starts that server.
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: >-
         ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
@@ -785,6 +789,11 @@ jobs:
           cache-bin: false
           cache-workspace-crates: "true"
           save: "true"
+      # Read the counters before the first compile, so the summary below can
+      # report what this job did rather than what the machine has done since
+      # its cache server last started.
+      - name: Record the sccache baseline
+        run: ./scripts/ci/sccache_baseline.sh
       - name: Install cargo-nextest
         uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
         with:
@@ -863,8 +872,16 @@ jobs:
       - name: Mark workspace test success
         id: workspace-tests-ok
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
+      # Report the compiler cache on every tier, named by nothing it excludes.
+      # Guarding this on a single tier is what let the owned pool run for
+      # weeks with nobody able to say whether it was compiling warm or cold:
+      # the rung that skips the summary produces no counters, and no counters
+      # reads exactly like a healthy cache. The script names an absent sccache
+      # rather than reporting a measured zero, and it leaves a
+      # host-supervised server running instead of stopping one other jobs are
+      # still using.
       - name: Summarize and stop sccache
-        if: always() && env.HARN_RUNNER_TIER == 'blacksmith'
+        if: always()
         run: ./scripts/ci/finalize_sccache.sh
 
   # GitHub job dependencies wait for terminal producer state, even when an

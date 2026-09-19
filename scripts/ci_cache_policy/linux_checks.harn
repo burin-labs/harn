@@ -438,9 +438,13 @@ fn persistent_compile_lane_errors(
       != "write" {
     errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]
   }
+  // The summary must not name the tiers it knows. A tier missing from that
+  // list produces no counters at all, and a rung with no counters reads
+  // exactly like one with a warm cache, so a cold compile lands as a clean
+  // pass. The script itself distinguishes an absent sccache from an idle one
+  // and leaves a host-supervised server running, so it is safe everywhere.
   const finalize = step_by_name(job?.steps ?? [], "Summarize and stop sccache")
-  if trim(finalize?.if ?? "")
-    != "always() && env.${RUNNER_TIER_ENV} == '${BLACKSMITH_RUNNER_TIER}'"
+  if trim(finalize?.if ?? "") != "always()"
     || trim(finalize?.run ?? "")
       != "./scripts/ci/finalize_sccache.sh" {
     errors = errors + ["ci.yml:${job_name} must finalize its job-owned sccache daemon"]
