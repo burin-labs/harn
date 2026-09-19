@@ -617,7 +617,7 @@ jobs:
   # owned capacity anyway, so the probe is skipped rather than failed for them.
   runner-availability:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d924b47e5f445468454904f2bb32c6f9b4f050eb
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@f793e380d4349964615a5f1d62dd1bb2cc523721
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
