@@ -2,6 +2,13 @@ use super::*;
 use filetime::FileTime;
 use tempfile::tempdir;
 
+/// A fixed instant for tests that inject `now`: the sweep compares the
+/// directory mtimes the test sets against the `now` it passes, so the
+/// wall clock never enters the decision.
+fn fixed_now() -> SystemTime {
+    std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
+}
+
 fn artifact_dir(parent: &Path, pid: u32, nanos: u128, counter: u64) -> PathBuf {
     parent.join(format!("harn-command-cmd_{pid}_{nanos}_{counter}"))
 }
@@ -41,7 +48,7 @@ fn dead_pid() -> u32 {
 #[test]
 fn command_artifact_sweep_deletes_stale_artifact_dirs() {
     let temp = tempdir().unwrap();
-    let now = SystemTime::now();
+    let now = fixed_now();
     let stale = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
     set_dir_mtime(&stale, now - Duration::from_secs(10));
 
@@ -53,7 +60,7 @@ fn command_artifact_sweep_deletes_stale_artifact_dirs() {
 #[test]
 fn command_artifact_sweep_preserves_recent_artifact_dirs() {
     let temp = tempdir().unwrap();
-    let now = SystemTime::now();
+    let now = fixed_now();
     let recent = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
     set_dir_mtime(&recent, now - Duration::from_secs(3));
 
@@ -65,7 +72,7 @@ fn command_artifact_sweep_preserves_recent_artifact_dirs() {
 #[test]
 fn command_artifact_sweep_removes_completed_current_process_artifact_dirs() {
     let temp = tempdir().unwrap();
-    let now = SystemTime::now();
+    let now = fixed_now();
     let completed = create_artifact_dir(temp.path(), std::process::id(), 100, 1);
     set_dir_mtime(&completed, now - Duration::from_secs(10));
 
@@ -77,7 +84,7 @@ fn command_artifact_sweep_removes_completed_current_process_artifact_dirs() {
 #[test]
 fn command_artifact_sweep_preserves_active_current_process_artifact_dirs() {
     let temp = tempdir().unwrap();
-    let now = SystemTime::now();
+    let now = fixed_now();
     let active = create_artifact_dir(temp.path(), std::process::id(), 100, 1);
     let artifacts = CommandArtifacts {
         output_path: active.join("combined.txt"),
@@ -432,7 +439,7 @@ fn fallback_registration_uses_the_same_bounded_alias_fifo() {
 #[test]
 fn command_artifact_sweep_preserves_malformed_names() {
     let temp = tempdir().unwrap();
-    let now = SystemTime::now();
+    let now = fixed_now();
     let malformed = temp.path().join("harn-command-cmd_123_not-nanos_1");
     std::fs::create_dir(&malformed).unwrap();
     set_dir_mtime(&malformed, now - Duration::from_secs(10));
@@ -448,7 +455,7 @@ fn command_artifact_sweep_does_not_follow_symlinks() {
     use std::os::unix::fs::symlink;
 
     let temp = tempdir().unwrap();
-    let now = SystemTime::now();
+    let now = fixed_now();
     let target = temp.path().join("target");
     std::fs::create_dir(&target).unwrap();
     std::fs::write(target.join("keep.txt"), "keep").unwrap();
@@ -467,7 +474,7 @@ fn command_artifact_sweep_does_not_follow_symlinks() {
 #[test]
 fn command_artifact_pressure_sweep_removes_oldest_dead_dirs_over_limit() {
     let temp = tempdir().unwrap();
-    let now = SystemTime::now();
+    let now = fixed_now();
     let pid = dead_pid();
     let first = create_artifact_dir(temp.path(), pid, 100, 1);
     let second = create_artifact_dir(temp.path(), pid, 200, 1);
