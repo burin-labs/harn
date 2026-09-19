@@ -1610,7 +1610,7 @@ fn a_loopback_grant_admits_sockets_only_where_a_namespace_bounds_them() {
     // NEGATIVE CONTROL: the same grant with nothing to build the namespace.
     // It must be refused, because the filter it would otherwise be rendered
     // with places no limit on where a socket may reach.
-    let mut unnamespaced = policy.clone();
+    let mut unnamespaced = policy;
     unnamespaced.process_sandbox.netns_launcher_path = None;
     resolve_netns_launcher(&unnamespaced)
         .expect_err("a loopback grant with no namespace helper must be refused, never widened");
