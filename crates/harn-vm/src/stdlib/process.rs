@@ -71,6 +71,45 @@ pub fn current_session_environment() -> Option<crate::security::SessionEnvironme
     SESSION_ENVIRONMENT_CONTEXT.with(|current| current.borrow().clone())
 }
 
+/// Declare a default environment for a surface that has none, for as long as
+/// the returned guard is held.
+///
+/// This is what a host surface wants, and the distinction from
+/// [`set_session_environment`] is the whole point of the function existing.
+///
+/// If a policy is already installed, this leaves it alone. A surface
+/// declaring its default must never overwrite a session that made a real
+/// choice: an MCP dispatch that happens inside an agent session would
+/// otherwise replace that session's `granted` policy with a permissive one
+/// and widen the very boundary the session asked for.
+///
+/// On drop it restores whatever was installed before rather than clearing.
+/// Clearing is not the inverse of installing, and a guard that cleared would
+/// leave an enclosing session with no policy at all — which, at a spawn seam,
+/// is an error rather than a default.
+#[must_use = "the declaration lasts only while the guard is held"]
+pub fn declare_session_environment_if_absent(
+    environment: crate::security::SessionEnvironment,
+) -> SessionEnvironmentGuard {
+    let previous = current_session_environment();
+    if previous.is_none() {
+        set_session_environment(Some(environment));
+    }
+    SessionEnvironmentGuard { previous }
+}
+
+/// Restores the session environment that was installed before its
+/// declaration, including on the panicking path.
+pub struct SessionEnvironmentGuard {
+    previous: Option<crate::security::SessionEnvironment>,
+}
+
+impl Drop for SessionEnvironmentGuard {
+    fn drop(&mut self) {
+        set_session_environment(self.previous.take());
+    }
+}
+
 /// Per-task ambient-scope swap of the session environment. Same rationale as
 /// [`swap_thread_execution_context`]: a fan-out worker holds its session's
 /// environment across `.await`s, so it must keep its own copy rather than read a

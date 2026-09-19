@@ -269,7 +269,7 @@ impl DispatchCore {
 
     pub async fn dispatch(&self, mut request: CallRequest) -> Result<CallResponse, DispatchError> {
         // Declared, not omitted; see `dispatch_environment` for why.
-        let _environment = crate::dispatch_environment::InheritedDispatchEnvironment::install();
+        let _environment = crate::dispatch_environment::declare();
         let trace_id = request.trace_id.clone().unwrap_or_default();
         let function_scopes = self
             .catalog()

@@ -336,7 +336,7 @@ async fn execute_conformance_source(
     };
 
     // Declared, not omitted; see `case_environment` for why.
-    let _environment = case_environment::ConformanceCaseEnvironment::install();
+    let _environment = case_environment::declare();
     let start = std::time::Instant::now();
     let result = tokio::time::timeout(
         std::time::Duration::from_millis(timeout_ms),

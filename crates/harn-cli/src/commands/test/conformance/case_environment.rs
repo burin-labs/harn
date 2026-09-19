@@ -12,21 +12,13 @@
 //! already launched a policy for the same reason; this is the conformance
 //! runner's equivalent, and `inherited` reproduces its behaviour exactly.
 
-/// Installs the conformance runner's environment declaration for one case and
-/// clears it when the case ends, including on the panicking path.
-pub(super) struct ConformanceCaseEnvironment;
-
-impl ConformanceCaseEnvironment {
-    pub(super) fn install() -> Self {
-        harn_vm::stdlib::process::set_session_environment(Some(
-            harn_vm::security::SessionEnvironment::inherited(),
-        ));
-        Self
-    }
-}
-
-impl Drop for ConformanceCaseEnvironment {
-    fn drop(&mut self) {
-        harn_vm::stdlib::process::set_session_environment(None);
-    }
+/// Declare the runner's default environment for the life of one case.
+///
+/// Only when nothing else has declared one, and the previous declaration is
+/// restored on drop: a case must not silently widen or erase a policy an
+/// enclosing surface chose.
+pub(super) fn declare() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
+    harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    )
 }

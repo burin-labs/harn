@@ -33,22 +33,11 @@ pub(crate) mod test_support {
     ///
     /// Since harn#8477 an inheriting spawn refuses when no session
     /// environment is installed, because absence used to read as permission.
-    /// A test whose subject is spawning rather than credential scope installs
+    /// A test whose subject is spawning rather than credential scope holds
     /// this and keeps asserting what it is about.
-    pub(crate) struct InheritedForTest;
-
-    impl InheritedForTest {
-        pub(crate) fn install() -> Self {
-            harn_vm::stdlib::process::set_session_environment(Some(
-                harn_vm::security::SessionEnvironment::inherited(),
-            ));
-            Self
-        }
-    }
-
-    impl Drop for InheritedForTest {
-        fn drop(&mut self) {
-            harn_vm::stdlib::process::set_session_environment(None);
-        }
+    pub(crate) fn declare_inherited() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
+        harn_vm::stdlib::process::declare_session_environment_if_absent(
+            harn_vm::security::SessionEnvironment::inherited(),
+        )
     }
 }

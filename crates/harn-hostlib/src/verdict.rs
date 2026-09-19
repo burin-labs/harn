@@ -375,7 +375,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
     fn arbitrary_passing_command_cannot_issue_pass() {
         // Asserts verdict authority, not credential scope; it inherits on
         // purpose and now says so (harn#8477).
-        let _environment = crate::process::test_support::InheritedForTest::install();
+        let _environment = crate::process::test_support::declare_inherited();
         let _scope = enter_execution_scope(mint_execution_scope());
         let cwd = std::env::current_dir().expect("cwd");
         let res = run_test_in(

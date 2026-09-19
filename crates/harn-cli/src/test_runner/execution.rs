@@ -251,7 +251,9 @@ async fn execute_compiled(
     let module_phase_recorder = vm.enable_module_phase_timing();
     let result = local
         .run_until(async {
-            let _environment = InheritedCaseEnvironment::install();
+            let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+                harn_vm::security::SessionEnvironment::inherited(),
+            );
             vm.set_prepared_module_cache(prepared_module_cache.clone());
             harn_vm::register_vm_stdlib(&mut vm);
             crate::install_default_hostlib(&mut vm);
@@ -457,28 +459,5 @@ fn compile_failure(
             ..PhaseTimings::default()
         }),
         timing_spans: Vec::new(),
-    }
-}
-
-/// Installs the test runner's environment declaration for one case and clears
-/// it when the case ends, including on the panicking path.
-///
-/// `inherited` reproduces the runner's long-standing behaviour exactly. What
-/// it adds is that the behaviour is now stated, so a case's subprocesses no
-/// longer depend on the absence of a policy meaning the most permissive one.
-struct InheritedCaseEnvironment;
-
-impl InheritedCaseEnvironment {
-    fn install() -> Self {
-        harn_vm::stdlib::process::set_session_environment(Some(
-            harn_vm::security::SessionEnvironment::inherited(),
-        ));
-        Self
-    }
-}
-
-impl Drop for InheritedCaseEnvironment {
-    fn drop(&mut self) {
-        harn_vm::stdlib::process::set_session_environment(None);
     }
 }

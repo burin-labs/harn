@@ -545,9 +545,9 @@ fn accepted_cancel_kills_only_the_cancelled_sessions_background_children() {
     // so it declares its own inheriting environment. What it asserts is that
     // a cancel reaches one session's children and not another's, which is
     // unrelated to credential scope (harn#8477).
-    harn_vm::stdlib::process::set_session_environment(Some(
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
         harn_vm::security::SessionEnvironment::inherited(),
-    ));
+    );
 
     fn spawn_sleeper(session_id: &str) -> u32 {
         harn_hostlib::tools::long_running::spawn_long_running(
