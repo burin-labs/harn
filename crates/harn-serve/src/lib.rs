@@ -5,6 +5,7 @@ pub mod adapters;
 mod auth;
 mod auth_context;
 mod core;
+mod dispatch_environment;
 pub mod embed;
 mod error;
 mod exports;
