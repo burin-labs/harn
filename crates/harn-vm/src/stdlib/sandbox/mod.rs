@@ -1753,6 +1753,12 @@ pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> V
     normalized_process_roots(&policy.process_sandbox.write_roots)
 }
 
+/// Directories a confined child may place a Unix-domain socket under.
+#[cfg(target_os = "linux")]
+pub(crate) fn process_sandbox_unix_socket_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    normalized_process_roots(&policy.process_sandbox.unix_socket_roots)
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub(crate) fn process_sandbox_presets(policy: &CapabilityPolicy) -> Vec<ProcessSandboxPreset> {
     policy.process_sandbox.effective_presets()

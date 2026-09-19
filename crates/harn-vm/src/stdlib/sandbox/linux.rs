@@ -10,7 +10,10 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use seccompiler::{BpfProgram, SeccompAction, SeccompFilter, TargetArch};
+use seccompiler::{
+    BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter,
+    SeccompRule, TargetArch,
+};
 
 use super::{
     policy_allows_capability, policy_allows_network, policy_allows_workspace_write,
@@ -285,17 +288,16 @@ fn profile_setup(
                 .to_string(),
         ));
     }
-    if !policy.process_sandbox.unix_socket_roots.is_empty() {
-        // seccomp filters the syscall, not the socket path, and Landlock has
-        // no access right for connecting to a socket file, so a Unix-socket
-        // grant cannot be scoped to its roots here. Admitting the socket
-        // syscalls would let a child reach any socket its user can open —
-        // a container daemon's, for one — which is an escape, not a grant.
-        return Err(sandbox_rejection(
-            "path-scoped Unix-domain sockets for child processes require a backend that filters sockets by path; the Linux backend cannot enforce that boundary"
-                .to_string(),
-        ));
-    }
+    // A Unix-socket grant is rendered here as serve-only local IPC rather than
+    // refused. seccomp filters the syscall and not the socket path, and no
+    // Landlock ABI has an access right governing connection to a socket file,
+    // so `connect` is the one operation that cannot be scoped: a child allowed
+    // to make it reaches every socket its uid can open, a container daemon's
+    // among them, which is an escape and not a grant. Withholding `connect`
+    // removes that reach entirely while leaving the serving half — create,
+    // bind, listen, accept — which is all a build server needs to talk to
+    // itself. `unix_socket_local_ipc_grant` owns that decision; the seccomp
+    // and Landlock terms below both read it so they cannot disagree.
     // landlock_profile() returns Err under OsHardened when Landlock is
     // unavailable (effective_fallback resolves to Enforce), so the
     // OsHardened "must engage" contract is enforced before fork rather
@@ -310,8 +312,19 @@ fn profile_setup(
     }
     Ok(ProcessProfile {
         landlock,
-        seccomp: compile_seccomp_program(&allowed_syscalls(policy))?,
+        seccomp: compile_seccomp_program(policy)?,
     })
+}
+
+/// Whether this policy asks for, and this backend will render, serve-only
+/// local IPC over Unix-domain sockets.
+///
+/// A policy that already permits general networking is not a local-IPC case:
+/// it has `connect` for its own reasons, and re-deciding it here would either
+/// take away authority the policy was granted or imply this term protects
+/// something it does not.
+fn unix_socket_local_ipc_grant(policy: &CapabilityPolicy) -> bool {
+    !policy.process_sandbox.unix_socket_roots.is_empty() && !policy_allows_network(policy)
 }
 
 fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
@@ -358,12 +371,41 @@ fn landlock_profile(
     }
 
     let handled_access_fs = landlock_handled_access(abi);
-    let ruleset_attr = LandlockRulesetAttr { handled_access_fs };
+    // Abstract Unix sockets have no filesystem path, so the path scoping that
+    // covers a socket file cannot reach them: without this, a serve-only grant
+    // would still let a child speak to any abstract socket on the host. ABI 6
+    // added a domain scope that confines them to this sandbox and its
+    // descendants, which is the containment the grant claims. An older kernel
+    // cannot express it, so the grant is refused there rather than issued
+    // half-enforced.
+    let scope_abstract_unix = unix_socket_local_ipc_grant(policy);
+    if scope_abstract_unix && abi < LANDLOCK_ABI_SCOPED {
+        return Err(sandbox_rejection(format!(
+            "serve-only Unix-domain sockets need Landlock ABI {LANDLOCK_ABI_SCOPED} to contain abstract sockets; this host reports ABI {abi}"
+        )));
+    }
+    let ruleset_attr = LandlockRulesetAttr {
+        handled_access_fs,
+        handled_access_net: 0,
+        scoped: if scope_abstract_unix {
+            LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET
+        } else {
+            0
+        },
+    };
+    // The kernel reads exactly as many bytes as the caller declares and
+    // rejects a size its ABI does not know, so the declared size tracks the
+    // fields actually in use rather than the Rust struct.
+    let ruleset_attr_size = if scope_abstract_unix {
+        std::mem::size_of::<LandlockRulesetAttr>()
+    } else {
+        std::mem::size_of::<u64>()
+    };
     let ruleset_fd = unsafe {
         libc::syscall(
             libc::SYS_landlock_create_ruleset,
             &raw const ruleset_attr,
-            std::mem::size_of::<LandlockRulesetAttr>(),
+            ruleset_attr_size,
             0,
         ) as libc::c_int
     };
@@ -398,7 +440,25 @@ fn landlock_profile(
         // confinement and grant its canonical inode without exposing `/run`.
         push_rule(&mut profile, path, LANDLOCK_ACCESS_FS_READ_FILE, true)?;
     }
-    if proc_runtime_reads_are_contained() {
+    if policy.process_sandbox.allow_process_self_introspection {
+        // Directory reads below procfs, which the file-only grant below
+        // deliberately withholds. A managed runtime that identifies itself by
+        // enumerating `/proc/self/task` cannot start without this, and it
+        // fails inside a static initializer, so the child reports a build
+        // engine error rather than anything resembling a denial.
+        //
+        // The rule names `/proc` and not `/proc/self` because Landlock
+        // resolves a rule to an inode: `/proc/self` is this child's own
+        // PID directory, and the compiler drivers and shell scripts it spawns
+        // are different processes whose own directories the rule would not
+        // cover. Granting the parent is the only shape that reaches them.
+        push_rule(
+            &mut profile,
+            PathBuf::from("/proc"),
+            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR,
+            true,
+        )?;
+    } else if proc_runtime_reads_are_contained() {
         // Some language runtimes (notably Swift on Linux) discover argv by
         // reading their own memory map. A rule for `/proc/self/maps` cannot
         // cover grandchildren: Landlock resolves it to the immediate child's
@@ -461,6 +521,26 @@ fn landlock_profile(
     if policy_allows_workspace_write(policy) {
         for root in process_sandbox_policy_write_roots(policy) {
             push_rule(&mut profile, root, workspace_access, false)?;
+        }
+    }
+    if scope_abstract_unix {
+        // The path half of the serve-only grant. seccomp decides that the
+        // child may create a Unix socket at all; this decides where it may
+        // put one. A socket file outside every named root is refused even
+        // though the syscall was admitted, which is what makes the roots mean
+        // something rather than decorate the policy.
+        for root in super::process_sandbox_unix_socket_roots(policy) {
+            push_rule(
+                &mut profile,
+                root,
+                LANDLOCK_ACCESS_FS_MAKE_SOCK
+                    | LANDLOCK_ACCESS_FS_READ_FILE
+                    | LANDLOCK_ACCESS_FS_READ_DIR
+                    | LANDLOCK_ACCESS_FS_WRITE_FILE
+                    | LANDLOCK_ACCESS_FS_MAKE_DIR
+                    | LANDLOCK_ACCESS_FS_REMOVE_FILE,
+                true,
+            )?;
         }
     }
     Ok(Some(profile))
@@ -836,13 +916,46 @@ fn yama_scope_contains_process_reads(value: &str) -> bool {
 /// number 26 is `ptrace`, which we deliberately withhold (see
 /// `allowlist_excludes_process_introspection_and_io_uring`). The exclusion
 /// held only for callers that agreed to use the ABI we expected.
-fn compile_seccomp_program(allowed_syscalls: &[libc::c_long]) -> Result<BpfProgram, VmError> {
+fn compile_seccomp_program(policy: &CapabilityPolicy) -> Result<BpfProgram, VmError> {
     // `c_long` is already `i64` on every target `target_arch()` accepts —
     // they are all LP64 — so the syscall numbers need no conversion.
-    let rules = allowed_syscalls
-        .iter()
-        .map(|syscall| (*syscall, Vec::new()))
-        .collect();
+    let mut rules: std::collections::BTreeMap<libc::c_long, Vec<SeccompRule>> =
+        allowed_syscalls(policy)
+            .iter()
+            .map(|syscall| (*syscall, Vec::new()))
+            .collect();
+
+    if unix_socket_local_ipc_grant(policy) {
+        // `socket` is admitted only for the Unix domain. An argument condition
+        // is the whole protection: an unconditional entry here would hand the
+        // child every address family, which is the grant this term exists to
+        // avoid. `bind`, `listen` and `accept` take a descriptor rather than a
+        // family, so they cannot be filtered the same way and are admitted
+        // outright — safely, because the only descriptors the child can obtain
+        // are the Unix-domain ones this rule allowed. `connect` is absent by
+        // design and is what keeps a host daemon's socket out of reach.
+        let unix_domain_only = SeccompRule::new(vec![SeccompCondition::new(
+            0,
+            SeccompCmpArgLen::Dword,
+            SeccompCmpOp::Eq,
+            libc::AF_UNIX as u64,
+        )
+        .map_err(|err| {
+            sandbox_rejection(format!("failed to build the Unix-domain condition: {err}"))
+        })?])
+        .map_err(|err| sandbox_rejection(format!("failed to build the socket rule: {err}")))?;
+        rules.insert(libc::SYS_socket, vec![unix_domain_only]);
+        for syscall in [
+            libc::SYS_bind,
+            libc::SYS_listen,
+            libc::SYS_accept,
+            libc::SYS_accept4,
+            libc::SYS_getsockname,
+        ] {
+            rules.entry(syscall).or_default();
+        }
+    }
+    let rules: std::collections::BTreeMap<libc::c_long, Vec<SeccompRule>> = rules;
 
     // Denials return EPERM rather than killing: a child that trips the
     // ceiling should fail the individual call the way a permission error
@@ -1241,6 +1354,8 @@ fn landlock_handled_access(abi: u32) -> u64 {
 #[repr(C)]
 struct LandlockRulesetAttr {
     handled_access_fs: u64,
+    handled_access_net: u64,
+    scoped: u64,
 }
 
 #[repr(C)]
@@ -1250,6 +1365,10 @@ struct LandlockPathBeneathAttr {
 }
 
 const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1 << 0;
+/// First ABI carrying `scoped`, and so the first that can contain an abstract
+/// Unix socket inside the sandbox domain.
+const LANDLOCK_ABI_SCOPED: u32 = 6;
+const LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET: u64 = 1 << 0;
 const LANDLOCK_RULE_PATH_BENEATH: libc::c_int = 1;
 const LANDLOCK_ACCESS_FS_EXECUTE: u64 = 1 << 0;
 const LANDLOCK_ACCESS_FS_WRITE_FILE: u64 = 1 << 1;

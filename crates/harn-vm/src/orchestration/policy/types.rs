@@ -320,13 +320,71 @@ pub struct ProcessSandboxPolicy {
     /// socket file under the project or temp dir; without this grant they die
     /// with a bare `Operation not permitted` that reads like a toolchain defect.
     ///
-    /// Enforced on macOS, where the seatbelt filters sockets by path. Linux,
-    /// Windows, and OpenBSD cannot scope a Unix socket by path, so a non-empty
-    /// grant there rejects the spawn rather than widening, the contract
-    /// `allow_tcp_loopback` follows. Omitted from the wire when empty so no
+    /// Enforced on macOS, where the seatbelt filters sockets by path.
+    ///
+    /// Linux renders this grant as **serve-only** local IPC, which is a
+    /// deliberately different and narrower shape than the macOS one. The
+    /// kernel offers no access right governing connection to a filesystem
+    /// socket at any Landlock ABI, so a child that may `connect` can reach
+    /// every socket its uid can open — a container daemon's among them, which
+    /// is an escape and not a grant. Linux therefore admits socket creation,
+    /// `bind`, `listen` and `accept` for the Unix domain, scopes creation to
+    /// these roots, contains abstract sockets inside the sandbox domain, and
+    /// **refuses `connect` outright**. A build server that talks to itself is
+    /// served; a child reaching for somebody else's socket is not. Build
+    /// servers (sbt, Gradle's Kotlin daemon, MSBuild worker nodes) need only
+    /// the serving half, so this costs them nothing, and a policy that also
+    /// permits general networking keeps `connect` because it was already
+    /// reachable.
+    ///
+    /// Windows and OpenBSD still reject a non-empty grant rather than widening
+    /// it, the contract `allow_tcp_loopback` follows. Each backend's actual
+    /// disposition is reported rather than assumed; see
+    /// [`UnixSocketEnforcement`]. Omitted from the wire when empty so no
     /// workflow graph digest pinned before the field existed moves.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unix_socket_roots: Vec<String>,
+    /// Permit a confined child to enumerate its own entries under the process
+    /// filesystem, not merely read the files it already knows the names of.
+    ///
+    /// Managed runtimes discover their own identity this way. The .NET build
+    /// engine reads its process name from `/proc/self/task` inside a static
+    /// initializer, before any project is loaded, so a child without this
+    /// grant cannot start at all and reports `MSB1025` rather than anything
+    /// resembling a permission problem.
+    ///
+    /// Enforced on Linux, which otherwise grants procfs file reads without
+    /// directory reads. It is a no-op on macOS and Windows, which have no
+    /// procfs and do not gate self-identification this way, so those backends
+    /// neither widen nor refuse for it.
+    ///
+    /// The grant is read-only and carries no network authority whatsoever. It
+    /// does let a child see the other processes of its own uid, because
+    /// Landlock resolves a rule to an inode and a rule narrow enough to name
+    /// only this process cannot cover the grandchildren a compiler driver
+    /// spawns. That widening is stated rather than hidden.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_process_self_introspection: bool,
+}
+
+/// What a backend actually did with [`ProcessSandboxPolicy::unix_socket_roots`].
+///
+/// The grant means different things on different kernels, and a reader of a
+/// receipt must not have to infer which. Absence of a denial is not evidence
+/// of a grant, so every backend states its disposition even when it refused.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum UnixSocketEnforcement {
+    /// No grant was requested, so nothing was decided.
+    NotRequested,
+    /// Creation, binding and connection are all scoped to the named roots.
+    PathScoped,
+    /// Creation is scoped to the named roots and connection is refused
+    /// outright, because this kernel cannot scope a connection by path.
+    ServeOnly,
+    /// The backend cannot render the grant and refused the spawn rather than
+    /// widening it.
+    Refused,
 }
 
 /// Runtime-owned forwarding endpoints for a managed child-process egress
@@ -355,6 +413,7 @@ impl ProcessSandboxPolicy {
         extend_unique(&mut self.read_deny_roots, &other.read_deny_roots);
         self.allow_tcp_loopback |= other.allow_tcp_loopback;
         extend_unique(&mut self.unix_socket_roots, &other.unix_socket_roots);
+        self.allow_process_self_introspection |= other.allow_process_self_introspection;
     }
 
     fn intersect(&self, requested: &Self) -> Self {
@@ -386,6 +445,10 @@ impl ProcessSandboxPolicy {
                 &self.unix_socket_roots,
                 &requested.unix_socket_roots,
             ),
+            // Narrows like every other additive term: a nested request may
+            // keep the grant its ceiling already made and may never invent it.
+            allow_process_self_introspection: self.allow_process_self_introspection
+                && requested.allow_process_self_introspection,
         }
     }
 }
@@ -1007,6 +1070,14 @@ impl CapabilityPolicy {
         if requested_ps.allow_tcp_loopback && !ceiling_ps.allow_tcp_loopback {
             return Err(
                 "flattened stage policy enabled TCP loopback beyond the stage grant".to_string(),
+            );
+        }
+        if requested_ps.allow_process_self_introspection
+            && !ceiling_ps.allow_process_self_introspection
+        {
+            return Err(
+                "flattened stage policy enabled process self-introspection beyond the stage grant"
+                    .to_string(),
             );
         }
 
