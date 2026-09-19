@@ -1629,6 +1629,15 @@ jobs:
         env:
           PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
         run: make check-protocol-symbol-removals
+      # The contract that keeps the three refusals above reachable from a pull
+      # request is itself a policy check, and the expensive sweep that also
+      # runs it is push-only. Running it only there would mean a re-added
+      # event condition is refused after the merge it was supposed to gate --
+      # the exact shape this job exists to remove. It is one Harn script and
+      # needs no build, so it belongs on both sides.
+      - name: Check CI cache and gate ownership policy
+        if: always()
+        run: make check-ci-cache-policy
 
   audit-scripts:
     name: Check repository policies

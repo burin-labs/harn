@@ -1036,6 +1036,15 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
       + ["ci.yml:audit-scripts must not guard retroactive CHANGELOG edits behind the merge"]
   }
 
+  // This contract is itself a policy check, and the expensive sweep that also
+  // runs it is push-only. Reachable only from there, a re-added event
+  // condition would be refused after the merge it was meant to gate, so the
+  // rule would arrive one merge too late to stop its own class.
+  if command_step_count(fast_steps, "make check-ci-cache-policy") != 1 {
+    errors = errors
+      + ["ci.yml:fast-policy-gates must run this contract itself, or it cannot refuse before a merge"]
+  }
+
   // The cost invariant that keeps the cheap job eligible.
   for step in fast_steps {
     if trim(step?.uses ?? "") == "./.github/actions/node-cache" {

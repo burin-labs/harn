@@ -403,6 +403,10 @@ fn workflow() {
             name: "Check no undeclared protocol symbol removals",
             run: "make check-protocol-symbol-removals",
           },
+          {
+            name: "Check CI cache and gate ownership policy",
+            run: "make check-ci-cache-policy",
+          },
         ],
       },
       "audit-scripts": {
@@ -975,6 +979,27 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
   assert(
     ci_linux_lane_policy_errors(fattened).contains(
       "ci.yml:fast-policy-gates must not run make test-pr-gate-post-warm-integrations; it would stop being cheap",
+    ),
+  )
+
+  // Left reachable only from the push-only sweep. The rule would then refuse
+  // a re-added event condition one merge after it landed.
+  const unreachable = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps.filter(
+          { step -> trim(step?.run ?? "") != "make check-ci-cache-policy" },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(unreachable).contains(
+      "ci.yml:fast-policy-gates must run this contract itself, or it cannot refuse before a merge",
     ),
   )
 }
