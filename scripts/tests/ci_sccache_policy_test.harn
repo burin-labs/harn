@@ -388,6 +388,23 @@ fn workflow() {
         "timeout-minutes": 15,
         steps: [{name: "Check source file lengths"}],
       },
+      "fast-policy-gates": {
+        "runs-on": "ubuntu-latest",
+        needs: artifact_consumer_needs,
+        // No event term: the refusals here must be able to refuse a pull
+        // request, which is the whole reason this job exists.
+        if: artifact_consumer_if,
+        "timeout-minutes": 15,
+        steps: [
+          {name: "Verify shared Harn binary"},
+          {name: "Reject flaky test patterns", run: "make lint-test-patterns"},
+          {name: "Check no retroactive CHANGELOG edits"},
+          {
+            name: "Check no undeclared protocol symbol removals",
+            run: "make check-protocol-symbol-removals",
+          },
+        ],
+      },
       "audit-scripts": {
         "runs-on": "ubuntu-latest",
         needs: artifact_consumer_needs,
@@ -399,7 +416,6 @@ fn workflow() {
             if: "needs.changes.outputs.prompt_prose == 'true'",
             run: "make lint-no-rust-prompt-prose",
           },
-          {name: "Reject flaky test patterns", run: "make lint-test-patterns"},
           {uses: "./.github/actions/node-cache"},
           {name: "Run pre-warm shell gates without Cargo"},
           {run: "make test-pr-gate-post-warm-integrations"},
@@ -885,46 +901,80 @@ pipeline test_rejects_prompt_prose_check_in_compile_lane(harness: Harness, task:
 }
 
 @test
-pipeline test_rejects_late_or_duplicated_flaky_test_pattern_policy(
+pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
   harness: Harness,
   task: unknown,
 ) {
   const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  const fast_job = valid.jobs["fast-policy-gates"]
   const policy_job = valid.jobs["audit-scripts"]
-  const without_early_policy = policy_job.steps.filter(
-    { step -> trim(step?.run ?? "") != "make lint-test-patterns" },
-  )
-    .to_list()
-  const late = {
+
+  // Moved back behind the merge. Both halves are asserted: the cheap job
+  // losing it, and the expensive job gaining it. Checking only one would pass
+  // while the refusal was merely deleted, or while a duplicate still burned
+  // fourteen minutes after the fact.
+  const moved_back = {
     ...valid,
     jobs: {
       ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps.filter(
+          { step -> trim(step?.run ?? "") != "make lint-test-patterns" },
+        )
+          .to_list(),
+      },
       "audit-scripts": {
         ...policy_job,
-        steps: without_early_policy
+        steps: policy_job.steps
           + [{name: "Reject flaky test patterns", run: "make lint-test-patterns"}],
       },
     },
   }
-  const late_errors = ci_linux_lane_policy_errors(late)
+  const moved_errors = ci_linux_lane_policy_errors(moved_back)
   assert(
-    late_errors.contains(
-      "ci.yml:audit-scripts must reject flaky test patterns immediately after exact CLI source policies and before setup or integration sweeps",
+    moved_errors.contains(
+      "ci.yml:fast-policy-gates must own exactly one invocation to reject flaky test patterns",
     ),
   )
+  assert(
+    moved_errors.contains("ci.yml:audit-scripts must not reject flaky test patterns behind the merge"),
+  )
+
+  // Duplicated inside the cheap job.
   const duplicated = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "audit-scripts": {
-        ...policy_job,
-        steps: policy_job.steps + [{run: "make lint-test-patterns"}],
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps + [{run: "make lint-test-patterns"}],
       },
     },
   }
   assert(
     ci_linux_lane_policy_errors(duplicated).contains(
-      "ci.yml:audit-scripts must own exactly one make lint-test-patterns invocation",
+      "ci.yml:fast-policy-gates must own exactly one invocation to reject flaky test patterns",
+    ),
+  )
+
+  // Made expensive. Running before the merge is earned by staying cheap, so
+  // the moment this job grows a sweep it has stopped satisfying the rule that
+  // put it there.
+  const fattened = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps + [{run: "make test-pr-gate-post-warm-integrations"}],
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(fattened).contains(
+      "ci.yml:fast-policy-gates must not run make test-pr-gate-post-warm-integrations; it would stop being cheap",
     ),
   )
 }
