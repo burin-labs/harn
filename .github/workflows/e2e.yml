@@ -46,7 +46,7 @@ jobs:
   # the fleet is switched off and when it is merely busy, and a busy fleet is a
   # reason to queue, not a reason to send this suite somewhere else.
   runner-availability:
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@f793e380d4349964615a5f1d62dd1bb2cc523721
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
