@@ -124,13 +124,13 @@ impl SessionUpdatePayloads {
         out.push_str("fn deserialize_present_session_update_value<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {\n    Value::deserialize(deserializer).map(Some)\n}\n\n");
         out.push_str("#[derive(Clone, Debug, PartialEq, Eq, Serialize)]\n#[serde(untagged)]\npub enum ACPTypedSessionUpdate {\n");
         for (_, name) in &self.variants {
-            out.push_str(&format!("    {}({name}),\n", &name[3..]));
+            out.push_str(&format!("    {}({name}),\n", rust_variant(name)));
         }
         out.push_str("}\n\nimpl<'de> Deserialize<'de> for ACPTypedSessionUpdate {\n    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {\n        let value = Value::deserialize(deserializer)?;\n        match value.get(\"sessionUpdate\").and_then(Value::as_str) {\n");
         for ((kind, name), schema) in self.variants.iter().zip(&self.schemas) {
             out.push_str(&format!("            Some({kind:?}) => {{\n"));
             super::session_update_validation::append_checks(out, schema, Target::Rust);
-            out.push_str(&format!("                serde_json::from_value(value).map(Self::{}).map_err(serde::de::Error::custom)\n            }},\n", &name[3..]));
+            out.push_str(&format!("                serde_json::from_value(value).map(Self::{}).map_err(serde::de::Error::custom)\n            }},\n", rust_variant(name)));
         }
         out.push_str("            _ => Err(serde::de::Error::custom(\"unknown typed session update\")),\n        }\n    }\n}\n\n");
     }
@@ -156,6 +156,12 @@ impl SessionUpdatePayloads {
         }
         out.push_str("        }\n    }\n}\n\n");
     }
+}
+
+fn rust_variant(name: &str) -> &str {
+    name.strip_prefix("ACP")
+        .and_then(|name| name.strip_suffix("Update"))
+        .expect("session-update record name")
 }
 
 fn merge_properties(shape: &mut Value, common: &Value) -> Result<(), String> {
@@ -215,7 +221,7 @@ fn swift_names(kind: &mut FieldKind) {
     match kind {
         FieldKind::Named(name) => *name = format!("Harn{name}"),
         FieldKind::List(inner) | FieldKind::Nullable(inner) | FieldKind::DefaultList(inner) => {
-            swift_names(inner)
+            swift_names(inner);
         }
         _ => {}
     }

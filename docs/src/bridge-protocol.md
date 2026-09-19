@@ -181,7 +181,9 @@ identity constraints, and conditional requirements such as the escape tool on
 a write-access stance transition. They do not accept the retired root-field
 envelopes. Standard `available_commands_update` keeps `availableCommands` at
 the update root. The generated TypeScript union is `ACPTypedSessionUpdate`;
-its static types do not replace runtime schema validation.
+`ACPHarnExtensionUpdate` aliases it, so the envelope cannot bypass required
+fields through a generic extension. Static types do not replace runtime schema
+validation.
 
 The Rust and Swift binding checks consume the adapter's same 17-kind fixture,
 round-trip every field, and refuse the corresponding empty-metadata controls.

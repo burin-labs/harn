@@ -571,10 +571,7 @@ export interface ACPSessionTruncatedUpdate {
     session_updates.append(&mut out, super::records::Target::Typescript);
     out.push_str(
         r"
-export interface ACPHarnExtensionUpdate {
-  sessionUpdate: HarnACPSessionUpdateExtension
-  _meta?: ACPExtensionMeta<ACPObject>
-}
+export type ACPHarnExtensionUpdate = ACPTypedSessionUpdate
 
 export type ACPSessionUpdateEnvelope =
   | ACPUserMessageUpdate
@@ -585,7 +582,6 @@ export type ACPSessionUpdateEnvelope =
   | ACPSessionTruncatedUpdate
 ",
     );
-    out.push_str(&session_updates.typescript_union_members());
     out.push_str(
         r#"  | ACPHarnExtensionUpdate
 

@@ -51,8 +51,12 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
         }
         if let Some(minimum) = field["minLength"].as_u64() {
             let too_short = match target {
-                Target::Rust => format!("{value}.and_then(Value::as_str).is_some_and(|text| text.chars().count() < {minimum})"),
-                Target::Swift => format!("({value}?.stringValue?.unicodeScalars.count ?? {minimum}) < {minimum}"),
+                Target::Rust => format!(
+                    "{value}.and_then(Value::as_str).is_some_and(|text| text.chars().count() < {minimum})"
+                ),
+                Target::Swift => {
+                    format!("({value}?.stringValue?.unicodeScalars.count ?? {minimum}) < {minimum}")
+                }
                 _ => unreachable!(),
             };
             refuse(out, &too_short, &child_path, "is too short", target);
@@ -70,8 +74,12 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
         if let Some(pattern) = field["pattern"].as_str() {
             assert_eq!(pattern, "\\S", "unsupported session-update string pattern");
             let blank = match target {
-                Target::Rust => format!("{value}.and_then(Value::as_str).is_some_and(|text| text.trim().is_empty())"),
-                Target::Swift => format!("{value}?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true"),
+                Target::Rust => format!(
+                    "{value}.and_then(Value::as_str).is_some_and(|text| text.trim().is_empty())"
+                ),
+                Target::Swift => format!(
+                    "{value}?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true"
+                ),
                 _ => unreachable!(),
             };
             refuse(out, &blank, &child_path, "must not be blank", target);
@@ -79,20 +87,29 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
         if let Some(choices) = field["enum"].as_array() {
             let choices = string_choices(choices);
             let outside = match target {
-                Target::Rust => format!("{value}.and_then(Value::as_str).is_some_and(|text| ![{choices}].contains(&text))"),
-                Target::Swift => format!("{value}?.stringValue.map({{ ![{choices}].contains($0) }}) == true"),
+                Target::Rust => format!(
+                    "{value}.and_then(Value::as_str).is_some_and(|text| ![{choices}].contains(&text))"
+                ),
+                Target::Swift => {
+                    format!("{value}?.stringValue.map({{ ![{choices}].contains($0) }}) == true")
+                }
                 _ => unreachable!(),
             };
             refuse(out, &outside, &child_path, "has an unknown value", target);
         }
         if field["properties"].is_object() {
+            let mut checks = String::new();
+            append_object(&mut checks, field, &child_path, target);
+            if checks.is_empty() {
+                continue;
+            }
             let present = match target {
                 Target::Rust => format!("{value}.is_some()"),
                 Target::Swift => format!("{value} != nil"),
                 _ => unreachable!(),
             };
             out.push_str(&format!("            if {present} {{\n"));
-            append_object(out, field, &child_path, target);
+            out.push_str(&checks);
             out.push_str("            }\n");
         }
     }
@@ -116,8 +133,12 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
                     .expect("conditional string enum"),
             );
             let applies = match target {
-                Target::Rust => format!("{value}.and_then(Value::as_str).is_some_and(|text| [{choices}].contains(&text))"),
-                Target::Swift => format!("{value}?.stringValue.map({{ [{choices}].contains($0) }}) == true"),
+                Target::Rust => format!(
+                    "{value}.and_then(Value::as_str).is_some_and(|text| [{choices}].contains(&text))"
+                ),
+                Target::Swift => {
+                    format!("{value}?.stringValue.map({{ [{choices}].contains($0) }}) == true")
+                }
                 _ => unreachable!(),
             };
             for field in rule["then"]["required"]

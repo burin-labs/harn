@@ -103,7 +103,7 @@ fn native_decoder_preserves_replay_and_required_nulls_and_rejects_bad_identity()
                 update["_meta"]["harn"]["compactionPolicy"] = serde_json::Value::Null;
             }
             "reminder_emitted" => {
-                update["_meta"]["harn"]["reminder"]["ttlTurns"] = serde_json::Value::Null
+                update["_meta"]["harn"]["reminder"]["ttlTurns"] = serde_json::Value::Null;
             }
             "worker_update" => {
                 update["_meta"]["harn"]["metadata"] = serde_json::Value::Null;
