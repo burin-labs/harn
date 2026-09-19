@@ -613,6 +613,7 @@ fn each_deciding_source_names_its_own_gate() {
             cleanup: None,
             environment_policy: Default::default(),
             grants: Vec::new(),
+            admitted_environment: Vec::new(),
         },
     ));
     policy_with_path_annotation("read_file", ToolKind::Read);
@@ -757,6 +758,7 @@ fn a_path_refusal_names_the_path_that_refused_not_every_path_declared() {
             cleanup: None,
             environment_policy: Default::default(),
             grants: Vec::new(),
+            admitted_environment: Vec::new(),
         },
     ));
     let mut annotations = BTreeMap::new();
