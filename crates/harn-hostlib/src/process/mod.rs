@@ -27,7 +27,11 @@ pub use real::replace_current_process;
 pub use windows::KillOnCloseJob;
 
 /// Shared by this crate's tests only.
-#[cfg(test)]
+///
+/// Gated on `unix` to match its callers. Both of them are `#[cfg(unix)]`
+/// tests, so on Windows this module would be dead code, and the workspace
+/// denies warnings there — a break invisible on a macOS or Linux run.
+#[cfg(all(test, unix))]
 pub(crate) mod test_support {
     /// Declares that a test's spawns inherit this process's environment.
     ///
