@@ -1179,16 +1179,9 @@ mod approval_policy_tests {
                 cwd: Some(temp.path().to_string_lossy().into_owned()),
                 project_root: None,
                 source_dir: Some(temp.path().to_string_lossy().into_owned()),
-                env: BTreeMap::new(),
-                adapter: None,
-                repo_path: None,
-                worktree_path: None,
-                branch: None,
-                base_ref: None,
-                cleanup: None,
-                environment_policy: Default::default(),
-                grants: Vec::new(),
-                admitted_environment: Vec::new(),
+                // Only the three paths above matter to this test; the rest of
+                // the record is whatever a default run carries.
+                ..Default::default()
             },
         ));
 
@@ -1233,16 +1226,9 @@ mod approval_policy_tests {
                 cwd: Some(temp.path().to_string_lossy().into_owned()),
                 project_root: None,
                 source_dir: Some(temp.path().to_string_lossy().into_owned()),
-                env: BTreeMap::new(),
-                adapter: None,
-                repo_path: None,
-                worktree_path: None,
-                branch: None,
-                base_ref: None,
-                cleanup: None,
-                environment_policy: Default::default(),
-                grants: Vec::new(),
-                admitted_environment: Vec::new(),
+                // Only the three paths above matter to this test; the rest of
+                // the record is whatever a default run carries.
+                ..Default::default()
             },
         ));
 
