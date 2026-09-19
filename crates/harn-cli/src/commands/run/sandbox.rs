@@ -31,6 +31,18 @@ pub struct RunSandboxOptions {
     pub allow_process_loopback: bool,
     /// Let subprocesses enumerate their own process-filesystem entries.
     pub allow_process_self_introspection: bool,
+    /// Absolute path to the installed helper that builds a private network
+    /// namespace for a confined child. Required by `allow_process_loopback`
+    /// on backends that render loopback that way; the grant is refused rather
+    /// than weakened when it is missing.
+    ///
+    /// Behind a pointer because of where this struct travels. It is held
+    /// across awaits in most of the command futures in this crate, and those
+    /// futures each carry it many times over, so the stack-frame gate reads a
+    /// plain `Option<String>` here as about 3.5 KB of growth in the widest of
+    /// them. A rarely populated host fact does not get to charge that to
+    /// every command, and the pointer keeps the field inline at one word.
+    pub netns_launcher_path: Option<Box<String>>,
     /// Session environment policy for this run. Always present: the default
     /// captures the launcher environment at launch.
     ///
@@ -52,6 +64,7 @@ impl Default for RunSandboxOptions {
             allow_process_network: false,
             allow_process_loopback: false,
             allow_process_self_introspection: false,
+            netns_launcher_path: None,
             environment: EnvironmentPolicyConfig::default(),
         }
     }
@@ -73,6 +86,16 @@ impl RunSandboxOptions {
     /// Permit confined child processes to run TCP loopback servers and clients.
     pub fn with_process_loopback(mut self, enabled: bool) -> Self {
         self.allow_process_loopback = enabled;
+        self
+    }
+
+    /// Name the installed namespace helper this run may launch children
+    /// through. Separate from the loopback grant on purpose: the grant is the
+    /// policy question and the path is a property of the host, and a run that
+    /// asks for one without the other must be refused rather than silently
+    /// downgraded.
+    pub fn with_netns_launcher(mut self, path: Option<String>) -> Self {
+        self.netns_launcher_path = path.map(Box::new);
         self
     }
 
@@ -172,6 +195,7 @@ pub(crate) fn sandbox_options_from_args(args: &crate::cli::SandboxArgs) -> RunSa
         .with_process_write_roots(args.sandbox_write_root.iter().cloned())
         .with_process_unix_socket_roots(args.sandbox_unix_socket_root.iter().cloned())
         .with_process_self_introspection(args.sandbox_allow_process_self_introspection)
+        .with_netns_launcher(args.netns_launcher.clone())
         .with_environment_policy(capability)
 }
 
@@ -262,6 +286,7 @@ pub(super) fn install_run_sandbox_scope(
                 network: options.allow_process_network,
                 loopback: options.allow_process_loopback,
                 self_introspection: options.allow_process_self_introspection,
+                netns_launcher: options.netns_launcher_path.as_deref().cloned(),
             },
         );
         policy.process_network_proxy = process_proxy.as_ref().map(|proxy| proxy.endpoints());
@@ -402,7 +427,7 @@ fn plural_suffix(count: usize) -> &'static str {
 /// travel together because they are decided together by one caller and read
 /// together by the policy; passing them as a run of bare booleans invites a
 /// silent transposition at a call site the type checker cannot catch.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct RunProcessGrants {
     /// General outbound networking for child processes.
     pub network: bool,
@@ -410,6 +435,12 @@ pub(super) struct RunProcessGrants {
     pub loopback: bool,
     /// Reading `/proc` entries belonging to the sandboxed task itself.
     pub self_introspection: bool,
+    /// The installed helper that renders `loopback` where the backend has no
+    /// other way to express it. It travels with the grant rather than beside
+    /// it because the two are read together and are meaningless apart: a
+    /// helper without the grant launches nothing, and the grant without a
+    /// helper is refused.
+    pub netns_launcher: Option<String>,
 }
 
 pub(super) fn default_run_capability_policy(
@@ -481,6 +512,7 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| path.display().to_string())
                 .collect(),
             allow_process_self_introspection: grants.self_introspection,
+            netns_launcher_path: grants.netns_launcher,
         }),
         side_effect_level: Some(
             if grants.network {

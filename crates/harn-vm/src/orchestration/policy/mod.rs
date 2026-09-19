@@ -77,9 +77,10 @@ pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotation
 pub use types::{
     default_read_deny_home_paths, enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics,
     CapabilityPolicy, ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy,
-    JoinPolicy, MapPolicy, ModelPolicy, NativeToolFallbackPolicy, ProcessNetworkProxy,
-    ProcessSandboxPolicy, ProcessSandboxPreset, ReducePolicy, RequiredSuccessfulTool, RetryPolicy,
-    SandboxProfile, StageContract, ToolArgConstraint, TurnPolicy, UnixSocketEnforcement,
+    JoinPolicy, LoopbackEnforcement, MapPolicy, ModelPolicy, NativeToolFallbackPolicy,
+    ProcessNetworkProxy, ProcessSandboxPolicy, ProcessSandboxPreset, ReducePolicy,
+    RequiredSuccessfulTool, RetryPolicy, SandboxProfile, StageContract, ToolArgConstraint,
+    TurnPolicy, UnixSocketEnforcement,
 };
 
 thread_local! {

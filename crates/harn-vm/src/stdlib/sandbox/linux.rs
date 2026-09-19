@@ -49,12 +49,15 @@ impl SandboxBackend for Backend {
 
     fn prepare_std_command(
         program: &str,
-        _args: &[String],
+        args: &[String],
         command: &mut Command,
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        let prep = profile_setup(program, policy, profile)?;
+        let mut prep = profile_setup(program, policy, profile)?;
+        if let Some(launcher) = resolve_netns_launcher(policy)? {
+            return Ok(namespaced_outcome(launcher, program, args, &mut prep));
+        }
         // SAFETY: `pre_exec` may only call async-signal-safe functions
         // before exec. The raw syscalls here (`prctl`,
         // `landlock_*`, seccomp `prctl`) are async-signal-safe per
@@ -67,12 +70,15 @@ impl SandboxBackend for Backend {
 
     fn prepare_tokio_command(
         program: &str,
-        _args: &[String],
+        args: &[String],
         command: &mut tokio::process::Command,
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        let prep = profile_setup(program, policy, profile)?;
+        let mut prep = profile_setup(program, policy, profile)?;
+        if let Some(launcher) = resolve_netns_launcher(policy)? {
+            return Ok(namespaced_outcome(launcher, program, args, &mut prep));
+        }
         // SAFETY: see Linux `prepare_std_command` above.
         unsafe {
             command.pre_exec(move || apply_profile(&prep));
@@ -282,12 +288,11 @@ fn profile_setup(
                 .to_string(),
         ));
     }
-    if policy.process_sandbox.allow_tcp_loopback {
-        return Err(sandbox_rejection(
-            "TCP loopback-only child networking requires a private Linux network namespace; this build cannot enforce that boundary"
-                .to_string(),
-        ));
-    }
+    // Loopback-only networking is rendered by the namespace helper, not here,
+    // and it is refused rather than approximated when the helper is missing.
+    // `resolve_netns_launcher` owns that decision so the spawn path and this
+    // one cannot disagree about whether the grant is available.
+    resolve_netns_launcher(policy)?;
     // A Unix-socket grant is rendered here as serve-only local IPC rather than
     // refused. seccomp filters the syscall and not the socket path, and no
     // Landlock ABI has an access right governing connection to a socket file,
@@ -1255,7 +1260,7 @@ fn allowed_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
         libc::SYS_vfork,
     ]);
 
-    if policy_allows_network(policy) {
+    if policy_allows_network(policy) || namespaced_loopback_grant(policy) {
         syscalls.extend([
             libc::SYS_accept,
             libc::SYS_accept4,
@@ -1417,6 +1422,17 @@ const DIRECTORY_ONLY_ACCESS_FS: u64 = LANDLOCK_ACCESS_FS_READ_DIR
     | LANDLOCK_ACCESS_FS_MAKE_SYM
     | LANDLOCK_ACCESS_FS_REFER;
 
+#[path = "netns.rs"]
+mod netns;
+
+pub use netns::decode_seccomp_hex;
+pub(crate) use netns::{keep_ruleset_across_exec, keep_ruleset_across_exec_tokio};
+use netns::{namespaced_loopback_grant, namespaced_outcome, resolve_netns_launcher};
+
 #[cfg(test)]
 #[path = "linux_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "netns_tests.rs"]
+mod netns_tests;

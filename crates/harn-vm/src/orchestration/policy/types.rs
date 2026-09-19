@@ -8,7 +8,8 @@ mod process_sandbox;
 mod read_deny_defaults;
 
 pub use process_sandbox::{
-    ProcessNetworkProxy, ProcessSandboxPolicy, ProcessSandboxPreset, UnixSocketEnforcement,
+    LoopbackEnforcement, ProcessNetworkProxy, ProcessSandboxPolicy, ProcessSandboxPreset,
+    UnixSocketEnforcement,
 };
 pub use read_deny_defaults::default_read_deny_home_paths;
 

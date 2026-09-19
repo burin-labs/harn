@@ -135,6 +135,32 @@ pub struct ProcessSandboxPolicy {
     /// spawns. That widening is stated rather than hidden.
     #[serde(default, skip_serializing_if = "is_false")]
     pub allow_process_self_introspection: bool,
+    /// Absolute path to the helper that builds a private network namespace for
+    /// a confined child, supplied by the embedder rather than compiled in.
+    ///
+    /// Loopback-only child networking has no expression in either kernel
+    /// interface this backend uses. A syscall filter decides address families,
+    /// not addresses, and Landlock scopes network access by port and never by
+    /// address, so "loopback and nothing else" can only be built as a private
+    /// network namespace with one interface raised. The namespace must exist
+    /// *before* confinement, and confinement must still be installed before
+    /// the child's program is reached, which a pre-exec callback cannot do:
+    /// the filter it installs is a default-deny allowlist carrying no
+    /// namespace syscalls, so a helper run behind it dies at `unshare`.
+    ///
+    /// The helper therefore runs first and receives the policy as data. It is
+    /// named here rather than derived because on distributions that restrict
+    /// unprivileged namespaces the permission is granted per executable path
+    /// by host policy, and that grant must name one stable, separately
+    /// installed file. Deriving the path from this binary would move the grant
+    /// onto whichever build happened to be running.
+    ///
+    /// Absent, a loopback request is **refused** and the refusal names the
+    /// path that was looked for. It is never degraded to a weaker grant: the
+    /// weaker grants leak datagram egress, and a reader of the receipt would
+    /// have no way to tell which one was applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub netns_launcher_path: Option<String>,
 }
 
 /// What a backend actually did with [`ProcessSandboxPolicy::unix_socket_roots`].
@@ -159,6 +185,28 @@ pub enum UnixSocketEnforcement {
     SupersededByNetworkGrant,
     /// The backend cannot render the grant and refused the spawn rather than
     /// widening it.
+    Refused,
+}
+
+/// What a backend actually did with [`ProcessSandboxPolicy::allow_tcp_loopback`].
+///
+/// Loopback is the grant with the widest gap between what was asked for and
+/// what a given mechanism can deliver, so naming the mechanism is the point.
+/// A reader who sees only that loopback was permitted cannot tell whether
+/// datagrams can still leave the host, and that difference is the whole
+/// security argument.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum LoopbackEnforcement {
+    /// No loopback grant was requested, so nothing was decided.
+    NotRequested,
+    /// A private network namespace with only the loopback interface raised.
+    /// There is no route off the host to deny, so there is no residual: this
+    /// is the only mechanism that closes datagram egress as well as stream
+    /// egress.
+    PrivateNetworkNamespace,
+    /// The backend cannot build a namespace and refused the spawn rather than
+    /// issuing one of the weaker grants. The refusal names what it looked for.
     Refused,
 }
 
@@ -189,6 +237,9 @@ impl ProcessSandboxPolicy {
         self.allow_tcp_loopback |= other.allow_tcp_loopback;
         extend_unique(&mut self.unix_socket_roots, &other.unix_socket_roots);
         self.allow_process_self_introspection |= other.allow_process_self_introspection;
+        if let Some(path) = other.netns_launcher_path.as_ref() {
+            self.netns_launcher_path = Some(path.clone());
+        }
     }
 
     pub(super) fn intersect(&self, requested: &Self) -> Self {
@@ -224,6 +275,12 @@ impl ProcessSandboxPolicy {
             // keep the grant its ceiling already made and may never invent it.
             allow_process_self_introspection: self.allow_process_self_introspection
                 && requested.allow_process_self_introspection,
+            // Host-owned like `allow_tcp_loopback` and for the same reason:
+            // naming an executable that may build a namespace is authority,
+            // and a nested request may neither invent it nor erase the one
+            // its ceiling installed. Host configuration still composes
+            // additively through `extend`.
+            netns_launcher_path: self.netns_launcher_path.clone(),
         }
     }
 }
