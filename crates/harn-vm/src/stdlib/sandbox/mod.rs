@@ -1764,7 +1764,7 @@ pub(crate) fn process_sandbox_unix_socket_roots(policy: &CapabilityPolicy) -> Ve
 /// A reader of a receipt must not have to infer the shape of the grant from
 /// the platform it ran on, and must not read silence as a scope that was
 /// applied. Every backend answers, including when it refuses.
-pub(crate) fn unix_socket_enforcement(policy: &CapabilityPolicy) -> UnixSocketEnforcement {
+pub fn unix_socket_enforcement(policy: &CapabilityPolicy) -> UnixSocketEnforcement {
     if policy.process_sandbox.unix_socket_roots.is_empty() {
         return UnixSocketEnforcement::NotRequested;
     }

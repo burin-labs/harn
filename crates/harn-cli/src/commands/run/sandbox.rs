@@ -579,6 +579,14 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
             .as_ref()
             .map(|policy| policy.process_sandbox.unix_socket_roots.clone())
             .unwrap_or_default(),
+        // The roots alone do not say what was enforced over them: the same
+        // grant is path-scoped on one backend and serve-only on another, and
+        // on a backend that refuses it the roots are still listed above.
+        // Naming the disposition keeps a reader from inferring a scope from a
+        // platform.
+        "process_unix_socket_enforcement": active_policy
+            .as_ref()
+            .map(|policy| harn_vm::unix_socket_enforcement(policy)),
         "side_effect_level": side_effect_level,
         "egress": egress,
     })

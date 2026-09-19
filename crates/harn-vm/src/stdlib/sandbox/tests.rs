@@ -1445,3 +1445,46 @@ fn sandbox_denial_classifies_default_toolchain_cache_as_environment() {
         other => panic!("expected a categorized error, got {other:?}"),
     }
 }
+
+/// Every backend states what it does with a Unix-socket grant, including when
+/// it refuses.
+///
+/// This is the cross-platform half of the contract: the field means a
+/// different thing on each kernel, and a reader of a receipt must be able to
+/// tell which without knowing the platform. Asserting it here, rather than
+/// only where one backend happens to be compiled, is also what keeps the
+/// reporting function from being dead on the platforms that answer with a
+/// constant.
+#[test]
+fn unix_socket_enforcement_is_stated_on_every_backend() {
+    let mut policy = CapabilityPolicy {
+        workspace_roots: vec!["/ws".to_string()],
+        sandbox_profile: SandboxProfile::Worktree,
+        ..CapabilityPolicy::default()
+    };
+    assert_eq!(
+        unix_socket_enforcement(&policy),
+        UnixSocketEnforcement::NotRequested,
+        "a policy asking for no sockets must say so rather than imply a scope",
+    );
+
+    policy.process_sandbox = Box::new(crate::orchestration::ProcessSandboxPolicy {
+        unix_socket_roots: vec!["/ws".to_string()],
+        ..Default::default()
+    });
+
+    #[cfg(target_os = "macos")]
+    let expected = UnixSocketEnforcement::PathScoped;
+    // Linux cannot scope a connection by path at any Landlock ABI, so it
+    // grants the serving half only and must report the narrower shape.
+    #[cfg(target_os = "linux")]
+    let expected = UnixSocketEnforcement::ServeOnly;
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let expected = UnixSocketEnforcement::Refused;
+
+    assert_eq!(
+        unix_socket_enforcement(&policy),
+        expected,
+        "the disposition must match what this backend actually applies",
+    );
+}
