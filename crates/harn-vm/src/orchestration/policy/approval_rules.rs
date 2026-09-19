@@ -13,8 +13,14 @@ use crate::workspace_path::{WorkspacePathInfo, WorkspacePathKind};
 use super::ToolApprovalPolicy;
 
 mod host_request;
+mod path_guards;
 mod sensitive_paths;
 pub use host_request::ToolApprovalRequest;
+use path_guards::default_guard;
+pub use path_guards::{
+    denial_gate_for_source, SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD,
+    SOURCE_DEFAULT_SENSITIVE_PATH,
+};
 
 const POLICY_RECEIPT_TYPE: &str = "harn.permission_policy_decision.v1";
 
@@ -451,6 +457,12 @@ pub struct PolicyEvaluation {
     pub required_approval: Option<ApprovalShape>,
     #[serde(default)]
     pub risk_labels: Vec<String>,
+    /// The declared paths the deciding rule refused ON, when it refused on a
+    /// path at all. Additive and empty for every other decision, so a reader
+    /// and a host both get the subject of a path refusal as a typed value
+    /// rather than having to parse it back out of the reason prose.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied_paths: Vec<String>,
     pub receipt: JsonValue,
 }
 
@@ -805,6 +817,11 @@ struct Candidate {
     reason: String,
     approval: ApprovalShape,
     risk_labels: Vec<String>,
+    /// The declared path this candidate refused, for the guards that refuse
+    /// ON a path. Empty for every rule that matched on something else, so a
+    /// reader can tell "no path was the reason" from "the path is in the
+    /// prose somewhere".
+    denied_paths: Vec<String>,
 }
 
 impl Candidate {
@@ -920,6 +937,7 @@ fn evaluate_context(policy: &ToolApprovalPolicy, ctx: EvaluationContext) -> Poli
                 ),
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["repeated_call".to_string()],
+                denied_paths: Vec::new(),
             });
         }
     }
@@ -929,63 +947,6 @@ fn evaluate_context(policy: &ToolApprovalPolicy, ctx: EvaluationContext) -> Poli
     }
 
     default_allow(&ctx)
-}
-
-fn default_guard(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Option<Candidate> {
-    if !policy.allow_sensitive_paths {
-        if let Some(path) = sensitive_paths::first_candidate(policy, &ctx.path_candidates) {
-            let path = sensitive_paths::bounded_evidence(&path);
-            return Some(Candidate {
-                source: "default_sensitive_path".to_string(),
-                index: None,
-                id: Some("sensitive_path".to_string()),
-                action: PolicyAction::Deny,
-                reason: format!("path '{path}' is denied by the sensitive-path default"),
-                approval: ApprovalShape::default(),
-                risk_labels: vec!["sensitive_path".to_string()],
-            });
-        }
-    }
-
-    if !policy.allow_external_paths {
-        for entry in &ctx.path_entries {
-            if matches!(entry.kind, WorkspacePathKind::Invalid) {
-                return Some(Candidate {
-                    source: "default_path_guard".to_string(),
-                    index: None,
-                    id: Some("invalid_path".to_string()),
-                    action: PolicyAction::Deny,
-                    reason: entry
-                        .reason
-                        .clone()
-                        .unwrap_or_else(|| format!("path '{}' is invalid", entry.display_path())),
-                    approval: ApprovalShape::default(),
-                    risk_labels: vec!["invalid_path".to_string()],
-                });
-            }
-            if entry.workspace_path.is_none()
-                && entry
-                    .host_path
-                    .as_ref()
-                    .is_some_and(|path| !under_external_root(path, &policy.external_roots))
-            {
-                return Some(Candidate {
-                    source: "default_external_path".to_string(),
-                    index: None,
-                    id: Some("external_path".to_string()),
-                    action: PolicyAction::Deny,
-                    reason: format!(
-                        "path '{}' is outside the workspace and no external root allows it",
-                        entry.display_path()
-                    ),
-                    approval: ApprovalShape::default(),
-                    risk_labels: vec!["external_path".to_string()],
-                });
-            }
-        }
-    }
-
-    None
 }
 
 fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Vec<Candidate> {
@@ -1000,6 +961,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
                 reason: format!("tool '{}' matches deny pattern '{pattern}'", ctx.tool_name),
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["matched_deny_rule".to_string()],
+                denied_paths: Vec::new(),
             });
         }
     }
@@ -1026,6 +988,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
                     ),
                     approval: ApprovalShape::default(),
                     risk_labels: vec!["write_path_not_allowed".to_string()],
+                    denied_paths: Vec::new(),
                 });
             }
         }
@@ -1044,6 +1007,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
                 ),
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["approval_required".to_string()],
+                denied_paths: Vec::new(),
             });
         }
     }
@@ -1058,6 +1022,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
                 reason: format!("tool '{}' matches allow pattern '{pattern}'", ctx.tool_name),
                 approval: ApprovalShape::default(),
                 risk_labels: Vec::new(),
+                denied_paths: Vec::new(),
             });
         }
     }
@@ -1085,6 +1050,7 @@ fn rule_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Vec<
                 .unwrap_or_else(|| format!("tool '{}' matched policy rule", ctx.tool_name)),
             approval: rule.approval.clone(),
             risk_labels: risk_labels_for_rule(rule),
+            denied_paths: Vec::new(),
         })
         .collect()
 }
@@ -1123,6 +1089,7 @@ fn evaluation_from_candidate(candidate: Candidate, ctx: &EvaluationContext) -> P
         matched_rule,
         required_approval,
         risk_labels,
+        denied_paths: candidate.denied_paths,
         receipt,
     }
 }
@@ -1137,6 +1104,7 @@ fn default_allow(ctx: &EvaluationContext) -> PolicyEvaluation {
         matched_rule: None,
         required_approval: None,
         risk_labels: Vec::new(),
+        denied_paths: Vec::new(),
         receipt,
     }
 }

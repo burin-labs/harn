@@ -253,6 +253,18 @@ pub enum DenialGate {
     /// A dynamic permission rule (`when`/`unless` predicate) denied the
     /// call.
     DynamicPermission,
+    /// The workspace path boundary refused a declared path argument: the
+    /// path is malformed, or it resolves outside the workspace and no
+    /// external root admits it. This is a scope answer, not an approval
+    /// one — it is decided before any configured approval rule is
+    /// consulted and it does not change when approval is turned off, so a
+    /// reader told "approval" here goes and inspects the wrong control.
+    WorkspaceBoundary,
+    /// The deny-by-default sensitive-path guard refused a declared path
+    /// argument (credential files, private keys, and the like). Also
+    /// decided ahead of the configured rules, and also not an approval
+    /// decision.
+    SensitivePath,
     /// A static approval policy decided `deny`.
     ApprovalPolicy,
     /// Approval was required (`ask`) but could not be requested because no
@@ -272,13 +284,15 @@ pub enum DenialGate {
 }
 
 impl DenialGate {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::ToolCeiling,
         Self::MalformedToolWrapper,
         Self::CapabilityCeiling,
         Self::SideEffectCeiling,
         Self::ArgConstraint,
         Self::DynamicPermission,
+        Self::WorkspaceBoundary,
+        Self::SensitivePath,
         Self::ApprovalPolicy,
         Self::ApprovalUnavailable,
         Self::HostRejected,
@@ -295,6 +309,8 @@ impl DenialGate {
             Self::SideEffectCeiling => "side_effect_ceiling",
             Self::ArgConstraint => "arg_constraint",
             Self::DynamicPermission => "dynamic_permission",
+            Self::WorkspaceBoundary => "workspace_boundary",
+            Self::SensitivePath => "sensitive_path",
             Self::ApprovalPolicy => "approval_policy",
             Self::ApprovalUnavailable => "approval_unavailable",
             Self::HostRejected => "host_rejected",
@@ -315,6 +331,8 @@ impl DenialGate {
             Self::SideEffectCeiling => "Side-effect ceiling denial",
             Self::ArgConstraint => "Tool argument constraint denial",
             Self::DynamicPermission => "Dynamic permission denial",
+            Self::WorkspaceBoundary => "Workspace boundary denial",
+            Self::SensitivePath => "Sensitive path denial",
             Self::ApprovalPolicy => "Approval policy denial",
             Self::ApprovalUnavailable => "Approval unavailable denial",
             Self::HostRejected => "Host rejection denial",
