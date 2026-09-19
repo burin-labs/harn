@@ -62,7 +62,7 @@ pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 /// success.
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::{
-    decode_seccomp_hex, transferable_confinement, TransferableConfinement,
+    decode_seccomp_hex, keep_ruleset_across_exec, transferable_confinement, TransferableConfinement,
 };
 
 /// Push a transient execution policy with `sandbox_profile` replaced by the
