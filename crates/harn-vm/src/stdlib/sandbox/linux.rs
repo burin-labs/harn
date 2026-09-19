@@ -441,6 +441,18 @@ fn landlock_profile(
         push_rule(&mut profile, path, LANDLOCK_ACCESS_FS_READ_FILE, true)?;
     }
     if policy.process_sandbox.allow_process_self_introspection {
+        // The grant rides on the same containment the file-read grant below
+        // requires, and refuses rather than widens when it is missing. A rule
+        // below procfs cannot be narrowed to this process, so on a host that
+        // lets a task inspect its neighbours the grant would hand the child
+        // every process of its uid instead of its own. That is a different
+        // grant from the one the field describes, so it is not issued.
+        if !proc_runtime_reads_are_contained() {
+            return Err(sandbox_rejection(
+                "process self-introspection needs a kernel that keeps a sandboxed task from inspecting its neighbours; this host permits it, so the grant would widen past the process it names"
+                    .to_string(),
+            ));
+        }
         // Directory reads below procfs, which the file-only grant below
         // deliberately withholds. A managed runtime that identifies itself by
         // enumerating `/proc/self/task` cannot start without this, and it

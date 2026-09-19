@@ -530,6 +530,41 @@ fn local_ipc_defers_to_a_policy_that_already_permits_networking() {
     );
 }
 
+/// The self-introspection grant is refused, not widened, on a permissive host.
+///
+/// A rule below procfs cannot name one process, so without the kernel's own
+/// containment the grant would hand the child every process of its uid. This
+/// asserts the direction the running host supports, and says which one it
+/// took, so a reader cannot mistake a silent pass for coverage of both.
+#[test]
+fn process_self_introspection_refuses_a_host_that_cannot_contain_it() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
+    policy.workspace_roots = vec![workspace.path().display().to_string()];
+    policy.side_effect_level = Some("process_exec".to_string());
+    policy.process_sandbox = Box::new(crate::orchestration::ProcessSandboxPolicy {
+        allow_process_self_introspection: true,
+        ..Default::default()
+    });
+
+    let rendered = landlock_profile("/bin/ls", &policy, SandboxProfile::Worktree);
+    if proc_runtime_reads_are_contained() {
+        assert!(
+            rendered.is_ok(),
+            "a containing host must render the grant rather than refuse it",
+        );
+    } else {
+        let error = rendered.expect_err(
+            "a host that cannot contain a task's view of its neighbours must refuse \
+             the grant instead of issuing a wider one",
+        );
+        assert!(
+            format!("{error:?}").contains("neighbours"),
+            "the refusal must name why, not just fail: {error:?}",
+        );
+    }
+}
+
 /// The reported disposition tracks what the backend did, in all three states.
 ///
 /// A receipt that always said the same thing would be decoration. Each arm
