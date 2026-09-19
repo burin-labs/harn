@@ -53,6 +53,7 @@ Environment:
   HARN_CLI_BENCH_ITERATIONS Default iteration count
   HARN_CLI_BUDGETS          Default budgets.toml path
   HARN_CLI_BASELINE         Default baseline JSON path
+  HARN_EXT_CLI_COLD_START_REPORT  Optional measurement receipt JSON path
   CARGO_TARGET_DIR          Cargo target directory for release builds
 EOF
 }

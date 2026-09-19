@@ -20,12 +20,10 @@ Per-command budgets and recorded baselines land alongside each W ticket
 each port has its own "before" and "after" cold-start number that the
 ticket author records here.
 
-The GitHub Actions workflow exists (`cli-cold-start-budget.yml`) but is
-**not yet a required status check**. It runs on PRs that touch the
-dispatch wedge, the embedded `std/cli` scripts, or the bytecode cache,
-and reports its result for review. Promoting it to a required check
-happens once at least one ported command has its baseline committed and
-the runner pool is stable.
+The GitHub Actions workflow (`cli-cold-start-budget.yml`) is advisory. It
+runs daily on main and supports manual dispatch; it does not run on pull
+requests. [CI evidence](ci-evidence.md) distinguishes setup failures from
+measured startup regressions.
 
 ## What "cold start" means here
 
