@@ -14,6 +14,22 @@
 
 use serde_json::Value;
 
+/// Canonical journal identity, with fallbacks for older transcript envelopes.
+pub(crate) fn tool_call_id(event: &harn_session_store::StoredEvent) -> Option<String> {
+    event
+        .headers
+        .get("tool_call_id")
+        .cloned()
+        .or_else(|| string_at(&event.payload, TOOL_CALL_ID))
+        .or_else(|| {
+            event
+                .payload
+                .pointer(TOOL_RESULT_FACT_CALL_ID)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
 /// Pointer to the terminal loop status recorded on an `agent_run_terminal`
 /// event, e.g. `"done"`. [`crate::llm::agent_terminal_class`] owns what the
 /// values mean.
@@ -36,6 +52,8 @@ pub(crate) const TERMINAL_OWNER: &str = "/transcript_event/metadata/terminal/own
 /// Producer-owned explanation paired with [`TERMINAL_KIND`]. This can be more
 /// precise than the legacy loop-level [`STOP_REASON`].
 pub(crate) const TERMINAL_REASON: &str = "/transcript_event/metadata/terminal/reason";
+/// Loop-owned budget account, present when decision exposure was requested.
+pub(crate) const ADAPTIVE_BUDGET: &str = "/transcript_event/metadata/adaptive_budget";
 
 /// Provider-assigned name of the model that served an `llm_call`.
 pub(crate) const MODEL: &str = "/transcript_event/metadata/model";

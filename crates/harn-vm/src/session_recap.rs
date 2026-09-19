@@ -678,7 +678,7 @@ impl<'a> RecapProjector<'a> {
 
     fn absorb_tool_call(&mut self, turn_index: usize, event: &StoredEvent) {
         let segment_index = self.current_segment(turn_index);
-        let Some(tool_call_id) = tool_call_id(event) else {
+        let Some(tool_call_id) = facts::tool_call_id(event) else {
             self.unassigned += 1;
             return;
         };
@@ -704,7 +704,7 @@ impl<'a> RecapProjector<'a> {
     }
 
     fn absorb_tool_result(&mut self, turn_index: usize, event: &StoredEvent) {
-        let Some(tool_call_id) = tool_call_id(event) else {
+        let Some(tool_call_id) = facts::tool_call_id(event) else {
             self.unassigned += 1;
             return;
         };
@@ -940,21 +940,6 @@ fn is_recap_event(event: &StoredEvent) -> bool {
 
 fn is_checkpoint(event: &StoredEvent) -> bool {
     event.kind.discriminator() == "loop_checkpoint"
-}
-
-fn tool_call_id(event: &StoredEvent) -> Option<String> {
-    event
-        .headers
-        .get("tool_call_id")
-        .cloned()
-        .or_else(|| facts::string_at(&event.payload, facts::TOOL_CALL_ID))
-        .or_else(|| {
-            event
-                .payload
-                .pointer(facts::TOOL_RESULT_FACT_CALL_ID)
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        })
 }
 
 fn find_tool(iterations: &[IterationRecap], call_id: &str) -> Option<(usize, usize)> {

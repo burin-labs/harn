@@ -604,7 +604,10 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
         None,
         None,
         &terminal,
-        1,
+        super::super::live_transcript_journal::TerminalAccounting {
+            provider_call_count: 1,
+            adaptive_budget: None,
+        },
     )
     .await
     .expect("persist terminal");
