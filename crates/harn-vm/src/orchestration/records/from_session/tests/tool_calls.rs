@@ -7,6 +7,45 @@ use super::super::*;
 use super::support::*;
 
 #[tokio::test]
+async fn tool_results_join_by_the_journals_canonical_identity() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    let id = meta.id.clone();
+    store
+        .append(&id, tool_call("call_header", "look"))
+        .await
+        .expect("append call");
+    let mut result = AppendEvent::new(
+        harn_session_store::SessionEventKind::ToolResult,
+        json!({
+            "transcript_event": {
+                "kind": "tool_result",
+                "role": "tool",
+                "text": "known non-empty tool output",
+                "metadata": {},
+            },
+            "raw_message": {
+                "role": "tool",
+                "tool_call_id": "call_header",
+                "content": "known non-empty tool output",
+            },
+        }),
+    );
+    result
+        .headers
+        .insert("tool_call_id".into(), "call_header".into());
+    store.append(&id, result).await.expect("append result");
+    let run = project_run_record_from_session(&store, &id)
+        .await
+        .expect("project");
+    assert_eq!(run.tool_recordings.len(), 1);
+    assert_eq!(run.tool_recordings[0].result, "known non-empty tool output");
+}
+
+#[tokio::test]
 async fn tool_calls_join_their_updates_and_results_by_provider_call_id() {
     let (store, id) = capstone_like_store().await;
     let run = project_run_record_from_session(&store, &id)

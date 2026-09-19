@@ -315,7 +315,7 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/mod.rs",
-        "line": 108,
+        "line": 109,
         "reader": "EFFORT_LADDER_UNGATED_ENV"
       }
     ],
@@ -333,7 +333,7 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/mod.rs",
-        "line": 330,
+        "line": 331,
         "reader": "LLM_CALLS_DISABLED_ENV"
       }
     ],

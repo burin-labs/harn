@@ -40,6 +40,8 @@ pub type AgentSessionFinalization = {
   stop_reason?: string,
   iterations?: int,
   error?: unknown,
+  // Loop-owned evidence persisted without reinterpreting budget policy.
+  adaptive_budget?: dict?,
 }
 
 pub fn agent_session_finalize(

@@ -407,6 +407,7 @@ struct TerminalFacts {
     kind: Option<crate::agent_events::AgentTerminalKind>,
     owner: Option<String>,
     reason: Option<String>,
+    adaptive_budget: Option<serde_json::Value>,
     at: EventClock,
 }
 
@@ -705,6 +706,9 @@ fn assemble(
         );
     }
     if let Some(terminal) = &fold.terminal {
+        if let Some(budget) = &terminal.adaptive_budget {
+            metadata.insert("adaptive_budget".to_string(), budget.clone());
+        }
         if let Some(stop_reason) = &terminal.stop_reason {
             metadata.insert("stop_reason".to_string(), json!(stop_reason));
         }
@@ -974,7 +978,7 @@ impl SessionFold {
 
     fn absorb_tool_call(&mut self, event: &StoredEvent) {
         let payload = &event.payload;
-        let Some(tool_call_id) = facts::string_at(payload, facts::TOOL_CALL_ID) else {
+        let Some(tool_call_id) = facts::tool_call_id(event) else {
             return;
         };
         if self.tool_index.contains_key(&tool_call_id) {
@@ -997,7 +1001,7 @@ impl SessionFold {
 
     fn absorb_tool_update(&mut self, event: &StoredEvent) {
         let payload = &event.payload;
-        let Some(record) = self.tool_for(payload) else {
+        let Some(record) = self.tool_for(event) else {
             return;
         };
         let status = facts::string_at(payload, facts::TOOL_STATUS);
@@ -1023,7 +1027,7 @@ impl SessionFold {
     fn absorb_tool_result(&mut self, event: &StoredEvent) {
         let payload = &event.payload;
         let text = facts::semantic_string(payload, &facts::TEXT).unwrap_or_default();
-        let Some(record) = self.tool_for(payload) else {
+        let Some(record) = self.tool_for(event) else {
             return;
         };
         record.result = text;
@@ -1032,8 +1036,8 @@ impl SessionFold {
     /// Resolve the recorded call this event belongs to, by provider tool-call
     /// id. Returns `None` for an event that names no call or names one this
     /// session never opened.
-    fn tool_for(&mut self, payload: &serde_json::Value) -> Option<&mut ToolCallRecord> {
-        let tool_call_id = facts::string_at(payload, facts::TOOL_CALL_ID)?;
+    fn tool_for(&mut self, event: &StoredEvent) -> Option<&mut ToolCallRecord> {
+        let tool_call_id = facts::tool_call_id(event)?;
         let index = *self.tool_index.get(&tool_call_id)?;
         self.tools.get_mut(index)
     }
@@ -1049,6 +1053,8 @@ impl SessionFold {
                 .and_then(crate::agent_events::AgentTerminalKind::from_wire),
             owner: facts::string_at(&event.payload, facts::TERMINAL_OWNER),
             reason: facts::string_at(&event.payload, facts::TERMINAL_REASON),
+            adaptive_budget: facts::semantic_value(&event.payload, &[facts::ADAPTIVE_BUDGET])
+                .filter(|value| !value.is_null()),
             at: EventClock {
                 text: event.ts.clone(),
                 ms: event.ts_ms,

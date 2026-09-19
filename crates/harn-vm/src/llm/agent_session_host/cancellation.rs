@@ -259,7 +259,10 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             None,
             None,
             &terminal,
-            provider_call_count,
+            super::live_transcript_journal::TerminalAccounting {
+                provider_call_count,
+                adaptive_budget: None,
+            },
         )
         .await?;
     }
