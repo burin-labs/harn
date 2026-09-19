@@ -157,7 +157,7 @@ fn live_landlock_available(test: &str) -> bool {
     }
 }
 
-fn linux_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
+pub(super) fn linux_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
     CapabilityPolicy {
         tools: Vec::new(),
         capabilities: std::collections::BTreeMap::from([(
