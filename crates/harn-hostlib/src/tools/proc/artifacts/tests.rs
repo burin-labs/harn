@@ -181,9 +181,11 @@ fn namespace_admission_precedes_artifact_directory_publication() {
     assert!(!dir.exists(), "directory became visible before its lease");
 }
 
-/// Unix only: the descriptor budget this pins is a Unix per-process limit,
-/// and neither descriptor directory exists on Windows. The integration test
-/// that drives the real tool is gated the same way.
+/// What this process currently holds open.
+///
+/// Every platform leaks the same way when a completed command keeps its
+/// lease: one open handle per command. Only the way to count them differs,
+/// so both platforms are measured rather than skipping one.
 #[cfg(unix)]
 fn open_descriptor_count() -> usize {
     let dir = if cfg!(target_os = "linux") {
@@ -196,6 +198,22 @@ fn open_descriptor_count() -> usize {
         .count()
 }
 
+/// Windows has no descriptor directory, so ask the kernel for the count.
+#[cfg(windows)]
+fn open_descriptor_count() -> usize {
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
+
+    let mut handles: u32 = 0;
+    // SAFETY: `GetCurrentProcess` returns a pseudo-handle that needs no close,
+    // and `handles` is a live, correctly sized out-parameter for the call.
+    let measured = unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut handles) };
+    assert!(
+        measured != 0,
+        "the process must be able to count its own handles"
+    );
+    handles as usize
+}
+
 /// The falsifier for the descriptor exhaustion, at the seam that owns the
 /// lease.
 ///
@@ -205,7 +223,6 @@ fn open_descriptor_count() -> usize {
 /// commands here: if retirement were the only thing releasing descriptors
 /// this would grow by one per command, which is the pre-fix behavior and
 /// what the negative control shows.
-#[cfg(unix)]
 #[test]
 fn completed_commands_do_not_accumulate_lease_descriptors() {
     let temp = tempdir().unwrap();
