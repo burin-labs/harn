@@ -1614,10 +1614,7 @@ export type ACPTypedSessionUpdate =
   | ACPWorkerUpdate
 
 
-export interface ACPHarnExtensionUpdate {
-  sessionUpdate: HarnACPSessionUpdateExtension
-  _meta?: ACPExtensionMeta<ACPObject>
-}
+export type ACPHarnExtensionUpdate = ACPTypedSessionUpdate
 
 export type ACPSessionUpdateEnvelope =
   | ACPUserMessageUpdate
@@ -1626,26 +1623,6 @@ export type ACPSessionUpdateEnvelope =
   | ACPToolCallUpdate
   | ACPPlanUpdate
   | ACPSessionTruncatedUpdate
-  | ACPArtifactUpdate
-  | ACPAvailableCommandsUpdate
-  | ACPFsWatchUpdate
-  | ACPHandoffUpdate
-  | ACPHitlRequestUpdate
-  | ACPHitlResolvedUpdate
-  | ACPLiveSessionClientUpdate
-  | ACPLogUpdate
-  | ACPProgressUpdate
-  | ACPReminderEmittedUpdate
-  | ACPSkillActivatedUpdate
-  | ACPSkillDeactivatedUpdate
-  | ACPSkillNarrowUpdate
-  | ACPSkillScopeToolsUpdate
-  | ACPStanceTransitionUpdate
-  | ACPToolSearchQueryUpdate
-  | ACPToolSearchResultUpdate
-  | ACPTranscriptCompactedUpdate
-  | ACPTranscriptProjectedUpdate
-  | ACPWorkerUpdate
   | ACPHarnExtensionUpdate
 
 export interface ACPSessionUpdateParams {

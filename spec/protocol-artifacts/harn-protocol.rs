@@ -3660,26 +3660,26 @@ fn deserialize_present_session_update_value<'de, D: serde::Deserializer<'de>>(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum ACPTypedSessionUpdate {
-    ArtifactUpdate(ACPArtifactUpdate),
-    AvailableCommandsUpdate(ACPAvailableCommandsUpdate),
-    FsWatchUpdate(ACPFsWatchUpdate),
-    HandoffUpdate(ACPHandoffUpdate),
-    HitlRequestUpdate(ACPHitlRequestUpdate),
-    HitlResolvedUpdate(ACPHitlResolvedUpdate),
-    LiveSessionClientUpdate(ACPLiveSessionClientUpdate),
-    LogUpdate(ACPLogUpdate),
-    ProgressUpdate(ACPProgressUpdate),
-    ReminderEmittedUpdate(ACPReminderEmittedUpdate),
-    SkillActivatedUpdate(ACPSkillActivatedUpdate),
-    SkillDeactivatedUpdate(ACPSkillDeactivatedUpdate),
-    SkillNarrowUpdate(ACPSkillNarrowUpdate),
-    SkillScopeToolsUpdate(ACPSkillScopeToolsUpdate),
-    StanceTransitionUpdate(ACPStanceTransitionUpdate),
-    ToolSearchQueryUpdate(ACPToolSearchQueryUpdate),
-    ToolSearchResultUpdate(ACPToolSearchResultUpdate),
-    TranscriptCompactedUpdate(ACPTranscriptCompactedUpdate),
-    TranscriptProjectedUpdate(ACPTranscriptProjectedUpdate),
-    WorkerUpdate(ACPWorkerUpdate),
+    Artifact(ACPArtifactUpdate),
+    AvailableCommands(ACPAvailableCommandsUpdate),
+    FsWatch(ACPFsWatchUpdate),
+    Handoff(ACPHandoffUpdate),
+    HitlRequest(ACPHitlRequestUpdate),
+    HitlResolved(ACPHitlResolvedUpdate),
+    LiveSessionClient(ACPLiveSessionClientUpdate),
+    Log(ACPLogUpdate),
+    Progress(ACPProgressUpdate),
+    ReminderEmitted(ACPReminderEmittedUpdate),
+    SkillActivated(ACPSkillActivatedUpdate),
+    SkillDeactivated(ACPSkillDeactivatedUpdate),
+    SkillNarrow(ACPSkillNarrowUpdate),
+    SkillScopeTools(ACPSkillScopeToolsUpdate),
+    StanceTransition(ACPStanceTransitionUpdate),
+    ToolSearchQuery(ACPToolSearchQueryUpdate),
+    ToolSearchResult(ACPToolSearchResultUpdate),
+    TranscriptCompacted(ACPTranscriptCompactedUpdate),
+    TranscriptProjected(ACPTranscriptProjectedUpdate),
+    Worker(ACPWorkerUpdate),
 }
 
 impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
@@ -3748,13 +3748,10 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::ArtifactUpdate)
+                    .map(Self::Artifact)
                     .map_err(serde::de::Error::custom)
             }
             Some("available_commands_update") => {
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_some() {}
-                }
                 if value.pointer("/availableCommands").is_none() {
                     return Err(serde::de::Error::custom(
                         "session update availableCommands is required",
@@ -3766,7 +3763,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::AvailableCommandsUpdate)
+                    .map(Self::AvailableCommands)
                     .map_err(serde::de::Error::custom)
             }
             Some("fs_watch") => {
@@ -3807,7 +3804,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::FsWatchUpdate)
+                    .map(Self::FsWatch)
                     .map_err(serde::de::Error::custom)
             }
             Some("handoff") => {
@@ -3862,7 +3859,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::HandoffUpdate)
+                    .map(Self::Handoff)
                     .map_err(serde::de::Error::custom)
             }
             Some("hitl_request") => {
@@ -3908,7 +3905,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::HitlRequestUpdate)
+                    .map(Self::HitlRequest)
                     .map_err(serde::de::Error::custom)
             }
             Some("hitl_resolved") => {
@@ -3954,7 +3951,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::HitlResolvedUpdate)
+                    .map(Self::HitlResolved)
                     .map_err(serde::de::Error::custom)
             }
             Some("live_session_client") => {
@@ -3995,7 +3992,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::LiveSessionClientUpdate)
+                    .map(Self::LiveSessionClient)
                     .map_err(serde::de::Error::custom)
             }
             Some("log") => {
@@ -4027,7 +4024,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::LogUpdate)
+                    .map(Self::Log)
                     .map_err(serde::de::Error::custom)
             }
             Some("progress") => {
@@ -4077,7 +4074,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::ProgressUpdate)
+                    .map(Self::Progress)
                     .map_err(serde::de::Error::custom)
             }
             Some("reminder_emitted") => {
@@ -4185,7 +4182,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::ReminderEmittedUpdate)
+                    .map(Self::ReminderEmitted)
                     .map_err(serde::de::Error::custom)
             }
             Some("skill_activated") => {
@@ -4244,7 +4241,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::SkillActivatedUpdate)
+                    .map(Self::SkillActivated)
                     .map_err(serde::de::Error::custom)
             }
             Some("skill_deactivated") => {
@@ -4298,7 +4295,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::SkillDeactivatedUpdate)
+                    .map(Self::SkillDeactivated)
                     .map_err(serde::de::Error::custom)
             }
             Some("skill_narrow") => {
@@ -4330,7 +4327,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::SkillNarrowUpdate)
+                    .map(Self::SkillNarrow)
                     .map_err(serde::de::Error::custom)
             }
             Some("skill_scope_tools") => {
@@ -4380,7 +4377,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::SkillScopeToolsUpdate)
+                    .map(Self::SkillScopeTools)
                     .map_err(serde::de::Error::custom)
             }
             Some("stance_transition") => {
@@ -4468,7 +4465,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::StanceTransitionUpdate)
+                    .map(Self::StanceTransition)
                     .map_err(serde::de::Error::custom)
             }
             Some("tool_search_query") => {
@@ -4523,7 +4520,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::ToolSearchQueryUpdate)
+                    .map(Self::ToolSearchQuery)
                     .map_err(serde::de::Error::custom)
             }
             Some("tool_search_result") => {
@@ -4564,7 +4561,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::ToolSearchResultUpdate)
+                    .map(Self::ToolSearchResult)
                     .map_err(serde::de::Error::custom)
             }
             Some("transcript_compacted") => {
@@ -4633,7 +4630,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::TranscriptCompactedUpdate)
+                    .map(Self::TranscriptCompacted)
                     .map_err(serde::de::Error::custom)
             }
             Some("transcript_projected") => {
@@ -4701,7 +4698,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::TranscriptProjectedUpdate)
+                    .map(Self::TranscriptProjected)
                     .map_err(serde::de::Error::custom)
             }
             Some("worker_update") => {
@@ -4802,7 +4799,7 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                     ));
                 }
                 serde_json::from_value(value)
-                    .map(Self::WorkerUpdate)
+                    .map(Self::Worker)
                     .map_err(serde::de::Error::custom)
             }
             _ => Err(serde::de::Error::custom("unknown typed session update")),

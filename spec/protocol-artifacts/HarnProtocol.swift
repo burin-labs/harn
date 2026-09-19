@@ -3869,10 +3869,6 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
             self = .artifact(try container.decode(HarnACPArtifactUpdate.self))
         case "available_commands_update":
-            if value["_meta"] != nil {
-            if value["_meta"]?["harn"] != nil {
-            }
-            }
             if value["availableCommands"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update availableCommands is required") }
             if value["sessionUpdate"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update sessionUpdate is required") }
             self = .available_commands_update(try container.decode(HarnACPAvailableCommandsUpdate.self))
