@@ -375,11 +375,9 @@ impl TypeChecker {
                     scope.define_fn(name, sig);
                     walk_all(scope, body, false);
                 }
-                Node::SkillDecl { name, .. } => {
-                    if at_module_scope {
-                        scope.define_var(name, None);
-                        scope.clear_nil_widenable(name);
-                    }
+                Node::SkillDecl { name, .. } if at_module_scope => {
+                    scope.define_var(name, None);
+                    scope.clear_nil_widenable(name);
                 }
                 Node::EvalPackDecl {
                     binding_name,

@@ -32,7 +32,7 @@ fn skill_and_eval_pack_bindings_stay_in_their_declaring_body() {
         let span = unresolved[0]
             .span
             .expect("unresolved name must have a source span");
-        assert_eq!(&source[span.start..span.end], "local_binding");
+        assert_eq!(source.get(span.start..span.end), Some("local_binding"));
         assert!(span.start > source.find("pipeline reads").unwrap());
     }
 }
