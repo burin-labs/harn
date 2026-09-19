@@ -156,6 +156,10 @@ pub(crate) mod shared_state;
 pub mod shells;
 pub mod skills;
 pub mod stdlib;
+/// What the active backend does with a Unix-socket grant, so a launcher can
+/// disclose the shape it actually applied rather than the shape the field
+/// name suggests.
+pub use stdlib::sandbox::unix_socket_enforcement;
 /// Session-metadata change notification for surfaces that project a session.
 pub use stdlib::session_change::{
     subscribe as subscribe_session_changes, SessionChangeSubscription,

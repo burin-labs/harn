@@ -73,15 +73,27 @@ pub(crate) struct SandboxArgs {
         conflicts_with = "no_sandbox"
     )]
     pub sandbox_write_root: Vec<PathBuf>,
-    /// Directories under which subprocesses may bind and connect Unix-domain
-    /// sockets (build servers, compiler daemons). Repeatable; grants no IP
-    /// networking. Unsupported OS backends fail closed.
+    /// Directories under which subprocesses may serve Unix-domain sockets
+    /// (build servers, compiler daemons). Repeatable; grants no IP
+    /// networking. Where a backend cannot scope a connection by path it
+    /// grants the serving half only and refuses to connect. Unsupported OS
+    /// backends fail closed.
     #[arg(
         long = "sandbox-unix-socket-root",
         value_name = "PATH",
         conflicts_with = "no_sandbox"
     )]
     pub sandbox_unix_socket_root: Vec<PathBuf>,
+    /// Let subprocesses enumerate their own entries in the process
+    /// filesystem, which some managed runtimes need in order to identify
+    /// themselves during startup. Read-only, grants no network authority,
+    /// and fails closed on a kernel that cannot keep a sandboxed task from
+    /// inspecting its neighbours.
+    #[arg(
+        long = "sandbox-allow-process-self-introspection",
+        conflicts_with = "no_sandbox"
+    )]
+    pub sandbox_allow_process_self_introspection: bool,
     /// Session environment: `inherited` snapshots the launcher (default),
     /// `isolated` admits runtime essentials only, and `granted` adds the
     /// declared `--grant` set. This is independent of the filesystem sandbox.

@@ -3,8 +3,13 @@
 //! constraint machinery. Everything here is plain data (+ a single
 //! helper, `enforce_tool_arg_constraints`, that operates on it).
 
+mod process_sandbox;
 #[path = "read_deny_defaults_data.rs"]
 mod read_deny_defaults;
+
+pub use process_sandbox::{
+    ProcessNetworkProxy, ProcessSandboxPolicy, ProcessSandboxPreset, UnixSocketEnforcement,
+};
 pub use read_deny_defaults::default_read_deny_home_paths;
 
 use std::collections::BTreeMap;
@@ -243,153 +248,6 @@ impl SandboxProfile {
     }
 }
 
-/// Named host filesystem presets granted only to child-process OS
-/// sandboxes. These do not widen Harn file builtins; they are used so
-/// subprocesses can load runtimes, compilers, and cache files that live
-/// outside the workspace while Harn's own read/write surface remains
-/// scoped by `workspace_roots` and `read_only_roots`.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Ord, PartialOrd)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessSandboxPreset {
-    /// Minimal host runtime roots needed to execute common system binaries.
-    SystemRuntime,
-    /// OS/vendor developer toolchains such as Xcode, Command Line Tools,
-    /// Homebrew, plus common user-managed runtime roots such as
-    /// `~/.local/share/uv`, `~/.rustup`, `~/.cargo`, `~/.pyenv`, and `~/.nvm`.
-    DeveloperToolchains,
-    /// Per-user package-manager config/cache roots used by npm, pip, cargo,
-    /// git credential helpers, and enterprise CA configuration.
-    PackageManagerConfig,
-    /// Per-user scratch/cache locations used by developer tools. Write access
-    /// is granted only when the active policy already allows workspace writes.
-    UserTemp,
-}
-
-impl ProcessSandboxPreset {
-    pub const fn default_presets() -> &'static [Self] {
-        &[
-            Self::SystemRuntime,
-            Self::DeveloperToolchains,
-            Self::PackageManagerConfig,
-            Self::UserTemp,
-        ]
-    }
-}
-
-/// Process-only policy layered onto the active sandbox profile.
-///
-/// `presets: None` means "use the runtime defaults"; `Some([])` is an
-/// explicit request for no named presets. Extra roots are process-only:
-/// they do not allow Harn file tools to read or write those paths. TCP
-/// loopback is a separate capability from external network access so local
-/// test servers do not require a remote-egress grant.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct ProcessSandboxPolicy {
-    pub presets: Option<Vec<ProcessSandboxPreset>>,
-    pub read_roots: Vec<String>,
-    pub write_roots: Vec<String>,
-    /// Subtrees a confined child may never read, whatever else grants them.
-    ///
-    /// This is the ONLY subtractive term in the policy. It composes
-    /// most-restrictive over every additive source: a preset, a workspace root,
-    /// a `read_only_root`, and an explicit `read_roots` entry all lose to it.
-    /// That ordering is the point — `PackageManagerConfig` grants `~/.config`,
-    /// `~/.cache`, and `~/.netrc` wholesale, so a denylist that merely competed
-    /// with presets would leave credentials readable by default.
-    ///
-    /// Enforced on macOS (a trailing `deny file-read*`, last-match-wins) and on
-    /// Linux (Landlock is allow-only, so the denial is expressed by granting
-    /// the siblings that do not lead to it). **Windows and OpenBSD do not apply
-    /// it yet**, and they do NOT refuse the spawn either.
-    ///
-    /// Refusing would be the fail-closed reflex, and it is wrong here: the
-    /// default denylist is never empty, so refusing on an unsupporting backend
-    /// would refuse every spawn on that platform. Saying plainly that the term
-    /// is unenforced there is worth more than a comment claiming a protection
-    /// the code does not provide.
-    pub read_deny_roots: Vec<String>,
-    /// Permit a confined child to bind and connect TCP loopback sockets while
-    /// retaining the deny on non-loopback destinations. Backends that cannot
-    /// enforce this distinction reject the spawn rather than widening it.
-    pub allow_tcp_loopback: bool,
-    /// Directories under which a confined child may bind and connect
-    /// Unix-domain sockets. Path-scoped: a socket outside every root is still
-    /// refused, and nothing here grants IP networking. Build servers (sbt,
-    /// Gradle's Kotlin daemon, MSBuild worker nodes) talk to themselves over a
-    /// socket file under the project or temp dir; without this grant they die
-    /// with a bare `Operation not permitted` that reads like a toolchain defect.
-    ///
-    /// Enforced on macOS, where the seatbelt filters sockets by path. Linux,
-    /// Windows, and OpenBSD cannot scope a Unix socket by path, so a non-empty
-    /// grant there rejects the spawn rather than widening, the contract
-    /// `allow_tcp_loopback` follows. Omitted from the wire when empty so no
-    /// workflow graph digest pinned before the field existed moves.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub unix_socket_roots: Vec<String>,
-}
-
-/// Runtime-owned forwarding endpoints for a managed child-process egress
-/// proxy. Naming a loopback endpoint is authority because the OS sandbox grants
-/// it; only the host may install this transport state. Destination decisions
-/// remain owned by `crate::egress`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ProcessNetworkProxy {
-    pub http_port: u16,
-    pub socks_port: u16,
-}
-
-impl ProcessSandboxPolicy {
-    pub fn effective_presets(&self) -> Vec<ProcessSandboxPreset> {
-        self.presets
-            .clone()
-            .unwrap_or_else(|| ProcessSandboxPreset::default_presets().to_vec())
-    }
-
-    pub fn extend(&mut self, other: &Self) {
-        if let Some(presets) = other.presets.as_ref() {
-            self.presets = Some(presets.clone());
-        }
-        extend_unique(&mut self.read_roots, &other.read_roots);
-        extend_unique(&mut self.write_roots, &other.write_roots);
-        extend_unique(&mut self.read_deny_roots, &other.read_deny_roots);
-        self.allow_tcp_loopback |= other.allow_tcp_loopback;
-        extend_unique(&mut self.unix_socket_roots, &other.unix_socket_roots);
-    }
-
-    fn intersect(&self, requested: &Self) -> Self {
-        let presets = match (&self.presets, &requested.presets) {
-            (None, None) => None,
-            _ => Some(intersect_presets(
-                &self.effective_presets(),
-                &requested.effective_presets(),
-            )),
-        };
-        Self {
-            presets,
-            read_roots: intersect_roots(&self.read_roots, &requested.read_roots),
-            write_roots: intersect_roots(&self.write_roots, &requested.write_roots),
-            // UNION, not intersection, and deliberately so. Every other field
-            // here narrows as it nests; this one is a denial, so narrowing it
-            // would WIDEN the resulting authority. A nested request may add a
-            // denial and may never drop one the outer policy made.
-            read_deny_roots: {
-                let mut denied = self.read_deny_roots.clone();
-                extend_unique(&mut denied, &requested.read_deny_roots);
-                denied
-            },
-            // Loopback is host-owned authority like `process_network_proxy`:
-            // a nested request may neither invent it nor erase an outer grant.
-            // Host configuration still composes additively through `extend`.
-            allow_tcp_loopback: self.allow_tcp_loopback,
-            unix_socket_roots: intersect_roots(
-                &self.unix_socket_roots,
-                &requested.unix_socket_roots,
-            ),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CapabilityPolicy {
     pub tools: Vec<String>,
@@ -539,7 +397,7 @@ impl<'de> Deserialize<'de> for CapabilityPolicy {
     }
 }
 
-fn is_false(value: &bool) -> bool {
+pub(super) fn is_false(value: &bool) -> bool {
     !value
 }
 
@@ -1009,6 +867,14 @@ impl CapabilityPolicy {
                 "flattened stage policy enabled TCP loopback beyond the stage grant".to_string(),
             );
         }
+        if requested_ps.allow_process_self_introspection
+            && !ceiling_ps.allow_process_self_introspection
+        {
+            return Err(
+                "flattened stage policy enabled process self-introspection beyond the stage grant"
+                    .to_string(),
+            );
+        }
 
         // Argument-level constraints (e.g. edit scoped to `src/**`) compose by
         // union in `intersect`, so more constraints = stricter. Dropping one the
@@ -1102,7 +968,7 @@ fn encode_restricted_capabilities(
 /// instead would drop both, and an empty root list means "fall back to the
 /// execution root", so the narrowing a caller asked for would silently come
 /// back *wider* than either side intended.
-fn intersect_roots(host: &[String], requested: &[String]) -> Vec<String> {
+pub(super) fn intersect_roots(host: &[String], requested: &[String]) -> Vec<String> {
     if host.is_empty() {
         return requested.to_vec();
     }
@@ -1156,7 +1022,7 @@ fn strictest_sandbox_profile(left: SandboxProfile, right: SandboxProfile) -> San
     }
 }
 
-fn intersect_presets(
+pub(super) fn intersect_presets(
     left: &[ProcessSandboxPreset],
     right: &[ProcessSandboxPreset],
 ) -> Vec<ProcessSandboxPreset> {
@@ -1166,7 +1032,7 @@ fn intersect_presets(
         .collect()
 }
 
-fn extend_unique(target: &mut Vec<String>, roots: &[String]) {
+pub(super) fn extend_unique(target: &mut Vec<String>, roots: &[String]) {
     for root in roots {
         if !target.contains(root) {
             target.push(root.clone());

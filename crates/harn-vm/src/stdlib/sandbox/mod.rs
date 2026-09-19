@@ -102,6 +102,19 @@ pub(crate) mod process_cwd;
 use process_cwd::enforce_process_cwd_for_policy;
 pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
+mod policy_projection;
+#[cfg(target_os = "linux")]
+pub(crate) use policy_projection::process_sandbox_unix_socket_roots;
+pub use policy_projection::unix_socket_enforcement;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) use policy_projection::{
+    process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
+};
 mod replace;
 
 // Each backend uses one of these: platform helpers call `unavailable`; Linux confines in `pre_exec`.
@@ -1731,26 +1744,6 @@ fn git_scope_extension_for_roots(
 ))]
 pub(crate) fn process_sandbox_readonly_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     normalized_read_only_roots(policy)
-}
-
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
-pub(crate) fn process_sandbox_policy_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.read_roots)
-}
-
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
-pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.write_roots)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]

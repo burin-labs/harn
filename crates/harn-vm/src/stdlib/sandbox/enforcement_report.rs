@@ -8,7 +8,8 @@
 use std::path::Path;
 
 use crate::orchestration::{
-    pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    current_execution_policy, pop_execution_policy, push_execution_policy, CapabilityPolicy,
+    SandboxProfile,
 };
 use crate::security::SessionEnvironment;
 use crate::tool_annotations::SideEffectLevel;
@@ -78,11 +79,23 @@ fn process_filesystem_sandbox_report_matches_live_escape() {
         "allowed"
     };
 
+    // The Unix-socket disposition rides the same receipt because it is the
+    // term whose meaning differs most between backends, and a reader who
+    // cannot see which shape was applied would have to infer it from the
+    // platform. `not_requested` here is a measurement of this probe policy,
+    // which asks for no sockets, and not a claim that the grant is inert.
+    let unix_sockets = super::unix_socket_enforcement(
+        &current_execution_policy().expect("probe policy is pushed"),
+    );
     let marker = format!(
-        "harn.sandbox_enforcement schema=harn.ci.sandbox_enforcement.v1 backend={} filesystem_mechanism={} active={} outside_write={outcome}",
+        "harn.sandbox_enforcement schema=harn.ci.sandbox_enforcement.v1 backend={} filesystem_mechanism={} active={} outside_write={outcome} unix_sockets={}",
         active_backend_name(),
         active_backend_filesystem_mechanism(),
         active,
+        serde_json::to_value(unix_sockets)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_else(|| "unknown".to_string()),
     );
     println!("{marker}");
     if let Ok(path) = std::env::var("HARN_SANDBOX_ENFORCEMENT_RECEIPT") {

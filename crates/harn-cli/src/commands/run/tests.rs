@@ -5,8 +5,8 @@ use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
     eval_source_for_code, execute_explain_cost, execute_run, execute_run_with_options,
     install_cli_llm_mock_mode, persist_cli_llm_mock_recording, run_sandbox_attestation,
-    split_eval_header, CliLlmMockMode, ProjectRuntimeMode, RunExecutionOptions, RunProfileOptions,
-    RunSandboxOptions, StdoutPassthroughGuard,
+    split_eval_header, CliLlmMockMode, ProjectRuntimeMode, RunExecutionOptions, RunProcessGrants,
+    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
 };
 // Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
 // a forked child), so an unconditional import is dead on Windows and trips
@@ -268,9 +268,39 @@ fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
 #[test]
 fn default_run_policy_keeps_loopback_separate_from_remote_network() {
     let workspace = Path::new("/tmp/workspace");
-    let default = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, false);
-    let network = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], true, false);
-    let loopback = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, true);
+    let default = default_run_capability_policy(
+        workspace,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        RunProcessGrants::default(),
+    );
+    let network = default_run_capability_policy(
+        workspace,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        RunProcessGrants {
+            network: true,
+            ..RunProcessGrants::default()
+        },
+    );
+    let loopback = default_run_capability_policy(
+        workspace,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        RunProcessGrants {
+            loopback: true,
+            ..RunProcessGrants::default()
+        },
+    );
 
     assert_eq!(default.side_effect_level.as_deref(), Some("process_exec"));
     assert_eq!(network.side_effect_level.as_deref(), Some("network"));
@@ -337,6 +367,11 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["process_network_enabled"], true);
     assert_eq!(metadata["process_loopback_requested"], false);
     assert_eq!(metadata["process_loopback_enabled"], true);
+    // This run asks for no socket roots, and the receipt has to say that
+    // rather than omit the field: a reader who sees an empty root list and no
+    // disposition cannot tell "nothing was requested" from "a backend quietly
+    // declined to scope it".
+    assert_eq!(metadata["process_unix_socket_enforcement"], "not_requested");
     assert_eq!(
         metadata["process_network_mode"],
         if cfg!(target_os = "macos") {
@@ -564,8 +599,7 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
         &[],
         &[],
         &[],
-        false,
-        false,
+        RunProcessGrants::default(),
     );
 
     assert_eq!(policy.side_effect_level.as_deref(), Some("process_exec"));
