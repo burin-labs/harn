@@ -1,0 +1,11 @@
+pipeline declares(harness: Harness) {
+  skill local_skill {
+    description "Local skill"
+    prompt "Follow the runbook."
+  }
+  harness.stdio.println(local_skill)
+}
+
+pipeline main(harness: Harness) {
+  harness.stdio.println(local_skill)
+}
