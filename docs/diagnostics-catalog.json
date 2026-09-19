@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 76
+      "count": 77
     },
     {
       "id": "FMT",
@@ -2500,6 +2500,15 @@
           "summary": "Replace the field-by-field record copy with `pick`"
         }
       ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-078",
+      "category": "LNT",
+      "summary": "tool descriptor spells its per-parameter map as a JSON Schema document",
+      "repairs": [],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
