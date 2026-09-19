@@ -130,11 +130,7 @@ fn persistent_lane(
         if: "env.HARN_RUNNER_TIER != 'blacksmith'",
         with: cache_inputs,
       },
-      {
-        name: "Summarize and stop sccache",
-        if: "always() && env.HARN_RUNNER_TIER == 'blacksmith'",
-        run: "./scripts/ci/finalize_sccache.sh",
-      },
+      {name: "Summarize and stop sccache", if: "always()", run: "./scripts/ci/finalize_sccache.sh"},
     ],
   }
   if write_cache {
@@ -1013,6 +1009,40 @@ pipeline test_rejects_a_producer_cache_guard_that_names_only_the_hosted_tier(har
       "ci.yml:rust-check-inputs must restore rust-cache on every tier except Blacksmith, which has its own sticky sccache",
     ),
     "a guard naming only the hosted tier must be refused; got ${to_string(errors)}",
+  )
+}
+
+/**
+ * The cache summary must not name the tiers it knows. A tier left off that
+ * list emits no counters, and a rung with no counters is indistinguishable
+ * from one with a warm cache, so a fully cold compile reports as a clean
+ * pass. This is the defect that hid the owned pool's cache behaviour.
+ */
+pipeline test_rejects_a_cache_summary_guard_that_names_one_tier(harness: Harness) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  const guarded = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-check-inputs": {
+        ...producer,
+        steps: producer.steps.map(
+          fn(step) {
+            if trim(to_string(step?.name ?? "")) != "Summarize and stop sccache" {
+              return step
+            }
+            return {...step, if: "always() && env.HARN_RUNNER_TIER == 'blacksmith'"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(guarded)
+  assert(
+    errors.contains("ci.yml:rust-check-inputs must finalize its job-owned sccache daemon"),
+    "a summary guard naming one tier must be refused; got ${to_string(errors)}",
   )
 }
 
