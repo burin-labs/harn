@@ -4,6 +4,62 @@ use crate::typechecker::DiagnosticDetails;
 use crate::TypeExpr;
 
 #[test]
+fn skill_and_eval_pack_bindings_stay_in_their_declaring_body() {
+    for declaration in [
+        r#"skill local_binding { description "Local"; prompt "Follow the runbook." }"#,
+        r#"eval_pack local_binding "local-pack" {}"#,
+    ] {
+        let source = format!(
+            "pipeline declares(harness: Harness) {{\n{declaration}\n\
+             harness.stdio.println(local_binding)\n}}\n\
+             pipeline reads(harness: Harness) {{\n\
+             harness.stdio.println(local_binding)\n}}"
+        );
+        let diagnostics = check_source_with_imports(&source, &[]);
+        let unresolved: Vec<_> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == Code::UndefinedVariable)
+            .collect();
+        assert_eq!(
+            unresolved.len(),
+            1,
+            "only the sibling reference must fail for {declaration}: {diagnostics:?}"
+        );
+        assert!(matches!(
+            unresolved[0].details.as_ref(),
+            Some(DiagnosticDetails::UnresolvedName { name }) if name == "local_binding"
+        ));
+        let span = unresolved[0]
+            .span
+            .expect("unresolved name must have a source span");
+        assert_eq!(&source[span.start..span.end], "local_binding");
+        assert!(span.start > source.find("pipeline reads").unwrap());
+    }
+}
+
+#[test]
+fn module_skill_and_eval_pack_bindings_keep_forward_references() {
+    for declaration in [
+        r#"skill shared_binding { description "Shared"; prompt "Follow the runbook." }"#,
+        r#"eval_pack shared_binding "shared-pack" {}"#,
+    ] {
+        let diagnostics = check_source_with_imports(
+            &format!(
+                "pipeline reads(harness: Harness) {{\n\
+                 harness.stdio.println(shared_binding)\n}}\n{declaration}"
+            ),
+            &[],
+        );
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == Code::UndefinedVariable),
+            "module binding must resolve for {declaration}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
 fn enum_payload_closure_reassignment_does_not_poison_outer_narrowing() {
     let errs = errors(
         r#"enum Option<T> {

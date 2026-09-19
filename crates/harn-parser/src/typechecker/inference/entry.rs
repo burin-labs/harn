@@ -376,8 +376,10 @@ impl TypeChecker {
                     walk_all(scope, body, false);
                 }
                 Node::SkillDecl { name, .. } => {
-                    scope.define_var(name, None);
-                    scope.clear_nil_widenable(name);
+                    if at_module_scope {
+                        scope.define_var(name, None);
+                        scope.clear_nil_widenable(name);
+                    }
                 }
                 Node::EvalPackDecl {
                     binding_name,
@@ -385,8 +387,10 @@ impl TypeChecker {
                     summarize,
                     ..
                 } => {
-                    scope.define_var(binding_name, Some(TypeExpr::Named("dict".into())));
-                    scope.clear_nil_widenable(binding_name);
+                    if at_module_scope {
+                        scope.define_var(binding_name, Some(TypeExpr::Named("dict".into())));
+                        scope.clear_nil_widenable(binding_name);
+                    }
                     walk_all(scope, body, false);
                     if let Some(summary_body) = summarize {
                         walk_all(scope, summary_body, false);

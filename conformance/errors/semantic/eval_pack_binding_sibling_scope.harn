@@ -1,0 +1,8 @@
+pipeline declares(harness: Harness) {
+  eval_pack local_pack "local-pack" {}
+  harness.stdio.println(local_pack)
+}
+
+pipeline main(harness: Harness) {
+  harness.stdio.println(local_pack)
+}
