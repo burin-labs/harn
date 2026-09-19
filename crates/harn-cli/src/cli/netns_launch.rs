@@ -13,7 +13,7 @@ pub(crate) struct NetnsLaunchArgs {
     /// Inherited Landlock ruleset descriptor. Absent on a host with no
     /// Landlock, where the resolved fallback lets the run proceed on the
     /// syscall filter alone.
-    #[arg(long = "ruleset-fd")]
+    #[arg(long = harn_vm::process_sandbox::NETNS_RULESET_FD_FLAG.trim_start_matches('-'))]
     pub ruleset_fd: Option<i32>,
     /// The compiled seccomp program, hex-encoded.
     ///
@@ -21,9 +21,22 @@ pub(crate) struct NetnsLaunchArgs {
     /// filter would run the payload unconfined while every layer above still
     /// reported the profile as enforced, which is the exact failure the
     /// transferable confinement was built to end.
-    #[arg(long = "seccomp-hex")]
+    #[arg(long = harn_vm::process_sandbox::NETNS_SECCOMP_FLAG.trim_start_matches('-'))]
     pub seccomp_hex: String,
     /// The payload: program first, then its arguments.
     #[arg(trailing_var_arg = true, required = true)]
     pub payload: Vec<String>,
+}
+
+/// The helper invocation parsed on its own, before the runtime exists.
+///
+/// The pre-runtime dispatcher cannot parse the whole command tree, because
+/// building that parse is part of what the runtime is started for, and the
+/// helper must run while the process is still single-threaded. Flattening the
+/// same argument type here keeps one definition of the arguments across both
+/// entry points.
+#[derive(clap::Parser, Debug)]
+pub(crate) struct NetnsLaunchInvocation {
+    #[command(flatten)]
+    pub args: NetnsLaunchArgs,
 }

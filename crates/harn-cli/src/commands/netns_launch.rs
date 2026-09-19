@@ -33,6 +33,7 @@
 
 use std::convert::Infallible;
 use std::io;
+#[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 

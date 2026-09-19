@@ -81,11 +81,17 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 process::exit(1);
             }
         }
-        Command::NetnsLaunch(args) => {
-            // The success type is uninhabited: a launch that worked replaced
-            // this process, so the only reachable arm is the failure one.
-            let Err(error) = commands::netns_launch::run(args);
-            eprintln!("error: {error}");
+        Command::NetnsLaunch(_) => {
+            // Unreachable: the pre-runtime dispatcher claims this invocation
+            // before the runtime that owns this match is built. Refusing
+            // rather than running it keeps the failure legible, because the
+            // namespace this helper exists to create cannot be created from
+            // here: a user namespace is refused to a multi-threaded caller,
+            // and the runtime's worker threads are already up.
+            eprintln!(
+                "error: the namespace helper must run before the runtime starts; reaching it \
+                 here means the pre-runtime dispatcher did not recognise the invocation"
+            );
             process::exit(1);
         }
         Command::Skill(args) => match args.command {

@@ -170,7 +170,7 @@ pub(crate) use models::{
     ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs, ModelsLoraPromoteArgs,
     ModelsLoraTrainArgs, ModelsTestArgs,
 };
-pub(crate) use netns_launch::NetnsLaunchArgs;
+pub(crate) use netns_launch::{NetnsLaunchArgs, NetnsLaunchInvocation};
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,
     OrchestratorDlqArgs, OrchestratorFireArgs, OrchestratorInspectArgs, OrchestratorLocalArgs,
@@ -641,7 +641,7 @@ SCRIPTING
     ConformanceHelper(ConformanceHelperArgs),
     /// Internal: build a private network namespace, then enter the
     /// confinement handed over with it and exec the payload.
-    #[command(hide = true, name = "netns-launch")]
+    #[command(hide = true, name = harn_vm::process_sandbox::NETNS_LAUNCH_SUBCOMMAND)]
     NetnsLaunch(NetnsLaunchArgs),
 }
 

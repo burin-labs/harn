@@ -24,6 +24,7 @@ use super::{
     SandboxFallback,
 };
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
+use crate::process_sandbox::{NETNS_LAUNCH_SUBCOMMAND, NETNS_RULESET_FD_FLAG, NETNS_SECCOMP_FLAG};
 use crate::value::VmError;
 
 pub(super) struct Backend;
@@ -336,19 +337,6 @@ fn resolve_netns_launcher(policy: &CapabilityPolicy) -> Result<Option<PathBuf>, 
     }
     Ok(Some(path))
 }
-
-/// The subcommand the namespace helper is invoked as.
-///
-/// A subcommand of this same runtime rather than a separate program: the host
-/// policy grant names an installed *copy* at a stable path, and a copy of one
-/// binary is cheaper to keep at the pinned revision than a second artifact
-/// with its own build and release story.
-pub(super) const NETNS_LAUNCH_SUBCOMMAND: &str = "netns-launch";
-
-/// Flag naming the inherited Landlock ruleset descriptor.
-pub(super) const NETNS_RULESET_FD_FLAG: &str = "--ruleset-fd";
-/// Flag carrying the compiled seccomp program, hex-encoded.
-pub(super) const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 
 /// Assemble the helper's argv: how to confine, then what to run.
 ///
