@@ -998,6 +998,13 @@ fn tree(root: &std::path::Path, names: &[&str]) {
 /// is not something to freeze into an assertion.
 #[test]
 fn report_default_denylist_expansion_cost() {
+    // Hold the same lock the tests that rewrite `HOME` take. This one only
+    // reads it, but reading it unlocked races a writer, and the vacuity guard
+    // below then fires on a temporary home that another test installed rather
+    // than on anything about this measurement.
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let Some(home) = crate::user_dirs::home_dir() else {
         eprintln!("[landlock-cost] no home dir on this host; nothing to measure");
         return;
