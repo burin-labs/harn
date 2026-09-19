@@ -152,7 +152,7 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
     ),
     {
       headers: __provider_auth_headers(
-        provider,
+        "fireworks",
         safe_string(auth["env"], ""),
         safe_string(auth["value"], ""),
       )

@@ -328,18 +328,21 @@ impl TypeChecker {
         );
     }
 
-    /// Pre-populate placeholder signatures for every
-    /// `fn`/`pipeline`/`tool`/`let`/`const` name reachable from the
-    /// program (including names defined inside pipeline or fn bodies)
-    /// so the strict cross-module undefined-call check can resolve
-    /// forward references and recursive calls whose own scope does not
-    /// inherit from the enclosing block.
+    /// Pre-populate placeholder signatures so the strict cross-module
+    /// undefined-call check can resolve forward references and recursive
+    /// calls whose own scope does not inherit from the enclosing block.
     ///
-    /// Rust's lexical scoping guarantees the runtime lookup will still
-    /// respect shadowing at execution time; the placeholders only
-    /// satisfy the *static* "does this name exist somewhere" check.
+    /// Callables (`fn`/`pipeline`/`tool`) are registered wherever they are
+    /// declared, including inside another body, because a call may precede
+    /// the declaration. Value bindings are registered only at module scope.
+    ///
+    /// A `let` inside one function is not in scope inside another, and the
+    /// runtime enforces exactly that. Registering those names here made the
+    /// checker answer "does this name exist anywhere in the file" instead of
+    /// "is it in scope here", so a reference to another function's local
+    /// passed the checker and died at runtime on first execution (#8459).
     fn register_callable_placeholders(scope: &mut TypeScope, nodes: &[SNode]) {
-        fn walk(scope: &mut TypeScope, node: &SNode) {
+        fn walk(scope: &mut TypeScope, node: &SNode, at_module_scope: bool) {
             let inner = match &node.node {
                 Node::AttributedDecl { inner, .. } => inner.as_ref(),
                 _ => node,
@@ -350,7 +353,7 @@ impl TypeChecker {
                         TypeChecker::fn_signature_from_decl(inner, Some(inner.span), |_, _| None)
                             .expect("matched FnDecl");
                     scope.define_fn(name, sig);
-                    walk_all(scope, body);
+                    walk_all(scope, body, false);
                 }
                 Node::Pipeline {
                     name,
@@ -365,12 +368,12 @@ impl TypeChecker {
                         Some(inner.span),
                     );
                     scope.define_fn(name, sig);
-                    walk_all(scope, body);
+                    walk_all(scope, body, false);
                 }
                 Node::ToolDecl { name, body, .. } => {
                     let sig = TypeChecker::empty_callable_signature(Some(inner.span));
                     scope.define_fn(name, sig);
-                    walk_all(scope, body);
+                    walk_all(scope, body, false);
                 }
                 Node::SkillDecl { name, .. } => {
                     scope.define_var(name, None);
@@ -384,9 +387,9 @@ impl TypeChecker {
                 } => {
                     scope.define_var(binding_name, Some(TypeExpr::Named("dict".into())));
                     scope.clear_nil_widenable(binding_name);
-                    walk_all(scope, body);
+                    walk_all(scope, body, false);
                     if let Some(summary_body) = summarize {
-                        walk_all(scope, summary_body);
+                        walk_all(scope, summary_body, false);
                     }
                 }
                 Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
@@ -394,6 +397,14 @@ impl TypeChecker {
                     // need forward-ref placeholders; destructuring
                     // patterns are checked as statements and define
                     // their vars as they are walked.
+                    //
+                    // A binding inside a body belongs to that body alone, so
+                    // it is deliberately not registered here: the statement
+                    // checker defines it as it walks that body, and no other
+                    // body can see it.
+                    if !at_module_scope {
+                        return;
+                    }
                     if let BindingPattern::Identifier(name) = pattern {
                         if !crate::ast::is_discard_name(name) {
                             scope.define_var(name, None);
@@ -404,12 +415,12 @@ impl TypeChecker {
                 _ => {}
             }
         }
-        fn walk_all(scope: &mut TypeScope, nodes: &[SNode]) {
+        fn walk_all(scope: &mut TypeScope, nodes: &[SNode], at_module_scope: bool) {
             for node in nodes {
-                walk(scope, node);
+                walk(scope, node, at_module_scope);
             }
         }
-        walk_all(scope, nodes);
+        walk_all(scope, nodes, true);
     }
 
     fn register_imported_callable_signatures_into(scope: &mut TypeScope, nodes: &[SNode]) {
