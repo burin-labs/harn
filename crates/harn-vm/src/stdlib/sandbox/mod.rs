@@ -53,7 +53,7 @@ use std::process::{Command, Output};
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::orchestration::ProcessSandboxPreset;
-use crate::orchestration::{CapabilityPolicy, SandboxProfile};
+use crate::orchestration::{CapabilityPolicy, SandboxProfile, UnixSocketEnforcement};
 use crate::value::{environment_io_error_thrown, ErrorCategory, VmError};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1757,6 +1757,33 @@ pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> V
 #[cfg(target_os = "linux")]
 pub(crate) fn process_sandbox_unix_socket_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     normalized_process_roots(&policy.process_sandbox.unix_socket_roots)
+}
+
+/// What the active backend will actually do with a Unix-socket grant.
+///
+/// A reader of a receipt must not have to infer the shape of the grant from
+/// the platform it ran on, and must not read silence as a scope that was
+/// applied. Every backend answers, including when it refuses.
+pub(crate) fn unix_socket_enforcement(policy: &CapabilityPolicy) -> UnixSocketEnforcement {
+    if policy.process_sandbox.unix_socket_roots.is_empty() {
+        return UnixSocketEnforcement::NotRequested;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        UnixSocketEnforcement::PathScoped
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if policy_allows_network(policy) {
+            UnixSocketEnforcement::SupersededByNetworkGrant
+        } else {
+            UnixSocketEnforcement::ServeOnly
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        UnixSocketEnforcement::Refused
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]

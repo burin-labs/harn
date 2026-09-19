@@ -79,7 +79,7 @@ pub use types::{
     CapabilityPolicy, ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy,
     JoinPolicy, MapPolicy, ModelPolicy, NativeToolFallbackPolicy, ProcessNetworkProxy,
     ProcessSandboxPolicy, ProcessSandboxPreset, ReducePolicy, RequiredSuccessfulTool, RetryPolicy,
-    SandboxProfile, StageContract, ToolArgConstraint, TurnPolicy,
+    SandboxProfile, StageContract, ToolArgConstraint, TurnPolicy, UnixSocketEnforcement,
 };
 
 thread_local! {

@@ -382,6 +382,11 @@ pub enum UnixSocketEnforcement {
     /// Creation is scoped to the named roots and connection is refused
     /// outright, because this kernel cannot scope a connection by path.
     ServeOnly,
+    /// The policy already permits general networking, so the socket
+    /// operations these roots would grant are authority the policy holds for
+    /// another reason. The roots narrow nothing here, and saying so is worth
+    /// more than reporting a scope that is not being applied.
+    SupersededByNetworkGrant,
     /// The backend cannot render the grant and refused the spawn rather than
     /// widening it.
     Refused,

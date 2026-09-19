@@ -446,10 +446,128 @@ fn process_network_ceiling_controls_real_child_socket() {
         .expect("the listener must observe the allowed child connection");
 }
 
+/// A policy whose only grant is serve-only local IPC under `root`.
+fn local_ipc_policy(root: &std::path::Path) -> CapabilityPolicy {
+    let mut policy = linux_policy_with_workspace_ops(&["read_text", "write_text"]);
+    policy.workspace_roots = vec![root.display().to_string()];
+    policy.side_effect_level = Some("process_exec".to_string());
+    policy.process_sandbox = Box::new(crate::orchestration::ProcessSandboxPolicy {
+        unix_socket_roots: vec![root.display().to_string()],
+        ..Default::default()
+    });
+    policy
+}
+
+/// The serving half of local IPC is admitted and the connecting half is not.
+///
+/// Asserted against the compiled filter rather than a live child because the
+/// claim is about which decision the backend made, and a child that merely
+/// failed to bind would not say whether `connect` was withheld on purpose or
+/// the probe was broken. The end-to-end reading belongs to the toolchain that
+/// needs it.
+#[test]
+fn local_ipc_grant_admits_serving_and_withholds_connect() {
+    let root = tempfile::tempdir().expect("root");
+    let granted = local_ipc_policy(root.path());
+    assert!(
+        unix_socket_local_ipc_grant(&granted),
+        "a Unix-socket root on a non-network policy must be rendered as local IPC",
+    );
+
+    let syscalls = allowed_syscalls(&granted);
+    assert!(
+        !syscalls.contains(&libc::SYS_connect),
+        "connect must stay out of the allowlist: it is the one socket operation \
+         this backend cannot scope, and admitting it reaches every socket the \
+         user can open",
+    );
+
+    let filter = compile_seccomp_program(&granted).expect("compile the granted filter");
+    let denied = {
+        let mut policy = granted.clone();
+        policy.process_sandbox = Default::default();
+        compile_seccomp_program(&policy).expect("compile the ungranted filter")
+    };
+    assert_ne!(
+        filter, denied,
+        "the grant must change the compiled filter; an identical program means \
+         the roots were read and then ignored",
+    );
+}
+
+/// Negative control: without the roots the grant is not rendered at all.
+#[test]
+fn local_ipc_is_withheld_without_socket_roots() {
+    let root = tempfile::tempdir().expect("root");
+    let mut policy = local_ipc_policy(root.path());
+    policy.process_sandbox = Default::default();
+    assert!(
+        !unix_socket_local_ipc_grant(&policy),
+        "no socket roots must mean no local-IPC grant",
+    );
+    assert!(
+        !allowed_syscalls(&policy).contains(&libc::SYS_socket),
+        "an ungranted policy must not be able to create a socket at all",
+    );
+}
+
+/// A policy that already permits networking is not re-decided here.
+///
+/// It holds `connect` for its own reasons, and quietly taking that away in the
+/// name of a Unix-socket term would remove authority the policy was granted.
+#[test]
+fn local_ipc_defers_to_a_policy_that_already_permits_networking() {
+    let root = tempfile::tempdir().expect("root");
+    let mut policy = local_ipc_policy(root.path());
+    policy.side_effect_level = Some("network".to_string());
+    assert!(
+        !unix_socket_local_ipc_grant(&policy),
+        "a network-permitting policy must keep the ceiling its own level gave it",
+    );
+    assert!(
+        allowed_syscalls(&policy).contains(&libc::SYS_connect),
+        "the network ceiling still owns connect",
+    );
+}
+
+/// The reported disposition tracks what the backend did, in all three states.
+///
+/// A receipt that always said the same thing would be decoration. Each arm
+/// here corresponds to a different code path above, so a change that stops
+/// applying a scope cannot keep reporting one.
+#[test]
+fn unix_socket_disposition_is_reported_per_decision() {
+    let root = tempfile::tempdir().expect("root");
+
+    let mut none = linux_policy_with_workspace_ops(&["read_text"]);
+    none.side_effect_level = Some("process_exec".to_string());
+    assert_eq!(
+        crate::stdlib::sandbox::unix_socket_enforcement(&none),
+        crate::orchestration::UnixSocketEnforcement::NotRequested,
+    );
+
+    let granted = local_ipc_policy(root.path());
+    assert_eq!(
+        crate::stdlib::sandbox::unix_socket_enforcement(&granted),
+        crate::orchestration::UnixSocketEnforcement::ServeOnly,
+        "Linux cannot scope a connection by path, so it must report the \
+         narrower shape it actually applied rather than claiming path scoping",
+    );
+
+    let mut networked = granted.clone();
+    networked.side_effect_level = Some("network".to_string());
+    assert_eq!(
+        crate::stdlib::sandbox::unix_socket_enforcement(&networked),
+        crate::orchestration::UnixSocketEnforcement::SupersededByNetworkGrant,
+        "roots that narrow nothing must say so rather than imply a scope",
+    );
+}
+
 #[test]
 fn seccomp_filter_is_default_deny_allowlist() {
-    let filter = compile_seccomp_program(&[libc::SYS_read, libc::SYS_write])
-        .expect("compile the probe filter");
+    let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
+    policy.side_effect_level = Some("read_only".to_string());
+    let filter = compile_seccomp_program(&policy).expect("compile the probe filter");
     assert_eq!(
         filter.last().map(|entry| entry.k),
         Some(libc::SECCOMP_RET_ERRNO | libc::EPERM as u32),
@@ -742,6 +860,74 @@ fn proc_runtime_reads_require_restricted_yama_scope() {
             "scope {unsafe_or_unknown} must not grant procfs reads",
         );
     }
+}
+
+/// Live conformance for process self-introspection, both directions.
+///
+/// `/bin/ls /proc/self/task` is the smallest command that needs a directory
+/// read below procfs and nothing else, and it is the exact operation a managed
+/// build engine performs while identifying itself. The two branches cannot
+/// both pass: with the grant the enumeration must succeed, and without it the
+/// same command against the same kernel must fail. A host that cannot enforce
+/// Landlock takes the gate's decision rather than quietly passing, because an
+/// unconfined child enumerates procfs happily and that reads as a grant.
+#[test]
+fn process_self_introspection_grant_controls_live_procfs_enumeration() {
+    let _guard = handler_sandbox_test_guard();
+    let lsm = active_lsm_list();
+    match landlock_gate(
+        LiveLandlock::probe(),
+        live_landlock_required(),
+        "process_self_introspection_grant_controls_live_procfs_enumeration",
+        &lsm,
+    ) {
+        LandlockGate::Proceed => {}
+        LandlockGate::Skip(reason) => {
+            eprintln!("{reason}");
+            return;
+        }
+        LandlockGate::Fail(reason) => panic!("{reason}"),
+    }
+
+    let workspace = tempfile::tempdir().expect("workspace");
+    let args = vec!["/proc/self/task".to_string()];
+    let run_probe = |policy: &CapabilityPolicy| {
+        let mut command = Command::new("/bin/ls");
+        command.args(&args).current_dir(workspace.path());
+        let preparation = Backend::prepare_std_command(
+            "/bin/ls",
+            &args,
+            &mut command,
+            policy,
+            SandboxProfile::Worktree,
+        )
+        .expect("prepare sandboxed child");
+        assert!(matches!(preparation, PrepareOutcome::Direct));
+        command.output().expect("run sandboxed child")
+    };
+
+    let mut withheld = linux_policy_with_workspace_ops(&["read_text"]);
+    withheld.workspace_roots = vec![workspace.path().display().to_string()];
+    withheld.side_effect_level = Some("process_exec".to_string());
+    let withheld_output = run_probe(&withheld);
+    assert!(
+        !withheld_output.status.success(),
+        "procfs enumeration must be denied without the grant, otherwise the \
+         grant is measuring nothing: {}",
+        String::from_utf8_lossy(&withheld_output.stderr),
+    );
+
+    let mut granted = withheld.clone();
+    granted.process_sandbox = Box::new(crate::orchestration::ProcessSandboxPolicy {
+        allow_process_self_introspection: true,
+        ..Default::default()
+    });
+    let granted_output = run_probe(&granted);
+    assert!(
+        granted_output.status.success(),
+        "the grant must let a child enumerate its own procfs entries: {}",
+        String::from_utf8_lossy(&granted_output.stderr),
+    );
 }
 
 // ---- complement enumeration: how a denial is expressed without a deny rule
