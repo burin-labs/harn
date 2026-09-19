@@ -9,6 +9,78 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.139
+
+### Fixed
+
+- A tool descriptor that spells its `parameters` map as a JSON Schema document is
+  now refused rather than read as parameters literally named `type`, `properties`
+  and `required`. The registry refuses the shape when it builds, and the new
+  `schema-shaped-tool-parameters` lint rule reports it at check time even in
+  descriptor literals whose consumer reads `parameters` as a schema. Pass a
+  complete schema as `inputSchema` and keep `parameters` for named parameters.
+- A confined child on Linux can now serve local IPC over a Unix-domain socket
+  and enumerate its own entries in the process filesystem, which build tools do
+  before they read any configuration. Both grants were previously refused
+  outright, so toolchains that need them could not start and reported an
+  internal build error rather than a denial. The socket grant admits creating,
+  binding, listening and accepting inside the named roots, contains abstract
+  sockets inside the sandbox, and continues to refuse connecting, because no
+  kernel interface scopes a connection to a socket file by path and a child
+  permitted to connect would reach every socket its user can open. The receipt
+  now names which of those shapes a backend applied instead of leaving a reader
+  to infer it from the platform.
+- **AWS Smithy types now resolve across the whole compatible range (#8436).**
+  The published `cloud-aws` feature bounded Smithy types to one exact release,
+  which blocked patch fixes and desynchronized from the package-verify contract
+  whenever a dependency update rewrote it. The bound is now the range the
+  constraint actually describes: below 1.7.
+- **A package-verify dependency contract may now declare no minimum (#8436).**
+  A constraint that names the first version that breaks has no floor to pin,
+  and pinning one anyway conflicts with whichever sibling crate in the same
+  published graph raised its own floor last. Such a contract is still checked
+  against the newest admitted resolution and still reports its receipt.
+- **A refused tool call now always records whether the automated reviewer
+  answered it (#8439).** Under an `auto_review` resolver the seam that offers a
+  refusal to the reviewer used to decline in silence, so a run whose reviewer
+  was never installed and a run that never wanted one produced identical
+  records. The refusal then reached the host and was filed as a bare
+  `host_rejected`, naming the last layer to say no rather than the layer that
+  was supposed to answer first. Every declined refusal now carries an
+  `auto_review` annotation with `reviewer_answered` and, when no verdict was
+  obtained, the `unavailable_reason` that says which decline path fired.
+- **The shell guard answers the worktree rule for the repository a command
+  targets (#8447).** The admission census measured the directory the guard is
+  installed in, so a command aimed at another repository was judged by this
+  one and told to run an admission command that does not exist where it
+  pointed. The wrapper now reports one row per repository the command could
+  mean and the guard picks the row for the target it resolves from `-C`. A
+  target no row covers is refused as unmeasured rather than read as a
+  repository that owns nothing.
+- The shell guard adapter denies a command when the policy fails to produce a
+  verdict, naming the failure, instead of reporting silence the host reads as
+  an allow. A missing interpreter still allows, decided before any policy runs,
+  and now says on stderr that the guard is off.
+- A completed command releases its artifact active-lease descriptor instead of
+  holding it until the artifact is retired, so a long session no longer runs
+  out of file descriptors after a few hundred commands.
+- CI reports the compiler cache on every runner tier instead of one, and
+  measures each job against a baseline taken before its first compile. A tier
+  left out of that guard produced no counters at all, and a run with no
+  counters was indistinguishable from one with a warm cache, so a fully cold
+  build reported as a clean pass.
+- `harn check` resolves a value name in the scope that can actually see it. A
+  reference to a binding that lives only inside another function is now
+  reported, instead of passing the checker and failing at runtime the first
+  time that branch executes.
+- **A refusal the automated reviewer answered is no longer credited to a
+  person.** When a reviewer refused a call, the refusal still travelled on to
+  the host, and a host that returns no decision metadata defaults the recorded
+  decider to `person`. In a non-interactive run that credited a decision nobody
+  made, on a call the reviewer had already settled, while the same record
+  carried the reviewer's own verdict and rationale. The reviewer is now named
+  as the decider whenever it answered.
+
 ## v0.10.138
 
 ### Added
