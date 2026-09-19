@@ -234,6 +234,7 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
                     cleanup: None,
                     environment_policy: Default::default(),
                     grants: Vec::new(),
+                    admitted_environment: Vec::new(),
                 },
             ));
             let execution_result = match vm.execute(&chunk).await {

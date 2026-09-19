@@ -306,6 +306,7 @@ async fn execute_compiled(
                     cleanup: None,
                     environment_policy: Default::default(),
                     grants: Vec::new(),
+                    admitted_environment: Vec::new(),
                 },
             ));
             if let Some(ref root) = project_root {
