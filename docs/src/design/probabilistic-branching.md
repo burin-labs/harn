@@ -184,11 +184,15 @@ same limits.
 ### Model execution
 
 The initial implementation uses the existing structured LLM transport. A
-`PredicatePolicy` fixes the provider route, resolved model ID, effort, threshold,
-token bounds, deadline and admitted budget handle. There is no ambient actor-model
-fallback. Effort is explicit; examples assume `low`. Temperature is exactly `0`.
-An endpoint that cannot honor that combination returns `unsupported_options`,
-rather than silently dropping a parameter. Model selection remains catalog-owned.
+`PredicatePolicy` fixes the provider route, resolved model ID, threshold,
+resource bounds, deadline and admitted budget handle. Its backend configuration
+is a closed variant: `structured_llm` or, when implemented, `native_decision`.
+There is no ambient actor-model fallback. The `structured_llm` variant requires
+explicit effort (examples assume `low`) and temperature exactly `0`. An endpoint
+that cannot honor that combination returns `unsupported_options`, rather than
+silently dropping a parameter. The `native_decision` variant cannot carry either
+setting unless its operation contract explicitly supports it. Model selection
+remains catalog-owned.
 
 Provider calls use strict schema validation. Transport retries, schema retries,
 LLM repair, tool use, conversation continuation, and provider failover are disabled
@@ -202,8 +206,113 @@ answer cannot satisfy a generated `evidence: string` contract directly. A future
 adapter may produce an input-reference string mechanically and mark
 `evidence_kind: "input_reference"`; an LLM result uses `"model_rationale"`.
 It must not invent a rationale or make a second hidden text-model call. The
-receipt records raw probability semantics and their conversion. No Jev route
+receipt records raw probability semantics and their conversion. No Harn Jev route
 support or cross-provider confidence equivalence is claimed by this dossier.
+
+### Provider catalog ownership and model operations
+
+The existing TOML sources remain authoritative. Provider connection and auth
+metadata belong in `crates/harn-vm/src/llm/catalog_sources/10-providers/`;
+served model rows belong in `catalog_sources/60-models/`; routing and aliases
+stay in their existing fragments. Operation support and request constraints
+belong in `crates/harn-vm/src/llm/capability_sources/`. The generated
+`providers.toml`, `capabilities.toml`, and `spec/provider-catalog/` artifacts
+are projections, not additional editing surfaces.
+
+The catalog should describe what a model can do with a typed set of operation
+contracts, rather than one mutually exclusive `model_type = "llm"` switch.
+A model can support several operations. The first registry members cover real
+existing or proposed paths: `text_generation`, `embedding`, and
+`decision_evaluation`. Each member has a closed request/result contract and
+operation-specific settings. A decision operation records its supported question
+kinds, such as boolean, choice, and score; the predicate expression initially
+uses only boolean questions. A classifier returning one fixed label set is not
+automatically able to answer arbitrary natural-language predicates.
+
+There is no universal probability or evidence-string requirement on all model
+operations. An embedding returns a vector; segmentation would return a mask;
+ordinary image processing may be deterministic. Each operation declares the
+uncertainty information its result actually carries. `PredicateOutcome` belongs
+to predicate evaluation, not to every service in the catalog.
+
+Keep these independent facts separate:
+
+| Fact | Owner and use |
+| --- | --- |
+| Operation | Typed capability contract; determines whether a route can perform the requested job. |
+| Input/output kinds | Operation contract, such as text/JSON in and decision out; future image inputs do not imply image generation. |
+| Serving protocol | Typed operation transport binding; determines endpoint and encoding. A gateway can serve chat and decisions through different endpoints. |
+| Architecture | Existing optional `ModelArchitectureDef` metadata; unknown stays unknown. Transformer, diffusion, or tree-based internals do not select a transport or grant a capability. |
+| Limits and accounting | Operation-specific bounds plus existing route prices, quotas and data controls. A zero output-token rate is different from absent usage. |
+
+For example, this is a proposed capability fragment, not valid configuration for
+the current release:
+
+```toml
+[[provider.typesafe]]
+model_match = "jev-1.13.0"
+
+[provider.typesafe.operations.decision_evaluation]
+implementation = "native"
+protocol = "typesafe_system_one"
+question_kinds = ["boolean", "choice", "score"]
+input_kinds = ["text", "json"]
+evidence_kind = "input_reference"
+```
+
+The same logical model needs distinct served rows and capability rules for the
+direct route and each supported gateway. Reuse `wire_model`, `logical_model`,
+`served_variant`, snapshot/alias metadata, and route-specific limits/pricing.
+An aggregator's generic chat wildcard must not admit a decision-only model as
+a coding driver. The operation selects the endpoint before transport:
+TypeSafe documents `/v1/systemone`, OpenRouter's decision client uses
+`/api/alpha/decisions`, and Vercel documents `/v1/evaluate` plus a TypeSafe-shaped
+compatibility API. These are not interchangeable chat endpoints.
+[TypeSafe API][jev-api], [OpenRouter client][openrouter-decisions],
+[Gateway evaluation][gateway-evaluation], [compatibility API][gateway-typesafe].
+
+For a structured LLM backend, the evaluator consumes a declared text-generation
+operation with the required schema/options support. It must not label that route
+as a native decision model. Both backends project to `PredicateOutcome`; their
+probability provenance, evidence kind, supported settings and calibration remain
+distinct. Switching the backend keeps the caller's outcome interface but still
+requires a task-specific quality check and a new cache identity.
+
+The catalog schema extension must reconcile existing fields at the owning
+normalization boundary. Today `api_dialect` is a top-level optional string,
+capabilities include string labels, and `is_embedding_model()` infers its answer
+from `embedding_dim`. Introduce typed operation contracts, mechanically migrate
+the existing text/embedding routes, and derive compatibility projections from
+that contract. Reject contradictory old/new fields in overrides. Do not leave
+two authoritative tests of whether a route is generative, embedding-only, or
+decision-capable. Strictly decode new contracts and refuse unknown required
+operations; never default them to text generation. Existing consumers must retain
+their previous route behavior under the migration, verified by parity fixtures.
+
+The extension generates Rust-facing catalog data, JSON/schema, Harn, TypeScript,
+Swift, provider matrix/support documentation, and downstream picker metadata
+together. Model pickers and automatic routing filter by the requested operation
+before applying tier or price preferences. A fast classifier does not become a
+general coding model because it is cheap or has a high advertised benchmark.
+Cross-route equivalence is not permission to reuse an evaluation or fall back;
+the explicit predicate policy and versioned identity still govern both.
+
+This leaves room for image classification, detection, segmentation, reranking,
+and conventional ML models without implementing speculative runtimes now. Add
+an operation only with a real owner, typed input/output, executor, and tests.
+A future image operation needs image limits and an image/request/compute billing
+unit; it must not masquerade as a token-based chat request. Such billing uses
+a typed meter in the existing accounting owner, not a second spending ledger.
+Harn need not embed model weights or an inference framework to describe an
+operation served by an existing host or HTTP service.
+
+Catalog verification must reach selection and the outgoing request, not merely
+prove that a plausible model ID resolves. Required counterexamples include an
+unserved sibling ID, a decision-only route requested as a chat driver, unsupported
+effort/temperature, a missing capability row beneath a broad gateway wildcard,
+and a changed operation surviving an overlay without being dropped. Each served
+route needs its own live capability evidence before it is marked supported;
+accepting an ignored option does not count as honoring it.
 
 ### Cache and determinism
 
@@ -215,8 +324,9 @@ of:
 ```text
 predicate text bytes + input schema fingerprint + canonical input value
 + provider route + resolved model ID/revision
-+ evaluator version + output schema version + effort + temperature
-+ confidence policy/calibration version + decoding/token options
++ operation + backend kind + protocol version + typed backend options
++ evaluator version + output schema version
++ confidence policy/calibration version + resource/decoding options
 ```
 
 Encoding is length-delimited and domain-separated, not string concatenation.
@@ -248,7 +358,8 @@ decisions. It is a replay contract, not a claim about repeated inference.
 
 ### Resource ceilings
 
-The proposed initial profile has these ceilings, independent of provider price:
+The proposed initial structured-LLM profile has these ceilings, independent of
+provider price:
 
 | Resource | Per evaluation | Per run predicate sub-budget |
 | --- | --- | --- |
@@ -278,6 +389,15 @@ not a guarantee about an external billing service. An unexpected provider charge
 is recorded as an accounting breach and stops further predicate dispatch.
 No background refresh, speculative calls, or automatic batching are included.
 
+A native-decision profile keeps the same physical-request, evaluation-count,
+deadline and parent-budget ceilings. It bounds encoded input and question count,
+and validates the fixed result's size. It admits cost from that operation's
+declared billing units and enforceable bounds, without inventing an unsupported
+LLM output-token option. A route with unknown request overhead, price, or an
+unbounded billed category remains unavailable until its admission bound is
+established. The gateway smoke below is API research, not proof of this budget
+admission implementation.
+
 ### Receipts and the run record
 
 The runtime appends `predicate_started` before dispatch and one settled
@@ -292,7 +412,8 @@ PredicateReceipt v1
   predicate_digest, input_type_digest, input_digest, request_key
   evaluator_version, output_schema_version, policy_digest
   requested_route, resolved_provider, resolved_model, model_revision?
-  effort, temperature, confidence_kind, calibration_id?, evidence_kind
+  operation, backend_kind, protocol_version, backend_options
+  confidence_kind, calibration_id?, evidence_kind
   source: live | cache | tape | fixture
   source_receipt_id?, tape_sequence?, fixture_id?
   outcome: PredicateOutcomePayload
@@ -307,6 +428,10 @@ and consumed; it does not certify the truth of the model's evidence. The caller'
 existing action/completion receipt links the evaluation ID when the result
 influences a decision. This makes an evaluated-but-unused predicate distinguishable
 from a predicate that actually selected a branch.
+
+`backend_options` is the same closed policy variant admitted before dispatch.
+It records effort/temperature for structured LLMs and the actual native settings
+for native decisions; absent controls are not reported as if they were honored.
 
 Cache/tape/fixture receipts report zero new provider attempts and retain source
 usage only as provenance. Run summaries include evaluated, accepted, uncertain,
@@ -574,10 +699,78 @@ is mandatory, so merely writing an unused receipt cannot satisfy adoption gates.
 The checker cannot decide whether an English predicate duplicates a typed rule;
 that remains a review obligation backed by the three regression contracts.
 
+Follow-up scrutiny found another way to launder authority: a decision-only model
+could inherit a gateway's generic chat/tool defaults. The catalog plan now makes
+operation admission typed, tests the missing-specific-rule case, and separates
+architecture metadata from execution capabilities. It also makes the size and
+tooling costs explicit rather than assuming a small parser change is sufficient.
+
 The second pass also tightened the syntax tradeoff: the proposed compiler work
 must demonstrate site manifests and type diagnostics
 that a library alone would not supply. Otherwise the library alternative wins.
 That is a falsifiable reason for syntax, not a presumption that new keywords help.
+
+## Tooling, portability and distribution
+
+New syntax has a language-wide cost even when the runtime reuses existing
+services. The first implementation PR must inventory all expression visitors and
+generated language projections; a parser-only success is not feature support.
+
+| Surface | Required change and evidence |
+| --- | --- |
+| Lexer/scanner, parser and type checker | Preserve existing uses of the identifier `predicate`; recognize the contextual expression, validate the closed input/policy, and require outcome narrowing. Positive and malformed-source fixtures cover the canonical frontend and tree-sitter scanner. |
+| Compiler, IR, kernel and VM | Lower one expression to one declared evaluator effect with stable source/type identity. The native and portable compilers agree on the operation; unsupported execution refuses explicitly. Check helper calls and nested workers, not only top-level examples. |
+| WebAssembly | Reuse `harn-kernel` and the shared frontend through `harn-wasm`. A host handles capability suspension/resumption and credentials. The Wasm artifact contains no model weights, provider secrets, or second evaluator. Offline response, cancellation, denied capability, and missing-host cases need browser-worker coverage. |
+| Linter and formatter | Every expression walker visits the input and policy. Formatting round-trips preserve question bytes and predicate identity. Diagnostics distinguish illegal boolean use, unsupported options, and an unused result without treating model evidence as a type proof. |
+| Language server and VS Code | Completion, hover, diagnostics, source spans and formatting use the same contract. Regenerate highlighting vocabulary/TextMate/tree-sitter projections and test the extension's language-server surface. No provider calls occur while editing. |
+| Documentation and skills | Update the language reference, separate how-to, tested examples and authoring/testing skills. Generated provider documentation distinguishes native decisions from a structured LLM adapter. |
+| Catalog consumers and model pickers | Generate the existing JSON/schema, Harn, TypeScript and Swift projections. Test that a decision-only route cannot be selected as a text driver and that unknown operation variants fail explicitly. |
+
+The intended implementation adds protocol adapters and ordinary control logic,
+reusing the current HTTP/JSON, cache, journal and budget owners. It does not add
+an inference engine, tokenizer package, model weights, or another SDK dependency
+by default. Community Rust clients exist, but adopting one requires evidence
+that it improves the seam without introducing hidden retries or redundant
+transport; a thin adapter over the existing client is the initial recommendation.
+[Community Rust client][jev-rust]
+
+Binary growth is unmeasured until implementation. Compare before/after native
+release artifacts with identical target, features, compiler, LTO, stripping and
+embedded stdlib/AOT configuration, using the existing release-size policy and
+section attribution. Also compare the raw and compressed browser Wasm artifact
+under identical settings. Missing or incomparable artifacts are an unmeasured
+result, not zero growth. Report byte deltas and new dependencies with each
+affected implementation step; reuse CI artifacts rather than commissioning
+duplicate release builds. Any multi-megabyte native increase requires explicit
+attribution and design review before proceeding. It must not be concealed by
+raising a size baseline. No precise byte saving or ceiling is claimed here.
+
+## Gateway smoke and adoption boundary
+
+Six synthetic API calls exercised the three worked questions through two
+gateways, each call containing one clear positive and one clear negative case.
+All calls returned finite probabilities in range; the twelve answers selected
+the expected side at a 0.5 threshold. Observed wall time ranged from 276 to
+1,082 milliseconds. These are deliberately easy reachability examples, not
+held-out quality measurements or canonical Harn-path tests.
+
+The observed model identities differed: one gateway returned a dated model ID,
+while the other returned a moving alias. Probabilities also differed on the same
+examples. That does not identify the cause, establish confidence calibration,
+or prove immutable weights behind a dated name. It reinforces the requirement
+to record the actual route, response identity and probability semantics, and to
+keep cross-run reuse disabled without an immutable revision contract.
+
+The initial downstream adoption should annotate review findings while the
+existing review process still decides whether they block. Measure false
+positives, missed findings and abstentions before making the assessment
+authoritative. Automatic command review comes later: the current reviewer
+classifies risk and authorization, then deterministic policy computes permission.
+A boolean predicate cannot replace that whole contract. A native replacement
+needs typed classifications, preserved permission floors, outcome evidence and
+a held-out safety corpus; low confidence or unavailable service must escalate
+through the existing approval path. This sequence gives the mechanism a real
+consumer while keeping unproven classification away from automatic grants.
 
 ## Implementation sequence
 
@@ -588,10 +781,10 @@ targets; generated grammar output is additional. Dependencies are sequential.
 
 | PR | Owning change and estimated size | Falsifier and negative control | Required gate |
 | --- | --- | --- | --- |
-| 1. Parser and checker | Contextual expression, typed site manifest, outcome union, capability lowering, spec and editor grammar. Roughly 700–1,200 lines. Until runtime support lands, execution refuses explicitly. | Positive and negative parser/type fixtures; deleting the outcome/type restriction must admit an illegal direct boolean or nonserializable input. No provider call is possible in this PR. | Focused parser/checker tests, `harn check`, conformance, Harn lint/format, tree-sitter and generated-spec drift. |
-| 2. Runtime and receipt | One evaluator using existing structured transport, strict outcome conversion, reservations, cancellation, journal/projection. Roughly 900–1,500 lines. Raw provider tapes supply hermetic responses from the start. | A malformed response, no model, accepted stop or exhausted budget cannot select a branch; disabling admission must dispatch the forbidden request. Assert emitted and consumed receipt IDs through a helper call too. | Runtime mechanism contracts, `harn check`, conformance, run-record projection tests and binary drift. |
+| 1. Parser, checker and catalog contract | Contextual expression, typed site manifest, outcome union, capability lowering, typed model-operation schema and migration, spec, expression visitors and editor grammar. Roughly 1,200–2,200 lines. Until runtime support lands, execution refuses explicitly. | Positive and negative parser/type fixtures; deleting the outcome/type restriction admits an illegal direct boolean or nonserializable input. Removing operation admission admits a decision-only chat driver. Existing text/embedding routes retain their behavior. No provider call is possible in this PR. | Focused parser/checker tests, `harn check`, conformance, Harn lint/format, tree-sitter/LSP/extension checks, catalog/matrix/support generation checks and schema round-trips. |
+| 2. Runtime and receipt | One evaluator using existing structured transport, strict outcome conversion, reservations, cancellation, journal/projection and portable host suspension. Roughly 1,200–2,000 lines. Raw provider tapes supply hermetic responses from the start; the catalog does not advertise a native executor before it exists. | A malformed response, no model, accepted stop or exhausted budget cannot select a branch; disabling admission dispatches the forbidden request. Assert emitted and consumed receipt IDs through a helper call and the portable host boundary. | Runtime mechanism contracts, `harn check`, conformance, Wasm/browser-worker coverage, run-record projection, binary drift and comparable native/Wasm size reports. |
 | 3. Cache and tape | Versioned typed key, isolated namespace, single-flight cache, predicate tape record and strict fixture consumption. Roughly 700–1,200 lines. | Same key makes one physical request; changed input/schema/model/policy misses; replay with deleted/extra entry fails with zero live calls. Disabling mismatch checking must expose incorrect replay. | Cache/replay/fidelity contracts, `harn check`, conformance and tape-version compatibility tests. |
-| 4. Stdlib helpers | Typed outcome policies, declared fixture helper, generic review/deliverable/census examples. Roughly 350–650 lines. No existing rule replacement. | Positive predicate plus red deterministic evidence stays blocked in all three worked contracts; removing each deterministic guard exposes a false accept. | Owning Harn tests, `harn check`, conformance, strict public-return checks and mechanism contracts. |
+| 4. Stdlib helpers | Typed outcome policies, declared fixture helper, generic review/deliverable/census examples. Roughly 350–650 lines. No existing rule replacement. | Positive predicate plus red deterministic evidence stays blocked in all three worked contracts; removing each deterministic guard exposes a false accept. | Owning Harn tests, `harn check`, conformance, strict public-return checks, mechanism contracts and embedded-stdlib size attribution. |
 | 5. Documentation and skill | Current-language reference, separate how-to, checked examples, language/testing skills and user-visible limits. Roughly 250–450 lines. | Published examples run from a clean offline fixture set; remove a fixture and the documented run fails for the named reason. | Documentation snippets, symbols/links, `harn check`, conformance and source drift. |
 
 No new dependency is assumed. Any proposed dependency requires a cargo-deny pass
@@ -599,11 +792,22 @@ before that PR is accepted. One implementation PR advances at a time. Downstream
 adoption follows a released dependency update and its own reviewed PR; it does not
 change this sequence into permission to replace deterministic policy.
 
+Native decision adapters follow as a separately reviewed implementation step
+before native downstream adoption, estimated at 400–800 lines per distinct wire
+protocol including tests. They reuse the operation contract and require live
+route evidence, exact request/response tapes, usage admission, option refusal,
+no hidden retries, catalog regeneration and a comparable size report. The
+falsifier requests an unsupported option or an unserved neighboring model and
+asserts zero provider dispatch. Removing capability admission must make that
+forbidden dispatch observable. Native model-family inference is never a
+substitute for this route-specific contract.
+
 ## Evidence gaps
 
-No production model calls were made for this dossier. Semantic accuracy,
-confidence calibration, latency and actual cost for the three questions are
-unmeasured. The native Jev adapter, portable capability transport, concurrent
+The synthetic gateway smoke proves API access and basic answer shape only.
+Semantic accuracy, confidence calibration, representative latency and invoice
+cost for real workloads remain unmeasured. The native Jev adapter, portable
+capability transport, concurrent
 reservation behavior, and crash recovery remain implementation obligations.
 The proposed grammar has not been added to the parser. Review must resolve
 whether its compiler-visible benefits justify the language surface before any
@@ -614,6 +818,11 @@ implementation claim is made.
 [jev-confidence]: https://docs.typesafe.ai/confidence
 [jev-sdk]: https://github.com/typesafe-ai/typesafe-sdk-python/tree/2ce5c65f13646cab6e6f782328194c9d85f3300a
 [jev-adapter]: https://github.com/typesafe-ai/system-one-adapter-python/tree/adffc2eab300a4fa3c0e92252d4ffd6ceaa53700
+[jev-api]: https://docs.typesafe.ai/api
+[jev-rust]: https://github.com/gilljon/typesafe-ai-rs
+[openrouter-decisions]: https://github.com/OpenRouterTeam/typescript-sdk/blob/main/src/funcs/alphaDecisionsCreate.ts
+[gateway-evaluation]: https://vercel.com/docs/ai-gateway/modalities/evaluation
+[gateway-typesafe]: https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe
 [probably]: https://probably-lang.southpolesteve.workers.dev/
 [probably-source]: https://probably-lang.southpolesteve.workers.dev/probably-source.zip
 [dspy-signatures]: https://github.com/stanfordnlp/dspy/blob/40a6e168914a7b81a78b1a081d93f26de18c8d0d/docs/docs/learn/programming/signatures.md
