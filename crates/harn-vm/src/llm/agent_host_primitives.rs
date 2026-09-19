@@ -1223,26 +1223,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         resolution,
                     );
                 }
-                HostPermissionOutcome::Rejected {
-                    reason,
-                    mut resolution,
-                } => {
-                    // A reviewer that answered owns this refusal. The host was
-                    // still asked, and its answer is recorded, but a host that
-                    // returns no decision metadata is attributed to a person by
-                    // default -- which in a run with no person present credits a
-                    // decision nobody made, on a call the reviewer had already
-                    // settled. Name the layer that actually decided.
-                    if crate::orchestration::reviewer_refused(&decision) {
-                        resolution.decider =
-                            crate::orchestration::ToolPermissionDecider::AutoReviewer;
-                    }
+                HostPermissionOutcome::Rejected { reason, resolution } => {
                     emit_runtime_resolved_activity(
                         &session_id,
                         &approval_id,
                         &tool_name,
                         &decision,
-                        resolution,
+                        host_permission::attribute_reviewer_refusal(&decision, resolution),
                     );
                     let denial = crate::agent_events::ToolDenial::terminal(
                         crate::agent_events::DenialGate::HostRejected,
