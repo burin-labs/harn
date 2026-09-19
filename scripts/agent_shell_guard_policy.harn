@@ -50,3 +50,27 @@ pub const WORKTREE_ADMISSION_POLICY: WorktreeAdmissionPolicy = {
   repository_markers: [".git"],
   max_root_walk: 12,
 }
+
+/**
+ * A build command whose setup a repository's root Makefile may own.
+ *
+ * `cargo` is handled separately and unconditionally, because every repository
+ * that wires this guard is a Cargo workspace with those targets. Other build
+ * tools are not universal: a repository with no `swift-build` target cannot be
+ * told to run one. So these rules only fire when the wrapper has measured that
+ * the root Makefile really declares the target, which keeps the guard from
+ * naming a command the operator does not have.
+ *
+ * `program` is the executable basename, `verb` its first non-option argument,
+ * `target` the Make target that owns the same work, and `escape` the
+ * assignment that releases one command from the rule. The escape is spelled
+ * out rather than derived from `program`: the guard runs in a standalone hook
+ * host that permits no string-case builtin, and a rule whose escape hatch can
+ * only be computed is a rule that faults instead of deciding.
+ */
+pub type MakeOwnedCommandRule = {program: string, verb: string, target: string, escape: string}
+
+pub const MAKE_OWNED_COMMAND_RULES: list<MakeOwnedCommandRule> = [
+  {program: "swift", verb: "build", target: "swift-build", escape: "HARN_ALLOW_RAW_SWIFT=1"},
+  {program: "swift", verb: "test", target: "swift-test", escape: "HARN_ALLOW_RAW_SWIFT=1"},
+]

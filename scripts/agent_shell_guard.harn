@@ -16,10 +16,18 @@
 //      owning admission command so the remote lease, private ledger, recovery
 //      journal, and filesystem projection cannot diverge.
 //
+//   4. Bare `swift build` / `swift test`, and any other build tool whose setup
+//      a repository's root Makefile owns. Unlike Cargo these are not universal,
+//      so the rule fires only against a target the wrapper measured to exist.
+//
 // Contract: reads a Codex or Claude PreToolUse payload on stdin, prints a
 // permission decision on stdout. Exit status is always 0 — a crashed guard
 // must not look like a denial.
-import { DISPOSABLE_PATH_POLICY, WORKTREE_ADMISSION_POLICY } from "./agent_shell_guard_policy"
+import {
+  DISPOSABLE_PATH_POLICY,
+  MAKE_OWNED_COMMAND_RULES,
+  WORKTREE_ADMISSION_POLICY,
+} from "./agent_shell_guard_policy"
 
 // Commands whose full output is worth keeping. Grepping any of these through a
 // pipe without a redirect is what forces a rerun.
@@ -107,6 +115,99 @@ pub fn cargo_violation(command: string) -> string {
         + target
         + "` instead. "
         + "For a genuine one-off, set HARN_ALLOW_RAW_CARGO=1 in the command."
+    }
+  }
+  return ""
+}
+
+/**
+ * The Make targets the wrapper found in the repository's root Makefile.
+ *
+ * `checked` false means nobody looked, which is NOT the same as a repository
+ * that declares no targets. The distinction decides the opposite way from the
+ * worktree rule, and deliberately: refusing `git worktree add` on an unreadable
+ * census is safe because the harm it prevents is real wherever it fires, while
+ * refusing `swift build` on an unreadable census would send the operator to a
+ * Make target that may not exist. An unmeasured repository therefore allows,
+ * and the rule is inert rather than wrong.
+ */
+pub type MakeTargetCensus = {checked: bool, targets: list<string>}
+
+pub const UNMEASURED_MAKE_TARGETS: MakeTargetCensus = {checked: false, targets: []}
+
+pub const MAKE_TARGETS_ENV: string = "HARN_EXT_SHELL_GUARD_MAKE_TARGETS"
+
+pub const MAKE_TARGETS_CHECKED_ENV: string = "HARN_EXT_SHELL_GUARD_MAKE_TARGETS_CHECKED"
+
+/** Parse the whitespace-separated target list the wrapper reports. */
+pub fn make_target_census(checked: string, reported: string) -> MakeTargetCensus {
+  if checked != "1" {
+    return UNMEASURED_MAKE_TARGETS
+  }
+  let targets: list<string> = []
+  for line in reported.split("\n") {
+    for word in line.split(" ") {
+      const name = word.trim()
+      if name != "" && !targets.contains(name) {
+        targets = targets + [name]
+      }
+    }
+  }
+  return {checked: true, targets: targets}
+}
+
+pub fn make_target_census_from_env(env: HarnessEnv) -> MakeTargetCensus {
+  return make_target_census(
+    to_string(env.get(MAKE_TARGETS_CHECKED_ENV) ?? ""),
+    to_string(env.get(MAKE_TARGETS_ENV) ?? ""),
+  )
+}
+
+/** The first non-option argument of a stage, which is the tool's verb. */
+fn stage_verb(argv: list<string>) -> string {
+  for token in argv.slice(1, len(argv)) {
+    if token.starts_with("-") {
+      continue
+    }
+    return token
+  }
+  return ""
+}
+
+/**
+ * Refuse a build command whose Make target this repository is measured to own.
+ *
+ * Nothing fires without a measurement: an unmeasured census, or one that does
+ * not list the target, allows. That is the whole point of the rule — a
+ * repository that has no `swift-test` target must never be told to run one.
+ */
+pub fn make_owned_command_violation(command: string, census: MakeTargetCensus) -> string {
+  if !census.checked {
+    return ""
+  }
+  for group in command_groups(command) {
+    for stage in group {
+      const argv = launched_argv(stage.argv, 0)
+      const program = argv_program(argv)
+      const verb = stage_verb(argv)
+      for rule in MAKE_OWNED_COMMAND_RULES {
+        if program != rule.program || verb != rule.verb {
+          continue
+        }
+        if !census.targets.contains(rule.target) {
+          continue
+        }
+        if command.contains(rule.escape) {
+          continue
+        }
+        return "`" + rule.program + " " + rule.verb + "` bypasses the repository Make target, "
+          + "including the build limit and environment it sets. Run `make "
+          + rule.target
+          + "` instead, passing a focused selection with ARGS=... . "
+          + "For a genuine one-off, set "
+          + rule.escape
+          + " in the command."
+      }
     }
   }
   return ""
@@ -576,7 +677,11 @@ fn admission_of(row: WorktreeAdmissionRow) -> WorktreeAdmission {
   return {available: true, command: row.command, denial: ""}
 }
 
-pub fn decision(payload: string, census: WorktreeAdmissionCensus) -> ShellGuardDecision {
+pub fn decision(
+  payload: string,
+  census: WorktreeAdmissionCensus,
+  make_targets: MakeTargetCensus,
+) -> ShellGuardDecision {
   let parsed = nil
   try {
     parsed = json_parse(payload)
@@ -621,6 +726,10 @@ pub fn decision(payload: string, census: WorktreeAdmissionCensus) -> ShellGuardD
       return {allow: false, reason: cargo}
     }
   }
+  const make_owned = make_owned_command_violation(command, make_targets)
+  if make_owned != "" {
+    return {allow: false, reason: make_owned}
+  }
   const disposable_trash = disposable_trash_violation(command)
   if disposable_trash != "" {
     return {allow: false, reason: disposable_trash}
@@ -637,7 +746,11 @@ fn main(harness: Harness) {
   // Harness capability since before the oldest release this adapter supports.
   const input = harness.stdio.read_line({trim: false})
   const payload = input.value ?? ""
-  const verdict = decision(payload, worktree_admission_census_from_env(harness.env))
+  const verdict = decision(
+    payload,
+    worktree_admission_census_from_env(harness.env),
+    make_target_census_from_env(harness.env),
+  )
   if verdict.allow {
     return nil
   }

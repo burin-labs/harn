@@ -121,7 +121,12 @@ guard_command=(
   "$harn_runner" run
 )
 [[ "$harn_mode" == "standalone" ]] && guard_command+=(--standalone)
-guard_command+=(--allow=command_risk_scan "$script_dir/agent_shell_guard.harn")
+# `lowercase` folds Windows path spellings before the disposable-path match.
+# Standalone mode permits no builtin that is not granted, and an ungranted one
+# does not degrade: it throws, the adapter fails closed, and every `trash`
+# command outside a POSIX temp root is refused with an interpreter error in
+# place of a rule. The unit tests never saw it because they run in a full host.
+guard_command+=(--allow=command_risk_scan,lowercase "$script_dir/agent_shell_guard.harn")
 
 # The worktree rule may only name an admission command this repository actually
 # has. The guard runs in a hook host with no filesystem builtin, so the answer
@@ -188,6 +193,21 @@ done < <(tr -c '[:alnum:]/._@+~-' '\n' <"$payload_file" | grep '^/' | sort -u)
 HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION="$guard_admission_rows"
 export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION
 export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION_CHECKED=1
+
+# The Make targets this repository declares. A build tool that is not universal
+# (`swift`, unlike `cargo`) may only be redirected to a target that exists, and
+# the guard cannot read the filesystem to find out. Read the phony and rule
+# declarations of the root Makefile: a name at the start of a line followed by
+# `:`, excluding `:=` assignments and the dot-prefixed directives.
+guard_make_targets=""
+if [[ -f "$guard_repo_root/Makefile" ]]; then
+  guard_make_targets="$(
+    sed -n 's/^\([A-Za-z0-9][A-Za-z0-9._+-]*\)[[:space:]]*:[^=].*$/\1/p;s/^\([A-Za-z0-9][A-Za-z0-9._+-]*\)[[:space:]]*:$/\1/p' \
+      "$guard_repo_root/Makefile" 2>/dev/null | sort -u | tr '\n' ' '
+  )"
+fi
+export HARN_EXT_SHELL_GUARD_MAKE_TARGETS="$guard_make_targets"
+export HARN_EXT_SHELL_GUARD_MAKE_TARGETS_CHECKED=1
 
 # A PreToolUse hook holds the agent's shell call open for as long as it runs, so
 # the harness timeout is the wrong backstop: by the time it fires the agent has
