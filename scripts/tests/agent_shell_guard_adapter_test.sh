@@ -226,8 +226,10 @@ if kill -0 "$hanging_child_pid" 2>/dev/null; then
 fi
 
 # Timeout and signal-shaped exits mean the policy produced no trustworthy
-# decision, so all three statuses deny. Other interpreter failures remain
-# fail-open so a broken local runtime cannot lock every shell call.
+# decision, so all three statuses deny. Every other non-zero status after the
+# policy has started denies as well: the interpreter was present and runnable,
+# the evaluation failed, and no rule was applied. An absent or non-executable
+# interpreter is the one case that still allows, settled before the policy runs.
 cat >"$fixture_root/status-harn" <<'STUB'
 #!/usr/bin/env bash
 if [[ "${GUARD_PARTIAL:-0}" == "1" ]]; then
@@ -254,9 +256,40 @@ crash_output="$(
     | GUARD_PARTIAL=1 GUARD_STATUS=9 HARN_BIN="$fixture_root/status-harn" \
       "$fixture_root/scripts/agent-shell-guard.sh"
 )"
-if [[ -n "$crash_output" ]]; then
-  echo "adapter did not fail open after an interpreter crash" >&2
+if [[ "$crash_output" != *'"permissionDecision":"deny"'* ]]; then
+  echo "adapter did not deny after the policy crashed" >&2
   printf '%s\n' "$crash_output" >&2
+  exit 1
+fi
+if [[ "$crash_output" == *"must-not-escape"* ]]; then
+  echo "adapter let a partial verdict escape a crashed policy" >&2
+  printf '%s\n' "$crash_output" >&2
+  exit 1
+fi
+
+# A policy that throws is the shape that made this fail-open costly: the
+# in-process suite stays green because every rule still answers, while the
+# host reads the adapter's silence as an allow and runs the command. Keep the
+# throwing policy as a permanent fixture so that combination cannot return.
+mkdir -p "$fixture_root/throwing"
+cp "$repo_root/scripts/agent-shell-guard.sh" "$fixture_root/throwing/"
+cat >"$fixture_root/throwing/agent_shell_guard.harn" <<'HARN'
+fn main(harness: Harness) {
+  throw "deliberate top-of-decision fault"
+}
+HARN
+throw_output="$(
+  printf '%s' "$payload" \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/throwing/agent-shell-guard.sh"
+)"
+if [[ "$throw_output" != *'"permissionDecision":"deny"'* ]]; then
+  echo "adapter did not deny a policy that threw before deciding" >&2
+  printf '%s\n' "$throw_output" >&2
+  exit 1
+fi
+if [[ "$throw_output" != *"deliberate top-of-decision fault"* ]]; then
+  echo "adapter denied without naming the thrown reason" >&2
+  printf '%s\n' "$throw_output" >&2
   exit 1
 fi
 

@@ -15,7 +15,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 payload_file="$(mktemp "${TMPDIR:-/tmp}/agent-shell-guard.XXXXXX")"
 decision_file="$(mktemp "${TMPDIR:-/tmp}/agent-shell-guard-decision.XXXXXX")"
 deadline_marker="${decision_file}.deadline"
-trap 'rm -f "$payload_file" "$decision_file" "$deadline_marker"' EXIT
+fault_file="${decision_file}.fault"
+trap 'rm -f "$payload_file" "$decision_file" "$deadline_marker" "$fault_file"' EXIT
 cat >"$payload_file"
 
 # Never build from a hook. Prefer an explicit binary, then a repository wrapper
@@ -174,11 +175,26 @@ run_with_deadline() {
 
 guard_status=0
 if [[ "${AGENT_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then
-  run_with_deadline "${guard_command[@]}" >"$decision_file" || guard_status=$?
+  run_with_deadline "${guard_command[@]}" >"$decision_file" 2> >(tee "$fault_file" >&2) \
+    || guard_status=$?
 else
-  run_with_deadline "${guard_command[@]}" >"$decision_file" 2>/dev/null \
+  run_with_deadline "${guard_command[@]}" >"$decision_file" 2>"$fault_file" \
     || guard_status=$?
 fi
+
+# What the policy said as it failed, flattened to one JSON-safe line. The
+# reason is the difference between "the guard is off" and "the guard faulted
+# and here is why", and the second is the only one an operator can act on.
+# Keep the head, not the tail: an interpreter prints the thrown message first
+# and the source excerpt after it, so trimming from the end preserves the
+# reason and drops the listing.
+guard_fault_reason() {
+  local text=""
+  [[ -s "$fault_file" ]] || return 0
+  text="$(tr -d '\000-\010\013\014\016-\037' <"$fault_file" | tr '\n\r\t' '   ' \
+    | sed 's/[\\"]/ /g' | tr -s ' ' | head -c 400)"
+  printf '%s' "$text"
+}
 
 # 124 is the conventional deadline status; 137 and 143 are SIGKILL and SIGTERM.
 # All mean the same thing here: the deny-class policy did not produce a
@@ -189,6 +205,25 @@ elif [[ "$guard_status" == "124" || "$guard_status" == "137" || "$guard_status" 
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Repository command policy timed out before producing a verdict; retry when host load subsides."}}'
   if [[ "${AGENT_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then
     echo "agent-shell-guard: policy exceeded ${deadline_seconds}s; failing closed" >&2
+  fi
+else
+  # The policy ran and faulted. Every other status used to fall through to an
+  # empty verdict, which the host reads as an allow, so one throw anywhere in
+  # the evaluation switched every rule off at once and said nothing. The
+  # in-process suite cannot catch that: it calls the evaluator directly and
+  # never runs under this host's builtin restrictions, so a rule reaching for
+  # a denied builtin threw on every command with the whole suite green.
+  #
+  # An interpreter that is missing or not executable is a different case and
+  # is still allowed, deliberately, so a fresh clone or a mid-rebuild tree
+  # stays usable. That one is settled above, before the policy is ever run, so
+  # reaching here means the interpreter existed and the evaluation failed.
+  printf '%s%s%s\n' \
+    '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Repository command policy faulted before producing a verdict, so no rule was applied: ' \
+    "$(guard_fault_reason)" \
+    '"}}'
+  if [[ "${AGENT_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then
+    echo "agent-shell-guard: policy exited ${guard_status}; failing closed" >&2
   fi
 fi
 exit 0
