@@ -589,7 +589,13 @@ fn seccomp_filter_is_default_deny_allowlist() {
 /// through `int $0x80`.
 #[test]
 fn seccomp_filter_validates_architecture_before_syscall_number() {
-    let filter = compile_seccomp_program(&[libc::SYS_msync]).expect("compile the probe filter");
+    let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
+    policy.side_effect_level = Some("read_only".to_string());
+    assert!(
+        allowed_syscalls(&policy).contains(&libc::SYS_msync),
+        "this test reasons about msync being allowlisted, so its premise must hold",
+    );
+    let filter = compile_seccomp_program(&policy).expect("compile the probe filter");
 
     let arch_load = filter.first().expect("filter must not be empty");
     assert_eq!(
