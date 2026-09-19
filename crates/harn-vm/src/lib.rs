@@ -30,6 +30,8 @@ pub mod agent_events;
 mod agent_lifecycle_cleanup;
 pub(crate) mod agent_session_journal;
 pub mod agent_session_restore;
+#[cfg(test)]
+mod agent_session_terminal_evidence_tests;
 pub mod agent_sessions;
 pub mod agent_transcript_budget;
 pub mod atomic_io;

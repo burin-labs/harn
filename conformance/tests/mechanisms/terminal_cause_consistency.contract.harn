@@ -1,0 +1,94 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_options } from "std/agent/options"
+import { agent_session_finalize, agent_session_init } from "std/agent/state"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn main(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("terminal-cause")
+  const session = agent_session_init(
+    harness.agent,
+    "Record the terminal cause",
+    nil,
+    {provider: "mock", root: root, session_id: "conflicting-terminal", max_iterations: 36},
+  )
+  const conflict = agent_session_finalize(
+    harness.agent,
+    session.session_id,
+    {
+      final_status: "budget_exhausted",
+      stop_reason: "natural",
+      iterations: 29,
+      error: {category: "fixture_failure", message: "Recorded failure without a proven cause"},
+    },
+  )
+  assert_eq(conflict.terminal.kind, "unknown")
+  assert_eq(conflict.terminal.reason, "conflicting_terminal_evidence")
+  assert_eq(conflict.stop_reason, conflict.terminal.reason)
+  assert_eq(conflict.terminal_class, nil)
+  harness.stdio.println("conflicting evidence: unknown")
+  const tools = tool_define(
+    tool_registry(),
+    "lookup",
+    "Read deterministic evidence",
+    {
+      handler: { _args -> "known evidence" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  const budget = with_llm_script(
+    harness.llm,
+    [llm_tool_call("lookup", {})],
+    { ->
+      return agent_loop(
+        harness,
+        "Keep inspecting",
+        nil,
+        agent_options(
+          {
+            provider: "mock",
+            root: root,
+            session_id: "budget-terminal",
+            tools: tools,
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 1,
+            final_wrapup: false,
+          },
+        ),
+      )
+    },
+  )
+  assert_eq(budget.llm.iterations, 1)
+  assert_eq(budget.terminal.kind, "policy_budget")
+  assert_eq(budget.terminal.reason, "max_iterations")
+  assert_eq(budget.stop_reason, budget.terminal.reason)
+  assert_eq(budget.terminal_class, nil)
+  harness.stdio.println("genuine budget stop: policy_budget")
+  const natural = with_llm_script(
+    harness.llm,
+    [llm_text("<done>##DONE##</done>")],
+    { ->
+      return agent_loop(
+        harness,
+        "Finish the task",
+        nil,
+        agent_options(
+          {
+            provider: "mock",
+            root: root,
+            session_id: "natural-terminal",
+            max_iterations: 4,
+            final_wrapup: false,
+          },
+        ),
+      )
+    },
+  )
+  assert_eq(natural.llm.iterations, 1)
+  assert_eq(natural.terminal.kind, "natural")
+  assert_eq(natural.stop_reason, natural.terminal.reason)
+  assert_eq(natural.terminal_class, nil)
+  harness.stdio.println("clean completion: natural")
+}

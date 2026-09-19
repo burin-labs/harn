@@ -402,12 +402,10 @@ struct LlmCallFacts {
 struct TerminalFacts {
     final_status: Option<String>,
     stop_reason: Option<String>,
-    error: Option<String>,
+    error: Option<Box<serde_json::Value>>,
     class: Option<String>,
-    kind: Option<crate::agent_events::AgentTerminalKind>,
-    owner: Option<String>,
-    reason: Option<String>,
     adaptive_budget: Option<serde_json::Value>,
+    outcome: Option<Box<crate::agent_events::AgentTerminalOutcome>>,
     at: EventClock,
 }
 
@@ -619,7 +617,9 @@ fn assemble(
 
     let status = run_status_for(
         &meta.status,
-        fold.terminal.as_ref().and_then(|terminal| terminal.kind),
+        fold.terminal
+            .as_ref()
+            .and_then(|terminal| terminal.outcome.as_ref().map(|outcome| outcome.kind)),
         fold.terminal
             .as_ref()
             .and_then(|t| t.final_status.as_deref()),
@@ -709,32 +709,28 @@ fn assemble(
         if let Some(budget) = &terminal.adaptive_budget {
             metadata.insert("adaptive_budget".to_string(), budget.clone());
         }
-        if let Some(stop_reason) = &terminal.stop_reason {
+        let stop_reason = terminal
+            .outcome
+            .as_ref()
+            .map(|outcome| &outcome.reason)
+            .or(terminal.stop_reason.as_ref());
+        if let Some(stop_reason) = stop_reason {
             metadata.insert("stop_reason".to_string(), json!(stop_reason));
         }
-        if let Some(class) = &terminal.class {
+        let class = match &terminal.outcome {
+            Some(outcome) => outcome.terminal_class.map(|class| class.as_str()),
+            None => terminal.class.as_deref(),
+        };
+        if let Some(class) = class {
             metadata.insert("terminal_class".to_string(), json!(class));
         }
         if let Some(error) = &terminal.error {
             metadata.insert("terminal_error".to_string(), json!(error));
         }
-        if let Some(kind) = terminal.kind {
-            metadata.insert(
-                "terminal".to_string(),
-                json!({
-                    "kind": kind.as_str(),
-                    "reason": terminal.reason.as_deref().or(terminal.stop_reason.as_deref()),
-                    "owner": terminal.owner.as_deref().unwrap_or_else(|| kind.owner()),
-                    // WHEN the terminal was sealed, carried beside what it was.
-                    // The record already dates the run's end from this same
-                    // stamp, but only as `finished_at`, whose source a reader
-                    // has to look up in `run_clock` to know it came from the
-                    // terminal at all. A reader asking "when did this stop, and
-                    // was that stop the end of the run" had to join two fields
-                    // to find out; now the terminal answers for itself.
-                    "sealed_at": terminal.at.text,
-                }),
-            );
+        if let Some(outcome) = &terminal.outcome {
+            let mut value = outcome.to_json();
+            value["sealed_at"] = json!(terminal.at.text);
+            metadata.insert("terminal".to_string(), value);
         }
     }
 
@@ -1043,18 +1039,36 @@ impl SessionFold {
     }
 
     fn absorb_terminal(&mut self, event: &StoredEvent) {
+        let stop_reason = facts::string_at(&event.payload, facts::STOP_REASON);
+        let error = facts::semantic_value(&event.payload, &[facts::TERMINAL_ERROR])
+            .filter(|value| !value.is_null())
+            .map(Box::new);
+        let class = facts::string_at(&event.payload, facts::TERMINAL_CLASS);
+        let outcome = facts::string_at(&event.payload, facts::TERMINAL_KIND)
+            .as_deref()
+            .and_then(crate::agent_events::AgentTerminalKind::from_wire)
+            .map(|kind| {
+                crate::agent_events::AgentTerminalOutcome::from_evidence(
+                    kind,
+                    facts::string_at(&event.payload, facts::TERMINAL_REASON)
+                        .or_else(|| stop_reason.clone())
+                        .unwrap_or_else(|| kind.as_str().to_string()),
+                    facts::string_at(&event.payload, facts::TERMINAL_OUTCOME_CLASS)
+                        .as_deref()
+                        .or(class.as_deref())
+                        .and_then(crate::llm::AgentTerminalClass::from_wire),
+                )
+                .with_error(error.as_deref())
+            })
+            .map(Box::new);
         self.terminal = Some(TerminalFacts {
             final_status: facts::string_at(&event.payload, facts::FINAL_STATUS),
-            stop_reason: facts::string_at(&event.payload, facts::STOP_REASON),
-            error: facts::string_at(&event.payload, facts::TERMINAL_ERROR),
-            class: facts::string_at(&event.payload, facts::TERMINAL_CLASS),
-            kind: facts::string_at(&event.payload, facts::TERMINAL_KIND)
-                .as_deref()
-                .and_then(crate::agent_events::AgentTerminalKind::from_wire),
-            owner: facts::string_at(&event.payload, facts::TERMINAL_OWNER),
-            reason: facts::string_at(&event.payload, facts::TERMINAL_REASON),
             adaptive_budget: facts::semantic_value(&event.payload, &[facts::ADAPTIVE_BUDGET])
                 .filter(|value| !value.is_null()),
+            stop_reason,
+            error,
+            class,
+            outcome,
             at: EventClock {
                 text: event.ts.clone(),
                 ms: event.ts_ms,
