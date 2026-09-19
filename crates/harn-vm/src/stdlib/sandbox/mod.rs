@@ -53,7 +53,7 @@ use std::process::{Command, Output};
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::orchestration::ProcessSandboxPreset;
-use crate::orchestration::{CapabilityPolicy, SandboxProfile, UnixSocketEnforcement};
+use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{environment_io_error_thrown, ErrorCategory, VmError};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -102,6 +102,19 @@ pub(crate) mod process_cwd;
 use process_cwd::enforce_process_cwd_for_policy;
 pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
+mod policy_projection;
+#[cfg(target_os = "linux")]
+pub(crate) use policy_projection::process_sandbox_unix_socket_roots;
+pub use policy_projection::unix_socket_enforcement;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) use policy_projection::{
+    process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
+};
 mod replace;
 
 // Each backend uses one of these: platform helpers call `unavailable`; Linux confines in `pre_exec`.
@@ -1731,59 +1744,6 @@ fn git_scope_extension_for_roots(
 ))]
 pub(crate) fn process_sandbox_readonly_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     normalized_read_only_roots(policy)
-}
-
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
-pub(crate) fn process_sandbox_policy_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.read_roots)
-}
-
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
-pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.write_roots)
-}
-
-/// Directories a confined child may place a Unix-domain socket under.
-#[cfg(target_os = "linux")]
-pub(crate) fn process_sandbox_unix_socket_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.unix_socket_roots)
-}
-
-/// What the active backend will actually do with a Unix-socket grant.
-///
-/// A reader of a receipt must not have to infer the shape of the grant from
-/// the platform it ran on, and must not read silence as a scope that was
-/// applied. Every backend answers, including when it refuses.
-pub fn unix_socket_enforcement(policy: &CapabilityPolicy) -> UnixSocketEnforcement {
-    if policy.process_sandbox.unix_socket_roots.is_empty() {
-        return UnixSocketEnforcement::NotRequested;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        UnixSocketEnforcement::PathScoped
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if policy_allows_network(policy) {
-            UnixSocketEnforcement::SupersededByNetworkGrant
-        } else {
-            UnixSocketEnforcement::ServeOnly
-        }
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        UnixSocketEnforcement::Refused
-    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]

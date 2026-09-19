@@ -484,8 +484,8 @@ fn local_ipc_grant_admits_serving_and_withholds_connect() {
 
     let filter = compile_seccomp_program(&granted).expect("compile the granted filter");
     let denied = {
-        let mut policy = granted.clone();
-        policy.process_sandbox = Default::default();
+        let mut policy = granted;
+        *policy.process_sandbox = Default::default();
         compile_seccomp_program(&policy).expect("compile the ungranted filter")
     };
     assert_ne!(
@@ -500,7 +500,7 @@ fn local_ipc_grant_admits_serving_and_withholds_connect() {
 fn local_ipc_is_withheld_without_socket_roots() {
     let root = tempfile::tempdir().expect("root");
     let mut policy = local_ipc_policy(root.path());
-    policy.process_sandbox = Default::default();
+    *policy.process_sandbox = Default::default();
     assert!(
         !unix_socket_local_ipc_grant(&policy),
         "no socket roots must mean no local-IPC grant",
@@ -542,10 +542,10 @@ fn process_self_introspection_refuses_a_host_that_cannot_contain_it() {
     let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
     policy.workspace_roots = vec![workspace.path().display().to_string()];
     policy.side_effect_level = Some("process_exec".to_string());
-    policy.process_sandbox = Box::new(crate::orchestration::ProcessSandboxPolicy {
+    *policy.process_sandbox = crate::orchestration::ProcessSandboxPolicy {
         allow_process_self_introspection: true,
         ..Default::default()
-    });
+    };
 
     // Mapped to the refusal text rather than matched on the profile, which
     // carries a raw descriptor and is deliberately not printable.
@@ -593,7 +593,7 @@ fn unix_socket_disposition_is_reported_per_decision() {
          narrower shape it actually applied rather than claiming path scoping",
     );
 
-    let mut networked = granted.clone();
+    let mut networked = granted;
     networked.side_effect_level = Some("network".to_string());
     assert_eq!(
         crate::stdlib::sandbox::unix_socket_enforcement(&networked),
@@ -962,11 +962,11 @@ fn process_self_introspection_grant_controls_live_procfs_enumeration() {
         String::from_utf8_lossy(&withheld_output.stderr),
     );
 
-    let mut granted = withheld.clone();
-    granted.process_sandbox = Box::new(crate::orchestration::ProcessSandboxPolicy {
+    let mut granted = withheld;
+    *granted.process_sandbox = crate::orchestration::ProcessSandboxPolicy {
         allow_process_self_introspection: true,
         ..Default::default()
-    });
+    };
     let granted_output = run_probe(&granted);
     assert!(
         granted_output.status.success(),

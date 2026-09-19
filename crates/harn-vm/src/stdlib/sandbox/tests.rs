@@ -1,5 +1,5 @@
 use super::*;
-use crate::orchestration::{pop_execution_policy, push_execution_policy};
+use crate::orchestration::{pop_execution_policy, push_execution_policy, UnixSocketEnforcement};
 
 mod overlay_scope;
 mod path_contracts;
@@ -1457,9 +1457,14 @@ fn sandbox_denial_classifies_default_toolchain_cache_as_environment() {
 /// constant.
 #[test]
 fn unix_socket_enforcement_is_stated_on_every_backend() {
+    // Pinned below the network rank on purpose: an absent side-effect level
+    // reads as network-allowed, and on Linux a network grant supersedes the
+    // socket scope. This case is about the scope a backend applies when it is
+    // the narrowest thing in force, so the wider grant is kept out of it.
     let mut policy = CapabilityPolicy {
         workspace_roots: vec!["/ws".to_string()],
         sandbox_profile: SandboxProfile::Worktree,
+        side_effect_level: Some("process_exec".to_string()),
         ..CapabilityPolicy::default()
     };
     assert_eq!(
@@ -1468,10 +1473,10 @@ fn unix_socket_enforcement_is_stated_on_every_backend() {
         "a policy asking for no sockets must say so rather than imply a scope",
     );
 
-    policy.process_sandbox = Box::new(crate::orchestration::ProcessSandboxPolicy {
+    *policy.process_sandbox = crate::orchestration::ProcessSandboxPolicy {
         unix_socket_roots: vec!["/ws".to_string()],
         ..Default::default()
-    });
+    };
 
     #[cfg(target_os = "macos")]
     let expected = UnixSocketEnforcement::PathScoped;
