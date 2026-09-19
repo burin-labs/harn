@@ -1422,6 +1422,7 @@ const DIRECTORY_ONLY_ACCESS_FS: u64 = LANDLOCK_ACCESS_FS_READ_DIR
     | LANDLOCK_ACCESS_FS_MAKE_SYM
     | LANDLOCK_ACCESS_FS_REFER;
 
+#[path = "netns.rs"]
 mod netns;
 
 pub use netns::decode_seccomp_hex;
