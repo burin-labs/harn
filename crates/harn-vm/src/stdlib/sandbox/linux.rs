@@ -1115,6 +1115,28 @@ fn yama_scope_contains_process_reads(value: &str) -> bool {
 /// number 26 is `ptrace`, which we deliberately withhold (see
 /// `allowlist_excludes_process_introspection_and_io_uring`). The exclusion
 /// held only for callers that agreed to use the ABI we expected.
+/// A loopback grant rendered inside a private network namespace, where the
+/// namespace and not the filter is the boundary.
+///
+/// The child must be able to create and address sockets or the grant it was
+/// given is worth nothing: a filter that refuses `socket` refuses loopback
+/// exactly as hard as it refuses the internet, and the run reads as a working
+/// sandbox while the tool it was opened for still cannot start. What makes
+/// admitting them safe is that there is nowhere for them to reach. Inside the
+/// namespace the only interface is loopback, so no packet of any protocol has
+/// a route off the host, which is the guarantee the filter could not express:
+/// its network terms carry no address condition, and they do not mediate
+/// datagrams at all.
+///
+/// Safe only because the two always travel together. A loopback grant with no
+/// helper to build the namespace is refused outright by
+/// [`resolve_netns_launcher`], on this path as well as on the spawn path, so
+/// this predicate cannot be true for a child that is about to run on the host
+/// network.
+fn namespaced_loopback_grant(policy: &CapabilityPolicy) -> bool {
+    policy.process_sandbox.allow_tcp_loopback
+}
+
 fn compile_seccomp_program(policy: &CapabilityPolicy) -> Result<BpfProgram, VmError> {
     // `c_long` is already `i64` on every target `target_arch()` accepts —
     // they are all LP64 — so the syscall numbers need no conversion.
@@ -1442,7 +1464,7 @@ fn allowed_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
         libc::SYS_vfork,
     ]);
 
-    if policy_allows_network(policy) {
+    if policy_allows_network(policy) || namespaced_loopback_grant(policy) {
         syscalls.extend([
             libc::SYS_accept,
             libc::SYS_accept4,
