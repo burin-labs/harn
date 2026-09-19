@@ -14,6 +14,11 @@ static ARTIFACTS: LazyLock<Mutex<ArtifactRegistry>> =
 static ACTIVE_ARTIFACT_LEASES: LazyLock<Mutex<BTreeMap<PathBuf, File>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
 static LAST_RETENTION_SWEEP: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+/// One descriptor per artifact namespace, held for the life of the process,
+/// standing in for the one this process used to hold per completed command.
+/// In production a process uses a single namespace, so this is one descriptor.
+static SESSION_LEASES: LazyLock<Mutex<BTreeMap<PathBuf, File>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 const RETENTION_ENV: &str = "HARN_COMMAND_ARTIFACT_RETENTION_SECS";
 const MAX_DIRS_ENV: &str = "HARN_COMMAND_ARTIFACT_MAX_DIRS";
@@ -25,6 +30,7 @@ const DEFAULT_MAX_DIRS: usize = 512;
 const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
 const ACTIVE_LEASE_FILE: &str = ".active.lock";
+const SESSION_LEASE_PREFIX: &str = ".session-";
 const ARTIFACT_NAMESPACE_PREFIX: &str = "harn-command-artifacts";
 const LEGACY_NAMESPACE_LEASE_PREFIX: &str = ".harn-command-artifacts";
 const NAMESPACE_LEASE_FILE: &str = ".namespace.lock";
@@ -478,7 +484,23 @@ fn register_completed_artifacts_with_options(
             );
             Ok(())
         },
-    )
+    )?;
+    // The active lease answers one question: is a command running in this
+    // directory right now. A completed one is not, and holding its descriptor
+    // until the directory is retired spends one per command for the life of
+    // the session. That is how a long session ran out of descriptors: the
+    // retention cap is measured in directories, 512 of them by default, while
+    // the cost was paid in descriptors against a per-process limit of 256, so
+    // the process died of exhaustion before retention ever trimmed anything.
+    //
+    // Nothing is weakened by releasing here. The sweep skips any directory
+    // younger than the retention window before it ever consults the lease, so
+    // a completed artifact is protected by that window, which is the policy
+    // that is supposed to govern it. The lease still protects a command that
+    // is genuinely running, whose directory can go stale while it works, and
+    // the marker file stays on disk until the artifact is retired.
+    release_artifact_lease(&dir);
+    Ok(())
 }
 
 fn retire_completed_artifacts_under_namespace(
@@ -600,6 +622,9 @@ fn mark_artifacts_active_under_namespace(
         .expect("active command artifact lease store poisoned");
     if active_leases.contains_key(&dir) {
         return Ok(());
+    }
+    if let Some(namespace) = dir.parent() {
+        hold_session_lease(namespace);
     }
     let lease_path = dir.join(ACTIVE_LEASE_FILE);
     let lease = OpenOptions::new()
@@ -931,6 +956,7 @@ fn sweep_command_artifact_dirs_except(
     now: SystemTime,
     current_dir: Option<&Path>,
 ) {
+    sweep_stale_session_leases(temp_dir);
     let mut dirs = collect_command_artifact_dirs(temp_dir);
     dirs.sort_by_key(|dir| dir.modified);
     let mut live_count = dirs.len();
@@ -971,6 +997,109 @@ fn sweep_command_artifact_dirs_except(
     }
 }
 
+/// The session lease a process holds while it can still serve its own
+/// completed results.
+fn session_lease_path(namespace: &Path, pid: u32) -> PathBuf {
+    namespace.join(format!("{SESSION_LEASE_PREFIX}{pid}.lock"))
+}
+
+/// Take this process's session lease once, under the namespace lock.
+///
+/// A completed command's own lock used to be what told another process that
+/// its results were still being served, at the cost of one descriptor per
+/// command. This says the same thing once, for the whole session.
+fn hold_session_lease(namespace: &Path) {
+    let mut held = SESSION_LEASES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if held.contains_key(namespace) {
+        return;
+    }
+    let path = session_lease_path(namespace, std::process::id());
+    let Ok(lease) = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+    else {
+        return;
+    };
+    if harn_flock::lock_with_deadline(
+        &lease,
+        &path,
+        harn_flock::LockMode::Exclusive,
+        ACTIVE_LEASE_LOCK_TIMEOUT,
+    )
+    .is_ok()
+    {
+        held.insert(namespace.to_path_buf(), lease);
+    }
+}
+
+/// Whether the process that owns `pid`'s artifacts is still serving them.
+///
+/// Only a process that took a session lease counts. An artifact directory
+/// named after some unrelated live process is not claimed by anything and
+/// stays evictable, which is what keeps a live stranger from starving fresh
+/// output.
+fn owner_session_is_live(namespace: &Path, pid: u32) -> bool {
+    let path = session_lease_path(namespace, pid);
+    let Ok(lease) = OpenOptions::new().read(true).write(true).open(&path) else {
+        return false;
+    };
+    match lease.try_lock() {
+        Ok(()) => {
+            let _ = lease.unlock();
+            false
+        }
+        // Held, or unreadable: either way, assume the owner is still serving.
+        Err(_) => true,
+    }
+}
+
+/// Remove session leases whose owning process is gone.
+///
+/// A lease file is one per process, not one per command, but a machine that
+/// runs many sessions would still accumulate them forever. Both this and the
+/// acquisition run under the namespace lock, so a lease that can be taken here
+/// belongs to no live session and is safe to delete.
+fn sweep_stale_session_leases(namespace: &Path) {
+    let Ok(entries) = std::fs::read_dir(namespace) else {
+        return;
+    };
+    let own = session_lease_path(namespace, std::process::id());
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == own {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(SESSION_LEASE_PREFIX) || !name.ends_with(".lock") {
+            continue;
+        }
+        let Ok(lease) = OpenOptions::new().read(true).write(true).open(&path) else {
+            continue;
+        };
+        if lease.try_lock().is_ok() {
+            let _ = lease.unlock();
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+/// Whether this process still has the directory in its completed registry.
+fn dir_is_registered(path: &Path) -> bool {
+    ARTIFACTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .completed
+        .iter()
+        .any(|artifact| artifact.path == path)
+}
+
 fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
     if ACTIVE_ARTIFACT_LEASES
         .lock()
@@ -978,6 +1107,25 @@ fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
         .contains_key(&dir.path)
     {
         return true;
+    }
+    // A completed result stays readable while its owner is still serving it.
+    // This is the guarantee the per-command descriptor used to provide, now
+    // answered once per process instead of once per command.
+    if let (Some(namespace), Some(name)) = (
+        dir.path.parent(),
+        dir.path.file_name().and_then(|name| name.to_str()),
+    ) {
+        if let Some(owner) = parse_command_artifact_dir_name(name) {
+            if owner == std::process::id() {
+                // Our own directories answer from the registry, so the ones we
+                // have already evicted stay evictable.
+                if dir_is_registered(&dir.path) {
+                    return true;
+                }
+            } else if owner_session_is_live(namespace, owner) {
+                return true;
+            }
+        }
     }
     let lease_path = dir.path.join(ACTIVE_LEASE_FILE);
     let Ok(metadata) = std::fs::symlink_metadata(&lease_path) else {
@@ -1206,6 +1354,110 @@ mod tests {
             .to_string()
             .contains(&namespace_path.display().to_string()));
         assert!(!dir.exists(), "directory became visible before its lease");
+    }
+
+    fn open_descriptor_count() -> usize {
+        let dir = if cfg!(target_os = "linux") {
+            "/proc/self/fd"
+        } else {
+            "/dev/fd"
+        };
+        std::fs::read_dir(dir)
+            .expect("the process must be able to enumerate its own descriptors")
+            .count()
+    }
+
+    /// The falsifier for the descriptor exhaustion, at the seam that owns the
+    /// lease.
+    ///
+    /// Each completed command used to leave its active-lease descriptor open
+    /// until the artifact was retired, so a session paid one descriptor per
+    /// command. The retention cap is deliberately set far above the number of
+    /// commands here: if retirement were the only thing releasing descriptors
+    /// this would grow by one per command, which is the pre-fix behavior and
+    /// what the negative control shows.
+    #[test]
+    fn completed_commands_do_not_accumulate_lease_descriptors() {
+        let temp = tempdir().unwrap();
+        let unretired = 100_000;
+        let cycle = |counter: u64| {
+            let dir = artifact_dir(temp.path(), std::process::id(), 400, counter);
+            let artifacts = artifacts_in(&dir);
+            create_and_mark_artifacts_active_with_timeout(&artifacts, Duration::from_secs(5))
+                .unwrap();
+            register_completed_artifacts_with_guard_options(
+                &format!("command-descriptors-{counter}"),
+                Some(&format!("handle-descriptors-{counter}")),
+                &artifacts,
+                ActiveArtifactLeaseGuard::new(&artifacts),
+                unretired,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+            dir
+        };
+
+        // Warm up first: the namespace lease and any lazily-opened global
+        // must already be counted, or their one-time cost reads as growth.
+        for counter in 0..5 {
+            cycle(counter);
+        }
+        let before = open_descriptor_count();
+        for counter in 5..125 {
+            cycle(counter);
+        }
+        let after = open_descriptor_count();
+
+        // The gate runs each test in its own process, so this counts almost
+        // nothing but the code under test. The slack covers descriptors the run
+        // itself opens transiently. The defect this pins spends one per command,
+        // so the bound sits far below the command count either way.
+        const UNRELATED_SLACK: usize = 16;
+        assert!(
+            after <= before + UNRELATED_SLACK,
+            "descriptor count grew from {before} to {after} across 120 completed commands"
+        );
+        assert!(
+            ACTIVE_ARTIFACT_LEASES
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty(),
+            "a completed command must hold no active lease"
+        );
+    }
+
+    /// A dead session's lease is collected; a live one's is left alone.
+    ///
+    /// Without this the namespace would gather one small file per harn
+    /// process that ever ran there, which is a slower version of the problem
+    /// the session lease exists to solve.
+    #[test]
+    fn stale_session_leases_are_collected_and_live_ones_are_kept() {
+        let temp = tempdir().unwrap();
+        let dead = session_lease_path(temp.path(), dead_pid());
+        std::fs::write(&dead, b"").unwrap();
+
+        // A live one, held exactly the way a running session holds it.
+        let live_path = session_lease_path(temp.path(), dead_pid() - 1);
+        let live = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&live_path)
+            .unwrap();
+        live.lock().unwrap();
+
+        // This process's own lease is never a candidate, held or not.
+        let own = session_lease_path(temp.path(), std::process::id());
+        std::fs::write(&own, b"").unwrap();
+
+        sweep_stale_session_leases(temp.path());
+
+        assert!(!dead.exists(), "a lease no session holds must be collected");
+        assert!(live_path.exists(), "a held lease must be left alone");
+        assert!(own.exists(), "this process's own lease must be left alone");
+        live.unlock().unwrap();
     }
 
     #[test]
