@@ -29,6 +29,8 @@ pub struct RunSandboxOptions {
     pub allow_process_network: bool,
     /// Permit child TCP loopback servers without granting remote egress.
     pub allow_process_loopback: bool,
+    /// Let subprocesses enumerate their own process-filesystem entries.
+    pub allow_process_self_introspection: bool,
     /// Session environment policy for this run. Always present: the default
     /// captures the launcher environment at launch.
     ///
@@ -49,6 +51,7 @@ impl Default for RunSandboxOptions {
             process_unix_socket_roots: Vec::new(),
             allow_process_network: false,
             allow_process_loopback: false,
+            allow_process_self_introspection: false,
             environment: EnvironmentPolicyConfig::default(),
         }
     }
@@ -137,6 +140,12 @@ impl RunSandboxOptions {
         self.process_unix_socket_roots = roots.into_iter().collect();
         self
     }
+
+    /// Let subprocesses enumerate their own process-filesystem entries.
+    pub fn with_process_self_introspection(mut self, allow: bool) -> Self {
+        self.allow_process_self_introspection = allow;
+        self
+    }
 }
 
 /// Build the run's confinement options from the shared sandbox flag block.
@@ -162,6 +171,7 @@ pub(crate) fn sandbox_options_from_args(args: &crate::cli::SandboxArgs) -> RunSa
         .with_process_read_roots(args.sandbox_read_root.iter().cloned())
         .with_process_write_roots(args.sandbox_write_root.iter().cloned())
         .with_process_unix_socket_roots(args.sandbox_unix_socket_root.iter().cloned())
+        .with_process_self_introspection(args.sandbox_allow_process_self_introspection)
         .with_environment_policy(capability)
 }
 
@@ -250,6 +260,7 @@ pub(super) fn install_run_sandbox_scope(
             &options.process_unix_socket_roots,
             options.allow_process_network,
             options.allow_process_loopback,
+            options.allow_process_self_introspection,
         );
         policy.process_network_proxy = process_proxy.as_ref().map(|proxy| proxy.endpoints());
         harn_vm::orchestration::push_execution_policy(policy);
@@ -394,6 +405,7 @@ pub(super) fn default_run_capability_policy(
     process_unix_socket_roots: &[PathBuf],
     allow_process_network: bool,
     allow_process_loopback: bool,
+    allow_process_self_introspection: bool,
 ) -> harn_vm::orchestration::CapabilityPolicy {
     let mut workspace_roots = Vec::with_capacity(1 + write_roots.len());
     workspace_roots.push(
@@ -454,6 +466,7 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| normalize_run_workspace_root(path.as_path()))
                 .map(|path| path.display().to_string())
                 .collect(),
+            allow_process_self_introspection,
         }),
         side_effect_level: Some(
             if allow_process_network {
@@ -693,6 +706,7 @@ mod tests {
             &options.process_read_roots,
             &options.process_write_roots,
             &[],
+            false,
             false,
             false,
         );

@@ -268,9 +268,12 @@ fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
 #[test]
 fn default_run_policy_keeps_loopback_separate_from_remote_network() {
     let workspace = Path::new("/tmp/workspace");
-    let default = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, false);
-    let network = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], true, false);
-    let loopback = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, true);
+    let default =
+        default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, false, false);
+    let network =
+        default_run_capability_policy(workspace, &[], &[], &[], &[], &[], true, false, false);
+    let loopback =
+        default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, true, false);
 
     assert_eq!(default.side_effect_level.as_deref(), Some("process_exec"));
     assert_eq!(network.side_effect_level.as_deref(), Some("network"));
@@ -564,6 +567,7 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
         &[],
         &[],
         &[],
+        false,
         false,
         false,
     );
