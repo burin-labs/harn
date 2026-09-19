@@ -375,7 +375,7 @@ impl TypeChecker {
                     scope.define_fn(name, sig);
                     walk_all(scope, body, false);
                 }
-                Node::SkillDecl { name, .. } => {
+                Node::SkillDecl { name, .. } if at_module_scope => {
                     scope.define_var(name, None);
                     scope.clear_nil_widenable(name);
                 }
@@ -385,8 +385,10 @@ impl TypeChecker {
                     summarize,
                     ..
                 } => {
-                    scope.define_var(binding_name, Some(TypeExpr::Named("dict".into())));
-                    scope.clear_nil_widenable(binding_name);
+                    if at_module_scope {
+                        scope.define_var(binding_name, Some(TypeExpr::Named("dict".into())));
+                        scope.clear_nil_widenable(binding_name);
+                    }
                     walk_all(scope, body, false);
                     if let Some(summary_body) = summarize {
                         walk_all(scope, summary_body, false);
