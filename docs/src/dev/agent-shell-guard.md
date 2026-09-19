@@ -28,6 +28,27 @@ Inspection and package-management commands such as `cargo tree` and
 For a real one-off, add `HARN_ALLOW_RAW_CARGO=1` to that command. The escape is
 visible in the shell call and does not weaken later calls.
 
+### Build tools that only some repositories own
+
+Every repository wiring this guard is a Cargo workspace, so the table above
+applies everywhere. Other build tools do not, and a repository cannot be told
+to run a Make target it has never declared. Those rules therefore fire only
+where the adapter has measured the target in the root `Makefile`:
+
+| Instead of | Run | Fires when the Makefile declares |
+|---|---|---|
+| `swift build` | `make swift-build` | `swift-build` |
+| `swift test` | `make swift-test` | `swift-test` |
+
+The one-off escape is `HARN_ALLOW_RAW_SWIFT=1`. A repository with no such
+target, or one whose `Makefile` the adapter could not read, is left alone: the
+rule is inert there rather than pointing at a command that does not exist.
+
+This is the opposite of how the worktree rule treats an unreadable census, and
+deliberately so. Refusing raw worktree creation on an unknown answer prevents
+real harm wherever it fires; refusing `swift test` on an unknown answer would
+send the operator to a target that may not be there.
+
 ## Admit Fleet worktrees before creating them
 
 Agent shell calls cannot run raw `git worktree add`. Use the owning
