@@ -171,9 +171,9 @@ impl Record {
         &self,
         out: &mut String,
         target: Target,
-        preserve_required_nulls: bool,
+        preserve_wire_presence: bool,
     ) {
-        self.append_record(out, target, false, true, preserve_required_nulls);
+        self.append_record(out, target, false, true, preserve_wire_presence);
     }
 
     fn append_record(
@@ -182,7 +182,7 @@ impl Record {
         target: Target,
         closed: bool,
         mutable: bool,
-        preserve_required_nulls: bool,
+        preserve_wire_presence: bool,
     ) {
         let name = &self.name;
         match target {
@@ -210,6 +210,9 @@ impl Record {
                         out.push_str(&format!(
                             "    #[serde(default, skip_serializing_if = {predicate:?})]\n"
                         ));
+                        if preserve_wire_presence && matches!(field.kind, FieldKind::Json) {
+                            out.push_str("    #[serde(deserialize_with = \"deserialize_present_session_update_value\")]\n");
+                        }
                     }
                     if !closed && field.rust_name != field.wire_name {
                         out.push_str(&format!("    #[serde(rename = {:?})]\n", field.wire_name));
@@ -242,13 +245,20 @@ impl Record {
             }
         }
         let explicit_swift_nulls = matches!(target, Target::Swift)
-            && preserve_required_nulls
+            && preserve_wire_presence
             && self
                 .fields
                 .iter()
                 .any(|field| field.required && matches!(field.kind, FieldKind::Nullable(_)));
+        let explicit_swift_presence = matches!(target, Target::Swift)
+            && preserve_wire_presence
+            && self
+                .fields
+                .iter()
+                .any(|field| !field.required && matches!(field.kind, FieldKind::Json));
         if matches!(target, Target::Swift)
             && (explicit_swift_nulls
+                || explicit_swift_presence
                 || self
                     .fields
                     .iter()
@@ -262,6 +272,26 @@ impl Record {
                     out.push_str(&format!(" = {:?}", field.wire_name));
                 }
                 out.push('\n');
+            }
+            out.push_str("    }\n");
+        }
+        if explicit_swift_presence {
+            out.push_str("\n    public init(from decoder: Decoder) throws {\n        let values = try decoder.container(keyedBy: CodingKeys.self)\n");
+            for field in &self.fields {
+                let name = camel_ident(&field.wire_name);
+                let kind = field.kind.type_name(target);
+                if !field.required && matches!(field.kind, FieldKind::Json) {
+                    out.push_str(&format!("        {name} = values.contains(.{name}) ? try values.decode({kind}.self, forKey: .{name}) : nil\n"));
+                } else {
+                    let decode = if field.required {
+                        "decode"
+                    } else {
+                        "decodeIfPresent"
+                    };
+                    out.push_str(&format!(
+                        "        {name} = try values.{decode}({kind}.self, forKey: .{name})\n"
+                    ));
+                }
             }
             out.push_str("    }\n");
         }

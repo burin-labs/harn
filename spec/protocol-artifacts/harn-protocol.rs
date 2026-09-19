@@ -3227,6 +3227,7 @@ pub struct ACPLogUpdateMetaHarn {
     pub message: String,
     pub level: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_present_session_update_value")]
     pub fields: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed: Option<bool>,
@@ -3250,6 +3251,7 @@ pub struct ACPProgressUpdateMetaHarn {
     pub message: String,
     pub phase: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_present_session_update_value")]
     pub data: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
@@ -3374,13 +3376,16 @@ pub struct ACPSkillNarrowUpdateMetaHarn {
     #[serde(rename = "remainingTools")]
     pub remaining_tools: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_present_session_update_value")]
     #[serde(rename = "keptToolDetails")]
     pub kept_tool_details: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_present_session_update_value")]
     pub policy: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_present_session_update_value")]
     #[serde(rename = "removedToolDetails")]
     pub removed_tool_details: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3518,6 +3523,7 @@ pub struct ACPTranscriptCompactedUpdateMetaHarn {
     #[serde(rename = "archivedMessages")]
     pub archived_messages: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_present_session_update_value")]
     #[serde(rename = "compactionPolicy")]
     pub compaction_policy: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3538,6 +3544,7 @@ pub struct ACPTranscriptCompactedUpdateMetaHarn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_present_session_update_value")]
     pub recap: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "receiptId")]
@@ -3616,6 +3623,7 @@ pub struct ACPWorkerUpdateMetaHarn {
     pub terminal: bool,
     pub metadata: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_present_session_update_value")]
     pub audit: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed: Option<bool>,
@@ -3641,6 +3649,12 @@ pub struct ACPWorkerUpdate {
     pub session_update: String,
     #[serde(rename = "_meta")]
     pub meta: ACPWorkerUpdateMeta,
+}
+
+fn deserialize_present_session_update_value<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -55,8 +55,12 @@ private struct RecapBindingProbe {
             harn["replayed"] = true
             switch update["sessionUpdate"] as! String {
             case "artifact": harn["title"] = NSNull()
-            case "transcript_compacted": harn["snapshotAssetId"] = NSNull()
-            case "worker_update": harn["metadata"] = NSNull()
+            case "transcript_compacted":
+                harn["snapshotAssetId"] = NSNull()
+                harn["compactionPolicy"] = NSNull()
+            case "worker_update":
+                harn["metadata"] = NSNull()
+                harn["audit"] = NSNull()
             case "reminder_emitted":
                 var reminder = harn["reminder"] as! [String: Any]
                 reminder["ttlTurns"] = NSNull()

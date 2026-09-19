@@ -121,6 +121,7 @@ impl SessionUpdatePayloads {
     }
 
     fn append_rust_union(&self, out: &mut String) {
+        out.push_str("fn deserialize_present_session_update_value<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {\n    Value::deserialize(deserializer).map(Some)\n}\n\n");
         out.push_str("#[derive(Clone, Debug, PartialEq, Eq, Serialize)]\n#[serde(untagged)]\npub enum ACPTypedSessionUpdate {\n");
         for (_, name) in &self.variants {
             out.push_str(&format!("    {}({name}),\n", &name[3..]));

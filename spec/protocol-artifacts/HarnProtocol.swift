@@ -3343,6 +3343,21 @@ public struct HarnACPLogUpdateMetaHarn: Codable, Sendable, Equatable {
     public var level: String
     public var fields: HarnACPValue?
     public var replayed: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case level
+        case fields
+        case replayed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        message = try values.decode(String.self, forKey: .message)
+        level = try values.decode(String.self, forKey: .level)
+        fields = values.contains(.fields) ? try values.decode(HarnACPValue.self, forKey: .fields) : nil
+        replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
+    }
 }
 
 public struct HarnACPLogUpdateMeta: Codable, Sendable, Equatable {
@@ -3370,6 +3385,33 @@ public struct HarnACPProgressUpdateMetaHarn: Codable, Sendable, Equatable {
     public var replayed: Bool?
     public var total: Int?
     public var totalBytes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case phase
+        case data
+        case kind
+        case pendingCount
+        case pendingWrites
+        case progress
+        case replayed
+        case total
+        case totalBytes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        message = try values.decode(String.self, forKey: .message)
+        phase = try values.decode(String.self, forKey: .phase)
+        data = values.contains(.data) ? try values.decode(HarnACPValue.self, forKey: .data) : nil
+        kind = try values.decodeIfPresent(String.self, forKey: .kind)
+        pendingCount = try values.decodeIfPresent(Int.self, forKey: .pendingCount)
+        pendingWrites = try values.decodeIfPresent([HarnACPValue].self, forKey: .pendingWrites)
+        progress = try values.decodeIfPresent(Int.self, forKey: .progress)
+        replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
+        total = try values.decodeIfPresent(Int.self, forKey: .total)
+        totalBytes = try values.decodeIfPresent(Int.self, forKey: .totalBytes)
+    }
 }
 
 public struct HarnACPProgressUpdateMeta: Codable, Sendable, Equatable {
@@ -3488,6 +3530,27 @@ public struct HarnACPSkillNarrowUpdateMetaHarn: Codable, Sendable, Equatable {
     public var reason: String?
     public var removedToolDetails: HarnACPValue?
     public var replayed: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case removedTools
+        case remainingTools
+        case keptToolDetails
+        case policy
+        case reason
+        case removedToolDetails
+        case replayed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        removedTools = try values.decode([String].self, forKey: .removedTools)
+        remainingTools = try values.decode([String].self, forKey: .remainingTools)
+        keptToolDetails = values.contains(.keptToolDetails) ? try values.decode(HarnACPValue.self, forKey: .keptToolDetails) : nil
+        policy = values.contains(.policy) ? try values.decode(HarnACPValue.self, forKey: .policy) : nil
+        reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        removedToolDetails = values.contains(.removedToolDetails) ? try values.decode(HarnACPValue.self, forKey: .removedToolDetails) : nil
+        replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
+    }
 }
 
 public struct HarnACPSkillNarrowUpdateMeta: Codable, Sendable, Equatable {
@@ -3628,6 +3691,25 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         case schemaVersion
     }
 
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try values.decode(String.self, forKey: .mode)
+        strategy = try values.decode(String.self, forKey: .strategy)
+        snapshotAssetId = try values.decode(String?.self, forKey: .snapshotAssetId)
+        archivedMessages = try values.decodeIfPresent(Int.self, forKey: .archivedMessages)
+        compactionPolicy = values.contains(.compactionPolicy) ? try values.decode(HarnACPValue.self, forKey: .compactionPolicy) : nil
+        engineStrategy = try values.decodeIfPresent(String.self, forKey: .engineStrategy)
+        estimatedTokensAfter = try values.decodeIfPresent(Int.self, forKey: .estimatedTokensAfter)
+        estimatedTokensBefore = try values.decodeIfPresent(Int.self, forKey: .estimatedTokensBefore)
+        instructionMode = try values.decodeIfPresent(String.self, forKey: .instructionMode)
+        instructionSource = try values.decodeIfPresent(String.self, forKey: .instructionSource)
+        reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        recap = values.contains(.recap) ? try values.decode(HarnACPValue.self, forKey: .recap) : nil
+        receiptId = try values.decodeIfPresent(String.self, forKey: .receiptId)
+        replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
+        schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
+    }
+
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(mode, forKey: .mode)
@@ -3701,6 +3783,33 @@ public struct HarnACPWorkerUpdateMetaHarn: Codable, Sendable, Equatable {
     public var workerMode: String?
     public var workerName: String?
     public var workerTask: String?
+
+    enum CodingKeys: String, CodingKey {
+        case workerId
+        case event
+        case status
+        case terminal
+        case metadata
+        case audit
+        case replayed
+        case workerMode
+        case workerName
+        case workerTask
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        workerId = try values.decode(String.self, forKey: .workerId)
+        event = try values.decode(String.self, forKey: .event)
+        status = try values.decode(String.self, forKey: .status)
+        terminal = try values.decode(Bool.self, forKey: .terminal)
+        metadata = try values.decode(HarnACPValue.self, forKey: .metadata)
+        audit = values.contains(.audit) ? try values.decode(HarnACPValue.self, forKey: .audit) : nil
+        replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
+        workerMode = try values.decodeIfPresent(String.self, forKey: .workerMode)
+        workerName = try values.decodeIfPresent(String.self, forKey: .workerName)
+        workerTask = try values.decodeIfPresent(String.self, forKey: .workerTask)
+    }
 }
 
 public struct HarnACPWorkerUpdateMeta: Codable, Sendable, Equatable {

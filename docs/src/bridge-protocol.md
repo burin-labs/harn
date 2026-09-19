@@ -185,7 +185,7 @@ its static types do not replace runtime schema validation.
 
 The Rust and Swift binding checks consume the adapter's same 17-kind fixture,
 round-trip every field, and refuse the corresponding empty-metadata controls.
-Replay markers and required null fields are also checked. The former
+Replay markers and explicit null metadata are also checked. The former
 `HARN_TYPED_SESSION_UPDATE_PAYLOADS` field-table constant is removed.
 
 `reminder_emitted` is sent when a pending system reminder is rendered
