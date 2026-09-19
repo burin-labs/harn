@@ -386,3 +386,71 @@ async fn a_refusal_no_reviewer_answered_records_why_not() {
     );
     crate::agent_sessions::close(&session_id);
 }
+
+/// A reviewer that answers and refuses, in the decision-record shape the seam
+/// requires.
+fn refusing_reviewer() -> Arc<VmClosure> {
+    compiled_closure(
+        "reviewer",
+        "fn reviewer(request: dict) { return {approved: false, reviewer_answered: true, rationale: \"this install is unrelated to the stated task\"} }",
+    )
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_reviewer_that_refuses_is_the_decider_not_a_person() {
+    // The record used to contradict itself. A reviewer answered and said no,
+    // the refusal then reached the host as a formality, and the host returned
+    // no decision metadata -- which defaults to `person`. So a run with no
+    // person present filed the refusal under a human who was never asked,
+    // while the same event carried the reviewer's own verdict and rationale.
+    //
+    // The falsifier: when a reviewer answered, the decider is the reviewer.
+    crate::orchestration::clear_execution_policy_stacks();
+    crate::orchestration::clear_approval_reviewers();
+    crate::orchestration::clear_all_approval_policy_repeat_counts();
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "auto-review-refusal-attribution".to_string(),
+    ));
+    crate::orchestration::push_approval_policy(asking_policy());
+    let seen = Arc::new(std::sync::Mutex::new(0usize));
+    let previous =
+        crate::llm::agent_runtime::swap_current_host_bridge(Some(rejecting_bridge(seen.clone())));
+
+    let dispatched = dispatch_pip_install(&session_id, Some(refusing_reviewer())).await;
+
+    crate::llm::agent_runtime::swap_current_host_bridge(previous);
+    crate::orchestration::pop_approval_policy();
+    crate::orchestration::clear_approval_reviewers();
+    crate::orchestration::clear_all_approval_policy_repeat_counts();
+
+    // Negative control: the attribution claim only means something if the host
+    // was asked and returned the metadata-less rejection that defaults to
+    // `person`. Without this the assertion could pass on a build that never
+    // reached the host at all.
+    assert_eq!(
+        *seen.lock().expect("seen count"),
+        1,
+        "the refusal must still have reached the host: {dispatched}"
+    );
+    let activity = permission_activity(&session_id);
+    assert_eq!(
+        activity["decider"],
+        serde_json::json!("auto_reviewer"),
+        "a reviewer answered this refusal, so no person may be credited with it: {activity}"
+    );
+    assert_eq!(activity["outcome"], serde_json::json!("denied"));
+
+    let annotations = auto_review_annotations(&session_id);
+    assert_eq!(
+        annotations.len(),
+        1,
+        "expected one annotation: {annotations:?}"
+    );
+    assert_eq!(
+        annotations[0]["reviewer_answered"],
+        serde_json::json!(true),
+        "the reviewer answered, and the record must say so: {}",
+        annotations[0]
+    );
+    crate::agent_sessions::close(&session_id);
+}

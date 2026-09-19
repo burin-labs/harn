@@ -398,6 +398,28 @@ fn record_decline(
     }
 }
 
+/// Whether a reviewer actually answered this refusal and said no.
+///
+/// Reads the annotation [`record_decline`] leaves on the receipt. A caller uses
+/// it to attribute the refusal to the layer that truly decided it: when the
+/// reviewer answered, a later host refusal is a formality and recording the
+/// host's default decider credits whoever the host names for a call the
+/// reviewer had already settled.
+///
+/// False for every decline the reviewer did not answer, so a seam that could
+/// not obtain a verdict never reads as one that refused.
+pub fn reviewer_refused(decision: &crate::orchestration::PolicyEvaluation) -> bool {
+    decision
+        .receipt
+        .get("auto_review")
+        .and_then(|entry| {
+            let answered = entry.get("reviewer_answered")?.as_bool()?;
+            let approved = entry.get("approved")?.as_bool()?;
+            Some(answered && !approved)
+        })
+        .unwrap_or(false)
+}
+
 /// Offer one refused decision to the reviewer, rewriting it in place on a grant.
 ///
 /// Returns whether the decision was granted, so the caller can record the
