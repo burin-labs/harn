@@ -19,6 +19,7 @@
 - [Coming from elsewhere](./concepts/sota-comparison.md)
 - [Why Harn?](./why-harn.md)
 - [How Harn compares](./how-harn-compares.md)
+- [Probabilistic branching proposal](./design/probabilistic-branching.md)
 
 # Tutorials
 
