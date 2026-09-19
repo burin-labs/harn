@@ -32,6 +32,24 @@ fn main() {
                 .unwrap_or_default();
             thread::sleep(Duration::from_millis(millis));
         }
+        // Reports whether a descriptor number is open in THIS process, after
+        // the exec. The caller cannot answer this for itself: its own copy is
+        // open either way, so only the exec'd side can tell whether the
+        // descriptor was carried across or quietly closed on the way.
+        #[cfg(target_os = "linux")]
+        Some("--fd-open") => {
+            let fd = args
+                .next()
+                .expect("descriptor number to probe")
+                .parse::<i32>()
+                .expect("descriptor number must be an integer");
+            if std::path::Path::new(&format!("/proc/self/fd/{fd}")).exists() {
+                write_stdout("fd-open");
+            } else {
+                write_stdout("fd-closed");
+                std::process::exit(1);
+            }
+        }
         #[cfg(target_os = "linux")]
         Some("--proc-self-maps") => {
             let protected_pid = args.next().expect("protected parent pid");

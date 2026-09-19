@@ -76,7 +76,7 @@ mod enforcement_report;
 mod handler_env;
 mod introspection;
 #[cfg(target_os = "linux")]
-mod linux;
+pub(crate) mod linux;
 mod locked_append;
 #[cfg(target_os = "macos")]
 mod macos;

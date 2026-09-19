@@ -156,10 +156,7 @@ pub fn decode_seccomp_hex(text: &str) -> io::Result<Vec<u8>> {
 ///
 /// The confinement is moved into the closure so the descriptor stays owned,
 /// and therefore open, until the spawn is done with it.
-pub(crate) fn keep_ruleset_across_exec(
-    command: &mut Command,
-    confinement: TransferableConfinement,
-) {
+pub fn keep_ruleset_across_exec(command: &mut Command, confinement: TransferableConfinement) {
     let Some(hook) = clear_cloexec_hook(confinement) else {
         return;
     };
