@@ -8,6 +8,9 @@ use tempfile::TempDir;
 
 use super::*;
 
+#[path = "tests/status.rs"]
+mod status_tests;
+
 fn store(temp: &TempDir) -> HostLeaseStore {
     HostLeaseStore::for_root(temp.path()).unwrap()
 }
@@ -67,6 +70,61 @@ fn waiter(waiter_id: &str, requested_at_ms: i64) -> WaiterIdentity {
         requested_at_ms,
         recoverable: false,
     }
+}
+
+#[test]
+fn status_reports_an_admitted_worker_before_the_next_acquisition() {
+    let temp = TempDir::new().unwrap();
+    let store = Arc::new(store(&temp));
+    let handle = store
+        .try_acquire(request("holder"))
+        .unwrap()
+        .handle
+        .unwrap();
+    let run = store
+        .begin_run(
+            "pending-worker",
+            HostLeasePriorityClass::Measurement,
+            HostLeaseResourceKey {
+                machine: handle.host.clone(),
+                resource_class: handle.resource_class,
+                domain: handle.domain.clone(),
+            },
+            HostLeaseExecutionContext::cargo(Path::new("/workspace"), Path::new("/target"), None),
+            60_000,
+        )
+        .unwrap();
+    let (progress_tx, progress_rx) = mpsc::channel();
+    let (resume_tx, resume_rx) = mpsc::channel();
+    let worker = {
+        let store = Arc::clone(&store);
+        let run_id = run.run_id.clone();
+        thread::spawn(move || {
+            let mut report = |receipt: &HostLeaseAcquireReceipt| {
+                progress_tx.send(receipt.clone()).unwrap();
+                resume_rx.recv().unwrap();
+            };
+            store.acquire_wait_for_run_with_progress(&run_id, std::process::id(), &mut report)
+        })
+    };
+    let progress = progress_rx.recv().unwrap();
+    assert_eq!(progress.queue.unwrap().position, 1);
+    assert!(
+        store
+            .release(&handle.host, &handle.lease_id)
+            .unwrap()
+            .released
+    );
+    let state = store.status(&handle.host).unwrap();
+    resume_tx.send(()).unwrap();
+    let acquisition = worker.join().unwrap().unwrap();
+    assert_eq!(acquisition.status, HostLeaseAcquireStatus::Acquired);
+    assert!(state.active.is_none());
+    let encoded = serde_json::to_value(state).unwrap();
+    assert_eq!(
+        encoded["pending"][0]["waiter_id"], run.run_id,
+        "status must retain the admitted worker while no lease is active"
+    );
 }
 
 #[test]

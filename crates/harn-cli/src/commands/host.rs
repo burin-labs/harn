@@ -10,7 +10,7 @@ use crate::cli::{
 };
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonError};
 
-pub const HOST_LEASE_CLI_SCHEMA_VERSION: u32 = 3;
+pub const HOST_LEASE_CLI_SCHEMA_VERSION: u32 = 4;
 const EX_TEMPFAIL: i32 = 75;
 
 mod cargo_run;
@@ -192,22 +192,76 @@ fn status(store: &harn_hostlib::HostLeaseStore, args: HostLeaseStatusArgs) -> i3
     let host = args
         .host
         .unwrap_or_else(harn_hostlib::HostLeaseStore::default_host);
-    match store.status_for_domain(&host, resource_class(args.resource_class), &args.domain) {
+    if let Some(class) = args.resource_class {
+        return match store.status_for_domain(
+            &host,
+            resource_class(class),
+            args.domain
+                .as_deref()
+                .unwrap_or(harn_hostlib::DEFAULT_HOST_LEASE_DOMAIN),
+        ) {
+            Ok(state) => {
+                print_success(&state, args.json, format_lease_state);
+                0
+            }
+            Err(error) => print_error("host_lease_status", &error.to_string(), args.json),
+        };
+    }
+    match store.status_overview(&host, args.domain.as_deref()) {
         Ok(state) => {
-            print_success(&state, args.json, |state| match state.active.as_ref() {
-                Some(active) => format!(
-                    "Host {} is leased by {} ({}, lease {})",
-                    state.host,
-                    active.owner,
-                    active.priority_class.as_str(),
-                    active.lease_id
-                ),
-                None => format!("Host {} is available", state.host),
+            print_success(&state, args.json, |state| {
+                let active = state
+                    .resources
+                    .iter()
+                    .filter(|resource| resource.active.is_some())
+                    .count();
+                let pending: usize = state
+                    .resources
+                    .iter()
+                    .map(|resource| resource.pending.len())
+                    .sum();
+                let details = state
+                    .resources
+                    .iter()
+                    .map(format_lease_state)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("Host {}: {active} active, {pending} pending across {} resource domains\n{details}",
+                    state.host, state.resources.len())
             });
             0
         }
         Err(error) => print_error("host_lease_status", &error.to_string(), args.json),
     }
+}
+
+fn format_lease_state(state: &harn_hostlib::HostLeaseState) -> String {
+    let ownership = state.active.as_ref().map_or_else(
+        || "no active lease".to_string(),
+        |active| {
+            format!(
+                "leased by {} ({}, lease {})",
+                active.owner,
+                active.priority_class.as_str(),
+                active.lease_id
+            )
+        },
+    );
+    let mut text = format!(
+        "Host {} [{}/{}]: {ownership}, {} pending",
+        state.host,
+        state.resource_class.as_str(),
+        state.domain,
+        state.pending.len()
+    );
+    for pending in &state.pending {
+        text.push_str(&format!(
+            "\n  pending {} ({})",
+            pending.waiter_id,
+            pending.priority_class.as_str()
+        ));
+    }
+    text
 }
 
 pub(super) fn priority(value: HostLeasePriorityArg) -> harn_hostlib::HostLeasePriorityClass {

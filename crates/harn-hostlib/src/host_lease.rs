@@ -10,6 +10,9 @@ mod admission;
 mod db;
 mod execution;
 mod schema;
+mod status;
+
+pub use status::{HostLeaseOverview, HostLeasePendingRequest, HostLeaseState};
 
 pub use execution::{
     HostLeaseCargoExecutionContext, HostLeaseExecutionContext, HostLeaseOperationKind,
@@ -434,31 +437,6 @@ pub struct HostLeaseAcquireReceipt {
     #[serde(default)]
     /// Queue ordering observed during the final atomic acquisition attempt.
     pub queue: Option<HostLeaseQueueEvidence>,
-}
-
-/// Current authoritative lease state for one host.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HostLeaseState {
-    /// Contract schema version.
-    pub schema_version: u32,
-    /// Machine resource name.
-    pub host: String,
-    #[serde(default)]
-    /// Resource class inspected on this host.
-    pub resource_class: HostLeaseResourceClass,
-    #[serde(default = "default_host_lease_domain")]
-    /// Coordination domain inspected on this host.
-    pub domain: String,
-    /// Observation timestamp in Unix milliseconds.
-    pub observed_at_ms: i64,
-    #[serde(default)]
-    /// Current owner, or `None` when the host is available.
-    pub active: Option<HostLeaseHandle>,
-    /// True when this read removed an expired or dead-owner row.
-    pub recovered_stale_lease: bool,
-    #[serde(default)]
-    /// Exact stale or dead-owner authority removed by this observation.
-    pub recovered: Option<HostLeaseHandle>,
 }
 
 /// Versioned result of a token-scoped lease renewal.
@@ -1133,38 +1111,6 @@ impl HostLeaseStore {
         let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         self.status_in_transaction(tx, host, resource_class, domain, now)
-    }
-
-    fn status_in_transaction(
-        &self,
-        tx: Transaction<'_>,
-        host: &str,
-        resource_class: HostLeaseResourceClass,
-        domain: &str,
-        now: i64,
-    ) -> Result<HostLeaseState, HostLeaseError> {
-        let (active, recovered) = active_handle(
-            &tx,
-            host,
-            resource_class,
-            domain,
-            now,
-            self.process_inspector.as_ref(),
-        )?;
-        tx.commit()?;
-        if recovered.is_some() {
-            self.signal_waiters();
-        }
-        Ok(HostLeaseState {
-            schema_version: SCHEMA_VERSION,
-            host: host.to_string(),
-            resource_class,
-            domain: domain.to_string(),
-            observed_at_ms: now,
-            active,
-            recovered_stale_lease: recovered.is_some(),
-            recovered,
-        })
     }
 }
 
