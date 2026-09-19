@@ -94,6 +94,19 @@ pub(crate) struct SandboxArgs {
         conflicts_with = "no_sandbox"
     )]
     pub sandbox_allow_process_self_introspection: bool,
+    /// Absolute path to the installed helper that builds a private network
+    /// namespace for a confined child, which is how loopback-only child
+    /// networking is rendered on backends that cannot express it any other
+    /// way. Supplied rather than derived: on hosts that restrict
+    /// unprivileged namespaces the permission is granted per executable path
+    /// by host policy, and that grant has to name one stable installed file.
+    /// Without it a loopback grant is refused, never weakened.
+    #[arg(
+        long = "netns-launcher",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub netns_launcher: Option<String>,
     /// Session environment: `inherited` snapshots the launcher (default),
     /// `isolated` admits runtime essentials only, and `granted` adds the
     /// declared `--grant` set. This is independent of the filesystem sandbox.

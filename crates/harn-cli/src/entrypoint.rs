@@ -81,6 +81,13 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 process::exit(1);
             }
         }
+        Command::NetnsLaunch(args) => {
+            // The success type is uninhabited: a launch that worked replaced
+            // this process, so the only reachable arm is the failure one.
+            let Err(error) = commands::netns_launch::run(args);
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
         Command::Skill(args) => match args.command {
             SkillCommand::List(list) => commands::skills::run_list(&list),
             SkillCommand::Get(get) => commands::skills::run_get(&get),

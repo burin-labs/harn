@@ -124,7 +124,7 @@ mod replace;
 /// `pre_exec` callback, which nothing can carry across a process boundary; the
 /// other backends put theirs in the spawn's argv, which survives on its own.
 #[cfg(target_os = "linux")]
-pub use linux::{transferable_confinement, TransferableConfinement};
+pub use linux::{decode_seccomp_hex, transferable_confinement, TransferableConfinement};
 #[cfg(target_os = "linux")]
 pub(crate) use refusal::mechanism_skipped_warning;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -1341,6 +1341,17 @@ fn build_std_command<B: SandboxBackend + ?Sized>(
             wrapped.args(args);
             Ok(wrapped)
         }
+        #[cfg(target_os = "linux")]
+        PrepareOutcome::NamespacedExec {
+            wrapper,
+            args,
+            confinement,
+        } => {
+            let mut wrapped = Command::new(wrapper);
+            wrapped.args(args);
+            linux::keep_ruleset_across_exec(&mut wrapped, confinement);
+            Ok(wrapped)
+        }
     }
 }
 
@@ -1358,6 +1369,17 @@ fn build_tokio_command<B: SandboxBackend + ?Sized>(
         PrepareOutcome::WrappedExec { wrapper, args } => {
             let mut wrapped = tokio::process::Command::new(wrapper);
             wrapped.args(args);
+            Ok(wrapped)
+        }
+        #[cfg(target_os = "linux")]
+        PrepareOutcome::NamespacedExec {
+            wrapper,
+            args,
+            confinement,
+        } => {
+            let mut wrapped = tokio::process::Command::new(wrapper);
+            wrapped.args(args);
+            linux::keep_ruleset_across_exec_tokio(&mut wrapped, confinement);
             Ok(wrapped)
         }
     }

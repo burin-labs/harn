@@ -42,6 +42,7 @@ mod local;
 mod mcp;
 mod merge_captain;
 mod models;
+mod netns_launch;
 mod orchestrator;
 mod pack;
 mod package;
@@ -169,6 +170,7 @@ pub(crate) use models::{
     ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs, ModelsLoraPromoteArgs,
     ModelsLoraTrainArgs, ModelsTestArgs,
 };
+pub(crate) use netns_launch::NetnsLaunchArgs;
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,
     OrchestratorDlqArgs, OrchestratorFireArgs, OrchestratorInspectArgs, OrchestratorLocalArgs,
@@ -637,6 +639,10 @@ SCRIPTING
     /// Internal fixtures used by the conformance suite.
     #[command(hide = true, name = "conformance-helper")]
     ConformanceHelper(ConformanceHelperArgs),
+    /// Internal: build a private network namespace, then enter the
+    /// confinement handed over with it and exec the payload.
+    #[command(hide = true, name = "netns-launch")]
+    NetnsLaunch(NetnsLaunchArgs),
 }
 
 #[cfg(test)]

@@ -49,12 +49,15 @@ impl SandboxBackend for Backend {
 
     fn prepare_std_command(
         program: &str,
-        _args: &[String],
+        args: &[String],
         command: &mut Command,
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        let prep = profile_setup(program, policy, profile)?;
+        let mut prep = profile_setup(program, policy, profile)?;
+        if let Some(launcher) = resolve_netns_launcher(policy)? {
+            return Ok(namespaced_outcome(launcher, program, args, &mut prep));
+        }
         // SAFETY: `pre_exec` may only call async-signal-safe functions
         // before exec. The raw syscalls here (`prctl`,
         // `landlock_*`, seccomp `prctl`) are async-signal-safe per
@@ -67,12 +70,15 @@ impl SandboxBackend for Backend {
 
     fn prepare_tokio_command(
         program: &str,
-        _args: &[String],
+        args: &[String],
         command: &mut tokio::process::Command,
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        let prep = profile_setup(program, policy, profile)?;
+        let mut prep = profile_setup(program, policy, profile)?;
+        if let Some(launcher) = resolve_netns_launcher(policy)? {
+            return Ok(namespaced_outcome(launcher, program, args, &mut prep));
+        }
         // SAFETY: see Linux `prepare_std_command` above.
         unsafe {
             command.pre_exec(move || apply_profile(&prep));
@@ -271,6 +277,200 @@ pub fn transferable_confinement(program: &str) -> Result<Option<TransferableConf
     }))
 }
 
+/// Turn a prepared profile into the helper invocation that will enter it.
+///
+/// The profile is consumed rather than borrowed: the ruleset descriptor has to
+/// outlive this call and be inherited by the helper, so ownership moves into
+/// the confinement that the spawn keeps alive.
+fn namespaced_outcome(
+    launcher: PathBuf,
+    program: &str,
+    args: &[String],
+    prep: &mut ProcessProfile,
+) -> PrepareOutcome {
+    let confinement = TransferableConfinement {
+        ruleset: prep.landlock.take().map(LandlockProfile::take_ruleset),
+        seccomp: std::mem::take(&mut prep.seccomp),
+    };
+    let argv = namespaced_launcher_argv(program, args, &confinement);
+    PrepareOutcome::NamespacedExec {
+        wrapper: launcher.display().to_string(),
+        args: argv,
+        confinement,
+    }
+}
+
+/// The helper this spawn must go through, or `None` when it needs none.
+///
+/// `Ok(None)` means loopback was not requested. It never means loopback was
+/// requested and the helper was missing: that is an error and is returned as
+/// one, naming the path that was looked for, because the alternative grants
+/// this backend could reach instead all leak datagram egress and a reader of
+/// the receipt could not tell which one had been applied.
+fn resolve_netns_launcher(policy: &CapabilityPolicy) -> Result<Option<PathBuf>, VmError> {
+    if !policy.process_sandbox.allow_tcp_loopback {
+        return Ok(None);
+    }
+    let Some(path) = policy.process_sandbox.netns_launcher_path.as_ref() else {
+        return Err(sandbox_rejection(
+            "TCP loopback-only child networking needs a private network namespace, which only \
+             the namespace helper can build; no helper path was supplied, so the grant is \
+             refused rather than widened"
+                .to_string(),
+        ));
+    };
+    let path = PathBuf::from(path);
+    if !path.is_absolute() {
+        return Err(sandbox_rejection(format!(
+            "the namespace helper path must be absolute so the host policy grant names one \
+             file; got {}",
+            path.display()
+        )));
+    }
+    if !path.is_file() {
+        return Err(sandbox_rejection(format!(
+            "TCP loopback-only child networking needs the namespace helper at {}, which is not \
+             an existing file on this host; the grant is refused rather than widened",
+            path.display()
+        )));
+    }
+    Ok(Some(path))
+}
+
+/// The subcommand the namespace helper is invoked as.
+///
+/// A subcommand of this same runtime rather than a separate program: the host
+/// policy grant names an installed *copy* at a stable path, and a copy of one
+/// binary is cheaper to keep at the pinned revision than a second artifact
+/// with its own build and release story.
+pub(super) const NETNS_LAUNCH_SUBCOMMAND: &str = "netns-launch";
+
+/// Flag naming the inherited Landlock ruleset descriptor.
+pub(super) const NETNS_RULESET_FD_FLAG: &str = "--ruleset-fd";
+/// Flag carrying the compiled seccomp program, hex-encoded.
+pub(super) const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
+
+/// Assemble the helper's argv: how to confine, then what to run.
+///
+/// The filter travels hex-encoded in argv rather than over a pipe, unlike the
+/// owner-death handover next to it. That handover carries the payload command,
+/// which may contain credentials; a compiled syscall filter is a public fact
+/// about the policy and reveals nothing the receipt does not already state, so
+/// it does not need the pipe's protection and argv keeps the helper a plain
+/// exec with no setup protocol.
+pub(super) fn namespaced_launcher_argv(
+    payload_program: &str,
+    payload_args: &[String],
+    confinement: &TransferableConfinement,
+) -> Vec<String> {
+    let mut argv = vec![NETNS_LAUNCH_SUBCOMMAND.to_string()];
+    if let Some(fd) = confinement.ruleset_fd() {
+        argv.push(NETNS_RULESET_FD_FLAG.to_string());
+        argv.push(fd.to_string());
+    }
+    argv.push(NETNS_SECCOMP_FLAG.to_string());
+    argv.push(hex_encode(&confinement.seccomp_bytes()));
+    argv.push("--".to_string());
+    argv.push(payload_program.to_string());
+    argv.extend(payload_args.iter().cloned());
+    argv
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(DIGITS[usize::from(byte >> 4)] as char);
+        out.push(DIGITS[usize::from(byte & 0x0f)] as char);
+    }
+    out
+}
+
+/// Decode the filter the helper was handed. Rejects anything that is not a
+/// whole number of bytes rather than silently truncating, because a truncated
+/// filter still installs and still reports success while denying the wrong
+/// syscalls.
+pub fn decode_seccomp_hex(text: &str) -> io::Result<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return Err(io::Error::other(
+            "transferred seccomp program is not a whole number of bytes",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(text.len() / 2);
+    let raw = text.as_bytes();
+    for pair in raw.chunks_exact(2) {
+        let hi = (pair[0] as char).to_digit(16);
+        let lo = (pair[1] as char).to_digit(16);
+        match (hi, lo) {
+            (Some(hi), Some(lo)) => bytes.push(((hi << 4) | lo) as u8),
+            _ => {
+                return Err(io::Error::other(
+                    "transferred seccomp program is not hexadecimal",
+                ))
+            }
+        }
+    }
+    Ok(bytes)
+}
+
+/// Keep the ruleset descriptor open across the helper's `exec`.
+///
+/// Rust marks every descriptor it opens close-on-exec, which is the right
+/// default everywhere else and is fatal here: the helper would be handed a
+/// number naming nothing and would enter no ruleset, leaving the payload
+/// confined by seccomp alone while every layer above still reported the
+/// filesystem boundary as enforced. Clearing the flag in the child, after
+/// fork, keeps the parent's own descriptor table untouched.
+///
+/// The confinement is moved into the closure so the descriptor stays owned,
+/// and therefore open, until the spawn is done with it.
+pub(super) fn keep_ruleset_across_exec(
+    command: &mut Command,
+    confinement: TransferableConfinement,
+) {
+    let Some(hook) = clear_cloexec_hook(confinement) else {
+        return;
+    };
+    // SAFETY: `pre_exec` may only call async-signal-safe functions. `fcntl` is
+    // async-signal-safe, and the hook allocates, locks and performs no I/O.
+    unsafe {
+        command.pre_exec(hook);
+    }
+}
+
+/// The tokio twin of [`keep_ruleset_across_exec`].
+pub(super) fn keep_ruleset_across_exec_tokio(
+    command: &mut tokio::process::Command,
+    confinement: TransferableConfinement,
+) {
+    let Some(hook) = clear_cloexec_hook(confinement) else {
+        return;
+    };
+    // SAFETY: see `keep_ruleset_across_exec`.
+    unsafe {
+        command.pre_exec(hook);
+    }
+}
+
+/// `None` when there is no descriptor to carry, which is the no-Landlock host
+/// whose resolved fallback lets the run proceed on seccomp alone.
+///
+/// The confinement is moved into the closure so the descriptor stays owned,
+/// and therefore open, for as long as the command can be spawned.
+fn clear_cloexec_hook(
+    confinement: TransferableConfinement,
+) -> Option<impl FnMut() -> io::Result<()> + Send + Sync + 'static> {
+    let fd = confinement.ruleset_fd()?;
+    Some(move || {
+        let _keep_open = &confinement;
+        // SAFETY: async-signal-safe; `fd` is owned by the moved confinement.
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, 0) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    })
+}
+
 fn profile_setup(
     program: &str,
     policy: &CapabilityPolicy,
@@ -282,12 +482,11 @@ fn profile_setup(
                 .to_string(),
         ));
     }
-    if policy.process_sandbox.allow_tcp_loopback {
-        return Err(sandbox_rejection(
-            "TCP loopback-only child networking requires a private Linux network namespace; this build cannot enforce that boundary"
-                .to_string(),
-        ));
-    }
+    // Loopback-only networking is rendered by the namespace helper, not here,
+    // and it is refused rather than approximated when the helper is missing.
+    // `resolve_netns_launcher` owns that decision so the spawn path and this
+    // one cannot disagree about whether the grant is available.
+    resolve_netns_launcher(policy)?;
     // A Unix-socket grant is rendered here as serve-only local IPC rather than
     // refused. seccomp filters the syscall and not the socket path, and no
     // Landlock ABI has an access right governing connection to a socket file,

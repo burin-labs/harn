@@ -39,7 +39,9 @@ pub use crate::stdlib::sandbox::{
 /// silent — the payload runs unconfined and every step before it still reports
 /// success.
 #[cfg(target_os = "linux")]
-pub use crate::stdlib::sandbox::{transferable_confinement, TransferableConfinement};
+pub use crate::stdlib::sandbox::{
+    decode_seccomp_hex, transferable_confinement, TransferableConfinement,
+};
 
 /// Push a transient execution policy with `sandbox_profile` replaced by the
 /// requested profile. The returned guard restores the surrounding policy on
