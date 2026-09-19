@@ -72,7 +72,6 @@ fn record(name: &str, fields: &[ShapeField], records: &mut Vec<Record>) -> Resul
                 rust_name: field.name.clone().into(),
                 kind,
                 required: !field.optional,
-                identity: false,
             })
         })
         .collect::<Result<_, String>>()?;

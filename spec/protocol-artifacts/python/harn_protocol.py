@@ -162,6 +162,67 @@ __all__ = [
     "is_request",
     "is_response",
     "is_notification",
+    "ACPArtifactUpdateMetaHarn",
+    "ACPArtifactUpdateMeta",
+    "ACPArtifactUpdate",
+    "ACPAvailableCommandsUpdateMetaHarn",
+    "ACPAvailableCommandsUpdateMeta",
+    "ACPAvailableCommandsUpdate",
+    "ACPFsWatchUpdateMetaHarn",
+    "ACPFsWatchUpdateMeta",
+    "ACPFsWatchUpdate",
+    "ACPHandoffUpdateMetaHarn",
+    "ACPHandoffUpdateMeta",
+    "ACPHandoffUpdate",
+    "ACPHitlRequestUpdateMetaHarn",
+    "ACPHitlRequestUpdateMeta",
+    "ACPHitlRequestUpdate",
+    "ACPHitlResolvedUpdateMetaHarn",
+    "ACPHitlResolvedUpdateMeta",
+    "ACPHitlResolvedUpdate",
+    "ACPLiveSessionClientUpdateMetaHarn",
+    "ACPLiveSessionClientUpdateMeta",
+    "ACPLiveSessionClientUpdate",
+    "ACPLogUpdateMetaHarn",
+    "ACPLogUpdateMeta",
+    "ACPLogUpdate",
+    "ACPProgressUpdateMetaHarn",
+    "ACPProgressUpdateMeta",
+    "ACPProgressUpdate",
+    "ACPReminderEmittedUpdateMetaHarnReminder",
+    "ACPReminderEmittedUpdateMetaHarn",
+    "ACPReminderEmittedUpdateMeta",
+    "ACPReminderEmittedUpdate",
+    "ACPSkillActivatedUpdateMetaHarn",
+    "ACPSkillActivatedUpdateMeta",
+    "ACPSkillActivatedUpdate",
+    "ACPSkillDeactivatedUpdateMetaHarn",
+    "ACPSkillDeactivatedUpdateMeta",
+    "ACPSkillDeactivatedUpdate",
+    "ACPSkillNarrowUpdateMetaHarn",
+    "ACPSkillNarrowUpdateMeta",
+    "ACPSkillNarrowUpdate",
+    "ACPSkillScopeToolsUpdateMetaHarn",
+    "ACPSkillScopeToolsUpdateMeta",
+    "ACPSkillScopeToolsUpdate",
+    "ACPStanceTransitionUpdateMetaHarn",
+    "ACPStanceTransitionUpdateMeta",
+    "ACPStanceTransitionUpdate",
+    "ACPToolSearchQueryUpdateMetaHarn",
+    "ACPToolSearchQueryUpdateMeta",
+    "ACPToolSearchQueryUpdate",
+    "ACPToolSearchResultUpdateMetaHarn",
+    "ACPToolSearchResultUpdateMeta",
+    "ACPToolSearchResultUpdate",
+    "ACPTranscriptCompactedUpdateMetaHarn",
+    "ACPTranscriptCompactedUpdateMeta",
+    "ACPTranscriptCompactedUpdate",
+    "ACPTranscriptProjectedUpdateMetaHarn",
+    "ACPTranscriptProjectedUpdateMeta",
+    "ACPTranscriptProjectedUpdate",
+    "ACPWorkerUpdateMetaHarn",
+    "ACPWorkerUpdateMeta",
+    "ACPWorkerUpdate",
 ]
 
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
@@ -1338,169 +1399,373 @@ class MCPPrompt(_HarnDataclass):
     arguments: Optional[List[JsonObject]] = None
 
 @dataclass
+class ACPArtifactUpdateMetaHarn(_HarnDataclass):
+    artifactId: str
+    title: Optional[str]
+    spec: JsonValue
+    metadata: JsonValue
+    provenance: JsonValue
+    fallback: Optional[str] = None
+    kind: Optional[str] = None
+    mimeType: Optional[str] = None
+    replayed: Optional[bool] = None
+    sizeBytes: Optional[int] = None
+
+@dataclass
+class ACPArtifactUpdateMeta(_HarnDataclass):
+    harn: ACPArtifactUpdateMetaHarn
+
+@dataclass
 class ACPArtifactUpdate(_HarnDataclass):
     sessionUpdate: str
-    artifactId: str
-    kind: Optional[str] = None
-    title: Optional[str] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPArtifactUpdateMeta
+
+@dataclass
+class ACPAvailableCommandsUpdateMetaHarn(_HarnDataclass):
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPAvailableCommandsUpdateMeta(_HarnDataclass):
+    harn: Optional[ACPAvailableCommandsUpdateMetaHarn] = None
 
 @dataclass
 class ACPAvailableCommandsUpdate(_HarnDataclass):
     sessionUpdate: str
-    availableCommands: JsonValue
-    _meta: Optional[HarnExtensionMeta] = None
+    availableCommands: List[JsonValue]
+    _meta: Optional[ACPAvailableCommandsUpdateMeta] = None
+
+@dataclass
+class ACPFsWatchUpdateMetaHarn(_HarnDataclass):
+    subscriptionId: str
+    events: List[JsonValue]
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPFsWatchUpdateMeta(_HarnDataclass):
+    harn: ACPFsWatchUpdateMetaHarn
 
 @dataclass
 class ACPFsWatchUpdate(_HarnDataclass):
     sessionUpdate: str
-    subscriptionId: str
-    events: JsonValue
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPFsWatchUpdateMeta
+
+@dataclass
+class ACPHandoffUpdateMetaHarn(_HarnDataclass):
+    handoffId: str
+    artifactId: str
+    handoff: Dict[str, JsonValue]
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPHandoffUpdateMeta(_HarnDataclass):
+    harn: ACPHandoffUpdateMetaHarn
 
 @dataclass
 class ACPHandoffUpdate(_HarnDataclass):
     sessionUpdate: str
-    handoffId: str
-    artifactId: str
-    handoff: JsonValue
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPHandoffUpdateMeta
+
+@dataclass
+class ACPHitlRequestUpdateMetaHarn(_HarnDataclass):
+    requestId: str
+    kind: str
+    payload: JsonValue
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPHitlRequestUpdateMeta(_HarnDataclass):
+    harn: ACPHitlRequestUpdateMetaHarn
 
 @dataclass
 class ACPHitlRequestUpdate(_HarnDataclass):
     sessionUpdate: str
+    _meta: ACPHitlRequestUpdateMeta
+
+@dataclass
+class ACPHitlResolvedUpdateMetaHarn(_HarnDataclass):
     requestId: str
     kind: str
-    payload: JsonValue
-    _meta: Optional[HarnExtensionMeta] = None
+    outcome: JsonValue
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPHitlResolvedUpdateMeta(_HarnDataclass):
+    harn: ACPHitlResolvedUpdateMetaHarn
 
 @dataclass
 class ACPHitlResolvedUpdate(_HarnDataclass):
     sessionUpdate: str
-    requestId: str
-    kind: str
-    outcome: JsonValue
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPHitlResolvedUpdateMeta
+
+@dataclass
+class ACPLiveSessionClientUpdateMetaHarn(_HarnDataclass):
+    action: str
+    state: JsonValue
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPLiveSessionClientUpdateMeta(_HarnDataclass):
+    harn: ACPLiveSessionClientUpdateMetaHarn
 
 @dataclass
 class ACPLiveSessionClientUpdate(_HarnDataclass):
     sessionUpdate: str
-    action: str
-    state: Optional[JsonValue] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPLiveSessionClientUpdateMeta
+
+@dataclass
+class ACPLogUpdateMetaHarn(_HarnDataclass):
+    message: str
+    level: str
+    fields: Optional[JsonValue] = None
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPLogUpdateMeta(_HarnDataclass):
+    harn: ACPLogUpdateMetaHarn
 
 @dataclass
 class ACPLogUpdate(_HarnDataclass):
     sessionUpdate: str
+    _meta: ACPLogUpdateMeta
+
+@dataclass
+class ACPProgressUpdateMetaHarn(_HarnDataclass):
     message: str
-    level: Optional[str] = None
-    fields: Optional[JsonValue] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    phase: str
+    data: Optional[JsonValue] = None
+    kind: Optional[str] = None
+    pendingCount: Optional[int] = None
+    pendingWrites: Optional[List[JsonValue]] = None
+    progress: Optional[int] = None
+    replayed: Optional[bool] = None
+    total: Optional[int] = None
+    totalBytes: Optional[int] = None
+
+@dataclass
+class ACPProgressUpdateMeta(_HarnDataclass):
+    harn: ACPProgressUpdateMetaHarn
 
 @dataclass
 class ACPProgressUpdate(_HarnDataclass):
     sessionUpdate: str
-    message: str
-    phase: Optional[str] = None
-    progress: Optional[int] = None
-    total: Optional[int] = None
-    data: Optional[JsonValue] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPProgressUpdateMeta
+
+@dataclass
+class ACPReminderEmittedUpdateMetaHarnReminder(_HarnDataclass):
+    reminderId: str
+    tags: List[str]
+    body: str
+    roleHint: str
+    renderedRole: str
+    source: str
+    ttlTurns: Optional[int]
+    authority: Optional[str] = None
+
+@dataclass
+class ACPReminderEmittedUpdateMetaHarn(_HarnDataclass):
+    reminder: ACPReminderEmittedUpdateMetaHarnReminder
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPReminderEmittedUpdateMeta(_HarnDataclass):
+    harn: ACPReminderEmittedUpdateMetaHarn
 
 @dataclass
 class ACPReminderEmittedUpdate(_HarnDataclass):
     sessionUpdate: str
-    reminderId: str
-    reminder: Optional[JsonValue] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPReminderEmittedUpdateMeta
+
+@dataclass
+class ACPSkillActivatedUpdateMetaHarn(_HarnDataclass):
+    skillName: str
+    iteration: int
+    reason: Optional[str] = None
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPSkillActivatedUpdateMeta(_HarnDataclass):
+    harn: ACPSkillActivatedUpdateMetaHarn
 
 @dataclass
 class ACPSkillActivatedUpdate(_HarnDataclass):
     sessionUpdate: str
+    _meta: ACPSkillActivatedUpdateMeta
+
+@dataclass
+class ACPSkillDeactivatedUpdateMetaHarn(_HarnDataclass):
     skillName: str
     iteration: Optional[int] = None
-    reason: Optional[str] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPSkillDeactivatedUpdateMeta(_HarnDataclass):
+    harn: ACPSkillDeactivatedUpdateMetaHarn
 
 @dataclass
 class ACPSkillDeactivatedUpdate(_HarnDataclass):
     sessionUpdate: str
-    skillName: str
-    iteration: Optional[int] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPSkillDeactivatedUpdateMeta
+
+@dataclass
+class ACPSkillNarrowUpdateMetaHarn(_HarnDataclass):
+    removedTools: List[str]
+    remainingTools: List[str]
+    keptToolDetails: Optional[JsonValue] = None
+    policy: Optional[JsonValue] = None
+    reason: Optional[str] = None
+    removedToolDetails: Optional[JsonValue] = None
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPSkillNarrowUpdateMeta(_HarnDataclass):
+    harn: ACPSkillNarrowUpdateMetaHarn
 
 @dataclass
 class ACPSkillNarrowUpdate(_HarnDataclass):
     sessionUpdate: str
-    removedTools: List[str]
-    remainingTools: List[str]
-    reason: Optional[str] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPSkillNarrowUpdateMeta
+
+@dataclass
+class ACPSkillScopeToolsUpdateMetaHarn(_HarnDataclass):
+    skillName: str
+    allowedTools: List[str]
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPSkillScopeToolsUpdateMeta(_HarnDataclass):
+    harn: ACPSkillScopeToolsUpdateMetaHarn
 
 @dataclass
 class ACPSkillScopeToolsUpdate(_HarnDataclass):
     sessionUpdate: str
-    skillName: str
-    allowedTools: List[str]
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPSkillScopeToolsUpdateMeta
+
+@dataclass
+class ACPStanceTransitionUpdateMetaHarn(_HarnDataclass):
+    phase: str
+    allowedTools: Optional[List[str]] = None
+    consent: Optional[str] = None
+    escapeTool: Optional[str] = None
+    justification: Optional[str] = None
+    reason: Optional[str] = None
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPStanceTransitionUpdateMeta(_HarnDataclass):
+    harn: ACPStanceTransitionUpdateMetaHarn
 
 @dataclass
 class ACPStanceTransitionUpdate(_HarnDataclass):
     sessionUpdate: str
-    phase: str
-    escapeTool: Optional[str] = None
-    allowedTools: Optional[List[str]] = None
-    justification: Optional[str] = None
-    consent: Optional[str] = None
-    reason: Optional[str] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPStanceTransitionUpdateMeta
+
+@dataclass
+class ACPToolSearchQueryUpdateMetaHarn(_HarnDataclass):
+    toolUseId: str
+    name: str
+    query: JsonValue
+    mode: Optional[str] = None
+    replayed: Optional[bool] = None
+    strategy: Optional[str] = None
+
+@dataclass
+class ACPToolSearchQueryUpdateMeta(_HarnDataclass):
+    harn: ACPToolSearchQueryUpdateMetaHarn
 
 @dataclass
 class ACPToolSearchQueryUpdate(_HarnDataclass):
     sessionUpdate: str
+    _meta: ACPToolSearchQueryUpdateMeta
+
+@dataclass
+class ACPToolSearchResultUpdateMetaHarn(_HarnDataclass):
     toolUseId: str
-    name: str
-    query: JsonValue
-    strategy: Optional[str] = None
+    promoted: List[JsonValue]
     mode: Optional[str] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    replayed: Optional[bool] = None
+    strategy: Optional[str] = None
+
+@dataclass
+class ACPToolSearchResultUpdateMeta(_HarnDataclass):
+    harn: ACPToolSearchResultUpdateMetaHarn
 
 @dataclass
 class ACPToolSearchResultUpdate(_HarnDataclass):
     sessionUpdate: str
-    toolUseId: str
-    promoted: JsonValue
-    strategy: Optional[str] = None
-    mode: Optional[str] = None
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPToolSearchResultUpdateMeta
+
+@dataclass
+class ACPTranscriptCompactedUpdateMetaHarn(_HarnDataclass):
+    mode: str
+    strategy: str
+    snapshotAssetId: Optional[str]
+    archivedMessages: Optional[int] = None
+    compactionPolicy: Optional[JsonValue] = None
+    engineStrategy: Optional[str] = None
+    estimatedTokensAfter: Optional[int] = None
+    estimatedTokensBefore: Optional[int] = None
+    instructionMode: Optional[str] = None
+    instructionSource: Optional[str] = None
+    reason: Optional[str] = None
+    recap: Optional[JsonValue] = None
+    receiptId: Optional[str] = None
+    replayed: Optional[bool] = None
+    schemaVersion: Optional[int] = None
+
+@dataclass
+class ACPTranscriptCompactedUpdateMeta(_HarnDataclass):
+    harn: ACPTranscriptCompactedUpdateMetaHarn
 
 @dataclass
 class ACPTranscriptCompactedUpdate(_HarnDataclass):
     sessionUpdate: str
-    mode: str
-    strategy: str
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPTranscriptCompactedUpdateMeta
+
+@dataclass
+class ACPTranscriptProjectedUpdateMetaHarn(_HarnDataclass):
+    policy: str
+    reason: str
+    droppedCount: Optional[int] = None
+    keptCount: Optional[int] = None
+    prefixHash: Optional[str] = None
+    providerSafetyBlocked: Optional[bool] = None
+    reclaimedTokens: Optional[int] = None
+    redactedCount: Optional[int] = None
+    redactionPointers: Optional[List[JsonValue]] = None
+    replayed: Optional[bool] = None
+    rootsConsulted: Optional[List[JsonValue]] = None
+
+@dataclass
+class ACPTranscriptProjectedUpdateMeta(_HarnDataclass):
+    harn: ACPTranscriptProjectedUpdateMetaHarn
 
 @dataclass
 class ACPTranscriptProjectedUpdate(_HarnDataclass):
     sessionUpdate: str
-    policy: str
-    reason: str
-    _meta: Optional[HarnExtensionMeta] = None
+    _meta: ACPTranscriptProjectedUpdateMeta
 
 @dataclass
-class ACPWorkerUpdate(_HarnDataclass):
-    sessionUpdate: str
+class ACPWorkerUpdateMetaHarn(_HarnDataclass):
     workerId: str
     event: str
     status: str
     terminal: bool
+    metadata: JsonValue
+    audit: Optional[JsonValue] = None
+    replayed: Optional[bool] = None
+    workerMode: Optional[str] = None
     workerName: Optional[str] = None
     workerTask: Optional[str] = None
-    workerMode: Optional[str] = None
-    metadata: Optional[JsonValue] = None
-    audit: Optional[JsonValue] = None
-    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPWorkerUpdateMeta(_HarnDataclass):
+    harn: ACPWorkerUpdateMetaHarn
+
+@dataclass
+class ACPWorkerUpdate(_HarnDataclass):
+    sessionUpdate: str
+    _meta: ACPWorkerUpdateMeta
+
 
 HARN_PREPARED_SESSION_SCHEMA = "harn.prepared_session.v1"
 HARN_PREPARED_SESSION_STATES = ("needs_approval", "ready", "blocked", "active", "delta", "stopped", "pivoted", "terminal")

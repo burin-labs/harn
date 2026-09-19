@@ -265,9 +265,10 @@ fn external_action_vocabulary_projects_to_every_supported_host() {
     let vocabulary = ExternalActionVocabulary::load(&protocol_source()).unwrap();
     let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
     let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
-    let ts = generate_typescript(&vocabulary, &setup, &activity);
-    let swift = generate_swift(&vocabulary, &setup, &activity);
-    let rust = generate_rust(&vocabulary, &setup, &activity);
+    let payloads = super::session_update_payloads::SessionUpdatePayloads::load_for_tests();
+    let ts = generate_typescript(&vocabulary, &setup, &activity, &payloads);
+    let swift = generate_swift(&vocabulary, &setup, &activity, &payloads);
+    let rust = generate_rust(&vocabulary, &setup, &activity, &payloads);
 
     assert!(ts.contains("isExternalActionActivityStatusTerminal"));
     assert!(ts.contains("canExternalActionActivityStatusAdvance"));
@@ -298,10 +299,31 @@ fn generic_permission_activity_projects_to_every_supported_host() {
     let generated = [
         (
             "TypeScript",
-            generate_typescript(&actions, &setup, &activity),
+            generate_typescript(
+                &actions,
+                &setup,
+                &activity,
+                &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+            ),
         ),
-        ("Swift", generate_swift(&actions, &setup, &activity)),
-        ("Rust", generate_rust(&actions, &setup, &activity)),
+        (
+            "Swift",
+            generate_swift(
+                &actions,
+                &setup,
+                &activity,
+                &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+            ),
+        ),
+        (
+            "Rust",
+            generate_rust(
+                &actions,
+                &setup,
+                &activity,
+                &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+            ),
+        ),
     ];
 
     for value in activity
@@ -353,9 +375,24 @@ fn adding_external_action_values_updates_all_host_projections() {
     let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
     let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
     for generated in [
-        generate_typescript(&vocabulary, &setup, &activity),
-        generate_swift(&vocabulary, &setup, &activity),
-        generate_rust(&vocabulary, &setup, &activity),
+        generate_typescript(
+            &vocabulary,
+            &setup,
+            &activity,
+            &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+        ),
+        generate_swift(
+            &vocabulary,
+            &setup,
+            &activity,
+            &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+        ),
+        generate_rust(
+            &vocabulary,
+            &setup,
+            &activity,
+            &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+        ),
     ] {
         for future_value in [
             "future_outcome",
@@ -386,9 +423,24 @@ fn complete_external_action_activity_projects_without_sensitive_values() {
     let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
     let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
     for generated in [
-        generate_typescript(&actions, &setup, &activity),
-        generate_swift(&actions, &setup, &activity),
-        generate_rust(&actions, &setup, &activity),
+        generate_typescript(
+            &actions,
+            &setup,
+            &activity,
+            &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+        ),
+        generate_swift(
+            &actions,
+            &setup,
+            &activity,
+            &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+        ),
+        generate_rust(
+            &actions,
+            &setup,
+            &activity,
+            &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+        ),
     ] {
         for required in [
             "harn.external_action_activity.v1",
@@ -441,10 +493,31 @@ fn connector_setup_vocabulary_projects_to_every_supported_host() {
     let generated = [
         (
             "TypeScript",
-            generate_typescript(&actions, &setup, &activity),
+            generate_typescript(
+                &actions,
+                &setup,
+                &activity,
+                &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+            ),
         ),
-        ("Swift", generate_swift(&actions, &setup, &activity)),
-        ("Rust", generate_rust(&actions, &setup, &activity)),
+        (
+            "Swift",
+            generate_swift(
+                &actions,
+                &setup,
+                &activity,
+                &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+            ),
+        ),
+        (
+            "Rust",
+            generate_rust(
+                &actions,
+                &setup,
+                &activity,
+                &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+            ),
+        ),
     ];
 
     for value in setup
@@ -930,7 +1003,10 @@ type Example struct {
 
 #[test]
 fn generated_go_artifact_is_gofmt_stable_when_gofmt_is_available() {
-    let go = generate_go_artifact().expect("generate Go artifact");
+    let go = generate_go_artifact(
+        &super::session_update_payloads::SessionUpdatePayloads::load_for_tests(),
+    )
+    .expect("generate Go artifact");
     let mut child = match Command::new("gofmt")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

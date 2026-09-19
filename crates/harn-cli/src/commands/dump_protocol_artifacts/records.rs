@@ -9,7 +9,6 @@ pub(super) enum FieldKind {
     Integer(Integer),
     Bool,
     LiteralBool(bool),
-    StringList,
     Json,
     Named(String),
     List(Box<Self>),
@@ -25,8 +24,6 @@ pub(super) enum FieldKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Integer {
-    /// Existing session-update counters use Go's machine-sized int.
-    HostCount,
     /// Existing plan ranges use Rust usize and Go's machine-sized int.
     HostIndex,
     /// Harn's signed integer projects to Swift Int64.
@@ -54,7 +51,7 @@ impl FieldKind {
         match self {
             Self::Integer(integer) => match target {
                 Rust => match integer {
-                    Integer::U64 | Integer::HostCount | Integer::UnsignedHarn => "u64",
+                    Integer::U64 | Integer::UnsignedHarn => "u64",
                     Integer::U32 => "u32",
                     Integer::Usize | Integer::HostIndex => "usize",
                     Integer::I64 | Integer::Harn => "i64",
@@ -62,7 +59,7 @@ impl FieldKind {
                 Go => match integer {
                     Integer::U32 => "uint32",
                     Integer::I64 | Integer::Harn => "int64",
-                    Integer::HostCount | Integer::HostIndex => "int",
+                    Integer::HostIndex => "int",
                     _ => "uint64",
                 },
                 Swift if matches!(integer, Integer::Harn | Integer::UnsignedHarn) => "Int64",
@@ -111,7 +108,6 @@ impl FieldKind {
                     Go => format!("[]{item}"),
                 }
             }
-            Self::StringList => Self::List(Box::new(Self::String)).type_name(target),
             kind => match (kind, target) {
                 (Self::NonEmptyString | Self::String, Rust | Swift) => "String",
                 (Self::NonEmptyString | Self::String, Python) => "str",
@@ -140,12 +136,7 @@ impl FieldKind {
             Target::Rust => format!("Option<{inner}>"),
             Target::Swift => format!("{inner}?"),
             Target::Python => format!("Optional[{inner}]"),
-            Target::Go
-                if !matches!(
-                    self,
-                    Self::StringList | Self::List(_) | Self::DefaultList(_) | Self::Json
-                ) =>
-            {
+            Target::Go if !matches!(self, Self::List(_) | Self::DefaultList(_) | Self::Json) => {
                 format!("*{inner}")
             }
             _ => inner,
@@ -159,7 +150,6 @@ pub(super) struct Field {
     pub rust_name: Cow<'static, str>,
     pub kind: FieldKind,
     pub required: bool,
-    pub identity: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,18 +160,30 @@ pub(super) struct Record {
 
 impl Record {
     pub(super) fn append(&self, out: &mut String, target: Target) {
-        self.append_record(out, target, false, false);
+        self.append_record(out, target, false, false, false);
     }
 
     pub(super) fn append_closed(&self, out: &mut String, target: Target) {
-        self.append_record(out, target, true, true);
+        self.append_record(out, target, true, true, false);
     }
 
-    pub(super) fn append_mutable(&self, out: &mut String, target: Target) {
-        self.append_record(out, target, false, true);
+    pub(super) fn append_mutable(
+        &self,
+        out: &mut String,
+        target: Target,
+        preserve_required_nulls: bool,
+    ) {
+        self.append_record(out, target, false, true, preserve_required_nulls);
     }
 
-    fn append_record(&self, out: &mut String, target: Target, closed: bool, mutable: bool) {
+    fn append_record(
+        &self,
+        out: &mut String,
+        target: Target,
+        closed: bool,
+        mutable: bool,
+        preserve_required_nulls: bool,
+    ) {
         let name = &self.name;
         match target {
             Target::Rust if closed => out.push_str(&format!("#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]\n#[serde(rename_all = \"camelCase\", deny_unknown_fields)]\npub struct {name} {{\n")),
@@ -239,11 +241,18 @@ impl Record {
                 )),
             }
         }
-        if matches!(target, Target::Swift)
+        let explicit_swift_nulls = matches!(target, Target::Swift)
+            && preserve_required_nulls
             && self
                 .fields
                 .iter()
-                .any(|field| camel_ident(&field.wire_name) != field.wire_name)
+                .any(|field| field.required && matches!(field.kind, FieldKind::Nullable(_)));
+        if matches!(target, Target::Swift)
+            && (explicit_swift_nulls
+                || self
+                    .fields
+                    .iter()
+                    .any(|field| camel_ident(&field.wire_name) != field.wire_name))
         {
             out.push_str("\n    enum CodingKeys: String, CodingKey {\n");
             for field in &self.fields {
@@ -253,6 +262,21 @@ impl Record {
                     out.push_str(&format!(" = {:?}", field.wire_name));
                 }
                 out.push('\n');
+            }
+            out.push_str("    }\n");
+        }
+        if explicit_swift_nulls {
+            out.push_str("\n    public func encode(to encoder: Encoder) throws {\n        var values = encoder.container(keyedBy: CodingKeys.self)\n");
+            for field in &self.fields {
+                let name = camel_ident(&field.wire_name);
+                let encode = if field.required {
+                    "encode"
+                } else {
+                    "encodeIfPresent"
+                };
+                out.push_str(&format!(
+                    "        try values.{encode}({name}, forKey: .{name})\n"
+                ));
             }
             out.push_str("    }\n");
         }

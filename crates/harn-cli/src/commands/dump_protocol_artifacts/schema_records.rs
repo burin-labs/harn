@@ -1,6 +1,6 @@
 //! Normalize the supported record shapes from owning wire schemas once.
 
-use super::records::{snake_ident, Field, FieldKind, Record};
+use super::records::{snake_ident, Field, FieldKind, Integer, Record};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -14,6 +14,14 @@ pub(super) struct SchemaRecords<'a> {
 
 impl SchemaRecords<'_> {
     pub(super) fn load(&self) -> Result<Vec<Record>, String> {
+        self.load_records(true)
+    }
+
+    pub(super) fn load_extensible(&self) -> Result<Vec<Record>, String> {
+        self.load_records(false)
+    }
+
+    fn load_records(&self, require_closed: bool) -> Result<Vec<Record>, String> {
         self.names
             .iter()
             .map(|(key, name)| {
@@ -24,7 +32,7 @@ impl SchemaRecords<'_> {
                         .pointer(&format!("/$defs/{key}"))
                         .ok_or_else(|| format!("missing {} record {key}", self.label))?
                 };
-                if object["additionalProperties"] != false {
+                if require_closed && object["additionalProperties"] != false {
                     return Err(format!("{} {key} must be closed", self.label));
                 }
                 let properties = object["properties"]
@@ -64,14 +72,15 @@ impl SchemaRecords<'_> {
                             .ok_or_else(|| format!("missing {} {key}.{field}", self.label))?;
                         Ok(Field {
                             wire_name: field.to_owned().into(),
-                            rust_name: if field == "_type" {
+                            rust_name: if field == "_meta" {
+                                "meta".into()
+                            } else if field == "_type" {
                                 "type_name".into()
                             } else {
                                 snake_ident(field).into()
                             },
                             kind: self.kind(key, field, shape, &mut BTreeSet::new())?,
                             required: names.contains(field),
-                            identity: false,
                         })
                     })
                     .collect::<Result<_, String>>()?;
@@ -136,8 +145,20 @@ impl SchemaRecords<'_> {
                 wire_type: None,
             });
         }
+        if schema["enum"]
+            .as_array()
+            .is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_string))
+        {
+            return Ok(FieldKind::String);
+        }
         Ok(match schema["type"].as_str() {
+            Some("string") if schema["minLength"].as_u64() == Some(1) => FieldKind::NonEmptyString,
             Some("string") => FieldKind::String,
+            Some("integer") => FieldKind::Integer(if schema["minimum"].as_i64() == Some(0) {
+                Integer::U64
+            } else {
+                Integer::I64
+            }),
             Some("boolean") => FieldKind::Bool,
             Some("array") => FieldKind::List(Box::new(self.kind(
                 owner,

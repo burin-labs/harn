@@ -24,6 +24,7 @@ mod records;
 mod schema_records;
 mod session_recap;
 mod session_update_payloads;
+mod session_update_validation;
 mod support;
 mod values;
 
@@ -130,7 +131,8 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
     let external_actions = ExternalActionVocabulary::load(source)?;
     let connector_setup = ConnectorSetupVocabulary::load(source)?;
     let activity = ActivityVocabulary::load(source)?;
-    let go_artifact = generate_go_artifact()?;
+    let session_updates = session_update_payloads::SessionUpdatePayloads::load(source)?;
+    let go_artifact = generate_go_artifact(&session_updates)?;
     let mut artifacts = vec![
         Artifact::new("README.md", generate_readme()),
         Artifact::new(
@@ -144,20 +146,38 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
         ),
         Artifact::new(
             "harn-protocol.ts",
-            generate_typescript(&external_actions, &connector_setup, &activity),
+            generate_typescript(
+                &external_actions,
+                &connector_setup,
+                &activity,
+                &session_updates,
+            ),
         ),
         Artifact::new(
             "HarnProtocol.swift",
-            generate_swift(&external_actions, &connector_setup, &activity),
+            generate_swift(
+                &external_actions,
+                &connector_setup,
+                &activity,
+                &session_updates,
+            ),
         ),
         Artifact::new(
             "harn-protocol.rs",
             format_rust_source(
-                generate_rust(&external_actions, &connector_setup, &activity),
+                generate_rust(
+                    &external_actions,
+                    &connector_setup,
+                    &activity,
+                    &session_updates,
+                ),
                 source.repo_root(),
             )?,
         ),
-        Artifact::new("python/harn_protocol.py", generate_python()),
+        Artifact::new(
+            "python/harn_protocol.py",
+            generate_python_with_payloads(&session_updates),
+        ),
         Artifact::new("python/__init__.py", PYTHON_INIT_STUB.to_string()),
         Artifact::new("go/harnprotocol/harnprotocol.go", go_artifact),
         Artifact::new("go/harnprotocol/go.mod", generate_go_mod()),
