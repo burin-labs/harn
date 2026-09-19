@@ -340,6 +340,11 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["process_network_enabled"], true);
     assert_eq!(metadata["process_loopback_requested"], false);
     assert_eq!(metadata["process_loopback_enabled"], true);
+    // This run asks for no socket roots, and the receipt has to say that
+    // rather than omit the field: a reader who sees an empty root list and no
+    // disposition cannot tell "nothing was requested" from "a backend quietly
+    // declined to scope it".
+    assert_eq!(metadata["process_unix_socket_enforcement"], "not_requested");
     assert_eq!(
         metadata["process_network_mode"],
         if cfg!(target_os = "macos") {
