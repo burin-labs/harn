@@ -1229,7 +1229,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         &approval_id,
                         &tool_name,
                         &decision,
-                        resolution,
+                        host_permission::attribute_reviewer_refusal(&decision, resolution),
                     );
                     let denial = crate::agent_events::ToolDenial::terminal(
                         crate::agent_events::DenialGate::HostRejected,
