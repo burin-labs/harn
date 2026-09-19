@@ -547,20 +547,24 @@ fn process_self_introspection_refuses_a_host_that_cannot_contain_it() {
         ..Default::default()
     });
 
-    let rendered = landlock_profile("/bin/ls", &policy, SandboxProfile::Worktree);
+    // Mapped to the refusal text rather than matched on the profile, which
+    // carries a raw descriptor and is deliberately not printable.
+    let refusal = landlock_profile("/bin/ls", &policy, SandboxProfile::Worktree)
+        .err()
+        .map(|error| format!("{error:?}"));
     if proc_runtime_reads_are_contained() {
         assert!(
-            rendered.is_ok(),
-            "a containing host must render the grant rather than refuse it",
+            refusal.is_none(),
+            "a containing host must render the grant rather than refuse it: {refusal:?}",
         );
     } else {
-        let error = rendered.expect_err(
+        let refusal = refusal.expect(
             "a host that cannot contain a task's view of its neighbours must refuse \
              the grant instead of issuing a wider one",
         );
         assert!(
-            format!("{error:?}").contains("neighbours"),
-            "the refusal must name why, not just fail: {error:?}",
+            refusal.contains("neighbours"),
+            "the refusal must name why, not just fail: {refusal}",
         );
     }
 }
