@@ -181,6 +181,10 @@ fn namespace_admission_precedes_artifact_directory_publication() {
     assert!(!dir.exists(), "directory became visible before its lease");
 }
 
+/// Unix only: the descriptor budget this pins is a Unix per-process limit,
+/// and neither descriptor directory exists on Windows. The integration test
+/// that drives the real tool is gated the same way.
+#[cfg(unix)]
 fn open_descriptor_count() -> usize {
     let dir = if cfg!(target_os = "linux") {
         "/proc/self/fd"
@@ -201,6 +205,7 @@ fn open_descriptor_count() -> usize {
 /// commands here: if retirement were the only thing releasing descriptors
 /// this would grow by one per command, which is the pre-fix behavior and
 /// what the negative control shows.
+#[cfg(unix)]
 #[test]
 fn completed_commands_do_not_accumulate_lease_descriptors() {
     let temp = tempdir().unwrap();
