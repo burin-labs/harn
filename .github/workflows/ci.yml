@@ -1562,6 +1562,74 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # The refusals that are cheap enough to run before the merge.
+  #
+  # A gate that runs only after the merge cannot refuse anything. Its one
+  # available action is to turn the default branch red once the change is
+  # already in, and on a pull request its absence reads exactly like its
+  # success. These three cost 24 seconds together, need no build and no Node,
+  # and two of them already resolve their base as the first parent precisely
+  # so they read correctly on the synthetic merge commit a pull request is
+  # checked out as. They were simply never reached there.
+  #
+  # The expensive remainder stays in `audit-scripts`. Fourteen minutes is a
+  # cost argument, which is a different question from whether a gate can
+  # refuse, and `scripts/ci_cache_policy/policy_core.harn` records both.
+  fast-policy-gates:
+    name: Check fast repository policies
+    # Same live-artifact barrier as the other consumers of the shared CLI.
+    needs: [changes, rust-artifacts-ready]
+    # No event condition, deliberately. The contract asserts its absence
+    # rather than the absence of one spelling, because any event term here
+    # would put these refusals back behind the merge.
+    if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Both base-relative guards below walk to the first parent, so the
+          # history has to reach it.
+          fetch-depth: 0
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      # `if: always()` on every step below is the point of this job's shape,
+      # the same reason the expensive lane carries it: a step that fails must
+      # not skip the ones after it, or one red hides its siblings.
+      - name: Reject flaky test patterns
+        if: always()
+        run: make lint-test-patterns
+      - name: Check no retroactive CHANGELOG edits
+        if: always()
+        # GitHub checks out pull requests and merge groups as synthetic merge
+        # commits. HEAD^1 is the current base, while the event payload's
+        # pull-request-open base SHA can become stale as the branch advances.
+        run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn -- --base HEAD^1'
+      - name: Check no undeclared protocol symbol removals
+        if: always()
+        # spec/protocol-artifacts/ is a downstream contract: integrators
+        # compile against the exported names. check-protocol-artifacts
+        # regenerates and compares, so a symbol the generator stops emitting
+        # vanishes from both sides and stays green -- which is why this guard
+        # exists beside it. Same first-parent base as the CHANGELOG guard.
+        env:
+          PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
+        run: make check-protocol-symbol-removals
+
   audit-scripts:
     name: Check repository policies
     # Consumes only the small portable CLI bundle through the same live
@@ -1619,12 +1687,6 @@ jobs:
       - name: Check prompts are not embedded in Rust
         if: needs.changes.outputs.prompt_prose == 'true'
         run: make lint-no-rust-prompt-prose
-      # This source-only Harn ratchet needs only the exact portable CLI above.
-      # Keep it ahead of Node setup and both integration sweeps so a flaky-test
-      # pattern fails the head before minutes of unrelated work have elapsed.
-      - name: Reject flaky test patterns
-        if: always()
-        run: make lint-test-patterns
       # `make spec-lint` must run the repository's declared Redocly CLI, not
       # let npx fall back to an unrelated registry package. Keep this install
       # in the already-required audit lane, where the snapshot check can reuse
@@ -1658,23 +1720,6 @@ jobs:
       - name: Run repository policy checks
         if: always()
         run: make repository-policies
-      - name: Check no retroactive CHANGELOG edits
-        if: always()
-        # GitHub checks out PRs and merge groups as synthetic merge commits.
-        # HEAD^1 is the current base, while the event payload's PR-open base
-        # SHA can become stale as main advances.
-        run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn -- --base HEAD^1'
-      - name: Check no undeclared protocol symbol removals
-        if: always()
-        # spec/protocol-artifacts/ is a downstream contract: integrators compile
-        # against the exported names. check-protocol-artifacts regenerates and
-        # compares, so a symbol the generator stops emitting vanishes from both
-        # sides and stays green -- which is why this guard exists beside it, and
-        # why that check now runs in `repository-policies` above rather than
-        # only in the local aggregate. Same HEAD^1 base as the CHANGELOG guard.
-        env:
-          PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
-        run: make check-protocol-symbol-removals
 
   windows-plan:
     name: Windows CI routing
@@ -2546,6 +2591,7 @@ jobs:
         rust-security,
         stack-frames,
         harn-audit,
+        fast-policy-gates,
         source-length-ratchet,
         ci-walltime-report,
         audit-scripts,
@@ -2727,6 +2773,11 @@ jobs:
           echo "Source file lengths: $source_length_result"
           require_result "$source_length_result" \
             "Source file-length ratchet failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          fast_policy_result="${{ needs['fast-policy-gates'].result }}"
+          echo "Fast repository policies: $fast_policy_result"
+          require_result "$fast_policy_result" \
+            "Fast repository policy gates failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           ci_walltime_report_result="${{ needs['ci-walltime-report'].result }}"
           echo "CI timing report: $ci_walltime_report_result"
