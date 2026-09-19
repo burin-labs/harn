@@ -13,12 +13,14 @@ mod exits;
 mod format;
 mod inference;
 pub mod method_registry;
+mod predicate;
 mod schema_inference;
 mod scope;
 mod union;
 
 pub use exits::{block_definitely_exits, stmt_definitely_exits};
 pub use format::{format_type, shape_mismatch_detail};
+pub use predicate::{canonical_type as canonical_predicate_type, PredicateSite};
 
 /// Substitute generic bindings with the same open-row folding used by type
 /// inference. Schema compilation calls this instead of carrying a second type
@@ -58,6 +60,8 @@ pub struct TypeCheckFacts {
     pub diagnostics: Vec<TypeDiagnostic>,
     pub inlay_hints: Vec<InlayHintInfo>,
     pub binding_types: Vec<BindingTypeInfo>,
+    /// Validated model-evaluation sites, including sites inside helper bodies.
+    pub predicate_sites: Vec<PredicateSite>,
 }
 
 /// Static info for one `import * as alias from "path"` binding.
@@ -204,6 +208,8 @@ pub struct TypeChecker {
     source: Option<String>,
     hints: Vec<InlayHintInfo>,
     binding_types: Vec<BindingTypeInfo>,
+    predicate_sites: Vec<PredicateSite>,
+    predicate_bindings: Vec<(crate::lexical::BindingId, Span)>,
     /// When true, flag unvalidated boundary-API values used in field access.
     strict_types: bool,
     /// Explicit process-bound compatibility mode for pre-Harness callers.
@@ -421,6 +427,8 @@ impl TypeChecker {
             source: None,
             hints: Vec::new(),
             binding_types: Vec::new(),
+            predicate_sites: Vec::new(),
+            predicate_bindings: Vec::new(),
             strict_types: false,
             legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
             privileged_wire_builtins: false,
@@ -448,6 +456,8 @@ impl TypeChecker {
             source: None,
             hints: Vec::new(),
             binding_types: Vec::new(),
+            predicate_sites: Vec::new(),
+            predicate_bindings: Vec::new(),
             strict_types: strict,
             legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
             privileged_wire_builtins: false,

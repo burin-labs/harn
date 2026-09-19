@@ -31,6 +31,7 @@ mod nested_generic_alias_inference;
 mod nil_safety;
 mod ownership;
 mod pipeline_typing;
+mod probabilistic_predicates;
 mod reachability;
 mod record_arguments;
 mod record_projection;

@@ -239,10 +239,12 @@ impl TypeChecker {
             }
         }
 
+        self.check_unused_predicate_bindings(program);
         TypeCheckFacts {
             diagnostics: self.diagnostics,
             inlay_hints: self.hints,
             binding_types: self.binding_types,
+            predicate_sites: self.predicate_sites,
         }
     }
 

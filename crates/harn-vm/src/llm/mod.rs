@@ -87,6 +87,7 @@ mod model_test;
 mod permission_preview;
 pub(crate) mod permissions;
 pub mod plan;
+mod predicate;
 pub mod prompt;
 pub(crate) mod prompt_cache;
 mod protocol_violation;
@@ -964,6 +965,7 @@ async fn llm_stream_builtin_wrap(
 
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
+    predicate::register(vm);
     agent_config::register_agent_control_primitives(vm);
     register_builtin_defs(vm, LLM_RUNTIME_PRIMITIVE_BUILTINS);
     register_builtin_defs(vm, tools::PARSE_HOST_PRIMITIVE_BUILTINS);

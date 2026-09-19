@@ -198,6 +198,11 @@ diagnostic_codes! {
     TupleIndexOutOfBounds, "HARN-TYP-027", Typ, "constant tuple index is outside the fixed arity";
     ImplicitAnyParameter, "HARN-TYP-028", Typ, "declared parameter has no type annotation";
     InvalidTypePredicate, "HARN-TYP-029", Typ, "type predicate contract is invalid";
+    PredicateInputInvalid, "HARN-TYP-030", Typ, "probabilistic predicate input must have a closed serializable type";
+    PredicateBooleanUse, "HARN-TYP-031", Typ, "probabilistic predicate outcome cannot be used as a boolean";
+    PredicateOutcomeUnused, "HARN-TYP-032", Typ, "probabilistic predicate outcome must be consumed";
+    PredicateSiteInvalid, "HARN-TYP-033", Typ, "probabilistic predicate site identity must be literal and unique";
+    PredicateOutcomeUnnarrowed, "HARN-TYP-034", Typ, "probabilistic predicate variant fields require outcome narrowing";
     ParserUnexpectedToken, "HARN-PAR-001", Par, "parser found an unexpected token";
     ParserUnexpectedEof, "HARN-PAR-002", Par, "parser reached end of file while expecting syntax";
     ParserUnexpectedCharacter, "HARN-PAR-003", Par, "lexer found an unexpected character";

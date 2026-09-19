@@ -5,7 +5,7 @@ use std::path::Path;
 
 use harn_lexer::{Lexer, LexerError};
 
-use crate::{BindingTypeInfo, InlayHintInfo, TypeCheckFacts};
+use crate::{BindingTypeInfo, InlayHintInfo, PredicateSite, TypeCheckFacts};
 use crate::{Parser, ParserError, SNode, TypeChecker, TypeDiagnostic};
 
 /// Stable source identity used by the incremental analysis cache.
@@ -72,6 +72,7 @@ pub struct TypeCheckOutput {
     pub diagnostics: Vec<TypeDiagnostic>,
     pub inlay_hints: Vec<InlayHintInfo>,
     pub binding_types: Vec<BindingTypeInfo>,
+    pub predicate_sites: Vec<PredicateSite>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,6 +210,7 @@ struct CachedTypeCheck {
     diagnostics: Vec<TypeDiagnostic>,
     inlay_hints: Vec<InlayHintInfo>,
     binding_types: Vec<BindingTypeInfo>,
+    predicate_sites: Vec<PredicateSite>,
 }
 
 #[derive(Debug, Clone)]
@@ -383,6 +385,7 @@ impl AnalysisDatabase {
                 diagnostics: cached.diagnostics.clone(),
                 inlay_hints: cached.inlay_hints.clone(),
                 binding_types: cached.binding_types.clone(),
+                predicate_sites: cached.predicate_sites.clone(),
             });
         }
 
@@ -391,6 +394,7 @@ impl AnalysisDatabase {
             diagnostics,
             inlay_hints,
             binding_types,
+            predicate_sites,
         } = config
             .into_checker()
             .check_with_facts(&parsed.program, &parsed.source);
@@ -398,6 +402,7 @@ impl AnalysisDatabase {
             diagnostics: diagnostics.clone(),
             inlay_hints: inlay_hints.clone(),
             binding_types: binding_types.clone(),
+            predicate_sites: predicate_sites.clone(),
         };
         self.entries
             .get_mut(id)
@@ -410,6 +415,7 @@ impl AnalysisDatabase {
             diagnostics,
             inlay_hints,
             binding_types,
+            predicate_sites,
         })
     }
 }
