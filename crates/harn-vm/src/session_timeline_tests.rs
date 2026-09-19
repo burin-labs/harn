@@ -50,6 +50,7 @@ async fn persisted_transcript_projects_stable_tool_revision_and_identity_links()
                 "text": "Read source",
                 "metadata": {
                     "tool_name": "read_file",
+                    "raw_input": {"path": "./src/../src/lib.rs"},
                     "input": {"path": "src/lib.rs"}
                 }
             }

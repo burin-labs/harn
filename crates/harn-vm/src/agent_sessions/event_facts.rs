@@ -131,12 +131,13 @@ pub(crate) const TOOL_NAME_ANY: [&str; 3] = [
     "/raw_message/tool_calls/0/name",
 ];
 /// Tool arguments across the transcript envelope and both raw-message
-/// placements. Distinct from [`TOOL_RAW_INPUT`], which is only the envelope's
-/// pre-normalization copy.
-pub(crate) const TOOL_INPUT_ANY: [&str; 3] = [
+/// placements, falling back to the envelope's pre-normalization copy when no
+/// more specific input was recorded.
+pub(crate) const TOOL_INPUT_ANY: [&str; 4] = [
     "/transcript_event/metadata/input",
     "/raw_message/input",
     "/raw_message/tool_calls/0/arguments",
+    TOOL_RAW_INPUT,
 ];
 /// Tool output, preferring the structured metadata copy over the rendered text
 /// a human would read.

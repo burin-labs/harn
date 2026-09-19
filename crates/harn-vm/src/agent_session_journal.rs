@@ -12,6 +12,7 @@ use harn_session_store::{
     SessionWriteLease,
 };
 
+use crate::agent_sessions::event_facts as facts;
 use crate::stdlib::session_store;
 use crate::value::{DictMap, VmError};
 
@@ -342,7 +343,16 @@ fn append_event_for_mutation(
             let source_event_id = source_event_id(&event.payload);
             let message_id = message_id(&event.payload);
             let tool_call_id = tool_call_id(&event.payload);
-            if tool_call_id.is_some() && matches!(&event.kind, SessionEventKind::Message) {
+            // A narrated native call has a public message as well as tool
+            // lifecycle events. Converting that message into a tool row lets
+            // the result merge erase its text and chronological position.
+            let has_public_text = facts::string_at(&event.payload, facts::VISIBILITY).as_deref()
+                == Some("public")
+                && facts::semantic_string(&event.payload, &facts::TEXT).is_some();
+            if tool_call_id.is_some()
+                && matches!(&event.kind, SessionEventKind::Message)
+                && !has_public_text
+            {
                 event.kind = SessionEventKind::ToolCall;
             }
             apply_identity(
@@ -588,6 +598,10 @@ fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
 }
+
+#[cfg(test)]
+#[path = "agent_session_journal_public_timeline_tests.rs"]
+mod public_timeline_tests;
 
 #[cfg(test)]
 mod tests {

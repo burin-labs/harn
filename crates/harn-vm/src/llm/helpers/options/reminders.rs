@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) const DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET: &str =
     "llm/prompts/directive_envelope_instructions.harn.prompt";
-pub(super) const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
+pub(crate) const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
 
 pub(super) fn directive_envelope_instructions() -> &'static str {
     static RENDERED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
