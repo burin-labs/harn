@@ -321,6 +321,7 @@ fn widening_evaluation() -> PolicyEvaluation {
         matched_rule: None,
         required_approval: None,
         risk_labels: vec!["dynamic_authority".to_string()],
+        denied_paths: Vec::new(),
         receipt: json!({
             "type": "harn.permission_policy_decision.v1",
             "action": "ask",

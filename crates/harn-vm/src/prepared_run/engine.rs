@@ -1260,6 +1260,7 @@ pub(super) fn evaluate_requirement(
                     matched_rule: None,
                     required_approval: None,
                     risk_labels: vec!["network_policy".to_string()],
+                    denied_paths: Vec::new(),
                     receipt: json!({
                         "type": "harn.permission_policy_decision.v1",
                         "action": "deny",
