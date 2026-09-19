@@ -131,6 +131,96 @@ impl Drop for EnvGuard {
     }
 }
 
+fn open_descriptor_count() -> usize {
+    let dir = if cfg!(target_os = "linux") {
+        "/proc/self/fd"
+    } else {
+        "/dev/fd"
+    };
+    std::fs::read_dir(dir)
+        .expect("the process must be able to enumerate its own descriptors")
+        .count()
+}
+
+/// The falsifier for the descriptor exhaustion, through the real tool.
+///
+/// Every completed command used to leave its artifact active-lease descriptor
+/// open until the artifact was retired, so a session spent one descriptor per
+/// command and died of exhaustion at the per-process limit long before the
+/// retention cap of 512 directories trimmed anything.
+///
+/// The cap is set far above the command count on purpose. If retirement were
+/// still the only thing that released a descriptor, this would grow by one per
+/// command, which is exactly what it does on the unfixed build.
+#[test]
+fn completed_commands_do_not_accumulate_artifact_lease_descriptors() {
+    const WARMUP: usize = 5;
+    const MEASURED: usize = 300;
+
+    let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
+    let temp = tempdir().unwrap();
+    let _tmpdir_guard = TmpdirEnvGuard(std::env::var_os("TMPDIR"));
+    let _max_dirs_guard = EnvGuard::set("HARN_COMMAND_ARTIFACT_MAX_DIRS", "100000");
+    std::env::set_var("TMPDIR", temp.path());
+
+    let spawner = Arc::new(MockSpawner::new());
+    let _guard = install_spawner(spawner.clone());
+    for _ in 0..(WARMUP + MEASURED) {
+        spawner.enqueue(MockProcessConfig::with_stdout(0, "out\n"));
+    }
+
+    let run = || {
+        let mut req = dict();
+        req.insert("argv".into(), vlist_str(&["bash", "-c", "echo out"]));
+        require_dict(call("hostlib_tools_run_command", req).unwrap());
+    };
+
+    // Warm up so one-time descriptors, the namespace lease among them, are
+    // already counted and cannot read as growth.
+    for _ in 0..WARMUP {
+        run();
+    }
+    let before = open_descriptor_count();
+    for _ in 0..MEASURED {
+        run();
+    }
+    let after = open_descriptor_count();
+
+    // Prove the condition was actually reached. The reported failure was a
+    // per-process descriptor limit of 256, so the run has to leave more than
+    // that many artifacts retained, or a flat count would say nothing.
+    const REPORTED_DESCRIPTOR_LIMIT: usize = 256;
+    let namespace = temp
+        .path()
+        .join(format!("harn-command-artifacts-{}", effective_uid()));
+    let retained = std::fs::read_dir(&namespace)
+        .expect("artifact namespace must exist")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("harn-command-cmd_")
+        })
+        .count();
+    assert!(
+        retained > REPORTED_DESCRIPTOR_LIMIT,
+        "only {retained} artifacts were retained, at or below the {REPORTED_DESCRIPTOR_LIMIT} \
+         descriptor limit this test exists to exceed"
+    );
+
+    // The gate runs each test in its own process, so this counts almost
+    // nothing but the code under test. The slack covers descriptors the run
+    // itself opens transiently. The defect this pins spends one per command,
+    // so the bound sits far below the command count either way.
+    const UNRELATED_SLACK: usize = 16;
+    assert!(
+        after <= before + UNRELATED_SLACK,
+        "descriptor count grew from {before} to {after} across {MEASURED} completed commands, \
+         with {retained} artifacts retained"
+    );
+}
+
 #[test]
 fn command_creation_sweeps_only_owned_namespace_and_never_ambient_siblings() {
     const AMBIENT_SIBLING_COUNT: usize = 2_048;
