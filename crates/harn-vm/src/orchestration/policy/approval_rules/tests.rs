@@ -280,6 +280,7 @@ fn external_declared_paths_are_denied_without_root() {
             cleanup: None,
             environment_policy: Default::default(),
             grants: Vec::new(),
+            admitted_environment: Vec::new(),
         },
     ));
     policy_with_path_annotation("read_file", ToolKind::Read);

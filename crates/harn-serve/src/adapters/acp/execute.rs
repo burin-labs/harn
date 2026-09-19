@@ -359,6 +359,8 @@ pub(super) async fn execute_chunk(
         // Non-secret receipts for the session's grants travel on the propagated
         // execution record.
         grants: setup.session_environment.receipts(),
+        // What the policy actually admitted, not just which policy chose it.
+        admitted_environment: setup.session_environment.admitted_environment_names(),
         ..Default::default()
     };
     harn_vm::stdlib::process::set_thread_execution_context(Some(execution));
