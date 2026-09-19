@@ -91,17 +91,21 @@ fi
 # guard is vendored in owns an admission command. The wrapper measures its own
 # tree, so both directions need their own fixture root rather than a different
 # payload, and both are exercised end to end through the adapter.
-worktree_payload='{"tool_name":"Bash","tool_input":{"command":"bash -lc '\''git -C /workspace worktree add ../unowned origin/main'\''"}}'
+# The rule answers for the repository the command targets, so each direction
+# points `-C` at a root this test built and knows the answer for. A repository
+# marker is what the wrapper walks up to find, and both roots need one before
+# they can be measured at all.
+mkdir -p "$fixture_root/.git"
 
-admitted_root="$(mktemp -d)"
+admitted_root="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$admitted_root"' EXIT
-mkdir -p "$admitted_root/scripts"
+mkdir -p "$admitted_root/scripts" "$admitted_root/.git"
 cp "$repo_root/scripts/agent-shell-guard.sh" "$admitted_root/scripts/"
 cp "$repo_root/scripts/agent_shell_guard.harn" "$admitted_root/scripts/"
 cp "$repo_root/scripts/agent_shell_guard_policy.harn" "$admitted_root/scripts/"
 printf '// admission\n' >"$admitted_root/scripts/fleet-worktree-admit.ts"
 worktree_blocked="$(
-  printf '%s' "$worktree_payload" \
+  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -lc 'git -C $admitted_root worktree add ../unowned origin/main'\"}}" \
     | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
 )"
 if [[ "$worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
@@ -115,12 +119,29 @@ fi
 # must be allowed. Naming a command the operator cannot run is the failure this
 # direction guards, and an empty verdict is how the adapter says "allowed".
 worktree_allowed="$(
-  printf '%s' "$worktree_payload" \
+  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -lc 'git -C $fixture_root worktree add ../unowned origin/main'\"}}" \
     | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
 )"
 if [[ -n "$worktree_allowed" ]]; then
   echo "adapter refused raw worktree creation where the repository owns no admission command" >&2
   printf '%s\n' "$worktree_allowed" >&2
+  exit 1
+fi
+
+# A target outside every measured root is not a target found to own nothing.
+# A path *inside* a measured repository is covered by that repository's row,
+# which is why this one points outside them all.
+# Without this arm the fix is a hole: the easy version of "answer for the
+# repository the command targets" allows anything it failed to resolve, which
+# is the whole absence-reads-as-success shape this rule exists to avoid.
+worktree_unmeasured="$(
+  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git -C /no-such-repository-8447/lane worktree add ../unowned origin/main\"}}" \
+    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$worktree_unmeasured" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$worktree_unmeasured" != *'could not tell'* ]]; then
+  echo "adapter treated an unmeasured target repository as one owning no admission command" >&2
+  printf '%s\n' "$worktree_unmeasured" >&2
   exit 1
 fi
 

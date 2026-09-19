@@ -146,6 +146,50 @@ fn is_git_worktree_add(argv: list<string>) -> bool {
   return false
 }
 
+/**
+ * The directory a `git -C <path> ...` invocation runs in, or "" when none is given.
+ *
+ * Mirrors the flag table in `is_git_worktree_add` on purpose: the two walk the
+ * same argv and have to agree about which flags consume a value, or this one
+ * would read a flag's argument as a directory. Git accumulates repeated `-C`
+ * relative to each other; the last one is taken here, which is the same answer
+ * whenever it is absolute and the only case this is consulted for.
+ */
+fn git_directory_argument(argv: list<string>) -> string {
+  let consumes_next = false
+  let pending_directory = false
+  let directory = ""
+  for token in argv.slice(1, len(argv)) {
+    if pending_directory {
+      directory = token
+      pending_directory = false
+      continue
+    }
+    if consumes_next {
+      consumes_next = false
+      continue
+    }
+    if token == "-C" {
+      pending_directory = true
+      continue
+    }
+    if [
+      "-c",
+      "--git-dir",
+      "--work-tree",
+      "--namespace",
+      "--super-prefix",
+      "--config-env",
+      "--exec-path",
+    ]
+      .contains(token) {
+      consumes_next = true
+      continue
+    }
+  }
+  return directory
+}
+
 fn argv_program(argv: list<string>) -> string {
   if len(argv) == 0 {
     return ""
@@ -211,32 +255,52 @@ fn nested_shell_payload(argv: list<string>) -> string {
   return ""
 }
 
-fn raw_worktree_add_violation_at(command: string, depth: int) -> string {
+/**
+ * The worktree-creation attempt in a command, with the directory it targets.
+ *
+ * `reason` is empty when there is no attempt. `target` is the `-C` directory
+ * of the same invocation, so the caller can ask about the repository the
+ * command actually points at rather than the one this guard happens to be
+ * installed in.
+ */
+type WorktreeAddAttempt = {reason: string, target: string}
+
+const NO_WORKTREE_ADD: WorktreeAddAttempt = {reason: "", target: ""}
+
+fn raw_worktree_add_attempt_at(command: string, depth: int) -> WorktreeAddAttempt {
   for group in command_groups(command) {
     for stage in group {
       const argv = launched_argv(stage.argv, 0)
       if argv_program(argv) == "git" && is_git_worktree_add(argv) {
-        return "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
-          + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
-          + "and records the joined ledger and recovery receipts before returning success."
+        return {
+          reason: "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
+            + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
+            + "and records the joined ledger and recovery receipts before returning success.",
+          target: git_directory_argument(argv),
+        }
       }
       if depth < 4 {
         const nested = nested_shell_payload(argv)
         if nested != "" {
-          const violation = raw_worktree_add_violation_at(nested, depth + 1)
-          if violation != "" {
-            return violation
+          const attempt = raw_worktree_add_attempt_at(nested, depth + 1)
+          if attempt.reason != "" {
+            return attempt
           }
         }
       }
     }
   }
-  return ""
+  return NO_WORKTREE_ADD
 }
 
 /** Reject only Git's worktree-creation subcommand, including shell wrappers. */
 pub fn raw_worktree_add_violation(command: string) -> string {
-  return raw_worktree_add_violation_at(command, 0)
+  return raw_worktree_add_attempt_at(command, 0).reason
+}
+
+/** The same walk, keeping the directory the attempt targets. */
+pub fn raw_worktree_add_attempt(command: string) -> WorktreeAddAttempt {
+  return raw_worktree_add_attempt_at(command, 0)
 }
 
 /** True only for a path rooted in an OS-temp or known generated-output tree. */
@@ -385,43 +449,134 @@ pub const ADMISSION_ENV: string = "HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION"
 
 pub const ADMISSION_CHECKED_ENV: string = "HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION_CHECKED"
 
-pub fn worktree_admission_from_env(env: HarnessEnv) -> WorktreeAdmission {
-  return worktree_admission_reported(
+pub type WorktreeAdmissionRow = {root: string, command: string}
+
+/**
+ * Every root the wrapper measured for this one command.
+ *
+ * The guard cannot read the filesystem, and the wrapper cannot read argv, so
+ * neither can answer "does the repository this command targets own an
+ * admission command" alone. The wrapper measures every root the command could
+ * plausibly mean, and the guard, which owns the argv decision, picks the row
+ * for the one it actually means.
+ *
+ * The first row is the wrapper's own repository, which is the answer when the
+ * command names no directory of its own.
+ *
+ * `denial` is non-empty when the census could not be trusted at all. It stays
+ * separate from an empty row set for the reason the whole rule exists: not
+ * measuring must never read as measuring absence.
+ */
+pub type WorktreeAdmissionCensus = {rows: list<WorktreeAdmissionRow>, denial: string}
+
+/**
+ * Parse the census the wrapper reports.
+ *
+ * One row per line, root and command separated by a tab, the command empty
+ * when that repository owns none. A row naming a command this policy does not
+ * know is a refusal rather than an allow, because a renamed admission command
+ * would otherwise turn the rule off silently.
+ */
+pub fn worktree_admission_census(checked: string, reported: string) -> WorktreeAdmissionCensus {
+  if checked != "1" {
+    return {
+      rows: [],
+      denial: "no wrapper reported which repositories own a Fleet admission command ("
+        + ADMISSION_CHECKED_ENV
+        + " is not set)",
+    }
+  }
+  let rows: list<WorktreeAdmissionRow> = []
+  for line in reported.split("\n") {
+    const trimmed = line.trim()
+    if trimmed == "" {
+      continue
+    }
+    const parts = trimmed.split("\t")
+    const root = to_string(parts[0] ?? "").trim()
+    let command = ""
+    if len(parts) > 1 {
+      command = to_string(parts[1] ?? "").trim()
+    }
+    if root == "" {
+      return {rows: [], denial: "the wrapper reported an admission row with no repository root"}
+    }
+    if command != "" && !WORKTREE_ADMISSION_POLICY.admission_command_paths.contains(command) {
+      return {
+        rows: [],
+        denial: "the wrapper reported an admission command this policy does not know: `"
+          + command
+          + "`",
+      }
+    }
+    rows += [{root: root, command: command}]
+  }
+  if len(rows) == 0 {
+    return {rows: [], denial: "the wrapper reported no repository roots at all"}
+  }
+  return {rows: rows, denial: ""}
+}
+
+pub fn worktree_admission_census_from_env(env: HarnessEnv) -> WorktreeAdmissionCensus {
+  return worktree_admission_census(
     to_string(env.get(ADMISSION_CHECKED_ENV) ?? ""),
     to_string(env.get(ADMISSION_ENV) ?? ""),
   )
 }
 
-/** The same answer from the two values the wrapper reports, for direct testing. */
-pub fn worktree_admission_reported(checked: string, reported: string) -> WorktreeAdmission {
-  if checked != "1" {
+/**
+ * The answer for the repository one command targets.
+ *
+ * An absolute target is matched against the measured roots, longest root
+ * first, so a worktree nested inside another repository resolves to the
+ * nearest one. A target no row covers is unmeasured and refuses: absence of a
+ * row is the wrapper not having looked there, never proof that nothing is
+ * there.
+ *
+ * A command with no directory of its own, or a relative one, takes the
+ * wrapper's own repository. A relative path cannot be resolved here because
+ * the host payload carries no working directory, and guessing would be the
+ * same error this change exists to remove, so it keeps the conservative
+ * answer rather than inventing a root.
+ */
+pub fn worktree_admission_for(
+  census: WorktreeAdmissionCensus,
+  target: string,
+) -> WorktreeAdmission {
+  if census.denial != "" {
+    return {available: false, command: "", denial: census.denial}
+  }
+  if target == "" || !target.starts_with("/") {
+    return admission_of(census.rows[0] ?? {root: "", command: ""})
+  }
+  let best = ""
+  let chosen: WorktreeAdmissionRow = {root: "", command: ""}
+  for row in census.rows {
+    if (target == row.root || target.starts_with(row.root + "/")) && len(row.root) > len(best) {
+      best = row.root
+      chosen = row
+    }
+  }
+  if best == "" {
     return {
       available: false,
       command: "",
-      denial: "no wrapper reported whether this repository owns a Fleet admission command ("
-        + ADMISSION_CHECKED_ENV
-        + " is not set)",
+      denial: "no measured repository covers the directory this command targets (`"
+        + target
+        + "`), so whether it owns an admission command was never looked at",
     }
   }
-  if reported == "" {
-    return {available: false, command: "", denial: ""}
-  }
-  // The wrapper has to name the path in shell, so the two spellings can drift.
-  // Catching a divergence here keeps a renamed admission command from silently
-  // turning the rule off, which is the failure this whole change is about.
-  if !WORKTREE_ADMISSION_POLICY.admission_command_paths.contains(reported) {
-    return {
-      available: false,
-      command: reported,
-      denial: "the wrapper reported an admission command this policy does not know: `"
-        + reported
-        + "`",
-    }
-  }
-  return {available: true, command: reported, denial: ""}
+  return admission_of(chosen)
 }
 
-pub fn decision(payload: string, admission: WorktreeAdmission) -> ShellGuardDecision {
+fn admission_of(row: WorktreeAdmissionRow) -> WorktreeAdmission {
+  if row.command == "" {
+    return {available: false, command: "", denial: ""}
+  }
+  return {available: true, command: row.command, denial: ""}
+}
+
+pub fn decision(payload: string, census: WorktreeAdmissionCensus) -> ShellGuardDecision {
   let parsed = nil
   try {
     parsed = json_parse(payload)
@@ -435,24 +590,28 @@ pub fn decision(payload: string, admission: WorktreeAdmission) -> ShellGuardDeci
   if command == "" {
     return {allow: true, reason: ""}
   }
-  const worktree = raw_worktree_add_violation(command)
-  if worktree != "" {
-    // The rule is pure argv analysis, so it fires in every repository that
-    // wires this guard. Only a repository that actually owns the admission
-    // command can be told to use it.
+  const attempt = raw_worktree_add_attempt(command)
+  if attempt.reason != "" {
+    // The rule is pure argv analysis, so it fires wherever this guard is
+    // wired. Only the repository the command actually targets can be told to
+    // use an admission command, and only if that repository has one: the
+    // census used to be taken against the guard's own installation, so a
+    // command pointing at another repository was refused and sent to a path
+    // that does not exist there.
+    const admission = worktree_admission_for(census, attempt.target)
     if admission.denial != "" {
       return {
         allow: false,
         reason: "Raw `git worktree add` is refused because this guard could not tell whether "
-          + "this repository owns a Fleet admission command, and an unreadable census must not "
-          + "read as an absent one: "
+          + "the repository it targets owns a Fleet admission command, and an unreadable census "
+          + "must not read as an absent one: "
           + admission.denial,
       }
     }
     if admission.available {
       return {
         allow: false,
-        reason: worktree + " This repository provides it at " + admission.command + ".",
+        reason: attempt.reason + " That repository provides it at " + admission.command + ".",
       }
     }
   }
@@ -478,7 +637,7 @@ fn main(harness: Harness) {
   // Harness capability since before the oldest release this adapter supports.
   const input = harness.stdio.read_line({trim: false})
   const payload = input.value ?? ""
-  const verdict = decision(payload, worktree_admission_from_env(harness.env))
+  const verdict = decision(payload, worktree_admission_census_from_env(harness.env))
   if verdict.allow {
     return nil
   }
