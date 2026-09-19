@@ -583,6 +583,32 @@ impl SessionEnvironment {
         self.grants.iter().map(SessionGrant::receipt).collect()
     }
 
+    /// Every environment variable name a child of this session can see, sorted
+    /// and deduplicated. Names only; a value never appears here.
+    ///
+    /// This answers the question a reader of a run record actually has, which
+    /// the policy kind alone does not: *what did this run hand to the
+    /// processes that executed tool calls?* `Isolated` and `Granted` are
+    /// already allowlist-filtered in the snapshot, so this is that filtered
+    /// set plus anything a grant exposes. `Inherited` returns the launcher's
+    /// whole set, which is the honest answer for a session that asked to
+    /// inherit it, and is usually the moment a reader notices how large it is.
+    ///
+    /// Command-bound grants are included: a name reachable by some child is
+    /// exposed by this run, and a receipt that hid it behind the binding
+    /// would understate the run's authority.
+    pub fn admitted_environment_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.launcher_snapshot.keys().cloned().collect();
+        for grant in &self.grants {
+            if let Some(var) = grant.receipt().exposed_as_env {
+                names.push(var);
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
     /// Materialize the session-scoped process environment overlay: the
     /// `(VAR, value)` pairs for every grant that opted into `expose_as_env`
     /// without a `for_command` binding. Empty for an isolated policy.
@@ -1103,6 +1129,55 @@ mod tests {
         .unwrap();
         assert_eq!(granted.launcher_value("PATH"), Some("/bin"));
         assert_eq!(granted.launcher_value("UNRELATED_SECRET"), None);
+    }
+
+    /// The receipt must name what the run exposed, and never more than that.
+    /// A reader auditing a run cannot get this from the policy kind: two
+    /// granted sessions differ entirely in what they handed to a child.
+    #[test]
+    fn admitted_names_report_the_allowlisted_set_plus_grants_and_no_values() {
+        let env = env_from(&[("FIREWORKS_API_KEY", "fw-secret-value")]);
+        let specs = vec![env_grant(
+            "fireworks",
+            "FIREWORKS_API_KEY",
+            Some("FIREWORKS_API_KEY"),
+        )];
+        let snapshot = BTreeMap::from([
+            ("PATH".to_string(), "/bin".to_string()),
+            (
+                "HARN_PROBE_FAKE_API_KEY".to_string(),
+                "must-not-be-retained".to_string(),
+            ),
+        ]);
+        let granted = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Granted,
+            specs,
+            snapshot,
+            &env,
+        )
+        .unwrap();
+
+        let names = granted.admitted_environment_names();
+        assert!(names.contains(&"PATH".to_string()));
+        assert!(
+            names.contains(&"FIREWORKS_API_KEY".to_string()),
+            "a grant that exposes a variable must appear in the receipt",
+        );
+        assert!(
+            !names.contains(&"HARN_PROBE_FAKE_API_KEY".to_string()),
+            "a name the allowlist refused must not be reported as admitted",
+        );
+        assert!(
+            !names
+                .iter()
+                .any(|name| name.contains("fw-secret-value")
+                    || name.contains("must-not-be-retained")),
+            "the receipt must carry names, never values",
+        );
+        let mut sorted = names.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(names, sorted, "names must be sorted and deduplicated");
     }
 
     #[test]

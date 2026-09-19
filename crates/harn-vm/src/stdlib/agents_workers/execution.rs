@@ -40,6 +40,10 @@ fn execution_record(profile: &WorkerExecutionProfile) -> crate::orchestration::R
             .map(|environment| environment.kind())
             .unwrap_or_default(),
         grants: Vec::new(),
+        // Same reasoning as `grants`: the session-level record owns the
+        // environment receipt, and a fan-out worker runs under that same
+        // ambient policy rather than one of its own.
+        admitted_environment: Vec::new(),
     };
     if let Some(worktree) = &profile.worktree {
         record.adapter = Some("worktree".to_string());

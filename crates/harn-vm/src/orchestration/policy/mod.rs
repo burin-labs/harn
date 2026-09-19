@@ -1187,6 +1187,7 @@ mod approval_policy_tests {
                 cleanup: None,
                 environment_policy: Default::default(),
                 grants: Vec::new(),
+                admitted_environment: Vec::new(),
             },
         ));
 
@@ -1240,6 +1241,7 @@ mod approval_policy_tests {
                 cleanup: None,
                 environment_policy: Default::default(),
                 grants: Vec::new(),
+                admitted_environment: Vec::new(),
             },
         ));
 
