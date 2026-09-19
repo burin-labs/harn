@@ -731,3 +731,72 @@ fn a_ruleless_deny_stays_an_approval_denial() {
         DenialGate::WorkspaceBoundary,
     );
 }
+
+/// The half of #8463 that is easy to overstate, pinned so it cannot be.
+///
+/// `denied_paths` was never empty before this change: the dispatch seam
+/// backfilled it with EVERY path the call declared whenever the denial
+/// carried none. So the improvement is not "a path is named where none was",
+/// it is "the path that actually refused is named instead of the whole
+/// declared set". On a single-path call the two are indistinguishable, which
+/// is why this test uses a tool that declares two and refuses on one.
+#[test]
+fn a_path_refusal_names_the_path_that_refused_not_every_path_declared() {
+    let temp = tempfile::tempdir().unwrap();
+    crate::stdlib::process::set_thread_execution_context(Some(
+        crate::orchestration::RunExecutionRecord {
+            cwd: Some(temp.path().to_string_lossy().into_owned()),
+            project_root: None,
+            source_dir: Some(temp.path().to_string_lossy().into_owned()),
+            env: BTreeMap::new(),
+            adapter: None,
+            repo_path: None,
+            worktree_path: None,
+            branch: None,
+            base_ref: None,
+            cleanup: None,
+            environment_policy: Default::default(),
+            grants: Vec::new(),
+        },
+    ));
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "move_file".to_string(),
+        ToolAnnotations {
+            kind: ToolKind::Move,
+            side_effect_level: SideEffectLevel::WorkspaceWrite,
+            arg_schema: ToolArgSchema {
+                path_params: vec!["from".to_string(), "to".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+    push_execution_policy(CapabilityPolicy {
+        tool_annotations: annotations,
+        ..Default::default()
+    });
+
+    // `from` is inside the workspace and unobjectionable; `to` is what the
+    // boundary refuses.
+    let args = serde_json::json!({"from": "src/main.rs", "to": "/tmp/outside.txt"});
+    let decision =
+        evaluate_tool_approval_policy(&ToolApprovalPolicy::default(), "move_file", &args, None);
+    assert!(decision.is_deny());
+
+    let declared = crate::orchestration::current_tool_declared_paths("move_file", &args);
+    assert!(
+        declared.len() > 1,
+        "this test measures nothing unless the call declares more than one path: {declared:?}"
+    );
+
+    let denial = decision.terminal_denial();
+    assert_eq!(
+        denial.denied_paths,
+        vec!["/tmp/outside.txt".to_string()],
+        "the refusal must name the path that refused, not the declared set {declared:?}"
+    );
+
+    pop_execution_policy();
+    crate::stdlib::process::set_thread_execution_context(None);
+}
