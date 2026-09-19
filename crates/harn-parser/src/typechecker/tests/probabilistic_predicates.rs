@@ -158,11 +158,11 @@ fn predicate_unused_check_resolves_shadowing_and_closure_capture() {
     ));
     assert!(errors(&shadow).contains(&Code::PredicateOutcomeUnused));
     let captured = facts(&format!(
-        r#"
+        r"
         const result = {}
         const consume = fn() {{ harness.stdio.println(result.kind) }}
         consume()
-    "#,
+    ",
         call("{value: 1}")
     ));
     assert!(errors(&captured).is_empty(), "{:?}", captured.diagnostics);
@@ -176,13 +176,13 @@ fn predicate_site_requires_literal_unique_identity() {
         call("{value: 2}")
     ));
     assert!(errors(&duplicate).contains(&Code::PredicateSiteInvalid));
-    let dynamic = facts(&format!(
+    let dynamic = facts(
         r#"
         const id = "finding.v1"
-        const result = harness.llm.evaluate_predicate(id, "Question?", {{value: 1}}, policy)
+        const result = harness.llm.evaluate_predicate(id, "Question?", {value: 1}, policy)
         harness.stdio.println(result.kind)
-    "#
-    ));
+    "#,
+    );
     assert!(errors(&dynamic).contains(&Code::PredicateSiteInvalid));
 }
 

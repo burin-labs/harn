@@ -1,6 +1,4 @@
-use harn_parser::analysis::{
-    AnalysisDatabase, AnalysisError, SourceId, SourceVersion, TypeCheckConfig,
-};
+use harn_parser::analysis::{AnalysisDatabase, AnalysisError, SourceId, SourceVersion};
 use harn_parser::{Node, SNode};
 use harn_vm::stdlib::template::outline::OutlineBlock;
 use tower_lsp::lsp_types::*;
@@ -170,7 +168,7 @@ impl DocumentState {
             .as_deref()
             .zip(module_graph.as_ref())
             .map(|(path, graph)| graph.typecheck_import_config_for_file(path))
-            .unwrap_or_else(TypeCheckConfig::new);
+            .unwrap_or_default();
         let analysis = match self.analysis.typecheck(&self.source_id, config) {
             Ok(analysis) => analysis,
             Err(error) => {
