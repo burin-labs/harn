@@ -9,6 +9,7 @@
 //! descriptor hook is what makes the handover real rather than reported.
 
 use std::io;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 
