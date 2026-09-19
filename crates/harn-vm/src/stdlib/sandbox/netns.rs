@@ -16,16 +16,15 @@ use crate::orchestration::CapabilityPolicy;
 use crate::process_sandbox::{NETNS_LAUNCH_SUBCOMMAND, NETNS_RULESET_FD_FLAG, NETNS_SECCOMP_FLAG};
 use crate::VmError;
 
-use super::backend::PrepareOutcome;
-use super::linux::{LandlockProfile, ProcessProfile, TransferableConfinement};
-use super::refusal::sandbox_rejection;
+use super::{sandbox_rejection, LandlockProfile, ProcessProfile, TransferableConfinement};
+use crate::stdlib::sandbox::backend::PrepareOutcome;
 
 /// Turn a prepared profile into the helper invocation that will enter it.
 ///
 /// The profile is consumed rather than borrowed: the ruleset descriptor has to
 /// outlive this call and be inherited by the helper, so ownership moves into
 /// the confinement that the spawn keeps alive.
-pub(super) fn namespaced_outcome(
+pub(crate) fn namespaced_outcome(
     launcher: PathBuf,
     program: &str,
     args: &[String],
@@ -50,7 +49,7 @@ pub(super) fn namespaced_outcome(
 /// one, naming the path that was looked for, because the alternative grants
 /// this backend could reach instead all leak datagram egress and a reader of
 /// the receipt could not tell which one had been applied.
-pub(super) fn resolve_netns_launcher(
+pub(crate) fn resolve_netns_launcher(
     policy: &CapabilityPolicy,
 ) -> Result<Option<PathBuf>, VmError> {
     if !policy.process_sandbox.allow_tcp_loopback {
@@ -90,7 +89,7 @@ pub(super) fn resolve_netns_launcher(
 /// about the policy and reveals nothing the receipt does not already state, so
 /// it does not need the pipe's protection and argv keeps the helper a plain
 /// exec with no setup protocol.
-pub(super) fn namespaced_launcher_argv(
+pub(crate) fn namespaced_launcher_argv(
     payload_program: &str,
     payload_args: &[String],
     confinement: &TransferableConfinement,
@@ -156,7 +155,7 @@ pub fn decode_seccomp_hex(text: &str) -> io::Result<Vec<u8>> {
 ///
 /// The confinement is moved into the closure so the descriptor stays owned,
 /// and therefore open, until the spawn is done with it.
-pub(super) fn keep_ruleset_across_exec(
+pub(crate) fn keep_ruleset_across_exec(
     command: &mut Command,
     confinement: TransferableConfinement,
 ) {
@@ -171,7 +170,7 @@ pub(super) fn keep_ruleset_across_exec(
 }
 
 /// The tokio twin of [`keep_ruleset_across_exec`].
-pub(super) fn keep_ruleset_across_exec_tokio(
+pub(crate) fn keep_ruleset_across_exec_tokio(
     command: &mut tokio::process::Command,
     confinement: TransferableConfinement,
 ) {
@@ -221,6 +220,6 @@ fn clear_cloexec_hook(
 /// [`resolve_netns_launcher`], on this path as well as on the spawn path, so
 /// this predicate cannot be true for a child that is about to run on the host
 /// network.
-pub(super) fn namespaced_loopback_grant(policy: &CapabilityPolicy) -> bool {
+pub(crate) fn namespaced_loopback_grant(policy: &CapabilityPolicy) -> bool {
     policy.process_sandbox.allow_tcp_loopback
 }
