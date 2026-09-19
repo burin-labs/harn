@@ -69,6 +69,8 @@ use paths::{
 };
 
 mod backend;
+mod build_command;
+pub(crate) use build_command::{build_std_command, build_tokio_command};
 #[cfg(all(test, target_os = "linux"))]
 mod enforcement_report;
 mod handler_env;
@@ -1323,66 +1325,6 @@ fn sandboxed_process_config(
             .any(|removed| key.eq_ignore_ascii_case(removed))
     });
     Ok(resolved)
-}
-
-fn build_std_command<B: SandboxBackend + ?Sized>(
-    program: &str,
-    args: &[String],
-    policy: &CapabilityPolicy,
-    profile: SandboxProfile,
-) -> Result<Command, VmError> {
-    ensure_managed_process_egress_supported::<B>(policy)?;
-    let mut command = Command::new(program);
-    command.args(args);
-    match B::prepare_std_command(program, args, &mut command, policy, profile)? {
-        PrepareOutcome::Direct => Ok(command),
-        PrepareOutcome::WrappedExec { wrapper, args } => {
-            let mut wrapped = Command::new(wrapper);
-            wrapped.args(args);
-            Ok(wrapped)
-        }
-        #[cfg(target_os = "linux")]
-        PrepareOutcome::NamespacedExec {
-            wrapper,
-            args,
-            confinement,
-        } => {
-            let mut wrapped = Command::new(wrapper);
-            wrapped.args(args);
-            linux::keep_ruleset_across_exec(&mut wrapped, confinement);
-            Ok(wrapped)
-        }
-    }
-}
-
-fn build_tokio_command<B: SandboxBackend + ?Sized>(
-    program: &str,
-    args: &[String],
-    policy: &CapabilityPolicy,
-    profile: SandboxProfile,
-) -> Result<tokio::process::Command, VmError> {
-    ensure_managed_process_egress_supported::<B>(policy)?;
-    let mut command = tokio::process::Command::new(program);
-    command.args(args);
-    match B::prepare_tokio_command(program, args, &mut command, policy, profile)? {
-        PrepareOutcome::Direct => Ok(command),
-        PrepareOutcome::WrappedExec { wrapper, args } => {
-            let mut wrapped = tokio::process::Command::new(wrapper);
-            wrapped.args(args);
-            Ok(wrapped)
-        }
-        #[cfg(target_os = "linux")]
-        PrepareOutcome::NamespacedExec {
-            wrapper,
-            args,
-            confinement,
-        } => {
-            let mut wrapped = tokio::process::Command::new(wrapper);
-            wrapped.args(args);
-            linux::keep_ruleset_across_exec_tokio(&mut wrapped, confinement);
-            Ok(wrapped)
-        }
-    }
 }
 
 fn ensure_managed_process_egress_supported<B: SandboxBackend + ?Sized>(
