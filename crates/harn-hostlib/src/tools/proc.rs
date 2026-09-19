@@ -577,6 +577,14 @@ pub(crate) fn process_error_to_hostlib(
         ProcessError::CatastrophicFloor(message) => {
             HostlibError::CatastrophicFloor { builtin, message }
         }
+        // Reported as a backend fault, not an invalid parameter. The caller's
+        // arguments were well formed; what is missing is a session
+        // environment the embedder was supposed to install, and naming the
+        // parameter would send whoever reads this to the wrong place.
+        error @ ProcessError::SessionEnvironmentMissing { .. } => HostlibError::Backend {
+            builtin,
+            message: error.to_string(),
+        },
     }
 }
 

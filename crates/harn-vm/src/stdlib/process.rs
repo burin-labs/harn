@@ -61,7 +61,13 @@ pub fn set_session_environment(environment: Option<crate::security::SessionEnvir
 
 /// The environment policy governing subprocess env construction for the current
 /// task, or `None` on the legacy non-session path.
-pub(crate) fn current_session_environment() -> Option<crate::security::SessionEnvironment> {
+///
+/// Public because a host's process seam has to be able to tell "no policy is
+/// installed" apart from "a policy is installed and admits nothing". Those two
+/// look identical downstream — both produce a child the caller did not
+/// explicitly populate — and only the first is a defect. A seam that cannot
+/// ask this question ends up treating absence as permission.
+pub fn current_session_environment() -> Option<crate::security::SessionEnvironment> {
     SESSION_ENVIRONMENT_CONTEXT.with(|current| current.borrow().clone())
 }
 

@@ -94,6 +94,7 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     // Observed before the spawn, so a rebuild that lands mid-run is visible
     // when the worker is reaped without a terminal state of its own.
     let binary = BinaryWitness::observe(PathBuf::from(&executable));
+    let _environment = InheritedHostEnvironment::install();
     let spec = harn_hostlib::process::SpawnSpec {
         builtin: "harn_host_lease_run_cargo",
         program: executable,
@@ -984,6 +985,7 @@ fn run_cargo_workload(
             );
         }
     };
+    let _environment = InheritedHostEnvironment::install();
     let mut child = match harn_hostlib::process::spawn_process(spec) {
         Ok(child) => child,
         Err(error) => {
@@ -1036,6 +1038,7 @@ fn run_cargo_workload(
             );
         }
     };
+    let _environment = InheritedHostEnvironment::install();
     let mut child = match harn_hostlib::process::spawn_process(spec) {
         Ok(child) => child,
         Err(error) => {
@@ -1181,6 +1184,31 @@ fn wait_for_cargo_workload(
             eprintln!("error: failed to wait for Cargo: {error}");
             1
         }
+    }
+}
+
+/// Declares that this host command's children inherit its environment.
+///
+/// The cargo lease host exists to run the developer's own `cargo` with the
+/// developer's own toolchain, so inheriting is the correct behaviour and not
+/// an oversight. Since harn#8477 the process host refuses an inheriting spawn
+/// that no session environment stands behind, because absence used to read as
+/// permission. This is that declaration, made where the intent is legible
+/// rather than left to a default.
+struct InheritedHostEnvironment;
+
+impl InheritedHostEnvironment {
+    fn install() -> Self {
+        harn_vm::stdlib::process::set_session_environment(Some(
+            harn_vm::security::SessionEnvironment::inherited(),
+        ));
+        Self
+    }
+}
+
+impl Drop for InheritedHostEnvironment {
+    fn drop(&mut self) {
+        harn_vm::stdlib::process::set_session_environment(None);
     }
 }
 
