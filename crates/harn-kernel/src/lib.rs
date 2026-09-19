@@ -22,6 +22,7 @@ mod builtin_id;
 pub mod compiler;
 pub mod opcode;
 mod portable_builtin;
+pub mod predicate;
 pub mod program;
 pub mod pure;
 mod runtime_limits;

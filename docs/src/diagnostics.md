@@ -35,7 +35,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 | Category | Title | Codes |
 |---|---|---:|
-| [`TYP`](#typ--type-checker) | Type checker | 29 |
+| [`TYP`](#typ--type-checker) | Type checker | 34 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 8 |
@@ -92,6 +92,11 @@ Harn's static type checker rejects programs whose types do not unify. Type error
 | [`HARN-TYP-027`](#harn-typ-027) | constant tuple index is outside the fixed arity | — | — |
 | [`HARN-TYP-028`](#harn-typ-028) | declared parameter has no type annotation | `types/annotate-parameter` | `surface-changing` |
 | [`HARN-TYP-029`](#harn-typ-029) | type predicate contract is invalid | — | — |
+| [`HARN-TYP-030`](#harn-typ-030) | probabilistic predicate input must have a closed serializable type | — | — |
+| [`HARN-TYP-031`](#harn-typ-031) | probabilistic predicate outcome cannot be used as a boolean | — | — |
+| [`HARN-TYP-032`](#harn-typ-032) | probabilistic predicate outcome must be consumed | — | — |
+| [`HARN-TYP-033`](#harn-typ-033) | probabilistic predicate site identity must be literal and unique | — | — |
+| [`HARN-TYP-034`](#harn-typ-034) | probabilistic predicate variant fields require outcome narrowing | — | — |
 
 ## PAR — Parser / lexer
 
@@ -818,6 +823,79 @@ fn is_nonempty_text(value: unknown) -> implies value is string {
 
 A false result in the second example may still mean an empty string, so Harn
 does not narrow the false branch.
+
+### `HARN-TYP-030`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+probabilistic predicate input must have a closed serializable type
+
+Predicate evaluation sends only the declared input to a model and records its
+type in the site manifest. The input must be a typed record, tuple, list, string
+map, primitive, or union of those types. Functions, capability handles, open
+records, recursive types, and gradual `any`, `unknown`, `dict`, or `list` values
+do not define that boundary.
+
+Validate external data against a closed schema first. Pass the resulting value,
+not a callback, capability, or the surrounding conversation. The policy must
+also have a closed record type. Runtime admission separately validates finite
+numbers, size, model options, and resource limits.
+
+### `HARN-TYP-031`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+probabilistic predicate outcome cannot be used as a boolean
+
+A predicate outcome includes uncertainty, refusal, unavailable evaluation,
+budget exhaustion, replay mismatch, and cancellation. Treating the record as a
+truthy value would select a branch without an accepted verdict.
+
+Match `result.kind`, then use `result.value.verdict` inside the `verdict` arm.
+Give the remaining kinds an explicit disposition. A model verdict does not
+prove a type refinement or grant permission.
+
+### `HARN-TYP-032`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+probabilistic predicate outcome must be consumed
+
+A predicate evaluation produces an outcome even when no verdict is available.
+An unused binding, discard binding, or discarded expression would hide that
+decision and its receipt.
+
+Match the outcome, return it to a caller, or pass it to an outcome policy. A
+same-named binding in another scope does not consume the original result.
+This check establishes use, not the correctness of the caller's policy.
+
+### `HARN-TYP-033`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+probabilistic predicate site identity must be literal and unique
+
+The evaluator's first two arguments are nonempty string literals: a stable site
+ID and the question asked of the model. A module cannot declare two sites with
+the same ID. Repeated execution of one site is allowed.
+
+Place a repeated evaluation in a typed helper with a literal ID and question.
+Pass only the changing input and policy into the helper. Different questions
+or source sites need different IDs.
+
+### `HARN-TYP-034`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+probabilistic predicate variant fields require outcome narrowing
+
+A predicate outcome includes uncertainty and failure variants. Read a field
+only after narrowing to variants that all contain it. Match `outcome.kind`
+before reading `outcome.value.verdict` in the `verdict` arm. The common `kind`
+and `receipt` fields are available without narrowing.
+
+This applies to named property access, indexed access, and destructuring.
+Dynamic field names cannot establish that the selected variants contain a field.
 
 ### `HARN-PAR-001`
 

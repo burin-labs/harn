@@ -4,7 +4,7 @@
     {
       "id": "TYP",
       "title": "Type checker",
-      "count": 29
+      "count": 34
     },
     {
       "id": "PAR",
@@ -481,6 +481,51 @@
       "code": "HARN-TYP-029",
       "category": "TYP",
       "summary": "type predicate contract is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-030",
+      "category": "TYP",
+      "summary": "probabilistic predicate input must have a closed serializable type",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-031",
+      "category": "TYP",
+      "summary": "probabilistic predicate outcome cannot be used as a boolean",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-032",
+      "category": "TYP",
+      "summary": "probabilistic predicate outcome must be consumed",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-033",
+      "category": "TYP",
+      "summary": "probabilistic predicate site identity must be literal and unique",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-034",
+      "category": "TYP",
+      "summary": "probabilistic predicate variant fields require outcome narrowing",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

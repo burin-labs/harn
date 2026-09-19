@@ -11,6 +11,7 @@ impl TypeChecker {
     ) {
         let context_checked = self.check_node_with_expected(value, type_ann.as_ref(), scope);
         let inferred = self.infer_type(value, scope);
+        self.record_predicate_binding(pattern, inferred.as_ref(), span, scope);
         let BindingPattern::Identifier(name) = pattern else {
             self.check_pattern_defaults(pattern, scope);
             self.define_pattern_vars_typed(pattern, &inferred, scope, false);

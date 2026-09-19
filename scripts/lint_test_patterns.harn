@@ -176,6 +176,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/cache_dir_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/burin_mini_playground.rs",
   "crates/harn-cli/tests/harn_cli_e2e/check_result_cache.rs",
+  // Imported-site manifests and their persisted cache must survive fresh CLI processes.
+  "crates/harn-cli/tests/harn_cli_e2e/predicate_contract.rs",
   // Cancellation poisoning crosses the async hostlib/VM/CLI boundary. A real
   // CLI process proves a caught launch error leaves the parent execution live.
   "crates/harn-cli/tests/harn_cli_e2e/command_probe_parent_liveness.rs",

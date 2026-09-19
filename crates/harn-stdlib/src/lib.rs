@@ -78,6 +78,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "json/stream" => "stdlib/stdlib_json_stream.harn",
     "xml" => "stdlib/stdlib_xml.harn",
     "cache" => "stdlib/stdlib_cache.harn",
+    "predicate" => "stdlib/stdlib_predicate.harn",
     "observability" => "stdlib/stdlib_observability.harn",
     "timing" => "stdlib/stdlib_timing.harn",
     "verification" => "stdlib/stdlib_verification.harn",
