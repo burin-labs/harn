@@ -1426,10 +1426,8 @@ const DIRECTORY_ONLY_ACCESS_FS: u64 = LANDLOCK_ACCESS_FS_READ_DIR
 mod netns;
 
 pub use netns::decode_seccomp_hex;
-pub(super) use netns::{
-    keep_ruleset_across_exec, keep_ruleset_across_exec_tokio, namespaced_loopback_grant,
-    namespaced_outcome, resolve_netns_launcher,
-};
+pub(crate) use netns::{keep_ruleset_across_exec, keep_ruleset_across_exec_tokio};
+use netns::{namespaced_loopback_grant, namespaced_outcome, resolve_netns_launcher};
 
 #[cfg(test)]
 #[path = "linux_tests.rs"]
