@@ -185,6 +185,12 @@ pub(super) async fn flush_init_terminal(
     Ok(())
 }
 
+pub(super) struct TerminalAccounting<'a> {
+    pub provider_call_count: i64,
+    /// The loop owns the decision schema; the host persists its account unchanged.
+    pub adaptive_budget: Option<&'a serde_json::Value>,
+}
+
 pub(super) async fn flush_terminal(
     session_id: &str,
     final_status: &str,
@@ -192,21 +198,25 @@ pub(super) async fn flush_terminal(
     terminal_class: Option<&str>,
     terminal_error: Option<&serde_json::Value>,
     terminal: &crate::agent_events::AgentTerminalOutcome,
-    provider_call_count: i64,
+    accounting: TerminalAccounting<'_>,
 ) -> Result<(), VmError> {
+    let mut metadata = serde_json::json!({
+        "final_status": final_status,
+        "stop_reason": stop_reason,
+        "terminal_class": terminal_class,
+        "error": terminal_error,
+        "terminal": terminal,
+        "provider_call_count": accounting.provider_call_count,
+    });
+    if let Some(budget) = accounting.adaptive_budget {
+        metadata["adaptive_budget"] = budget.clone();
+    }
     let event = super::super::helpers::transcript_event(
         "agent_run_terminal",
         "assistant",
         "internal",
         "Agent loop reached a terminal state",
-        Some(serde_json::json!({
-            "final_status": final_status,
-            "stop_reason": stop_reason,
-            "terminal_class": terminal_class,
-            "error": terminal_error,
-            "terminal": terminal,
-            "provider_call_count": provider_call_count,
-        })),
+        Some(metadata),
     );
     crate::agent_sessions::append_terminal_event_once(session_id, event)
         .map_err(VmError::Runtime)?;

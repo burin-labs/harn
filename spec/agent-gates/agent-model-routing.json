@@ -204,7 +204,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/state.harn",
-        "line": 290,
+        "line": 292,
         "reader": "agent_session_record_usage"
       },
       {
@@ -421,7 +421,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/state.harn",
-        "line": 289,
+        "line": 291,
         "reader": "agent_session_record_usage"
       },
       {

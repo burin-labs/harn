@@ -337,12 +337,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
-        "line": 205,
+        "line": 219,
         "reader": "__agent_loop_project_terminal_result"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
-        "line": 211,
+        "line": 225,
         "reader": "__agent_loop_project_terminal_result"
       },
       {
@@ -478,12 +478,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
-        "line": 185,
+        "line": 199,
         "reader": "__agent_loop_project_terminal_result"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
-        "line": 192,
+        "line": 206,
         "reader": "__agent_loop_project_terminal_result"
       },
       {

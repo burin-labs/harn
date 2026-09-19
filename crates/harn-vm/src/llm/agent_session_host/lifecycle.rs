@@ -416,6 +416,7 @@ pub(super) async fn host_agent_session_finalize(
     let mut stop_reason = opt_str(&status_dict, "stop_reason").unwrap_or_default();
     let mut terminal_error = opt_json(&status_dict, "error");
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
+    let adaptive_budget = opt_json(&status_dict, "adaptive_budget");
 
     let session = finalization.session_mut();
 
@@ -570,7 +571,10 @@ pub(super) async fn host_agent_session_finalize(
         terminal_class.map(crate::llm::agent_terminal_class::AgentTerminalClass::as_str),
         terminal_error.as_ref(),
         &terminal_outcome,
-        session.provider_call_count,
+        live_transcript_journal::TerminalAccounting {
+            provider_call_count: session.provider_call_count,
+            adaptive_budget: adaptive_budget.as_ref(),
+        },
     )
     .await?;
     let recap = if let Some(store) = recap_store {
@@ -644,7 +648,7 @@ pub(super) async fn host_agent_session_finalize(
             &session.rejected_tools,
         ),
     );
-    let result = serde_json::json!({
+    let mut result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
         "final_status": final_status,
         "stop_reason": stop_reason,
@@ -721,6 +725,9 @@ pub(super) async fn host_agent_session_finalize(
         "daemon_state": session.daemon_state,
         "daemon_snapshot_path": session.daemon_snapshot_path,
     });
+    if let Some(budget) = adaptive_budget {
+        result["adaptive_budget"] = budget;
+    }
     Ok(json_to_vm(&result))
 }
 
