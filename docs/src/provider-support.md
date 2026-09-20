@@ -56,6 +56,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | Siliconflow | `siliconflow` | `SILICONFLOW_API_KEY` |
 | Tgi | `tgi` | none — runs without a key |
 | Together | `together` | `TOGETHER_AI_API_KEY` |
+| TypeSafe | `typesafe` | `TYPESAFE_API_KEY` |
 | Vercel AI Gateway | `vercel_ai_gateway` | `AI_GATEWAY_API_KEY` or `VERCEL_AI_GATEWAY_API_KEY` |
 | Vertex | `vertex` | `VERTEX_AI_ACCESS_TOKEN` or `GOOGLE_OAUTH_ACCESS_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS` |
 | Vllm | `vllm` | none — runs without a key |
@@ -106,7 +107,8 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Siliconflow` | OpenAI-compatible chat completions | `siliconflow` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Tgi` | OpenAI-compatible chat completions | `tgi` | `text` | no | yes | `none` / `none` | none | no | No | none | `local_zero_cost` | `not_recorded` |
 | `Together` | OpenAI-compatible chat completions | `together:openai/gpt-oss-20b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
-| `Vercel AI Gateway` | OpenAI-compatible chat completions | `vercel_ai_gateway:vercel/openai/gpt-5.4-nano` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | No | none | `high` | `not_recorded` |
+| `TypeSafe` | OpenAI-compatible chat completions | `typesafe:typesafe/jev-1.13.0` | `json` | no | yes | `none` / `none` | none | no | No | none | `high` | `not_recorded` |
+| `Vercel AI Gateway` | OpenAI-compatible chat completions | `vercel_ai_gateway:vercel/typesafe-ai/jev` | `json` | no | yes | `none` / `none` | none | no | No | none | `high` | `not_recorded` |
 | `Vertex` | Gemini generateContent | `vertex:vertex/gemini-2.5-flash` | `native` | yes | yes | `none` / `native_json` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | No | none | `local_zero_cost` | `not_recorded` |
 | `Volcengine Ark` | OpenAI-compatible chat completions | `volcengine_ark` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |

@@ -68,6 +68,7 @@ unverified = [
   "qianfan",
   "siliconflow",
   "tgi",
+  "typesafe",
   "vercel_ai_gateway",
   "vllm",
   "volcengine_ark",
@@ -847,6 +848,34 @@ features = ["responses_api", "native_tools", "reasoning", "prompt_caching", "wir
 method = "GET"
 path = "/models"
 
+# TypeSafe — System One decision models. NOT a chat provider: the published
+# API is `POST /v1/systemone`, which answers typed questions over one shared
+# state and returns probabilities, not prose.
+#
+# `chat_endpoint` names that same `/systemone` path rather than an invented
+# `/chat/completions`. The catalog contract requires a non-empty endpoint on
+# every provider, a requirement that predates decision-only providers, and the
+# choice is between the real path and a path that does not exist. The value is
+# inert either way: no `typesafe` model row declares `text_generation`, so
+# operation admission refuses a chat request before transport. How the decision
+# operation is actually dialled is named by the `decision_protocol` capability
+# rule, which is the authoritative owner.
+#
+# Direct access was waitlisted on 2026-09-20 and Harn holds no TYPESAFE_API_KEY;
+# the `vercel/typesafe-ai/jev` route is the one reachable today.
+# https://docs.typesafe.ai/api
+[providers.typesafe]
+display_name = "TypeSafe"
+base_url = "https://api.typesafe.ai/v1"
+base_url_env = "TYPESAFE_BASE_URL"
+auth_style = "bearer"
+auth_env = "TYPESAFE_API_KEY"
+chat_endpoint = "/systemone"
+
+[providers.typesafe.healthcheck]
+method = "GET"
+path = "/models"
+
 # Cloudflare Workers AI / AI Gateway — OpenAI-compatible path is scoped by
 # account id. Set CLOUDFLARE_AI_BASE_URL to the concrete account/gateway URL.
 [providers.cloudflare_ai_gateway]
@@ -1094,6 +1123,7 @@ unverified = [
   "qianfan",
   "sambanova",
   "siliconflow",
+  "typesafe",
   "vercel_ai_gateway",
   "volcengine_ark",
   "zai",
@@ -2705,9 +2735,12 @@ tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
 
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."claude-haiku-4-5-20251001"]
 name = "Claude Haiku 4.5"
 provider = "anthropic"
+operations = ["text_generation", "decision"]
 context_window = 200000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
@@ -3274,9 +3307,12 @@ tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."gpt-5.4-mini"]
 name = "GPT-5.4 Mini"
 provider = "openai"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
@@ -3284,9 +3320,12 @@ tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."gpt-5.4-nano"]
 name = "GPT-5.4 Nano"
 provider = "openai"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
@@ -3605,9 +3644,12 @@ serving_tiers = [
   { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
 ]
 
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."gemini-3.1-flash-lite"]
 name = "Gemini 3.1 Flash-Lite"
 provider = "gemini"
+operations = ["text_generation", "decision"]
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025 }
@@ -6392,9 +6434,12 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
 
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."openai/gpt-5.4-mini"]
 name = "GPT-5.4 Mini (via OpenRouter)"
 provider = "openrouter"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
@@ -6402,9 +6447,12 @@ tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "cheap"]
 
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."openai/gpt-5.4-nano"]
 name = "GPT-5.4 Nano (via OpenRouter)"
 provider = "openrouter"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
@@ -6704,6 +6752,135 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 # 2026-08-15 reachability sweep: Fireworks no longer deploys `glm-5p1`
 # (HTTP 404 `Model not found, inaccessible, and/or not deployed`); its model
 # listing carries only `glm-5p2`, which stays catalogued above.
+
+# --- source: 60-models/99-typesafe-jev.toml ---
+# ── TypeSafe Jev — decision-only routes ──────────────────────────────────────
+#
+# Jev is a System One decision model: it answers typed questions over a shared
+# state with probabilities, and it cannot hold a conversation. Every row here
+# declares `operations = ["decision"]` and nothing else, so the checker and the
+# runtime refuse it as a chat driver before any request is made. A chat call to
+# `typesafe-ai/jev` on the Vercel gateway is refused upstream too, with
+# `ModelTypeMismatchError` on `/v1/chat/completions` (observed 2026-09-20).
+#
+# How the operation is dialled per route lives in the capability rules, not
+# here: see `capability_sources/20-providers/04-decision-contracts.toml`. These
+# three endpoints are not interchangeable chat endpoints, so the protocol is a
+# typed capability rather than something inferred from the provider id.
+#
+# Shared facts, all from TypeSafe's own documentation:
+#   * `jev-latest` is an alias currently pointing at `jev-1.13.0`, alongside a
+#     `jev-preview` alias. https://docs.typesafe.ai/models
+#   * Pricing is input-only, $0.042 per million tokens; output tokens are free.
+#     https://typesafe.ai/blog/introducing-system-one-models-and-jev
+#   * The documented request ceiling is 64k tokens overall, of which at most
+#     32k may be `state` plus the longest question. `context_window` records the
+#     32k state ceiling, because that is the bound a caller has to plan against
+#     and the one OpenRouter publishes for the route.
+#     https://docs.typesafe.ai/models, https://openrouter.ai/typesafe
+#   * Text and structured JSON only; no image, audio, or video input.
+#     https://docs.typesafe.ai/concepts/system-one
+#
+# `logical_model` and `equivalence_group` are shared so that cross-route
+# equivalence is visible to a human reading the catalog. They are NOT a
+# licence to fail a predicate over from one route to another: a decision model
+# answers with a probability distribution, and silently re-asking a different
+# serving route would change the distribution without changing the receipt.
+#
+# Availability: only the Vercel gateway route has been reached. The direct
+# TypeSafe API was waitlisted on 2026-09-20 and Harn holds no key for it, and
+# OpenRouter did not list Jev when the route was checked. Those three rows
+# therefore carry `availability = "unknown"` rather than the default
+# `serverless`, which would claim the route works out of the box.
+
+# Direct TypeSafe, pinned snapshot. Documented, not reached: access is
+# waitlisted. https://docs.typesafe.ai/api
+[models."typesafe/jev-1.13.0"]
+name = "Jev 1.13.0 (TypeSafe)"
+blurb = "Answers yes/no, multiple-choice, and rating questions about a shared state in well under a second, and cannot write prose."
+provider = "typesafe"
+wire_model = "jev-1.13.0"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "direct"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+availability = "unknown"
+row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Direct TypeSafe, moving selector. `jev-latest` resolves to `jev-1.13.0`
+# today. https://docs.typesafe.ai/models
+[models."typesafe/jev-latest"]
+name = "Jev Latest (TypeSafe)"
+blurb = "Follows TypeSafe's current flagship decision model instead of pinning a version."
+provider = "typesafe"
+wire_model = "jev-latest"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "direct"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+availability = "unknown"
+row_kind = "selector"
+current_snapshot = "typesafe/jev-1.13.0"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Vercel AI Gateway. The only route reached live: on 2026-09-20 the gateway
+# model list carried `typesafe-ai/jev` with `"type": "evaluation"`, and
+# `/v1/chat/completions` refused it with `ModelTypeMismatchError`.
+# https://vercel.com/docs/ai-gateway/modalities/evaluation
+[models."vercel/typesafe-ai/jev"]
+name = "Jev (Vercel AI Gateway)"
+blurb = "Jev's decision answers over the gateway key Harn already holds, with no separate TypeSafe account."
+provider = "vercel_ai_gateway"
+wire_model = "typesafe-ai/jev"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "vercel-ai-gateway"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+row_kind = "selector"
+current_snapshot = "typesafe/jev-1.13.0"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# OpenRouter. Documented, not reached: OpenRouter publishes an alpha decisions
+# endpoint and a TypeSafe provider page, but its model list did not carry Jev
+# when the route was checked on 2026-09-20.
+# https://openrouter.ai/typesafe
+[models."openrouter/typesafe/jev-1.13"]
+name = "Jev 1.13 (OpenRouter)"
+blurb = "Jev's decision answers through OpenRouter's alpha decisions endpoint."
+provider = "openrouter"
+wire_model = "typesafe/jev-1.13"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "openrouter"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+availability = "unknown"
+row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
 
 # --- source: 60-models/99-vercel-ai-gateway.toml ---
 # Curated Vercel AI Gateway routes used by Harn's provider probes and Burin's
