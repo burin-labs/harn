@@ -122,6 +122,39 @@ fn ordinary_package_receipt_marks_connector_gate_not_applicable() {
 }
 
 #[test]
+fn declared_package_export_reaches_its_function_through_a_colliding_directory() {
+    let (temp, _package) = scaffold_and_install("package");
+    let consumer = temp.path().join("consumer");
+    fs::create_dir(&consumer).unwrap();
+    fs::write(
+        consumer.join("harn.toml"),
+        "[package]\nname = \"consumer\"\n[dependencies]\nexample-package = { path = \"../example-package\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        consumer.join("main.harn"),
+        "import { greet } from \"example-package/lib\"\nfn main(harness: Harness) { harness.stdio.log(greet(\"consumer\")) }\n",
+    )
+    .unwrap();
+    let install = run(Command::new(harn_e2e_binary())
+        .current_dir(&consumer)
+        .arg("install"));
+    assert!(install.status.success(), "{install:?}");
+    let check = run(Command::new(harn_e2e_binary())
+        .current_dir(&consumer)
+        .args(["check", "main.harn", "--json"]));
+    assert!(check.status.success(), "{check:?}");
+    let execute = run(Command::new(harn_e2e_binary())
+        .current_dir(&consumer)
+        .args(["run", "main.harn"]));
+    assert!(execute.status.success(), "{execute:?}");
+    assert_eq!(
+        String::from_utf8(execute.stdout).unwrap().trim(),
+        "[harn] Hello, consumer!"
+    );
+}
+
+#[test]
 fn strict_package_receipt_proves_both_source_gate_policies_fired() {
     let (_temp, package) = scaffold_and_install("package");
     let receipt = verify_with_policy(&package, true);

@@ -399,23 +399,69 @@ fn target_within_package_root(package_root: &Path, path: PathBuf) -> Option<Path
 fn finalize_package_target(package_root: &Path, path: &Path) -> Option<PathBuf> {
     if path.is_dir() {
         let lib = path.join("lib.harn");
-        return if lib.exists() {
-            target_within_package_root(package_root, lib)
-        } else {
-            target_within_package_root(package_root, path.to_path_buf())
-        };
+        // A namespace directory is a module only when it has an entry file.
+        // Otherwise the caller must continue to the manifest's export map.
+        // Returning the directory here masks e.g. exports.lib="lib/main.harn".
+        return lib
+            .is_file()
+            .then(|| target_within_package_root(package_root, lib))
+            .flatten();
     }
-    if path.exists() {
+    if path.is_file() {
         return target_within_package_root(package_root, path.to_path_buf());
     }
     if path.extension().is_none() {
         let mut with_extension = path.to_path_buf();
         with_extension.set_extension("harn");
-        if with_extension.exists() {
+        if with_extension.is_file() {
             return target_within_package_root(package_root, with_extension);
         }
     }
     None
+}
+
+#[cfg(test)]
+mod package_target_tests {
+    use super::resolve_from_packages_root;
+
+    #[test]
+    fn export_alias_resolves_past_a_directory_without_a_module_entry() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("example");
+        std::fs::create_dir_all(package.join("lib")).unwrap();
+        let entry = package.join("lib/main.harn");
+        std::fs::write(&entry, "pub fn answer() -> int { return 42 }\n").unwrap();
+        std::fs::write(
+            package.join("harn.toml"),
+            "[exports]\nlib = \"lib/main.harn\"\n",
+        )
+        .unwrap();
+
+        let resolved = resolve_from_packages_root(root.path(), "example/lib")
+            .expect("declared export must resolve");
+        assert_eq!(resolved, entry);
+        assert!(super::super::read_module_source(&resolved)
+            .unwrap()
+            .contains("answer"));
+    }
+
+    #[test]
+    fn directory_entry_stays_a_module_but_a_bare_directory_does_not() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("example/namespace");
+        std::fs::create_dir_all(&directory).unwrap();
+        assert_eq!(
+            resolve_from_packages_root(root.path(), "example/namespace"),
+            None
+        );
+
+        let entry = directory.join("lib.harn");
+        std::fs::write(&entry, "pub fn answer() -> int { return 42 }\n").unwrap();
+        assert_eq!(
+            resolve_from_packages_root(root.path(), "example/namespace"),
+            Some(entry)
+        );
+    }
 }
 
 #[cfg(test)]
