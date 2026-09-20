@@ -420,11 +420,11 @@ impl harn_clock::Clock for CancelWhenSleepStarts {
             *slot.lock().unwrap() = Some("SIGTERM".to_string());
         }
         self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-        std::future::pending::<()>().await
+        std::future::pending::<()>().await;
     }
 
     async fn sleep_until_utc(&self, _deadline: time::OffsetDateTime) {
-        std::future::pending::<()>().await
+        std::future::pending::<()>().await;
     }
 }
 
