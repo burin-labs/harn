@@ -138,7 +138,7 @@ fn unrestricted_and_explicitly_empty_paths_get_no_adapter() {
     let mut empty = vec![("PATH".to_string(), String::new())];
     inject_env(&mut empty, &policy);
     assert_eq!(empty, vec![("PATH".to_string(), String::new())]);
-    let fallback = super::super::handler_sandbox_test_guard();
+    let fallback = super::super::super::handler_sandbox_test_guard();
     fallback.set("off");
     let mut disabled = original.clone();
     inject_env(&mut disabled, &policy);

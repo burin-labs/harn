@@ -80,8 +80,6 @@ pub(crate) mod linux;
 mod locked_append;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(target_os = "macos")]
-mod macos_swiftpm;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
 mod paths;

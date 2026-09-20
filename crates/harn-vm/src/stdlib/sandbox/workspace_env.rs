@@ -307,7 +307,7 @@ pub(crate) fn inject_workspace_process_env(
     }
     inject_jvm_loopback_env(env, policy);
     #[cfg(target_os = "macos")]
-    super::macos_swiftpm::inject_env(env, policy);
+    super::macos::swiftpm::inject_env(env, policy);
 }
 
 /// The JVM option that makes a loopback-only grant hold for Java children.

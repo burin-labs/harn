@@ -14,7 +14,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use super::macos_swiftpm::compatible_args as macos_sandbox_compatible_args;
+use self::swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
     normalized_process_roots, policy_allows_network, policy_allows_workspace_write,
     process_sandbox_developer_toolchain_read_roots,
@@ -26,6 +26,7 @@ use super::{
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
 
+pub(super) mod swiftpm;
 mod toolchain_roots;
 
 const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";

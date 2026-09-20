@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::orchestration::CapabilityPolicy;
 
-use super::{
+use super::super::{
     ensure_parent_dirs_scoped, normalized_workspace_roots, openat_file, renameat_name,
     unlinkat_name, warn_once, ScopedMutationTarget,
 };
@@ -148,10 +148,14 @@ fn launcher_source(name: &str, real_program: &Path) -> String {
 /// Add adapters to the child's existing search path without changing which
 /// installed tool each adapter ultimately executes. A deliberately empty PATH
 /// remains empty, and repeated environment composition does not stack adapters.
-pub(super) fn inject_env(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
+pub(in crate::stdlib::sandbox) fn inject_env(
+    env: &mut Vec<(String, String)>,
+    policy: &CapabilityPolicy,
+) {
     if !policy.sandbox_profile.confines_processes()
-        || super::effective_fallback(policy.sandbox_profile) == super::SandboxFallback::Off
-        || !super::active_backend_available()
+        || super::super::effective_fallback(policy.sandbox_profile)
+            == super::super::SandboxFallback::Off
+        || !super::super::active_backend_available()
     {
         return;
     }
@@ -279,5 +283,5 @@ fn write_launcher(target: &ScopedMutationTarget, source: &[u8]) -> io::Result<()
 }
 
 #[cfg(test)]
-#[path = "macos_swiftpm_tests.rs"]
+#[path = "swiftpm_tests.rs"]
 mod tests;
