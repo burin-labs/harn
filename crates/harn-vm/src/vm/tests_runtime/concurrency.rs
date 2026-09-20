@@ -388,6 +388,46 @@ fn test_host_signal_token_dispatches_matching_signal() {
     });
 }
 
+/// A clock whose sleep makes a cancellation observable the moment the sleep
+/// begins, and then never completes.
+///
+/// The tests below need the cancellation to be noticed by the blocking
+/// operation itself rather than by the poll between operations, because those
+/// are the two observers whose disagreement is the defect. Arranging that with
+/// a timer would make the test a race, and a test written to remove a timing
+/// dependency must not introduce one. Setting the flag from inside the sleep
+/// puts the cancellation exactly where it is needed, with no duration to tune:
+/// the sleep future never resolves, so the operation's own cancel poll is the
+/// only thing that can end it.
+#[derive(Debug)]
+struct CancelWhenSleepStarts {
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    signal: Option<Arc<std::sync::Mutex<Option<String>>>>,
+}
+
+#[async_trait::async_trait]
+impl harn_clock::Clock for CancelWhenSleepStarts {
+    fn now_utc(&self) -> time::OffsetDateTime {
+        time::OffsetDateTime::UNIX_EPOCH
+    }
+
+    fn monotonic_ms(&self) -> i64 {
+        0
+    }
+
+    async fn sleep(&self, _duration: Duration) {
+        if let Some(slot) = &self.signal {
+            *slot.lock().unwrap() = Some("SIGTERM".to_string());
+        }
+        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        std::future::pending::<()>().await
+    }
+
+    async fn sleep_until_utc(&self, _deadline: time::OffsetDateTime) {
+        std::future::pending::<()>().await
+    }
+}
+
 // Which observer of a cancellation actually runs the interrupt handlers.
 //
 // A cancellation is noticed independently in several places. The between-ops
@@ -439,16 +479,12 @@ pipeline t(harness: Harness) {
         .unwrap();
         vm.install_interrupt_signal_token(signal_token);
         vm.install_cancel_token(cancel_token);
-
-        // The host publishes the signal name before the cancel flag, so an
-        // observer that sees the flag could always have seen the name. Keeping
-        // that order here means a failure is about dispatch, not about a
-        // reader racing the writer.
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            *signal_writer.lock().unwrap() = Some("SIGTERM".to_string());
-            cancel_writer.store(true, std::sync::atomic::Ordering::SeqCst);
-        });
+        vm.set_harness(crate::Harness::with_clock(Arc::new(
+            CancelWhenSleepStarts {
+                cancel: cancel_writer,
+                signal: Some(signal_writer),
+            },
+        )));
     })
     .unwrap();
 
@@ -502,11 +538,12 @@ pipeline t(harness: Harness) {
         .unwrap();
         vm.install_interrupt_signal_token(signal_token);
         vm.install_cancel_token(cancel_token);
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            *signal_writer.lock().unwrap() = Some("SIGTERM".to_string());
-            cancel_writer.store(true, std::sync::atomic::Ordering::SeqCst);
-        });
+        vm.set_harness(crate::Harness::with_clock(Arc::new(
+            CancelWhenSleepStarts {
+                cancel: cancel_writer,
+                signal: Some(signal_writer),
+            },
+        )));
     });
 
     assert!(
@@ -550,10 +587,12 @@ pipeline t(harness: Harness) {
         .unwrap();
         // A cancel token and no signal token at all: nothing can supply a name.
         vm.install_cancel_token(cancel_token);
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            cancel_writer.store(true, std::sync::atomic::Ordering::SeqCst);
-        });
+        vm.set_harness(crate::Harness::with_clock(Arc::new(
+            CancelWhenSleepStarts {
+                cancel: cancel_writer,
+                signal: None,
+            },
+        )));
     });
 
     assert!(
@@ -598,10 +637,12 @@ pipeline t(harness: Harness) {
         )
         .unwrap();
         vm.install_cancel_token(cancel_token);
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            cancel_writer.store(true, std::sync::atomic::Ordering::SeqCst);
-        });
+        vm.set_harness(crate::Harness::with_clock(Arc::new(
+            CancelWhenSleepStarts {
+                cancel: cancel_writer,
+                signal: None,
+            },
+        )));
     });
 
     assert!(
