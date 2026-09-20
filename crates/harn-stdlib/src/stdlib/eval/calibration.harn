@@ -210,10 +210,15 @@ type NormalizedRow = {
 }
 
 const DEFAULT_THRESHOLDS = [0.5, 0.7, 0.9]
+
 const DEFAULT_TARGET_ERROR = 0.05
+
 const DEFAULT_SEED = 1
+
 const BIN_COUNT = 10
+
 const CONTRACT = "harn.calibration_report.v1"
+
 const GUARANTEE = "marginal coverage on exchangeable data: at most target_error of future rows are both accepted and wrong"
 
 fn __round6(value: float) -> float {
@@ -260,7 +265,7 @@ fn __normalize(raw: any, index: int, level_order: list<string>) -> any {
   if !abstained && predicted == "" {
     return "missing_label:row ${index} of question ${question_id} answered with no predicted label"
   }
-  const confidence = to_float(raw?.confidence ?? nil)
+  const confidence = to_float(raw?.confidence)
   if confidence == nil || confidence < 0.0 || confidence > 1.0 {
     return "invalid_confidence:row ${index} of question ${question_id} has confidence ${to_string(raw?.confidence)}, which is not a probability"
   }
