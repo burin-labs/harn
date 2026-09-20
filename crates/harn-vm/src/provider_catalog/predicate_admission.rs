@@ -23,8 +23,17 @@ pub fn predicate_model_catalog_identity() -> Vec<u8> {
                 &model.provider,
                 &model.wire_model,
                 model.normalized_operations(),
-                decision_contract_for_route(&model.provider, id)
-                    .map(|contract| contract.protocol.as_str()),
+                // Only a decision row's protocol can change admission, and a
+                // capability lookup is not free. Resolving one per catalog row
+                // would put several hundred lookups on the check-cache key
+                // path for a fact that is `None` on almost all of them.
+                model
+                    .supports_operation(ModelOperation::Decision)
+                    .then(|| {
+                        decision_contract_for_route(&model.provider, id)
+                            .map(|contract| contract.protocol.as_str())
+                    })
+                    .flatten(),
             )
         })
         .collect();
