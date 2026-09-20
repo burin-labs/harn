@@ -69,7 +69,7 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/mod.rs",
-        "line": 846,
+        "line": 847,
         "reader": "helpers::opt_int"
       }
     ],
@@ -87,7 +87,7 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/mod.rs",
-        "line": 847,
+        "line": 848,
         "reader": "helpers::opt_int"
       }
     ],

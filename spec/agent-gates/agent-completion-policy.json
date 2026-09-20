@@ -162,7 +162,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 88,
+        "line": 101,
         "reader": "__agent_loop_run"
       }
     ],
@@ -238,7 +238,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 741,
+        "line": 756,
         "reader": "__agent_loop_run"
       },
       {
@@ -292,6 +292,11 @@
     "name": "AgentSpec.terminal_callback",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 1213,
+        "reader": "__agent_loop_run"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "line": 734,

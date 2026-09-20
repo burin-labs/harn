@@ -97,7 +97,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 107,
+        "line": 121,
         "reader": "__agent_loop_run"
       }
     ],
@@ -317,7 +317,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 89,
+        "line": 102,
         "reader": "__agent_loop_run"
       },
       {
@@ -949,7 +949,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 350,
+        "line": 365,
         "reader": "__agent_loop_run"
       },
       {
@@ -1000,7 +1000,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 883,
+        "line": 898,
         "reader": "__agent_loop_run"
       },
       {

@@ -41,6 +41,11 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
   let successful_tools_seen = []
   let rejected_tools_seen = []
   let current_max = 0
+  // Hoisted beside `current_max` for the same reason: the error epilogue below
+  // runs outside the try block and reports the same budget the in-loop
+  // terminal boundary reports. Reading the spec field again down there would
+  // add a second, differently shaped read of the same option.
+  let iteration_budget = nil
   let terminal_callback_attempted = false
   // One invoker serves ordinary terminal decisions and the error epilogue.
   // Mark entry before calling host code: a callback that throws is not retried.
@@ -95,6 +100,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let stall_recovery_evidence_revision = ""
     const max_verify_attempts = opts?.max_verify_attempts ?? 20
     const budget = opts.iteration_budget
+    iteration_budget = budget
     current_max = budget.initial
     let extensions_used = 0
     let budget_decisions = []
@@ -1207,8 +1213,13 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
   if is_err(run) && !terminal_callback_attempted && opts?.terminal_callback != nil {
     const error = unwrap_err(run)
     const terminal = __agent_loop_boundary_terminal_record(error_category(error), iteration, error)
+    // Call the terminal invoker by name rather than through the closure: the
+    // epilogue runs outside the loop, and naming the owner keeps this read of
+    // the agent options auditable at the same origin the in-loop path uses.
     const notification = try {
-      notify_terminal(
+      agent_compute_terminal_callback(
+        harness.agent,
+        session,
         opts,
         {
           iteration: iteration,
@@ -1216,7 +1227,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           stop_reason: terminal.stop_reason,
           terminal_error: terminal?.error,
           max_iterations: current_max,
-          iteration_budget: opts?.iteration_budget,
+          iteration_budget: iteration_budget,
           session_successful_tools: successful_tools_seen,
           session_rejected_tools: rejected_tools_seen,
         },
