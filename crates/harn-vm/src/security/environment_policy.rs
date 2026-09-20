@@ -82,6 +82,8 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "RUSTUP_HOME",
     "RUST_BACKTRACE",
     "RUST_LOG",
+    // SwiftPM manifest compiler modules are a relocatable build cache.
+    "SWIFTPM_MODULECACHE_OVERRIDE",
     // Node / npm / pnpm: module path + cache/home roots.
     "NODE_PATH",
     "NPM_CONFIG_CACHE",
@@ -147,6 +149,7 @@ const WINDOWS_ENV_ALLOWLIST: &[&str] = &[
 /// diagnostic with the roots a relocated toolchain points at — read this list so
 /// there is no second per-language path table to drift from the allowlist.
 pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
+    "SWIFTPM_MODULECACHE_OVERRIDE",
     // Rust / Cargo
     "CARGO_HOME",
     "CARGO_TARGET_DIR",
@@ -187,6 +190,7 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
 /// out-of-jail gap. A denial while one of these points *outside* the sandbox
 /// jail is a provable environment/config gap, not the workload's code defect.
 pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
+    "SWIFTPM_MODULECACHE_OVERRIDE",
     "CARGO_HOME",
     "CARGO_TARGET_DIR",
     "CCACHE_DIR",
