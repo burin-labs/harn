@@ -173,6 +173,23 @@ Hosts migrating from pre-#905 builds must read these fields from
 `crates/harn-serve/tests/fixtures/acp/session_update_extensions.json`
 pins the new wire shape verbatim.
 
+The schema in `conformance/protocols/schemas/acp-session-update.schema.json`
+owns the generated extension records. Decode Harn extensions through Rust's
+`ACPTypedSessionUpdate` or Swift's `HarnACPTypedSessionUpdate`, then read the
+variant's typed `meta.harn` fields. These decoders enforce required fields,
+identity constraints, and conditional requirements such as the escape tool on
+a write-access stance transition. They do not accept the retired root-field
+envelopes. Standard `available_commands_update` keeps `availableCommands` at
+the update root. The generated TypeScript union is `ACPTypedSessionUpdate`;
+`ACPHarnExtensionUpdate` aliases it, so the envelope cannot bypass required
+fields through a generic extension. Static types do not replace runtime schema
+validation.
+
+The Rust and Swift binding checks consume the adapter's same 17-kind fixture,
+round-trip every field, and refuse the corresponding empty-metadata controls.
+Replay markers and explicit null metadata are also checked. The former
+`HARN_TYPED_SESSION_UPDATE_PAYLOADS` field-table constant is removed.
+
 `reminder_emitted` is sent when a pending system reminder is rendered
 into the next model request. Its payload lives at
 `update._meta.harn.reminder`:

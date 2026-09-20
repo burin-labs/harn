@@ -13,7 +13,7 @@ use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::prepared_session::append_swift_prepared_session_types;
 use super::session_recap::append_swift_session_recap_types;
-use super::session_update_payloads::append_swift_session_update_payloads;
+use super::session_update_payloads::SessionUpdatePayloads;
 use super::support::*;
 use super::values::*;
 
@@ -33,6 +33,7 @@ pub(super) fn generate_swift_for_tests() -> String {
         &ExternalActionVocabulary::load_for_tests(),
         &ConnectorSetupVocabulary::load_for_tests(),
         &ActivityVocabulary::load_for_tests(),
+        &SessionUpdatePayloads::load_for_tests(),
     )
 }
 
@@ -40,6 +41,7 @@ pub(super) fn generate_swift(
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
     activity: &ActivityVocabulary,
+    session_updates: &SessionUpdatePayloads,
 ) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "swift");
     out.push_str("import Foundation\n\n");
@@ -1193,7 +1195,7 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
 "#,
     );
     append_session_timeline_types(&mut out);
-    append_swift_session_update_payloads(&mut out);
+    session_updates.append(&mut out, super::records::Target::Swift);
     append_swift_prepared_session_types(&mut out);
     append_swift_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Swift);

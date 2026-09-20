@@ -132,7 +132,7 @@ pub(super) fn append(out: &mut String, target: Target) {
                 )
             });
         }
-        record.append_mutable(out, target);
+        record.append_mutable(out, target, false);
     }
     while out.ends_with("\n\n") {
         out.pop();

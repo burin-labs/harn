@@ -5,7 +5,9 @@ private enum RecapBindingProbeError: Error {
     case expectedUnknownSnapshotFieldRejection
     case expectedUnknownNestedFieldRejection
     case expectedUnknownVerificationStatusRejection
-    case wireMismatch
+    case wireMismatch(type: String, expected: String, actual: String)
+    case incompleteSessionUpdateFixture
+    case acceptedMissingSessionUpdateIdentity
 }
 
 private func roundTrip<T: Codable>(_ type: T.Type, _ input: [String: Any], _ expected: [String: Any]) throws {
@@ -13,7 +15,12 @@ private func roundTrip<T: Codable>(_ type: T.Type, _ input: [String: Any], _ exp
     let decoded = try JSONDecoder().decode(type, from: data)
     let encoded = try JSONEncoder().encode(decoded)
     let actual = try JSONSerialization.jsonObject(with: encoded) as! NSDictionary
-    guard actual.isEqual(to: expected) else { throw RecapBindingProbeError.wireMismatch }
+    guard actual.isEqual(to: expected) else {
+        throw RecapBindingProbeError.wireMismatch(
+            type: String(describing: type), expected: String(describing: expected),
+            actual: String(describing: actual)
+        )
+    }
 }
 
 private func optionalField<T: Codable>(_ type: T.Type, _ base: [String: Any], _ field: String, _ present: Any) throws {
@@ -28,12 +35,53 @@ private func optionalField<T: Codable>(_ type: T.Type, _ base: [String: Any], _ 
 @main
 private struct RecapBindingProbe {
     static func main() throws {
-        guard CommandLine.arguments.count == 2 else {
-            fatalError("usage: protocol-binding-session-recap FIXTURE")
+        guard CommandLine.arguments.count == 3 else {
+            fatalError("usage: protocol-binding-session-recap FIXTURE SESSION_UPDATES")
         }
         let fixture = try JSONSerialization.jsonObject(
             with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         ) as! [String: Any]
+        let notifications = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
+        ) as! [[String: Any]]
+        var updateKinds = Set<String>()
+        for notification in notifications {
+            let params = notification["params"] as! [String: Any]
+            var update = params["update"] as! [String: Any]
+            updateKinds.insert(update["sessionUpdate"] as! String)
+            try roundTrip(HarnACPTypedSessionUpdate.self, update, update)
+            var meta = update["_meta"] as! [String: Any]
+            var harn = meta["harn"] as! [String: Any]
+            harn["replayed"] = true
+            switch update["sessionUpdate"] as! String {
+            case "artifact": harn["title"] = NSNull()
+            case "transcript_compacted":
+                harn["snapshotAssetId"] = NSNull()
+                harn["compactionPolicy"] = NSNull()
+            case "worker_update":
+                harn["metadata"] = NSNull()
+                harn["audit"] = NSNull()
+            case "reminder_emitted":
+                var reminder = harn["reminder"] as! [String: Any]
+                reminder["ttlTurns"] = NSNull()
+                harn["reminder"] = reminder
+            default: break
+            }
+            meta["harn"] = harn
+            update["_meta"] = meta
+            try roundTrip(HarnACPTypedSessionUpdate.self, update, update)
+            update["_meta"] = ["harn": [String: Any]()]
+            let invalid = try JSONSerialization.data(withJSONObject: update)
+            do {
+                _ = try JSONDecoder().decode(HarnACPTypedSessionUpdate.self, from: invalid)
+                throw RecapBindingProbeError.acceptedMissingSessionUpdateIdentity
+            } catch RecapBindingProbeError.acceptedMissingSessionUpdateIdentity {
+                throw RecapBindingProbeError.acceptedMissingSessionUpdateIdentity
+            } catch {}
+        }
+        guard updateKinds.count == 17 else {
+            throw RecapBindingProbeError.incompleteSessionUpdateFixture
+        }
         let recap = fixture["sessionRecapAvailability"] as! [String: Any]
         let plan = fixture["planDocument"] as! [String: Any]
         try roundTrip(HarnPlanDocument.self, plan, plan)

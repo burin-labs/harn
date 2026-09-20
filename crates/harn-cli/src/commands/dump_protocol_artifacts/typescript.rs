@@ -12,9 +12,7 @@ use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::prepared_session::append_typescript_prepared_session_types;
 use super::session_recap::append_typescript_session_recap_types;
-use super::session_update_payloads::{
-    append_typescript_session_update_payloads, typescript_session_update_union_members,
-};
+use super::session_update_payloads::SessionUpdatePayloads;
 use super::support::*;
 use super::swift::{deprecated_wire_value, deprecation_message, wire_value_property_name};
 use super::values::*;
@@ -25,6 +23,7 @@ pub(super) fn generate_typescript_for_tests() -> String {
         &ExternalActionVocabulary::load_for_tests(),
         &ConnectorSetupVocabulary::load_for_tests(),
         &ActivityVocabulary::load_for_tests(),
+        &SessionUpdatePayloads::load_for_tests(),
     )
 }
 
@@ -32,6 +31,7 @@ pub(super) fn generate_typescript(
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
     activity: &ActivityVocabulary,
+    session_updates: &SessionUpdatePayloads,
 ) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "typescript");
     out.push_str("export const HARN_TOOL_PERMISSION_DECISION_SCHEMA = \"harn.tool_permission_decision.v1\" as const\n");
@@ -568,13 +568,10 @@ export interface ACPSessionTruncatedUpdate {
 }
 "#,
     );
-    append_typescript_session_update_payloads(&mut out);
+    session_updates.append(&mut out, super::records::Target::Typescript);
     out.push_str(
         r"
-export interface ACPHarnExtensionUpdate {
-  sessionUpdate: HarnACPSessionUpdateExtension
-  _meta?: ACPExtensionMeta<ACPObject>
-}
+export type ACPHarnExtensionUpdate = ACPTypedSessionUpdate
 
 export type ACPSessionUpdateEnvelope =
   | ACPUserMessageUpdate
@@ -585,7 +582,6 @@ export type ACPSessionUpdateEnvelope =
   | ACPSessionTruncatedUpdate
 ",
     );
-    out.push_str(&typescript_session_update_union_members());
     out.push_str(
         r#"  | ACPHarnExtensionUpdate
 

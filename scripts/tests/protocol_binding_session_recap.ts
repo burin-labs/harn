@@ -1,5 +1,17 @@
 import { decodeHarnSessionRecapAvailability } from "../../spec/protocol-artifacts/harn-protocol";
-import type { HarnPlanStep, HarnPlanApproval, HarnPlanCommentAnchor } from "../../spec/protocol-artifacts/harn-protocol";
+import type { ACPSessionUpdateEnvelope, ACPHarnExtensionUpdate, HarnPlanStep, HarnPlanApproval, HarnPlanCommentAnchor } from "../../spec/protocol-artifacts/harn-protocol";
+
+const worker: ACPSessionUpdateEnvelope = {
+  sessionUpdate: "worker_update",
+  _meta: { harn: { workerId: "worker", event: "started", status: "running", terminal: false, metadata: null } },
+};
+const availableCommands: ACPSessionUpdateEnvelope = {
+  sessionUpdate: "available_commands_update", availableCommands: [],
+};
+// @ts-expect-error The envelope cannot bypass required identity through a generic extension.
+const missingWorkerIdentity: ACPSessionUpdateEnvelope = { sessionUpdate: "worker_update", _meta: { harn: {} } };
+// @ts-expect-error The extension alias requires the same metadata contract.
+const missingWorkerMetadata: ACPHarnExtensionUpdate = { sessionUpdate: "worker_update" };
 
 const step: HarnPlanStep = { id: "step", content: "Verify", status: "pending" };
 step.priority = null;

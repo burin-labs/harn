@@ -359,6 +359,7 @@ outputs = [
 ]
 sources = [
   "spec/openapi.yaml",
+  "conformance/protocols/schemas/acp-session-update.schema.json",
   "crates/harn-cli/src/commands/",
   "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn",
   "crates/harn-vm/src/mcp_tasks.rs",
