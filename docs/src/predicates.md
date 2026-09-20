@@ -6,16 +6,22 @@ tooling. **Execution currently refuses with an explicit unavailable-evaluator
 error.** It makes no model request. Budget admission, receipts, replay, and model
 execution are separate implementation steps.
 
-Import the public types from `std/predicate`:
+Import the public types from `std/predicate`. This illustrative helper requires
+a catalog route named `fixture` on provider `mock` with
+`operations = ["text_generation", "decision"]`:
 
-```harn
+```harn,ignore
 import "std/predicate"
 
 fn assess(
   llm: HarnessLlm,
   input: {claim: string, observation: string},
-  policy: PredicatePolicy,
 ) -> PredicateOutcome {
+  const policy: PredicatePolicy = {
+    backend: "structured_llm", provider: "mock", model: "fixture",
+    effort: "low", temperature: 0.0, threshold: 0.8,
+    evaluation_cost_limit: 0.0, run_cost_limit: 0.0,
+  }
   return llm.evaluate_predicate(
     "finding.support.v1",
     "Does the observation support the claim?",
@@ -32,12 +38,17 @@ fn assess(
 | `id` | Nonempty string literal, unique among sites in one source module. A helper may execute the same site repeatedly. |
 | `question` | Nonempty string literal. Its bytes are part of the manifest identity. |
 | `input` | Closed serializable type: primitives, closed records, typed lists, tuples, string-keyed maps, or unions of those types. |
-| `policy` | Closed `PredicatePolicy` record. |
+| `policy` | Closed, compile-time constant `PredicatePolicy` record naming a catalog route that declares `decision`. |
 
 The policy requires `backend: "structured_llm"`, string fields `provider`,
 `model`, and `effort`, and floating-point fields `temperature`, `threshold`,
-`evaluation_cost_limit`, and `run_cost_limit`. Checking validates this shape;
-it does not resolve a provider or establish a resource reservation.
+`evaluation_cost_limit`, and `run_cost_limit`. Checking validates this shape and
+the route's declared `decision` operation. A text-generation capability alone
+does not grant decision support. The checker makes no provider request and does
+not establish credential availability or a resource reservation. Unknown routes
+and policies supplied only at runtime refuse admission.
+The current `structured_llm` backend also requires `text_generation`; a native
+decision-only route cannot inherit a chat transport from its provider.
 
 An unvalidated `any`, `unknown`, bare `dict` or `list`, open record, recursive
 type, function, or capability handle cannot be an input. Validate external
@@ -89,7 +100,9 @@ returns schema `harn.predicate_sites.v1` with a `sites` array. Each site contain
 its ID, question SHA-256, canonical input-type SHA-256, outcome schema, declared
 effects, and source path/line/column. The census includes transitive imports,
 so checking an entry file also reports sites declared in its helpers. The
-check-result cache preserves the manifest and tracks imported source changes.
+check-result cache preserves the manifest and tracks imported source changes,
+model operations, wire identities, and aliases. Removing `decision` support
+invalidates a previously successful check.
 
 An empty `sites` array means the checked import closure declares no evaluation sites.
 `null` means the file failed checking and has no complete census. A site is a
@@ -105,6 +118,7 @@ and model answers do not appear in this manifest.
 | `HARN-TYP-032` | An outcome is discarded. |
 | `HARN-TYP-033` | Site identity is not literal/unique, or indirect invocation hides the site. |
 | `HARN-TYP-034` | A variant field is read before narrowing the outcome. |
+| `HARN-TYP-035` | A model lacks a required operation, or its route cannot be determined at check time. |
 
 The [design explanation](design/probabilistic-branching.md) defines the remaining
 runtime, replay, budget, and provider contracts.

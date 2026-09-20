@@ -462,7 +462,8 @@ pub(crate) fn check_file_report_inner(
             module_graph,
         ) {
             Ok(manifest) => Some(manifest),
-            Err(message) => {
+            Err(error) => {
+                let message = error.message;
                 has_error = true;
                 diagnostic_count += 1;
                 if let Some(text) = text.as_mut() {
@@ -472,7 +473,7 @@ pub(crate) fn check_file_report_inner(
                 diagnostics.push(CheckDiagnostic {
                     source: "predicate",
                     severity: "error",
-                    code: None,
+                    code: error.code,
                     message,
                     span: None,
                     help: None,

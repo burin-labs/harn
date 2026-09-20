@@ -53,6 +53,7 @@ fn calculate_cost_uses_catalog_model_pricing() {
             row_kind: None,
             current_snapshot: None,
             embedding_dim: None,
+            operations: None,
             embedding_max_tokens: None,
         },
     );
@@ -160,6 +161,7 @@ fn calculate_cost_decimal_is_exact_for_inexact_catalog_rates() {
             row_kind: None,
             current_snapshot: None,
             embedding_dim: None,
+            operations: None,
             embedding_max_tokens: None,
         },
     );

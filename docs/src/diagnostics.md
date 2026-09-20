@@ -35,7 +35,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 | Category | Title | Codes |
 |---|---|---:|
-| [`TYP`](#typ--type-checker) | Type checker | 34 |
+| [`TYP`](#typ--type-checker) | Type checker | 35 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 8 |
@@ -97,6 +97,7 @@ Harn's static type checker rejects programs whose types do not unify. Type error
 | [`HARN-TYP-032`](#harn-typ-032) | probabilistic predicate outcome must be consumed | — | — |
 | [`HARN-TYP-033`](#harn-typ-033) | probabilistic predicate site identity must be literal and unique | — | — |
 | [`HARN-TYP-034`](#harn-typ-034) | probabilistic predicate variant fields require outcome narrowing | — | — |
+| [`HARN-TYP-035`](#harn-typ-035) | probabilistic predicate model must declare the decision operation | — | — |
 
 ## PAR — Parser / lexer
 
@@ -896,6 +897,27 @@ and `receipt` fields are available without narrowing.
 
 This applies to named property access, indexed access, and destructuring.
 Dynamic field names cannot establish that the selected variants contain a field.
+
+### `HARN-TYP-035`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+probabilistic predicate model must declare the decision operation
+
+Predicate evaluation requires an explicitly declared `decision` operation on
+the selected catalog route. The current `structured_llm` backend also requires
+`text_generation`. An embedding route, unknown model, or decision-only native
+route cannot inherit a generic chat capability from its provider.
+
+Declare a compile-time constant policy with a provider and model whose catalog
+operations satisfy the backend. A policy supplied only at runtime cannot prove
+this check-time obligation. Check the named model and missing operation in the
+diagnostic; do not add an operation merely to silence the checker without
+evidence that the route supports it.
+
+This check makes no provider request and establishes neither credential
+availability nor model quality. Runtime admission still owns provider options,
+authority, resource reservations, and the evaluation outcome.
 
 ### `HARN-PAR-001`
 

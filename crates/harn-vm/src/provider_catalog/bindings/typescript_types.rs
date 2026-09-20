@@ -5,7 +5,7 @@
 //! `bindings.rs`; this file is the literal text they emit, and nothing else.
 
 pub(super) const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 10
+  schema_version: 11
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -151,6 +151,8 @@ export interface HarnAliasToolCalling {
   last_probe_at?: string
 }
 
+export type HarnModelOperation = __HARN_MODEL_OPERATIONS__
+
 export interface HarnCatalogModel {
   id: string
   name: string
@@ -223,6 +225,7 @@ export interface HarnCatalogModel {
   row_kind?: "snapshot" | "selector"
   current_snapshot?: string
   embedding_dim?: number
+  operations: HarnModelOperation[]
   embedding_max_tokens?: number
 }
 

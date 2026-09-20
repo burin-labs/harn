@@ -322,6 +322,7 @@ fn model_patch_schema() -> &'static PatchSchema {
     static MODEL_PATCH_SCHEMA: PatchSchema = PatchSchema {
         fields: &[
             "name",
+            "operations",
             "provider",
             "context_window",
             "logical_model",

@@ -20,7 +20,9 @@ mod union;
 
 pub use exits::{block_definitely_exits, stmt_definitely_exits};
 pub use format::{format_type, shape_mismatch_detail};
-pub use predicate::{canonical_type as canonical_predicate_type, PredicateSite};
+pub use predicate::{
+    canonical_type as canonical_predicate_type, PredicateModelRoute, PredicateSite,
+};
 
 /// Substitute generic bindings with the same open-row folding used by type
 /// inference. Schema compilation calls this instead of carrying a second type
@@ -254,10 +256,6 @@ pub struct TypeChecker {
     namespace_imports: std::collections::HashMap<String, NamespaceImportBinding>,
     /// Local predicate functions whose bodies have passed contract checking.
     validated_type_predicates: HashSet<(usize, usize)>,
-    /// Compile-time environment populated by every successfully folded
-    /// `const` binding. Later const initializers see earlier values so
-    /// expressions like `const Y = X + 1` work.
-    const_env: crate::const_eval::ConstEnv,
     /// Coinductive guard for recursive-type subtype checks. Holds the
     /// pre-unfolding `(expected, actual)` pairs currently on the
     /// `types_compatible_at` stack. Re-encountering a pair means the walk has
@@ -442,7 +440,6 @@ impl TypeChecker {
             imported_callable_decls: Vec::new(),
             namespace_imports: std::collections::HashMap::new(),
             validated_type_predicates: HashSet::new(),
-            const_env: crate::const_eval::ConstEnv::new(),
             subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }
     }
@@ -471,7 +468,6 @@ impl TypeChecker {
             imported_callable_decls: Vec::new(),
             namespace_imports: std::collections::HashMap::new(),
             validated_type_predicates: HashSet::new(),
-            const_env: crate::const_eval::ConstEnv::new(),
             subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }
     }

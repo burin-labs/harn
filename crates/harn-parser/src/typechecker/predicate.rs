@@ -16,6 +16,37 @@ pub struct PredicateSite {
     pub column: usize,
     pub start: usize,
     pub end: usize,
+    /// The declaration-time route, before catalog admission. An unknown route
+    /// remains explicit so consumers cannot confuse no measurement with support.
+    #[serde(default)]
+    pub model_route: Option<PredicateModelRoute>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PredicateModelRoute {
+    pub provider: String,
+    pub model: String,
+}
+
+fn model_route(policy: &SNode, scope: &TypeScope) -> Option<PredicateModelRoute> {
+    let crate::const_eval::ConstValue::Dict(fields) = scope.const_value(policy)? else {
+        return None;
+    };
+    let string = |name: &str| {
+        fields.iter().find_map(|(key, value)| {
+            if key != name {
+                return None;
+            }
+            match value {
+                crate::const_eval::ConstValue::String(value) => Some(value.clone()),
+                _ => None,
+            }
+        })
+    };
+    Some(PredicateModelRoute {
+        provider: string("provider")?,
+        model: string("model")?,
+    })
 }
 
 /// A deterministic structural identity, independent of field/union ordering
@@ -214,6 +245,7 @@ impl TypeChecker {
             .any(|site| site.start == span.start && site.end == span.end)
         {
             self.predicate_sites.push(PredicateSite {
+                model_route: model_route(policy, scope),
                 id,
                 question,
                 input_type,

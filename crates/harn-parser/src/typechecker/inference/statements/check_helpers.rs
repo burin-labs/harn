@@ -56,7 +56,9 @@ impl TypeChecker {
                 });
         }
         let projected = self.has_projection_contract(value, scope);
+        let folded = scope.const_value(value);
         scope.define_var(name, ty);
+        scope.const_values.insert(name.clone(), folded);
         scope.define_flow_alias(name, value.clone());
         if projected {
             scope.mark_projected(name);
@@ -72,9 +74,6 @@ impl TypeChecker {
                     scope.mark_untyped_source(name, &boundary);
                 }
             }
-        }
-        if let Ok(folded) = crate::const_eval::const_eval(value, &self.const_env) {
-            self.const_env.insert(name.clone(), folded);
         }
     }
 

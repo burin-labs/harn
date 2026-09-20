@@ -169,7 +169,7 @@ impl DocumentState {
             .zip(module_graph.as_ref())
             .map(|(path, graph)| graph.typecheck_import_config_for_file(path))
             .unwrap_or_default();
-        let analysis = match self.analysis.typecheck(&self.source_id, config) {
+        let mut analysis = match self.analysis.typecheck(&self.source_id, config) {
             Ok(analysis) => analysis,
             Err(error) => {
                 match error {
@@ -186,6 +186,11 @@ impl DocumentState {
                 return;
             }
         };
+        analysis
+            .diagnostics
+            .extend(harn_vm::provider_catalog::validate_predicate_models(
+                &analysis.predicate_sites,
+            ));
         let program = analysis.program;
         let type_diags = analysis.diagnostics;
         self.inlay_hints = analysis.inlay_hints;
@@ -558,6 +563,7 @@ fn main(harness: Harness) {
             "HARN-TYP-032",
             "HARN-TYP-033",
             "HARN-TYP-034",
+            "HARN-TYP-035",
         ] {
             let diagnostic = state.diagnostics.iter().find(|diagnostic| {
                 matches!(diagnostic.code.as_ref(), Some(NumberOrString::String(value)) if value == code)

@@ -5,7 +5,12 @@ use crate::test_util;
 const HELPER: &str = r#"
 import "std/predicate"
 
-pub fn assess(llm: HarnessLlm, input: {text: string}, policy: PredicatePolicy) -> PredicateOutcome {
+pub fn assess(llm: HarnessLlm, input: {text: string}) -> PredicateOutcome {
+  const policy: PredicatePolicy = {
+    backend: "structured_llm", provider: "mock", model: "fixture",
+    effort: "low", temperature: 0.0, threshold: 0.8,
+    evaluation_cost_limit: 0.0, run_cost_limit: 0.0,
+  }
   return llm.evaluate_predicate("finding.v1", "Is this supported?", input, policy)
 }
 "#;
@@ -15,12 +20,7 @@ import "std/predicate"
 import { assess } from "./helper"
 
 fn main(harness: Harness) {
-  const policy: PredicatePolicy = {
-    backend: "structured_llm", provider: "mock", model: "fixture",
-    effort: "low", temperature: 0.0, threshold: 0.8,
-    evaluation_cost_limit: 0.0, run_cost_limit: 0.0,
-  }
-  const result = assess(harness.llm, {text: "observation"}, policy)
+  const result = assess(harness.llm, {text: "observation"})
   match result.kind {
     "verdict" -> { if result.value.verdict { harness.stdio.println("accepted") } }
     _ -> { harness.stdio.println(result.receipt) }
@@ -29,12 +29,17 @@ fn main(harness: Harness) {
 "#;
 
 fn check(root: &Path, cache: &Path) -> (bool, serde_json::Value) {
+    let overlay = root.join("providers.toml");
+    if !overlay.exists() {
+        write_operations(root, "decision");
+    }
     let output = test_util::process::harn_e2e_command()
         .args(["check", "--json", "main.harn"])
         .current_dir(root)
         .env("HARN_CACHE_DIR", cache)
         .env("HARN_CHECK_RESULT_CACHE", "1")
         .env("HARN_BYTECODE_CACHE", "1")
+        .env("HARN_HOST_PROVIDERS_CONFIG", overlay)
         .output()
         .expect("run checker");
     let report = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -44,6 +49,22 @@ fn check(root: &Path, cache: &Path) -> (bool, serde_json::Value) {
         );
     });
     (output.status.success(), report)
+}
+
+fn write_operations(root: &Path, operation: &str) {
+    std::fs::write(
+        root.join("providers.toml"),
+        format!(
+            r#"
+[models.fixture]
+name = "Declared fixture"
+provider = "mock"
+context_window = 8192
+operations = ["text_generation", "{operation}"]
+"#
+        ),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -141,8 +162,8 @@ pub(super) fn predicate_helper_manifest_survives_warm_cache_and_tracks_changed_q
         r#"
 import "std/predicate"
 import { evaluate } from "./leaf"
-pub fn assess(llm: HarnessLlm, input: {text: string}, policy: PredicatePolicy) -> PredicateOutcome {
-  return evaluate(llm, input, policy)
+pub fn assess(llm: HarnessLlm, input: {text: string}) -> PredicateOutcome {
+  return evaluate(llm, input)
 }
 "#,
     )
@@ -214,6 +235,100 @@ pub(super) fn predicate_census_refuses_an_invalid_imported_site() {
                         .unwrap()
                         .contains("helper.harn")
             }),
+        "{report}"
+    );
+}
+
+#[test]
+pub(super) fn predicate_operation_admission_invalidates_cached_success() {
+    let root = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("main.harn"), MAIN).unwrap();
+    std::fs::write(root.path().join("helper.harn"), HELPER).unwrap();
+    let (passed, accepted) = check(root.path(), cache.path());
+    assert!(passed, "{accepted}");
+    assert_eq!(
+        accepted["data"]["files"][0]["predicate_manifest"]["sites"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    write_operations(root.path(), "text_generation");
+    let (passed, refused) = check(root.path(), cache.path());
+    assert!(
+        !passed,
+        "a catalog change must invalidate the green cache: {refused}"
+    );
+    let diagnostics = refused["data"]["files"][0]["diagnostics"]
+        .as_array()
+        .unwrap();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "HARN-TYP-035"
+                && diagnostic["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("mock/fixture")
+                && diagnostic["message"].as_str().unwrap().contains("decision")),
+        "{refused}"
+    );
+    assert!(refused["data"]["files"][0]["predicate_manifest"].is_null());
+    write_operations(root.path(), "decision");
+    assert!(
+        check(root.path(), cache.path()).0,
+        "restoring the declaration restores admission"
+    );
+    // Preserve the unavailable-runtime contract through a checked source and
+    // an explicit fixture catalog. The old conformance fixture passed policy
+    // dynamically, so it no longer satisfies static operation admission.
+    let execution = test_util::process::harn_e2e_command()
+        .args(["run", "main.harn"])
+        .current_dir(root.path())
+        .env(
+            "HARN_HOST_PROVIDERS_CONFIG",
+            root.path().join("providers.toml"),
+        )
+        .env("HARN_CACHE_DIR", cache.path())
+        .env("HARN_LLM_CALLS_DISABLED", "1")
+        .output()
+        .expect("execute the admitted predicate source");
+    assert!(!execution.status.success());
+    assert!(
+        String::from_utf8_lossy(&execution.stderr)
+            .contains("this runtime has no budgeted predicate evaluator"),
+        "{}",
+        String::from_utf8_lossy(&execution.stderr)
+    );
+}
+
+#[test]
+pub(super) fn predicate_embedding_model_is_refused_at_check_time() {
+    let root = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("main.harn"), MAIN).unwrap();
+    std::fs::write(
+        root.path().join("helper.harn"),
+        HELPER.replace(
+            "provider: \"mock\", model: \"fixture\"",
+            "provider: \"openai\", model: \"text-embedding-3-small\"",
+        ),
+    )
+    .unwrap();
+    let (passed, report) = check(root.path(), cache.path());
+    assert!(!passed, "{report}");
+    assert!(
+        report["data"]["files"][0]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "HARN-TYP-035"
+                && diagnostic["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("text-embedding-3-small")
+                && diagnostic["message"].as_str().unwrap().contains("decision")),
         "{report}"
     );
 }

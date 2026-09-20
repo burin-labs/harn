@@ -11,13 +11,27 @@ use harn_parser::{DiagnosticSeverity, Node, PredicateSite};
 
 use crate::package::CheckConfig;
 
+pub(super) struct CensusError {
+    pub message: String,
+    pub code: Option<String>,
+}
+
+impl From<String> for CensusError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            code: None,
+        }
+    }
+}
+
 pub(super) fn collect(
     analysis: &mut AnalysisDatabase,
     root: &Path,
     sites: &[PredicateSite],
     config: &CheckConfig,
     graph: &harn_modules::ModuleGraph,
-) -> Result<PredicateManifest, String> {
+) -> Result<PredicateManifest, CensusError> {
     let mut manifest = PredicateManifest::from_checked_sites(&root.to_string_lossy(), sites);
     let mut seen = BTreeSet::from([root.canonicalize().unwrap_or_else(|_| root.into())]);
     let mut pending = vec![root.to_path_buf()];
@@ -28,7 +42,8 @@ pub(super) fn collect(
                     "cannot census unresolved import '{}' in {}",
                     import.raw_path,
                     parent.display()
-                ));
+                )
+                .into());
             };
             if !seen.insert(path.clone()) {
                 continue;
@@ -68,7 +83,7 @@ pub(super) fn collect(
             if !candidate {
                 continue;
             }
-            let checked = analysis
+            let mut checked = analysis
                 .typecheck(&id, super::analysis::typecheck_config(&path, config, graph))
                 .map_err(|error| {
                     format!(
@@ -76,18 +91,29 @@ pub(super) fn collect(
                         path.display()
                     )
                 })?;
+            checked
+                .diagnostics
+                .extend(harn_vm::provider_catalog::validate_predicate_models(
+                    &checked.predicate_sites,
+                ));
             let errors: Vec<_> = checked
                 .diagnostics
                 .iter()
                 .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-                .map(|diagnostic| diagnostic.message.as_str())
                 .collect();
             if !errors.is_empty() {
-                return Err(format!(
-                    "predicate census source {} failed checking: {}",
-                    path.display(),
-                    errors.join("; ")
-                ));
+                return Err(CensusError {
+                    message: format!(
+                        "predicate census source {} failed checking: {}",
+                        path.display(),
+                        errors
+                            .iter()
+                            .map(|error| error.message.as_str())
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    ),
+                    code: Some(errors[0].code.to_string()),
+                });
             }
             manifest.sites.extend(
                 PredicateManifest::from_checked_sites(

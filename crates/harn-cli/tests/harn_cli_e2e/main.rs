@@ -121,7 +121,7 @@ mod workflow_authoring_eval;
 mod workflow_cli;
 mod workflow_patch_cli;
 
-const _: [(&str, fn()); 10] = [
+const _: [(&str, fn()); 12] = [
     (
         required_pr_e2e::CASES[0],
         eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs,
@@ -161,5 +161,13 @@ const _: [(&str, fn()); 10] = [
     (
         required_pr_e2e::CASES[9],
         predicate_contract::predicate_census_refuses_an_invalid_imported_site,
+    ),
+    (
+        required_pr_e2e::CASES[10],
+        predicate_contract::predicate_embedding_model_is_refused_at_check_time,
+    ),
+    (
+        required_pr_e2e::CASES[11],
+        predicate_contract::predicate_operation_admission_invalidates_cached_success,
     ),
 ];

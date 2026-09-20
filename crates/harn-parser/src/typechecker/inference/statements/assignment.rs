@@ -10,6 +10,9 @@ impl TypeChecker {
         scope: &mut TypeScope,
     ) {
         self.check_assignment_target_references(target, scope);
+        if let Some(root) = Self::assignment_root_identifier(target) {
+            scope.const_values.insert(root.to_string(), None);
+        }
         let path_slot_type = if matches!(&target.node, Node::Identifier(_)) {
             None
         } else {

@@ -286,6 +286,10 @@ public struct HarnAliasToolCalling: Codable, Sendable, Equatable {
     }
 }
 
+public enum HarnModelOperation: String, Codable, Sendable, Equatable {
+__HARN_MODEL_OPERATIONS__
+}
+
 public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
@@ -343,6 +347,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let currentSnapshot: String?
     /// Embedding vector length when this row describes an embeddings model.
     public let embeddingDim: Int?
+    public let operations: [HarnModelOperation]
     /// Maximum input tokens the embeddings endpoint accepts for this row.
     public let embeddingMaxTokens: Int?
 
@@ -393,6 +398,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case rowKind = "row_kind"
         case currentSnapshot = "current_snapshot"
         case embeddingDim = "embedding_dim"
+        case operations
         case embeddingMaxTokens = "embedding_max_tokens"
     }
 
@@ -444,6 +450,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         rowKind = try container.decodeIfPresent(String.self, forKey: .rowKind)
         currentSnapshot = try container.decodeIfPresent(String.self, forKey: .currentSnapshot)
         embeddingDim = try container.decodeIfPresent(Int.self, forKey: .embeddingDim)
+        operations = try container.decode([HarnModelOperation].self, forKey: .operations)
         embeddingMaxTokens = try container.decodeIfPresent(Int.self, forKey: .embeddingMaxTokens)
     }
 }

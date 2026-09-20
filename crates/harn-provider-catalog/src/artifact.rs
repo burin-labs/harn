@@ -255,6 +255,8 @@ pub struct CatalogAlias {
 pub struct CatalogModel {
     pub id: String,
     pub name: String,
+    /// Normalized operation contract; never inferred by a consuming host.
+    pub operations: Vec<crate::ModelOperation>,
     /// Per-route training/retention posture, present only when this route
     /// differs from its provider's declaration. Carried through the artifact
     /// unchanged so every downstream projection reads the same fact.

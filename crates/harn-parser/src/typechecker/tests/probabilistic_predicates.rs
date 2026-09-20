@@ -279,3 +279,118 @@ fn predicate_sites_survive_the_analysis_cache() {
         serde_json::to_value(warm.predicate_sites).unwrap()
     );
 }
+
+#[test]
+fn predicate_route_is_captured_before_name_shadowing() {
+    let source = format!(
+        r#"
+fn main(harness: Harness) {{
+  const policy = {POLICY}
+  const captured = policy
+  if true {{
+    const policy = {{backend: "structured_llm", provider: "other", model: "other", effort: "low", temperature: 0.0, threshold: 0.8, evaluation_cost_limit: 0.0, run_cost_limit: 0.0}}
+    const result = harness.llm.evaluate_predicate("captured", "Supported?", {{value: 1}}, captured)
+    harness.stdio.println(result.kind)
+    harness.stdio.println(policy.model)
+  }}
+}}
+"#
+    );
+    let program = Parser::new(Lexer::new(&source).tokenize().unwrap())
+        .parse()
+        .unwrap();
+    let facts = TypeChecker::new().check_with_facts(&program, &source);
+    assert!(errors(&facts).is_empty(), "{:?}", facts.diagnostics);
+    assert_eq!(facts.predicate_sites.len(), 1);
+    let route = facts.predicate_sites[0].model_route.as_ref().unwrap();
+    assert_eq!((&*route.provider, &*route.model), ("mock", "fixture"));
+}
+
+#[test]
+fn predicate_route_does_not_reuse_a_shadowed_constant() {
+    let source = format!(
+        r#"
+const policy = {POLICY}
+fn assess(harness: Harness, policy: {{backend: "structured_llm", provider: string, model: string, effort: string, temperature: float, threshold: float, evaluation_cost_limit: float, run_cost_limit: float}}) {{
+  const result = harness.llm.evaluate_predicate("parameter", "Supported?", {{value: 1}}, policy)
+  harness.stdio.println(result.kind)
+}}
+"#
+    );
+    let program = Parser::new(Lexer::new(&source).tokenize().unwrap())
+        .parse()
+        .unwrap();
+    let facts = TypeChecker::new().check_with_facts(&program, &source);
+    assert_eq!(facts.predicate_sites.len(), 1);
+    assert!(facts.predicate_sites[0].model_route.is_none());
+}
+
+#[test]
+fn predicate_route_is_not_constant_after_a_conditional_record_write() {
+    let facts = facts(&format!(
+        r#"
+      if true {{ policy.model = "changed" }}
+      const result = {}
+      harness.stdio.println(result.kind)
+    "#,
+        call("{value: 1}")
+    ));
+    assert_eq!(facts.predicate_sites.len(), 1);
+    assert!(
+        facts.predicate_sites[0].model_route.is_none(),
+        "a field write must invalidate the captured policy route"
+    );
+}
+
+#[test]
+fn a_shadowed_record_write_preserves_the_outer_predicate_policy() {
+    let facts = facts(&format!(
+        r#"
+      if true {{ let policy = {{model: "local"}}; policy.model = "changed" }}
+      const result = {}
+      harness.stdio.println(result.kind)
+    "#,
+        call("{value: 1}")
+    ));
+    assert_eq!(facts.predicate_sites.len(), 1);
+    assert_eq!(
+        facts.predicate_sites[0].model_route.as_ref().unwrap().model,
+        "fixture"
+    );
+}
+
+#[test]
+fn a_captured_record_write_invalidates_the_predicate_policy() {
+    let facts = facts(&format!(
+        r#"
+      const change = fn() {{ policy.model = "changed" }}
+      change()
+      const result = {}
+      harness.stdio.println(result.kind)
+    "#,
+        call("{value: 1}")
+    ));
+    assert_eq!(facts.predicate_sites.len(), 1);
+    assert!(
+        facts.predicate_sites[0].model_route.is_none(),
+        "a captured field write must invalidate the policy route"
+    );
+}
+
+#[test]
+fn a_closure_local_write_preserves_the_outer_predicate_policy() {
+    let facts = facts(&format!(
+        r#"
+      const change = fn() {{ let policy = {{model: "local"}}; policy.model = "changed" }}
+      change()
+      const result = {}
+      harness.stdio.println(result.kind)
+    "#,
+        call("{value: 1}")
+    ));
+    assert_eq!(facts.predicate_sites.len(), 1);
+    assert_eq!(
+        facts.predicate_sites[0].model_route.as_ref().unwrap().model,
+        "fixture"
+    );
+}

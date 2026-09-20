@@ -156,6 +156,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
 fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
     llm_config::ModelDef {
         name: model.name.clone(),
+        operations: Some(model.operations.iter().copied().collect()),
         display_name: Some(model.display_name.clone()),
         blurb: model.blurb.clone(),
         provider: model.provider.clone(),
