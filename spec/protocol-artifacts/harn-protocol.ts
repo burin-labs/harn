@@ -1523,18 +1523,23 @@ export interface ACPTranscriptCompactedUpdateMetaHarn {
   mode: string
   strategy: string
   snapshotAssetId: string | null
-  archivedMessages?: number
-  compactionPolicy?: ACPValue
-  engineStrategy?: string
-  estimatedTokensAfter?: number
-  estimatedTokensBefore?: number
-  instructionMode?: string
-  instructionSource?: string
-  reason?: string
-  recap?: ACPValue
-  receiptId?: string
+  reason: string
+  receiptId: string
+  schemaVersion: number
+  engineStrategy: string
+  requestedStrategy: string | null
+  resolvedThresholdTokens: number | null
+  thresholdSource: string | null
+  hardLimitTokens: number | null
+  archivedMessages: number
+  estimatedTokensBefore: number
+  estimatedTokensAfter: number
+  instructionMode: string | null
+  instructionSource: string | null
+  compactionPolicy: ACPValue
+  recap: ACPValue
+  sourceMeasurement: ACPValue
   replayed?: boolean
-  schemaVersion?: number
 }
 
 export interface ACPTranscriptCompactedUpdateMeta {

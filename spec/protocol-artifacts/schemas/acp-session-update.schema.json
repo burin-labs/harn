@@ -709,7 +709,14 @@
         "_meta": {
           "type": "object", "required": ["harn"], "additionalProperties": true,
           "properties": { "harn": {
-            "type": "object", "required": ["mode", "strategy", "snapshotAssetId"], "additionalProperties": true,
+            "type": "object",
+            "required": [
+              "mode", "strategy", "snapshotAssetId", "reason", "receiptId", "schemaVersion",
+              "engineStrategy", "requestedStrategy", "resolvedThresholdTokens", "thresholdSource",
+              "hardLimitTokens", "archivedMessages", "estimatedTokensBefore", "estimatedTokensAfter",
+              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement"
+            ],
+            "additionalProperties": true,
             "properties": {
               "mode": { "type": "string" }, "strategy": { "type": "string" },
               "reason": { "type": "string" }, "receiptId": { "type": "string" },
@@ -718,8 +725,13 @@
               "archivedMessages": { "type": "integer", "minimum": 0 },
               "estimatedTokensBefore": { "type": "integer", "minimum": 0 },
               "estimatedTokensAfter": { "type": "integer", "minimum": 0 },
-              "instructionMode": { "type": "string" }, "instructionSource": { "type": "string" },
-              "compactionPolicy": {}, "recap": {}
+              "instructionMode": { "type": ["string", "null"] }, "instructionSource": { "type": ["string", "null"] },
+              "compactionPolicy": {}, "recap": {},
+              "requestedStrategy": { "type": ["string", "null"] },
+              "resolvedThresholdTokens": { "type": ["integer", "null"], "minimum": 0 },
+              "thresholdSource": { "type": ["string", "null"] },
+              "hardLimitTokens": { "type": ["integer", "null"], "minimum": 0 },
+              "sourceMeasurement": {}
             }
           } }
         }

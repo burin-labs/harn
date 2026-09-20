@@ -1699,18 +1699,23 @@ class ACPTranscriptCompactedUpdateMetaHarn(_HarnDataclass):
     mode: str
     strategy: str
     snapshotAssetId: Optional[str]
-    archivedMessages: Optional[int] = None
-    compactionPolicy: Optional[JsonValue] = None
-    engineStrategy: Optional[str] = None
-    estimatedTokensAfter: Optional[int] = None
-    estimatedTokensBefore: Optional[int] = None
-    instructionMode: Optional[str] = None
-    instructionSource: Optional[str] = None
-    reason: Optional[str] = None
-    recap: Optional[JsonValue] = None
-    receiptId: Optional[str] = None
+    reason: str
+    receiptId: str
+    schemaVersion: int
+    engineStrategy: str
+    requestedStrategy: Optional[str]
+    resolvedThresholdTokens: Optional[int]
+    thresholdSource: Optional[str]
+    hardLimitTokens: Optional[int]
+    archivedMessages: int
+    estimatedTokensBefore: int
+    estimatedTokensAfter: int
+    instructionMode: Optional[str]
+    instructionSource: Optional[str]
+    compactionPolicy: JsonValue
+    recap: JsonValue
+    sourceMeasurement: JsonValue
     replayed: Optional[bool] = None
-    schemaVersion: Optional[int] = None
 
 @dataclass
 class ACPTranscriptCompactedUpdateMeta(_HarnDataclass):
