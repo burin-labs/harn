@@ -1,0 +1,744 @@
+import { percentile } from "std/math"
+
+/**
+ * std/eval/calibration - turn a labeled corpus plus a classifier's answers into
+ * a reliability curve, a calibration error, and a derived abstention threshold.
+ *
+ * Import with: import "std/eval/calibration"
+ *
+ * # What this measures and what it does not
+ *
+ * A classifier that reports a confidence is making a claim about itself: "when
+ * I say 0.9, I am right nine times in ten". Nothing in an API enforces that.
+ * A confidence computed as a formula over an answer distribution is a shape
+ * statistic, not a frequency, and it can be arbitrarily far from the observed
+ * hit rate. This module is the instrument that decides whether a given
+ * confidence number may be treated as a probability.
+ *
+ * It measures agreement between a stated confidence and an observed accuracy on
+ * rows whose correct answer is already known. It cannot tell you whether the
+ * labels are right, whether the corpus resembles production traffic, or whether
+ * a backend that was calibrated last month still is. Those are the caller's
+ * problems, which is why the report carries a corpus digest and a served model
+ * identity rather than a bare number.
+ *
+ * # The input row
+ *
+ * The row shape is the minimal structural record any classifier can produce, so
+ * a chat classifier, a decision backend, and a hand-written heuristic are all
+ * measurable by the same report:
+ *
+ *   {question_id, expected, predicted, confidence, abstained, backend?, cost?,
+ *    latency_ms?}
+ *
+ * `expected` and `predicted` are label strings. A boolean question uses the
+ * labels "true" and "false". A score question supplies its ordered legend
+ * through `level_order`, which also turns on the mean absolute level error.
+ *
+ * # Refusals are not reports
+ *
+ * An empty corpus has no calibration error. Reporting 0.0 for it would be a
+ * measured nothing dressed as a measured zero, and a gate reading that number
+ * would open. Every input this module cannot measure returns a `refused`
+ * outcome that names the reason instead.
+ */
+/** One bin of the reliability curve. */
+pub type CalibrationBin = {
+  index: int,
+  lower: float,
+  upper: float,
+  rows: int,
+  mean_confidence: float,
+  accuracy: float,
+}
+
+/**
+ * One candidate threshold, scored.
+ *
+ * A row is *withheld* at a threshold when the backend abstained or when its
+ * confidence is below the threshold; otherwise it is *accepted*. `coverage` and
+ * `abstention_rate` are complements over `rows`.
+ *
+ * The two error rates are deliberately not symmetric and are never averaged
+ * into one number. A false accept is a wrong answer the gate let through. A
+ * false reject is a right answer the gate threw away. A gate that withholds
+ * everything has a perfect false-accept rate and is useless, so both rates ship
+ * with their own denominator.
+ *
+ * A withheld row the backend abstained on is not a false reject: it carried no
+ * prediction that could have been right.
+ */
+pub type CalibrationThresholdRow = {
+  threshold: float,
+  rows: int,
+  accepted: int,
+  withheld: int,
+  coverage: float,
+  abstention_rate: float,
+  false_accept: int,
+  false_accept_rate: float,
+  false_reject: int,
+  false_reject_rate: float,
+  accepted_accuracy: float,
+}
+
+/** A cost or latency distribution over the rows that carried the field. */
+pub type CalibrationDistribution = {
+  rows: int,
+  p50: float?,
+  p90: float?,
+  max: float?,
+}
+
+/**
+ * The derived abstention threshold, or a typed refusal to derive one.
+ *
+ * Split conformal prediction (arXiv 2405.01563, "Conformal Prediction Sets Can
+ * Cause Disparate Impact" discusses the abstention framing; the construction
+ * itself is the standard split-conformal quantile). The nonconformity score of
+ * a row is `1 - confidence-of-correct`: `1 - confidence` when the prediction
+ * matched the label, and `1.0` when it did not, because a wrong prediction
+ * carries no confidence in the correct answer.
+ *
+ * With `n` calibration rows and target error `e`, the threshold is `1 - q`,
+ * where `q` is the `ceil((n + 1) * (1 - e))`-th smallest score. The guarantee
+ * is **marginal coverage on exchangeable data**: for a new row drawn from the
+ * same distribution as the calibration split, the probability that it is both
+ * accepted and wrong is at most `e`. It is an average over rows, not a promise
+ * about any one row, and it says nothing conditional on the confidence value.
+ *
+ * `q >= 1.0` means the calibration split cannot certify the target at any
+ * threshold, which is what an overconfident-and-wrong backend produces. That is
+ * a `no_threshold` outcome, never a threshold of 0.0.
+ */
+pub type CalibrationRecommendation = {
+  kind: "threshold",
+  threshold: float,
+  target_error: float,
+  calibration_rows: int,
+  holdout_rows: int,
+  holdout_error: float,
+  holdout_coverage: float,
+  guarantee: string,
+} \
+  | {
+  kind: "no_threshold",
+  reason: "target_unreachable" | "split_too_small",
+  target_error: float,
+  calibration_rows: int,
+  holdout_rows: int,
+  detail: string,
+}
+
+/** Everything measured for one `(question_id, backend)` pair. */
+pub type CalibrationGroup = {
+  question_id: string,
+  backend: string,
+  rows: int,
+  scored_rows: int,
+  abstained_rows: int,
+  correct_rows: int,
+  accuracy: float,
+  expected_calibration_error: float,
+  bins: list<CalibrationBin>,
+  thresholds: list<CalibrationThresholdRow>,
+  cost_usd: CalibrationDistribution,
+  latency_ms: CalibrationDistribution,
+  recommendation: CalibrationRecommendation,
+  level_order: list<string>,
+  mean_absolute_level_error: float?,
+}
+
+/**
+ * The versioned report contract.
+ *
+ * A consumer pins `corpus_digest`, `model_revision`, `served_model_id`, and
+ * `report_digest` in its policy. Re-running the report and getting a different
+ * `report_digest` invalidates the pin: the numbers behind the policy changed.
+ * A provider alias that silently re-points to a new served model changes
+ * `served_model_id`, which changes `report_digest`, so the alias change cannot
+ * pass unnoticed. The digest is over the canonical JSON of this report body,
+ * so a Harn version that changes the report shape also invalidates every pin —
+ * intentionally, because the numbers are no longer comparable.
+ */
+pub type CalibrationReport = {
+  kind: "report",
+  contract: "harn.calibration_report.v1",
+  corpus_digest: string,
+  report_digest: string,
+  model_revision: string,
+  served_model_id: string,
+  rows: int,
+  thresholds: list<float>,
+  target_error: float,
+  seed: int,
+  groups: list<CalibrationGroup>,
+} \
+  | {
+  kind: "refused",
+  contract: "harn.calibration_report.v1",
+  reason: "empty_corpus" \
+    | "single_row" \
+    | "missing_label" \
+    | "invalid_confidence" \
+    | "label_mismatch",
+  detail: string,
+  rows: int,
+}
+
+/** Caller-supplied report settings. Every field has a documented default. */
+pub type CalibrationOptions = {
+  thresholds: list<float>?,
+  target_error: float?,
+  seed: int?,
+  model_revision: string?,
+  served_model_id: string?,
+  level_order: list<string>?,
+}
+
+/** A normalized corpus row. Internal; the public entry validates into it. */
+type NormalizedRow = {
+  question_id: string,
+  backend: string,
+  expected: string,
+  predicted: string,
+  confidence: float,
+  abstained: bool,
+  correct: bool,
+  cost: float?,
+  latency_ms: float?,
+}
+
+const DEFAULT_THRESHOLDS = [0.5, 0.7, 0.9]
+const DEFAULT_TARGET_ERROR = 0.05
+const DEFAULT_SEED = 1
+const BIN_COUNT = 10
+const CONTRACT = "harn.calibration_report.v1"
+const GUARANTEE = "marginal coverage on exchangeable data: at most target_error of future rows are both accepted and wrong"
+
+fn __round6(value: float) -> float {
+  return round(value * 1000000.0) / 1000000.0
+}
+
+fn __rate(count: int, denom: int) -> float {
+  if denom <= 0 {
+    return 0.0
+  }
+  return to_float(count) / to_float(denom)
+}
+
+fn __optional_float(value: any) -> float? {
+  if value == nil {
+    return nil
+  }
+  return to_float(value)
+}
+
+/** Refuse, with the reason and the row count the refusal was made on. */
+fn __refuse(reason: string, detail: string, rows: int) -> CalibrationReport {
+  return {kind: "refused", contract: CONTRACT, reason: reason, detail: detail, rows: rows}
+}
+
+/**
+ * Validate and normalize one raw row.
+ *
+ * Returns the normalized row, or a string naming the reason it cannot be
+ * measured. Normalization happens exactly here: nothing downstream re-reads a
+ * raw field.
+ */
+fn __normalize(raw: any, index: int, level_order: list<string>) -> any {
+  const question_id = trim(to_string(raw?.question_id ?? ""))
+  if question_id == "" {
+    return "missing_label:row ${index} has no question_id"
+  }
+  const expected = trim(to_string(raw?.expected ?? ""))
+  if expected == "" {
+    return "missing_label:row ${index} of question ${question_id} has no expected label"
+  }
+  const abstained = (raw?.abstained ?? false) == true
+  const predicted = trim(to_string(raw?.predicted ?? ""))
+  if !abstained && predicted == "" {
+    return "missing_label:row ${index} of question ${question_id} answered with no predicted label"
+  }
+  const confidence = to_float(raw?.confidence ?? nil)
+  if confidence == nil || confidence < 0.0 || confidence > 1.0 {
+    return "invalid_confidence:row ${index} of question ${question_id} has confidence ${to_string(raw?.confidence)}, which is not a probability"
+  }
+  if len(level_order) > 0 {
+    if __position(level_order, expected) == nil {
+      return "label_mismatch:expected label ${expected} on row ${index} is not in the supplied level order"
+    }
+    if !abstained && __position(level_order, predicted) == nil {
+      return "label_mismatch:predicted label ${predicted} on row ${index} is not in the supplied level order"
+    }
+  }
+  const backend = trim(to_string(raw?.backend ?? ""))
+  return {
+    question_id: question_id,
+    backend: if backend == "" {
+      "default"
+    } else {
+      backend
+    },
+    expected: expected,
+    predicted: predicted,
+    confidence: confidence,
+    abstained: abstained,
+    correct: !abstained && predicted == expected,
+    cost: __optional_float(raw?.cost),
+    latency_ms: __optional_float(raw?.latency_ms),
+  }
+}
+
+/** Reliability curve over the rows the backend actually answered. */
+fn __bins(scored: list<NormalizedRow>) -> list<CalibrationBin> {
+  let counts = []
+  let confidence_sums = []
+  let correct_counts = []
+  let i = 0
+  while i < BIN_COUNT {
+    counts = counts + [0]
+    confidence_sums = confidence_sums + [0.0]
+    correct_counts = correct_counts + [0]
+    i = i + 1
+  }
+  for row in scored {
+    // Bin b is [b/10, (b+1)/10), and the last bin is closed so a confidence of
+    // 1.0 has somewhere to go. The boundary is compared against the same
+    // division that produces the bin's `upper`, so a confidence that reads
+    // exactly 0.7 lands in bin 7 rather than in bin 6 through float error.
+    let index = BIN_COUNT - 1
+    let b = 0
+    while b < BIN_COUNT {
+      if row.confidence < to_float(b + 1) / to_float(BIN_COUNT) {
+        index = b
+        break
+      }
+      b = b + 1
+    }
+    counts[index] = counts[index] + 1
+    confidence_sums[index] = confidence_sums[index] + row.confidence
+    if row.correct {
+      correct_counts[index] = correct_counts[index] + 1
+    }
+  }
+  let bins = []
+  let bin = 0
+  while bin < BIN_COUNT {
+    const rows = counts[bin]
+    bins = bins
+      + [
+        {
+          index: bin,
+          lower: to_float(bin) / to_float(BIN_COUNT),
+          upper: to_float(bin + 1) / to_float(BIN_COUNT),
+          rows: rows,
+          mean_confidence: if rows > 0 {
+            __round6(confidence_sums[bin] / to_float(rows))
+          } else {
+            0.0
+          },
+          accuracy: __round6(__rate(correct_counts[bin], rows)),
+        },
+      ]
+    bin = bin + 1
+  }
+  return bins
+}
+
+/** Expected calibration error: bin-weighted gap between confidence and accuracy. */
+fn __expected_calibration_error(bins: list<CalibrationBin>, scored_rows: int) -> float {
+  if scored_rows <= 0 {
+    return 0.0
+  }
+  let total = 0.0
+  for bin in bins {
+    if bin.rows > 0 {
+      total = total + to_float(bin.rows) * abs(bin.accuracy - bin.mean_confidence)
+    }
+  }
+  return __round6(total / to_float(scored_rows))
+}
+
+/** Score one candidate threshold over every row of the group. */
+fn __threshold_row(rows: list<NormalizedRow>, threshold: float) -> CalibrationThresholdRow {
+  let accepted = 0
+  let false_accept = 0
+  let withheld = 0
+  let false_reject = 0
+  for row in rows {
+    if !row.abstained && row.confidence >= threshold {
+      accepted = accepted + 1
+      if !row.correct {
+        false_accept = false_accept + 1
+      }
+    } else {
+      withheld = withheld + 1
+      if !row.abstained && row.correct {
+        false_reject = false_reject + 1
+      }
+    }
+  }
+  const total = len(rows)
+  return {
+    threshold: threshold,
+    rows: total,
+    accepted: accepted,
+    withheld: withheld,
+    coverage: __round6(__rate(accepted, total)),
+    abstention_rate: __round6(__rate(withheld, total)),
+    false_accept: false_accept,
+    false_accept_rate: __round6(__rate(false_accept, accepted)),
+    false_reject: false_reject,
+    false_reject_rate: __round6(__rate(false_reject, withheld)),
+    accepted_accuracy: __round6(__rate(accepted - false_accept, accepted)),
+  }
+}
+
+fn __distribution(values: list<float>) -> CalibrationDistribution {
+  if len(values) == 0 {
+    return {rows: 0, p50: nil, p90: nil, max: nil}
+  }
+  return {
+    rows: len(values),
+    p50: __round6(to_float(percentile(values, 50))),
+    p90: __round6(to_float(percentile(values, 90))),
+    max: __round6(to_float(values.sorted()[len(values) - 1])),
+  }
+}
+
+/** Rows the backend actually answered. */
+fn __answered(rows: list<NormalizedRow>) -> list<NormalizedRow> {
+  let out = []
+  for row in rows {
+    if !row.abstained {
+      out = out + [row]
+    }
+  }
+  return out
+}
+
+/** Position of `label` in `order`, or nil. */
+fn __position(order: list<string>, label: string) -> int? {
+  let i = 0
+  while i < len(order) {
+    if order[i] == label {
+      return i
+    }
+    i = i + 1
+  }
+  return nil
+}
+
+fn __present(rows: list<NormalizedRow>, field: string) -> list<float> {
+  let out = []
+  for row in rows {
+    const value = if field == "cost" {
+      row.cost
+    } else {
+      row.latency_ms
+    }
+    if value != nil {
+      out = out + [to_float(value)]
+    }
+  }
+  return out
+}
+
+fn __lcg_next(state: int) -> int {
+  return (state * 1103515245 + 12345) % 2147483648
+}
+
+/**
+ * Seeded deterministic split.
+ *
+ * The same seed and the same rows always produce the same two halves, so a
+ * report is reproducible and a recommendation is auditable. A Fisher-Yates
+ * shuffle driven by a linear congruential generator, which is not a source of
+ * randomness for anything that needs one.
+ */
+fn __shuffled(rows: list<NormalizedRow>, seed: int) -> list<NormalizedRow> {
+  let order = []
+  for row in rows {
+    order = order + [row]
+  }
+  let state = if seed <= 0 {
+    1
+  } else {
+    seed
+  }
+  let i = len(order) - 1
+  while i > 0 {
+    state = __lcg_next(state)
+    const j = state % (i + 1)
+    const swap = order[i]
+    order[i] = order[j]
+    order[j] = swap
+    i = i - 1
+  }
+  return order
+}
+
+/** Nonconformity: `1 - confidence-of-correct`, and a wrong answer has none. */
+fn __nonconformity(row: NormalizedRow) -> float {
+  if row.correct {
+    return 1.0 - row.confidence
+  }
+  return 1.0
+}
+
+fn __no_threshold(
+  reason: string,
+  target_error: float,
+  calibration_rows: int,
+  holdout_rows: int,
+  detail: string,
+) -> CalibrationRecommendation {
+  return {
+    kind: "no_threshold",
+    reason: reason,
+    target_error: target_error,
+    calibration_rows: calibration_rows,
+    holdout_rows: holdout_rows,
+    detail: detail,
+  }
+}
+
+/** Measure a fitted threshold on rows it was not fitted on. */
+fn __holdout_scores(holdout: list<NormalizedRow>, threshold: float) -> CalibrationThresholdRow {
+  return __threshold_row(holdout, threshold)
+}
+
+/**
+ * Derive the abstention threshold on a held-out split.
+ *
+ * Fitting and measuring on the same rows reports the threshold's performance on
+ * data it already saw, which is optimistic by construction. The split exists so
+ * the reported `holdout_error` is a number the threshold did not get to tune
+ * against.
+ */
+fn __recommend(
+  rows: list<NormalizedRow>,
+  target_error: float,
+  seed: int,
+) -> CalibrationRecommendation {
+  const scored = __answered(rows)
+  const shuffled = __shuffled(scored, seed)
+  const total = len(shuffled)
+  const split = to_int(total / 2) ?? 0
+  const calibration = shuffled.slice(0, split)
+  const holdout = shuffled.slice(split, total)
+  if split < 2 || len(holdout) < 2 {
+    return __no_threshold(
+      "split_too_small",
+      target_error,
+      split,
+      len(holdout),
+      "a conformal threshold needs at least two answered rows on each side of the split; this group has ${total}",
+    )
+  }
+  let scores = []
+  for row in calibration {
+    scores = scores + [__nonconformity(row)]
+  }
+  const ordered = scores.sorted()
+  const rank = to_int(ceil(to_float(split + 1) * (1.0 - target_error))) ?? (split + 1)
+  if rank > split {
+    return __no_threshold(
+      "target_unreachable",
+      target_error,
+      split,
+      len(holdout),
+      "a target error of ${to_string(target_error)} needs at least ${to_string(rank)} calibration rows; this split has ${to_string(split)}",
+    )
+  }
+  const quantile = to_float(ordered[rank - 1])
+  if quantile >= 1.0 {
+    return __no_threshold(
+      "target_unreachable",
+      target_error,
+      split,
+      len(holdout),
+      "the calibration split is wrong too often to certify a ${to_string(target_error)} error rate at any threshold",
+    )
+  }
+  const threshold = __round6(1.0 - quantile)
+  const measured = __holdout_scores(holdout, threshold)
+  return {
+    kind: "threshold",
+    threshold: threshold,
+    target_error: target_error,
+    calibration_rows: split,
+    holdout_rows: len(holdout),
+    holdout_error: __round6(__rate(measured.false_accept, len(holdout))),
+    holdout_coverage: measured.coverage,
+    guarantee: GUARANTEE,
+  }
+}
+
+/** Mean absolute distance between predicted and expected level, in legend steps. */
+fn __level_error(scored: list<NormalizedRow>, level_order: list<string>) -> float? {
+  if len(level_order) == 0 || len(scored) == 0 {
+    return nil
+  }
+  let total = 0.0
+  for row in scored {
+    const expected_at = __position(level_order, row.expected)
+    const predicted_at = __position(level_order, row.predicted)
+    if expected_at == nil || predicted_at == nil {
+      return nil
+    }
+    total = total + abs(to_float(expected_at) - to_float(predicted_at))
+  }
+  return __round6(total / to_float(len(scored)))
+}
+
+fn __group(
+  question_id: string,
+  backend: string,
+  rows: list<NormalizedRow>,
+  thresholds: list<float>,
+  target_error: float,
+  seed: int,
+  level_order: list<string>,
+) -> CalibrationGroup {
+  const scored = __answered(rows)
+  let correct_rows = 0
+  for row in rows {
+    if row.correct {
+      correct_rows = correct_rows + 1
+    }
+  }
+  const bins = __bins(scored)
+  let threshold_rows = []
+  for threshold in thresholds {
+    threshold_rows = threshold_rows + [__threshold_row(rows, threshold)]
+  }
+  return {
+    question_id: question_id,
+    backend: backend,
+    rows: len(rows),
+    scored_rows: len(scored),
+    abstained_rows: len(rows) - len(scored),
+    correct_rows: correct_rows,
+    accuracy: __round6(__rate(correct_rows, len(scored))),
+    expected_calibration_error: __expected_calibration_error(bins, len(scored)),
+    bins: bins,
+    thresholds: threshold_rows,
+    cost_usd: __distribution(__present(rows, "cost")),
+    latency_ms: __distribution(__present(rows, "latency_ms")),
+    recommendation: __recommend(rows, target_error, seed),
+    level_order: level_order,
+    mean_absolute_level_error: __level_error(scored, level_order),
+  }
+}
+
+/**
+ * Digest the corpus, not the report.
+ *
+ * Built from the normalized rows in a canonical order so that two callers who
+ * present the same corpus in a different order pin the same digest, and a
+ * caller who changes one label does not.
+ */
+fn __corpus_digest(rows: list<NormalizedRow>) -> string {
+  let lines = []
+  for row in rows {
+    lines = lines
+      + [
+        row.question_id
+          + "\u{1f}"
+          + row.backend
+          + "\u{1f}"
+          + row.expected
+          + "\u{1f}"
+          + row.predicted
+          + "\u{1f}"
+          + to_string(__round6(row.confidence))
+          + "\u{1f}"
+          + to_string(row.abstained),
+      ]
+  }
+  return sha256(join(lines.sorted(), "\n"))
+}
+
+fn __sorted_group_keys(grouped: dict) -> list<string> {
+  return grouped.keys().sorted()
+}
+
+/**
+ * Measure a classifier against a labeled corpus.
+ *
+ * `rows` is the raw corpus; this function is the boundary that validates and
+ * normalizes it. Anything it cannot measure comes back as a `refused` outcome
+ * naming the reason, never as a report of zero error.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: calibration_report([])
+ */
+pub fn calibration_report(rows: list, options: CalibrationOptions = {}) -> CalibrationReport {
+  if len(rows) == 0 {
+    return __refuse("empty_corpus", "the corpus has no rows, so it has no calibration error", 0)
+  }
+  if len(rows) == 1 {
+    return __refuse(
+      "single_row",
+      "one row cannot separate a reliability curve from a coin flip",
+      1,
+    )
+  }
+  const level_order = options?.level_order ?? []
+  let normalized = []
+  let index = 0
+  for raw in rows {
+    const row = __normalize(raw, index, level_order)
+    if type_of(row) == "string" {
+      const parts = split(row, ":")
+      return __refuse(parts[0], join(parts.slice(1, len(parts)), ":"), len(rows))
+    }
+    normalized = normalized + [row]
+    index = index + 1
+  }
+  const thresholds = if len(options?.thresholds ?? []) > 0 {
+    (options?.thresholds ?? []).sorted()
+  } else {
+    DEFAULT_THRESHOLDS
+  }
+  const target_error = options?.target_error ?? DEFAULT_TARGET_ERROR
+  const seed = options?.seed ?? DEFAULT_SEED
+  let grouped = {}
+  for row in normalized {
+    const key = row.question_id + "\u{1f}" + row.backend
+    grouped[key] = (grouped[key] ?? []) + [row]
+  }
+  let groups = []
+  for key in __sorted_group_keys(grouped) {
+    const parts = split(key, "\u{1f}")
+    groups = groups
+      + [
+        __group(
+          parts[0],
+          parts[1],
+          grouped[key],
+          thresholds,
+          target_error,
+          seed,
+          level_order,
+        ),
+      ]
+  }
+  const body = {
+    kind: "report",
+    contract: CONTRACT,
+    corpus_digest: __corpus_digest(normalized),
+    report_digest: "",
+    model_revision: trim(to_string(options?.model_revision ?? "")),
+    served_model_id: trim(to_string(options?.served_model_id ?? "")),
+    rows: len(normalized),
+    thresholds: thresholds,
+    target_error: target_error,
+    seed: seed,
+    groups: groups,
+  }
+  return body + {report_digest: sha256(json_stringify(body))}
+}

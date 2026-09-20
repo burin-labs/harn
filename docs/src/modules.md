@@ -683,6 +683,19 @@ application-specific verdicts or mutate an external ledger.
 path rewrite map. Image construction, credentials, remote function declaration,
 byte transport, and container invocation remain adapter responsibilities.
 
+### std/eval/calibration
+
+Reliability curves, expected calibration error, threshold tables, and a
+conformal abstention threshold for any classifier that reports a confidence.
+A corpus the report cannot measure returns a typed refusal rather than a
+calibration error of zero. See
+[`std/eval/calibration`](./eval-calibration-reference.md) for the row shape,
+the report contract, and `harn eval calibrate`.
+
+| Function | Description |
+|---|---|
+| `calibration_report(rows, options)` | Measure a classifier's confidence against a labeled corpus |
+
 ### std/eval/sequential
 
 Anytime-valid confidence sequences and best-arm decisions for experiments that

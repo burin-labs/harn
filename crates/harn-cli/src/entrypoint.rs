@@ -746,6 +746,9 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     process::exit(code);
                 }
             }
+            Some(EvalCommand::Calibrate(calibrate_args)) => {
+                process::exit(commands::eval_calibrate::run(calibrate_args).await)
+            }
             Some(EvalCommand::ScopeTriage(scope_args)) => {
                 process::exit(commands::eval_scope_triage::run(scope_args).await)
             }

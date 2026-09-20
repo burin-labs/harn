@@ -1,0 +1,257 @@
+import "std/eval/calibration"
+
+/**
+ * Calibration report contract, including every negative control the primitive
+ * exists to survive. A report that cannot be wrong about a corpus it has never
+ * measured is not an instrument.
+ */
+fn row(id: int, expected: string, predicted: string, confidence: float) {
+  return {
+    question_id: "tool-safety",
+    expected: expected,
+    predicted: predicted,
+    confidence: confidence,
+    abstained: false,
+    cost: 0.001,
+    latency_ms: to_float(100 + id),
+  }
+}
+
+/** A corpus whose accuracy tracks confidence: the calibrated case. */
+fn monotonic_corpus(pairs: int) {
+  let rows = []
+  let i = 0
+  while i < pairs {
+    // Confidence 0.95 with nineteen of twenty right, 0.55 with eleven of twenty
+    // right: both bins sit on the diagonal, so the calibration error is small.
+    const high_correct = (i % 20) != 0
+    const low_correct = (i % 20) < 11
+    rows = rows
+      + [
+        row(i, "true", if high_correct { "true" } else { "false" }, 0.95),
+        row(i + 1000, "true", if low_correct { "true" } else { "false" }, 0.55),
+      ]
+    i = i + 1
+  }
+  return rows
+}
+
+pipeline test(harness: Harness, task: unknown) {
+  // --- Refusals: absence never reads as a measured zero. ---
+  const empty = calibration_report([])
+  assert_eq(empty.kind, "refused")
+  assert_eq(empty.reason, "empty_corpus")
+  assert_eq(empty.rows, 0)
+
+  const single = calibration_report([row(1, "true", "true", 0.9)])
+  assert_eq(single.kind, "refused")
+  assert_eq(single.reason, "single_row")
+
+  // A confidence outside [0, 1] is not a probability and cannot be binned.
+  const bad_confidence = calibration_report(
+    [row(1, "true", "true", 0.9), row(2, "true", "true", 1.4)],
+  )
+  assert_eq(bad_confidence.kind, "refused")
+  assert_eq(bad_confidence.reason, "invalid_confidence")
+
+  // A score question's labels must be in the legend it supplied.
+  const mismatched = calibration_report(
+    [row(1, "true", "true", 0.9), row(2, "true", "true", 0.8)],
+    {level_order: ["low", "medium", "high"]},
+  )
+  assert_eq(mismatched.kind, "refused")
+  assert_eq(mismatched.reason, "label_mismatch")
+
+  // --- Falsifier 1: confident and wrong every time. ---
+  let wrong_rows = []
+  let w = 0
+  while w < 40 {
+    wrong_rows = wrong_rows + [row(w, "true", "false", 1.0)]
+    w = w + 1
+  }
+  const wrong = calibration_report(wrong_rows, {target_error: 0.05})
+  assert_eq(wrong.kind, "report")
+  const wrong_group = wrong.groups[0]
+  assert_eq(wrong_group.accuracy, 0.0)
+  // Every row sits in the top bin at confidence 1.0 with accuracy 0.0, so the
+  // bin-weighted gap is the whole interval.
+  assert_eq(wrong_group.expected_calibration_error, 1.0)
+  assert_eq(wrong_group.bins[9].rows, 40)
+  assert_eq(wrong_group.bins[9].mean_confidence, 1.0)
+  assert_eq(wrong_group.bins[9].accuracy, 0.0)
+  // No threshold can certify a 5 percent error rate on a backend that is always
+  // wrong. The refusal is typed, not a threshold of 0.0 that accepts everything.
+  assert_eq(wrong_group.recommendation.kind, "no_threshold")
+  assert_eq(wrong_group.recommendation.reason, "target_unreachable")
+  // Negative control on that claim: the same shape with the answers right
+  // instead of wrong does produce a threshold, so the refusal is about the
+  // corpus and not about the corpus size.
+  let right_rows = []
+  let r = 0
+  while r < 40 {
+    right_rows = right_rows + [row(r, "true", "true", 1.0)]
+    r = r + 1
+  }
+  const right = calibration_report(right_rows, {target_error: 0.05})
+  assert_eq(right.groups[0].recommendation.kind, "threshold")
+  assert_eq(right.groups[0].expected_calibration_error, 0.0)
+
+  // --- Falsifier 4: a monotonic corpus is nearly calibrated. ---
+  const good = calibration_report(monotonic_corpus(20), {thresholds: [0.9]})
+  assert_eq(good.kind, "report")
+  const good_group = good.groups[0]
+  assert_eq(good_group.rows, 40)
+  assert_eq(good_group.scored_rows, 40)
+  // 0.95 bin: 19/20 right. 0.55 bin: 11/20 right. Mean gap is 0.05.
+  assert_eq(good_group.bins[9].rows, 20)
+  assert_eq(good_group.bins[9].accuracy, 0.95)
+  assert_eq(good_group.bins[5].rows, 20)
+  assert_eq(good_group.bins[5].accuracy, 0.55)
+  assert_eq(good_group.expected_calibration_error, 0.0)
+  // At 0.9 the gate accepts only the high-confidence half.
+  const at_high = good_group.thresholds[0]
+  assert_eq(at_high.accepted, 20)
+  assert_eq(at_high.withheld, 20)
+  assert_eq(at_high.coverage, 0.5)
+  assert_eq(at_high.false_accept, 1)
+  assert_eq(at_high.false_accept_rate, 0.05)
+  // Eleven right answers below the threshold are thrown away.
+  assert_eq(at_high.false_reject, 11)
+  assert_eq(at_high.false_reject_rate, 0.55)
+
+  // --- Falsifier 3: shuffling the labels collapses each bin to the base rate. ---
+  // Same confidences, same corpus size, but the answers are now right or wrong
+  // on a cycle that has nothing to do with the confidence. Both bins land on
+  // the same accuracy, which is what a confidence carrying no information looks
+  // like, and the calibration error rises because neither bin is on the
+  // diagonal any more.
+  let shuffled_rows = []
+  let s = 0
+  for source in monotonic_corpus(20) {
+    shuffled_rows = shuffled_rows
+      + [
+        source
+          + {
+            expected: "true",
+            predicted: if (s % 8) >= 2 {
+              "true"
+            } else {
+              "false"
+            },
+          },
+      ]
+    s = s + 1
+  }
+  const shuffled = calibration_report(shuffled_rows)
+  const shuffled_group = shuffled.groups[0]
+  assert_eq(shuffled_group.bins[9].accuracy, 0.75)
+  assert_eq(shuffled_group.bins[5].accuracy, 0.75)
+  assert_eq(shuffled_group.bins[9].accuracy, shuffled_group.bins[5].accuracy)
+  // 0.5 * |0.75 - 0.95| + 0.5 * |0.75 - 0.55|.
+  assert_eq(shuffled_group.expected_calibration_error, 0.2)
+  assert_eq(shuffled_group.expected_calibration_error > good_group.expected_calibration_error, true)
+
+  // --- Falsifier 5: the recommendation is measured on rows it was not fitted on. ---
+  // Forty rows at one confidence with five of them wrong. Five is odd, so the
+  // two halves of any split cannot carry the same number of wrong answers, and
+  // an error measured on one half can never equal the error measured over all
+  // forty. That inequality is the whole point of the split: fitting the
+  // threshold and reading its error off the same rows reports a number the
+  // threshold was allowed to tune against.
+  let split_rows = []
+  let k = 0
+  while k < 40 {
+    split_rows = split_rows + [row(k, "true", if k < 5 { "false" } else { "true" }, 0.6)]
+    k = k + 1
+  }
+  const split_report = calibration_report(split_rows, {target_error: 0.4})
+  const recommendation = split_report.groups[0].recommendation
+  assert_eq(recommendation.kind, "threshold")
+  // Fitted on half the rows, measured on the other half, and the two halves
+  // together are every answered row.
+  assert_eq(recommendation.calibration_rows, 20)
+  assert_eq(recommendation.holdout_rows, 20)
+  assert_eq(
+    recommendation.calibration_rows + recommendation.holdout_rows,
+    split_report.groups[0].scored_rows,
+  )
+  const in_sample = calibration_report(
+    split_rows,
+    {thresholds: [recommendation.threshold]},
+  )
+  const in_sample_error = in_sample.groups[0].thresholds[0].false_accept_rate
+  // Five wrong over forty rows, in-sample.
+  assert_eq(in_sample_error, 0.125)
+  // The held-out number is measured on twenty rows, so it cannot be the
+  // in-sample number. A recommendation that quietly fitted on everything would
+  // report 0.125 here.
+  assert_eq(recommendation.holdout_error != in_sample_error, true)
+  assert_eq(
+    recommendation.guarantee,
+    "marginal coverage on exchangeable data: at most target_error of future rows are both accepted and wrong",
+  )
+
+  // --- Grouping, distributions, and the contract. ---
+  const grouped = calibration_report(
+    [
+      row(1, "true", "true", 0.9) + {question_id: "a", backend: "jev"},
+      row(2, "true", "false", 0.9) + {question_id: "a", backend: "chat"},
+      row(3, "true", "true", 0.9) + {question_id: "b", backend: "jev"},
+      row(4, "true", "true", 0.4, ) + {question_id: "b", backend: "jev", abstained: true},
+    ],
+    {model_revision: "2026-09-20", served_model_id: "typesafe-ai/jev@1"},
+  )
+  assert_eq(grouped.kind, "report")
+  assert_eq(grouped.contract, "harn.calibration_report.v1")
+  assert_eq(len(grouped.groups), 3)
+  assert_eq(grouped.groups[0].question_id, "a")
+  assert_eq(grouped.groups[0].backend, "chat")
+  assert_eq(grouped.groups[1].backend, "jev")
+  // An abstained row is counted, is not scored, and is withheld at every
+  // threshold without being a false reject.
+  const b_group = grouped.groups[2]
+  assert_eq(b_group.rows, 2)
+  assert_eq(b_group.scored_rows, 1)
+  assert_eq(b_group.abstained_rows, 1)
+  assert_eq(b_group.thresholds[0].withheld, 1)
+  assert_eq(b_group.thresholds[0].false_reject, 0)
+  assert_eq(b_group.latency_ms.rows, 2)
+  assert_eq(b_group.cost_usd.rows, 2)
+
+  // --- The pin: a served-model change invalidates the report digest. ---
+  const pinned = calibration_report(
+    monotonic_corpus(5),
+    {model_revision: "2026-09-20", served_model_id: "typesafe-ai/jev@1"},
+  )
+  const repeated = calibration_report(
+    monotonic_corpus(5),
+    {model_revision: "2026-09-20", served_model_id: "typesafe-ai/jev@1"},
+  )
+  const realiased = calibration_report(
+    monotonic_corpus(5),
+    {model_revision: "2026-09-20", served_model_id: "typesafe-ai/jev@2"},
+  )
+  // Same corpus and same identity: same digests, so a pin holds.
+  assert_eq(pinned.corpus_digest, repeated.corpus_digest)
+  assert_eq(pinned.report_digest, repeated.report_digest)
+  // The alias moved underneath the caller. The corpus did not change, so the
+  // corpus digest cannot catch it; the report digest does.
+  assert_eq(realiased.corpus_digest, pinned.corpus_digest)
+  assert_eq(realiased.report_digest != pinned.report_digest, true)
+
+  // --- Ordered-level questions. ---
+  const scored = calibration_report(
+    [
+      row(1, "low", "low", 0.9),
+      row(2, "high", "medium", 0.8),
+      row(3, "medium", "medium", 0.7),
+      row(4, "low", "high", 0.6),
+    ],
+    {level_order: ["low", "medium", "high"]},
+  )
+  assert_eq(scored.kind, "report")
+  // Level distances 0, 1, 0, 2 over four rows.
+  assert_eq(scored.groups[0].mean_absolute_level_error, 0.75)
+  assert_eq(scored.groups[0].accuracy, 0.5)
+  assert_eq(scored.groups[0].level_order, ["low", "medium", "high"])
+}

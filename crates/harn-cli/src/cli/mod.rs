@@ -122,8 +122,8 @@ pub(crate) use dump::{
     DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
-    EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs, EvalPromptMode,
-    EvalPromptOutput, EvalScopeTriageArgs, EvalSkillGateArgs, EvalToolCallsArgs,
+    EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
+    EvalPromptMode, EvalPromptOutput, EvalScopeTriageArgs, EvalSkillGateArgs, EvalToolCallsArgs,
     EvalToolCallsCommand, EvalToolCallsRegressionArgs,
 };
 pub(crate) use explain::{CatalogFormat, ExplainArgs};

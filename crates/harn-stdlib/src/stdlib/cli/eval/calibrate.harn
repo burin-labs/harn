@@ -1,0 +1,214 @@
+import { calibration_report } from "std/eval/calibration"
+import { read_jsonl } from "std/jsonl"
+
+/**
+ * `harn eval calibrate` - measure a classifier's confidence against labels.
+ *
+ * Both files are JSONL, one row per line. The eval CLI already writes its
+ * per-row output that way (`per_case.jsonl`, `per_run.jsonl`), the answers side
+ * of a calibration run is machine-produced row-per-line data, and using one
+ * format for both sides means this command needs no second parser.
+ *
+ * Corpus row:  {id?, question_id, expected, input?}
+ * Answer row:  {id?, question_id, predicted, confidence, abstained?, backend?,
+ *               cost?, latency_ms?}
+ *
+ * The two files are joined on `id` when present and on line position when not.
+ * An answer with no corpus row, or a corpus row with no answer, fails the
+ * command and is named in the output. A silent inner join would let half a
+ * corpus produce a confident report about the other half.
+ */
+fn __env(env: HarnessEnv, name: string) -> string {
+  return trim(env.get_or(name, ""))
+}
+
+fn __env_float(env: HarnessEnv, name: string, fallback: float) -> float {
+  const value = __env(env, name)
+  if value == "" {
+    return fallback
+  }
+  return to_float(value) ?? fallback
+}
+
+fn __parse_thresholds(raw: string) -> list<float> {
+  let out = []
+  for part in split(raw, ",") {
+    const value = to_float(trim(part))
+    if value != nil {
+      out = out + [value]
+    }
+  }
+  return out
+}
+
+fn __rows(fs: HarnessFs, stdio: HarnessStdio, path: string, label: string) -> list? {
+  const rows = try {
+    read_jsonl(fs, path, {})
+  } catch (e) {
+    stdio.eprintln("error: failed to read the ${label} file ${path}: ${to_string(e)}")
+    return nil
+  }
+  if len(rows) == 0 {
+    stdio.eprintln("error: the ${label} file ${path} has no rows")
+    return nil
+  }
+  return rows
+}
+
+fn __key(row: any, index: int) -> string {
+  const id = trim(to_string(row?.id ?? ""))
+  return if id == "" {
+    "#${to_string(index)}"
+  } else {
+    id
+  }
+}
+
+/**
+ * Join the corpus to the answers, refusing on either kind of gap.
+ *
+ * Returns the joined rows, or nil after printing what did not match.
+ */
+fn __join(stdio: HarnessStdio, corpus: list, answers: list) -> list? {
+  let answers_by_key = {}
+  let index = 0
+  for answer in answers {
+    answers_by_key[__key(answer, index)] = answer
+    index = index + 1
+  }
+  let joined = []
+  let unanswered = []
+  let matched_keys = {}
+  let corpus_index = 0
+  for row in corpus {
+    const key = __key(row, corpus_index)
+    const answer = answers_by_key[key]
+    if answer == nil {
+      unanswered = unanswered + [key]
+    } else {
+      matched_keys[key] = true
+      joined = joined
+        + [
+          {
+            question_id: to_string(row?.question_id ?? answer?.question_id ?? ""),
+            expected: to_string(row?.expected ?? ""),
+            predicted: to_string(answer?.predicted ?? ""),
+            confidence: answer?.confidence,
+            abstained: (answer?.abstained ?? false) == true,
+            backend: to_string(answer?.backend ?? ""),
+            cost: answer?.cost,
+            latency_ms: answer?.latency_ms,
+          },
+        ]
+    }
+    corpus_index = corpus_index + 1
+  }
+  let unlabeled = []
+  for key in answers_by_key.keys().sorted() {
+    if matched_keys[key] == nil {
+      unlabeled = unlabeled + [key]
+    }
+  }
+  if len(unanswered) > 0 || len(unlabeled) > 0 {
+    stdio.eprintln(
+      "error: the corpus and the answers do not line up: ${to_string(len(unanswered))} corpus row(s) with no answer, ${to_string(len(unlabeled))} answer(s) with no corpus row",
+    )
+    if len(unanswered) > 0 {
+      stdio.eprintln("  corpus rows with no answer: ${join(unanswered.slice(0, min(10, len(unanswered))), ", ")}")
+    }
+    if len(unlabeled) > 0 {
+      stdio.eprintln("  answers with no corpus row: ${join(unlabeled.slice(0, min(10, len(unlabeled))), ", ")}")
+    }
+    return nil
+  }
+  return joined
+}
+
+fn __percent(value: float) -> string {
+  return "${to_string(round(value * 1000.0) / 10.0)} percent"
+}
+
+/** Plain-language rendering of one threshold row. */
+fn __threshold_line(row: any) -> string {
+  return "  at the ${to_string(row.threshold)} threshold: ${__percent(row.false_accept_rate)} of the ${to_string(row.accepted)} accepted answers were wrong, ${__percent(row.abstention_rate)} withheld, ${to_string(row.false_reject)} right answer(s) thrown away"
+}
+
+fn __recommendation_line(recommendation: any) -> string {
+  if recommendation.kind == "threshold" {
+    return "  recommended threshold ${to_string(recommendation.threshold)} for a ${__percent(recommendation.target_error)} target error, fitted on ${to_string(recommendation.calibration_rows)} rows and measured at ${__percent(recommendation.holdout_error)} error over ${to_string(recommendation.holdout_rows)} held-out rows (${recommendation.guarantee})"
+  }
+  return "  no recommended threshold: ${recommendation.detail}"
+}
+
+/** Render the report the way a person reads it, not the way it serializes. */
+fn __render(stdio: HarnessStdio, report: any) {
+  if report.kind == "refused" {
+    stdio.eprintln("refused (${report.reason}): ${report.detail}")
+    return
+  }
+  stdio.println(
+    "calibration report ${report.contract} over ${to_string(report.rows)} rows, corpus ${substring(report.corpus_digest, 0, 12)}, report ${substring(report.report_digest, 0, 12)}",
+  )
+  for group in report.groups {
+    stdio.println(
+      "${group.question_id} question (${group.backend}): ${to_string(group.rows)} rows, ${__percent(1.0 - group.accuracy)} error over the ${to_string(group.scored_rows)} answered, ${__percent(group.expected_calibration_error)} calibration error, ${to_string(group.abstained_rows)} abstained",
+    )
+    for threshold_row in group.thresholds {
+      stdio.println(__threshold_line(threshold_row))
+    }
+    stdio.println(__recommendation_line(group.recommendation))
+    if group.latency_ms.rows > 0 {
+      stdio.println(
+        "  latency over ${to_string(group.latency_ms.rows)} rows: p50 ${to_string(group.latency_ms.p50)} ms, p90 ${to_string(group.latency_ms.p90)} ms, max ${to_string(group.latency_ms.max)} ms",
+      )
+    }
+    if group.cost_usd.rows > 0 {
+      stdio.println(
+        "  cost over ${to_string(group.cost_usd.rows)} rows: p50 ${to_string(group.cost_usd.p50)}, p90 ${to_string(group.cost_usd.p90)}, max ${to_string(group.cost_usd.max)}",
+      )
+    }
+  }
+}
+
+fn main(harness: Harness) {
+  const env = harness.env
+  const stdio = harness.stdio
+  const corpus_path = __env(env, "HARN_EVAL_CALIBRATE_CORPUS")
+  const answers_path = __env(env, "HARN_EVAL_CALIBRATE_ANSWERS")
+  if corpus_path == "" || answers_path == "" {
+    stdio.eprintln("error: harn eval calibrate needs both --corpus and --answers")
+    return 2
+  }
+  const corpus = __rows(harness.fs, stdio, corpus_path, "corpus")
+  if corpus == nil {
+    return 2
+  }
+  const answers = __rows(harness.fs, stdio, answers_path, "answers")
+  if answers == nil {
+    return 2
+  }
+  const rows = __join(stdio, corpus, answers)
+  if rows == nil {
+    return 2
+  }
+  const thresholds = __parse_thresholds(__env(env, "HARN_EVAL_CALIBRATE_THRESHOLDS"))
+  const report = calibration_report(
+    rows,
+    {
+      thresholds: thresholds,
+      target_error: __env_float(env, "HARN_EVAL_CALIBRATE_TARGET_ERROR", 0.05),
+      model_revision: __env(env, "HARN_EVAL_CALIBRATE_MODEL_REVISION"),
+      served_model_id: __env(env, "HARN_EVAL_CALIBRATE_SERVED_MODEL_ID"),
+    },
+  )
+  if __env(env, "HARN_EVAL_CALIBRATE_JSON") == "1" {
+    stdio.println(json_stringify(report))
+  } else {
+    __render(stdio, report)
+  }
+  return if report.kind == "refused" {
+    1
+  } else {
+    0
+  }
+}
