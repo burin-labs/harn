@@ -1,3 +1,4 @@
+use crate::cancellation::{cancelled_error, HandlerDispatch, NotDispatchedReason};
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -130,12 +131,6 @@ fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>,
         }
     }
     (None, all_closed)
-}
-
-pub(crate) fn cancelled_vm_error() -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-        "kind:cancelled:VM cancelled by host",
-    )))
 }
 
 fn channel_closed_error(operation: &str, channel_name: &str) -> VmError {
@@ -1033,7 +1028,9 @@ async fn mailbox_receive_builtin(
             .as_ref()
             .is_some_and(|token| token.load(Ordering::SeqCst))
         {
-            return Err(cancelled_vm_error());
+            return Err(cancelled_error(HandlerDispatch::NotDispatched(
+                NotDispatchedReason::NoMachineInScope,
+            )));
         }
         if channel.is_closed() {
             let mut rx = channel.receiver.lock().await;
@@ -1321,7 +1318,9 @@ async fn sleep_builtin(
             _ = &mut sleep => break,
             _ = poll.tick() => {
                 if vm.is_cancel_requested() {
-                    return Err(cancelled_vm_error());
+                    return Err(cancelled_error(HandlerDispatch::NotDispatched(
+                NotDispatchedReason::NoMachineInScope,
+            )));
                 }
             }
         }
@@ -1480,7 +1479,9 @@ async fn receive_builtin(
                 }
                 _ = cancel_poll.tick() => {
                     if vm.is_cancel_requested() {
-                        return Err(cancelled_vm_error());
+                        return Err(cancelled_error(HandlerDispatch::NotDispatched(
+                NotDispatchedReason::NoMachineInScope,
+            )));
                     }
                 }
             }

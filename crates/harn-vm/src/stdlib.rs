@@ -37,7 +37,6 @@ pub(crate) mod compaction;
 #[cfg(feature = "compression")]
 mod compression;
 mod concurrency;
-pub(crate) use concurrency::cancelled_vm_error;
 mod connectors;
 mod cookies;
 mod cron;

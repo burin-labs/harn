@@ -1,3 +1,4 @@
+use crate::cancellation::{cancelled_error, HandlerDispatch, NotDispatchedReason};
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -137,7 +138,9 @@ impl VmSyncRuntime {
         {
             let primitive = self.primitive(kind, key, capacity)?;
             primitive.record_cancel();
-            return Err(cancelled_vm_error());
+            return Err(cancelled_error(HandlerDispatch::NotDispatched(
+                NotDispatchedReason::NoMachineInScope,
+            )));
         }
 
         let primitive = self.primitive(kind, key, capacity)?;
@@ -166,36 +169,40 @@ impl VmSyncRuntime {
             let mut cancel_poll = tokio::time::interval(Duration::from_millis(10));
             loop {
                 tokio::select! {
-                    permit = &mut acquire => break permit.map(Some),
-                    _ = &mut timeout => break Ok(None),
-                    _ = cancel_poll.tick(), if cancel_token.is_some() => {
-                        if cancel_token
-                            .as_ref()
-                            .is_some_and(|token| token.load(Ordering::SeqCst))
-                        {
-                            primitive.record_dequeued();
-                            primitive.record_cancel();
-                            return Err(cancelled_vm_error());
+                        permit = &mut acquire => break permit.map(Some),
+                        _ = &mut timeout => break Ok(None),
+                        _ = cancel_poll.tick(), if cancel_token.is_some() => {
+                            if cancel_token
+                                .as_ref()
+                                .is_some_and(|token| token.load(Ordering::SeqCst))
+                            {
+                                primitive.record_dequeued();
+                                primitive.record_cancel();
+                                return Err(cancelled_error(HandlerDispatch::NotDispatched(
+                    NotDispatchedReason::NoMachineInScope,
+                )));
+                            }
                         }
                     }
-                }
             }
         } else {
             let mut cancel_poll = tokio::time::interval(Duration::from_millis(10));
             loop {
                 tokio::select! {
-                    permit = &mut acquire => break permit.map(Some),
-                    _ = cancel_poll.tick(), if cancel_token.is_some() => {
-                        if cancel_token
-                            .as_ref()
-                            .is_some_and(|token| token.load(Ordering::SeqCst))
-                        {
-                            primitive.record_dequeued();
-                            primitive.record_cancel();
-                            return Err(cancelled_vm_error());
+                        permit = &mut acquire => break permit.map(Some),
+                        _ = cancel_poll.tick(), if cancel_token.is_some() => {
+                            if cancel_token
+                                .as_ref()
+                                .is_some_and(|token| token.load(Ordering::SeqCst))
+                            {
+                                primitive.record_dequeued();
+                                primitive.record_cancel();
+                                return Err(cancelled_error(HandlerDispatch::NotDispatched(
+                    NotDispatchedReason::NoMachineInScope,
+                )));
+                            }
                         }
                     }
-                }
             }
         };
 
@@ -377,12 +384,6 @@ impl Drop for VmSyncLease {
     fn drop(&mut self) {
         self.release();
     }
-}
-
-fn cancelled_vm_error() -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-        "kind:cancelled:VM cancelled by host",
-    )))
 }
 
 #[cfg(test)]

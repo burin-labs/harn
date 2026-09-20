@@ -1043,6 +1043,31 @@ impl Vm {
                 }
                 result
             }
+        };
+        // An async builtin runs against a freshly minted child machine, and a
+        // child inherits the cancellation token but never the handler list. So
+        // a builtin that observes the cancel itself has nothing it could
+        // dispatch through: a dispatch call placed there would find no
+        // handlers and report success. This is the nearest frame that holds
+        // the machine the handlers are registered on, so the dispatch belongs
+        // here, once, for every builtin.
+        let result = match result {
+            Err(error) if crate::cancellation::is_cancellation(&error) => {
+                // Replay is the one case that must not dispatch. The handlers
+                // ran when the run was live and their effects are already
+                // recorded; running them again would repeat those effects.
+                // The replay fact has a single owner, which is read here
+                // rather than re-derived per call site.
+                if crate::triggers::dispatcher::is_replay() {
+                    crate::cancellation::note_not_dispatched(
+                        crate::cancellation::NotDispatchedReason::ReplayPath,
+                    );
+                } else {
+                    self.dispatch_handlers_for_observed_cancel().await?;
+                }
+                Err(error)
+            }
+            other => other,
         }?;
         if matches!(
             name,

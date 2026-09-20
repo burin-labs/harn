@@ -65,6 +65,23 @@ pub(crate) fn cancelled_error(dispatch: HandlerDispatch) -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(CANCELLATION_PAYLOAD)))
 }
 
+/// Whether this error is the host cancellation.
+///
+/// The payload is matched here and nowhere else, so a caller asking "was this
+/// cancelled" does not have to re-type the text and drift from it.
+pub(crate) fn is_cancellation(error: &VmError) -> bool {
+    matches!(
+        error,
+        VmError::Thrown(VmValue::String(message)) if message.as_str() == CANCELLATION_PAYLOAD
+    )
+}
+
+/// Note a cancellation that ran no handlers at a frame that is not itself
+/// constructing the error, so the reason is still recorded once.
+pub(crate) fn note_not_dispatched(reason: NotDispatchedReason) {
+    record_undispatched_cancellation(reason);
+}
+
 /// Note a cancellation that ran no handlers, so the count is visible rather
 /// than inferred from silence.
 fn record_undispatched_cancellation(reason: NotDispatchedReason) {
