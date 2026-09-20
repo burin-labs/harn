@@ -565,6 +565,27 @@ pub fn merge_baseline(request: MergeBaselineRequest) {
     }
 }
 
+pub fn measurement_evidence(
+  sha: string,
+  commands: list,
+  measurements: dict,
+  failures: list<string>,
+) -> {
+  schema: string,
+  source_sha: string,
+  expected_commands: list<string>,
+  measurements: dict,
+  failure_reasons: list<string>,
+} {
+  return {
+    schema: "harn.cli_cold_start.measurement.v1",
+    source_sha: sha,
+    expected_commands: commands.map({ command -> to_string(command.key) }),
+    measurements: measurements,
+    failure_reasons: failures,
+  }
+}
+
 fn main(harness: Harness) -> int {
   const harn_bin = require_env(harness, "HARN_BIN")
   const budgets_file = require_env(harness, "HARN_CLI_BUDGETS_FILE")
@@ -636,6 +657,13 @@ fn main(harness: Harness) -> int {
       failures = failures + [key + ": " + join(reasons, "; ")]
     }
     harness.stdio.println(row_line(key, cold_ms, budget, baseline_ref, reasons))
+  }
+  const evidence_path = env_or(harness.env, "HARN_EXT_CLI_COLD_START_REPORT", "")
+  if evidence_path != "" {
+    harness.fs.write_text(
+      evidence_path,
+      json_stringify(measurement_evidence(sha, selection.commands, measurements, failures)),
+    )
   }
   if failures.count > 0 {
     harness.stdio.println("")

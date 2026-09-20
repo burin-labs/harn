@@ -1,0 +1,219 @@
+import { read_yaml } from "std/fs"
+import { with_temp_dir } from "std/testing"
+import "../bench_cli_cold_start.harn"
+
+const SOURCE_SHA = "1111111111111111111111111111111111111111"
+
+/**
+ * The terminal evidence the workflow's reporting step writes.
+ *
+ * Declared here so the parsed document is validated before it is read. An
+ * unvalidated read is what the ownership lint refuses, and it is also the
+ * weaker assertion: a typed read fails loudly when the reporting script stops
+ * emitting a field this test compares, instead of silently comparing nil.
+ */
+type ColdStartCiEvidence = {
+  schema: string,
+  source_sha: string,
+  status: string,
+  build_outcome: string,
+  measurement_outcome: string,
+  receipt_readable: bool,
+  expected_count: int?,
+  measured_count: int?,
+  pending_count: int?,
+  pending_commands: list<string>?,
+  unexpected_commands: list<string>?,
+  failure_reasons: list<string>?,
+}
+
+fn known_measurement() {
+  return measurement_evidence(
+    SOURCE_SHA,
+    [{key: "version"}, {key: "try --help"}],
+    {version: {cold_ms: 12.0}, "try --help": {cold_ms: 13.0}},
+    [],
+  )
+}
+
+fn report(
+  harness: {fs: HarnessFs, process: HarnessProcess},
+  root: string,
+  receipt: unknown,
+  build: string,
+  measurement: string,
+) {
+  const path = path_join(root, "measurement.json")
+  if harness.fs.exists(path) {
+    harness.fs.delete(path)
+  }
+  if receipt != nil {
+    harness.fs.write_text(path, json_stringify(receipt))
+  }
+  const summary = path_join(root, "summary.md")
+  const result = harness.process.run(
+    {
+      program: "bash",
+      args: ["../ci/report_cli_cold_start.sh", build, measurement, path, SOURCE_SHA, summary],
+    },
+  )
+  assert(result.stdout != "", "every outcome must produce a terminal receipt: " + result.stderr)
+  return {code: result.exit_code, evidence: json_parse(result.stdout), summary: summary}
+}
+
+@test
+pipeline test_cold_start_keeps_setup_measurement_and_terminal_evidence_separate(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/cli-cold-start-budget.yml")
+  assert(workflow != nil, "the canonical cold-start workflow must be readable")
+  const job = workflow.jobs["cold-start-budget"]
+  const build = job.steps.find({ step -> step?.id == "build" })
+  const measurement = job.steps.find({ step -> step?.id == "measurement" })
+  const evidence = job.steps.find({ step -> step?.id == "evidence" })
+  assert(build != nil, "release setup must publish its own outcome")
+  assert(measurement != nil, "startup measurement must publish its own outcome")
+  assert(evidence != nil, "a terminal report must distinguish setup and measurement failure")
+  assert_eq(measurement.get("timeout-minutes"), 5)
+  assert(build.get("timeout-minutes") > measurement.get("timeout-minutes"))
+  assert(
+    job.get("timeout-minutes")
+      > build.get("timeout-minutes") + measurement.get("timeout-minutes"),
+    "the job must leave reporting time after both independent ceilings",
+  )
+  assert_eq(measurement.run, "./scripts/bench_cli_cold_start.sh --no-build --iterations 10")
+  assert_eq(evidence.if, "always()")
+  assert_eq(evidence.env.BUILD_OUTCOME, "$" + "{{ steps.build.outcome }}")
+  assert_eq(evidence.env.MEASUREMENT_OUTCOME, "$" + "{{ steps.measurement.outcome }}")
+}
+
+@test
+pipeline test_cold_start_workflow_executes_the_terminal_report_on_both_outcomes(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/cli-cold-start-budget.yml")
+  const step = workflow.jobs["cold-start-budget"].steps.find({ step -> step?.id == "evidence" })
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      for arm in [
+        {
+          build: "success",
+          measurement: "success",
+          receipt: known_measurement(),
+          code: 0,
+          status: "passed",
+        },
+        {build: "failure", measurement: "skipped", receipt: nil, code: 1, status: "setup_failed"},
+      ] {
+        const measurement = path_join(root, "cold-start-measurement.json")
+        const evidence = path_join(root, "cold-start-evidence.json")
+        for path in [measurement, evidence] {
+          if harness.fs.exists(path) {
+            harness.fs.delete(path)
+          }
+        }
+        if arm.receipt != nil {
+          harness.fs.write_text(measurement, json_stringify(arm.receipt))
+        }
+        const result = harness.process.run(
+          {
+            program: "bash",
+            args: ["-e", "-c", step.run],
+            cwd: "../..",
+            env: {
+              BUILD_OUTCOME: arm.build,
+              MEASUREMENT_OUTCOME: arm.measurement,
+              RUNNER_TEMP: root,
+              GITHUB_SHA: SOURCE_SHA,
+              GITHUB_STEP_SUMMARY: path_join(root, "summary.md"),
+            },
+          },
+        )
+        assert_eq(result.exit_code, arm.code)
+        assert(harness.fs.exists(evidence), "the actual workflow step must write terminal evidence")
+        const report: ColdStartCiEvidence = schema_expect(
+          json_parse(harness.fs.read_text(evidence)),
+          schema_of(ColdStartCiEvidence),
+        )
+        assert_eq(report.status, arm.status)
+        assert_eq(
+          report.measured_count,
+          if arm.code == 0 {
+            2
+          } else {
+            nil
+          },
+        )
+      }
+    },
+  )
+}
+
+@test
+pipeline test_cold_start_report_distinguishes_setup_and_measured_failure(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const io = pick(harness, ["fs", "process"])
+      const known = known_measurement()
+      assert_eq(known.measurements.version.cold_ms, 12.0)
+      const passed = report(io, root, known, "success", "success")
+      assert_eq(passed.code, 0)
+      assert_eq(passed.evidence.status, "passed")
+      assert_eq(passed.evidence.measured_count, 2)
+      assert_eq(passed.evidence.pending_count, 0)
+      assert_eq(passed.evidence.failure_reasons, [])
+      assert(harness.fs.read_text(passed.summary).contains("passed"))
+      const setup = report(io, root, nil, "failure", "skipped")
+      assert_eq(setup.code, 1)
+      assert_eq(setup.evidence.status, "setup_failed")
+      assert_eq(setup.evidence.measured_count, nil)
+      const failed = report(
+        io,
+        root,
+        {...known, failure_reasons: ["version: exceeds budget 10 ms"]},
+        "success",
+        "failure",
+      )
+      assert_eq(failed.code, 1)
+      assert_eq(failed.evidence.status, "budget_failed")
+      assert_eq(failed.evidence.pending_count, 0)
+      assert_eq(failed.evidence.failure_reasons, ["version: exceeds budget 10 ms"])
+    },
+  )
+}
+
+@test
+pipeline test_cold_start_never_confuses_missing_or_partial_evidence_with_zero(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const io = pick(harness, ["fs", "process"])
+      const known = known_measurement()
+      for receipt in [
+        nil,
+        {},
+        {...known, measurements: {}},
+        {...known, expected_commands: [], measurements: {}},
+        {...known, source_sha: "2222222222222222222222222222222222222222"},
+        {...known, measurements: {version: {cold_ms: 12.0}}},
+      ] {
+        const result = report(io, root, receipt, "success", "success")
+        assert_eq(result.code, 1)
+        assert_eq(result.evidence.status, "measurement_failed")
+      }
+      const partial = report(
+        io,
+        root,
+        {...known, measurements: {version: {cold_ms: 12.0}}},
+        "success",
+        "success",
+      )
+      assert_eq(partial.evidence.expected_count, 2)
+      assert_eq(partial.evidence.measured_count, 1)
+      assert_eq(partial.evidence.pending_count, 1)
+      assert_eq(partial.evidence.pending_commands, ["try --help"])
+      const cancelled = report(io, root, known, "success", "cancelled")
+      assert_eq(cancelled.evidence.status, "measurement_failed")
+      const contradictory = report(io, root, known, "success", "failure")
+      assert_eq(contradictory.evidence.status, "measurement_failed")
+    },
+  )
+}
