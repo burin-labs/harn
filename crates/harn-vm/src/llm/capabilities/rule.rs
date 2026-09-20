@@ -9,6 +9,7 @@
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 
+use super::decision::{DecisionLimits, DecisionProtocol, DecisionQuestionKind};
 use super::model::{
     fill_opt, CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle,
     LiveEndpointFamily, ProviderDefaults, ReasoningHistoryWireField, ReasoningRoundTripPolicy,
@@ -53,6 +54,20 @@ pub struct ProviderRule {
     /// See [`LiveEndpointFamily`].
     #[serde(default)]
     pub live_endpoint_family: Option<LiveEndpointFamily>,
+    /// Wire protocol this route serves the `decision` operation over. Typed
+    /// and closed: an unknown value fails the capability load rather than
+    /// falling back to the structured-output chat backend. The catalog
+    /// `operations` set stays the admission owner; this says how an admitted
+    /// route is dialled. See [`DecisionProtocol`].
+    #[serde(default)]
+    pub decision_protocol: Option<DecisionProtocol>,
+    /// Question kinds this decision route accepts.
+    #[serde(default)]
+    pub decision_question_kinds: Option<Vec<DecisionQuestionKind>>,
+    /// Declared request ceilings for this decision route. See
+    /// [`DecisionLimits`].
+    #[serde(default)]
+    pub decision_limits: Option<DecisionLimits>,
     /// Native tool definition wire shape. Known values are `openai`
     /// and `anthropic`.
     #[serde(default)]
@@ -563,6 +578,9 @@ impl ProviderRule {
             native_tools,
             message_wire_format,
             live_endpoint_family,
+            decision_protocol,
+            decision_question_kinds,
+            decision_limits,
             native_tool_wire_format,
             defer_loading,
             tool_search,
@@ -664,6 +682,9 @@ impl ProviderRule {
         fill_opt(&mut self.native_tools, native_tools);
         fill_opt(&mut self.message_wire_format, message_wire_format);
         fill_opt(&mut self.live_endpoint_family, live_endpoint_family);
+        fill_opt(&mut self.decision_protocol, decision_protocol);
+        fill_opt(&mut self.decision_question_kinds, decision_question_kinds);
+        fill_opt(&mut self.decision_limits, decision_limits);
         fill_opt(&mut self.native_tool_wire_format, native_tool_wire_format);
         fill_opt(&mut self.defer_loading, defer_loading);
         fill_opt(&mut self.tool_search, tool_search);
@@ -1073,6 +1094,9 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         native_tools: None,
         message_wire_format: None,
         live_endpoint_family: None,
+        decision_protocol: None,
+        decision_question_kinds: None,
+        decision_limits: None,
         native_tool_wire_format: None,
         defer_loading: None,
         tool_search: None,
@@ -1211,6 +1235,9 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         native_tools: rule.native_tools.unwrap_or(false),
         message_wire_format,
         live_endpoint_family,
+        decision_protocol: rule.decision_protocol,
+        decision_question_kinds: rule.decision_question_kinds.clone().unwrap_or_default(),
+        decision_limits: rule.decision_limits,
         native_tool_wire_format: rule
             .native_tool_wire_format
             .clone()

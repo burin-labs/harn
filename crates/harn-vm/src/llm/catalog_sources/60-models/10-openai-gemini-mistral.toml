@@ -182,9 +182,12 @@ tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."gpt-5.4-mini"]
 name = "GPT-5.4 Mini"
 provider = "openai"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
@@ -192,9 +195,12 @@ tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."gpt-5.4-nano"]
 name = "GPT-5.4 Nano"
 provider = "openai"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
@@ -508,9 +514,12 @@ serving_tiers = [
   { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
 ]
 
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."gemini-3.1-flash-lite"]
 name = "Gemini 3.1 Flash-Lite"
 provider = "gemini"
+operations = ["text_generation", "decision"]
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025 }

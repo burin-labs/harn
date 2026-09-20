@@ -27,9 +27,12 @@ tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
 
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."claude-haiku-4-5-20251001"]
 name = "Claude Haiku 4.5"
 provider = "anthropic"
+operations = ["text_generation", "decision"]
 context_window = 200000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
