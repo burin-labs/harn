@@ -15,8 +15,12 @@ const UNADMITTED: WorktreeAdmissionCensus = {
   denial: "",
 }
 
+// Most cases here stand in a repository whose Make targets were never read,
+// which is the state every rule but the Make-owned one is indifferent to.
+const NO_MAKE_TARGETS: MakeTargetCensus = UNMEASURED_MAKE_TARGETS
+
 fn verdict(payload: string) -> ShellGuardDecision {
-  return decision(payload, ADMITTED)
+  return decision(payload, ADMITTED, NO_MAKE_TARGETS)
 }
 
 fn claude_payload(command: string) -> string {
@@ -275,20 +279,20 @@ pipeline test_worktree_refusal_requires_the_repository_to_own_admission(
   // this guard. Refusing in one with no admission command names a command the
   // operator cannot run, which is what this pair exists to prevent.
   const creation = "git worktree add ../lane origin/main"
-  const admitted = decision(codex_payload(creation), ADMITTED)
+  const admitted = decision(codex_payload(creation), ADMITTED, NO_MAKE_TARGETS)
   assert(!admitted.allow, "a repository that owns admission must refuse raw creation")
   assert(admitted.reason.contains("fleet-worktree-admit"))
   assert(
     admitted.reason.contains("scripts/fleet-worktree-admit.ts"),
     "the refusal must name where this repository provides the command: " + admitted.reason,
   )
-  const unadmitted = decision(codex_payload(creation), UNADMITTED)
+  const unadmitted = decision(codex_payload(creation), UNADMITTED, NO_MAKE_TARGETS)
   assert(
     unadmitted.allow,
     "a repository with no admission command must allow raw creation: " + unadmitted.reason,
   )
   // Everything else the guard refuses is unaffected by admission.
-  assert(!decision(codex_payload("cargo test"), UNADMITTED).allow)
+  assert(!decision(codex_payload("cargo test"), UNADMITTED, NO_MAKE_TARGETS).allow)
 }
 
 @test
@@ -303,7 +307,7 @@ pipeline test_unreadable_admission_census_refuses_rather_than_reading_as_absent(
     rows: [],
     denial: "worktree admission: read denied for `/workspace/scripts/fleet-worktree-admit.ts`",
   }
-  const verdict_blind = decision(codex_payload("git worktree add ../lane"), blind)
+  const verdict_blind = decision(codex_payload("git worktree add ../lane"), blind, NO_MAKE_TARGETS)
   assert(!verdict_blind.allow, "an unreadable census must refuse, not allow")
   assert(verdict_blind.reason.contains("could not tell"))
   assert(verdict_blind.reason.contains("read denied"))
@@ -353,12 +357,14 @@ pipeline test_worktree_rule_answers_for_the_repository_the_command_targets(
   const allowed = decision(
     codex_payload("git -C /repo/plain worktree add /tmp/lane origin/main"),
     census,
+    NO_MAKE_TARGETS,
   )
   assert(allowed.allow, "a repository with no admission command must be allowed: " + allowed.reason)
   // A target that owns one is still refused, and names that repository's path.
   const refused = decision(
     codex_payload("git -C /repo/owner worktree add /tmp/lane origin/main"),
     census,
+    NO_MAKE_TARGETS,
   )
   assert(!refused.allow, "a repository that owns the command must still be refused")
   assert(refused.reason.contains("scripts/fleet-worktree-admit.ts"))
@@ -368,13 +374,18 @@ pipeline test_worktree_rule_answers_for_the_repository_the_command_targets(
   const unmeasured = decision(
     codex_payload("git -C /repo/never-measured worktree add /tmp/lane origin/main"),
     census,
+    NO_MAKE_TARGETS,
   )
   assert(!unmeasured.allow, "an unmeasured target must refuse, not allow")
   assert(unmeasured.reason.contains("could not tell"))
   assert(unmeasured.reason.contains("/repo/never-measured"))
   // With no directory of its own the command means the wrapper's repository,
   // which is the first row.
-  const here = decision(codex_payload("git worktree add /tmp/lane origin/main"), census)
+  const here = decision(
+    codex_payload("git worktree add /tmp/lane origin/main"),
+    census,
+    NO_MAKE_TARGETS,
+  )
   assert(!here.allow, "the first row owns the command, so a bare add is refused")
   // The nearest enclosing repository wins, so a worktree nested inside
   // another repository is judged by its own root rather than the outer one.
@@ -386,7 +397,57 @@ pipeline test_worktree_rule_answers_for_the_repository_the_command_targets(
     decision(
       codex_payload("git -C /repo/owner/vendor/deep worktree add /tmp/lane origin/main"),
       nested,
+      NO_MAKE_TARGETS,
     ).allow,
     "the longest matching root must win",
   )
+}
+
+@test
+pipeline test_make_owned_build_refusal_requires_a_measured_target(harness: Harness, task: unknown) {
+  // The pair that decides whether this rule is safe to ship at all. Cargo is
+  // universal across the repositories that wire this guard; Swift is not. A
+  // repository whose Makefile owns `swift-test` can be sent there, and one
+  // whose Makefile does not must be left alone rather than pointed at a
+  // target it has never declared.
+  const owns = make_target_census("1", "build check swift-build swift-test test")
+  const owns_none = make_target_census("1", "build check test")
+  const refused = decision(codex_payload("swift test"), ADMITTED, owns)
+  assert(!refused.allow, "a repository that owns swift-test must refuse a bare swift test")
+  assert(
+    refused.reason.contains("make swift-test"),
+    "the refusal must name the target to run instead: " + refused.reason,
+  )
+  assert(!decision(codex_payload("swift build"), ADMITTED, owns).allow)
+  // NEGATIVE CONTROL: the identical commands where the target does not exist.
+  const allowed = decision(codex_payload("swift test"), ADMITTED, owns_none)
+  assert(
+    allowed.allow,
+    "a repository with no swift-test target must not be sent to one: " + allowed.reason,
+  )
+  assert(decision(codex_payload("swift build"), ADMITTED, owns_none).allow)
+  // An unmeasured repository is the same answer as one that owns nothing, and
+  // deliberately the opposite of the worktree rule: refusing here would name
+  // a command that may not exist, where refusing there prevents real harm.
+  assert(decision(codex_payload("swift test"), ADMITTED, NO_MAKE_TARGETS).allow)
+  assert(!make_target_census("", "swift-build swift-test").checked)
+  assert_eq(len(make_target_census("", "swift-build swift-test").targets), 0)
+  // The Make target itself is the allowed form, and so is a Swift verb no
+  // rule claims.
+  assert(decision(codex_payload("make swift-test ARGS='--filter Foo'"), ADMITTED, owns).allow)
+  assert(decision(codex_payload("swift package resolve"), ADMITTED, owns).allow)
+  assert(decision(codex_payload("swift --version"), ADMITTED, owns).allow)
+  // The escape hatch is per tool, and must not open any other rule.
+  assert(decision(codex_payload("HARN_ALLOW_RAW_SWIFT=1 swift build"), ADMITTED, owns).allow)
+  assert(
+    !decision(codex_payload("HARN_ALLOW_RAW_SWIFT=1 trash /tmp/generated.log"), ADMITTED, owns)
+      .allow,
+  )
+  // The Cargo escape does not release a Swift build, and vice versa.
+  assert(!decision(codex_payload("HARN_ALLOW_RAW_CARGO=1 swift build"), ADMITTED, owns).allow)
+  assert(!decision(codex_payload("HARN_ALLOW_RAW_SWIFT=1 cargo build"), ADMITTED, owns).allow)
+  // Compound and wrapped forms are classified per stage, like every other rule.
+  assert(!decision(codex_payload("cd /repo && swift build"), ADMITTED, owns).allow)
+  assert(!decision(codex_payload("env FOO=1 swift test"), ADMITTED, owns).allow)
+  assert(decision(codex_payload("grep swift-test Makefile"), ADMITTED, owns).allow)
 }
