@@ -150,6 +150,8 @@ A consumer pins four fields in its policy: `corpus_digest`, `model_revision`,
 - `corpus_digest` is a SHA-256 over the normalized rows in canonical order. Two
   callers presenting the same corpus in a different order pin the same digest.
 - `report_digest` is a SHA-256 over the canonical JSON of the report body.
+  Harn serializes dictionary keys in sorted order, so the digest does not depend
+  on the order the report was assembled in.
 
 **Invalidation rule.** Re-run the report. If `report_digest` differs from the
 pinned value, the pin is invalid and the policy that depends on it must not run
@@ -192,9 +194,11 @@ confident report about the other half.
 The default rendering is plain language:
 
 ```text
-tool-safety question (jev): 412 rows, 6.3 percent error over the 402 answered, 11.2 percent calibration error, 10 abstained
-  at the 0.9 threshold: 2.1 percent of the 341 accepted answers were wrong, 17.2 percent withheld, 46 right answer(s) thrown away
-  recommended threshold 0.93 for a 5.0 percent target error, fitted on 201 rows and measured at 3.5 percent error over 201 held-out rows
+calibration report harn.calibration_report.v1 over 40 rows, corpus 10079a7ad82d, report b5f567b8fb81
+tool-safety question (default): 40 rows, 25.0 percent error over the 40 answered, 0.0 percent calibration error, 0 abstained
+  at the 0.9 threshold: 5.0 percent of the 20 accepted answers were wrong, 50.0 percent withheld, 11 right answer(s) thrown away
+  recommended threshold 0.55 for a 30.0 percent target error, fitted on 20 rows and measured at 30.0 percent error over 20 held-out rows
+  latency over 40 rows: p50 139.5 ms, p90 155.1 ms, max 159.0 ms
 ```
 
 The command exits `1` when the report is a refusal and `2` when the inputs
