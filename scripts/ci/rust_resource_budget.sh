@@ -6,8 +6,14 @@
 # it, and is wrong on every other box: the same number oversubscribes a small
 # hosted runner and leaves an owned machine idle. The count is measured here
 # from the host and divided by the listeners actually sharing it, then capped
-# per profile, because peak memory rather than cores is what bounds a Rust
-# compile.
+# per profile.
+#
+# Both the cores the box has and the memory it has bound this number, and the
+# smaller of the two wins. Cores alone said three compilers on a four-core
+# vendor VM, which is right about the CPU and wrong about the box: that VM has
+# 16 GB, and the security archive's link phase was signalled dead there four
+# times in four hours while the same job passes on larger hosts. A budget that
+# cannot see memory cannot see that difference.
 set -euo pipefail
 
 # Every refusal in this file is named and carries what was actually observed,
@@ -20,29 +26,65 @@ budget_refuse() {
 }
 
 rust_resource_budget() {
-  local policy=$1 cores=$2 runners=$3 profile=${4:-e2e} reserved maximum share
+  local policy=$1 cores=$2 runners=$3 profile=${4:-e2e} memory_mb=$5
+  local reserved maximum share reserved_memory per_compiler memory_share
   if [[ ! "$cores" =~ ^[1-9][0-9]*$ || ! "$runners" =~ ^[1-9][0-9]*$ ]]; then
     budget_refuse census_not_positive "$cores" "$runners"
+    return 1
+  fi
+  # Memory is a census like the other two, so an unreadable or absent reading
+  # refuses by name here rather than falling through to a cores-only answer
+  # that looks measured. The whole point of this change is that the cores-only
+  # answer was wrong on a small box, so silently restoring it would restore the
+  # defect while reporting a budget.
+  if [[ ! "$memory_mb" =~ ^[1-9][0-9]*$ ]]; then
+    budget_refuse memory_census_not_positive "$cores" "$runners" \
+      "memory_mb=${memory_mb:-unset}"
     return 1
   fi
   if [[ "$profile" != "e2e" && "$profile" != "producer" ]]; then
     budget_refuse profile_unknown "$cores" "$runners" "profile=$profile"
     return 1
   fi
-  if ! jq -e '(.schema_version == 2) and
-      ([.reserved_host_cores, .e2e_max_compilers, .producer_max_compilers] |
+  if ! jq -e '(.schema_version == 3) and
+      ([.reserved_host_cores, .reserved_host_memory_mb, .memory_mb_per_compiler,
+        .e2e_max_compilers, .producer_max_compilers] |
       all(type == "number" and . >= 1 and . == floor))' "$policy" >/dev/null; then
     budget_refuse policy_invalid "$cores" "$runners" "policy=$policy"
     return 1
   fi
   reserved=$(jq -r .reserved_host_cores "$policy")
   maximum=$(jq -r ".${profile}_max_compilers" "$policy")
+  reserved_memory=$(jq -r .reserved_host_memory_mb "$policy")
+  per_compiler=$(jq -r .memory_mb_per_compiler "$policy")
   share=$(((cores - reserved) / runners))
   ((share >= 1)) || share=1
+  memory_share=$(((memory_mb - reserved_memory) / per_compiler / runners))
+  ((memory_share >= 1)) || memory_share=1
   local build=$share
+  ((build <= memory_share)) || build=$memory_share
   ((build <= maximum)) || build=$maximum
-  echo "RUST_RESOURCE_BUDGET profile=$profile cores=$cores online_local_runners=$runners cpu_share=$share build_jobs=$build" >&2
+  echo "RUST_RESOURCE_BUDGET profile=$profile cores=$cores memory_mb=$memory_mb online_local_runners=$runners cpu_share=$share memory_share=$memory_share build_jobs=$build" >&2
   printf 'build_jobs=%s\ntest_threads=%s\n' "$build" "$share"
+}
+
+host_memory_mb() {
+  # Total rather than available: the number this budget divides has to be a
+  # property of the box, not of whatever happened to be cached when the job
+  # started. A reading that moves with page cache would hand two runs of the
+  # same workflow two different budgets.
+  local cores=${1:-unmeasured} meminfo kb
+  if ! meminfo=$(cat /proc/meminfo 2>/dev/null); then
+    budget_refuse memory_census_failed "$cores" unmeasured "memory_mb=unmeasured"
+    return 1
+  fi
+  kb=$(awk '$1 == "MemTotal:" { print $2; exit }' <<< "$meminfo")
+  if [[ ! "$kb" =~ ^[1-9][0-9]*$ ]]; then
+    budget_refuse memory_census_empty "$cores" unmeasured \
+      "memory_mb=unmeasured mem_total_kb=${kb:-absent}"
+    return 1
+  fi
+  printf '%s\n' "$((kb / 1024))"
 }
 
 online_local_runners() {
@@ -75,7 +117,7 @@ online_local_runners() {
 }
 
 resource_budget_main() {
-  local runners cores policy profile=${HARN_BUDGET_PROFILE:-e2e}
+  local runners cores memory_mb policy profile=${HARN_BUDGET_PROFILE:-e2e}
   if ! cores=$(nproc); then
     budget_refuse cpu_census_failed unmeasured unmeasured
     return 1
@@ -89,8 +131,12 @@ resource_budget_main() {
       return 1
       ;;
   esac
+  # After the environment is resolved, so an unknown tier is still named as an
+  # unknown tier rather than as whatever the memory census happened to say.
+  memory_mb=$(host_memory_mb "$cores") || return 1
   policy="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rust-resource-policy.json"
-  rust_resource_budget "$policy" "$cores" "$runners" "$profile" >> "${GITHUB_OUTPUT:?}"
+  rust_resource_budget "$policy" "$cores" "$runners" "$profile" "$memory_mb" \
+    >> "${GITHUB_OUTPUT:?}"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
