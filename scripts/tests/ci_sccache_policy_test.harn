@@ -407,10 +407,7 @@ fn workflow() {
             name: "Check no undeclared protocol symbol removals",
             run: "make check-protocol-symbol-removals",
           },
-          {
-            name: "Check CI cache and gate ownership policy",
-            run: "make check-ci-cache-policy",
-          },
+          {name: "Check CI cache and gate ownership policy", run: "make check-ci-cache-policy"},
         ],
       },
       "audit-scripts": {
@@ -917,7 +914,6 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
   assert_eq(ci_linux_lane_policy_errors(valid), [])
   const fast_job = valid.jobs["fast-policy-gates"]
   const policy_job = valid.jobs["audit-scripts"]
-
   // Moved back behind the merge. Both halves are asserted: the cheap job
   // losing it, and the expensive job gaining it. Checking only one would pass
   // while the refusal was merely deleted, or while a duplicate still burned
@@ -947,9 +943,10 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
     ),
   )
   assert(
-    moved_errors.contains("ci.yml:audit-scripts must not reject flaky test patterns behind the merge"),
+    moved_errors.contains(
+      "ci.yml:audit-scripts must not reject flaky test patterns behind the merge",
+    ),
   )
-
   // Duplicated inside the cheap job.
   const duplicated = {
     ...valid,
@@ -966,7 +963,6 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
       "ci.yml:fast-policy-gates must own exactly one invocation to reject flaky test patterns",
     ),
   )
-
   // Made expensive. Running before the merge is earned by staying cheap, so
   // the moment this job grows a sweep it has stopped satisfying the rule that
   // put it there.
@@ -985,7 +981,6 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
       "ci.yml:fast-policy-gates must not run make test-pr-gate-post-warm-integrations; it would stop being cheap",
     ),
   )
-
   // Left reachable only from the push-only sweep. The rule would then refuse
   // a re-added event condition one merge after it landed.
   const unreachable = {
@@ -1006,7 +1001,6 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
       "ci.yml:fast-policy-gates must run this contract itself, or it cannot refuse before a merge",
     ),
   )
-
   // Credentials persisted back onto the checkout. Git then cannot read its
   // own config inside the sandbox and both base-relative guards fail closed.
   const credentialed = {
@@ -1016,13 +1010,12 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
       "fast-policy-gates": {
         ...fast_job,
         steps: fast_job.steps.map(
-          {
-            step ->
-              if contains(trim(step?.uses ?? ""), "actions/checkout@") {
-                {...step, with: {"fetch-depth": 0}}
-              } else {
-                step
-              }
+          { step ->
+            if contains(trim(step?.uses ?? ""), "actions/checkout@") {
+              {...step, with: {"fetch-depth": 0}}
+            } else {
+              step
+            }
           },
         )
           .to_list(),
@@ -1031,9 +1024,8 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
   }
   const credential_message =
     "ci.yml:fast-policy-gates must check out with persist-credentials: false,"
-      + " or its base-relative guards cannot read a base"
+    + " or its base-relative guards cannot read a base"
   assert(ci_linux_lane_policy_errors(credentialed).contains(credential_message))
-
   // A job with no checkout at all must not satisfy the rule by having nothing
   // to persist, which is the shape that let the defect through in the first
   // place.

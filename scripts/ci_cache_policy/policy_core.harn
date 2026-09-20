@@ -1717,7 +1717,11 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
         errors = errors
           + [
             "ci.yml:" + job + " is a cheap refusal and must carry no event condition"
-              + " (found " + term + " in: " + condition + ")",
+              + " (found "
+              + term
+              + " in: "
+              + condition
+              + ")",
           ]
       }
     }
