@@ -90,7 +90,56 @@ async fn typed_terminal_reason_wins_over_the_legacy_stop_reason() {
         run.metadata["terminal"]["reason"],
         "model_signalled_completion"
     );
-    assert_eq!(run.metadata["stop_reason"], "legacy_summary");
+    assert_eq!(run.metadata["stop_reason"], "model_signalled_completion");
+}
+
+#[tokio::test]
+async fn terminal_projection_retains_structured_error_and_uses_the_typed_class() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create");
+    let error = json!({"category": "auth_failure", "message": "Known credential failure"});
+    store
+        .append(
+            &meta.id,
+            AppendEvent::new(
+                custom("agent_run_terminal"),
+                transcript_event(
+                    "agent_run_terminal",
+                    json!({
+                        "final_status": "error",
+                        "stop_reason": "legacy_summary",
+                        "terminal_class": "generic_throw",
+                        "error": error,
+                        "terminal": {
+                            "kind": "provider_error",
+                            "owner": "provider",
+                            "reason": "auth_failure",
+                            "terminalClass": "provider_misconfigured",
+                        },
+                    }),
+                ),
+            ),
+        )
+        .await
+        .expect("append terminal");
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+    assert_eq!(
+        run.metadata
+            .get("terminal_error")
+            .expect("retain structured terminal error"),
+        &error
+    );
+    assert_eq!(run.metadata["stop_reason"], "auth_failure");
+    assert_eq!(run.metadata["terminal_class"], "provider_misconfigured");
+    assert_eq!(
+        run.metadata["terminal"]["terminalClass"],
+        run.metadata["terminal_class"]
+    );
 }
 
 #[tokio::test]
@@ -110,6 +159,48 @@ async fn journals_from_before_typed_terminals_keep_the_legacy_status_fallback() 
         .expect("project legacy journal");
     assert_eq!(run.status, "completed");
     assert!(!run.metadata.contains_key("terminal"));
+}
+
+#[tokio::test]
+async fn an_older_contradictory_terminal_projects_one_explicit_unknown() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create");
+    let error = json!({"category": "fixture_failure", "message": "Known recorded diagnostic"});
+    store
+        .append(
+            &meta.id,
+            AppendEvent::new(
+                custom("agent_run_terminal"),
+                transcript_event(
+                    "agent_run_terminal",
+                    json!({
+                        "final_status": "budget_exhausted",
+                        "stop_reason": "natural",
+                        "terminal_class": "generic_throw",
+                        "error": error,
+                        "terminal": {
+                            "kind": "policy_budget",
+                            "owner": "policy",
+                            "reason": "natural",
+                        },
+                    }),
+                ),
+            ),
+        )
+        .await
+        .expect("append original terminal");
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+    assert_eq!(run.status, "failed");
+    assert_eq!(run.metadata["terminal"]["kind"], "unknown");
+    assert_eq!(run.metadata["terminal"]["owner"], "unknown");
+    assert_eq!(run.metadata["stop_reason"], "conflicting_terminal_evidence");
+    assert!(!run.metadata.contains_key("terminal_class"));
+    assert_eq!(run.metadata["terminal_error"], error);
 }
 
 #[tokio::test]

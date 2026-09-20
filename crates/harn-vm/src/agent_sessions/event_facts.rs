@@ -40,11 +40,13 @@ pub(crate) const FINAL_STATUS: &str = "/transcript_event/metadata/final_status";
 pub(crate) const STOP_REASON: &str = "/transcript_event/metadata/stop_reason";
 /// VM-owned execution identity stamped on the invocation boundary.
 pub(crate) const EXECUTION_ID: &str = "/transcript_event/metadata/execution_id";
-/// Terminal error text, when the loop ended on one.
+/// Terminal error value, either structured diagnostics or legacy text.
 pub(crate) const TERMINAL_ERROR: &str = "/transcript_event/metadata/error";
 /// Coarse terminal classification assigned by
 /// [`crate::llm::agent_terminal_class`].
 pub(crate) const TERMINAL_CLASS: &str = "/transcript_event/metadata/terminal_class";
+/// Fine-grained class carried by the producer-owned typed terminal.
+pub(crate) const TERMINAL_OUTCOME_CLASS: &str = "/transcript_event/metadata/terminal/terminalClass";
 /// Producer-owned terminal kind recorded by `agent_session_finalize`.
 pub(crate) const TERMINAL_KIND: &str = "/transcript_event/metadata/terminal/kind";
 /// Producer-owned terminal attribution paired with [`TERMINAL_KIND`].

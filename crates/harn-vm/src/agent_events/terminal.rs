@@ -9,10 +9,10 @@
 //!
 //! This module produces the classification ONCE, at the loop boundary, into a
 //! typed [`AgentTerminalKind`] plus a coarse [`AgentTerminalKind::owner`], and
-//! carries it alongside the lossless raw `reason`. Harn owns the agent stop
+//! carries it alongside the resolved `reason`. Harn owns the agent stop
 //! vocabulary, so the classification is produced here rather than reconstructed
-//! in Burin or any other host. The typed outcome is *additive*: the raw
-//! `final_status` / `stop_reason` / `terminal_class` fields are unchanged.
+//! in any host. Legacy terminal aliases project this outcome; contradictory
+//! input cannot become a second, competing explanation for the same stop.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,8 +22,8 @@ use super::agent::AgentEvent;
 
 /// Coarse, typed classification of why an agent-loop session terminated.
 /// Serialized `snake_case`. The vocabulary is deliberately extensible —
-/// [`Self::Unknown`] is the honest fallback when no rule matched and the raw
-/// `reason` is authoritative.
+/// [`Self::Unknown`] is the honest fallback when no rule matched or the
+/// supplied terminal evidence conflicts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentTerminalKind {
@@ -59,7 +59,7 @@ pub enum AgentTerminalKind {
     /// The session suspended at a waitpoint and may resume later — its work is
     /// not finished and was not abandoned.
     Suspended,
-    /// No rule matched; the raw `reason` is authoritative.
+    /// No rule matched, or the supplied terminal evidence conflicts.
     Unknown,
 }
 
@@ -143,6 +143,31 @@ impl AgentTerminalKind {
     }
 }
 
+/// Sealed statuses that are a verdict on the deliverable rather than a claim
+/// about the mechanism that ended the loop.
+///
+/// A natural `stop_reason` beside one of these composes with it instead of
+/// contradicting it, because reaching the verdict at all requires the model to
+/// have stopped and said it was finished. `completion_unverified` is the run
+/// that attempted tool calls, had every one refused, and then announced
+/// completion, which is the record harn#7915 exists to produce.
+/// `verify_exhausted` is the run whose verification allowance ran out before
+/// its `done` could be confirmed, so its sentinel is the claim being judged.
+///
+/// This is keyed on the status rather than on [`AgentTerminalKind`] because
+/// the kinds are coarser than the distinction: `verify_exhausted` and a
+/// genuine `budget_exhausted` both classify as
+/// [`AgentTerminalKind::PolicyBudget`], and only the first of them composes
+/// with a natural reason. A real budget cut reported as a clean finish is the
+/// contradiction #8470 exists to stop reporting.
+const VERIFICATION_VERDICT_STATUSES: [&str; 2] = ["completion_unverified", "verify_exhausted"];
+
+/// Whether a sealed status is a verdict on the deliverable, so a natural
+/// `stop_reason` beside it is ordinary rather than contradictory.
+pub fn status_is_a_verification_verdict(canonical_status: &str) -> bool {
+    VERIFICATION_VERDICT_STATUSES.contains(&canonical_status)
+}
+
 /// Raw `stop_reason` values that seal a genuinely natural completion (a clean
 /// finish or a verified `done`). When `final_status` is `done`/empty, any
 /// `stop_reason` OUTSIDE this set is a policy/custom stop (e.g. a post-turn
@@ -165,7 +190,7 @@ const NATURAL_STOP_REASONS: [&str; 10] = [
     "done",
 ];
 
-/// Typed terminal outcome carried alongside the lossless raw reason. `owner` is
+/// Typed terminal outcome carried alongside its resolved reason. `owner` is
 /// derived from `kind` so a single field pins the responsible party, and
 /// `terminal_class` carries the finalize host's fine-grained reason when it
 /// produced one.
@@ -205,8 +230,7 @@ pub struct AgentTerminalOutcome {
 }
 
 impl AgentTerminalOutcome {
-    /// Build an outcome from a kind and the lossless raw `reason`, deriving the
-    /// `owner` from the kind.
+    /// Build an outcome from a known decision, deriving its owner from its kind.
     pub fn new(kind: AgentTerminalKind, reason: impl Into<String>) -> Self {
         Self {
             kind,
@@ -218,12 +242,49 @@ impl AgentTerminalOutcome {
         }
     }
 
-    /// Attach the finalize host's fine-grained class. Separate from `new` so
-    /// every existing construction keeps compiling and keeps its wire bytes,
-    /// and only the boundary that actually computes a class carries one.
+    /// Resolve finalization inputs or an older journal's typed evidence once.
+    /// A precise error class can replace a stale natural reason. A policy stop
+    /// paired with a natural reason has no such deciding evidence, so its cause
+    /// remains unknown instead of guessing whether policy or failure won.
+    pub fn from_evidence(
+        kind: AgentTerminalKind,
+        canonical_status: &str,
+        reason: impl Into<String>,
+        terminal_class: Option<AgentTerminalClass>,
+    ) -> Self {
+        let reason = reason.into();
+        if kind != AgentTerminalKind::Natural
+            && !status_is_a_verification_verdict(canonical_status)
+            && !reason.is_empty()
+            && NATURAL_STOP_REASONS.contains(&reason.as_str())
+        {
+            match (kind, terminal_class) {
+                (
+                    AgentTerminalKind::ProviderError | AgentTerminalKind::RuntimeError,
+                    Some(class),
+                ) if class != AgentTerminalClass::GenericThrow => {
+                    return Self::new(kind, class.as_str()).with_terminal_class(Some(class));
+                }
+                _ => return Self::new(AgentTerminalKind::Unknown, "conflicting_terminal_evidence"),
+            }
+        }
+        Self::new(kind, reason).with_terminal_class(terminal_class)
+    }
+
+    /// Whether conflicting evidence requires replacing the supplied status.
+    /// An otherwise unclassified stop can retain its existing status.
+    pub fn has_conflicting_evidence(&self) -> bool {
+        self.kind == AgentTerminalKind::Unknown && self.reason == "conflicting_terminal_evidence"
+    }
+
+    /// Attach a fine-grained cause only to an error outcome. Policy stops may
+    /// retain underlying errors as diagnostics without claiming a second cause.
     #[must_use]
     pub fn with_terminal_class(mut self, terminal_class: Option<AgentTerminalClass>) -> Self {
-        self.terminal_class = terminal_class;
+        self.terminal_class = match self.kind {
+            AgentTerminalKind::ProviderError | AgentTerminalKind::RuntimeError => terminal_class,
+            _ => None,
+        };
         self
     }
 
@@ -312,7 +373,7 @@ impl AgentTerminalOutcome {
 ///
 /// One owner for four steps that were previously inlined at the call site:
 /// classify the kind (using the class, so an errored turn is attributed rather
-/// than left `Unknown`), keep the lossless raw reason, and carry the class
+/// than left `Unknown`), resolve contradictory evidence, and carry the class
 /// itself so a consumer can name the cause and not just the owner. Keeping them
 /// together is what makes it visible when one of them is dropped.
 pub fn terminal_outcome_for_finalize(
@@ -321,21 +382,22 @@ pub fn terminal_outcome_for_finalize(
     terminal_class: Option<AgentTerminalClass>,
     has_error: bool,
 ) -> AgentTerminalOutcome {
+    let kind = classify_agent_terminal_with_class(
+        canonical_status,
+        stop_reason,
+        has_error,
+        terminal_class,
+    );
     let reason = if stop_reason.is_empty() {
         canonical_status
     } else {
         stop_reason
     };
-    AgentTerminalOutcome::new(
-        classify_agent_terminal_with_class(
-            canonical_status,
-            stop_reason,
-            has_error,
-            terminal_class,
-        ),
-        reason,
-    )
-    .with_terminal_class(terminal_class)
+    // A policy stop can carry an underlying provider error as diagnostic
+    // context (for example, a consecutive-failure circuit breaker). That
+    // diagnostic is not the cause that ended the loop, and must not become a
+    // competing terminal class beside the policy decision.
+    AgentTerminalOutcome::from_evidence(kind, canonical_status, reason, terminal_class)
 }
 
 /// Classify an agent-loop terminal condition into a typed [`AgentTerminalKind`].
@@ -715,6 +777,108 @@ mod tests {
         assert_eq!(outcome.kind, AgentTerminalKind::Natural);
         assert_eq!(outcome.owner, "agent");
         assert_eq!(outcome.terminal_class, None);
+    }
+
+    #[test]
+    fn contradictory_natural_evidence_names_an_unknown_cause() {
+        for status in ["budget_exhausted", "stuck", "error", "provider_error"] {
+            let outcome = terminal_outcome_for_finalize(
+                status,
+                "natural",
+                Some(AgentTerminalClass::GenericThrow),
+                true,
+            );
+            assert_eq!(outcome.kind, AgentTerminalKind::Unknown, "{status}");
+            assert_eq!(outcome.reason, "conflicting_terminal_evidence");
+            assert_eq!(outcome.terminal_class, None);
+            assert!(outcome.has_conflicting_evidence());
+        }
+    }
+
+    #[test]
+    fn a_verification_verdict_keeps_its_natural_stop_reason() {
+        // A run whose tool calls were all refused and which then announced it
+        // was finished reaches `completion_unverified` through a natural stop.
+        // That pair is the record harn#7915 exists to produce, so the conflict
+        // rule must leave it alone rather than replace it with an unknown.
+        let outcome =
+            terminal_outcome_for_finalize("completion_unverified", "natural", None, false);
+        assert_eq!(outcome.kind, AgentTerminalKind::CompletionUnverified);
+        assert_eq!(outcome.reason, "natural");
+        assert!(!outcome.has_conflicting_evidence());
+
+        // A verification allowance that ran out before `done` could be
+        // confirmed is the same shape: the sentinel is the claim being judged,
+        // not a competing account of how the run stopped.
+        let exhausted = terminal_outcome_for_finalize("verify_exhausted", "sentinel", None, false);
+        assert_eq!(exhausted.kind, AgentTerminalKind::PolicyBudget);
+        assert_eq!(exhausted.reason, "sentinel");
+        assert!(!exhausted.has_conflicting_evidence());
+
+        // The exemption is keyed on the status, not the kind, and a genuine
+        // budget cut classifies to the same kind as `verify_exhausted`. A real
+        // budget cut reported as a clean finish must still be refused, or this
+        // exemption would swallow the case #8470 exists to fix.
+        let budget = terminal_outcome_for_finalize("budget_exhausted", "sentinel", None, false);
+        assert_eq!(budget.kind, AgentTerminalKind::Unknown);
+        assert!(budget.has_conflicting_evidence());
+
+        assert!(status_is_a_verification_verdict("completion_unverified"));
+        assert!(status_is_a_verification_verdict("verify_exhausted"));
+        for status in [
+            "budget_exhausted",
+            "stuck",
+            "error",
+            "provider_error",
+            "cancelled",
+            "blocked",
+            "input_guardrail",
+            "scope_alert",
+            "suspended",
+            "done",
+            "",
+        ] {
+            assert!(!status_is_a_verification_verdict(status), "{status}");
+        }
+    }
+
+    #[test]
+    fn an_unclassified_policy_stop_is_not_conflicting_evidence() {
+        let outcome = terminal_outcome_for_finalize("incomplete", "policy stop", None, false);
+        assert_eq!(outcome.kind, AgentTerminalKind::Unknown);
+        assert_eq!(outcome.reason, "policy stop");
+        assert!(!outcome.has_conflicting_evidence());
+    }
+
+    #[test]
+    fn a_budget_circuit_breaker_keeps_its_error_as_context_not_a_second_cause() {
+        let outcome = terminal_outcome_for_finalize(
+            "budget_exhausted",
+            "circuit_breaker",
+            Some(AgentTerminalClass::RateLimited),
+            true,
+        )
+        .with_error(Some(&serde_json::json!({"message": "Repeated rate limit"})));
+        assert_eq!(outcome.kind, AgentTerminalKind::PolicyBudget);
+        assert_eq!(outcome.reason, "circuit_breaker");
+        assert_eq!(outcome.terminal_class, None);
+        assert_eq!(outcome.message.as_deref(), Some("Repeated rate limit"));
+    }
+
+    #[test]
+    fn a_precise_error_class_resolves_a_stale_natural_reason() {
+        let outcome = terminal_outcome_for_finalize(
+            "done",
+            "completed",
+            Some(AgentTerminalClass::ProviderMisconfigured),
+            true,
+        );
+        assert_eq!(outcome.kind, AgentTerminalKind::ProviderError);
+        assert_eq!(outcome.reason, "provider_misconfigured");
+        assert_eq!(
+            outcome.terminal_class,
+            Some(AgentTerminalClass::ProviderMisconfigured)
+        );
     }
 
     #[test]
