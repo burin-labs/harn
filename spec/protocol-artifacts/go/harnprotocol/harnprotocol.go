@@ -1493,23 +1493,23 @@ type ACPTranscriptCompactedUpdateMetaHarn struct {
 	Mode                    string          `json:"mode"`
 	Strategy                string          `json:"strategy"`
 	SnapshotAssetID         *string         `json:"snapshotAssetId"`
-	ArchivedMessages        *uint64         `json:"archivedMessages,omitempty"`
-	CompactionPolicy        json.RawMessage `json:"compactionPolicy,omitempty"`
-	EngineStrategy          *string         `json:"engineStrategy,omitempty"`
-	EstimatedTokensAfter    *uint64         `json:"estimatedTokensAfter,omitempty"`
-	EstimatedTokensBefore   *uint64         `json:"estimatedTokensBefore,omitempty"`
-	HardLimitTokens         **uint64        `json:"hardLimitTokens,omitempty"`
-	InstructionMode         **string        `json:"instructionMode,omitempty"`
-	InstructionSource       **string        `json:"instructionSource,omitempty"`
-	Reason                  *string         `json:"reason,omitempty"`
-	Recap                   json.RawMessage `json:"recap,omitempty"`
-	ReceiptID               *string         `json:"receiptId,omitempty"`
+	Reason                  string          `json:"reason"`
+	ReceiptID               string          `json:"receiptId"`
+	SchemaVersion           uint64          `json:"schemaVersion"`
+	EngineStrategy          string          `json:"engineStrategy"`
+	RequestedStrategy       *string         `json:"requestedStrategy"`
+	ResolvedThresholdTokens *uint64         `json:"resolvedThresholdTokens"`
+	ThresholdSource         *string         `json:"thresholdSource"`
+	HardLimitTokens         *uint64         `json:"hardLimitTokens"`
+	ArchivedMessages        uint64          `json:"archivedMessages"`
+	EstimatedTokensBefore   uint64          `json:"estimatedTokensBefore"`
+	EstimatedTokensAfter    uint64          `json:"estimatedTokensAfter"`
+	InstructionMode         *string         `json:"instructionMode"`
+	InstructionSource       *string         `json:"instructionSource"`
+	CompactionPolicy        json.RawMessage `json:"compactionPolicy"`
+	Recap                   json.RawMessage `json:"recap"`
+	SourceMeasurement       json.RawMessage `json:"sourceMeasurement"`
 	Replayed                *bool           `json:"replayed,omitempty"`
-	RequestedStrategy       **string        `json:"requestedStrategy,omitempty"`
-	ResolvedThresholdTokens **uint64        `json:"resolvedThresholdTokens,omitempty"`
-	SchemaVersion           *uint64         `json:"schemaVersion,omitempty"`
-	SourceMeasurement       json.RawMessage `json:"sourceMeasurement,omitempty"`
-	ThresholdSource         **string        `json:"thresholdSource,omitempty"`
 }
 
 type ACPTranscriptCompactedUpdateMeta struct {

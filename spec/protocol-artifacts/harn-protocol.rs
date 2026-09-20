@@ -3519,57 +3519,38 @@ pub struct ACPTranscriptCompactedUpdateMetaHarn {
     pub strategy: String,
     #[serde(rename = "snapshotAssetId")]
     pub snapshot_asset_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "archivedMessages")]
-    pub archived_messages: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "deserialize_present_session_update_value")]
-    #[serde(rename = "compactionPolicy")]
-    pub compaction_policy: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "engineStrategy")]
-    pub engine_strategy: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "estimatedTokensAfter")]
-    pub estimated_tokens_after: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "estimatedTokensBefore")]
-    pub estimated_tokens_before: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "hardLimitTokens")]
-    pub hard_limit_tokens: Option<Option<u64>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "instructionMode")]
-    pub instruction_mode: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "instructionSource")]
-    pub instruction_source: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "deserialize_present_session_update_value")]
-    pub recap: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: String,
     #[serde(rename = "receiptId")]
-    pub receipt_id: Option<String>,
+    pub receipt_id: String,
+    #[serde(rename = "schemaVersion")]
+    pub schema_version: u64,
+    #[serde(rename = "engineStrategy")]
+    pub engine_strategy: String,
+    #[serde(rename = "requestedStrategy")]
+    pub requested_strategy: Option<String>,
+    #[serde(rename = "resolvedThresholdTokens")]
+    pub resolved_threshold_tokens: Option<u64>,
+    #[serde(rename = "thresholdSource")]
+    pub threshold_source: Option<String>,
+    #[serde(rename = "hardLimitTokens")]
+    pub hard_limit_tokens: Option<u64>,
+    #[serde(rename = "archivedMessages")]
+    pub archived_messages: u64,
+    #[serde(rename = "estimatedTokensBefore")]
+    pub estimated_tokens_before: u64,
+    #[serde(rename = "estimatedTokensAfter")]
+    pub estimated_tokens_after: u64,
+    #[serde(rename = "instructionMode")]
+    pub instruction_mode: Option<String>,
+    #[serde(rename = "instructionSource")]
+    pub instruction_source: Option<String>,
+    #[serde(rename = "compactionPolicy")]
+    pub compaction_policy: Value,
+    pub recap: Value,
+    #[serde(rename = "sourceMeasurement")]
+    pub source_measurement: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "requestedStrategy")]
-    pub requested_strategy: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "resolvedThresholdTokens")]
-    pub resolved_threshold_tokens: Option<Option<u64>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "schemaVersion")]
-    pub schema_version: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "deserialize_present_session_update_value")]
-    #[serde(rename = "sourceMeasurement")]
-    pub source_measurement: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "thresholdSource")]
-    pub threshold_source: Option<Option<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -4591,6 +4572,11 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                         ));
                     }
                     if value.pointer("/_meta/harn").is_some() {
+                        if value.pointer("/_meta/harn/archivedMessages").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.archivedMessages is required",
+                            ));
+                        }
                         if value
                             .pointer("/_meta/harn/archivedMessages")
                             .and_then(Value::as_i64)
@@ -4600,6 +4586,21 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                                 "session update _meta.harn.archivedMessages is below its minimum",
                             ));
                         }
+                        if value.pointer("/_meta/harn/compactionPolicy").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.compactionPolicy is required",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/engineStrategy").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.engineStrategy is required",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/estimatedTokensAfter").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.estimatedTokensAfter is required",
+                            ));
+                        }
                         if value
                             .pointer("/_meta/harn/estimatedTokensAfter")
                             .and_then(Value::as_i64)
@@ -4607,12 +4608,22 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                         {
                             return Err(serde::de::Error::custom("session update _meta.harn.estimatedTokensAfter is below its minimum"));
                         }
+                        if value.pointer("/_meta/harn/estimatedTokensBefore").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.estimatedTokensBefore is required",
+                            ));
+                        }
                         if value
                             .pointer("/_meta/harn/estimatedTokensBefore")
                             .and_then(Value::as_i64)
                             .is_some_and(|number| number < 0)
                         {
                             return Err(serde::de::Error::custom("session update _meta.harn.estimatedTokensBefore is below its minimum"));
+                        }
+                        if value.pointer("/_meta/harn/hardLimitTokens").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.hardLimitTokens is required",
+                            ));
                         }
                         if value
                             .pointer("/_meta/harn/hardLimitTokens")
@@ -4623,9 +4634,47 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                                 "session update _meta.harn.hardLimitTokens is below its minimum",
                             ));
                         }
+                        if value.pointer("/_meta/harn/instructionMode").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.instructionMode is required",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/instructionSource").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.instructionSource is required",
+                            ));
+                        }
                         if value.pointer("/_meta/harn/mode").is_none() {
                             return Err(serde::de::Error::custom(
                                 "session update _meta.harn.mode is required",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/reason").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.reason is required",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/recap").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.recap is required",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/receiptId").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.receiptId is required",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/requestedStrategy").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.requestedStrategy is required",
+                            ));
+                        }
+                        if value
+                            .pointer("/_meta/harn/resolvedThresholdTokens")
+                            .is_none()
+                        {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.resolvedThresholdTokens is required",
                             ));
                         }
                         if value
@@ -4634,6 +4683,11 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                             .is_some_and(|number| number < 0)
                         {
                             return Err(serde::de::Error::custom("session update _meta.harn.resolvedThresholdTokens is below its minimum"));
+                        }
+                        if value.pointer("/_meta/harn/schemaVersion").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.schemaVersion is required",
+                            ));
                         }
                         if value
                             .pointer("/_meta/harn/schemaVersion")
@@ -4649,9 +4703,19 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                                 "session update _meta.harn.snapshotAssetId is required",
                             ));
                         }
+                        if value.pointer("/_meta/harn/sourceMeasurement").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.sourceMeasurement is required",
+                            ));
+                        }
                         if value.pointer("/_meta/harn/strategy").is_none() {
                             return Err(serde::de::Error::custom(
                                 "session update _meta.harn.strategy is required",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/thresholdSource").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.thresholdSource is required",
                             ));
                         }
                     }
