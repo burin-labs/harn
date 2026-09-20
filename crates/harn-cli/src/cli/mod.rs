@@ -168,7 +168,7 @@ pub(crate) use models::{
     ModelsCommand, ModelsInstallArgs, ModelsListArgs, ModelsListSort, ModelsLoraArgs,
     ModelsLoraBehaviorStrataPolicy, ModelsLoraCommand, ModelsLoraExportArgs, ModelsLoraInspectArgs,
     ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs, ModelsLoraPromoteArgs,
-    ModelsLoraTrainArgs, ModelsTestArgs,
+    ModelsLoraTrainArgs, ModelsTestArgs, RecommendOperation,
 };
 pub(crate) use netns_launch::{NetnsLaunchArgs, NetnsLaunchInvocation};
 pub(crate) use orchestrator::{
