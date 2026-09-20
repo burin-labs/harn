@@ -1017,6 +1017,11 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
   for {command, label} in [
     {command: "make lint-test-patterns", label: "reject flaky test patterns"},
     {command: "make check-protocol-symbol-removals", label: "guard protocol symbol removals"},
+    // The source-only policy sweep. Its whole reason for existing is that a
+    // stdlib type error used to be reportable only after the merge, so leaving
+    // it unpinned here would let it drift back into the push-only lane and the
+    // class would reopen with nothing saying so.
+    {command: "make repository-policies-source", label: "run the source-only policy sweep"},
   ] {
     if command_step_count(fast_steps, command) != 1 {
       errors = errors

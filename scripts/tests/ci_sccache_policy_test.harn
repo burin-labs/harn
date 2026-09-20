@@ -408,6 +408,7 @@ fn workflow() {
             run: "make check-protocol-symbol-removals",
           },
           {name: "Check CI cache and gate ownership policy", run: "make check-ci-cache-policy"},
+          {name: "Check source-only repository policies", run: "make repository-policies-source"},
         ],
       },
       "audit-scripts": {

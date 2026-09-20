@@ -32,6 +32,17 @@ import {
   agent_stall_initial_checkpoint,
 } from "std/agent/stall_checkpoint"
 
+/**
+ * What the agent loop's error channel carries.
+ *
+ * Most of the loop throws a string. The terminal-callback epilogue throws a
+ * record, and `llm_dispatch` throws one through this same channel from inside
+ * a helper the checker cannot see through. Declaring the union says what is
+ * actually here, so the strict-types policy judges the epilogue's throw
+ * instead of it being routed around a gate that only sees inline throws.
+ */
+type AgentLoopFailure = string | dict
+
 @complexity(allow)
 pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_opts: any) {
   let opts = initial_opts
@@ -53,7 +64,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     terminal_callback_attempted = true
     return agent_compute_terminal_callback(harness.agent, session, terminal_opts, terminal)
   }
-  let run = try {
+  let run: Result<_, AgentLoopFailure> = try {
     opts = agent_mcp_bootstrap_if_needed(harness.tools, session, opts)
     const primary_llm_opts = __agent_loop_effective_llm_options(harness.llm, opts)
     const primary_provider = to_string(primary_llm_opts?.provider ?? "")
