@@ -41,12 +41,18 @@ impl Vm {
             ("handle".to_string(), VmValue::Int(handle)),
             (
                 "signals".to_string(),
-                VmValue::List(std::sync::Arc::new(
-                    signals
-                        .into_iter()
-                        .map(|signal| VmValue::String(arcstr::ArcStr::from(signal)))
-                        .collect(),
-                )),
+                match signals {
+                    // Nil back out for nil in: no filter. An empty list is
+                    // still refused on the way in, so the two cannot be
+                    // confused.
+                    None => VmValue::Nil,
+                    Some(signals) => VmValue::List(std::sync::Arc::new(
+                        signals
+                            .into_iter()
+                            .map(|signal| VmValue::String(arcstr::ArcStr::from(signal)))
+                            .collect(),
+                    )),
+                },
             ),
             ("once".to_string(), VmValue::Bool(once)),
         ])))
@@ -78,7 +84,38 @@ impl Vm {
     pub(crate) fn has_interrupt_handler_for(&self, signal: &str) -> bool {
         self.interrupt_handlers
             .iter()
-            .any(|entry| entry.signals.iter().any(|candidate| candidate == signal))
+            .any(|entry| Self::handler_wants(entry, Some(signal)))
+    }
+
+    /// Whether any handler runs on a cancellation that carries no signal.
+    pub(crate) fn has_unfiltered_interrupt_handler(&self) -> bool {
+        self.interrupt_handlers
+            .iter()
+            .any(|entry| Self::handler_wants(entry, None))
+    }
+
+    /// How many handlers are skipped because they asked for a specific signal
+    /// and none was delivered. Reported rather than dropped quietly.
+    fn filtered_handlers_skipped_without_signal(&self) -> Vec<(i64, String)> {
+        self.interrupt_handlers
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .signals
+                    .as_ref()
+                    .map(|wanted| (entry.handle, wanted.join(",")))
+            })
+            .collect()
+    }
+
+    fn handler_wants(entry: &super::InterruptHandler, signal: Option<&str>) -> bool {
+        match (&entry.signals, signal) {
+            // No filter: every cancellation, with or without a signal.
+            (None, _) => true,
+            (Some(wanted), Some(signal)) => wanted.iter().any(|candidate| candidate == signal),
+            // Filtered, but nothing was delivered to match against.
+            (Some(_), None) => false,
+        }
     }
 
     /// Box-pin'd to break the static recursion cycle between
@@ -94,6 +131,18 @@ impl Vm {
     ) -> Pin<Box<dyn Future<Output = Result<bool, VmError>> + Send + 'a>> {
         Box::pin(async move {
             let signal = normalize_signal(signal)?;
+            self.dispatch_matching_interrupt_handlers(Some(signal))
+                .await
+        })
+    }
+
+    /// Run the handlers that want this cancellation. `None` is a cancellation
+    /// that carries no signal, which only unfiltered handlers want.
+    pub(crate) fn dispatch_matching_interrupt_handlers(
+        &mut self,
+        signal: Option<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, VmError>> + Send + '_>> {
+        Box::pin(async move {
             self.interrupted = true;
 
             if self.dispatching_interrupt {
@@ -104,7 +153,7 @@ impl Vm {
                 .interrupt_handlers
                 .iter()
                 .rev()
-                .filter(|entry| entry.signals.iter().any(|candidate| candidate == &signal))
+                .filter(|entry| Self::handler_wants(entry, signal.as_deref()))
                 .map(|entry| {
                     (
                         entry.handle,
@@ -147,6 +196,59 @@ impl Vm {
         })
     }
 
+    /// One owner for "a cancellation has been observed, so run its handlers".
+    ///
+    /// A cancellation is noticed in several independent places: the
+    /// between-ops poll, the op wrapper's timed-out branch, and the body of a
+    /// blocking operation that watches the flag itself. Before this existed,
+    /// each decided separately whether to dispatch, and the self-cancelling
+    /// ones did not. A handler then ran only because the observer that skipped
+    /// dispatch also left the signal in its slot for a later poll to find,
+    /// which made a registered cleanup hook depend on the program continuing
+    /// to execute after the throw. A program that stops there ran no handler
+    /// and reported nothing.
+    ///
+    /// Every observer calls this before returning the cancelled error.
+    ///
+    /// The signal is put back when no handler wants it, because taking it is
+    /// destructive and a path that does not dispatch must not be the path that
+    /// destroys it. An empty slot yields no dispatch rather than a guess: a
+    /// name that was never delivered matches no registered handler, so
+    /// inventing one silently discards the handler it fails to match, and not
+    /// every cancellation is a signal at all.
+    ///
+    /// Returns whether handlers ran.
+    pub(crate) async fn dispatch_handlers_for_observed_cancel(&mut self) -> Result<bool, VmError> {
+        let delivered = self
+            .pending_interrupt_signal
+            .take()
+            .or_else(|| self.take_host_interrupt_signal());
+
+        let Some(signal) = delivered else {
+            // No signal was delivered. A host stopping the session cancels
+            // this way, and a cleanup hook registered without a filter is
+            // written for exactly that, so it still runs. A hook that asked
+            // for particular signals cannot be matched against nothing, and
+            // that skip is named rather than dropped.
+            for (handle, wanted) in self.filtered_handlers_skipped_without_signal() {
+                eprintln!(
+                    "[harn] on_interrupt handler {handle} registered for {wanted} did not \
+                     run: this cancellation carried no signal"
+                );
+            }
+            if !self.has_unfiltered_interrupt_handler() {
+                return Ok(false);
+            }
+            return self.dispatch_matching_interrupt_handlers(None).await;
+        };
+
+        if !self.has_interrupt_handler_for(&signal) {
+            self.pending_interrupt_signal = Some(signal);
+            return Ok(false);
+        }
+        self.dispatch_interrupt_handlers(&signal).await
+    }
+
     pub(crate) async fn pending_scope_interrupt(&mut self) -> Option<VmError> {
         if let Some(code) = self.requested_process_exit() {
             self.cancel_spawned_tasks();
@@ -184,15 +286,10 @@ impl Vm {
         }
 
         if self.is_cancel_requested() {
-            let signal = self
-                .take_host_interrupt_signal()
-                .unwrap_or_else(|| "SIGINT".to_string());
-            if self.has_interrupt_handler_for(&signal) {
-                match self.dispatch_interrupt_handlers(&signal).await {
-                    Ok(true) => return None,
-                    Ok(false) => {}
-                    Err(error) => return Some(error),
-                }
+            match self.dispatch_handlers_for_observed_cancel().await {
+                Ok(true) => return None,
+                Ok(false) => {}
+                Err(error) => return Some(error),
             }
 
             match self.cancel_grace_instructions_remaining.as_mut() {
@@ -243,16 +340,23 @@ impl Vm {
     }
 }
 
-fn parse_signal_list(opts: Option<&VmValue>) -> Result<Vec<String>, VmError> {
+/// `None` means the handler asked for no filter and runs on every observed
+/// cancellation.
+///
+/// This used to default to SIGINT, which made the common registration - a
+/// cleanup hook with no options - silently specific to one signal. A host
+/// stopping a session cancels without any signal at all, so those hooks did
+/// not run on the case they were mostly written for.
+fn parse_signal_list(opts: Option<&VmValue>) -> Result<Option<Vec<String>>, VmError> {
     let Some(VmValue::Dict(opts)) = opts else {
-        return Ok(vec!["SIGINT".to_string()]);
+        return Ok(None);
     };
     let Some(value) = opts.get("signals") else {
-        return Ok(vec!["SIGINT".to_string()]);
+        return Ok(None);
     };
     match value {
-        VmValue::Nil => Ok(vec!["SIGINT".to_string()]),
-        VmValue::String(signal) => Ok(vec![normalize_signal(signal.as_ref())?]),
+        VmValue::Nil => Ok(None),
+        VmValue::String(signal) => Ok(Some(vec![normalize_signal(signal.as_ref())?])),
         VmValue::List(items) => {
             if items.is_empty() {
                 return Err(VmError::Runtime(
@@ -271,7 +375,7 @@ fn parse_signal_list(opts: Option<&VmValue>) -> Result<Vec<String>, VmError> {
             }
             out.sort();
             out.dedup();
-            Ok(out)
+            Ok(Some(out))
         }
         other => Err(VmError::TypeError(format!(
             "on_interrupt: signals must be a string or list<string>, got {}",

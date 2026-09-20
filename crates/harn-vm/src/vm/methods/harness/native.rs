@@ -147,6 +147,14 @@ impl crate::vm::Vm {
                             _ = &mut sleep => break,
                             _ = poll.tick() => {
                                 if self.is_cancel_requested() {
+                                    // This is an observer of the cancellation,
+                                    // so it dispatches before it throws. It
+                                    // used to return straight away and leave
+                                    // the signal for whatever polled next,
+                                    // which meant the handler ran only if the
+                                    // program kept executing past the throw.
+                                    self.dispatch_handlers_for_observed_cancel()
+                                        .await?;
                                     return Err(
                                         crate::stdlib::cancelled_vm_error(),
                                     );
