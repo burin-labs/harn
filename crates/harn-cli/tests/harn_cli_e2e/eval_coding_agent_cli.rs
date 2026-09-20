@@ -519,25 +519,41 @@ fn coding_agent_suite_default_structural_validator_vetoes_phantom_completion() {
         .lines()
         .map(|line| serde_json::from_str(line).expect("transcript event parses"))
         .collect();
-    let corrective_messages: Vec<&str> = transcript_events
+    let corrective_messages: Vec<&serde_json::Value> = transcript_events
         .iter()
         .filter(|event| {
-            event["kind"] == "message" && event["role"] == "user" && event["visibility"] == "public"
+            event["text"].as_str().is_some_and(|text| {
+                text.contains("<directive authority=\"corrective\" ttl_turns=\"1\">")
+            })
         })
-        .filter_map(|event| event["text"].as_str())
-        .filter(|text| text.contains("<directive authority=\"corrective\" ttl_turns=\"1\">"))
         .collect();
     assert_eq!(
         corrective_messages.len(),
         1,
         "default validator should persist one typed corrective directive; got:\n{transcript}"
     );
+    let corrective = corrective_messages[0];
+    assert_eq!(corrective["kind"], "message");
+    assert_eq!(corrective["role"], "user");
+    assert_eq!(corrective["visibility"], "internal");
+    let blocks = corrective["blocks"].as_array().expect("corrective blocks");
+    assert!(
+        !blocks.is_empty(),
+        "the corrective directive must retain its content"
+    );
+    assert!(
+        blocks.iter().all(|block| block["visibility"] == "internal"),
+        "corrective directive blocks must not leak into public presentation: {corrective}"
+    );
     assert!(
         !transcript.contains("<runtime_feedback"),
         "internal feedback markup must not be persisted as model-visible content; got:\n{transcript}"
     );
     assert!(
-        corrective_messages[0].contains("\"rule\":\"non_empty_when_writes_expected\""),
+        corrective["text"]
+            .as_str()
+            .expect("corrective text")
+            .contains("\"rule\":\"non_empty_when_writes_expected\""),
         "phantom completion should trip the write-expected rule; got:\n{transcript}"
     );
 }
