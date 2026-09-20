@@ -141,6 +141,21 @@ impl AgentTerminalKind {
             Self::Unknown => "unknown",
         }
     }
+
+    /// Whether a natural `stop_reason` beside this kind is ordinary rather
+    /// than contradictory.
+    ///
+    /// Most kinds name the mechanism that ended the loop, so a natural reason
+    /// beside one of them is a genuine disagreement about how the run stopped.
+    /// [`Self::CompletionUnverified`] is not such a claim: it is a verdict on
+    /// the deliverable, reached after the model stopped, and the model having
+    /// stopped naturally is the normal way to arrive at it. A run that
+    /// attempted tool calls, had every one refused, then announced it was
+    /// finished reports exactly that pair, and it is the shape harn#7915
+    /// exists to record rather than erase.
+    pub fn composes_with_a_natural_reason(self) -> bool {
+        matches!(self, Self::CompletionUnverified)
+    }
 }
 
 /// Raw `stop_reason` values that seal a genuinely natural completion (a clean
@@ -228,6 +243,7 @@ impl AgentTerminalOutcome {
     ) -> Self {
         let reason = reason.into();
         if kind != AgentTerminalKind::Natural
+            && !kind.composes_with_a_natural_reason()
             && !reason.is_empty()
             && NATURAL_STOP_REASONS.contains(&reason.as_str())
         {
@@ -765,6 +781,32 @@ mod tests {
             assert_eq!(outcome.reason, "conflicting_terminal_evidence");
             assert_eq!(outcome.terminal_class, None);
             assert!(outcome.has_conflicting_evidence());
+        }
+    }
+
+    #[test]
+    fn an_unverified_completion_keeps_its_natural_stop_reason() {
+        // A run whose tool calls were all refused and which then announced it
+        // was finished reaches `completion_unverified` through a natural stop.
+        // That pair is the record harn#7915 exists to produce, so the conflict
+        // rule must leave it alone rather than replace it with an unknown.
+        let outcome =
+            terminal_outcome_for_finalize("completion_unverified", "natural", None, false);
+        assert_eq!(outcome.kind, AgentTerminalKind::CompletionUnverified);
+        assert_eq!(outcome.reason, "natural");
+        assert!(!outcome.has_conflicting_evidence());
+        assert!(AgentTerminalKind::CompletionUnverified.composes_with_a_natural_reason());
+        // Every other non-natural kind still treats a natural reason as a
+        // disagreement, so the exemption cannot quietly widen.
+        for kind in AgentTerminalKind::ALL {
+            if kind == AgentTerminalKind::Natural || kind == AgentTerminalKind::Unknown {
+                continue;
+            }
+            assert_eq!(
+                kind.composes_with_a_natural_reason(),
+                kind == AgentTerminalKind::CompletionUnverified,
+                "{kind:?}"
+            );
         }
     }
 
