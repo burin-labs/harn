@@ -11,7 +11,7 @@ import {
 } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
-import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+import { llm_text, llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
 
 fn terminal_callback_tools() {
   let tools = tool_registry()
@@ -67,8 +67,7 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
         // the natural seal of the rescued run. The rescue verdict is only
         // correct on the first, so the branch is on the reported cause.
         terminal_callback: { info ->
-          if info?.exit_cause != "budget_exhausted" {
-            assert_eq(info?.exit_cause, "natural")
+          if info?.final_status != "budget_exhausted" {
             assert_eq(info?.final_status, "done")
             return {message: "The rescued run sealed on its own."}
           }
@@ -137,139 +136,345 @@ fn edit_call(id: string) {
   }
 }
 
-fn terminal_callback_notices(events: any) {
-  return events.filter(
-    { event -> event.type == "feedback_injected" && event?.kind == "terminal_callback" },
-  )
-    .map({ event -> to_string(event?.content ?? "") })
-    .to_list()
-}
-
-// The callback is the only in-band notification that the run ended, so it
-// reports the cause and nothing else. Returning a message makes the call
-// observable from outside: an invocation that never happens injects nothing,
-// which is what this case is here to catch.
-fn cause_reporting_callback() {
-  return { info -> return {message: "sealed exit_cause=" + to_string(info?.exit_cause ?? "")} }
-}
-
-/*
- * harn#8473. A run that dies on an error its loop cannot retry used to seal in
- * silence: the callback was gated on `terminal_error == nil`, so the one
- * notification an embedder gets never fired on the exit it most needs to hear
- * about. Two identical permanent denials are the cheapest fully hermetic route
- * to that exit -- no provider flakiness, no clock.
- */
-pipeline test_a_run_that_dies_on_an_error_still_reports_its_terminal(harness: Harness) {
-  with_llm_script(
-    harness.llm,
-    [edit_call("edit-1"), edit_call("edit-2"), edit_call("edit-3")],
-    { ->
-      const session = "terminal-exception-" + harness.random.uuid()
-      const opts: AgentSpec = {
-        provider: "mock",
-        session_id: session,
-        tools: denial_toolset(),
-        tool_format: "native",
-        loop_until_done: true,
-        done_sentinel: "##DONE##",
-        max_iterations: 4,
-        final_wrapup: false,
-        stall_diagnostics: {enabled: false},
-        approval_policy: {auto_deny: ["edit"]},
-        terminal_callback: cause_reporting_callback(),
-      }
-      const captured = agent_capture_events(
-        harness.agent,
-        session,
-        fn() { return agent_loop(harness, "Edit src/app.rs.", nil, opts) },
-      )
-      // The exit under test really is the error exit and not some other seal.
-      assert_eq(captured.result.status, "error")
-      assert_eq(captured.result.stop_reason, "repeated_non_retryable_denial")
-      assert_eq(terminal_callback_notices(captured.events), ["sealed exit_cause=exception"])
-    },
-  )
-}
-
-/*
- * Negative control for the case above: the rescue budget is still rationed.
- * A callback that asks to continue off an error exit is heard, but the loop
- * refuses the extension, because a run whose error is terminal cannot be
- * rescued by an embedder that was only told about it.
- */
-pipeline test_an_error_exit_hears_the_callback_but_refuses_its_rescue(harness: Harness) {
-  with_llm_script(
-    harness.llm,
-    [edit_call("edit-1"), edit_call("edit-2"), edit_call("edit-3"), edit_call("edit-4")],
-    { ->
-      const session = "terminal-exception-norescue-" + harness.random.uuid()
-      const opts: AgentSpec = {
-        provider: "mock",
-        session_id: session,
-        tools: denial_toolset(),
-        tool_format: "native",
-        loop_until_done: true,
-        done_sentinel: "##DONE##",
-        max_iterations: 6,
-        final_wrapup: false,
-        stall_diagnostics: {enabled: false},
-        approval_policy: {auto_deny: ["edit"]},
-        terminal_callback: { _info ->
-          return {message: "Try once more.", next_options: {llm_options: {temperature: 0.0}}}
+fn record_terminal(fs: HarnessFs, path: string, info: dict) -> nil {
+  const prior: list = if fs.exists(path) {
+    json_parse(fs.read_text(path))
+  } else {
+    []
+  }
+  fs.write_text(
+    path,
+    json_stringify(
+      prior.appending(
+        {
+          status: info.final_status,
+          reason: info.stop_reason,
+          has_error: info?.terminal_error != nil,
+          iteration: info.iteration,
+          successful_tools: info.session_successful_tools,
         },
-      }
-      const captured = agent_capture_events(
-        harness.agent,
-        session,
-        fn() { return agent_loop(harness, "Edit src/app.rs.", nil, opts) },
+      ),
+    ),
+  )
+}
+
+fn terminal_records(fs: HarnessFs, path: string) -> list {
+  assert(fs.exists(path), "the terminal callback must write its artifact")
+  return json_parse(fs.read_text(path))
+}
+
+fn terminal_spec(session: string) -> AgentSpec {
+  return {
+    provider: "mock",
+    session_id: session,
+    tools: terminal_callback_tools(),
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 4,
+    final_wrapup: false,
+    stall_diagnostics: {enabled: false},
+  }
+}
+
+pipeline test_a_thrown_loop_error_writes_the_terminal_artifact(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "terminal.json")
+      with_llm_script(
+        harness.llm,
+        [llm_tool_call("inspect", {}, "inspect-1")],
+        { ->
+          const opts = terminal_spec("terminal-throw-" + harness.random.uuid())
+            + {
+              post_turn_callback: { _info ->
+                throw "injected post-turn failure"
+              },
+              terminal_callback: { info -> record_terminal(harness.fs, path, info) },
+            }
+          const outcome = try {
+            agent_loop(harness, "Inspect the target.", nil, opts)
+          }
+          assert(is_err(outcome), "the loop must retain its thrown failure")
+          assert(contains(to_string(unwrap_err(outcome)), "injected post-turn failure"))
+          assert_eq(len(harness.llm.mock_calls()), 1)
+          const records = terminal_records(harness.fs, path)
+          assert_eq(len(records), 1)
+          assert_eq(records[0].status, "failed")
+          assert_eq(records[0].reason, "error")
+          assert(records[0].has_error)
+          assert_eq(records[0].iteration, 1)
+          assert_eq(records[0].successful_tools, ["inspect"])
+        },
       )
-      assert_eq(captured.result.status, "error")
-      assert_eq(captured.result.stop_reason, "repeated_non_retryable_denial")
-      // The cutoff fires on the second identical denial and the loop stops
-      // there. A granted rescue would have spent a third scripted call.
-      assert_eq(len(harness.llm.mock_calls()), 2)
-      const decisions = captured.result?.adaptive_budget?.decisions ?? []
-      for decision in decisions {
-        assert(
-          decision?.reason != "terminal_callback_continue",
-          "an error exit must not record a terminal rescue extension",
-        )
+    },
+  )
+}
+
+pipeline test_a_terminal_denial_is_recorded_without_a_rescue(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "terminal.json")
+      with_llm_script(
+        harness.llm,
+        [edit_call("edit-1"), edit_call("edit-2"), edit_call("edit-3")],
+        { ->
+          const opts = terminal_spec("terminal-denial-" + harness.random.uuid())
+            + {
+              tools: denial_toolset(),
+              approval_policy: {auto_deny: ["edit"]},
+              terminal_callback: { info ->
+                record_terminal(harness.fs, path, info)
+                return {message: "Try once more."}
+              },
+            }
+          const result = agent_loop(harness, "Edit src/app.rs.", nil, opts)
+          assert_eq(result.status, "error")
+          assert_eq(result.stop_reason, "repeated_non_retryable_denial")
+          assert_eq(len(harness.llm.mock_calls()), 2, "a terminal denial cannot be rescued")
+          const records = terminal_records(harness.fs, path)
+          assert_eq(len(records), 1)
+          assert_eq(records[0].status, result.status)
+          assert_eq(records[0].reason, result.stop_reason)
+          assert(records[0].has_error)
+        },
+      )
+    },
+  )
+}
+
+pipeline test_natural_completion_writes_its_artifact_before_the_artifact_check(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "terminal.json")
+      with_llm_script(
+        harness.llm,
+        [llm_text("Nothing to change. ##DONE##")],
+        { ->
+          const opts = terminal_spec("terminal-natural-" + harness.random.uuid())
+            + {
+              require_artifacts: [path],
+              terminal_callback: { info -> record_terminal(harness.fs, path, info) },
+            }
+          const result = agent_loop(harness, "Report the outcome.", nil, opts)
+          assert_eq(result.terminal.kind, "natural")
+          assert_eq(len(harness.llm.mock_calls()), 1)
+          const records = terminal_records(harness.fs, path)
+          assert_eq(len(records), 1)
+          assert_eq(records[0].status, "done")
+          assert_eq(records[0].reason, result.stop_reason)
+          assert(!records[0].has_error, "natural completion must not be relabeled as an error")
+        },
+      )
+    },
+  )
+}
+
+pipeline test_spent_terminal_allowance_still_notifies_but_cannot_extend(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "terminal.json")
+      with_llm_script(
+        harness.llm,
+        [
+          llm_tool_call("inspect", {}, "inspect-1"),
+          llm_tool_call("inspect", {}, "inspect-2"),
+          llm_text("This call must not be reached. ##DONE##"),
+        ],
+        { ->
+          const opts = terminal_spec("terminal-spent-" + harness.random.uuid())
+            + {
+              iteration_budget: {
+                mode: "fixed",
+                initial: 1,
+                max: 1,
+                extend_by: 1,
+                expose_decisions: true,
+              },
+              post_turn_callback: { _info -> return {message: "Keep inspecting."} },
+              terminal_callback: { info ->
+                record_terminal(harness.fs, path, info)
+                return {message: "Request a rescue turn."}
+              },
+            }
+          const result = agent_loop(harness, "Inspect the target.", nil, opts)
+          assert_eq(result.terminal.kind, "policy_budget")
+          assert_eq(result.stop_reason, "max_iterations")
+          assert_eq(len(harness.llm.mock_calls()), 2, "only one rescue turn may be spent")
+          const grants = result.adaptive_budget.decisions.filter(
+            { decision -> decision.reason == "terminal_callback_continue" },
+          )
+            .to_list()
+          assert_eq(len(grants), 1, "the terminal-report allowance must actually be spent")
+          const records = terminal_records(harness.fs, path)
+          assert_eq(len(records), 2, "the exhausted terminal must notify after the rescue terminal")
+          assert_eq(
+            records.map({ row -> row.status }).to_list(),
+            ["budget_exhausted", "budget_exhausted"],
+          )
+          assert_eq(records.map({ row -> row.iteration }).to_list(), [1, 2])
+        },
+      )
+    },
+  )
+}
+
+pipeline test_a_callback_that_throws_is_not_called_twice(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "terminal.json")
+      with_llm_script(
+        harness.llm,
+        [llm_text("Done. ##DONE##")],
+        { ->
+          const opts = terminal_spec("terminal-callback-throw-" + harness.random.uuid())
+            + {
+              terminal_callback: { info ->
+                record_terminal(harness.fs, path, info)
+                throw "injected terminal callback failure"
+              },
+            }
+          const outcome = try {
+            agent_loop(harness, "Report the outcome.", nil, opts)
+          }
+          assert(is_err(outcome))
+          assert(contains(to_string(unwrap_err(outcome)), "injected terminal callback failure"))
+          assert_eq(len(terminal_records(harness.fs, path)), 1)
+          assert_eq(len(harness.llm.mock_calls()), 1)
+        },
+      )
+    },
+  )
+}
+
+pipeline test_callback_failure_preserves_the_original_loop_error(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "terminal.json")
+      with_llm_script(
+        harness.llm,
+        [llm_tool_call("inspect", {}, "inspect-1")],
+        { ->
+          const opts = terminal_spec("terminal-double-error-" + harness.random.uuid())
+            + {
+              post_turn_callback: { _info ->
+                throw "original loop failure"
+              },
+              terminal_callback: { info ->
+                record_terminal(harness.fs, path, info)
+                throw "terminal writer failure"
+              },
+            }
+          const outcome = try {
+            agent_loop(harness, "Inspect the target.", nil, opts)
+          }
+          assert(is_err(outcome))
+          const error = unwrap_err(outcome)
+          assert_eq(error.kind, "agent_loop_terminal_callback_failed")
+          assert(contains(to_string(error.cause.terminal_error), "original loop failure"))
+          assert(contains(to_string(error.cause.callback_error), "terminal writer failure"))
+          assert_eq(len(terminal_records(harness.fs, path)), 1)
+          assert_eq(len(harness.llm.mock_calls()), 1)
+        },
+      )
+    },
+  )
+}
+
+pipeline test_a_deadline_notifies_without_reopening_the_loop(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "terminal.json")
+      harness.testing.clock_set(0)
+      try {
+        const opts = terminal_spec("terminal-deadline-" + harness.random.uuid())
+          + {
+            iteration_budget: {mode: "fixed", initial: 5, max: 5, wall_clock_ms: 1000},
+            llm_caller: { _call ->
+              harness.testing.clock_advance(1500)
+              return {ok: true, value: {text: "still working", provider: "mock", model: "mock"}}
+            },
+            terminal_callback: { info ->
+              record_terminal(harness.fs, path, info)
+              return {message: "Try another turn."}
+            },
+          }
+        const result = agent_loop(harness, "Keep inspecting.", nil, opts)
+        assert_eq(result.terminal.kind, "policy_budget")
+        assert_eq(result.stop_reason, "wall_clock")
+        assert_eq(result.llm.iterations, 1)
+        const records = terminal_records(harness.fs, path)
+        assert_eq(len(records), 1)
+        assert_eq(records[0].status, "budget_exhausted")
+        assert_eq(records[0].reason, "wall_clock")
+      } catch (error) {
+        throw error
+      } finally {
+        harness.testing.clock_reset()
       }
     },
   )
 }
 
-/*
- * Negative control: a run that ends on its own keeps its own cause. The new
- * notification must not relabel an ordinary completion as a failure, and it
- * must not change the status the loop sealed.
- */
-pipeline test_a_natural_exit_keeps_its_own_cause(harness: Harness) {
-  with_llm_script(
-    harness.llm,
-    [llm_text("Nothing to change here. ##DONE##")],
-    { ->
-      const session = "terminal-natural-" + harness.random.uuid()
-      const opts: AgentSpec = {
-        provider: "mock",
-        session_id: session,
-        tools: denial_toolset(),
-        tool_format: "native",
-        loop_until_done: true,
-        done_sentinel: "##DONE##",
-        max_iterations: 4,
-        final_wrapup: false,
-        stall_diagnostics: {enabled: false},
-        terminal_callback: cause_reporting_callback(),
-      }
-      const captured = agent_capture_events(
-        harness.agent,
-        session,
-        fn() { return agent_loop(harness, "Report on src/app.rs.", nil, opts) },
+pipeline test_reserved_verification_still_reaches_terminal_notification(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "terminal.json")
+      const source = path_join(root, "source.txt")
+      let tools = tool_registry()
+      tools = tool_define(
+        tools,
+        "apply_fix",
+        "Apply the fix.",
+        {
+          handler: { _args ->
+            harness.fs.write_text(source, "fixed")
+            return "fixed"
+          },
+          parameters: {},
+          returns: {type: "string"},
+          annotations: {kind: "write"},
+        },
       )
-      assert_eq(captured.result.status, "done")
-      assert_eq(terminal_callback_notices(captured.events), ["sealed exit_cause=natural"])
+      with_llm_script(
+        harness.llm,
+        [llm_tool_call("apply_fix", {}, "edit-1")],
+        { ->
+          const opts = terminal_spec("terminal-reserved-" + harness.random.uuid())
+            + {
+              tools: tools,
+              max_iterations: 1,
+              verify_completion: { info ->
+                assert_eq(info.stop_reason, "reserved_terminal_verify")
+                assert_eq(harness.fs.read_text(source), "fixed")
+                return nil
+              },
+              stall_diagnostics: {
+                enabled: true,
+                repair_aware: true,
+                post_edit_reverify: true,
+                reserved_terminal_verify: true,
+                reserved_terminal_verify_iterations: 1,
+              },
+              terminal_callback: { info -> record_terminal(harness.fs, path, info) },
+            }
+          const result = agent_loop(harness, "Apply and verify the fix.", nil, opts)
+          assert_eq(result.status, "done")
+          assert_eq(result.stop_reason, "reserved_terminal_verify")
+          const records = terminal_records(harness.fs, path)
+          assert_eq(len(records), 1)
+          assert_eq(records[0].status, "done")
+          assert_eq(records[0].reason, "reserved_terminal_verify")
+        },
+      )
     },
   )
 }

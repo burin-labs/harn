@@ -1155,9 +1155,9 @@ pub fn agent_compute_post_turn(
 }
 
 /**
- * agent_compute_terminal_callback gives host policy one bounded chance to
- * transform a non-successful loop terminal (for example max-iteration exhaustion
- * over a still-red workspace) into a normal continuation with `next_options`.
+ * Notify host policy of a terminal decision, including failure and exhausted
+ * budgets. The loop separately decides whether a returned continuation may
+ * consume its one terminal-report allowance.
  * It intentionally uses a distinct `terminal_callback` option instead of
  * replaying `post_turn_callback`, so ordinary no-tool/no-write nudges do not
  * accidentally reinterpret every terminal budget exit as a normal turn.
@@ -1176,9 +1176,12 @@ pub fn agent_compute_terminal_callback(
     session: {id: session.session_id},
     terminal: true,
     iteration: terminal?.iteration ?? 0,
-    final_status: terminal?.final_status ?? "",
+    final_status: if (terminal?.final_status ?? "") == "" {
+      "done"
+    } else {
+      terminal.final_status
+    },
     stop_reason: terminal?.stop_reason ?? "",
-    exit_cause: terminal?.exit_cause ?? "natural",
     terminal_error: terminal?.terminal_error,
     budget_exhausted: (terminal?.final_status ?? "") == "budget_exhausted",
     max_iterations: terminal?.max_iterations ?? 0,
