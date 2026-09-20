@@ -271,4 +271,5 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(scored.groups[0].mean_absolute_level_error, 0.75)
   assert_eq(scored.groups[0].accuracy, 0.5)
   assert_eq(scored.groups[0].level_order, ["low", "medium", "high"])
+  harness.stdio.log("stdlib eval calibration ok")
 }
