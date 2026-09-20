@@ -27,7 +27,6 @@
 import { scan_glob } from "./path_visibility.harn"
 
 const THREAD_SLEEP_ALLOWLIST: list<string> = [
-
   "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
   // Real subprocess lifecycle e2e: probes OS process-group death and
   // `background: true` survival, so the waits observe host process state.
@@ -64,7 +63,6 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 //   - `executor_tests.rs`: pre-existing budget, fairness, and finish-order
 //     tests extracted from executor.rs's inline test module.
 const TOKIO_SLEEP_ALLOWLIST: list<string> = [
-
   // `sse_telemetry_tests.rs`: one virtual-time test measures the wait before
   // a provider's first stream frame. Under `start_paused` the runtime
   // auto-advances only when every task is idle, so `sleep` is the
@@ -92,7 +90,6 @@ const TOKIO_SLEEP_ALLOWLIST: list<string> = [
 // Wall-clock `Instant::now() < deadline` comparisons inside any loop or
 // guard.
 const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
-
   // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
   // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
@@ -110,7 +107,6 @@ const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
 // Remaining entries: legitimate fixture-setup uses against real OS time
 // (httpdate Retry-After parsing, real-mtime touch fixtures).
 const SYSTEM_TIME_ALLOWLIST: list<string> = [
-
   "crates/harn-vm/src/http/tests.rs",
   "crates/harn-hostlib/tests/harn_hostlib/scanner_e2e.rs",
 ]
@@ -118,8 +114,7 @@ const SYSTEM_TIME_ALLOWLIST: list<string> = [
 // recv_timeout with an explicit sub-second Duration literal.
 // Named-constant variants are not caught here because the constant value
 // cannot be resolved by a static text search.
-const RECV_TIMEOUT_MILLIS_ALLOWLIST: list<string> = [
-]
+const RECV_TIMEOUT_MILLIS_ALLOWLIST: list<string> = []
 
 // Conformance tests that exercise real subprocesses should share the bounded
 // polling helpers from `conformance/tests/_common.harn` instead of copying
@@ -971,7 +966,11 @@ const INLINE_TEST_GRANDFATHER = [
   {rule: "instant_now_deadline", path: "crates/harn-vm/src/op_interrupt.rs", count: 6},
   {rule: "recv_timeout_millis", path: "crates/harn-vm/src/op_interrupt.rs", count: 3},
   {rule: "recv_timeout_millis", path: "crates/harn-vm/src/stdlib/session_wal_watch.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs", count: 1},
+  {
+    rule: "system_time",
+    path: "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs",
+    count: 1,
+  },
   {rule: "system_time", path: "crates/harn-hostlib/src/code_index/rename.rs", count: 1},
   {rule: "system_time", path: "crates/harn-hostlib/src/fs.rs", count: 1},
   {rule: "system_time", path: "crates/harn-hostlib/src/fs_snapshot.rs", count: 1},
@@ -987,7 +986,11 @@ const INLINE_TEST_GRANDFATHER = [
   {rule: "thread_sleep", path: "crates/harn-vm/src/atomic_io.rs", count: 1},
   {rule: "thread_sleep", path: "crates/harn-vm/src/op_interrupt.rs", count: 6},
   {rule: "thread_sleep", path: "crates/harn-vm/src/stdlib/clock.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-cli/src/commands/orchestrator/listener/routes.rs", count: 1},
+  {
+    rule: "tokio_sleep",
+    path: "crates/harn-cli/src/commands/orchestrator/listener/routes.rs",
+    count: 1,
+  },
   {rule: "tokio_sleep", path: "crates/harn-serve/src/adapters/worker.rs", count: 1},
   {rule: "tokio_sleep", path: "crates/harn-vm/src/composition/mod.rs", count: 1},
   {rule: "tokio_sleep", path: "crates/harn-vm/src/connectors/harn_module.rs", count: 1},
