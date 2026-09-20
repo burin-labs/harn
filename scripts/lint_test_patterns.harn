@@ -711,12 +711,43 @@ pub fn is_runtime_rs_path(rel: string) -> bool {
  * applied at once the moment someone split the file for an unrelated reason
  * (harn#8494).
  */
+/**
+ * Where a runtime file's inline test module begins, or nil when it has none.
+ *
+ * The marker is `#[cfg(test)]` immediately before a `mod` declaration, not any
+ * `#[cfg(test)]` at all. A test-only HELPER FUNCTION also carries that
+ * attribute, and one of those sitting high in a file used to end the runtime
+ * region there: everything below it was scanned under the test rules and
+ * blanked from the runtime rules. On the interrupt bridge that moved the split
+ * from line 1121 to line 380, so 741 lines of runtime code were classified as
+ * tests. 172 of the 1151 files with inline tests had a first marker that was
+ * not the module.
+ *
+ * The direction that matters is the quiet one. Runtime wall-clock reads below
+ * such a helper were removed from the runtime scan, so the rule that should
+ * have judged them reported nothing and read as clean.
+ */
 pub fn inline_test_module_line(text: string) -> int? {
+  const lines = text.lines()
   let line_no = 0
-  for line in text.lines() {
+  for line in lines {
     line_no = line_no + 1
-    if trim(line).starts_with("#[cfg(test") {
-      return line_no
+    if !trim(line).starts_with("#[cfg(test") {
+      continue
+    }
+    // Look past any further attributes and blank lines to the item the marker
+    // actually applies to.
+    let probe = line_no
+    while probe < len(lines) {
+      const next = trim(lines[probe] ?? "")
+      if next == "" || next.starts_with("#[") {
+        probe = probe + 1
+        continue
+      }
+      if next.starts_with("mod ") || next.starts_with("pub mod ") {
+        return line_no
+      }
+      break
     }
   }
   return nil
@@ -961,30 +992,16 @@ pub fn has_mock_time(text: string) -> bool {
 const INLINE_TEST_GRANDFATHER = [
   {rule: "ignore_attr", path: "crates/harn-vm/src/security/behavioral.rs", count: 1},
   {rule: "ignore_attr", path: "crates/harn-vm/src/security/stance_judge.rs", count: 1},
-  {rule: "instant_now_deadline", path: "crates/harn-hostlib/src/host_lease.rs", count: 1},
-  {rule: "instant_now_deadline", path: "crates/harn-vm/src/mcp_oauth.rs", count: 1},
-  {rule: "instant_now_deadline", path: "crates/harn-vm/src/op_interrupt.rs", count: 6},
-  {rule: "recv_timeout_millis", path: "crates/harn-vm/src/op_interrupt.rs", count: 3},
+  {rule: "instant_now_deadline", path: "crates/harn-vm/src/op_interrupt.rs", count: 1},
   {rule: "recv_timeout_millis", path: "crates/harn-vm/src/stdlib/session_wal_watch.rs", count: 1},
-  {
-    rule: "system_time",
-    path: "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs",
-    count: 1,
-  },
   {rule: "system_time", path: "crates/harn-hostlib/src/code_index/rename.rs", count: 1},
   {rule: "system_time", path: "crates/harn-hostlib/src/fs.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-hostlib/src/fs_snapshot.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-hostlib/src/host_lease.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-hostlib/src/tools/proc/artifacts.rs", count: 2},
   {rule: "system_time", path: "crates/harn-vm/src/agent_events/sinks.rs", count: 2},
   {rule: "system_time", path: "crates/harn-vm/src/event_log/util.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-vm/src/llm/providers/vertex.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-vm/src/mcp_oauth.rs", count: 1},
   {rule: "system_time", path: "crates/harn-vm/src/metadata.rs", count: 1},
   {rule: "system_time", path: "crates/harn-vm/src/triggers/worker_queue.rs", count: 1},
   {rule: "thread_sleep", path: "crates/harn-cli/src/commands/command_probe.rs", count: 1},
-  {rule: "thread_sleep", path: "crates/harn-vm/src/atomic_io.rs", count: 1},
-  {rule: "thread_sleep", path: "crates/harn-vm/src/op_interrupt.rs", count: 6},
+  {rule: "thread_sleep", path: "crates/harn-vm/src/op_interrupt.rs", count: 2},
   {rule: "thread_sleep", path: "crates/harn-vm/src/stdlib/clock.rs", count: 1},
   {
     rule: "tokio_sleep",
@@ -993,14 +1010,10 @@ const INLINE_TEST_GRANDFATHER = [
   },
   {rule: "tokio_sleep", path: "crates/harn-serve/src/adapters/worker.rs", count: 1},
   {rule: "tokio_sleep", path: "crates/harn-vm/src/composition/mod.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-vm/src/connectors/harn_module.rs", count: 1},
   {rule: "tokio_sleep", path: "crates/harn-vm/src/llm/api/transport/ndjson.rs", count: 1},
   {rule: "tokio_sleep", path: "crates/harn-vm/src/llm/fake.rs", count: 1},
   {rule: "tokio_sleep", path: "crates/harn-vm/src/llm/structured_envelope.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-vm/src/mcp_oauth.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-vm/src/stdlib/agents_daemon.rs", count: 4},
   {rule: "tokio_sleep", path: "crates/harn-vm/src/stdlib/monitors.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-vm/src/vm/execution.rs", count: 2},
 ]
 
 /** The pinned finding count for `rule` in `rel`, or nil when not pinned. */

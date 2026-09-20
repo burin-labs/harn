@@ -311,3 +311,58 @@ pipeline test_has_mock_time_requires_line_start(harness: Harness, task: unknown)
   assert_eq(has_mock_time("let x = harness.testing.clock_set(0)\n"), false)
   assert_eq(has_mock_time("no mocks here\n"), false)
 }
+
+// --- inline test module selection -------------------------------------------
+@test
+pipeline test_a_cfg_test_helper_is_not_the_test_module(harness: Harness, task: unknown) {
+  // The marker that ends the runtime region is `#[cfg(test)]` before a `mod`.
+  // A test-only helper function carries the same attribute, and treating it as
+  // the module moved the split hundreds of lines early: runtime code below it
+  // was scanned under the test rules and, worse, blanked from the runtime
+  // rules, so the rule that should have judged it reported nothing.
+  const helper_then_module = [
+    "use std::time::Instant;",
+    "",
+    "#[cfg(test)]",
+    "fn probe_for_test() -> usize {",
+    "    0",
+    "}",
+    "",
+    "fn runtime_wait() {",
+    "    let _ = Instant::now();",
+    "}",
+    "",
+    "#[cfg(test)]",
+    "mod tests {",
+    "    #[test]",
+    "    fn t() {}",
+    "}",
+  ]
+    .join("\n")
+  assert_eq(inline_test_module_line(helper_then_module), 12)
+  // Attributes and blank lines between the marker and the declaration still
+  // describe the same item.
+  const spaced = [
+    "fn runtime() {}",
+    "",
+    "#[cfg(test)]",
+    "#[allow(clippy::all)]",
+    "",
+    "mod tests {",
+    "}",
+  ]
+    .join("\n")
+  assert_eq(inline_test_module_line(spaced), 3)
+  // A `pub mod` is a test module too.
+  assert_eq(inline_test_module_line(["#[cfg(test)]", "pub mod tests {", "}"].join("\n")), 1)
+  // NEGATIVE: a file whose only marker is a helper has no inline test module,
+  // so none of its lines are withheld from the runtime rules.
+  const helper_only = ["fn runtime() {}", "#[cfg(test)]", "fn helper() {}"].join("\n")
+  assert_eq(inline_test_module_line(helper_only), nil)
+  assert(!carries_inline_tests("crates/x/src/a.rs", helper_only))
+  // POSITIVE CONTROL: the ordinary shape still selects, or the assertions
+  // above would be satisfied by a selector that never fires.
+  const plain = ["fn runtime() {}", "#[cfg(test)]", "mod tests {", "}"].join("\n")
+  assert_eq(inline_test_module_line(plain), 2)
+  assert(carries_inline_tests("crates/x/src/a.rs", plain))
+}
