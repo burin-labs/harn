@@ -14,6 +14,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+use super::macos_swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
     normalized_process_roots, policy_allows_network, policy_allows_workspace_write,
     process_sandbox_developer_toolchain_read_roots,
@@ -123,61 +124,6 @@ fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> Strin
         &process_sandbox_package_manager_config_read_roots(policy),
         &super::process_sandbox_developer_toolchain_cache_roots(policy),
     )
-}
-
-fn macos_sandbox_compatible_args(program: &str, args: &[String]) -> Vec<String> {
-    if is_swiftpm_invocation(program, args) {
-        return swiftpm_outer_sandbox_args(args);
-    }
-    args.to_vec()
-}
-
-fn is_swiftpm_invocation(program: &str, args: &[String]) -> bool {
-    Path::new(program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        == Some("swift")
-        && matches!(
-            args.first().map(String::as_str),
-            Some("build" | "test" | "run" | "package")
-        )
-}
-
-fn swiftpm_outer_sandbox_args(args: &[String]) -> Vec<String> {
-    let mut rewritten = Vec::with_capacity(args.len() + 9);
-    rewritten.push(args[0].clone());
-    if !has_swiftpm_option(args, "--disable-sandbox") {
-        rewritten.push("--disable-sandbox".to_string());
-    }
-    if !has_swiftpm_option(args, "--manifest-cache") {
-        rewritten.extend(["--manifest-cache".to_string(), "local".to_string()]);
-    }
-    if !has_swiftpm_option(args, "--cache-path") {
-        rewritten.extend([
-            "--cache-path".to_string(),
-            ".build/harn/swiftpm/cache".to_string(),
-        ]);
-    }
-    if !has_swiftpm_option(args, "--config-path") {
-        rewritten.extend([
-            "--config-path".to_string(),
-            ".build/harn/swiftpm/config".to_string(),
-        ]);
-    }
-    if !has_swiftpm_option(args, "--security-path") {
-        rewritten.extend([
-            "--security-path".to_string(),
-            ".build/harn/swiftpm/security".to_string(),
-        ]);
-    }
-    rewritten.extend(args.iter().skip(1).cloned());
-    rewritten
-}
-
-fn has_swiftpm_option(args: &[String], option: &str) -> bool {
-    let equals_prefix = format!("{option}=");
-    args.iter()
-        .any(|arg| arg == option || arg.starts_with(&equals_prefix))
 }
 
 #[cfg(test)]

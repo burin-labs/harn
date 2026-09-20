@@ -124,6 +124,10 @@ fn workspace_toolchain_env_with_package_cache(
         ("GOMODCACHE".to_string(), path("GOMODCACHE", "go-mod")),
         ("GOPATH".to_string(), path("GOPATH", "go")),
         (
+            "SWIFTPM_MODULECACHE_OVERRIDE".to_string(),
+            path("SWIFTPM_MODULECACHE_OVERRIDE", "swiftpm/modules"),
+        ),
+        (
             "CARGO_TARGET_DIR".to_string(),
             path("CARGO_TARGET_DIR", "cargo-target"),
         ),
@@ -302,6 +306,8 @@ pub(crate) fn inject_workspace_process_env(
         }
     }
     inject_jvm_loopback_env(env, policy);
+    #[cfg(target_os = "macos")]
+    super::macos_swiftpm::inject_env(env, policy);
 }
 
 /// The JVM option that makes a loopback-only grant hold for Java children.

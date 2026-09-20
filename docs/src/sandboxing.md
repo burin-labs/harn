@@ -445,6 +445,26 @@ write, so the grant follows the same principal that configured the
 sandbox. Granting a relocated state root does not grant its parent or
 its siblings.
 
+## Swift package commands on macOS
+
+SwiftPM normally starts its own sandbox for package manifests and plugins.
+macOS refuses that nested sandbox inside a confined Harn process. Harn supplies
+`--disable-sandbox` to SwiftPM while retaining the outer process sandbox, and
+defaults manifest caches, configuration, and security state to the project.
+
+Direct calls and workspace-local `swift` and `xcrun` launchers use the same
+option definitions. Harn prepends the launchers to the child process's `PATH`
+so ordinary project scripts receive those defaults too. SDK and toolchain
+selection, explicit SwiftPM options, and arguments after `--` are preserved.
+The launchers grant no additional file or network access.
+
+A script that replaces `PATH` or invokes an absolute Swift path bypasses the
+launcher. This includes a path previously returned by `xcrun --find swift`;
+lookup-only commands retain their original output. Such a script must supply
+its own `--disable-sandbox` and workspace-local cache/configuration options.
+An absolute Swift command issued directly through Harn's process interface
+still receives the defaults. Unrestricted processes receive no launchers.
+
 ## Selecting a profile
 
 ### From a pipeline
