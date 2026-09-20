@@ -396,6 +396,10 @@ fn workflow() {
         if: artifact_consumer_if,
         "timeout-minutes": 15,
         steps: [
+          {
+            uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            with: {"fetch-depth": 0, "persist-credentials": false},
+          },
           {name: "Verify shared Harn binary"},
           {name: "Reject flaky test patterns", run: "make lint-test-patterns"},
           {name: "Check no retroactive CHANGELOG edits"},
@@ -1002,6 +1006,51 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
       "ci.yml:fast-policy-gates must run this contract itself, or it cannot refuse before a merge",
     ),
   )
+
+  // Credentials persisted back onto the checkout. Git then cannot read its
+  // own config inside the sandbox and both base-relative guards fail closed.
+  const credentialed = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps.map(
+          {
+            step ->
+              if contains(trim(step?.uses ?? ""), "actions/checkout@") {
+                {...step, with: {"fetch-depth": 0}}
+              } else {
+                step
+              }
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const credential_message =
+    "ci.yml:fast-policy-gates must check out with persist-credentials: false,"
+      + " or its base-relative guards cannot read a base"
+  assert(ci_linux_lane_policy_errors(credentialed).contains(credential_message))
+
+  // A job with no checkout at all must not satisfy the rule by having nothing
+  // to persist, which is the shape that let the defect through in the first
+  // place.
+  const uncheckedout = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps.filter(
+          { step -> !contains(trim(step?.uses ?? ""), "actions/checkout@") },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(ci_linux_lane_policy_errors(uncheckedout).contains(credential_message))
 }
 
 @test

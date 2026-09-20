@@ -1036,6 +1036,16 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
       + ["ci.yml:audit-scripts must not guard retroactive CHANGELOG edits behind the merge"]
   }
 
+  // Both base-relative guards in this job read git through the Harn sandbox.
+  // Persisted credentials leave an include path outside the workspace that
+  // git cannot read there, every base resolves to none, and the guards fail
+  // closed. The expensive lane has carried this setting for the same reason
+  // since those guards were taught not to report a comparison they never made.
+  if !checkout_drops_credentials(fast_steps) {
+    errors = errors
+      + ["ci.yml:fast-policy-gates must check out with persist-credentials: false, or its base-relative guards cannot read a base"]
+  }
+
   // This contract is itself a policy check, and the expensive sweep that also
   // runs it is push-only. Reachable only from there, a re-added event
   // condition would be refused after the merge it was meant to gate, so the
@@ -1063,6 +1073,27 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
     }
   }
   return errors
+}
+
+/**
+ * Whether every checkout in `steps` opts out of persisted credentials.
+ *
+ * Requires at least one checkout: a job with none has no credentials to
+ * persist and would satisfy an all-of test vacuously, which is the same
+ * absence-reads-as-success shape the surrounding rules exist to refuse.
+ */
+fn checkout_drops_credentials(steps: list<dict>) -> bool {
+  let seen = 0
+  for step in steps {
+    if !contains(trim(step?.uses ?? ""), "actions/checkout@") {
+      continue
+    }
+    seen = seen + 1
+    if to_string(step?.with?.["persist-credentials"] ?? "") != "false" {
+      return false
+    }
+  }
+  return seen > 0
 }
 
 /** Steps in `steps` whose `run` is exactly `command`. */

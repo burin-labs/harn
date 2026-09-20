@@ -1594,6 +1594,13 @@ jobs:
           # Both base-relative guards below walk to the first parent, so the
           # history has to reach it.
           fetch-depth: 0
+          # Same reason the expensive lane sets this, argued in full there.
+          # Persisted credentials leave an `include.path` in .git/config
+          # pointing outside the workspace, git cannot read it inside the
+          # Harn sandbox, and every base read then resolves to none. The two
+          # guards below fail closed on that, so without this the job reds on
+          # every pull request. Nothing here pushes.
+          persist-credentials: false
       - name: Download shared Harn binary
         uses: ./.github/actions/download-artifact-with-retry
         with:
