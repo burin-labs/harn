@@ -599,5 +599,87 @@
     "expression": "type_of(options)",
     "owner": "type_of",
     "evidence": "Language type inspection reads the value kind and cannot introduce a configuration key."
+  },
+  {
+    "scope": "IterationBudget",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+    "expression": "agent_compute_terminal_callback(\n        harness.agent,\n        session,\n        opts,\n        {\n          iteration: iteration,\n          final_status: terminal.final_status,\n          stop_reason: terminal.stop_reason,\n          terminal_error: terminal?.error,\n          max_iterations: current_max,\n          iteration_budget: iteration_budget,\n          session_successful_tools: successful_tools_seen,\n          session_rejected_tools: rejected_tools_seen,\n        },\n      )",
+    "owner": "agent_compute_terminal_callback",
+    "evidence": "Consumer agent_compute_terminal_callback has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "IterationBudget",
+        "function": "agent_compute_terminal_callback",
+        "parameter": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      }
+    ]
+  },
+  {
+    "scope": "IterationBudget",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "__terminal_callback_verdict(opts, payload)",
+    "owner": "__terminal_callback_verdict",
+    "evidence": "Consumer __terminal_callback_verdict has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "IterationBudget",
+        "function": "__terminal_callback_verdict",
+        "parameter": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      }
+    ]
+  },
+  {
+    "scope": "IterationBudget",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "__post_turn_verdict_result(\n    agent,\n    session,\n    opts,\n    verdict,\n    \"terminal_callback\",\n  )",
+    "owner": "__post_turn_verdict_result",
+    "evidence": "Consumer __post_turn_verdict_result has an explicit parameter origin for IterationBudget at the recorded nested path; the parameter is unread there and its name records that.",
+    "consumers": [
+      {
+        "scope": "IterationBudget",
+        "function": "__post_turn_verdict_result",
+        "parameter": "_opts",
+        "path": [
+          "iteration_budget"
+        ]
+      }
+    ]
+  },
+  {
+    "scope": "IterationBudget",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "__interpret_verdict(verdict, opts)",
+    "owner": "__interpret_verdict",
+    "evidence": "Consumer __interpret_verdict has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "IterationBudget",
+        "function": "__interpret_verdict",
+        "parameter": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      }
+    ]
+  },
+  {
+    "scope": "IterationBudget",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "__post_turn_stop_needs_verify(verdict, _opts, stop_reason)",
+    "owner": "__post_turn_stop_needs_verify",
+    "evidence": "The stop-verification predicate takes the agent options only to keep its signature uniform with the other post-turn predicates; the parameter is unread there and its name records that, so it reaches no IterationBudget field."
+  },
+  {
+    "scope": "IterationBudget",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "__next_tool_claim(verdict, opts)",
+    "owner": "__next_tool_claim",
+    "evidence": "The claim reader forwards the agent options only to __tool_surface_claim_authority in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn, which reads the carried claim authority, the tool set and the policy. No path from here reaches an IterationBudget field."
   }
 ]

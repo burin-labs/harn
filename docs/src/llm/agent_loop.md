@@ -1248,6 +1248,30 @@ fn finalize_after_read(turn) {
 }
 ```
 
+### Terminal callback
+
+`terminal_callback(info)` records a terminal decision before the loop returns
+or propagates an error. It runs for natural completion, deadlines, exhausted
+budgets, terminal tool or provider errors, and thrown loop errors. A suspended
+session has not terminated and does not invoke it.
+
+The payload includes `final_status`, `stop_reason`, `terminal_error`,
+`iteration`, `max_iterations`, `iteration_budget`, and the session's successful
+and rejected tool names. Status and reason retain the loop's existing values;
+an otherwise empty completion status is reported as `done`. After the call,
+the returned `AgentResult.terminal` remains the authority for the finalized
+lifecycle classification.
+
+The callback may write an artifact and return `nil`. Returning a continuation
+uses the same verdict shape as `post_turn_callback`, but the loop permits at
+most one terminal rescue and only for eligible iteration or stall exits.
+Notification still runs after that allowance is spent. Errors, deadlines, and
+forced stops cannot be reopened by a callback. A rescued loop notifies again
+when it reaches its next terminal decision.
+
+A callback that throws is attempted once. If it also fails while recording a
+thrown loop error, the propagated error retains both causes.
+
 ### Example with retry
 
 ```harn
