@@ -48,12 +48,22 @@ The result is a closed union. A report:
 ```harn
 import "std/eval/calibration"
 
+fn answer(expected: string, predicted: string, confidence: float) {
+  return {
+    question_id: "tool-safety",
+    expected: expected,
+    predicted: predicted,
+    confidence: confidence,
+    abstained: false,
+  }
+}
+
 pipeline measure(harness: Harness, task: unknown) {
   const report = calibration_report(
     [
-      {question_id: "tool-safety", expected: "true", predicted: "true", confidence: 0.95, abstained: false},
-      {question_id: "tool-safety", expected: "true", predicted: "false", confidence: 0.55, abstained: false},
-      {question_id: "tool-safety", expected: "false", predicted: "false", confidence: 0.92, abstained: false},
+      answer("true", "true", 0.95),
+      answer("true", "false", 0.55),
+      answer("false", "false", 0.92),
     ],
     {thresholds: [0.9], served_model_id: "example/model@1"},
   )
@@ -61,8 +71,8 @@ pipeline measure(harness: Harness, task: unknown) {
     harness.stdio.eprintln("no report: ${report.reason}")
     return
   }
-  const group = report.groups[0]
-  harness.stdio.println("calibration error ${to_string(group.expected_calibration_error)}")
+  const error = report.groups[0].expected_calibration_error
+  harness.stdio.println("calibration error ${to_string(error)}")
 }
 ```
 
