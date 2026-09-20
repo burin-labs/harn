@@ -50,7 +50,7 @@ use super::driver::CheckedFile;
 /// failure — it is re-checked and rewritten.
 /// Version 3 retains the predicate site manifest; older entries cannot prove
 /// that zero sites were measured.
-const RESULT_CACHE_SCHEMA: u32 = 3;
+const RESULT_CACHE_SCHEMA: u32 = 4;
 
 /// Kill switch for just the check-result cache (the shared
 /// `HARN_BYTECODE_CACHE=0` toggle also disables it).
@@ -247,6 +247,10 @@ pub(super) fn result_cache_key(
     fold("harn-version", base.harn_version.as_bytes());
     fold("compiler-tag", &[base.compiler_tag]);
     fold("check-fingerprint", CHECK_FINGERPRINT.as_bytes());
+    fold(
+        "predicate-model-operations",
+        &harn_vm::provider_catalog::predicate_model_catalog_identity(),
+    );
     fold("path", path_str.as_bytes());
     fold("invariants", &[u8::from(check_invariants)]);
     for name in lint_exemptions {

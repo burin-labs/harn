@@ -12,9 +12,13 @@ use harn_lexer::Span;
 use crate::ast::{is_discard_name, BindingPattern, Node, SNode, TypedParam};
 
 mod call_resolution;
+mod mutations;
 pub use call_resolution::{
     lexically_resolved_identifier_spans, module_match_pattern_catalog_with_visible,
     resolved_identifier_bindings_with_source,
+};
+pub use mutations::{
+    nested_callable_reassigned_names, nested_callable_value_write_names, outer_value_write_names,
 };
 
 /// Stable identity for a source binding. Patterns do not carry individual
@@ -287,19 +291,6 @@ pub fn captured_bindings_in_compiled_module(
     analysis.captured
 }
 
-/// Names reassigned by a nested callable that are free relative to the current
-/// callable body. Type-flow narrowing uses this conservative summary: unknown
-/// names remain included so parameter captures continue to invalidate their
-/// narrowing at the caller-owned scope.
-pub fn nested_callable_reassigned_names(
-    body: &[SNode],
-    match_patterns: &MatchPatternCatalog,
-) -> Vec<String> {
-    let mut analysis = LexicalAnalysis::new(match_patterns);
-    analysis.walk_body(body, Vec::new(), false, BindingOwner::Current);
-    analysis.reassigned.into_iter().collect()
-}
-
 /// Resolve identifier-use spans to their exact lexical declarations.
 ///
 /// This is the semantic bridge for consumers that combine source-local facts
@@ -359,6 +350,7 @@ enum ScopeBinding {
 type Scope = HashMap<String, ScopeBinding>;
 
 struct LexicalAnalysis<'source> {
+    record_property_writes: bool,
     captured: HashSet<BindingId>,
     reassigned: BTreeSet<String>,
     resolved: HashMap<(usize, usize), BindingId>,
@@ -374,6 +366,7 @@ impl<'source> LexicalAnalysis<'source> {
 
     fn new_with_source(match_patterns: &MatchPatternCatalog, source: Option<&'source str>) -> Self {
         Self {
+            record_property_writes: false,
             captured: HashSet::new(),
             reassigned: BTreeSet::new(),
             resolved: HashMap::new(),
@@ -445,7 +438,14 @@ impl<'source> LexicalAnalysis<'source> {
             }
             Node::Assignment { target, .. } => {
                 if inside_nested_callable {
-                    if let Node::Identifier(name) = &target.node {
+                    let name = if self.record_property_writes {
+                        mutations::assignment_root_name(target)
+                    } else if let Node::Identifier(name) = &target.node {
+                        Some(name.as_str())
+                    } else {
+                        None
+                    };
+                    if let Some(name) = name {
                         self.record_reassignment(name, scopes);
                     }
                 }

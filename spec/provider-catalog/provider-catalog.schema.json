@@ -775,6 +775,14 @@
         "open_weight": {
           "type": "boolean"
         },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/model_operation"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
         "performance": {
           "$ref": "#/$defs/performance"
         },
@@ -862,6 +870,7 @@
       "required": [
         "id",
         "name",
+        "operations",
         "display_name",
         "provider",
         "aliases",
@@ -1207,6 +1216,13 @@
         "relative_speed_hint"
       ],
       "type": "object"
+    },
+    "model_operation": {
+      "enum": [
+        "text_generation",
+        "embedding",
+        "decision"
+      ]
     },
     "performance": {
       "additionalProperties": false,
@@ -1939,7 +1955,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v10.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v11.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1983,10 +1999,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v10.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v11.json"
     },
     "schema_version": {
-      "const": 10
+      "const": 11
     },
     "variants": {
       "items": {

@@ -904,6 +904,25 @@ cannot enter the third-party body. The provider catalog's
 `stream_options.include_usage` extension is emitted; an absent declaration
 fails closed.
 
+### Model operations
+
+Model rows declare `operations` as a closed set of `text_generation`,
+`embedding`, and `decision`. Catalog schema 11 requires the normalized set on
+every exported model and preserves it through runtime reload and the generated
+Harn, TypeScript, and Swift bindings. Unknown operation names fail decoding.
+
+An older source row without `operations` retains its existing job: `embedding`
+when it has `embedding_dim`, otherwise `text_generation`. This compatibility
+rule never grants `decision`. An explicit set replaces the legacy inference.
+Catalog validation requires embedding dimensions and the embedding operation
+to agree. Output modalities and tool support are projected from operations, so
+a decision-only row does not advertise text generation or text tools.
+
+Predicate evaluation requires a declared `decision` operation. Its currently
+registered `structured_llm` backend also requires `text_generation`; declaring
+an operation does not implement a native decision transport or establish model
+quality. See the [predicate contract](../predicates.md) for check-time admission.
+
 ### Field-wise catalog patches with `[patch.models]`
 
 An overlay's `[models.<id>]` table replaces the whole model row, which is

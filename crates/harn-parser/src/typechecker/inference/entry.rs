@@ -222,6 +222,7 @@ impl TypeChecker {
                         mutable_vars,
                         nil_widenable_vars,
                         schema_bindings,
+                        const_values,
                         untyped_sources,
                         record_contracts,
                         ..
@@ -233,6 +234,7 @@ impl TypeChecker {
                     root.mutable_vars.extend(mutable_vars);
                     root.nil_widenable_vars.extend(nil_widenable_vars);
                     root.schema_bindings.extend(schema_bindings);
+                    root.const_values.extend(const_values);
                     root.untyped_sources.extend(untyped_sources);
                     root.record_contracts.extend(record_contracts);
                 }

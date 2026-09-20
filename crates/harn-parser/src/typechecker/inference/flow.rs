@@ -17,6 +17,8 @@ use super::super::union::{
 };
 use super::super::TypeChecker;
 
+mod mutations;
+
 /// Flatten a match-arm pattern into its leaf alternatives. For an
 /// `OrPattern(a, b, c)` this yields `[a, b, c]`; for any other pattern
 /// node it yields a single-element iterator over the pattern itself.
@@ -307,54 +309,7 @@ fn collect_assigned_var_names(node: &SNode, names: &mut Vec<String>) {
     }
 }
 
-/// Variables reassigned *inside a nested closure* within `body` — the mirror of
-/// [`assigned_var_names`], which deliberately stops at closure boundaries.
-///
-/// Post-#4479 closures capture by reference, so a closure that reassigns an
-/// outer variable can reset it (e.g. to nil) when it is later called. Any
-/// flow-narrowing on such a variable is therefore unsound to keep. The callable
-/// pre-marks this set on its body scope so `apply_refinements` never narrows
-/// them — the conservative, TypeScript/Flow-aligned "assigned in a nested
-/// function ⇒ not narrowed" rule. See harn#4523.
-pub(in crate::typechecker) fn vars_reassigned_in_nested_closures(
-    body: &[SNode],
-    match_patterns: &crate::lexical::MatchPatternCatalog,
-) -> Vec<String> {
-    crate::lexical::nested_callable_reassigned_names(body, match_patterns)
-}
-
 impl TypeChecker {
-    /// Invalidate every narrowing (variable or reference path) whose subject is
-    /// reassigned in a branch or loop body that can continue in the current
-    /// callable.
-    /// Pre-mark, on a fresh callable body scope, every variable a nested
-    /// closure reassigns, so its flow-narrowing is suppressed for the whole
-    /// body. Call once at each callable entry (fn/pipeline/tool/closure) before
-    /// its statements are checked. See [`vars_reassigned_in_nested_closures`].
-    pub(in crate::typechecker) fn mark_closure_mutated_captures(
-        scope: &mut TypeScope,
-        body: &[SNode],
-    ) {
-        let match_patterns = scope.lexical_match_pattern_catalog();
-        for name in vars_reassigned_in_nested_closures(body, &match_patterns) {
-            scope.mark_closure_mutated(&name);
-        }
-    }
-
-    pub(in crate::typechecker) fn invalidate_assigned_narrowings(
-        scope: &mut TypeScope,
-        body: &[SNode],
-    ) {
-        for name in assigned_var_names(body) {
-            if let Some(original) = scope.narrowed_original(&name).cloned() {
-                scope.narrowed_vars.remove(&name);
-                scope.update_var(&name, original);
-            }
-            scope.clear_narrowed_paths_rooted_at(&name);
-            scope.clear_unknown_ruled_out_paths_rooted_at(&name);
-        }
-    }
-
     /// Wrap `extract_refinements` with the [`Code::LintVacuousCondition`]
     /// emission pass. Callers that own `&mut self` (every `if` / `while` /
     /// `guard` site) should prefer this over the bare associated form so the

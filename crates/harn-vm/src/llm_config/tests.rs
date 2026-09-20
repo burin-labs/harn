@@ -161,6 +161,7 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
             row_kind: None,
             current_snapshot: None,
             embedding_dim: None,
+            operations: None,
             embedding_max_tokens: None,
         },
     );
@@ -657,6 +658,7 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
             row_kind: None,
             current_snapshot: None,
             embedding_dim: None,
+            operations: None,
             embedding_max_tokens: None,
         },
     );

@@ -245,6 +245,7 @@ pub fn schema_value() -> Value {
                 "required": [
                     "id",
                     "name",
+                    "operations",
                     "display_name",
                     "provider",
                     "aliases",
@@ -315,11 +316,13 @@ pub fn schema_value() -> Value {
                     "released": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
                     "row_kind": {"enum": ["snapshot", "selector"]},
                     "current_snapshot": {"type": "string", "minLength": 1},
+                    "operations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/model_operation"}},
                     "embedding_dim": {"type": "integer", "minimum": 1},
                     "embedding_max_tokens": {"type": "integer", "minimum": 1}
                 },
                 "additionalProperties": false
             },
+            "model_operation": {"enum": llm_config::ModelOperation::ALL},
             "completion_review": {
                 "type": "object",
                 "required": ["evidence"],

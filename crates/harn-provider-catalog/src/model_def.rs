@@ -942,6 +942,11 @@ fn default_completion_review_scrutiny() -> String {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ModelDef {
     pub name: String,
+    /// Supported jobs. Absence preserves legacy text/embedding rows; an
+    /// explicit set replaces that legacy interpretation, including an empty
+    /// set. Decision support is never inferred from a text capability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operations: Option<std::collections::BTreeSet<crate::ModelOperation>>,
     /// Compact label for persistent UI chrome. When omitted, provider-catalog
     /// generation derives one from `name`; full route identity remains in the
     /// model id, provider, and serving metadata.
@@ -1120,12 +1125,29 @@ pub struct ModelDef {
 }
 
 impl ModelDef {
-    /// Whether this row represents an embeddings route rather than a chat or
-    /// completion model. Embedding dimensions are the typed discriminator:
-    /// they are required to interpret the response vector and are explicitly
-    /// absent from generative rows.
+    /// Resolve legacy rows at the catalog boundary. Consumers must use this
+    /// contract rather than interpreting embedding dimensions themselves.
+    pub fn supports_operation(&self, operation: crate::ModelOperation) -> bool {
+        self.operations.as_ref().map_or_else(
+            || match operation {
+                crate::ModelOperation::TextGeneration => self.embedding_dim.is_none(),
+                crate::ModelOperation::Embedding => self.embedding_dim.is_some(),
+                crate::ModelOperation::Decision => false,
+            },
+            |operations| operations.contains(&operation),
+        )
+    }
+
+    pub fn normalized_operations(&self) -> Vec<crate::ModelOperation> {
+        crate::ModelOperation::ALL
+            .into_iter()
+            .filter(|operation| self.supports_operation(*operation))
+            .collect()
+    }
+
+    /// Whether the operation contract includes embedding generation.
     pub fn is_embedding_model(&self) -> bool {
-        self.embedding_dim.is_some()
+        self.supports_operation(crate::ModelOperation::Embedding)
     }
 }
 

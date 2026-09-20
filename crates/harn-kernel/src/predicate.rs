@@ -54,6 +54,7 @@ mod tests {
 
     fn site(fields: Vec<ShapeField>) -> PredicateSite {
         PredicateSite {
+            model_route: None,
             id: "finding.v1".into(),
             question: "Supported?".into(),
             input_type: TypeExpr::Shape(fields),

@@ -15,9 +15,9 @@ use crate::llm_config::{
 use chrono::{NaiveDate, Utc};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 10;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 11;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v10.json";
+    "https://harnlang.com/schemas/provider-catalog.v11.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -40,10 +40,14 @@ mod cache_accounting_tests;
 #[cfg(test)]
 mod display_name_tests;
 mod from_artifact;
+mod predicate_admission;
+pub use predicate_admission::{predicate_model_catalog_identity, validate_predicate_models};
 mod harn_binding;
 mod local_runtime;
 #[cfg(test)]
 mod local_runtime_tests;
+#[cfg(test)]
+mod operation_tests;
 #[cfg(test)]
 mod pricing_tests;
 #[cfg(test)]
@@ -414,7 +418,8 @@ fn catalog_model(
         capability_tags.push("batch".to_string());
     }
     let batch = catalog_batch_support(batch_api, &caps);
-    let embedding_model = model.is_embedding_model();
+    let operations = model.normalized_operations();
+    let text_generation = operations.contains(&llm_config::ModelOperation::TextGeneration);
     CatalogModel {
         aliases,
         data_controls: model.data_controls.clone(),
@@ -440,32 +445,33 @@ fn catalog_model(
             .local_memory
             .clone()
             .filter(|memory| !memory.is_empty()),
-        modalities: modalities_from_caps(&caps, embedding_model),
+        modalities: modalities_from_caps(&caps, &operations),
+        operations,
         tool_support: ModelToolSupport {
-            native: !embedding_model && caps.native_tools,
-            text: !embedding_model && caps.text_tool_wire_format_supported,
-            preferred_format: (!embedding_model)
+            native: text_generation && caps.native_tools,
+            text: text_generation && caps.text_tool_wire_format_supported,
+            preferred_format: text_generation
                 .then(|| caps.preferred_tool_format.clone())
                 .flatten(),
-            parity: (!embedding_model)
+            parity: text_generation
                 .then(|| caps.tool_mode_parity.clone())
                 .flatten(),
-            parity_source: (!embedding_model)
+            parity_source: text_generation
                 .then(|| {
                     caps.tool_mode_parity_source
                         .map(|source| source.as_str().to_string())
                 })
                 .flatten(),
-            parity_notes: (!embedding_model)
+            parity_notes: text_generation
                 .then(|| caps.tool_mode_parity_notes.clone())
                 .flatten(),
             empirical_parity: None,
-            tool_search: if embedding_model {
-                Vec::new()
-            } else {
+            tool_search: if text_generation {
                 caps.tool_search.clone()
+            } else {
+                Vec::new()
             },
-            max_tools: (!embedding_model).then_some(caps.max_tools).flatten(),
+            max_tools: text_generation.then_some(caps.max_tools).flatten(),
         },
         structured_output,
         format_preferences: ModelFormatPreferences {
@@ -668,7 +674,7 @@ fn aliases_by_model(aliases: &[(String, AliasDef)]) -> BTreeMap<(String, String)
 
 fn modalities_from_caps(
     caps: &llm::capabilities::Capabilities,
-    embedding_model: bool,
+    operations: &[llm_config::ModelOperation],
 ) -> ModelModalities {
     let mut input = vec!["text".to_string()];
     if caps.vision || caps.vision_supported {
@@ -685,7 +691,10 @@ fn modalities_from_caps(
     }
     ModelModalities {
         input,
-        output: vec![if embedding_model { "embedding" } else { "text" }.to_string()],
+        output: operations
+            .iter()
+            .map(|operation| operation.output_modality().into())
+            .collect(),
     }
 }
 

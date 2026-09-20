@@ -854,6 +854,7 @@ mod tests {
                 row_kind: None,
                 current_snapshot: None,
                 embedding_dim: None,
+                operations: None,
                 embedding_max_tokens: None,
             },
         );
@@ -977,6 +978,7 @@ mod tests {
                 row_kind: None,
                 current_snapshot: None,
                 embedding_dim: None,
+                operations: None,
                 embedding_max_tokens: None,
             },
         );
@@ -1249,6 +1251,7 @@ mod tests {
                 row_kind: None,
                 current_snapshot: None,
                 embedding_dim: None,
+                operations: None,
                 embedding_max_tokens: None,
             },
         );

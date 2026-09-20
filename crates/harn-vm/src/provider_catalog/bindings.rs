@@ -13,7 +13,16 @@ pub fn typescript_declarations() -> String {
 }
 
 fn typescript_type_block(language: &str) -> String {
-    format!("{}{}", generated_header("//", language), TYPESCRIPT_TYPES)
+    let operations = llm_config::ModelOperation::ALL
+        .iter()
+        .map(|operation| format!("\"{}\"", operation.as_str()))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    format!(
+        "{}{}",
+        generated_header("//", language),
+        TYPESCRIPT_TYPES.replace("__HARN_MODEL_OPERATIONS__", &operations)
+    )
 }
 
 pub fn swift_binding() -> Result<String, serde_json::Error> {
@@ -30,7 +39,22 @@ pub fn swift_binding_embedded(
 }
 
 fn swift_binding_body() -> String {
-    format!("{}{}", generated_header("//", "swift"), SWIFT_TYPES)
+    let operations = llm_config::ModelOperation::ALL
+        .iter()
+        .map(|operation| {
+            format!(
+                "    case {} = \"{}\"",
+                operation.as_str(),
+                operation.as_str()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{}{}",
+        generated_header("//", "swift"),
+        SWIFT_TYPES.replace("__HARN_MODEL_OPERATIONS__", &operations)
+    )
 }
 
 fn generated_header(comment: &str, language: &str) -> String {

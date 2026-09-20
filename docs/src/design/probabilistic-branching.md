@@ -221,8 +221,8 @@ support or cross-provider confidence equivalence is claimed by this dossier.
 The existing TOML sources remain authoritative. Provider connection and auth
 metadata belong in `crates/harn-vm/src/llm/catalog_sources/10-providers/`;
 served model rows belong in `catalog_sources/60-models/`; routing and aliases
-stay in their existing fragments. Operation support and request constraints
-belong in `crates/harn-vm/src/llm/capability_sources/`. The generated
+stay in their existing fragments. Model rows declare the closed `operations`
+set; request constraints belong in `crates/harn-vm/src/llm/capability_sources/`. The generated
 `providers.toml`, `capabilities.toml`, and `spec/provider-catalog/` artifacts
 are projections, not additional editing surfaces.
 
@@ -230,7 +230,7 @@ The catalog should describe what a model can do with a typed set of operation
 contracts, rather than one mutually exclusive `model_type = "llm"` switch.
 A model can support several operations. The first registry members cover real
 existing or proposed paths: `text_generation`, `embedding`, and
-`decision_evaluation`. Each member has a closed request/result contract and
+`decision`. Each member has a closed request/result contract and
 operation-specific settings. A decision operation records its supported question
 kinds, such as boolean, choice, and score; predicate evaluation initially
 uses only boolean questions. A classifier returning one fixed label set is not
@@ -259,7 +259,7 @@ the current release:
 [[provider.typesafe]]
 model_match = "jev-1.13.0"
 
-[provider.typesafe.operations.decision_evaluation]
+[provider.typesafe.operations.decision]
 implementation = "native"
 protocol = "typesafe_system_one"
 question_kinds = ["boolean", "choice", "score"]
@@ -278,8 +278,8 @@ compatibility API. These are not interchangeable chat endpoints.
 [TypeSafe API][jev-api], [OpenRouter client][openrouter-decisions],
 [Gateway evaluation][gateway-evaluation], [compatibility API][gateway-typesafe].
 
-For a structured LLM backend, the evaluator consumes a declared text-generation
-operation with the required schema/options support. It must not label that route
+For a structured LLM backend, the evaluator requires both declared `decision`
+and `text_generation` operations with the required schema/options support. It must not label that route
 as a native decision model. Both backends project to `PredicateOutcome`; their
 probability provenance, evidence kind, supported settings and calibration remain
 distinct. Switching the backend keeps the caller's outcome interface but still
@@ -795,6 +795,15 @@ This sequence begins only after design approval. Each PR includes a changelog
 fragment, hermetic evidence, a negative control and the current conformance gate.
 Sizes are estimates of changed, hand-maintained lines including tests, not
 targets; generated grammar output is additional. Dependencies are sequential.
+
+- Step 1a status: frontend contract landed.
+- Step 1b status: operation catalog and static model admission implemented;
+  verification in progress.
+- Step 2 status: runtime and receipts not implemented.
+- Step 3 status: predicate cache and tape not implemented.
+- Step 4 status: outcome helpers and worked integrations not implemented.
+- Step 5 status: frontend reference available; runtime reference and skill
+  updates remain after runtime verification.
 
 | PR | Owning change and estimated size | Falsifier and negative control | Required gate |
 | --- | --- | --- | --- |
