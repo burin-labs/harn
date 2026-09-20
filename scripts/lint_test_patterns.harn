@@ -27,6 +27,7 @@
 import { scan_glob } from "./path_visibility.harn"
 
 const THREAD_SLEEP_ALLOWLIST: list<string> = [
+
   "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
   // Real subprocess lifecycle e2e: probes OS process-group death and
   // `background: true` survival, so the waits observe host process state.
@@ -63,6 +64,7 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 //   - `executor_tests.rs`: pre-existing budget, fairness, and finish-order
 //     tests extracted from executor.rs's inline test module.
 const TOKIO_SLEEP_ALLOWLIST: list<string> = [
+
   // `sse_telemetry_tests.rs`: one virtual-time test measures the wait before
   // a provider's first stream frame. Under `start_paused` the runtime
   // auto-advances only when every task is idle, so `sleep` is the
@@ -90,6 +92,7 @@ const TOKIO_SLEEP_ALLOWLIST: list<string> = [
 // Wall-clock `Instant::now() < deadline` comparisons inside any loop or
 // guard.
 const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
+
   // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
   // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
@@ -107,6 +110,7 @@ const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
 // Remaining entries: legitimate fixture-setup uses against real OS time
 // (httpdate Retry-After parsing, real-mtime touch fixtures).
 const SYSTEM_TIME_ALLOWLIST: list<string> = [
+
   "crates/harn-vm/src/http/tests.rs",
   "crates/harn-hostlib/tests/harn_hostlib/scanner_e2e.rs",
 ]
@@ -114,7 +118,8 @@ const SYSTEM_TIME_ALLOWLIST: list<string> = [
 // recv_timeout with an explicit sub-second Duration literal.
 // Named-constant variants are not caught here because the constant value
 // cannot be resolved by a static text search.
-const RECV_TIMEOUT_MILLIS_ALLOWLIST: list<string> = []
+const RECV_TIMEOUT_MILLIS_ALLOWLIST: list<string> = [
+]
 
 // Conformance tests that exercise real subprocesses should share the bounded
 // polling helpers from `conformance/tests/_common.harn` instead of copying
@@ -313,6 +318,11 @@ const DIRECT_HARN_BINARY_BASELINE = [
 const SHELL_SPAWN_LITERAL_BASELINE = [
   {path: "crates/harn-hostlib/tests/harn_hostlib/process_artifact_retention.rs", count: 1},
   {path: "crates/harn-vm/src/stdlib/sandbox/tests.rs", count: 1},
+  // Grandfathered by harn#8505, like the rows in INLINE_TEST_GRANDFATHER: an
+  // inline test module in a runtime file that no rule here had ever reached.
+  // This ratchet is already two-sided, so the row lives here rather than
+  // being duplicated into that table.
+  {path: "crates/harn-vm/src/op_interrupt.rs", count: 3},
 ]
 
 // Runtime files allowed to read host time directly (#1439). Each entry is a
@@ -696,6 +706,66 @@ pub fn is_runtime_rs_path(rel: string) -> bool {
   return !has_test_module_segment(rel)
 }
 
+/**
+ * The 1-based line of the first inline test module in a Rust source, or nil.
+ *
+ * Tests inside a `#[cfg(test)]` module in a runtime file were invisible to
+ * every rule in this gate while the scan set was chosen by path alone. That
+ * exemption was never a decision: it fell out of `is_test_rs_path`, so a rule
+ * here could be avoided indefinitely by leaving a test inline, and all of them
+ * applied at once the moment someone split the file for an unrelated reason
+ * (harn#8494).
+ */
+pub fn inline_test_module_line(text: string) -> int? {
+  let line_no = 0
+  for line in text.lines() {
+    line_no = line_no + 1
+    if trim(line).starts_with("#[cfg(test") {
+      return line_no
+    }
+  }
+  return nil
+}
+
+/**
+ * `text` with every line outside `[from, to]` replaced by an empty line.
+ *
+ * Blanking rather than slicing is deliberate. `find_hits` reports the line a
+ * match landed on, and slicing would renumber every finding below the cut, so
+ * the gate would name the wrong line in the real file. `first` and `last` are
+ * 1-based and inclusive, and a nil bound is open.
+ */
+pub fn only_lines(text: string, first: int?, last: int?) -> string {
+  let out: list<string> = []
+  let line_no = 0
+  for line in text.lines() {
+    line_no = line_no + 1
+    const at_or_after = first == nil || line_no >= first
+    const at_or_before = last == nil || line_no <= last
+    out = out + [at_or_after && at_or_before ? line : ""]
+  }
+  return out.join("\n")
+}
+
+/**
+ * True when a `.rs` file the path predicate calls runtime nonetheless carries
+ * tests this gate should scan.
+ *
+ * A path-selected test file is scanned whole and is not this case. A runtime
+ * file that holds an inline test module is scanned by the test rules over that
+ * module only, and by the runtime rules over the code above it, so neither
+ * rule set fires on the other's lines.
+ */
+pub fn carries_inline_tests(rel: string, text: string) -> bool {
+  if !rel.ends_with(".rs") {
+    return false
+  }
+  if is_test_rs_path(rel) {
+    return false
+  }
+  return inline_test_module_line(text) != nil
+}
+
 /** True when `rel` is one of the sanctioned E2E subprocess test files. */
 pub fn is_e2e_subprocess_path(rel: string) -> bool {
   if rel.starts_with("crates/harn-cli/tests/harn_cli_fast/orchestrator_http/") {
@@ -876,8 +946,87 @@ pub fn has_mock_time(text: string) -> bool {
  * file for which `skip(rel)` is true. Prints each hit as `  <n>:<line>`
  * followed by the pre-formatted `hint_lines`; returns the violation count.
  */
+// Findings that existed before this gate began selecting its scan set by
+// content as well as by path (harn#8505). Every one is inside an inline
+// `#[cfg(test)]` module in a runtime file, so no rule here had ever applied to
+// it; they are grandfathered rather than introduced.
+//
+// This is a RATCHET, not an allowlist. Each row pins one rule against one file
+// at an exact finding count, and `report_pattern` fails when the observed count
+// differs in EITHER direction: a new finding in a listed file is refused, and
+// so is a row whose findings have been fixed but whose entry was left behind.
+// The set can therefore only shrink, and it shrinks by deleting rows.
+//
+// A row is coarse to the extent that it counts findings in a file rather than
+// identifying each one, so swapping one finding for another inside the same
+// file and rule would not be caught. That is the known limit of the file-level
+// mechanisms these rules already use.
+//
+// harn#8507 tracks fixing these rather than carrying them.
+const INLINE_TEST_GRANDFATHER = [
+  {rule: "ignore_attr", path: "crates/harn-vm/src/security/behavioral.rs", count: 1},
+  {rule: "ignore_attr", path: "crates/harn-vm/src/security/stance_judge.rs", count: 1},
+  {rule: "instant_now_deadline", path: "crates/harn-hostlib/src/host_lease.rs", count: 1},
+  {rule: "instant_now_deadline", path: "crates/harn-vm/src/mcp_oauth.rs", count: 1},
+  {rule: "instant_now_deadline", path: "crates/harn-vm/src/op_interrupt.rs", count: 6},
+  {rule: "recv_timeout_millis", path: "crates/harn-vm/src/op_interrupt.rs", count: 3},
+  {rule: "recv_timeout_millis", path: "crates/harn-vm/src/stdlib/session_wal_watch.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-hostlib/src/code_index/rename.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-hostlib/src/fs.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-hostlib/src/fs_snapshot.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-hostlib/src/host_lease.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-hostlib/src/tools/proc/artifacts.rs", count: 2},
+  {rule: "system_time", path: "crates/harn-vm/src/agent_events/sinks.rs", count: 2},
+  {rule: "system_time", path: "crates/harn-vm/src/event_log/util.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-vm/src/llm/providers/vertex.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-vm/src/mcp_oauth.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-vm/src/metadata.rs", count: 1},
+  {rule: "system_time", path: "crates/harn-vm/src/triggers/worker_queue.rs", count: 1},
+  {rule: "thread_sleep", path: "crates/harn-cli/src/commands/command_probe.rs", count: 1},
+  {rule: "thread_sleep", path: "crates/harn-vm/src/atomic_io.rs", count: 1},
+  {rule: "thread_sleep", path: "crates/harn-vm/src/op_interrupt.rs", count: 6},
+  {rule: "thread_sleep", path: "crates/harn-vm/src/stdlib/clock.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-cli/src/commands/orchestrator/listener/routes.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-serve/src/adapters/worker.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-vm/src/composition/mod.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-vm/src/connectors/harn_module.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-vm/src/llm/api/transport/ndjson.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-vm/src/llm/fake.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-vm/src/llm/structured_envelope.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-vm/src/mcp_oauth.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-vm/src/stdlib/agents_daemon.rs", count: 4},
+  {rule: "tokio_sleep", path: "crates/harn-vm/src/stdlib/monitors.rs", count: 1},
+  {rule: "tokio_sleep", path: "crates/harn-vm/src/vm/execution.rs", count: 2},
+]
+
+/** The pinned finding count for `rule` in `rel`, or nil when not pinned. */
+pub fn grandfather_count(rule: string, rel: string) -> int? {
+  for row in INLINE_TEST_GRANDFATHER {
+    if row.rule == rule && row.path == rel {
+      return row.count
+    }
+  }
+  return nil
+}
+
+/** `rule:path` keys appearing more than once, which would make a row unreadable. */
+pub fn grandfather_duplicates() -> list<string> {
+  let seen: list<string> = []
+  let dupes: list<string> = []
+  for row in INLINE_TEST_GRANDFATHER {
+    const key = row.rule + ":" + row.path
+    if seen.contains(key) && !dupes.contains(key) {
+      dupes = dupes + [key]
+    }
+    seen = seen + [key]
+  }
+  return dupes
+}
+
 fn report_pattern(
   stdio: HarnessStdio,
+  rule: string,
   files: list,
   skip: fn(string) -> bool,
   pattern: string,
@@ -888,8 +1037,36 @@ fn report_pattern(
     if skip(f.rel) {
       continue
     }
-    for hit in find_hits(f.text, pattern) {
-      stdio.println("  ${hit.line_no}:${hit.text}")
+    const hits = find_hits(f.text, pattern)
+    const pinned = grandfather_count(rule, f.rel)
+    if pinned != nil {
+      // A pinned file is judged by count in both directions. Reporting each
+      // hit again would bury the one number a reader has to change.
+      if hits.count != pinned {
+        stdio.println(
+          "  ${f.rel}: expected ${to_string(pinned)}, found ${to_string(hits.count)} (${rule})",
+        )
+        if hits.count > pinned {
+          for hit in hits {
+            stdio.println("    ${hit.line_no}:${hit.text}")
+          }
+          for h in hint_lines {
+            stdio.println(h)
+          }
+        } else {
+          stdio.println(
+            "    hint: findings were removed; delete this row from INLINE_TEST_GRANDFATHER",
+          )
+        }
+        count = count + 1
+      }
+      continue
+    }
+    for hit in hits {
+      // Name the file, not just the line. The scan set is chosen by content
+      // as well as by path, so a bare line number no longer identifies
+      // anything a reader can open.
+      stdio.println("  ${f.rel}:${hit.line_no}:${hit.text}")
       for h in hint_lines {
         stdio.println(h)
       }
@@ -911,6 +1088,7 @@ fn load_files(fs: HarnessFs, rels: list<string>) -> list {
 pipeline main(harness: Harness, task: unknown) {
   let test_rels: list<string> = []
   let runtime_rels: list<string> = []
+  let inline_rels: list<string> = []
   for g in scan_glob(harness.fs, "lint-test-patterns", "crates/**/*.rs") {
     const rel = rel_path(g)
     if !harness.fs.stat(rel).is_file {
@@ -920,6 +1098,10 @@ pipeline main(harness: Harness, task: unknown) {
     }
     if is_test_rs_path(rel) {
       test_rels = test_rels + [rel]
+    } else {
+      // Selected by content: a runtime file may still hold tests. Its record
+      // is built below so the two rule sets each see only their own lines.
+      inline_rels = inline_rels + [rel]
     }
     if is_runtime_rs_path(rel) {
       runtime_rels = runtime_rels + [rel]
@@ -932,15 +1114,38 @@ pipeline main(harness: Harness, task: unknown) {
       harn_rels = harn_rels + [rel]
     }
   }
-  const test_files = load_files(harness.fs, test_rels)
+  // A path-selected test file is scanned whole. A runtime file that carries an
+  // inline test module contributes that module to the test scan, and only the
+  // code above it to the runtime scan.
+  let inline_test_files: list = []
+  for record in load_files(harness.fs, inline_rels) {
+    if !carries_inline_tests(record.rel, record.text) {
+      continue
+    }
+    const start = inline_test_module_line(record.text)
+    inline_test_files = inline_test_files
+      + [{rel: record.rel, text: only_lines(record.text, start, nil)}]
+  }
+  const test_files = load_files(harness.fs, test_rels) + inline_test_files
   const harn_files = load_files(harness.fs, harn_rels)
-  const runtime_files = load_files(harness.fs, runtime_rels)
+  let runtime_files: list = []
+  for record in load_files(harness.fs, runtime_rels) {
+    const start = inline_test_module_line(record.text)
+    runtime_files = runtime_files
+      + [
+        {
+          rel: record.rel,
+          text: start == nil ? record.text : only_lines(record.text, nil, start - 1),
+        },
+      ]
+  }
   let violations = 0
   harness.stdio.println("=== Checking test files for forbidden patterns ===")
   harness.stdio.println("--- std::thread::sleep ---")
   violations = violations
     + report_pattern(
       harness.stdio,
+      "thread_sleep",
       test_files,
       { rel -> THREAD_SLEEP_ALLOWLIST.contains(rel) },
       thread_sleep_pattern(),
@@ -950,6 +1155,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "tokio_sleep",
       test_files,
       { rel -> TOKIO_SLEEP_ALLOWLIST.contains(rel) },
       tokio_sleep_pattern(),
@@ -964,6 +1170,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "instant_now_deadline",
       test_files,
       { rel -> INSTANT_NOW_DEADLINE_ALLOWLIST.contains(rel) },
       instant_deadline_pattern(),
@@ -975,6 +1182,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "system_time",
       test_files,
       { rel -> SYSTEM_TIME_ALLOWLIST.contains(rel) },
       system_time_pattern(),
@@ -984,6 +1192,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "recv_timeout_millis",
       test_files,
       { rel -> RECV_TIMEOUT_MILLIS_ALLOWLIST.contains(rel) },
       recv_timeout_pattern(),
@@ -995,6 +1204,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "elapsed_millis_budget",
       test_files,
       { rel -> false },
       elapsed_millis_budget_pattern(),
@@ -1006,6 +1216,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "harn_command",
       test_files,
       { rel -> false },
       harn_command_pattern(),
@@ -1069,6 +1280,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "harn_e2e_command",
       test_files,
       is_e2e_subprocess_path,
       harn_e2e_command_pattern(),
@@ -1080,6 +1292,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "spawn_orchestrator",
       test_files,
       is_e2e_subprocess_path,
       spawn_orchestrator_pattern(),
@@ -1089,6 +1302,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "ignore_attr",
       test_files,
       { rel -> rel.starts_with("crates/harn-cli/tests/") },
       ignore_attr_pattern(),
@@ -1100,6 +1314,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "conformance_wait_helper",
       harn_files,
       { rel -> CONFORMANCE_HELPER_ALLOWLIST.contains(rel) },
       wait_helper_pattern(),
@@ -1111,6 +1326,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "random_fixed_port",
       harn_files,
       { rel -> false },
       random_fixed_port_pattern(),
@@ -1163,6 +1379,7 @@ pipeline main(harness: Harness, task: unknown) {
   violations = violations
     + report_pattern(
       harness.stdio,
+      "runtime_wall_clock",
       runtime_files,
       { rel -> NON_TEST_WALL_CLOCK_ALLOWLIST.contains(rel) },
       wall_clock_pattern(),
