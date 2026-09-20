@@ -709,7 +709,14 @@
         "_meta": {
           "type": "object", "required": ["harn"], "additionalProperties": true,
           "properties": { "harn": {
-            "type": "object", "required": ["mode", "strategy", "snapshotAssetId"], "additionalProperties": true,
+            "type": "object",
+            "required": [
+              "mode", "strategy", "snapshotAssetId", "reason", "receiptId", "schemaVersion",
+              "engineStrategy", "requestedStrategy", "resolvedThresholdTokens", "thresholdSource",
+              "hardLimitTokens", "archivedMessages", "estimatedTokensBefore", "estimatedTokensAfter",
+              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement"
+            ],
+            "additionalProperties": true,
             "properties": {
               "mode": { "type": "string" }, "strategy": { "type": "string" },
               "reason": { "type": "string" }, "receiptId": { "type": "string" },
