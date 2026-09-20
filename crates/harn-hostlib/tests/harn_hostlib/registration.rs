@@ -981,6 +981,65 @@ pipeline default(harness: Harness, task: unknown) {
     );
 }
 
+#[test]
+fn stdlib_host_lease_status_exposes_pending_runs_and_terminal_removal() {
+    let root = TempDir::new().unwrap();
+    let _env = HostLeaseRootGuard::set(root.path());
+    let store = HostLeaseStore::for_root(root.path()).unwrap();
+    let run = store
+        .begin_run(
+            "pending-worker",
+            HostLeasePriorityClass::Interactive,
+            harn_hostlib::HostLeaseResourceKey {
+                machine: "mac-local".to_string(),
+                resource_class: HostLeaseResourceClass::RustHeavy,
+                domain: "verification".to_string(),
+            },
+            harn_hostlib::HostLeaseExecutionContext::cargo(root.path(), root.path(), None),
+            60_000,
+        )
+        .unwrap();
+    let source = r#"
+import { host_lease_status } from "std/host_lease"
+fn main(harness: Harness) {
+  return host_lease_status(harness.host_lease, "mac-local", "rust-heavy", "verification")
+}
+"#;
+    let value = execute_harn(source).unwrap();
+    assert_response_schema("host_lease", "status", &value);
+    let state = expect_dict(value);
+    assert!(matches!(state.get("active"), Some(VmValue::Nil)));
+    let Some(VmValue::List(pending)) = state.get("pending") else {
+        panic!("pending evidence must cross the Harn host boundary");
+    };
+    assert_eq!(pending.len(), 1);
+    let entry = expect_dict(pending[0].clone());
+    assert_eq!(
+        entry.get("waiter_id").map(VmValue::display),
+        Some(run.run_id.clone())
+    );
+    assert_eq!(
+        entry.get("priority_class").map(VmValue::display).as_deref(),
+        Some("interactive")
+    );
+    assert!(matches!(entry.get("owner_pid"), Some(VmValue::Nil)));
+    assert!(matches!(
+        entry.get("recoverable"),
+        Some(VmValue::Bool(true))
+    ));
+    store
+        .transition_run(
+            &run.run_id,
+            harn_hostlib::HostLeaseRunState::Deferred {
+                observed_at_ms: 1,
+                waited_ms: 0,
+            },
+        )
+        .unwrap();
+    let state = expect_dict(execute_harn(source).unwrap());
+    assert!(matches!(state.get("pending"), Some(VmValue::List(pending)) if pending.is_empty()));
+}
+
 fn expect_dict(value: VmValue) -> harn_vm::value::DictMap {
     match value {
         VmValue::Dict(dict) => (*dict).clone(),

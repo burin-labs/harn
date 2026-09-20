@@ -28,7 +28,7 @@ pub(crate) enum HostLeaseCommand {
     Renew(HostLeaseRenewArgs),
     /// Release a lease owned by this token.
     Release(HostLeaseReleaseArgs),
-    /// Inspect the current lease for a host.
+    /// Inspect active leases and pending requests across a host's resources.
     Status(HostLeaseStatusArgs),
     /// Run a typed workload while its resource lease is actively supervised.
     Run(HostLeaseRunArgs),
@@ -123,10 +123,12 @@ pub(crate) struct HostLeaseReleaseArgs {
 pub(crate) struct HostLeaseStatusArgs {
     #[arg(long)]
     pub host: Option<String>,
-    #[arg(long, value_enum, default_value_t)]
-    pub resource_class: HostLeaseResourceClassArg,
-    #[arg(long, default_value = "default")]
-    pub domain: String,
+    /// Inspect one class instead of the whole host. Defaults its domain to "default".
+    #[arg(long, value_enum)]
+    pub resource_class: Option<HostLeaseResourceClassArg>,
+    /// Restrict the observation to one coordination domain.
+    #[arg(long)]
+    pub domain: Option<String>,
     #[arg(long)]
     pub json: bool,
 }

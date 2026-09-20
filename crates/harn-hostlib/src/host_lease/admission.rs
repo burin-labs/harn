@@ -460,15 +460,15 @@ fn upsert_waiter(
     Ok(())
 }
 
-fn cleanup_waiters(
+pub(super) fn cleanup_waiters(
     tx: &Transaction<'_>,
     now: i64,
     process_inspector: &dyn ProcessInspector,
-) -> Result<(), HostLeaseError> {
-    tx.execute(
+) -> Result<bool, HostLeaseError> {
+    let mut removed = tx.execute(
         "DELETE FROM host_lease_waiters WHERE deadline_at_ms <= ?1",
         params![now],
-    )?;
+    )? > 0;
     let mut statement = tx.prepare(
         "SELECT waiter_id, owner_pid, owner_process_identity
          FROM host_lease_waiters
@@ -501,18 +501,18 @@ fn cleanup_waiters(
                 "DELETE FROM host_lease_waiters WHERE waiter_id = ?1",
                 params![waiter_id],
             )?;
+            removed = true;
         }
     }
-    Ok(())
+    Ok(removed)
 }
 
-fn queue_evidence(
+pub(super) fn pending_requests(
     tx: &Transaction<'_>,
     resource: &HostLeaseResourceKey,
-    waiter_id: &str,
-) -> Result<(HostLeaseQueueEvidence, Option<i64>), HostLeaseError> {
+) -> Result<Vec<HostLeasePendingRequest>, HostLeaseError> {
     let mut statement = tx.prepare(
-        "SELECT waiter_id, requested_at_ms, deadline_at_ms
+        "SELECT waiter_id, priority_class, requested_at_ms, deadline_at_ms, owner_pid, recoverable
          FROM host_lease_waiters
          WHERE host = ?1 AND resource_class = ?2 AND domain = ?3
          ORDER BY priority_rank ASC, requested_at_ms ASC, waiter_id ASC",
@@ -527,15 +527,38 @@ fn queue_evidence(
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<u32>>(4)?,
+                    row.get::<_, bool>(5)?,
                 ))
             },
         )?
         .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(HostLeasePendingRequest {
+                waiter_id: row.0,
+                priority_class: HostLeasePriorityClass::parse(&row.1)?,
+                requested_at_ms: row.2,
+                deadline_at_ms: row.3,
+                owner_pid: row.4,
+                recoverable: row.5,
+            })
+        })
+        .collect()
+}
+
+fn queue_evidence(
+    tx: &Transaction<'_>,
+    resource: &HostLeaseResourceKey,
+    waiter_id: &str,
+) -> Result<(HostLeaseQueueEvidence, Option<i64>), HostLeaseError> {
+    let rows = pending_requests(tx, resource)?;
     let index = rows
         .iter()
-        .position(|row| row.0 == waiter_id)
+        .position(|row| row.waiter_id == waiter_id)
         .ok_or_else(|| {
             HostLeaseError::InvalidRequest("waiter disappeared during admission".to_string())
         })?;
@@ -543,10 +566,10 @@ fn queue_evidence(
     Ok((
         HostLeaseQueueEvidence {
             waiter_id: waiter_id.to_string(),
-            requested_at_ms: rows[index].1,
+            requested_at_ms: rows[index].requested_at_ms,
             position: u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1),
-            predecessor_waiter_id: predecessor.map(|row| row.0.clone()),
+            predecessor_waiter_id: predecessor.map(|row| row.waiter_id.clone()),
         },
-        predecessor.map(|row| row.2),
+        predecessor.map(|row| row.deadline_at_ms),
     ))
 }
