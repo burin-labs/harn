@@ -26,9 +26,9 @@ pub use stdlib_metadata::{
     parse_for_span as parse_stdlib_metadata, synthesize_example, StdlibMetadata,
 };
 pub use typechecker::{
-    block_definitely_exits, format_type, stmt_definitely_exits, substitute_type_expr,
-    BindingTypeInfo, DiagnosticDetails, DiagnosticSeverity, InlayHintInfo, NamespaceImportBinding,
-    TypeCheckFacts, TypeChecker, TypeDiagnostic,
+    block_definitely_exits, canonical_predicate_type, format_type, stmt_definitely_exits,
+    substitute_type_expr, BindingTypeInfo, DiagnosticDetails, DiagnosticSeverity, InlayHintInfo,
+    NamespaceImportBinding, PredicateSite, TypeCheckFacts, TypeChecker, TypeDiagnostic,
 };
 
 pub use builtin_signatures::install_builtin_manifest;

@@ -44,10 +44,27 @@ fn registry() -> BuiltinRegistry {
     registry
 }
 
+/// Declares, for every spawn in this module, that the child inherits this
+/// test process's environment.
+///
+/// These tests are tests OF the process host, and what they assert is
+/// spawning, capture, timeouts and signals, not credential scope. They used
+/// to get the inheriting behaviour by saying nothing, which is exactly the
+/// shape harn#8477 removed: an inheriting spawn now refuses unless a session
+/// environment says so. Saying it here keeps each test asserting what it is
+/// about, and keeps the refusal meaningful — `process_session_environment`
+/// owns the case where nothing is declared.
+fn declare_inherited() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
+    harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    )
+}
+
 pub(super) fn call(
     builtin: &str,
     request: harn_vm::value::DictMap,
 ) -> Result<VmValue, HostlibError> {
+    let _environment = declare_inherited();
     let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
         "process_tools_e2e::owner_death_guardian_fixture",
@@ -202,6 +219,9 @@ fn owner_death_supervisor_fixture() {
     if std::env::var_os(OWNER_DEATH_SUPERVISOR_ENV).is_none() {
         return;
     }
+    // A separate process, so it does not go through this module's `call`
+    // helper and declares its own inheriting environment (harn#8477).
+    let _environment = declare_inherited();
     let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
         "process_tools_e2e::owner_death_guardian_fixture",

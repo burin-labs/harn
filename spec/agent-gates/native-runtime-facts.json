@@ -37,6 +37,13 @@
   {
     "scope": "native-runner-option-helpers",
     "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"adaptive_budget\"",
+    "owner": "opt_json",
+    "evidence": "The runner supplies its resolved budget account and extension decisions as terminal evidence; the native host persists the account without selecting policy."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
     "expression": "\"error\"",
     "owner": "opt_json",
     "evidence": "Terminal error is supplied by the runner result."

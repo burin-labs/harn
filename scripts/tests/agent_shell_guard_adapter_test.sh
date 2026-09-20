@@ -505,4 +505,110 @@ if [[ "$fallback_resolved" != *DEBUG-INTERPRETER-RAN* ]]; then
   exit 1
 fi
 
+# The Make-target measurement, end to end through the adapter. The policy
+# cannot read the filesystem, so this is the only place that proves the
+# wrapper's census reaches it. Both arms run against the same fixture with
+# only the Makefile changed, which is the one variable under test.
+make_root="$(cd "$(mktemp -d)" && pwd -P)"
+trap 'rm -rf "$fixture_root" "$order_root" "$make_root"' EXIT
+mkdir -p "$make_root/scripts"
+cp "$repo_root/scripts/agent-shell-guard.sh" "$make_root/scripts/"
+cp "$repo_root/scripts/agent_shell_guard.harn" "$make_root/scripts/"
+cp "$repo_root/scripts/agent_shell_guard_policy.harn" "$make_root/scripts/"
+
+swift_payload='{"tool_name":"Bash","tool_input":{"command":"swift test"}}'
+
+# A repository whose Makefile owns the target. The assignment and the
+# dot-directive are there so the reader cannot mistake a loose match for a
+# real declaration.
+cat >"$make_root/Makefile" <<'MAKE'
+.PHONY: build swift-build swift-test
+SWIFT_FLAGS := --disable-sandbox
+build:
+	echo build
+swift-build:
+	echo swift build
+swift-test:
+	echo swift test
+MAKE
+owned="$(
+  printf '%s' "$swift_payload" \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$owned" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$owned" != *'Run `make swift-test` instead'* ]]; then
+  echo "adapter did not refuse a bare swift test in a repository that owns the target" >&2
+  printf '%s\n' "$owned" >&2
+  exit 1
+fi
+
+# CONTROL: the same command in a repository whose Makefile does not declare it.
+# Without this arm, a rule that denied unconditionally would pass the test
+# above and then name a target the operator does not have.
+cat >"$make_root/Makefile" <<'MAKE'
+.PHONY: build
+build:
+	echo build
+MAKE
+unowned="$(
+  printf '%s' "$swift_payload" \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$unowned" ]]; then
+  echo "adapter refused a bare swift test in a repository with no swift-test target" >&2
+  printf '%s\n' "$unowned" >&2
+  exit 1
+fi
+
+# CONTROL: no Makefile at all is the same answer, and the Cargo rule, which is
+# unconditional, still fires there. A silent census failure would otherwise
+# look identical to this allow.
+rm -f "$make_root/Makefile"
+no_makefile="$(
+  printf '%s' "$swift_payload" \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$no_makefile" ]]; then
+  echo "adapter refused a bare swift test in a repository with no Makefile" >&2
+  printf '%s\n' "$no_makefile" >&2
+  exit 1
+fi
+still_guarded="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"cargo check"}}' \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$still_guarded" != *'"permissionDecision":"deny"'* ]]; then
+  echo "control: the guard produced no verdict at all, so the allows above prove nothing" >&2
+  printf '%s\n' "$still_guarded" >&2
+  exit 1
+fi
+
+# Every rule the policy owns must reach a verdict in the standalone host, not
+# only in the full host the unit tests run in. An ungranted builtin does not
+# degrade: it throws, the adapter fails closed, and the operator gets an
+# interpreter error where a rule should be. The disposable-path matcher folds
+# case for Windows spellings, and that fold is only reached past the POSIX temp
+# roots, so the arm below is the one a unit test cannot stand in for.
+windows_temp="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"trash %TEMP%/build.log"}}' \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$windows_temp" != *'visible Trash'* ]]; then
+  echo "the disposable-path rule did not reach a verdict in the standalone host" >&2
+  printf '%s\n' "$windows_temp" >&2
+  exit 1
+fi
+
+# CONTROL: the same rule on a user file allows. A fault would deny both, so
+# without this arm the deny above could be an error message rather than a rule.
+user_file="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"trash /Users/alice/Documents/report.txt"}}' \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$user_file" ]]; then
+  echo "the disposable-path rule refused a user file, which it must never do" >&2
+  printf '%s\n' "$user_file" >&2
+  exit 1
+fi
+
 echo "agent_shell_guard_adapter_test: ok"

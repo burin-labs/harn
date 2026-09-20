@@ -53,6 +53,7 @@ pub(crate) mod mcp;
 pub(crate) mod merge_captain;
 pub(crate) mod merge_captain_mock;
 pub(crate) mod models;
+pub(crate) mod netns_launch;
 pub mod orchestrator;
 pub mod pack;
 pub(crate) mod package_scaffold;

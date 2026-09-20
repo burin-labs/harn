@@ -252,15 +252,18 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             crate::agent_events::classify_agent_terminal("cancelled", "cancelled", false, None),
             "cancelled",
         );
-        super::live_transcript_journal::flush_terminal(
+        Box::pin(super::live_transcript_journal::flush_terminal(
             session_id,
             "cancelled",
             "cancelled",
             None,
             None,
             &terminal,
-            provider_call_count,
-        )
+            super::live_transcript_journal::TerminalAccounting {
+                provider_call_count,
+                adaptive_budget: None,
+            },
+        ))
         .await?;
     }
     let removed =

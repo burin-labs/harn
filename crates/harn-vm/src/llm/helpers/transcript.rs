@@ -11,6 +11,7 @@ use super::blocks::{
     default_visibility_for_role, normalize_message_blocks, overall_visibility, render_blocks_text,
 };
 use super::messages::json_messages_to_vm;
+use super::options::DIRECTIVE_IDS_KEY;
 use super::{vm_value_to_json, TRANSCRIPT_ASSET_TYPE, TRANSCRIPT_TYPE, TRANSCRIPT_VERSION};
 
 /// Canonical `kind` for a [`SystemReminder`] transcript event.
@@ -458,6 +459,11 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
         .unwrap_or_else(|| "user".to_string());
     let blocks = normalize_message_blocks(dict.get("content"), &role);
     let text = render_blocks_text(&blocks);
+    if matches!(dict.get(DIRECTIVE_IDS_KEY), Some(VmValue::List(ids)) if !ids.is_empty()) {
+        // The transport role can be user, but this entire frame belongs to
+        // the harness. Keep both event and block visibility internal.
+        return transcript_event("message", &role, "internal", &text, None);
+    }
     let visibility = overall_visibility(&blocks, default_visibility_for_role(&role));
     let kind = if matches!(role.as_str(), "tool" | "tool_result") {
         "tool_result"

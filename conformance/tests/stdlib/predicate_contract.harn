@@ -1,0 +1,26 @@
+import "std/predicate"
+
+fn assess(llm: HarnessLlm, input: {value: int}, policy: PredicatePolicy) -> PredicateOutcome {
+  return llm.evaluate_predicate("test.refusal", "Supported?", input, policy)
+}
+
+fn main(harness: Harness) {
+  const policy: PredicatePolicy = {
+    backend: "structured_llm",
+    provider: "mock",
+    model: "fixture",
+    effort: "low",
+    temperature: 0.0,
+    threshold: 0.8,
+    evaluation_cost_limit: 0.0,
+    run_cost_limit: 0.0,
+  }
+  const refusal = try {
+    const result = assess(harness.llm, {value: 1}, policy)
+    "unexpected outcome: " + result.kind
+  } catch (error) {
+    to_string(error)
+  }
+  assert(contains(refusal, "this runtime has no budgeted predicate evaluator"))
+  harness.stdio.println("predicate executor explicitly unavailable")
+}

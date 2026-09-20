@@ -15,6 +15,7 @@ mod lint_json_contract;
 mod lint_report;
 mod mock_host;
 mod outcome;
+mod predicate_manifest;
 mod preflight;
 pub(crate) mod provider_matrix;
 mod result_cache;

@@ -12,8 +12,6 @@ use harn_vm::event_log::{
 };
 use harn_vm::mcp_progress::ProgressContext;
 use harn_vm::trust_graph::{append_trust_record, TrustOutcome, TrustRecord};
-#[cfg(test)]
-use harn_vm::VmValue;
 use harn_vm::{inject_leading_authority, ActorChain, TenantId, TraceId, Vm};
 use tokio::task::LocalSet;
 use tracing::Instrument;
@@ -30,12 +28,8 @@ mod event_log;
 use event_log::install_scoped_event_log;
 mod prepared_generation;
 mod prepared_tools;
-#[cfg(test)]
-use arguments::lift_flat_single_object_arg;
 use arguments::{build_vm_args, canonical_arguments_json};
 pub use config::DispatchCoreConfig;
-#[cfg(test)]
-use error_classification::budget_category_from_error;
 use error_classification::classify_vm_error;
 use prepared_generation::PreparedDispatchGeneration;
 pub use prepared_generation::{DispatchCallReceipt, DispatchGenerationReceipt};
@@ -274,6 +268,8 @@ impl DispatchCore {
     }
 
     pub async fn dispatch(&self, mut request: CallRequest) -> Result<CallResponse, DispatchError> {
+        // Declared, not omitted; see `dispatch_environment` for why.
+        let _environment = crate::dispatch_environment::declare();
         let trace_id = request.trace_id.clone().unwrap_or_default();
         let function_scopes = self
             .catalog()
@@ -741,7 +737,10 @@ impl DispatchCore {
 
 #[cfg(test)]
 mod tests {
+    use super::arguments::lift_flat_single_object_arg;
+    use super::error_classification::budget_category_from_error;
     use super::*;
+    use harn_vm::VmValue;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Default)]

@@ -16,6 +16,7 @@
 pub mod contracts;
 pub mod host_capabilities;
 pub mod llm_options;
+pub mod predicate;
 pub mod runtime_type_tags;
 pub mod shapes;
 pub mod signatures;

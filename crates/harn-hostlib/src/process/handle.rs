@@ -308,6 +308,27 @@ pub enum ProcessError {
     /// [`harn_vm::orchestration::universal_catastrophic_reason`].
     #[error("{0}")]
     CatastrophicFloor(String),
+    /// An inheriting spawn was requested with no session environment
+    /// installed on the spawning task.
+    ///
+    /// Refused rather than honored. An inheriting mode with no policy behind
+    /// it used to hand the child the calling process's whole environment,
+    /// filtered only by [`is_sensitive_env_name`], which is a name denylist
+    /// and cannot be a credential boundary. The absence of a policy is not a
+    /// permissive policy, and it must not be readable as one.
+    #[error(
+        "environment policy missing: a '{mode}' spawn of '{builtin}' reached the process host \
+         with no session environment installed, so the child's environment would be the \
+         calling process's own. Launch a session environment before spawning, or request \
+         the 'replace' mode and pass the child's environment explicitly."
+    )]
+    SessionEnvironmentMissing {
+        /// Builtin that requested the spawn.
+        builtin: &'static str,
+        /// The inheriting mode that was requested, named so the caller can
+        /// see which of its own options produced the refusal.
+        mode: &'static str,
+    },
 }
 
 use std::cell::RefCell;

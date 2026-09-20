@@ -1,16 +1,25 @@
 # Probabilistic branching
 
-Status: proposed, 2026-09-19. This explanation asks how a model's judgment can
+Status: design approved; frontend contract implemented, 2026-09-19.
+This explanation asks how a model's judgment can
 control a Harn branch without hiding uncertainty, provider effects, or test
-inputs. It proposes one typed predicate expression over existing runtime
-services. It does not claim that the syntax is implemented or that any model
-has passed an application quality gate.
+inputs. The implementation decision uses an ordinary capability call with
+checker obligations and a site manifest. Execution remains explicitly unavailable
+until the budgeted evaluator lands. No model has passed an application quality
+gate for these integrations.
 
-The recommendation is an explicit `predicate { ... }` expression returning a
+The authoring surface is `harness.llm.evaluate_predicate(...)`, returning a
 closed outcome. A caller handles that outcome with `match`, then uses an ordinary
 `if` on an accepted verdict. A model answer cannot establish a type refinement,
 grant authority, discharge an existing deterministic requirement, or turn a
 missing observation into a negative answer.
+
+The original contextual-expression proposal was dropped during implementation.
+An ordinary registered method supports the same closed input contract, illegal
+boolean-use diagnostic, unused-outcome diagnostic, and typed site manifest.
+Those checks also apply through typed helpers. New grammar would add no guarantee.
+The [current frontend reference](../predicates.md) distinguishes implemented
+checking from the remaining runtime work below.
 
 ## What the recent work changes
 
@@ -92,9 +101,9 @@ lesson is to inject an explicit typed classification into consumer tests and
 measure model quality separately. No phrase matcher, fixture name, or desired
 branch may manufacture the fixture verdict.
 
-## Proposed expression and types
+## Evaluation boundary and types
 
-All Harn blocks below are proposed syntax or integration sketches, deliberately
+All Harn blocks below are integration sketches, deliberately
 excluded from runnable documentation snippets. They are design examples, not
 instructions for the current release.
 
@@ -107,13 +116,12 @@ type FindingInput = {
 }
 
 const finding: FindingInput = candidate
-const result = predicate {
-  id: "review.load_bearing.v1",
-  question: "Does the observation support a material failure?",
-  input: finding,
-  policy: review_policy,
-  harness: harness,
-}
+const result = harness.llm.evaluate_predicate(
+  "review.load_bearing.v1",
+  "Does the observation support a material failure?",
+  finding,
+  review_policy,
+)
 
 match result.kind {
   "verdict" -> {
@@ -132,15 +140,14 @@ match result.kind {
 }
 ```
 
-`predicate` is a contextual expression introducer, recognized before this closed
-record body. Existing identifiers named `predicate` remain legal elsewhere.
-The compiler supplies a source site and input-schema fingerprint. `id` and
-`question` are compile-time strings; the input is evaluated once before
+The existing method-call grammar needs no new keyword or expression visitor.
+The frontend supplies a source site and input-type fingerprint. `id` and
+`question` are nonempty string literals; the input is evaluated once before
 dispatch. Its closed, serializable Harn type is required. Open `dict`, `any`,
 unvalidated `unknown`, functions, handles, cycles, and non-finite floats are
 rejected at this boundary. No surrounding locals or conversation are captured.
 
-The expression uses the supplied `Harness` for authority and the current run
+The method uses the supplied capability for authority and the current run
 record. It never creates credentials, grants, or a hidden session. The model
 receives only the question, frozen input, and versioned evaluator instruction.
 Untrusted text in the input is data; it cannot change policy or request tools.
@@ -196,7 +203,7 @@ remains catalog-owned.
 
 Provider calls use strict schema validation. Transport retries, schema retries,
 LLM repair, tool use, conversation continuation, and provider failover are disabled
-for this profile. One expression makes at most one physical request. A caller
+for this profile. One evaluation makes at most one physical request. A caller
 wanting escalation declares another evaluation whose receipt and cost remain
 visible. Existing checkpoint defaults must therefore be overridden at the owning
 boundary, not merely documented away.
@@ -225,7 +232,7 @@ A model can support several operations. The first registry members cover real
 existing or proposed paths: `text_generation`, `embedding`, and
 `decision_evaluation`. Each member has a closed request/result contract and
 operation-specific settings. A decision operation records its supported question
-kinds, such as boolean, choice, and score; the predicate expression initially
+kinds, such as boolean, choice, and score; predicate evaluation initially
 uses only boolean questions. A classifier returning one fixed label set is not
 automatically able to answer arbitrary natural-language predicates.
 
@@ -315,6 +322,14 @@ route needs its own live capability evidence before it is marked supported;
 accepting an ignored option does not count as honoring it.
 
 ### Cache and determinism
+
+Runtime admission must bind the invocation to a checked site in the executable
+artifact and validate its input against that site's closed type before cache
+lookup or dispatch. Gradual typing and computed property access can conceal a
+call from static discovery; neither an empty manifest nor a caller-supplied site
+ID grants permission to evaluate. Missing, forged, or mismatched site metadata
+must refuse with zero provider requests. The frontend-only implementation keeps
+the executor unavailable until this boundary exists.
 
 The minimum identity is predicate text plus typed input plus resolved model ID.
 That tuple alone is insufficient when effort, the evaluator instruction, or an
@@ -453,7 +468,7 @@ before reuse.
 
 ## Checking and hermetic tests
 
-`harn check` verifies the closed expression fields, literal identity/question,
+`harn check` verifies the method arguments, literal identity/question,
 serializable input type, policy type and capability effect. The result is
 `PredicateOutcome`, never `any` or `bool`. The ordinary union checker supplies
 narrowing and exhaustive matching. It must reject a missing uncertainty arm,
@@ -461,11 +476,14 @@ an outcome used directly as an `if` condition, and any attempt to refine an
 untrusted value's type from a probabilistic answer. It cannot prove that an
 English question is suitable for machine judgment.
 
-Compilation emits a manifest of predicate sites, text/schema digests, and their
+Frontend analysis emits a manifest of predicate sites, text/type digests, and their
 effects. That manifest lets tooling identify hidden model work even through a
 helper function. Runtime configuration supplies the actual model route and
 resource grant; checking source neither reaches a provider nor prices a run.
-Portable execution uses the same frontend and a declared capability suspension.
+The first implementation exposes this manifest in `harn check --json`, including
+cached reports. A failed check has no complete manifest. Persisting the manifest
+in executable artifacts belongs to the runtime step. Portable execution uses
+the same frontend and a declared capability suspension.
 A backend without the evaluator refuses that capability; it does not interpret
 the question itself.
 
@@ -547,7 +565,7 @@ assess whether the observed consequence matters after the source and change
 witness have been checked. It cannot mark an unexecuted command as verified or
 invent causality from a file location.
 
-The first syntax example is this integration. Given a witnessed lost update,
+The first call example is this integration. Given a witnessed lost update,
 fixture `true` queues the candidate; given a witnessed cosmetic discrepancy,
 fixture `false` retains a nonblocking candidate. Low confidence retains the
 finding as unassessed. The final review policy still requires its own evidence
@@ -572,13 +590,12 @@ type DeliverableInput = {
   artifact_excerpt: string,
   observation_ids: list<string>,
 }
-const assessment = predicate {
-  id: "deliverable.semantic_fit.v1",
-  question: "Does this artifact substantively meet the requirement?",
-  input: deliverable_input,
-  policy: deliverable_policy,
-  harness: harness,
-}
+const assessment = harness.llm.evaluate_predicate(
+  "deliverable.semantic_fit.v1",
+  "Does this artifact substantively meet the requirement?",
+  deliverable_input,
+  deliverable_policy,
+)
 const candidate = semantic_assessment(assessment)
 return submit_to_existing_requirement_gate(
   candidate, artifact_facts, verifier_facts,
@@ -613,13 +630,12 @@ type ExceptionRationaleInput = {
   observed_denial: string,
   evidence_digest: string,
 }
-const assessment = predicate {
-  id: "exception.rationale_support.v1",
-  question: "Does the observation support this exception rationale?",
-  input: rationale_input,
-  policy: advisory_policy,
-  harness: harness,
-}
+const assessment = harness.llm.evaluate_predicate(
+  "exception.rationale_support.v1",
+  "Does the observation support this exception rationale?",
+  rationale_input,
+  advisory_policy,
+)
 return annotate_existing_census(census, assessment)
 ```
 
@@ -638,12 +654,13 @@ that separation must make the false approval visible.
 
 | Alternative | Merit | Decision |
 | --- | --- | --- |
-| Ordinary library function | Existing checkpoints, typed schemas and cache wrappers can implement much of the behavior. It is the strongest alternative. | Reject as the complete authoring surface: ordinary calls do not give every site the proposed compiler-emitted predicate manifest and closed input/effect contract. Keep library code for orchestration beneath the expression. |
-| A stdlib `predicate()` builtin | Central runtime enforcement and a compact call are feasible. | Reject a second public surface alongside syntax. One internal registered capability owns execution; the expression lowers to it. If the compiler cannot demonstrate additional site/type diagnostics, the syntax proposal should be rejected in review rather than justified by aesthetics. |
+| Ordinary function without checker obligations | Existing checkpoints, typed schemas and cache wrappers can implement much of the behavior. | Insufficient alone: the baseline accepts truthy outcome records, function inputs, and discarded results. |
+| Registered library capability plus checker obligations | Ordinary method syntax can carry the same static identity, closed type, outcome-use checks, and site manifest. | Selected. `harness.llm.evaluate_predicate` is the sole evaluation entry point; typed helpers compose it. |
+| Contextual predicate expression | Makes model work visually distinctive. | Dropped: tests establish the required diagnostics and manifest on the library surface, so grammar adds no invariant. |
 | Reuse the completion judge | Already handles structured judgment, budgets and evidence. | Reuse its lower-level transport/checkpoint owners, not completion policy. A standalone classification should not acquire agent-loop termination, gap arbitration, or requirement-ledger semantics. |
 | Do nothing | Avoids language and tooling changes. | Reject because each caller would continue assembling cache identity, failure handling and replay requirements independently. The proposal is justified only if the three integrations share one enforced contract. |
 
-The expression deliberately does not add fuzzy `while`, probability sampling,
+The API deliberately does not add fuzzy `while`, probability sampling,
 implicit model escalation, arbitrary model-authored code, or a new provider
 registry. Native Jev support and broader classifiers can follow the same
 execution contract after capability and calibration evidence exists.
@@ -708,21 +725,21 @@ tooling costs explicit rather than assuming a small parser change is sufficient.
 The second pass also tightened the syntax tradeoff: the proposed compiler work
 must demonstrate site manifests and type diagnostics
 that a library alone would not supply. Otherwise the library alternative wins.
-That is a falsifiable reason for syntax, not a presumption that new keywords help.
+Implementation established library parity, so the library alternative won.
 
 ## Tooling, portability and distribution
 
-New syntax has a language-wide cost even when the runtime reuses existing
-services. The first implementation PR must inventory all expression visitors and
-generated language projections; a parser-only success is not feature support.
+The implementation keeps existing method syntax and its shared expression
+visitors. Checker and capability contracts still affect every host, so a
+parser-only success is not feature support.
 
 | Surface | Required change and evidence |
 | --- | --- |
-| Lexer/scanner, parser and type checker | Preserve existing uses of the identifier `predicate`; recognize the contextual expression, validate the closed input/policy, and require outcome narrowing. Positive and malformed-source fixtures cover the canonical frontend and tree-sitter scanner. |
-| Compiler, IR, kernel and VM | Lower one expression to one declared evaluator effect with stable source/type identity. The native and portable compilers agree on the operation; unsupported execution refuses explicitly. Check helper calls and nested workers, not only top-level examples. |
+| Lexer/scanner, parser and type checker | Reuse ordinary method grammar; validate the closed input/policy and outcome disposition. Positive and malformed-source fixtures cover the canonical checker. No keyword or scanner projection changes are needed. |
+| Compiler, IR, kernel and VM | Use the declared evaluator effect with stable source/type identity. The native and portable compilers agree on the operation; unsupported execution refuses explicitly. Persist the frontend manifest with executable artifacts in the runtime step. Check helper calls and nested workers, not only top-level examples. |
 | WebAssembly | Reuse `harn-kernel` and the shared frontend through `harn-wasm`. A host handles capability suspension/resumption and credentials. The Wasm artifact contains no model weights, provider secrets, or second evaluator. Offline response, cancellation, denied capability, and missing-host cases need browser-worker coverage. |
 | Linter and formatter | Every expression walker visits the input and policy. Formatting round-trips preserve question bytes and predicate identity. Diagnostics distinguish illegal boolean use, unsupported options, and an unused result without treating model evidence as a type proof. |
-| Language server and VS Code | Completion, hover, diagnostics, source spans and formatting use the same contract. Regenerate highlighting vocabulary/TextMate/tree-sitter projections and test the extension's language-server surface. No provider calls occur while editing. |
+| Language server and VS Code | Completion, hover, diagnostics, source spans and formatting use the same contract. Existing method highlighting applies; test the extension's language-server surface. No provider calls occur while editing. |
 | Documentation and skills | Update the language reference, separate how-to, tested examples and authoring/testing skills. Generated provider documentation distinguishes native decisions from a structured LLM adapter. |
 | Catalog consumers and model pickers | Generate the existing JSON/schema, Harn, TypeScript and Swift projections. Test that a decision-only route cannot be selected as a text driver and that unknown operation variants fail explicitly. |
 
@@ -781,7 +798,8 @@ targets; generated grammar output is additional. Dependencies are sequential.
 
 | PR | Owning change and estimated size | Falsifier and negative control | Required gate |
 | --- | --- | --- | --- |
-| 1. Parser, checker and catalog contract | Contextual expression, typed site manifest, outcome union, capability lowering, typed model-operation schema and migration, spec, expression visitors and editor grammar. Roughly 1,200–2,200 lines. Until runtime support lands, execution refuses explicitly. | Positive and negative parser/type fixtures; deleting the outcome/type restriction admits an illegal direct boolean or nonserializable input. Removing operation admission admits a decision-only chat driver. Existing text/embedding routes retain their behavior. No provider call is possible in this PR. | Focused parser/checker tests, `harn check`, conformance, Harn lint/format, tree-sitter/LSP/extension checks, catalog/matrix/support generation checks and schema round-trips. |
+| 1a. Checker and evaluation contract | Registered library capability, closed outcome union, typed site manifest and static obligations. The contextual expression is dropped. Until runtime support lands, execution refuses explicitly. | Positive and negative type fixtures; disabling the checks admits illegal boolean use, nonserializable input and discarded outcomes. A checked helper emits a site manifest, including on cached checks. No provider call is possible in this PR. | Focused parser/kernel tests, canonical CLI checks, conformance, Harn lint/format, LSP diagnostics and source/binary drift. |
+| 1b. Typed model-operation catalog | Canonical operation schema and migration with generated projections. Separate reviewed change, roughly 600–1,000 lines. | Removing operation admission admits a decision-only chat driver. Existing text/embedding routes retain their behavior through migration parity fixtures. | Catalog/matrix/support generation checks, consumer tests and schema round-trips. |
 | 2. Runtime and receipt | One evaluator using existing structured transport, strict outcome conversion, reservations, cancellation, journal/projection and portable host suspension. Roughly 1,200–2,000 lines. Raw provider tapes supply hermetic responses from the start; the catalog does not advertise a native executor before it exists. | A malformed response, no model, accepted stop or exhausted budget cannot select a branch; disabling admission dispatches the forbidden request. Assert emitted and consumed receipt IDs through a helper call and the portable host boundary. | Runtime mechanism contracts, `harn check`, conformance, Wasm/browser-worker coverage, run-record projection, binary drift and comparable native/Wasm size reports. |
 | 3. Cache and tape | Versioned typed key, isolated namespace, single-flight cache, predicate tape record and strict fixture consumption. Roughly 700–1,200 lines. | Same key makes one physical request; changed input/schema/model/policy misses; replay with deleted/extra entry fails with zero live calls. Disabling mismatch checking must expose incorrect replay. | Cache/replay/fidelity contracts, `harn check`, conformance and tape-version compatibility tests. |
 | 4. Stdlib helpers | Typed outcome policies, declared fixture helper, generic review/deliverable/census examples. Roughly 350–650 lines. No existing rule replacement. | Positive predicate plus red deterministic evidence stays blocked in all three worked contracts; removing each deterministic guard exposes a false accept. | Owning Harn tests, `harn check`, conformance, strict public-return checks, mechanism contracts and embedded-stdlib size attribution. |
@@ -809,9 +827,9 @@ Semantic accuracy, confidence calibration, representative latency and invoice
 cost for real workloads remain unmeasured. The native Jev adapter, portable
 capability transport, concurrent
 reservation behavior, and crash recovery remain implementation obligations.
-The proposed grammar has not been added to the parser. Review must resolve
-whether its compiler-visible benefits justify the language surface before any
-implementation claim is made.
+The frontend contract does not establish runtime admission, replay, provider
+behavior, or semantic quality. Its site manifest describes declared source
+sites, not executed evaluations or billed requests.
 
 [jev-intro]: https://typesafe.ai/blog/introducing-system-one-models-and-jev
 [jev-primitives]: https://docs.typesafe.ai/primitives

@@ -6,6 +6,13 @@ capability_method!(
     "Read the model catalog."
 );
 capability_method!(
+    llm_evaluate_predicate,
+    "harness.llm.evaluate_predicate",
+    ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    harn_builtin_meta::predicate::EVALUATE,
+    "Evaluate a declared probabilistic predicate and require an explicit outcome disposition."
+);
+capability_method!(
     llm_catalog_refresh,
     "harness.llm.catalog_refresh",
     ["llm.mutate@const=catalog"],

@@ -113,6 +113,7 @@ fn run_with_bridge_in_parent_workspace(
                         cleanup: None,
                         environment_policy: Default::default(),
                         grants: Vec::new(),
+                        admitted_environment: Vec::new(),
                     },
                 ));
                 harn_vm::orchestration::push_execution_policy(

@@ -1,0 +1,59 @@
+/**
+ * Types for explicit probabilistic evaluation.
+ *
+ * The registered capability contract owns these shapes. Runtime parity tests
+ * check this source projection in both directions.
+ */
+type PredicateVerdict = {verdict: bool, confidence: float, evidence: string}
+
+type PredicatePolicy = {
+  backend: "structured_llm",
+  provider: string,
+  model: string,
+  effort: string,
+  temperature: float,
+  threshold: float,
+  evaluation_cost_limit: float,
+  run_cost_limit: float,
+}
+
+type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: string} \
+  | {kind: "low_confidence", candidate: PredicateVerdict, threshold: float, receipt: string} \
+  | {
+  kind: "refused",
+  reason: "provider_refusal" | "schema_invalid" | "output_truncated",
+  diagnostic: string,
+  receipt: string,
+} \
+  | {
+  kind: "budget_cut",
+  limit: "requests" \
+    | "evaluations" \
+    | "input_tokens" \
+    | "output_tokens" \
+    | "deadline" \
+    | "evaluation_cost" \
+    | "run_cost" \
+    | "parent_budget",
+  requested: float,
+  remaining: float,
+  receipt: string,
+} \
+  | {
+  kind: "unavailable",
+  reason: "model_unconfigured" \
+    | "unsupported_options" \
+    | "transport_failed" \
+    | "authority_denied" \
+    | "producer_cancelled" \
+    | "cache_miss",
+  receipt: string,
+} \
+  | {
+  kind: "replay_mismatch",
+  expected_identity: string,
+  actual_identity: string,
+  occurrence: int,
+  receipt: string,
+} \
+  | {kind: "cancelled", control_event: string, receipt: string}

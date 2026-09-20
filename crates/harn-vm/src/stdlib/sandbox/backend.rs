@@ -60,6 +60,23 @@ pub(crate) enum PrepareOutcome {
         wrapper: String,
         args: Vec<String>,
     },
+    /// A wrapper that must build a namespace before confinement, so the
+    /// confinement travels to it as data instead of as a `pre_exec` callback.
+    ///
+    /// The distinction from [`Self::WrappedExec`] is not cosmetic. That
+    /// variant's wrapper is itself confined by the parent, which is correct
+    /// when the wrapper only re-execs. A wrapper that has to call `unshare`
+    /// cannot be: the filter is a default-deny allowlist carrying no namespace
+    /// syscalls, so confining it first kills it before it does its job. The
+    /// ruleset descriptor is therefore kept open across the exec and the
+    /// compiled filter is handed over as bytes, leaving the wrapper to enter
+    /// both once the namespace exists.
+    #[cfg(target_os = "linux")]
+    NamespacedExec {
+        wrapper: String,
+        args: Vec<String>,
+        confinement: super::linux::TransferableConfinement,
+    },
 }
 
 #[cfg(target_os = "linux")]

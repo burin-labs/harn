@@ -31,6 +31,37 @@ pub use crate::stdlib::sandbox::{
     SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
 };
 
+/// The subcommand the namespace helper is invoked as, and the flags that
+/// carry the confinement to it.
+///
+/// One definition, read by both sides of the handover. The Linux backend
+/// builds the argv from these and the CLI recognises and parses it with the
+/// same names, so the two cannot drift into a helper that is spawned but
+/// never dispatched. They are platform-neutral because the command surface
+/// that declares the subcommand is compiled on every platform, while the
+/// backend that invokes it is not.
+///
+/// A subcommand of this same runtime rather than a separate program: the host
+/// policy grant names an installed *copy* at a stable path, and a copy of one
+/// binary is cheaper to keep at the pinned revision than a second artifact
+/// with its own build and release story.
+pub const NETNS_LAUNCH_SUBCOMMAND: &str = "netns-launch";
+
+/// Flag naming the inherited Landlock ruleset descriptor.
+pub const NETNS_RULESET_FD_FLAG: &str = "--ruleset-fd";
+
+/// Flag carrying the compiled seccomp program, hex-encoded.
+pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
+
+/// The hook that carries the ruleset descriptor across that `exec`, without
+/// which the helper enters no ruleset while the layer above still reports the
+/// filesystem boundary as enforced.
+///
+/// Re-exported straight from the backend that owns it. The sandbox module's
+/// own export list is a length-ratcheted legacy file, and widening it by one
+/// name costs two lines there for no benefit to a reader.
+#[cfg(target_os = "linux")]
+pub use crate::stdlib::sandbox::linux::keep_ruleset_across_exec;
 /// Confinement an embedder builds here and enters in a process it re-execs.
 ///
 /// An embedder that spawns the payload directly never needs this: `pre_exec`
@@ -39,7 +70,9 @@ pub use crate::stdlib::sandbox::{
 /// silent — the payload runs unconfined and every step before it still reports
 /// success.
 #[cfg(target_os = "linux")]
-pub use crate::stdlib::sandbox::{transferable_confinement, TransferableConfinement};
+pub use crate::stdlib::sandbox::{
+    decode_seccomp_hex, transferable_confinement, TransferableConfinement,
+};
 
 /// Push a transient execution policy with `sandbox_profile` replaced by the
 /// requested profile. The returned guard restores the surrounding policy on

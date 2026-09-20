@@ -36,6 +36,8 @@ pub(crate) struct CheckFileReport {
     pub path: String,
     pub status: CheckFileStatus,
     pub diagnostics: Vec<CheckDiagnostic>,
+    /// None means no trustworthy site census, not zero model work.
+    pub predicate_manifest: Option<harn_kernel::predicate::PredicateManifest>,
 }
 
 impl CheckFileReport {
@@ -449,6 +451,37 @@ pub(crate) fn check_file_report_inner(
         }
     }
 
+    let predicate_manifest = if has_error {
+        None
+    } else {
+        match super::predicate_manifest::collect(
+            analysis,
+            path,
+            &output.predicate_sites,
+            config,
+            module_graph,
+        ) {
+            Ok(manifest) => Some(manifest),
+            Err(message) => {
+                has_error = true;
+                diagnostic_count += 1;
+                if let Some(text) = text.as_mut() {
+                    text.rendered
+                        .push_str(&format!("{path_str}: error: {message}\n"));
+                }
+                diagnostics.push(CheckDiagnostic {
+                    source: "predicate",
+                    severity: "error",
+                    code: None,
+                    message,
+                    span: None,
+                    help: None,
+                });
+                None
+            }
+        }
+    };
+
     if diagnostic_count == 0 {
         if let Some(text) = text.as_mut() {
             text.rendered.push_str(&format!("{path_str}: ok\n"));
@@ -466,6 +499,7 @@ pub(crate) fn check_file_report_inner(
         path: path_str,
         status,
         diagnostics,
+        predicate_manifest,
     }
 }
 
@@ -496,6 +530,7 @@ fn file_analysis_error_report(path: &str, error: FileAnalysisError) -> CheckFile
         FileAnalysisError::Read(error) => CheckFileReport {
             path: path.to_string(),
             status: CheckFileStatus::Error,
+            predicate_manifest: None,
             diagnostics: vec![CheckDiagnostic {
                 source: "io",
                 severity: "error",
@@ -514,6 +549,7 @@ fn analysis_diagnostic_report(path: &str, error: AnalysisError) -> CheckFileRepo
     CheckFileReport {
         path: path.to_string(),
         status: CheckFileStatus::Error,
+        predicate_manifest: None,
         diagnostics: vec![diagnostic],
     }
 }

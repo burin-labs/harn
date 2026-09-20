@@ -21,6 +21,16 @@ impl TypeChecker {
                 );
                 break; // warn once per block
             }
+            let is_returned_tail = idx + 1 == stmts.len()
+                && expected_tail.is_some_and(|ty| self.is_predicate_outcome(ty, scope));
+            if !is_returned_tail
+                && !matches!(stmt.node, Node::ReturnStmt { .. })
+                && self
+                    .infer_type(stmt, scope)
+                    .is_some_and(|ty| self.is_predicate_outcome(&ty, scope))
+            {
+                self.unused_predicate_error(stmt.span);
+            }
             if idx + 1 == stmts.len() && !matches!(stmt.node, Node::ReturnStmt { .. }) {
                 self.check_node_with_expected(stmt, expected_tail, scope);
             } else {
