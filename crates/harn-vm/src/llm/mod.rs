@@ -307,6 +307,7 @@ mod healthcheck;
 pub(crate) mod pairing_receipts;
 pub(crate) mod provider;
 mod provider_auth;
+pub(crate) mod provider_dispatch;
 pub(crate) mod providers;
 pub mod rate_governor;
 pub(crate) mod rate_limit;

@@ -1158,7 +1158,7 @@ mod tests {
             served_fast: false,
             accounting_status: crate::llm::usage::UsageAccountingStatus::Reported,
             known_cost_usd: 0.0123,
-            provider_call_count: 1,
+            provider_call_count: Some(1),
             unpriced_calls: 0,
             usage_unknown_calls: 0,
             unpriced: None,
@@ -1194,7 +1194,7 @@ mod tests {
             served_fast: false,
             accounting_status: crate::llm::usage::UsageAccountingStatus::Reported,
             known_cost_usd: 0.0,
-            provider_call_count: 1,
+            provider_call_count: Some(1),
             unpriced_calls: 1,
             usage_unknown_calls: 0,
             unpriced: Some(Box::new(crate::llm::usage::UnpricedFacts {

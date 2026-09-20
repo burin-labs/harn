@@ -231,7 +231,7 @@ fn a_recovered_retry_reports_partial_accounting_instead_of_a_black_out() {
         call.unpriced_calls, 1,
         "the discarded attempt stays visible"
     );
-    assert_eq!(call.provider_call_count, 2);
+    assert_eq!(call.provider_call_count, Some(2));
     assert_eq!(
         call.unpriced_reason(),
         Some(super::UnpricedReason::UsageUnreported),
@@ -343,7 +343,7 @@ fn a_severed_stream_reads_apart_from_a_request_that_never_answered() {
         Some(priced.known_cost_usd),
         "the priced sibling stays a measurement"
     );
-    assert_eq!(severed.provider_call_count, 2);
+    assert_eq!(severed.provider_call_count, Some(2));
     assert_eq!(severed.usage_unknown_calls, 1);
 }
 
@@ -351,7 +351,7 @@ fn a_severed_stream_reads_apart_from_a_request_that_never_answered() {
 fn terminal_unknown_ledger_counts_every_physical_attempt() {
     let usage = LlmUsage::unknown_attempts(3);
 
-    assert_eq!(usage.provider_call_count, 3);
+    assert_eq!(usage.provider_call_count, Some(3));
     assert_eq!(usage.unpriced_calls, 3);
     assert_eq!(usage.usage_unknown_calls, 3);
     assert_eq!(usage.cost_usd, None);
@@ -372,7 +372,7 @@ fn terminal_ledger_preserves_completed_receipts_before_unknown_attempts() {
     // projection, which is what a ceiling consumer fails closed on.
     assert_eq!(usage.cost_usd, Some(0.25));
     assert_eq!(usage.projected_cost_usd(), None);
-    assert_eq!(usage.provider_call_count, 3);
+    assert_eq!(usage.provider_call_count, Some(3));
     assert_eq!(usage.unpriced_calls, 2);
     assert_eq!(usage.usage_unknown_calls, 2);
     assert_eq!(usage.accounting_status, UsageAccountingStatus::Partial);
@@ -383,7 +383,8 @@ fn legacy_ledger_reconstructs_one_call_without_losing_known_cost() {
     let mut usage = LlmUsage::known_zero_attempt();
     usage.cost_usd = Some(0.25);
     usage.known_cost_usd = 0.0;
-    usage.provider_call_count = 0;
+    // A ledger recorded before the field existed carries no count at all.
+    usage.provider_call_count = None;
 
     let summary = summarize_usage_cost_certainty([&usage]);
 
@@ -391,6 +392,57 @@ fn legacy_ledger_reconstructs_one_call_without_losing_known_cost() {
     assert_eq!(summary.provider_call_count, 1);
     assert_eq!(summary.unpriced_calls, 0);
     assert_eq!(summary.usage_unknown_calls, 0);
+}
+
+/// The falsifier for burin-labs/harn#8529: a measured zero must survive the
+/// fold as zero. Reading an integer zero as the legacy marker minted every
+/// pre-dispatch refusal into one unpriced call.
+#[test]
+fn measured_zero_folds_as_zero_not_as_a_legacy_call() {
+    let usage = LlmUsage::no_provider_request();
+    assert_eq!(usage.provider_call_count, Some(0));
+
+    let summary = summarize_usage_cost_certainty([&usage]);
+
+    assert_eq!(summary.provider_call_count, 0);
+    assert_eq!(summary.unpriced_calls, 0);
+    assert_eq!(summary.usage_unknown_calls, 0);
+    assert_eq!(summary.known_cost_usd, 0.0);
+    assert_eq!(summary.projected_cost_usd(), Some(0.0));
+    assert!(!summary.unprojectable);
+
+    // Composed with a real request, the zero adds nothing and hides nothing.
+    let real = LlmUsage::unknown_attempt();
+    let composed = summarize_usage_cost_certainty([&usage, &real]);
+    assert_eq!(composed.provider_call_count, 1);
+    assert_eq!(composed.unpriced_calls, 1);
+}
+
+/// A legacy ledger and a measured zero must serialize differently, or a
+/// round trip would collapse one into the other.
+#[test]
+fn absent_count_and_measured_zero_serialize_distinctly() {
+    let mut legacy = LlmUsage::known_zero_attempt();
+    legacy.provider_call_count = None;
+    let measured = LlmUsage::no_provider_request();
+
+    let legacy_json = serde_json::to_value(&legacy).unwrap();
+    let measured_json = serde_json::to_value(&measured).unwrap();
+    assert!(legacy_json.get("provider_call_count").is_none());
+    assert_eq!(measured_json["provider_call_count"], 0);
+
+    let legacy_dict = legacy.to_vm_dict(&ProviderAttempts::default());
+    let measured_dict = measured.to_vm_dict(&ProviderAttempts::default());
+    assert!(legacy_dict.get("provider_call_count").is_none());
+    assert!(matches!(
+        measured_dict.get("provider_call_count"),
+        Some(VmValue::Int(0))
+    ));
+
+    let back: LlmUsage = serde_json::from_value(legacy_json).unwrap();
+    assert_eq!(back.provider_call_count, None);
+    let back: LlmUsage = serde_json::from_value(measured_json).unwrap();
+    assert_eq!(back.provider_call_count, Some(0));
 }
 
 #[test]

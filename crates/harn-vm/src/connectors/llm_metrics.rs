@@ -69,7 +69,7 @@ mod tests {
         let usage = LlmUsage {
             cost_usd: None,
             known_cost_usd: 0.01,
-            provider_call_count: 2,
+            provider_call_count: Some(2),
             unpriced_calls: 1,
             usage_unknown_calls: 1,
             ..LlmUsage::known_zero_attempt()
