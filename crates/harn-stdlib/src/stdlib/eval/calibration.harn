@@ -188,12 +188,12 @@ pub type CalibrationReport = {
 
 /** Caller-supplied report settings. Every field has a documented default. */
 pub type CalibrationOptions = {
-  thresholds: list<float>?,
-  target_error: float?,
-  seed: int?,
-  model_revision: string?,
-  served_model_id: string?,
-  level_order: list<string>?,
+  thresholds?: list<float>,
+  target_error?: float,
+  seed?: int,
+  model_revision?: string,
+  served_model_id?: string,
+  level_order?: list<string>,
 }
 
 /** A normalized corpus row. Internal; the public entry validates into it. */
@@ -687,7 +687,7 @@ pub fn calibration_report(rows: list, options: CalibrationOptions = {}) -> Calib
       1,
     )
   }
-  const level_order = options?.level_order ?? []
+  const level_order = options.level_order ?? []
   let normalized = []
   let index = 0
   for raw in rows {
@@ -699,13 +699,13 @@ pub fn calibration_report(rows: list, options: CalibrationOptions = {}) -> Calib
     normalized = normalized + [row]
     index = index + 1
   }
-  const thresholds = if len(options?.thresholds ?? []) > 0 {
-    (options?.thresholds ?? []).sorted()
+  const thresholds = if len(options.thresholds ?? []) > 0 {
+    (options.thresholds ?? []).sorted()
   } else {
     DEFAULT_THRESHOLDS
   }
-  const target_error = options?.target_error ?? DEFAULT_TARGET_ERROR
-  const seed = options?.seed ?? DEFAULT_SEED
+  const target_error = options.target_error ?? DEFAULT_TARGET_ERROR
+  const seed = options.seed ?? DEFAULT_SEED
   let grouped = {}
   for row in normalized {
     const key = row.question_id + "\u{1f}" + row.backend
@@ -732,8 +732,8 @@ pub fn calibration_report(rows: list, options: CalibrationOptions = {}) -> Calib
     contract: CONTRACT,
     corpus_digest: __corpus_digest(normalized),
     report_digest: "",
-    model_revision: trim(to_string(options?.model_revision ?? "")),
-    served_model_id: trim(to_string(options?.served_model_id ?? "")),
+    model_revision: trim(to_string(options.model_revision ?? "")),
+    served_model_id: trim(to_string(options.served_model_id ?? "")),
     rows: len(normalized),
     thresholds: thresholds,
     target_error: target_error,
