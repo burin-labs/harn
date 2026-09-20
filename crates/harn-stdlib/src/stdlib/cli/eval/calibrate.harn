@@ -1,5 +1,5 @@
 import { calibration_report } from "std/eval/calibration"
-import { read_jsonl } from "std/jsonl"
+import { parse_jsonl } from "std/jsonl"
 
 /**
  * `harn eval calibrate` - measure a classifier's confidence against labels.
@@ -41,15 +41,29 @@ fn __parse_thresholds(raw: string) -> list<float> {
   return out
 }
 
+/**
+ * Read one JSONL side.
+ *
+ * The read and the parse are separate steps on purpose. A denied or missing
+ * file and a file that genuinely holds no rows are different facts, and a
+ * helper that folded both into an empty list would report a permission refusal
+ * as an empty corpus.
+ */
 fn __rows(fs: HarnessFs, stdio: HarnessStdio, path: string, label: string) -> list? {
-  const rows = try {
-    read_jsonl(fs, path, {})
+  const text = try {
+    fs.read_text(path)
   } catch (e) {
-    stdio.eprintln("error: failed to read the ${label} file ${path}: ${to_string(e)}")
+    stdio.eprintln("error: could not read the ${label} file ${path}: ${to_string(e)}")
+    return nil
+  }
+  const rows = try {
+    parse_jsonl(text, {})
+  } catch (e) {
+    stdio.eprintln("error: the ${label} file ${path} is not JSONL: ${to_string(e)}")
     return nil
   }
   if len(rows) == 0 {
-    stdio.eprintln("error: the ${label} file ${path} has no rows")
+    stdio.eprintln("error: the ${label} file ${path} holds no rows")
     return nil
   }
   return rows

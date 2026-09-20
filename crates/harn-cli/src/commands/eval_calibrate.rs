@@ -4,8 +4,6 @@
 //! and this command all read the same numbers from one implementation. This
 //! file is the argument shim.
 
-use std::io::Write as _;
-
 use crate::cli::EvalCalibrateArgs;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
@@ -40,12 +38,9 @@ pub async fn run(args: EvalCalibrateArgs) -> i32 {
         if args.json { "1" } else { "0" },
     );
 
-    let outcome = dispatch::run_embedded_script("eval/calibrate", Vec::new(), args.json).await;
-    if !outcome.stdout.is_empty() {
-        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
-    }
-    if !outcome.stderr.is_empty() {
-        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
-    }
-    outcome.exit_code
+    // The corpus and answers are user-supplied paths that legitimately sit
+    // outside the workspace. Under the workspace-rooted sandbox their reads are
+    // denied, which surfaces as an empty corpus rather than as the access
+    // refusal it is, so this port opts out the way the other user-path ports do.
+    dispatch::dispatch_to_embedded_script_no_sandbox("eval/calibrate", Vec::new(), args.json).await
 }
