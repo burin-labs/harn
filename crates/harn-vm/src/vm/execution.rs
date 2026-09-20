@@ -909,12 +909,7 @@ impl crate::vm::Vm {
             }
             ScopeInterruptResult::CancelTimedOut => {
                 self.cancel_spawned_tasks();
-                let signal = self
-                    .take_host_interrupt_signal()
-                    .unwrap_or_else(|| "SIGINT".to_string());
-                if self.has_interrupt_handler_for(&signal) {
-                    self.dispatch_interrupt_handlers(&signal).await?;
-                }
+                self.dispatch_handlers_for_observed_cancel().await?;
                 Err(Self::cancelled_error())
             }
         }
