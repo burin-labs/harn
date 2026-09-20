@@ -1178,6 +1178,8 @@ pub fn agent_compute_terminal_callback(
     iteration: terminal?.iteration ?? 0,
     final_status: terminal?.final_status ?? "",
     stop_reason: terminal?.stop_reason ?? "",
+    exit_cause: terminal?.exit_cause ?? "natural",
+    terminal_error: terminal?.terminal_error,
     budget_exhausted: (terminal?.final_status ?? "") == "budget_exhausted",
     max_iterations: terminal?.max_iterations ?? 0,
     iteration_budget: terminal?.iteration_budget,

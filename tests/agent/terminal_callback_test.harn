@@ -63,7 +63,15 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
         post_turn_callback: { _info ->
           return {message: "Keep going until the done sentinel is present."}
         },
+        // Called twice now: once for the budget cut it rescues, and once for
+        // the natural seal of the rescued run. The rescue verdict is only
+        // correct on the first, so the branch is on the reported cause.
         terminal_callback: { info ->
+          if info?.exit_cause != "budget_exhausted" {
+            assert_eq(info?.exit_cause, "natural")
+            assert_eq(info?.final_status, "done")
+            return {message: "The rescued run sealed on its own."}
+          }
           assert_eq(info?.final_status, "budget_exhausted")
           assert_eq(info?.stop_reason, "max_iterations")
           assert(info?.budget_exhausted, "payload must expose a budget_exhausted boolean")
@@ -99,6 +107,169 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
         contains(feedback_kinds, "terminal_callback"),
         "terminal callback feedback should be injected under its own kind",
       )
+    },
+  )
+}
+
+fn denial_toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit a file.",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {
+        path: {type: "string", description: "Path to edit"},
+        text: {type: "string", description: "Replacement text"},
+      },
+      returns: {type: "string"},
+      annotations: {kind: "write"},
+    },
+  )
+  return tools
+}
+
+fn edit_call(id: string) {
+  return {
+    text: "",
+    tool_calls: [{id: id, name: "edit", arguments: {path: "src/app.rs", text: "fixed"}}],
+  }
+}
+
+fn terminal_callback_notices(events: any) {
+  return events.filter(
+    { event -> event.type == "feedback_injected" && event?.kind == "terminal_callback" },
+  )
+    .map({ event -> to_string(event?.content ?? "") })
+    .to_list()
+}
+
+// The callback is the only in-band notification that the run ended, so it
+// reports the cause and nothing else. Returning a message makes the call
+// observable from outside: an invocation that never happens injects nothing,
+// which is what this case is here to catch.
+fn cause_reporting_callback() {
+  return { info -> return {message: "sealed exit_cause=" + to_string(info?.exit_cause ?? "")} }
+}
+
+/*
+ * harn#8473. A run that dies on an error its loop cannot retry used to seal in
+ * silence: the callback was gated on `terminal_error == nil`, so the one
+ * notification an embedder gets never fired on the exit it most needs to hear
+ * about. Two identical permanent denials are the cheapest fully hermetic route
+ * to that exit -- no provider flakiness, no clock.
+ */
+pipeline test_a_run_that_dies_on_an_error_still_reports_its_terminal(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [edit_call("edit-1"), edit_call("edit-2"), edit_call("edit-3")],
+    { ->
+      const session = "terminal-exception-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: denial_toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 4,
+        final_wrapup: false,
+        stall_diagnostics: {enabled: false},
+        approval_policy: {auto_deny: ["edit"]},
+        terminal_callback: cause_reporting_callback(),
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Edit src/app.rs.", nil, opts) },
+      )
+      // The exit under test really is the error exit and not some other seal.
+      assert_eq(captured.result.status, "error")
+      assert_eq(captured.result.stop_reason, "repeated_non_retryable_denial")
+      assert_eq(terminal_callback_notices(captured.events), ["sealed exit_cause=exception"])
+    },
+  )
+}
+
+/*
+ * Negative control for the case above: the rescue budget is still rationed.
+ * A callback that asks to continue off an error exit is heard, but the loop
+ * refuses the extension, because a run whose error is terminal cannot be
+ * rescued by an embedder that was only told about it.
+ */
+pipeline test_an_error_exit_hears_the_callback_but_refuses_its_rescue(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [edit_call("edit-1"), edit_call("edit-2"), edit_call("edit-3"), edit_call("edit-4")],
+    { ->
+      const session = "terminal-exception-norescue-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: denial_toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 6,
+        final_wrapup: false,
+        stall_diagnostics: {enabled: false},
+        approval_policy: {auto_deny: ["edit"]},
+        terminal_callback: { _info ->
+          return {message: "Try once more.", next_options: {llm_options: {temperature: 0.0}}}
+        },
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Edit src/app.rs.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "error")
+      assert_eq(captured.result.stop_reason, "repeated_non_retryable_denial")
+      // The cutoff fires on the second identical denial and the loop stops
+      // there. A granted rescue would have spent a third scripted call.
+      assert_eq(len(harness.llm.mock_calls()), 2)
+      const decisions = captured.result?.adaptive_budget?.decisions ?? []
+      for decision in decisions {
+        assert(
+          decision?.reason != "terminal_callback_continue",
+          "an error exit must not record a terminal rescue extension",
+        )
+      }
+    },
+  )
+}
+
+/*
+ * Negative control: a run that ends on its own keeps its own cause. The new
+ * notification must not relabel an ordinary completion as a failure, and it
+ * must not change the status the loop sealed.
+ */
+pipeline test_a_natural_exit_keeps_its_own_cause(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("Nothing to change here. ##DONE##")],
+    { ->
+      const session = "terminal-natural-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: denial_toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 4,
+        final_wrapup: false,
+        stall_diagnostics: {enabled: false},
+        terminal_callback: cause_reporting_callback(),
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Report on src/app.rs.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      assert_eq(terminal_callback_notices(captured.events), ["sealed exit_cause=natural"])
     },
   )
 }
