@@ -1656,6 +1656,16 @@ jobs:
       - name: Check CI cache and gate ownership policy
         if: always()
         run: make check-ci-cache-policy
+      # The policies that read only committed source through the bundled CLI.
+      # They used to be reachable only from the push-only lane, so a stdlib
+      # type error could not be refused before it merged: main went red and
+      # every branch downstream inherited a failure it did not cause. They need
+      # no warm artifact, no Node and no compile, which is what makes them
+      # eligible here. The Makefile owns which policies those are, so this step
+      # and the expensive sweep cannot disagree about the list.
+      - name: Check source-only repository policies
+        if: always()
+        run: make repository-policies-source
 
   audit-scripts:
     name: Check repository policies

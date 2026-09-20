@@ -1,4 +1,4 @@
-.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-downstream-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths check-stack-frames check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-generated-registry gen-release-contract check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
+.PHONY: repository-policies repository-policies-source run-policy-list setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-downstream-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths check-stack-frames check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-generated-registry gen-release-contract check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache gh-check-state
 .PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
 .PHONY: check-typescript-protocol-binding check-swift-protocol-binding
@@ -1384,41 +1384,65 @@ verify-tree-sitter-parse:
 #
 # Failing output is replayed after the summary, so the one-line-per-check list
 # stays readable and the detail is still there.
+# Policies that read only committed source through the bundled CLI. They need
+# no warm artifact, no Node, and no compile, which is what makes them eligible
+# to refuse a pull request rather than report after the merge. Keep this list
+# and the one below as the single owner of what `repository-policies` runs, so
+# the two sides cannot drift.
+SOURCE_REPOSITORY_POLICIES := \
+  lint-agent-path-normalization \
+  check-stdlib-host-neutral \
+  check-public-product-names \
+  check-stdlib-strict-types \
+  check-stdlib-public-return-types \
+  check-schema-strict \
+  lint-diagnostic-codes
+
+# Everything else: warm artifacts, generators, Node, or a network-shaped check.
+WARM_REPOSITORY_POLICIES := \
+  lint-test-patterns \
+  check-app-host \
+  check-optional-dep-feature-contracts \
+  spec-lint \
+  check-bindings \
+  check-protocol-artifacts \
+  check-binary-size-policy \
+  check-receipt-structs \
+  check-portable-benchmark-schema \
+  check-portable-demo-package \
+  check-docs-links \
+  check-agent-guidance \
+  check-agent-gates \
+  check-tree-sitter-keywords \
+  check-grammar-fitness \
+  check-vm-exposures \
+  check-turn-end-boundary \
+  check-generated-registry \
+  check-cargo-lock-contract \
+  check-rust-test-lane-policy \
+  check-ci-cache-policy \
+  lint-actions-harn \
+  check-run-view-fixtures \
+  check-release-metadata
+
+# The source-only subset, so a pull request can be refused by the checks that
+# need nothing but the tree. Before this existed, a stdlib type error could
+# only be reported by the push-only lane, which meant main went red and every
+# branch downstream inherited a failure it did not cause.
+repository-policies-source:
+	@$(MAKE) --no-print-directory run-policy-list POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES)"
+
 repository-policies:
+	@$(MAKE) --no-print-directory run-policy-list \
+	  POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES) $(WARM_REPOSITORY_POLICIES)"
+
+# One recipe for both lists. Two copies of this loop would be two places for
+# the continue-past-a-failure behaviour to diverge, and that behaviour is the
+# reason the target exists: one red used to skip nine siblings with nothing
+# saying they had not run.
+run-policy-list:
 	@set -u; failures=""; passed=0; logs="$$(mktemp -d)"; \
-	for check in \
-	  lint-test-patterns \
-	  check-app-host \
-	  lint-agent-path-normalization \
-	  check-optional-dep-feature-contracts \
-	  spec-lint \
-	  check-bindings \
-	  check-protocol-artifacts \
-	  lint-diagnostic-codes \
-	  check-stdlib-host-neutral \
-	  check-public-product-names \
-	  check-stdlib-strict-types \
-	  check-stdlib-public-return-types \
-	  check-schema-strict \
-	  check-binary-size-policy \
-	  check-receipt-structs \
-	  check-portable-benchmark-schema \
-	  check-portable-demo-package \
-	  check-docs-links \
-	  check-agent-guidance \
-	  check-agent-gates \
-	  check-tree-sitter-keywords \
-	  check-grammar-fitness \
-	  check-vm-exposures \
-	  check-turn-end-boundary \
-	  check-generated-registry \
-	  check-cargo-lock-contract \
-	  check-rust-test-lane-policy \
-	  check-ci-cache-policy \
-	  lint-actions-harn \
-	  check-run-view-fixtures \
-	  check-release-metadata \
-	; do \
+	for check in $(POLICY_LIST); do \
 	  if $(MAKE) --no-print-directory "$$check" >"$$logs/$$check.log" 2>&1; then \
 	    printf 'PASS  %s\n' "$$check"; passed=$$((passed + 1)); \
 	  else \
