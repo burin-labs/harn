@@ -263,7 +263,47 @@ pub const ARTIFACT_READY_TIMEOUT_MINUTES = "50"
 
 pub const HARN_AUDIT_TIMEOUT_MINUTES = "65"
 
-pub const LIVE_ARTIFACT_CONSUMERS = ["audit-scripts", "ci-walltime-report", "source-length-ratchet"]
+pub const LIVE_ARTIFACT_CONSUMERS = [
+  "audit-scripts",
+  "ci-walltime-report",
+  "fast-policy-gates",
+  "source-length-ratchet",
+]
+
+/**
+ * Policy jobs cheap enough to refuse a change before it merges.
+ *
+ * THE RULE, not the list. A list of job names cannot say why a job is on it,
+ * so the next one is added without an argument and the one that should have
+ * moved never does. Two questions decide it.
+ *
+ *  1. Can it REFUSE a change? A gate's output is a verdict a merge can be
+ *     blocked on. A report's is not. A gate that runs only after the merge
+ *     cannot block anything at all: its single available action is to turn
+ *     the default branch red once the change is already in, and on a pull
+ *     request its absence reads exactly like its success.
+ *
+ *  2. Is it CHEAP on a runner nothing is queuing for? Cheap means seconds or
+ *     low minutes and no build, on hosted capacity, so it never takes a slot
+ *     a compile is waiting for. A gate that is expensive, or that wants
+ *     scarce capacity, stays behind the merge on cost.
+ *
+ * `fast-policy-gates` carries the three source-only refusals that were
+ * stranded in `audit-scripts`: they cost 24 seconds together. The rest of
+ * that job is fourteen minutes and stays where it is, which is a cost
+ * argument and not a claim that it should not be able to refuse.
+ */
+pub const CHEAP_PR_REFUSAL_JOBS = ["fast-policy-gates", "source-length-ratchet"]
+
+/**
+ * Event terms that put a job behind the merge.
+ *
+ * The invariant is the absence of ANY of these from a cheap gate's condition,
+ * not the absence of one spelling. `github.event_name == 'push'` alone skips
+ * pull requests just as effectively as the full main-push expression, so a
+ * test comparing against that one string would accept it.
+ */
+pub const EVENT_SCOPING_TERMS = ["github.event_name", "github.ref"]
 
 pub const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
@@ -1651,14 +1691,52 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
         "ci.yml:rust-check-inputs must ladder the elastic switch, the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then GitHub-hosted",
       ]
   }
+  // Stays behind the merge on COST, not on principle: fourteen minutes, most
+  // of it one aggregate and two integration sweeps. It is a candidate to move
+  // the day it gets cheaper, and the cheap refusals it used to strand now sit
+  // in `fast-policy-gates`.
   if trim(jobs["audit-scripts"]?.if ?? "") != MAIN_ONLY_POLICY_IF {
     errors = errors + ["ci.yml:audit-scripts must run on Rust-changing main pushes only"]
+  }
+  // Asserted PRESENT on pull requests, not merely permitted there. Without
+  // this, restoring an event condition would be a silent revert to a gate
+  // that can only turn the default branch red after the fact, and a gate's
+  // absence reads exactly like its success.
+  for job in CHEAP_PR_REFUSAL_JOBS {
+    // Existence first. A missing job yields an empty condition, which carries
+    // no event term and would satisfy the loop below -- the same shape as the
+    // defect this rule exists to stop, where a gate's absence passes for its
+    // success.
+    if jobs[job] == nil {
+      errors = errors + ["ci.yml:" + job + " is a cheap refusal and must exist"]
+      continue
+    }
+    const condition = trim(jobs[job]?.if ?? "")
+    for term in EVENT_SCOPING_TERMS {
+      if contains(condition, term) {
+        errors = errors
+          + [
+            "ci.yml:" + job + " is a cheap refusal and must carry no event condition"
+              + " (found "
+              + term
+              + " in: "
+              + condition
+              + ")",
+          ]
+      }
+    }
   }
   if trim(jobs["windows-cross-check"]?.if ?? "") != MAIN_ONLY_RUST_IF {
     errors = errors + ["ci.yml:windows-cross-check must run on Rust-changing main pushes only"]
   }
   const status = jobs["ci-status"] ?? {}
-  for name in ["audit-scripts", "windows-cross-check", ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
+  for name in [
+    "audit-scripts",
+    "fast-policy-gates",
+    "windows-cross-check",
+    ARTIFACT_READY_JOB,
+    SECURITY_READY_JOB,
+  ] {
     if !(status?.needs ?? []).contains(name) {
       errors = errors + ["ci.yml:ci-status must retain ${name}"]
     }
@@ -1666,6 +1744,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   const status_run = step_by_name(status?.steps ?? [], "Verify required CI jobs")?.run ?? ""
   for message in [
     "Repository policy checks failed or skipped on a Rust-changing main push.",
+    "Fast repository policy gates failed or skipped while Rust proof was required.",
     "Windows cross-compile check failed or skipped on a Rust-changing main push.",
   ] {
     if !contains(status_run, message) {

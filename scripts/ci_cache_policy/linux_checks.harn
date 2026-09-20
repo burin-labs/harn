@@ -976,38 +976,30 @@ fn strict_clippy_entrypoint_errors(rust_job: dict?) -> list<string> {
   return ["ci.yml:rust-checks must route strict Clippy through the cache-safe Rust lint entrypoint"]
 }
 
+/**
+ * The cheap refusals live in their own job, and the expensive lane keeps none
+ * of them.
+ *
+ * This used to assert an ORDER inside one job: the flaky-pattern gate had to
+ * precede Node setup and both integration sweeps, so a bad head failed before
+ * minutes of unrelated work had elapsed. Splitting the cheap refusals into
+ * `fast-policy-gates` makes that ordering structural rather than positional --
+ * they now run in a parallel job that starts as soon as the shared CLI exists,
+ * and they run on pull requests, which is what they could never do inside the
+ * main-only lane.
+ *
+ * What replaces the ordering is a cost invariant. The cheap job is eligible
+ * for pull requests only while it stays cheap, so it must own the refusals and
+ * must NOT grow a Node setup or an integration sweep. Without that, the next
+ * expensive step lands in the job that is cheapest to add to and the whole
+ * argument for running it before the merge quietly expires.
+ */
 fn early_source_policy_errors(workflow: dict) -> list<string> {
   const policy_steps = workflow?.jobs?.["audit-scripts"]?.steps ?? []
+  const fast_steps = workflow?.jobs?.["fast-policy-gates"]?.steps ?? []
   const prompt_step = step_by_name(policy_steps, "Check prompts are not embedded in Rust")
   const verify_index = step_index_by_name(policy_steps, "Verify portable Harn CLI")
   const prompt_index = step_index_by_name(policy_steps, "Check prompts are not embedded in Rust")
-  const test_pattern_index = step_index_by_name(policy_steps, "Reject flaky test patterns")
-  const pre_warm_index = step_index_by_name(policy_steps, "Run pre-warm shell gates without Cargo")
-  let node_setup_count = 0
-  let node_setup_index = -1
-  let post_warm_count = 0
-  let post_warm_index = -1
-  let test_pattern_command_count = 0
-  let test_pattern_command_index = -1
-  let test_pattern_name_count = 0
-  for {index, value: step} in policy_steps.enumerate() {
-    const command = trim(step?.run ?? "")
-    if trim(step?.uses ?? "") == "./.github/actions/node-cache" {
-      node_setup_count = node_setup_count + 1
-      node_setup_index = index
-    }
-    if command == "make test-pr-gate-post-warm-integrations" {
-      post_warm_count = post_warm_count + 1
-      post_warm_index = index
-    }
-    if command == "make lint-test-patterns" {
-      test_pattern_command_count = test_pattern_command_count + 1
-      test_pattern_command_index = index
-    }
-    if trim(step?.name ?? "") == "Reject flaky test patterns" {
-      test_pattern_name_count = test_pattern_name_count + 1
-    }
-  }
   let errors: list<string> = []
   if trim(prompt_step?.if ?? "") != "needs.changes.outputs.prompt_prose == 'true'"
     || trim(prompt_step?.run ?? "")
@@ -1017,24 +1009,101 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
     errors = errors
       + ["ci.yml:audit-scripts must run the prompt-prose policy with the shared Harn binary"]
   }
-  if test_pattern_command_count != 1 || test_pattern_name_count != 1 {
-    errors = errors
-      + ["ci.yml:audit-scripts must own exactly one make lint-test-patterns invocation"]
+  // Exactly one owner for each cheap refusal, and it is the job that can
+  // refuse. Counting both sides is the point: asserting only that the cheap
+  // job has it would pass while a duplicate still burned fourteen minutes
+  // behind the merge, and asserting only that the expensive job lacks it
+  // would pass if the refusal had simply been deleted.
+  for {command, label} in [
+    {command: "make lint-test-patterns", label: "reject flaky test patterns"},
+    {command: "make check-protocol-symbol-removals", label: "guard protocol symbol removals"},
+  ] {
+    if command_step_count(fast_steps, command) != 1 {
+      errors = errors
+        + ["ci.yml:fast-policy-gates must own exactly one invocation to " + label]
+    }
+    if command_step_count(policy_steps, command) != 0 {
+      errors = errors + ["ci.yml:audit-scripts must not " + label + " behind the merge"]
+    }
   }
-  if test_pattern_index != prompt_index + 1
-    || test_pattern_command_index != test_pattern_index
-    || node_setup_count != 1
-    || test_pattern_index >= node_setup_index
-    || pre_warm_index < 0
-    || test_pattern_index >= pre_warm_index
-    || post_warm_count != 1
-    || test_pattern_index >= post_warm_index {
+  if step_index_by_name(fast_steps, "Check no retroactive CHANGELOG edits") < 0 {
+    errors = errors + ["ci.yml:fast-policy-gates must own the retroactive CHANGELOG guard"]
+  }
+  if step_index_by_name(policy_steps, "Check no retroactive CHANGELOG edits") >= 0 {
+    errors = errors
+      + ["ci.yml:audit-scripts must not guard retroactive CHANGELOG edits behind the merge"]
+  }
+  // Both base-relative guards in this job read git through the Harn sandbox.
+  // Persisted credentials leave an include path outside the workspace that
+  // git cannot read there, every base resolves to none, and the guards fail
+  // closed. The expensive lane has carried this setting for the same reason
+  // since those guards were taught not to report a comparison they never made.
+  if !checkout_drops_credentials(fast_steps) {
     errors = errors
       + [
-        "ci.yml:audit-scripts must reject flaky test patterns immediately after exact CLI source policies and before setup or integration sweeps",
+        "ci.yml:fast-policy-gates must check out with persist-credentials: false, or its base-relative guards cannot read a base",
       ]
   }
+  // This contract is itself a policy check, and the expensive sweep that also
+  // runs it is push-only. Reachable only from there, a re-added event
+  // condition would be refused after the merge it was meant to gate, so the
+  // rule would arrive one merge too late to stop its own class.
+  if command_step_count(fast_steps, "make check-ci-cache-policy") != 1 {
+    errors = errors
+      + [
+        "ci.yml:fast-policy-gates must run this contract itself, or it cannot refuse before a merge",
+      ]
+  }
+  // The cost invariant that keeps the cheap job eligible.
+  for step in fast_steps {
+    if trim(step?.uses ?? "") == "./.github/actions/node-cache" {
+      errors = errors + ["ci.yml:fast-policy-gates must not set up Node; it would stop being cheap"]
+    }
+    const command = trim(step?.run ?? "")
+    for expensive in [
+      "make test-pr-gate-post-warm-integrations",
+      "make repository-policies",
+      "./scripts/tests/pr_gate_pre_warm_boundary_test.sh",
+    ] {
+      if command == expensive {
+        errors = errors
+          + ["ci.yml:fast-policy-gates must not run " + expensive + "; it would stop being cheap"]
+      }
+    }
+  }
   return errors
+}
+
+/**
+ * Whether every checkout in `steps` opts out of persisted credentials.
+ *
+ * Requires at least one checkout: a job with none has no credentials to
+ * persist and would satisfy an all-of test vacuously, which is the same
+ * absence-reads-as-success shape the surrounding rules exist to refuse.
+ */
+fn checkout_drops_credentials(steps: list<dict>) -> bool {
+  let seen = 0
+  for step in steps {
+    if !contains(trim(step?.uses ?? ""), "actions/checkout@") {
+      continue
+    }
+    seen = seen + 1
+    if to_string(step?.with?.["persist-credentials"] ?? "") != "false" {
+      return false
+    }
+  }
+  return seen > 0
+}
+
+/** Steps in `steps` whose `run` is exactly `command`. */
+fn command_step_count(steps: list<dict>, command: string) -> int {
+  let count = 0
+  for step in steps {
+    if trim(step?.run ?? "") == command {
+      count = count + 1
+    }
+  }
+  return count
 }
 
 /**
