@@ -144,6 +144,41 @@ fn jev_declares_no_text_generation_operation() {
     assert!(sibling.supports_operation(ModelOperation::Decision));
 }
 
+/// Falsifier (d), structural half: nothing alias-backed resolves to a
+/// decision-only row.
+///
+/// This is the invariant that keeps a decision row out of tier selection and
+/// escalation ladders, both of which enumerate ALIASES rather than model rows.
+/// Asserting it here is cheaper and harder to bypass than filtering at each of
+/// those call sites, and it fails the moment someone adds a convenience alias.
+#[test]
+fn no_alias_resolves_to_a_decision_only_row() {
+    let config = llm_config::embedded_config(None);
+    assert!(
+        config.aliases.len() > 20,
+        "measured only {} aliases; a near-empty census cannot falsify anything",
+        config.aliases.len()
+    );
+    let offending: Vec<_> = config
+        .aliases
+        .iter()
+        .filter(|(_, alias)| {
+            config.models.get(&alias.id).is_some_and(|entry| {
+                entry.supports_operation(ModelOperation::Decision)
+                    && !entry.supports_operation(ModelOperation::TextGeneration)
+            })
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    assert!(
+        offending.is_empty(),
+        "{} aliases point at a decision-only row, which would make it selectable \
+         as a tier or ladder rung: {:?}",
+        offending.len(),
+        offending
+    );
+}
+
 /// Falsifier (b): an unserved sibling is refused before any request.
 #[test]
 fn an_unserved_jev_sibling_is_not_in_the_catalog_at_all() {
