@@ -1050,6 +1050,9 @@ impl SessionFold {
             .map(|kind| {
                 crate::agent_events::AgentTerminalOutcome::from_evidence(
                     kind,
+                    facts::string_at(&event.payload, facts::FINAL_STATUS)
+                        .as_deref()
+                        .unwrap_or_default(),
                     facts::string_at(&event.payload, facts::TERMINAL_REASON)
                         .or_else(|| stop_reason.clone())
                         .unwrap_or_else(|| kind.as_str().to_string()),

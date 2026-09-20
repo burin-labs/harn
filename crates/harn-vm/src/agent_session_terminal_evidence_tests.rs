@@ -10,13 +10,19 @@ async fn canonical_terminal_causes_survive_the_durable_projection() {
     let root = tempfile::tempdir().expect("temporary session root");
     let root_literal =
         serde_json::to_string(root.path().to_str().expect("UTF-8 path")).expect("serialize root");
-    let source = include_str!(
-        "../../../conformance/tests/mechanisms/terminal_cause_consistency.contract.harn"
-    )
-    .replace(
-        "harness.fs.mkdtemp_in_workspace(\"terminal-cause\")",
-        &root_literal,
-    );
+    // Read the contract at run time rather than with `include_str!`. The
+    // fixture lives outside this crate, and a packaged crate cannot resolve an
+    // include that escapes its own directory, so the publishable-crates gate
+    // refuses one. `expect` keeps a missing fixture loud: this test must never
+    // pass by finding nothing to run.
+    let contract = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/tests/mechanisms/terminal_cause_consistency.contract.harn");
+    let source = std::fs::read_to_string(&contract)
+        .unwrap_or_else(|error| panic!("read {}: {error}", contract.display()))
+        .replace(
+            "harness.fs.mkdtemp_in_workspace(\"terminal-cause\")",
+            &root_literal,
+        );
     let chunk = crate::compile_source(&source).expect("compile public finalization fixture");
     let local = tokio::task::LocalSet::new();
     local

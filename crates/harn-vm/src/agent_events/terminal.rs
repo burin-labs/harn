@@ -141,21 +141,31 @@ impl AgentTerminalKind {
             Self::Unknown => "unknown",
         }
     }
+}
 
-    /// Whether a natural `stop_reason` beside this kind is ordinary rather
-    /// than contradictory.
-    ///
-    /// Most kinds name the mechanism that ended the loop, so a natural reason
-    /// beside one of them is a genuine disagreement about how the run stopped.
-    /// [`Self::CompletionUnverified`] is not such a claim: it is a verdict on
-    /// the deliverable, reached after the model stopped, and the model having
-    /// stopped naturally is the normal way to arrive at it. A run that
-    /// attempted tool calls, had every one refused, then announced it was
-    /// finished reports exactly that pair, and it is the shape harn#7915
-    /// exists to record rather than erase.
-    pub fn composes_with_a_natural_reason(self) -> bool {
-        matches!(self, Self::CompletionUnverified)
-    }
+/// Sealed statuses that are a verdict on the deliverable rather than a claim
+/// about the mechanism that ended the loop.
+///
+/// A natural `stop_reason` beside one of these composes with it instead of
+/// contradicting it, because reaching the verdict at all requires the model to
+/// have stopped and said it was finished. `completion_unverified` is the run
+/// that attempted tool calls, had every one refused, and then announced
+/// completion, which is the record harn#7915 exists to produce.
+/// `verify_exhausted` is the run whose verification allowance ran out before
+/// its `done` could be confirmed, so its sentinel is the claim being judged.
+///
+/// This is keyed on the status rather than on [`AgentTerminalKind`] because
+/// the kinds are coarser than the distinction: `verify_exhausted` and a
+/// genuine `budget_exhausted` both classify as
+/// [`AgentTerminalKind::PolicyBudget`], and only the first of them composes
+/// with a natural reason. A real budget cut reported as a clean finish is the
+/// contradiction #8470 exists to stop reporting.
+const VERIFICATION_VERDICT_STATUSES: [&str; 2] = ["completion_unverified", "verify_exhausted"];
+
+/// Whether a sealed status is a verdict on the deliverable, so a natural
+/// `stop_reason` beside it is ordinary rather than contradictory.
+pub fn status_is_a_verification_verdict(canonical_status: &str) -> bool {
+    VERIFICATION_VERDICT_STATUSES.contains(&canonical_status)
 }
 
 /// Raw `stop_reason` values that seal a genuinely natural completion (a clean
@@ -238,12 +248,13 @@ impl AgentTerminalOutcome {
     /// remains unknown instead of guessing whether policy or failure won.
     pub fn from_evidence(
         kind: AgentTerminalKind,
+        canonical_status: &str,
         reason: impl Into<String>,
         terminal_class: Option<AgentTerminalClass>,
     ) -> Self {
         let reason = reason.into();
         if kind != AgentTerminalKind::Natural
-            && !kind.composes_with_a_natural_reason()
+            && !status_is_a_verification_verdict(canonical_status)
             && !reason.is_empty()
             && NATURAL_STOP_REASONS.contains(&reason.as_str())
         {
@@ -386,7 +397,7 @@ pub fn terminal_outcome_for_finalize(
     // context (for example, a consecutive-failure circuit breaker). That
     // diagnostic is not the cause that ended the loop, and must not become a
     // competing terminal class beside the policy decision.
-    AgentTerminalOutcome::from_evidence(kind, reason, terminal_class)
+    AgentTerminalOutcome::from_evidence(kind, canonical_status, reason, terminal_class)
 }
 
 /// Classify an agent-loop terminal condition into a typed [`AgentTerminalKind`].
@@ -785,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unverified_completion_keeps_its_natural_stop_reason() {
+    fn a_verification_verdict_keeps_its_natural_stop_reason() {
         // A run whose tool calls were all refused and which then announced it
         // was finished reaches `completion_unverified` through a natural stop.
         // That pair is the record harn#7915 exists to produce, so the conflict
@@ -795,18 +806,39 @@ mod tests {
         assert_eq!(outcome.kind, AgentTerminalKind::CompletionUnverified);
         assert_eq!(outcome.reason, "natural");
         assert!(!outcome.has_conflicting_evidence());
-        assert!(AgentTerminalKind::CompletionUnverified.composes_with_a_natural_reason());
-        // Every other non-natural kind still treats a natural reason as a
-        // disagreement, so the exemption cannot quietly widen.
-        for kind in AgentTerminalKind::ALL {
-            if kind == AgentTerminalKind::Natural || kind == AgentTerminalKind::Unknown {
-                continue;
-            }
-            assert_eq!(
-                kind.composes_with_a_natural_reason(),
-                kind == AgentTerminalKind::CompletionUnverified,
-                "{kind:?}"
-            );
+
+        // A verification allowance that ran out before `done` could be
+        // confirmed is the same shape: the sentinel is the claim being judged,
+        // not a competing account of how the run stopped.
+        let exhausted = terminal_outcome_for_finalize("verify_exhausted", "sentinel", None, false);
+        assert_eq!(exhausted.kind, AgentTerminalKind::PolicyBudget);
+        assert_eq!(exhausted.reason, "sentinel");
+        assert!(!exhausted.has_conflicting_evidence());
+
+        // The exemption is keyed on the status, not the kind, and a genuine
+        // budget cut classifies to the same kind as `verify_exhausted`. A real
+        // budget cut reported as a clean finish must still be refused, or this
+        // exemption would swallow the case #8470 exists to fix.
+        let budget = terminal_outcome_for_finalize("budget_exhausted", "sentinel", None, false);
+        assert_eq!(budget.kind, AgentTerminalKind::Unknown);
+        assert!(budget.has_conflicting_evidence());
+
+        assert!(status_is_a_verification_verdict("completion_unverified"));
+        assert!(status_is_a_verification_verdict("verify_exhausted"));
+        for status in [
+            "budget_exhausted",
+            "stuck",
+            "error",
+            "provider_error",
+            "cancelled",
+            "blocked",
+            "input_guardrail",
+            "scope_alert",
+            "suspended",
+            "done",
+            "",
+        ] {
+            assert!(!status_is_a_verification_verdict(status), "{status}");
         }
     }
 
