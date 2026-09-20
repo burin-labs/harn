@@ -56,6 +56,7 @@ mod redaction_fixtures;
 mod run_view_fixtures;
 mod runtime_introspection;
 mod sandbox_hardened;
+mod session_environment_inherited_path;
 mod session_environment_leak;
 mod skill_activation_evidence_conformance;
 mod stdlib_event_registration;
