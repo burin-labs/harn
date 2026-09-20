@@ -1,0 +1,108 @@
+# ---------- Decision request contracts ---------------------------------------
+#
+# One owner for "how is the `decision` operation dialled on this route". The
+# catalog `operations` set on the model row stays the admission owner: it says
+# WHETHER a route answers decision requests. This file says HOW, because the
+# three decision endpoints are not interchangeable chat endpoints and the
+# protocol picks the URL and body shape before transport.
+#
+# Every row here is `extends = true`, and the file sorts first among
+# `20-providers/` so the decision fields are contributed before any blanket
+# provider row can terminate resolution. Nothing here changes a chat
+# capability; a row contributes only the decision fields it sets.
+#
+# `decision_protocol` is a closed enum. An unknown value fails the capability
+# load rather than falling back to the structured-output chat backend, because
+# falling back would send a decision request to a model that cannot answer one.
+#
+# `decision_limits` is declared only for the native decision APIs, which
+# publish request ceilings. A `structured_llm` route has no published decision
+# ceilings — its bound is the ordinary context window already on its catalog
+# row — so inventing numbers there would read as researched.
+
+# ---------- Native decision APIs ---------------------------------------------
+
+# TypeSafe System One, POST /v1/systemone. Documented, not reached: direct
+# access was waitlisted on 2026-09-20 and Harn holds no key.
+# https://docs.typesafe.ai/api
+#
+# Limits provenance:
+#   max_choice_options  255   https://docs.typesafe.ai/primitives/choice
+#   score_levels 2..10        https://docs.typesafe.ai/primitives/score
+#   state_window_tokens 32000 https://docs.typesafe.ai/models ("32k tokens for
+#                             `state` plus the longest question"; the overall
+#                             request ceiling is 64k)
+# `max_questions` is deliberately absent: TypeSafe publishes no question-count
+# ceiling and says adding questions barely moves response time.
+# https://docs.typesafe.ai/patterns
+[[provider.typesafe]]
+model_match = ["jev-*", "typesafe/jev-*"]
+extends = true
+decision_protocol = "typesafe_system_one"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000 }
+
+# Vercel AI Gateway evaluation modality. The gateway serves Jev on two paths:
+# `POST /v1/evaluate` (Vercel-native, documented under the evaluation modality)
+# and `POST /typesafe/v1/systemone` (a TypeSafe-compatible passthrough). Harn
+# names the Vercel-native path, because it is the one Vercel documents for this
+# modality and the one whose response carries gateway cost metadata. The
+# compatibility path is recorded here so a future reader does not rediscover it.
+# https://vercel.com/docs/ai-gateway/modalities/evaluation
+#
+# Observed live on 2026-09-20: the gateway model list carries `typesafe-ai/jev`
+# with `"type": "evaluation"`, and `/v1/chat/completions` refuses it with
+# `ModelTypeMismatchError`.
+[[provider.vercel_ai_gateway]]
+model_match = "typesafe-ai/jev*"
+extends = true
+decision_protocol = "vercel_evaluate"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000 }
+
+# OpenRouter alpha decisions, POST /api/alpha/decisions. Documented, not
+# reached: OpenRouter publishes the endpoint and a TypeSafe provider page, but
+# its model list did not carry Jev when the route was checked on 2026-09-20.
+# https://openrouter.ai/typesafe
+[[provider.openrouter]]
+model_match = "typesafe/jev*"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000 }
+
+# ---------- Chat routes serving decisions through structured output ----------
+#
+# A curated, small set: the cheap auxiliary-classification routes, each of
+# which already declares native structured output with a strict JSON schema in
+# its own capability row. A repository test resolves every route declaring
+# `structured_llm` and fails if its structured-output capability is not native,
+# so this list cannot drift into a route that cannot honour a schema.
+#
+# These rows also need `operations = ["text_generation", "decision"]` on their
+# catalog model row. `structured_llm` is the one protocol that dials the
+# ordinary chat endpoint, so it is the one that needs text generation too.
+
+[[provider.openai]]
+model_match = ["gpt-5.4-nano", "gpt-5.4-mini"]
+extends = true
+decision_protocol = "structured_llm"
+decision_question_kinds = ["boolean", "choice", "score"]
+
+[[provider.anthropic]]
+model_match = "claude-haiku-4-5*"
+extends = true
+decision_protocol = "structured_llm"
+decision_question_kinds = ["boolean", "choice", "score"]
+
+[[provider.gemini]]
+model_match = "gemini-3.1-flash-lite"
+extends = true
+decision_protocol = "structured_llm"
+decision_question_kinds = ["boolean", "choice", "score"]
+
+[[provider.openrouter]]
+model_match = ["openai/gpt-5.4-nano", "openai/gpt-5.4-mini"]
+extends = true
+decision_protocol = "structured_llm"
+decision_question_kinds = ["boolean", "choice", "score"]

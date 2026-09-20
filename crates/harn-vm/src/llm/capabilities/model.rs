@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use super::decision::{DecisionLimits, DecisionProtocol, DecisionQuestionKind};
 use super::rule::ProviderRule;
 
 /// Why a self-hosted row chose native vs text tools.
@@ -727,6 +728,17 @@ pub struct Capabilities {
     /// exactly one live endpoint, so there is nothing to select. See
     /// [`LiveEndpointFamily`].
     pub live_endpoint_family: Option<LiveEndpointFamily>,
+    /// Wire protocol this route serves the `decision` operation over, when it
+    /// serves one. `None` means the route answers no decision requests; the
+    /// catalog `operations` set is the admission owner, and this says how a
+    /// route it admits is dialled. See [`DecisionProtocol`].
+    pub decision_protocol: Option<DecisionProtocol>,
+    /// Question kinds the decision route accepts. Empty when the route serves
+    /// no decision operation.
+    pub decision_question_kinds: Vec<DecisionQuestionKind>,
+    /// Declared request ceilings for the decision route. See
+    /// [`DecisionLimits`].
+    pub decision_limits: Option<DecisionLimits>,
     /// Whether this route emits its reasoning INLINE in the text channel as
     /// `<think>...</think>` blocks (local Ollama/llama.cpp reasoning models,
     /// Qwen3 via vLLM, Kimi) rather than in a separate provider reasoning
@@ -885,6 +897,9 @@ impl Default for Capabilities {
             prefers_xml_tools: false,
             thinking_block_style: "none".to_string(),
             live_endpoint_family: None,
+            decision_protocol: None,
+            decision_question_kinds: Vec::new(),
+            decision_limits: None,
             emits_inline_reasoning: false,
             thinking_modes: Vec::new(),
             interleaved_thinking_supported: false,

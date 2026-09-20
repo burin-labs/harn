@@ -34,6 +34,7 @@ unverified = [
   "qianfan",
   "siliconflow",
   "tgi",
+  "typesafe",
   "vercel_ai_gateway",
   "vllm",
   "volcengine_ark",
@@ -810,6 +811,26 @@ completion_endpoint = "/completions"
 features = ["responses_api", "native_tools", "reasoning", "prompt_caching", "wire_model_capabilities"]
 
 [providers.vercel_ai_gateway.healthcheck]
+method = "GET"
+path = "/models"
+
+# TypeSafe — System One decision models. Deliberately NOT a chat provider:
+# the published API is `POST /v1/systemone`, which answers typed questions
+# over one shared state and returns probabilities, not prose. `chat_endpoint`
+# is therefore left empty; there is no chat route to invent, and the model
+# rows below declare `operations = ["decision"]` so admission refuses a chat
+# request before transport rather than 404-ing on a guessed path.
+# Direct access was waitlisted on 2026-09-20 and Harn holds no TYPESAFE_API_KEY;
+# the `vercel/typesafe-ai/jev` route is the one reachable today.
+# https://docs.typesafe.ai/api
+[providers.typesafe]
+display_name = "TypeSafe"
+base_url = "https://api.typesafe.ai/v1"
+base_url_env = "TYPESAFE_BASE_URL"
+auth_style = "bearer"
+auth_env = "TYPESAFE_API_KEY"
+
+[providers.typesafe.healthcheck]
 method = "GET"
 path = "/models"
 
