@@ -6,7 +6,7 @@ const HELPER: &str = r#"
 import "std/predicate"
 
 pub fn assess(llm: HarnessLlm, input: {text: string}) -> PredicateOutcome {
-  const policy: PredicatePolicy = {
+  const policy: EvaluationPolicy = {
     backend: "structured_llm", provider: "mock", model: "fixture",
     effort: "low", temperature: 0.0, threshold: 0.8,
     evaluation_cost_limit: 0.0, run_cost_limit: 0.0,
@@ -81,7 +81,7 @@ pub(super) fn predicate_helper_manifest_survives_warm_cache_and_tracks_changed_q
         .find(|file| file["path"].as_str().unwrap().ends_with("main.harn"))
         .unwrap();
     let manifest = &helper["predicate_manifest"];
-    assert_eq!(manifest["schema"], "harn.predicate_sites.v1");
+    assert_eq!(manifest["schema"], "harn.predicate_sites.v2");
     assert_eq!(manifest["sites"].as_array().unwrap().len(), 1);
     assert_eq!(manifest["sites"][0]["id"], "finding.v1");
     assert!(manifest["sites"][0]["source"]
@@ -89,7 +89,7 @@ pub(super) fn predicate_helper_manifest_survives_warm_cache_and_tracks_changed_q
         .unwrap()
         .ends_with("helper.harn"));
     assert_eq!(
-        manifest["sites"][0]["question_sha256"],
+        manifest["sites"][0]["questions"][0]["instructions_sha256"],
         harn_kernel::pure::sha256_hex(b"Is this supported?")
     );
     let (passed, warm) = check(root.path(), cache.path());
@@ -145,8 +145,8 @@ pub(super) fn predicate_helper_manifest_survives_warm_cache_and_tracks_changed_q
         .find(|file| file["path"].as_str().unwrap().ends_with("main.harn"))
         .unwrap();
     assert_ne!(
-        manifest["sites"][0]["question_sha256"],
-        changed_helper["predicate_manifest"]["sites"][0]["question_sha256"]
+        manifest["sites"][0]["questions"][0]["instructions_sha256"],
+        changed_helper["predicate_manifest"]["sites"][0]["questions"][0]["instructions_sha256"]
     );
     assert_eq!(
         changed_helper["predicate_manifest"]["sites"][0]["id"],

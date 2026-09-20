@@ -9,8 +9,15 @@ capability_method!(
     llm_evaluate_predicate,
     "harness.llm.evaluate_predicate",
     ["llm.write@arg3.provider", "llm.write@arg3.model"],
-    harn_builtin_meta::predicate::EVALUATE,
+    harn_builtin_meta::predicate::EVALUATE_PREDICATE,
     "Evaluate a declared probabilistic predicate and require an explicit outcome disposition."
+);
+capability_method!(
+    llm_evaluate,
+    "harness.llm.evaluate",
+    ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    harn_builtin_meta::predicate::EVALUATE,
+    "Evaluate a declared question set over one shared state and require an explicit outcome disposition."
 );
 capability_method!(
     llm_catalog_refresh,

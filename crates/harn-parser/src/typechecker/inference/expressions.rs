@@ -1752,11 +1752,22 @@ impl TypeChecker {
         match receiver {
             TypeExpr::Named(name) => {
                 let capability = harn_builtin_meta::CapabilityId::from_type_name(name.as_str())?;
-                let declared = builtin_signatures::lookup_capability_method(capability, method)
-                    .and_then(|sig| (!sig.returns.is_any()).then(|| sig.returns.to_type_expr()))?;
-                if capability != harn_builtin_meta::CapabilityId::Llm
-                    || !matches!(method, "call" | "completion")
-                {
+                let sig = builtin_signatures::lookup_capability_method(capability, method)?;
+                let declared = (!sig.returns.is_any()).then(|| sig.returns.to_type_expr())?;
+                if capability != harn_builtin_meta::CapabilityId::Llm {
+                    return Some(declared);
+                }
+                // A batched evaluation types every answer from its own
+                // question, so a choice answer's label is the literal union of
+                // that question's criteria keys. An unreadable question set
+                // keeps the declared answer map; the site check reports why.
+                if sig.name == harn_builtin_meta::predicate::EVALUATE.name {
+                    let Some(answers) = self.evaluation_answer_record(args, scope) else {
+                        return Some(declared);
+                    };
+                    return Some(Self::narrow_evaluation_answers(declared, answers));
+                }
+                if !matches!(method, "call" | "completion") {
                     return Some(declared);
                 }
                 let Some(data) = self.llm_call_schema_data_type(args, scope) else {
