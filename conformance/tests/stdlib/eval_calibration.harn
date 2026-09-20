@@ -197,7 +197,7 @@ pipeline test(harness: Harness, task: unknown) {
       row(1, "true", "true", 0.9) + {question_id: "a", backend: "jev"},
       row(2, "true", "false", 0.9) + {question_id: "a", backend: "chat"},
       row(3, "true", "true", 0.9) + {question_id: "b", backend: "jev"},
-      row(4, "true", "true", 0.4, ) + {question_id: "b", backend: "jev", abstained: true},
+      row(4, "true", "true", 0.4) + {question_id: "b", backend: "jev", abstained: true},
     ],
     {model_revision: "2026-09-20", served_model_id: "typesafe-ai/jev@1"},
   )
