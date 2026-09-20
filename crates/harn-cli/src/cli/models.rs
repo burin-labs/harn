@@ -831,11 +831,48 @@ pub(crate) struct ModelsInstallArgs {
     pub keep_alive: Option<String>,
 }
 
+/// Which job a recommendation is for. A route is offered only when its
+/// catalog row declares the operation, so a decision-only model is never
+/// suggested as a text driver and vice versa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub(crate) enum RecommendOperation {
+    /// Ordinary chat/completion work. The default.
+    #[default]
+    #[value(name = "text_generation")]
+    TextGeneration,
+    /// Embedding vectors.
+    #[value(name = "embedding")]
+    Embedding,
+    /// Typed decision answers over a shared state.
+    #[value(name = "decision")]
+    Decision,
+}
+
+impl RecommendOperation {
+    /// The catalog's own spelling of this operation.
+    pub(crate) const fn as_catalog_name(self) -> &'static str {
+        self.as_model_operation().as_str()
+    }
+
+    /// The typed catalog operation. Keeping the mapping here means the CLI
+    /// never carries its own operation vocabulary beside the catalog's.
+    pub(crate) const fn as_model_operation(self) -> harn_vm::llm_config::ModelOperation {
+        match self {
+            Self::TextGeneration => harn_vm::llm_config::ModelOperation::TextGeneration,
+            Self::Embedding => harn_vm::llm_config::ModelOperation::Embedding,
+            Self::Decision => harn_vm::llm_config::ModelOperation::Decision,
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct ModelRecommendArgs {
     /// Emit the recommendation and hardware snapshot as JSON.
     #[arg(long)]
     pub json: bool,
+    /// Recommend routes for this operation instead of a starter text model.
+    #[arg(long, value_enum, default_value_t = RecommendOperation::TextGeneration)]
+    pub operation: RecommendOperation,
 }
 
 #[derive(Debug, Args)]

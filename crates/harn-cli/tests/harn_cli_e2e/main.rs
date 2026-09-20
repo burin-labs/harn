@@ -36,6 +36,7 @@ mod command_probe_parent_liveness;
 mod conformance_json_cli;
 mod conformance_process_lifetime_e2e;
 mod coverage_cli;
+mod decision_route_admission;
 mod demo_cli_e2e;
 mod dev_cli;
 mod dispatch_aot;

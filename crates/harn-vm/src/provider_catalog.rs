@@ -39,6 +39,8 @@ mod bindings;
 mod cache_accounting_tests;
 mod decision_contract;
 #[cfg(test)]
+mod decision_contract_tests;
+#[cfg(test)]
 mod display_name_tests;
 mod from_artifact;
 pub use decision_contract::{decision_contract_for_route, DecisionContract};

@@ -55,8 +55,22 @@ fn legacy_routes_preserve_operations_without_granting_decision() {
         "exercise the real registry, not an empty fixture"
     );
     let mut embedding_count = 0;
+    let mut declared_count = 0;
     for model in &catalog.models {
         let legacy = &config.models[&model.id];
+        // A row that declares its own operation set is not a legacy row. This
+        // test is about what an UNDECLARED row inherits, so a declared row is
+        // counted and skipped rather than folded into the text expectation.
+        if let Some(declared) = &legacy.operations {
+            declared_count += 1;
+            assert_eq!(
+                model.operations,
+                declared.iter().copied().collect::<Vec<_>>(),
+                "{}",
+                model.id
+            );
+            continue;
+        }
         let expected = if legacy.embedding_dim.is_some() {
             embedding_count += 1;
             ModelOperation::Embedding
@@ -64,9 +78,18 @@ fn legacy_routes_preserve_operations_without_granting_decision() {
             ModelOperation::TextGeneration
         };
         assert_eq!(model.operations, [expected], "{}", model.id);
-        assert!(!model.operations.contains(&ModelOperation::Decision));
+        assert!(
+            !model.operations.contains(&ModelOperation::Decision),
+            "{} inherited the decision operation without declaring it",
+            model.id
+        );
     }
     assert!(embedding_count > 0, "known non-text route must be measured");
+    assert!(
+        declared_count >= 10,
+        "measured only {declared_count} rows declaring an operation set; the \
+         decision rows must be reaching this census"
+    );
 }
 
 #[test]

@@ -202,6 +202,46 @@ fn __resolve_local_model(local_model: any) -> dict? {
   return {provider: provider, model_id: model_id, harn_selector: selector}
 }
 
+/**
+ * Render the routes declaring a non-default operation.
+ *
+ * This branch exists because the hardware rule table answers exactly one
+ * question — which starter TEXT model suits this machine — and a decision or
+ * embedding route is not that. Rather than bend the table, the shim hands over
+ * the catalog rows that declare the requested operation and this renders them
+ * with their credential status.
+ *
+ * The count is always printed, including when it is zero. A silent empty list
+ * reads as "nothing to report"; a printed zero says the query ran and found
+ * nothing.
+ */
+fn __render_routes(harness: Harness, operation: string, routes: list, json_mode: bool) -> int {
+  if json_mode {
+    harness.stdio.println(json_stringify_pretty({operation: operation, routes: routes}))
+    return 0
+  }
+  harness.stdio.println(to_string(len(routes)) + " route(s) declare the " + operation + " operation")
+  for route in routes {
+    if type_of(route) != "dict" {
+      continue
+    }
+    const catalog_id = safe_string(route["catalog_id"], "")
+    const parts = [
+      "provider=" + safe_string(route["provider"], ""),
+      "credential=" + safe_string(route["credential_status"], "unknown"),
+      "availability=" + safe_string(route["availability"], "unknown"),
+    ]
+    const protocol = route["decision_protocol"]
+    const line = if type_of(protocol) == "string" && protocol != "" {
+      join(parts, "  ") + "  protocol=" + protocol
+    } else {
+      join(parts, "  ")
+    }
+    harness.stdio.println(catalog_id + "  " + line)
+  }
+  return 0
+}
+
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_MODELS_RECOMMEND_PAYLOAD_JSON", "")
   if raw == "" {
@@ -215,6 +255,11 @@ fn main(harness: Harness) -> int {
   } catch (e) {
     harness.stdio.eprintln("internal error: failed to parse recommend payload: " + e.message)
     return 70
+  }
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const operation = safe_string(payload["operation"], "text_generation")
+  if operation != "text_generation" {
+    return __render_routes(harness, operation, safe_list(payload["routes"]), json_mode)
   }
   const hardware = safe_dict(payload["hardware"])
   const ram = safe_dict(hardware["ram"])
@@ -258,7 +303,6 @@ fn main(harness: Harness) -> int {
   )
   const rationale = __rationale(ram["available_bytes"], gpu, has_provider_key, model_id)
     + __alternative_suffix(local_model, cloud_model, provider, model_id)
-  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     const envelope = {
       model_id: model_id,
