@@ -438,7 +438,7 @@ fn local_network_proxy(
                 harn_vm::egress::ProcessEgressProxy::start_allowlist(allowed_hosts)
                     .map(Arc::new)
                     .map(Some)
-                    .map_err(SandboxError::NetworkPolicy)
+                    .map_err(|error| SandboxError::NetworkPolicy(error.to_string()))
             }
             #[cfg(not(target_os = "macos"))]
             {
