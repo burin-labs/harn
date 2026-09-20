@@ -1704,6 +1704,12 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
                 "instructionMode",
                 "instructionSource",
                 "compactionPolicy",
+                "requestedStrategy",
+                "resolvedThresholdTokens",
+                "thresholdSource",
+                "hardLimitTokens",
+                "recap",
+                "sourceMeasurement",
             ],
         ),
         (

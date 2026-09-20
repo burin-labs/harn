@@ -718,8 +718,13 @@
               "archivedMessages": { "type": "integer", "minimum": 0 },
               "estimatedTokensBefore": { "type": "integer", "minimum": 0 },
               "estimatedTokensAfter": { "type": "integer", "minimum": 0 },
-              "instructionMode": { "type": "string" }, "instructionSource": { "type": "string" },
-              "compactionPolicy": {}, "recap": {}
+              "instructionMode": { "type": ["string", "null"] }, "instructionSource": { "type": ["string", "null"] },
+              "compactionPolicy": {}, "recap": {},
+              "requestedStrategy": { "type": ["string", "null"] },
+              "resolvedThresholdTokens": { "type": ["integer", "null"], "minimum": 0 },
+              "thresholdSource": { "type": ["string", "null"] },
+              "hardLimitTokens": { "type": ["integer", "null"], "minimum": 0 },
+              "sourceMeasurement": { "type": ["object", "null"] }
             }
           } }
         }
