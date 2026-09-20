@@ -829,6 +829,17 @@ jobs:
           ./scripts/ci/rust_artifact.sh build-security
           "$RUNNER_TEMP/harn-security.tar.zst"
           "$GITHUB_SHA"
+      # This step has been killed by a signal at around 330 seconds on hosted
+      # runners, well inside its own budget, leaving only ordinary Compiling
+      # lines and exit 143. Nothing on this path installs a signal handler, so
+      # each occurrence has produced silence rather than evidence. Report the
+      # machine here instead: whether memory ran out, whether the kernel says
+      # it killed something, and what was actually resident. Failure-only, so
+      # a green run pays nothing.
+      - name: Report host state after a failed security archive build
+        if: failure()
+        continue-on-error: true
+        run: ./scripts/ci/report_host_state.sh "security archive build"
       - name: Upload security test archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
