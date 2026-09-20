@@ -4,6 +4,29 @@ import "../bench_cli_cold_start.harn"
 
 const SOURCE_SHA = "1111111111111111111111111111111111111111"
 
+/**
+ * The terminal evidence the workflow's reporting step writes.
+ *
+ * Declared here so the parsed document is validated before it is read. An
+ * unvalidated read is what the ownership lint refuses, and it is also the
+ * weaker assertion: a typed read fails loudly when the reporting script stops
+ * emitting a field this test compares, instead of silently comparing nil.
+ */
+type ColdStartCiEvidence = {
+  schema: string,
+  source_sha: string,
+  status: string,
+  build_outcome: string,
+  measurement_outcome: string,
+  receipt_readable: bool,
+  expected_count: int?,
+  measured_count: int?,
+  pending_count: int?,
+  pending_commands: list<string>?,
+  unexpected_commands: list<string>?,
+  failure_reasons: list<string>?,
+}
+
 fn known_measurement() {
   return measurement_evidence(
     SOURCE_SHA,
@@ -105,7 +128,10 @@ pipeline test_cold_start_workflow_executes_the_terminal_report_on_both_outcomes(
         )
         assert_eq(result.exit_code, arm.code)
         assert(harness.fs.exists(evidence), "the actual workflow step must write terminal evidence")
-        const report = json_parse(harness.fs.read_text(evidence))
+        const report: ColdStartCiEvidence = schema_expect(
+          json_parse(harness.fs.read_text(evidence)),
+          schema_of(ColdStartCiEvidence),
+        )
         assert_eq(report.status, arm.status)
         assert_eq(
           report.measured_count,
