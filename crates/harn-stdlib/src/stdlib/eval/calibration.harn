@@ -83,12 +83,7 @@ pub type CalibrationThresholdRow = {
 }
 
 /** A cost or latency distribution over the rows that carried the field. */
-pub type CalibrationDistribution = {
-  rows: int,
-  p50: float?,
-  p90: float?,
-  max: float?,
-}
+pub type CalibrationDistribution = {rows: int, p50: float?, p90: float?, max: float?}
 
 /**
  * The derived abstention threshold, or a typed refusal to derive one.
@@ -177,11 +172,7 @@ pub type CalibrationReport = {
   | {
   kind: "refused",
   contract: "harn.calibration_report.v1",
-  reason: "empty_corpus" \
-    | "single_row" \
-    | "missing_label" \
-    | "invalid_confidence" \
-    | "label_mismatch",
+  reason: "empty_corpus" | "single_row" | "missing_label" | "invalid_confidence" | "label_mismatch",
   detail: string,
   rows: int,
 }
@@ -219,7 +210,8 @@ const BIN_COUNT = 10
 
 const CONTRACT = "harn.calibration_report.v1"
 
-const GUARANTEE = "marginal coverage on exchangeable data: at most target_error of future rows are both accepted and wrong"
+const GUARANTEE =
+  "marginal coverage on exchangeable data: at most target_error of future rows are both accepted and wrong"
 
 fn __round6(value: float) -> float {
   return round(value * 1000000.0) / 1000000.0
@@ -651,15 +643,15 @@ fn __corpus_digest(rows: list<NormalizedRow>) -> string {
     lines = lines
       + [
         row.question_id
-          + "\u{1f}"
+          + "\\u{1f}"
           + row.backend
-          + "\u{1f}"
+          + "\\u{1f}"
           + row.expected
-          + "\u{1f}"
+          + "\\u{1f}"
           + row.predicted
-          + "\u{1f}"
+          + "\\u{1f}"
           + to_string(__round6(row.confidence))
-          + "\u{1f}"
+          + "\\u{1f}"
           + to_string(row.abstained),
       ]
   }
@@ -686,11 +678,7 @@ pub fn calibration_report(rows: list, options: CalibrationOptions = {}) -> Calib
     return __refuse("empty_corpus", "the corpus has no rows, so it has no calibration error", 0)
   }
   if len(rows) == 1 {
-    return __refuse(
-      "single_row",
-      "one row cannot separate a reliability curve from a coin flip",
-      1,
-    )
+    return __refuse("single_row", "one row cannot separate a reliability curve from a coin flip", 1)
   }
   const level_order = options.level_order ?? []
   let normalized = []
@@ -713,24 +701,14 @@ pub fn calibration_report(rows: list, options: CalibrationOptions = {}) -> Calib
   const seed = options.seed ?? DEFAULT_SEED
   let grouped = {}
   for row in normalized {
-    const key = row.question_id + "\u{1f}" + row.backend
+    const key = row.question_id + "\\u{1f}" + row.backend
     grouped[key] = (grouped[key] ?? []) + [row]
   }
   let groups = []
   for key in __sorted_group_keys(grouped) {
-    const parts = split(key, "\u{1f}")
+    const parts = split(key, "\\u{1f}")
     groups = groups
-      + [
-        __group(
-          parts[0],
-          parts[1],
-          grouped[key],
-          thresholds,
-          target_error,
-          seed,
-          level_order,
-        ),
-      ]
+      + [__group(parts[0], parts[1], grouped[key], thresholds, target_error, seed, level_order)]
   }
   const body = {
     kind: "report",

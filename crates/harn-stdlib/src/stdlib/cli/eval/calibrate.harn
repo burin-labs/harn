@@ -114,10 +114,14 @@ fn __join(stdio: HarnessStdio, corpus: list, answers: list) -> list? {
       "error: the corpus and the answers do not line up: ${to_string(len(unanswered))} corpus row(s) with no answer, ${to_string(len(unlabeled))} answer(s) with no corpus row",
     )
     if len(unanswered) > 0 {
-      stdio.eprintln("  corpus rows with no answer: ${join(unanswered.slice(0, min(10, len(unanswered))), ", ")}")
+      stdio.eprintln(
+        "  corpus rows with no answer: ${join(unanswered.slice(0, min(10, len(unanswered))), ", ")}",
+      )
     }
     if len(unlabeled) > 0 {
-      stdio.eprintln("  answers with no corpus row: ${join(unlabeled.slice(0, min(10, len(unlabeled))), ", ")}")
+      stdio.eprintln(
+        "  answers with no corpus row: ${join(unlabeled.slice(0, min(10, len(unlabeled))), ", ")}",
+      )
     }
     return nil
   }

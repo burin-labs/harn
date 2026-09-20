@@ -24,12 +24,30 @@ fn monotonic_corpus(pairs: int) {
   while i < pairs {
     // Confidence 0.95 with nineteen of twenty right, 0.55 with eleven of twenty
     // right: both bins sit on the diagonal, so the calibration error is small.
-    const high_correct = (i % 20) != 0
-    const low_correct = (i % 20) < 11
+    const high_correct = i % 20 != 0
+    const low_correct = i % 20 < 11
     rows = rows
       + [
-        row(i, "true", if high_correct { "true" } else { "false" }, 0.95),
-        row(i + 1000, "true", if low_correct { "true" } else { "false" }, 0.55),
+        row(
+          i,
+          "true",
+          if high_correct {
+            "true"
+          } else {
+            "false"
+          },
+          0.95,
+        ),
+        row(
+          i + 1000,
+          "true",
+          if low_correct {
+            "true"
+          } else {
+            "false"
+          },
+          0.55,
+        ),
       ]
     i = i + 1
   }
@@ -42,18 +60,15 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(empty.kind, "refused")
   assert_eq(empty.reason, "empty_corpus")
   assert_eq(empty.rows, 0)
-
   const single = calibration_report([row(1, "true", "true", 0.9)])
   assert_eq(single.kind, "refused")
   assert_eq(single.reason, "single_row")
-
   // A confidence outside [0, 1] is not a probability and cannot be binned.
   const bad_confidence = calibration_report(
     [row(1, "true", "true", 0.9), row(2, "true", "true", 1.4)],
   )
   assert_eq(bad_confidence.kind, "refused")
   assert_eq(bad_confidence.reason, "invalid_confidence")
-
   // A score question's labels must be in the legend it supplied.
   const mismatched = calibration_report(
     [row(1, "true", "true", 0.9), row(2, "true", "true", 0.8)],
@@ -61,7 +76,6 @@ pipeline test(harness: Harness, task: unknown) {
   )
   assert_eq(mismatched.kind, "refused")
   assert_eq(mismatched.reason, "label_mismatch")
-
   // --- Falsifier 1: confident and wrong every time. ---
   let wrong_rows = []
   let w = 0
@@ -95,7 +109,6 @@ pipeline test(harness: Harness, task: unknown) {
   const right = calibration_report(right_rows, {target_error: 0.05})
   assert_eq(right.groups[0].recommendation.kind, "threshold")
   assert_eq(right.groups[0].expected_calibration_error, 0.0)
-
   // --- Falsifier 4: a monotonic corpus is nearly calibrated. ---
   const good = calibration_report(monotonic_corpus(20), {thresholds: [0.9]})
   assert_eq(good.kind, "report")
@@ -118,7 +131,6 @@ pipeline test(harness: Harness, task: unknown) {
   // Eleven right answers below the threshold are thrown away.
   assert_eq(at_high.false_reject, 11)
   assert_eq(at_high.false_reject_rate, 0.55)
-
   // --- Falsifier 3: shuffling the labels collapses each bin to the base rate. ---
   // Same confidences, same corpus size, but the answers are now right or wrong
   // on a cycle that has nothing to do with the confidence. Both bins land on
@@ -133,7 +145,7 @@ pipeline test(harness: Harness, task: unknown) {
         source
           + {
             expected: "true",
-            predicted: if (s % 8) >= 2 {
+            predicted: if s % 8 >= 2 {
               "true"
             } else {
               "false"
@@ -150,7 +162,6 @@ pipeline test(harness: Harness, task: unknown) {
   // 0.5 * |0.75 - 0.95| + 0.5 * |0.75 - 0.55|.
   assert_eq(shuffled_group.expected_calibration_error, 0.2)
   assert_eq(shuffled_group.expected_calibration_error > good_group.expected_calibration_error, true)
-
   // --- Falsifier 5: the recommendation is measured on rows it was not fitted on. ---
   // Forty rows at one confidence with five of them wrong. Five is odd, so the
   // two halves of any split cannot carry the same number of wrong answers, and
@@ -161,7 +172,19 @@ pipeline test(harness: Harness, task: unknown) {
   let split_rows = []
   let k = 0
   while k < 40 {
-    split_rows = split_rows + [row(k, "true", if k < 5 { "false" } else { "true" }, 0.6)]
+    split_rows = split_rows
+      + [
+        row(
+          k,
+          "true",
+          if k < 5 {
+            "false"
+          } else {
+            "true"
+          },
+          0.6,
+        ),
+      ]
     k = k + 1
   }
   const split_report = calibration_report(split_rows, {target_error: 0.4})
@@ -175,10 +198,7 @@ pipeline test(harness: Harness, task: unknown) {
     recommendation.calibration_rows + recommendation.holdout_rows,
     split_report.groups[0].scored_rows,
   )
-  const in_sample = calibration_report(
-    split_rows,
-    {thresholds: [recommendation.threshold]},
-  )
+  const in_sample = calibration_report(split_rows, {thresholds: [recommendation.threshold]})
   const in_sample_error = in_sample.groups[0].thresholds[0].false_accept_rate
   // Five wrong over forty rows, in-sample.
   assert_eq(in_sample_error, 0.125)
@@ -190,7 +210,6 @@ pipeline test(harness: Harness, task: unknown) {
     recommendation.guarantee,
     "marginal coverage on exchangeable data: at most target_error of future rows are both accepted and wrong",
   )
-
   // --- Grouping, distributions, and the contract. ---
   const grouped = calibration_report(
     [
@@ -217,7 +236,6 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(b_group.thresholds[0].false_reject, 0)
   assert_eq(b_group.latency_ms.rows, 2)
   assert_eq(b_group.cost_usd.rows, 2)
-
   // --- The pin: a served-model change invalidates the report digest. ---
   const pinned = calibration_report(
     monotonic_corpus(5),
@@ -238,7 +256,6 @@ pipeline test(harness: Harness, task: unknown) {
   // corpus digest cannot catch it; the report digest does.
   assert_eq(realiased.corpus_digest, pinned.corpus_digest)
   assert_eq(realiased.report_digest != pinned.report_digest, true)
-
   // --- Ordered-level questions. ---
   const scored = calibration_report(
     [
