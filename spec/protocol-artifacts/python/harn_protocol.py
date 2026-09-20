@@ -1704,13 +1704,18 @@ class ACPTranscriptCompactedUpdateMetaHarn(_HarnDataclass):
     engineStrategy: Optional[str] = None
     estimatedTokensAfter: Optional[int] = None
     estimatedTokensBefore: Optional[int] = None
-    instructionMode: Optional[str] = None
-    instructionSource: Optional[str] = None
+    hardLimitTokens: Optional[Optional[int]] = None
+    instructionMode: Optional[Optional[str]] = None
+    instructionSource: Optional[Optional[str]] = None
     reason: Optional[str] = None
     recap: Optional[JsonValue] = None
     receiptId: Optional[str] = None
     replayed: Optional[bool] = None
+    requestedStrategy: Optional[Optional[str]] = None
+    resolvedThresholdTokens: Optional[Optional[int]] = None
     schemaVersion: Optional[int] = None
+    sourceMeasurement: Optional[JsonValue] = None
+    thresholdSource: Optional[Optional[str]] = None
 
 @dataclass
 class ACPTranscriptCompactedUpdateMeta(_HarnDataclass):

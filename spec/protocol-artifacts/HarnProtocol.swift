@@ -3665,13 +3665,18 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
     public var engineStrategy: String?
     public var estimatedTokensAfter: Int?
     public var estimatedTokensBefore: Int?
-    public var instructionMode: String?
-    public var instructionSource: String?
+    public var hardLimitTokens: Int??
+    public var instructionMode: String??
+    public var instructionSource: String??
     public var reason: String?
     public var recap: HarnACPValue?
     public var receiptId: String?
     public var replayed: Bool?
+    public var requestedStrategy: String??
+    public var resolvedThresholdTokens: Int??
     public var schemaVersion: Int?
+    public var sourceMeasurement: HarnACPValue?
+    public var thresholdSource: String??
 
     enum CodingKeys: String, CodingKey {
         case mode
@@ -3682,13 +3687,18 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         case engineStrategy
         case estimatedTokensAfter
         case estimatedTokensBefore
+        case hardLimitTokens
         case instructionMode
         case instructionSource
         case reason
         case recap
         case receiptId
         case replayed
+        case requestedStrategy
+        case resolvedThresholdTokens
         case schemaVersion
+        case sourceMeasurement
+        case thresholdSource
     }
 
     public init(from decoder: Decoder) throws {
@@ -3701,13 +3711,18 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         engineStrategy = try values.decodeIfPresent(String.self, forKey: .engineStrategy)
         estimatedTokensAfter = try values.decodeIfPresent(Int.self, forKey: .estimatedTokensAfter)
         estimatedTokensBefore = try values.decodeIfPresent(Int.self, forKey: .estimatedTokensBefore)
-        instructionMode = try values.decodeIfPresent(String.self, forKey: .instructionMode)
-        instructionSource = try values.decodeIfPresent(String.self, forKey: .instructionSource)
+        hardLimitTokens = try values.decodeIfPresent(Int?.self, forKey: .hardLimitTokens)
+        instructionMode = try values.decodeIfPresent(String?.self, forKey: .instructionMode)
+        instructionSource = try values.decodeIfPresent(String?.self, forKey: .instructionSource)
         reason = try values.decodeIfPresent(String.self, forKey: .reason)
         recap = values.contains(.recap) ? try values.decode(HarnACPValue.self, forKey: .recap) : nil
         receiptId = try values.decodeIfPresent(String.self, forKey: .receiptId)
         replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
+        requestedStrategy = try values.decodeIfPresent(String?.self, forKey: .requestedStrategy)
+        resolvedThresholdTokens = try values.decodeIfPresent(Int?.self, forKey: .resolvedThresholdTokens)
         schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        sourceMeasurement = values.contains(.sourceMeasurement) ? try values.decode(HarnACPValue.self, forKey: .sourceMeasurement) : nil
+        thresholdSource = try values.decodeIfPresent(String?.self, forKey: .thresholdSource)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -3720,13 +3735,18 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         try values.encodeIfPresent(engineStrategy, forKey: .engineStrategy)
         try values.encodeIfPresent(estimatedTokensAfter, forKey: .estimatedTokensAfter)
         try values.encodeIfPresent(estimatedTokensBefore, forKey: .estimatedTokensBefore)
+        try values.encodeIfPresent(hardLimitTokens, forKey: .hardLimitTokens)
         try values.encodeIfPresent(instructionMode, forKey: .instructionMode)
         try values.encodeIfPresent(instructionSource, forKey: .instructionSource)
         try values.encodeIfPresent(reason, forKey: .reason)
         try values.encodeIfPresent(recap, forKey: .recap)
         try values.encodeIfPresent(receiptId, forKey: .receiptId)
         try values.encodeIfPresent(replayed, forKey: .replayed)
+        try values.encodeIfPresent(requestedStrategy, forKey: .requestedStrategy)
+        try values.encodeIfPresent(resolvedThresholdTokens, forKey: .resolvedThresholdTokens)
         try values.encodeIfPresent(schemaVersion, forKey: .schemaVersion)
+        try values.encodeIfPresent(sourceMeasurement, forKey: .sourceMeasurement)
+        try values.encodeIfPresent(thresholdSource, forKey: .thresholdSource)
     }
 }
 
@@ -4086,7 +4106,9 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if (value["_meta"]?["harn"]?["archivedMessages"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is below its minimum") }
             if (value["_meta"]?["harn"]?["estimatedTokensAfter"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensAfter is below its minimum") }
             if (value["_meta"]?["harn"]?["estimatedTokensBefore"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensBefore is below its minimum") }
+            if (value["_meta"]?["harn"]?["hardLimitTokens"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.hardLimitTokens is below its minimum") }
             if value["_meta"]?["harn"]?["mode"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.mode is required") }
+            if (value["_meta"]?["harn"]?["resolvedThresholdTokens"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.resolvedThresholdTokens is below its minimum") }
             if (value["_meta"]?["harn"]?["schemaVersion"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.schemaVersion is below its minimum") }
             if value["_meta"]?["harn"]?["snapshotAssetId"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.snapshotAssetId is required") }
             if value["_meta"]?["harn"]?["strategy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.strategy is required") }

@@ -1528,13 +1528,18 @@ export interface ACPTranscriptCompactedUpdateMetaHarn {
   engineStrategy?: string
   estimatedTokensAfter?: number
   estimatedTokensBefore?: number
-  instructionMode?: string
-  instructionSource?: string
+  hardLimitTokens?: number | null
+  instructionMode?: string | null
+  instructionSource?: string | null
   reason?: string
   recap?: ACPValue
   receiptId?: string
   replayed?: boolean
+  requestedStrategy?: string | null
+  resolvedThresholdTokens?: number | null
   schemaVersion?: number
+  sourceMeasurement?: ACPValue
+  thresholdSource?: string | null
 }
 
 export interface ACPTranscriptCompactedUpdateMeta {
