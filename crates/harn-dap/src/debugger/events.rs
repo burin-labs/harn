@@ -326,7 +326,7 @@ mod telemetry_tests {
             served_fast: false,
             accounting_status: harn_vm::llm::usage::UsageAccountingStatus::Reported,
             known_cost_usd: 0.0123,
-            provider_call_count: 1,
+            provider_call_count: Some(1),
             unpriced_calls: 0,
             usage_unknown_calls: 0,
             unpriced: None,

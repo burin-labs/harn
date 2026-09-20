@@ -11,8 +11,21 @@ use super::api;
 use super::call::{build_llm_error_dict, execute_llm_call};
 use super::stream::vm_stream_llm;
 
-fn llm_stream_error_item(err: &VmError, provider: &str, model: &str) -> VmValue {
-    build_llm_error_dict(err, provider, model)
+/// The error item a stream yields, carrying the requests the stream measured
+/// so a consumer can tell a refusal before dispatch from a failure after.
+fn llm_stream_error_item(
+    err: &VmError,
+    provider: &str,
+    model: &str,
+    ledger: &super::provider_dispatch::ProviderDispatchLedger,
+) -> VmValue {
+    match super::provider_dispatch::stamp_thrown_terminal(
+        VmError::Thrown(build_llm_error_dict(err, provider, model)),
+        ledger,
+    ) {
+        VmError::Thrown(value) => value,
+        other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
+    }
 }
 
 pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -45,10 +58,15 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
             return;
         }
 
-        let result = vm_stream_llm(&opts, &tx_for_task).await;
+        let ledger = super::provider_dispatch::ProviderDispatchLedger::default();
+        let result = super::provider_dispatch::with_provider_dispatch_ledger(
+            ledger.clone(),
+            vm_stream_llm(&opts, &tx_for_task),
+        )
+        .await;
         if let Err(e) = result {
             let _ = tx_for_task
-                .send(llm_stream_error_item(&e, &provider, &model))
+                .send(llm_stream_error_item(&e, &provider, &model, &ledger))
                 .await;
         }
         close_for_task.close();
@@ -110,8 +128,12 @@ async fn send_llm_stream_error(
     err: VmError,
     provider: &str,
     model: &str,
+    ledger: &super::provider_dispatch::ProviderDispatchLedger,
 ) {
-    let wrapped = VmError::Thrown(build_llm_error_dict(&err, provider, model));
+    let wrapped = super::provider_dispatch::stamp_thrown_terminal(
+        VmError::Thrown(build_llm_error_dict(&err, provider, model)),
+        ledger,
+    );
     let _ = stream_tx.send(Err(wrapped)).await;
 }
 
@@ -132,9 +154,15 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
         let mut visible = crate::visible_text::VisibleTextState::default();
         let mut partial = String::new();
         let mut deltas_open = true;
+        let ledger = super::provider_dispatch::ProviderDispatchLedger::default();
+        let task_ledger = ledger.clone();
         let mut llm_task =
             tokio::task::spawn_local(crate::orchestration::scope_inline_subtask(async move {
-                api::vm_call_llm_full_streaming(&opts, delta_tx).await
+                super::provider_dispatch::with_provider_dispatch_ledger(
+                    task_ledger,
+                    api::vm_call_llm_full_streaming(&opts, delta_tx),
+                )
+                .await
             }));
 
         loop {
@@ -182,14 +210,16 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                             let _ = stream_tx.send(Ok(final_chunk)).await;
                         }
                         Ok(Err(err)) => {
-                            send_llm_stream_error(&stream_tx, err, &provider, &model).await;
+                            send_llm_stream_error(&stream_tx, err, &provider, &model, &ledger)
+                                .await;
                         }
                         Err(join_err) if join_err.is_cancelled() => {}
                         Err(join_err) => {
                             let err = VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                                 "llm_stream_call background task failed: {join_err}"
                             ))));
-                            send_llm_stream_error(&stream_tx, err, &provider, &model).await;
+                            send_llm_stream_error(&stream_tx, err, &provider, &model, &ledger)
+                                .await;
                         }
                     }
                     break;
@@ -422,7 +452,35 @@ mod tests {
             detail: "first chunk deadline elapsed".to_string(),
         }));
 
-        let item = llm_stream_error_item(&err, "openai", "test-model");
+        // A stream error carries the requests the stream measured, so a
+        // consumer can tell a refusal before dispatch (a measured zero) from
+        // a failure after one (burin-labs/harn#8529). The stream always opens
+        // a scope around the provider call, so a stream that dispatched
+        // nothing stamps an exact zero.
+        let no_dispatch = super::super::provider_dispatch::ProviderDispatchLedger::default();
+        let item = llm_stream_error_item(&err, "openai", "test-model", &no_dispatch);
+        assert_eq!(
+            dict_string(&item, "provider_call_count").as_deref(),
+            Some("0"),
+            "a stream that never dispatched reports a measured zero"
+        );
+
+        let one_request = super::super::provider_dispatch::ProviderDispatchLedger::default();
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(
+                super::super::provider_dispatch::with_provider_dispatch_ledger(
+                    one_request.clone(),
+                    async { super::super::provider_dispatch::record_dispatch() },
+                ),
+            );
+        let after_request = llm_stream_error_item(&err, "openai", "test-model", &one_request);
+        assert_eq!(
+            dict_string(&after_request, "provider_call_count").as_deref(),
+            Some("1"),
+            "a stream that dispatched once and then failed reports one request"
+        );
 
         assert_eq!(dict_string(&item, "kind").as_deref(), Some("transient"));
         assert_eq!(

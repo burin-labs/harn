@@ -163,7 +163,7 @@ or derive cache behavior independently.
 | `reported_total_tokens` | int \| nil | Whole-call token count reported directly by the provider. This preserves total-only receipts without assigning tokens to an unknown input/output component. |
 | `cost_usd` | float \| nil | Cache- and serving-tier-adjusted catalog price for this response; `nil` (not `0`) when pricing is unknown |
 | `known_cost_usd` | float | Priced lower bound across all physical provider calls, retained when `cost_usd` is unknown because one call was unpriced |
-| `provider_call_count` | int | Physical provider calls represented by this logical call, including retries |
+| `provider_call_count` | int | Physical provider calls represented by this logical call, including retries. Measured at the transport boundary, so it is `0` for a terminal that never dispatched (a budget refusal, an admission denial, an argument error) and agrees with `agent_loop`'s count for the same event. A thrown `llm_call` error dict carries the same field. |
 | `unpriced_calls` | int | Physical calls without known catalog pricing |
 | `usage_unknown_calls` | int | Physical calls that returned no authoritative token or cost accounting |
 | `cache_read_tokens` | int | Prompt tokens served from provider-side cache |

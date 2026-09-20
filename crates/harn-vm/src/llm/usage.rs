@@ -154,8 +154,15 @@ pub struct LlmUsage {
     pub known_cost_usd: f64,
     /// Provider requests represented by this ledger. Aggregated logical calls
     /// retain their physical transaction count instead of collapsing to one.
-    #[serde(default)]
-    pub provider_call_count: i64,
+    ///
+    /// `None` is a ledger recorded before this field existed, whose one-call
+    /// certainty `summarize_usage_cost_certainty` reconstructs from the
+    /// original stable fields. `Some(0)` is a measured zero: the producer
+    /// observed no dispatch. Reading an integer zero as "legacy" made the
+    /// second unrepresentable, so every pre-dispatch refusal folded into one
+    /// unpriced call (burin-labs/harn#8529).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_count: Option<i64>,
     #[serde(default)]
     pub unpriced_calls: i64,
     #[serde(default)]
@@ -237,16 +244,17 @@ pub fn summarize_usage_cost_certainty<'a>(
     usages
         .into_iter()
         .fold(UsageCostCertainty::default(), |mut summary, usage| {
-            // A zero call count identifies ledgers recorded before the
+            // An absent call count identifies ledgers recorded before the
             // aggregation fields existed. Reconstruct their one-call
-            // certainty from the original stable fields.
-            let legacy = usage.provider_call_count == 0;
+            // certainty from the original stable fields. A present zero is a
+            // measurement and folds as one.
+            let legacy = usage.provider_call_count.is_none();
             summary.known_cost_usd += if legacy {
                 usage.cost_usd.unwrap_or(0.0)
             } else {
                 usage.known_cost_usd
             };
-            summary.provider_call_count += if legacy { 1 } else { usage.provider_call_count };
+            summary.provider_call_count += usage.provider_call_count.unwrap_or(1);
             summary.unpriced_calls += if legacy {
                 i64::from(usage.cost_usd.is_none())
             } else {
@@ -407,7 +415,7 @@ impl LlmUsage {
                 UsageAccountingStatus::Unknown
             },
             known_cost_usd: certainty.known_cost_usd,
-            provider_call_count: certainty.provider_call_count,
+            provider_call_count: Some(certainty.provider_call_count),
             unpriced_calls: certainty.unpriced_calls,
             usage_unknown_calls: certainty.usage_unknown_calls,
             unpriced: unpriced_facts(
@@ -439,7 +447,27 @@ impl LlmUsage {
             cost_usd: Some(0.0),
             accounting_status: UsageAccountingStatus::Reported,
             known_cost_usd: 0.0,
-            provider_call_count: 1,
+            provider_call_count: Some(1),
+            unpriced_calls: 0,
+            usage_unknown_calls: 0,
+            unpriced: None,
+            ..Self::unknown_attempt()
+        }
+    }
+
+    /// A terminal that made no provider request at all.
+    ///
+    /// Distinct from `known_zero_attempt`, which is one real request that cost
+    /// nothing (a cache or replay hit). Here nothing was dispatched, so the
+    /// cost is exactly zero, there is no unpriced attempt to bound, and the
+    /// physical request count is a measured zero rather than an assumed one.
+    /// Pre-dispatch budget refusals and admission denials terminate here.
+    pub(crate) fn no_provider_request() -> Self {
+        Self {
+            cost_usd: Some(0.0),
+            accounting_status: UsageAccountingStatus::Reported,
+            known_cost_usd: 0.0,
+            provider_call_count: Some(0),
             unpriced_calls: 0,
             usage_unknown_calls: 0,
             unpriced: None,
@@ -472,7 +500,7 @@ impl LlmUsage {
             served_fast: false,
             accounting_status: UsageAccountingStatus::Unknown,
             known_cost_usd: 0.0,
-            provider_call_count: count,
+            provider_call_count: Some(count),
             unpriced_calls: count,
             usage_unknown_calls: count,
             // No response arrived, so neither a token count nor a price table
@@ -575,7 +603,7 @@ impl LlmUsage {
                 UsageAccountingStatus::Unknown
             },
             known_cost_usd: cost_usd.unwrap_or(0.0),
-            provider_call_count: 1,
+            provider_call_count: Some(1),
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: i64::from(!usage_known && authoritative_cost.is_none()),
             unpriced: unpriced_facts(
@@ -647,7 +675,7 @@ impl LlmUsage {
                 UsageAccountingStatus::Unknown
             },
             known_cost_usd: cost_usd.unwrap_or(0.0),
-            provider_call_count: 1,
+            provider_call_count: Some(1),
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: usage_unknown,
             unpriced: unpriced_facts(
@@ -699,10 +727,15 @@ impl LlmUsage {
             crate::value::intern_key("known_cost_usd"),
             VmValue::Float(self.known_cost_usd),
         );
-        usage.insert(
-            crate::value::intern_key("provider_call_count"),
-            VmValue::Int(self.provider_call_count),
-        );
+        // An unmeasured count is absent, never null: a consumer that keys
+        // "stamped" on the field's presence must not read a legacy ledger as
+        // one that measured and found nothing.
+        if let Some(provider_call_count) = self.provider_call_count {
+            usage.insert(
+                crate::value::intern_key("provider_call_count"),
+                VmValue::Int(provider_call_count),
+            );
+        }
         usage.insert(
             crate::value::intern_key("unpriced_calls"),
             VmValue::Int(self.unpriced_calls),
@@ -802,10 +835,12 @@ impl LlmUsage {
             self.cost_usd.map_or(Value::Null, serde_json::Value::from),
         );
         fields.insert("known_cost_usd".to_string(), self.known_cost_usd.into());
-        fields.insert(
-            "provider_call_count".to_string(),
-            self.provider_call_count.into(),
-        );
+        if let Some(provider_call_count) = self.provider_call_count {
+            fields.insert(
+                "provider_call_count".to_string(),
+                provider_call_count.into(),
+            );
+        }
         fields.insert("unpriced_calls".to_string(), self.unpriced_calls.into());
         fields.insert(
             "usage_unknown_calls".to_string(),
@@ -853,8 +888,28 @@ impl LlmUsage {
         );
     }
 
-    pub(crate) fn empty_vm_dict() -> crate::value::DictMap {
-        Self::unknown_attempt().to_vm_dict(&ProviderAttempts::default())
+    /// The usage a terminal carries when no per-attempt ledger was recorded.
+    ///
+    /// `dispatches` is the call-scoped measurement from
+    /// `crate::llm::provider_dispatch`: `Some(0)` is a terminal that never
+    /// reached a provider, `Some(n)` is n requests whose usage never arrived,
+    /// and `None` means nothing measured, which stays conservative by
+    /// assuming one unknown attempt. Collapsing `Some(0)` into `None` is what
+    /// charged a reserve for refusals that cost nothing
+    /// (burin-labs/harn#8529).
+    pub(crate) fn measured_vm_dict(dispatches: Option<i64>) -> crate::value::DictMap {
+        let usage = match dispatches {
+            Some(0) => Self::no_provider_request(),
+            Some(count) if count > 0 => {
+                Self::unknown_attempts(usize::try_from(count).unwrap_or(usize::MAX))
+            }
+            _ => Self::unknown_attempt(),
+        };
+        let attempts = ProviderAttempts {
+            total: u32::try_from(dispatches.unwrap_or(0).max(0)).unwrap_or(u32::MAX),
+            ..ProviderAttempts::default()
+        };
+        usage.to_vm_dict(&attempts)
     }
 
     /// Lower the ledger to canonical tracing metadata while keeping route

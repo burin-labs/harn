@@ -665,8 +665,12 @@ fn envelope_from_operation_timeout(timeout_ms: u64) -> VmValue {
     VmValue::dict(env)
 }
 
+/// Usage for a terminal with no per-attempt ledger, stamped with whatever the
+/// open dispatch scope measured. No open scope stays conservative.
 fn empty_usage_dict() -> crate::value::DictMap {
-    crate::llm::usage::LlmUsage::empty_vm_dict()
+    crate::llm::usage::LlmUsage::measured_vm_dict(
+        crate::llm::provider_dispatch::measured_dispatches(),
+    )
 }
 
 fn build_usage_dict(outcome: &SchemaLoopOutcome) -> VmValue {
@@ -761,7 +765,14 @@ pub(crate) async fn llm_call_structured_result_impl(
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
     let operation_timeout_ms = take_operation_timeout_ms(&mut args)?;
-    await_with_operation_timeout(operation_timeout_ms, run_structured_envelope(args, bridge)).await
+    // The scope opens OUTSIDE the timeout: a timed-out structured call still
+    // needs to report the requests it did make, and a future cancelled by the
+    // timeout cannot report anything from inside itself.
+    crate::llm::provider_dispatch::with_provider_dispatch_ledger(
+        crate::llm::provider_dispatch::ProviderDispatchLedger::default(),
+        await_with_operation_timeout(operation_timeout_ms, run_structured_envelope(args, bridge)),
+    )
+    .await
 }
 
 async fn await_with_operation_timeout<F>(
