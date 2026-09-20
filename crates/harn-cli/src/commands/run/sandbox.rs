@@ -259,7 +259,7 @@ pub(super) fn install_run_sandbox_scope(
             .is_none_or(|policy| policy.process_network_proxy.is_none())
     {
         harn_vm::egress::ProcessEgressProxy::start_from_current_policy(true)
-            .unwrap_or_else(|error| crate::command_error(&error))
+            .unwrap_or_else(|error| crate::command_error(&error.to_string()))
     } else {
         None
     };

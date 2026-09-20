@@ -19,7 +19,7 @@
     {
       "id": "CAP",
       "title": "Capabilities",
-      "count": 8
+      "count": 9
     },
     {
       "id": "LLM",
@@ -850,6 +850,15 @@
       "related": [
         "HARN-CAP-001"
       ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-202",
+      "category": "CAP",
+      "summary": "confined host process cannot open the loopback listener a child's egress proxy needs",
+      "repairs": [],
+      "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
     },

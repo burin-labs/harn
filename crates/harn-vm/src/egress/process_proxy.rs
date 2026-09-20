@@ -21,13 +21,97 @@ use super::{
     normalize_host, parse_rule_list, ConfiguredPolicy, DefaultAction, EgressPolicy,
     EgressPolicyContext, EgressTarget, SsrfMode,
 };
-use crate::orchestration::ProcessNetworkProxy;
+use crate::orchestration::{current_execution_policy, ProcessNetworkProxy, SandboxProfile};
 
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const IDLE_TIMEOUT: Duration = Duration::from_mins(5);
 const MAX_AUDIT_EVENTS: usize = 256;
 const MAX_ACTIVE_CONNECTIONS: usize = 128;
+
+/// Why a child egress proxy could not be started.
+///
+/// The one classified case is the host process being unable to bind its own
+/// loopback listener. That is not a policy decision Harn made: the Harn
+/// process is itself confined, by its own `harn run` jail, by a parent Harn
+/// process's jail, or by the operating system, and that confinement denies
+/// `network-bind` on loopback. A confined parent cannot mediate egress for a
+/// child, so the child cannot start under a managed network policy. The raw
+/// OS text is `Operation not permitted` with no subject, and consumers have
+/// diagnosed it by hand as a cache-path problem and as a sandbox defect; it is
+/// one condition with one remedy, so it carries one diagnostic code.
+///
+/// Only `PermissionDenied` is classified. Every other bind failure keeps its
+/// unclassified shape so this variant cannot absorb an unrelated error.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessEgressProxyError {
+    /// `HARN-CAP-202`: the host process may not open a loopback listener.
+    HostLoopbackBindDenied {
+        /// Which listener failed, `HTTP` or `SOCKS5`.
+        protocol: &'static str,
+        /// The sandbox profile this process reports from its own execution
+        /// policy. `Unrestricted` means the confinement is inherited from a
+        /// parent process or the operating system rather than declared here.
+        profile: SandboxProfile,
+        /// The OS error text.
+        source: String,
+    },
+    /// Any other start failure, unchanged from before classification.
+    Other(String),
+}
+
+impl ProcessEgressProxyError {
+    pub const HOST_LOOPBACK_BIND_DENIED_CODE: &'static str = "HARN-CAP-202";
+
+    /// Classify one loopback bind failure. `PermissionDenied` becomes the
+    /// typed variant; anything else keeps the protocol-prefixed OS text.
+    fn from_bind(protocol: &'static str, error: io::Error) -> Self {
+        if error.kind() == io::ErrorKind::PermissionDenied {
+            return Self::HostLoopbackBindDenied {
+                protocol,
+                profile: current_execution_policy()
+                    .map(|policy| policy.sandbox_profile)
+                    .unwrap_or(SandboxProfile::Unrestricted),
+                source: error.to_string(),
+            };
+        }
+        Self::Other(format!("bind child {protocol} egress proxy: {error}"))
+    }
+}
+
+impl std::fmt::Display for ProcessEgressProxyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HostLoopbackBindDenied {
+                protocol,
+                profile,
+                source,
+            } => {
+                let confinement = if *profile == SandboxProfile::Unrestricted {
+                    "has no Harn sandbox profile of its own, so the confinement is inherited \
+                     from a parent process or the operating system"
+                        .to_string()
+                } else {
+                    format!(
+                        "is confined under Harn sandbox profile `{}`",
+                        profile.as_str()
+                    )
+                };
+                write!(
+                    f,
+                    "{code}: this Harn process cannot open the loopback listener its child's \
+                     {protocol} egress proxy needs ({source}); the process {confinement}. \
+                     Give the confining `harn run` --allow-process-loopback, or spawn the \
+                     child from a process that is not confined",
+                    code = Self::HOST_LOOPBACK_BIND_DENIED_CODE,
+                )
+            }
+            Self::Other(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ProcessEgressProxyError {}
 
 /// Secret-free evidence emitted at the process-egress authority boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,8 +137,10 @@ impl ProcessEgressProxy {
     /// Start a proxy from the current Harn egress policy. `Ok(None)` preserves
     /// the legacy unrestricted child-network grant when no policy was
     /// configured; a configured policy always becomes a managed boundary.
-    pub fn start_from_current_policy(default_block_private: bool) -> Result<Option<Self>, String> {
-        ensure_env_seeded().map_err(|error| error.to_string())?;
+    pub fn start_from_current_policy(
+        default_block_private: bool,
+    ) -> Result<Option<Self>, ProcessEgressProxyError> {
+        ensure_env_seeded().map_err(|error| ProcessEgressProxyError::Other(error.to_string()))?;
         let require_explicit =
             super::REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH.with(|depth| *depth.borrow() > 0);
         if super::configured_policy().is_none() && !require_explicit {
@@ -71,9 +157,10 @@ impl ProcessEgressProxy {
     /// Start the local-cloud projection of a deny-by-default host allowlist.
     /// Parsing goes through the same rule parser as `HARN_EGRESS_ALLOW` and
     /// `harness.net.egress_policy`.
-    pub fn start_allowlist(allowed_hosts: &[String]) -> Result<Self, String> {
+    pub fn start_allowlist(allowed_hosts: &[String]) -> Result<Self, ProcessEgressProxyError> {
         let policy = EgressPolicy {
-            allow: parse_rule_list(&allowed_hosts.join(",")).map_err(|error| error.to_string())?,
+            allow: parse_rule_list(&allowed_hosts.join(","))
+                .map_err(|error| ProcessEgressProxyError::Other(error.to_string()))?,
             deny: Vec::new(),
             default: DefaultAction::Deny,
             // NetworkPolicy::Limited is only a destination contract. It does
@@ -87,18 +174,24 @@ impl ProcessEgressProxy {
         )))
     }
 
-    fn start(policy: ProcessPolicySource) -> Result<Self, String> {
+    fn start(policy: ProcessPolicySource) -> Result<Self, ProcessEgressProxyError> {
         let http = TcpListener::bind(("127.0.0.1", 0))
-            .map_err(|error| format!("bind child HTTP egress proxy: {error}"))?;
+            .map_err(|error| ProcessEgressProxyError::from_bind("HTTP", error))?;
         let socks = TcpListener::bind(("127.0.0.1", 0))
-            .map_err(|error| format!("bind child SOCKS5 egress proxy: {error}"))?;
+            .map_err(|error| ProcessEgressProxyError::from_bind("SOCKS5", error))?;
         let http_port = http
             .local_addr()
-            .map_err(|error| format!("inspect child HTTP egress proxy: {error}"))?
+            .map_err(|error| {
+                ProcessEgressProxyError::Other(format!("inspect child HTTP egress proxy: {error}"))
+            })?
             .port();
         let socks_port = socks
             .local_addr()
-            .map_err(|error| format!("inspect child SOCKS5 egress proxy: {error}"))?
+            .map_err(|error| {
+                ProcessEgressProxyError::Other(format!(
+                    "inspect child SOCKS5 egress proxy: {error}"
+                ))
+            })?
             .port();
         let shutdown = Arc::new(AtomicBool::new(false));
         let active_connections = Arc::new(AtomicUsize::new(0));
@@ -113,7 +206,8 @@ impl ProcessEgressProxy {
             Arc::clone(&active_connections),
             Arc::clone(&audit),
             handle_http_client,
-        )?;
+        )
+        .map_err(ProcessEgressProxyError::Other)?;
         let socks_join = match spawn_listener(
             "harn-process-socks-proxy",
             socks,
@@ -128,7 +222,7 @@ impl ProcessEgressProxy {
                 shutdown.store(true, Ordering::Release);
                 let _ = TcpStream::connect(("127.0.0.1", http_port));
                 let _ = http_join.join();
-                return Err(error);
+                return Err(ProcessEgressProxyError::Other(error));
             }
         };
 
@@ -677,8 +771,66 @@ mod tests {
 
     #[test]
     fn malformed_allowlist_fails_before_listener_is_exposed() {
-        let error = ProcessEgressProxy::start_allowlist(&["[broken".to_string()]).unwrap_err();
+        let error = ProcessEgressProxy::start_allowlist(&["[broken".to_string()])
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("invalid bracketed host rule"), "{error}");
+    }
+
+    /// A refused loopback bind is one diagnosable condition: the host is
+    /// confined. The message must carry the code, name the listener, say the
+    /// confinement is inherited when this process declares no profile, and
+    /// name the remedy, or a reader is back to chasing a bare EPERM.
+    #[test]
+    fn permission_denied_bind_is_classified_as_confined_host() {
+        let error = ProcessEgressProxyError::from_bind(
+            "HTTP",
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Operation not permitted (os error 1)",
+            ),
+        );
+        let ProcessEgressProxyError::HostLoopbackBindDenied {
+            protocol,
+            profile,
+            source,
+        } = &error
+        else {
+            panic!("expected the confined-host variant, got {error:?}");
+        };
+        assert_eq!(*protocol, "HTTP");
+        assert_eq!(*profile, SandboxProfile::Unrestricted);
+        assert!(source.contains("Operation not permitted"), "{source}");
+        let rendered = error.to_string();
+        assert!(rendered.starts_with("HARN-CAP-202: "), "{rendered}");
+        assert!(rendered.contains("HTTP egress proxy"), "{rendered}");
+        assert!(
+            rendered.contains("inherited from a parent process"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("--allow-process-loopback"), "{rendered}");
+        assert!(rendered.contains("Operation not permitted"), "{rendered}");
+    }
+
+    /// Negative control for the classifier: a bind that fails for any other
+    /// reason keeps the old protocol-prefixed shape and never earns the code.
+    #[test]
+    fn other_bind_failures_are_not_classified_as_confinement() {
+        for kind in [
+            io::ErrorKind::AddrInUse,
+            io::ErrorKind::AddrNotAvailable,
+            io::ErrorKind::Other,
+        ] {
+            let error = ProcessEgressProxyError::from_bind(
+                "SOCKS5",
+                io::Error::new(kind, "listener refused"),
+            );
+            let ProcessEgressProxyError::Other(message) = &error else {
+                panic!("{kind:?} must not classify as confinement, got {error:?}");
+            };
+            assert_eq!(message, "bind child SOCKS5 egress proxy: listener refused");
+            assert!(!error.to_string().contains("HARN-CAP-202"), "{error}");
+        }
     }
 
     #[test]
