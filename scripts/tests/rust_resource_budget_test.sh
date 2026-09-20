@@ -80,16 +80,27 @@ if rust_resource_budget "$policy" 24 1 producr 65536 2>/dev/null; then
   exit 1
 fi
 
-# The decision this file exists for after the four hosted kills. A four-core
-# vendor VM with 16 GB is the box the security archive died on. Cores alone
-# allow three compilers there; memory allows two, and the smaller wins.
-[[ $(rust_resource_budget "$policy" 4 1 producer 16384) == $'build_jobs=2\ntest_threads=3' ]]
+# The decision this file exists for after the hosted kills, asserted on the
+# reading the runner actually reports rather than on a tidy one. A "16 GB"
+# vendor VM reports 15989 MB, not 16384: some is held back before the kernel
+# ever counts it. The first version of this policy was tested at 16384, which
+# sat exactly on an integer-division boundary, so it returned two here and one
+# on the real box. A round number that lands on a boundary is not a test of
+# the boundary.
+[[ $(rust_resource_budget "$policy" 4 1 producer 15989) == $'build_jobs=2\ntest_threads=3' ]]
 
-# The negative control for that row: the same box read through the old
-# cores-only arithmetic returns the count that died. If a later edit lets the
-# memory term stop binding, this is the number that comes back, so assert the
-# two differ rather than only asserting the new one.
-[[ $(rust_resource_budget "$policy" 4 1 producer 16384) != $'build_jobs=3\ntest_threads=3' ]]
+# And it must not be fragile across the band a four-core vendor VM can report,
+# since the exact figure varies with kernel and instance. One row proves a
+# point; these prove the plateau the point sits on.
+for reported in 14500 15000 15989 16384; do
+  [[ $(rust_resource_budget "$policy" 4 1 producer "$reported") == $'build_jobs=2\ntest_threads=3' ]]
+done
+
+# The negative control: the same box read through the old cores-only
+# arithmetic returns the count that died. If a later edit lets the memory term
+# stop binding, this is the number that comes back, so assert the two differ
+# rather than only asserting the new one.
+[[ $(rust_resource_budget "$policy" 4 1 producer 15989) != $'build_jobs=3\ntest_threads=3' ]]
 
 # Memory binds below cores only where memory is scarce. A large owned box is
 # unchanged by this policy, which is the claim that keeps the change from

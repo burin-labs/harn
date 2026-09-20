@@ -822,7 +822,15 @@ jobs:
       # Only security binaries enter this archive; the following workspace
       # tests reuse the same profile and unified features without rebuilding.
       - name: Build security test archive
-        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 16 }}
+        # Both tiers get the same 24 minutes, because the vendor tier's 16 no
+        # longer fits the build it has to run. Measured on a four-core vendor
+        # VM: at one compiler this build reports 15m57s and the step was killed
+        # nine seconds later while packaging, having compiled everything. Two
+        # compilers should land well inside 24, and the job's own limit is 70,
+        # so this borrows nothing it cannot afford. A step limit is a backstop
+        # against a hang, and a backstop set below the work's own duration
+        # reports every run as a hang.
+        timeout-minutes: 24
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-

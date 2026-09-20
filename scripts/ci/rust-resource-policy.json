@@ -2,7 +2,7 @@
   "schema_version": 3,
   "reserved_host_cores": 1,
   "reserved_host_memory_mb": 2048,
-  "memory_mb_per_compiler": 7168,
+  "memory_mb_per_compiler": 6144,
   "e2e_max_compilers": 2,
   "producer_max_compilers": 8
 }
