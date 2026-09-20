@@ -451,3 +451,59 @@ pipeline test_make_owned_build_refusal_requires_a_measured_target(harness: Harne
   assert(!decision(codex_payload("env FOO=1 swift test"), ADMITTED, owns).allow)
   assert(decision(codex_payload("grep swift-test Makefile"), ADMITTED, owns).allow)
 }
+
+@test
+pipeline test_an_option_value_is_not_read_as_the_subcommand(harness: Harness, task: unknown) {
+  const owns: MakeTargetCensus = {checked: true, targets: ["swift-build", "swift-test"]}
+  // The verb used to be "the first argument that does not begin with `-`",
+  // which skips an option but not the option's value. `/tmp` became the verb
+  // and no rule matched, so every Swift option with a value was a bypass.
+  assert(
+    !decision(codex_payload("swift --package-path /tmp test"), ADMITTED, owns).allow,
+    "an option's value must not be read as the subcommand",
+  )
+  // An option the value table has never heard of must fail closed rather than
+  // leave the same hole under a different name. This is the case an arity
+  // table alone does not cover.
+  assert(
+    !decision(codex_payload("swift --not-a-known-option /tmp build"), ADMITTED, owns).allow,
+    "an unknown option must not open the same bypass",
+  )
+  // POSITIVE CONTROL: a Swift subcommand no rule claims is still allowed, and
+  // so is the Make target itself. Refusing everything would satisfy the two
+  // assertions above while destroying the rule.
+  assert(decision(codex_payload("swift package resolve"), ADMITTED, owns).allow)
+  assert(decision(codex_payload("swift --version"), ADMITTED, owns).allow)
+  assert(decision(codex_payload("make swift-test"), ADMITTED, owns).allow)
+}
+
+@test
+pipeline test_a_raw_escape_only_releases_the_stage_that_sets_it(harness: Harness, task: unknown) {
+  const owns: MakeTargetCensus = {checked: true, targets: ["swift-build", "swift-test"]}
+  // The escape used to be a substring search over the whole command, so an
+  // unrelated earlier stage that merely mentioned it released the guarded one.
+  assert(
+    !decision(codex_payload("echo HARN_ALLOW_RAW_SWIFT=1; swift test"), ADMITTED, owns).allow,
+    "a mention in another stage must not release the swift stage",
+  )
+  assert(
+    !decision(codex_payload("echo HARN_ALLOW_RAW_CARGO=1; cargo test"), ADMITTED, owns).allow,
+    "a mention in another stage must not release the cargo stage",
+  )
+  // The same text as an argument rather than an assignment is also not an
+  // escape, on the stage that runs the tool.
+  assert(
+    !decision(codex_payload("swift test --filter HARN_ALLOW_RAW_SWIFT=1"), ADMITTED, owns).allow,
+    "the escape is an assignment, not an argument",
+  )
+  // POSITIVE CONTROL: the real assignment on the guarded stage still releases
+  // it, through a bare prefix and through `env`. Without these, a guard that
+  // ignored the escape entirely would pass every assertion above.
+  assert(decision(codex_payload("HARN_ALLOW_RAW_SWIFT=1 swift test"), ADMITTED, owns).allow)
+  assert(decision(codex_payload("env HARN_ALLOW_RAW_SWIFT=1 swift build"), ADMITTED, owns).allow)
+  assert(decision(codex_payload("HARN_ALLOW_RAW_CARGO=1 cargo test"), ADMITTED, owns).allow)
+  assert(
+    decision(codex_payload("echo hi && HARN_ALLOW_RAW_SWIFT=1 swift test"), ADMITTED, owns).allow,
+    "an earlier unrelated stage must not withdraw a real escape",
+  )
+}

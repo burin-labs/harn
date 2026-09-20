@@ -90,10 +90,19 @@ pub fn segments_of(command: string) -> list<string> {
   return segments
 }
 
+const RAW_CARGO_ESCAPE: string = "HARN_ALLOW_RAW_CARGO=1"
+
 pub fn cargo_violation(command: string) -> string {
   for group in command_groups(command) {
     for stage in group {
       if stage_program(stage) != "cargo" {
+        continue
+      }
+      // Per stage, for the same reason the Make-owned rule reads it per stage:
+      // the escape used to be a substring of the whole command, so
+      // `echo HARN_ALLOW_RAW_CARGO=1; cargo test` released a stage nothing set
+      // the variable for.
+      if stage_declares_assignment(stage, RAW_CARGO_ESCAPE) {
         continue
       }
       const verb_index = if (stage.argv[1] ?? "").starts_with("+") {
@@ -163,15 +172,101 @@ pub fn make_target_census_from_env(env: HarnessEnv) -> MakeTargetCensus {
   )
 }
 
-/** The first non-option argument of a stage, which is the tool's verb. */
-fn stage_verb(argv: list<string>) -> string {
+/**
+ * Options that take a separate value, so the value is not a subcommand.
+ *
+ * Mirrors the flag tables in `is_git_worktree_add` and `git_directory_argument`
+ * on purpose. This one only narrows the over-refusal described below; it is not
+ * what makes the classification safe, so an option missing from it is not a
+ * bypass.
+ */
+const VALUE_TAKING_OPTIONS: list<string> = [
+  "-C",
+  "--package-path",
+  "--scratch-path",
+  "--build-path",
+  "--cache-path",
+  "--destination",
+  "--toolchain",
+  "--configuration",
+  "-c",
+  "--filter",
+  "--jobs",
+  "-j",
+  "--triple",
+  "--sdk",
+]
+
+/**
+ * Whether a stage runs `<program> <verb>`, fail-closed about option values.
+ *
+ * The obvious reading — "the first argument that does not begin with `-`" —
+ * silently skips an option but not the option's value, so
+ * `swift --package-path /tmp test` classifies as the verb `/tmp` and no rule
+ * matches. Any option with a value bypasses the rule that way, whatever the
+ * option is called, so an arity table alone cannot close it: an option the
+ * table has never heard of is skipped as a bare flag and its value becomes the
+ * verb again.
+ *
+ * This asks a different question. The verb is present when it appears as ANY
+ * argument that is neither an option nor a known option's value. An option the
+ * table does not know leaves its value in the candidate set, where a value that
+ * happens to be the verb refuses rather than allows.
+ *
+ * The cost is a narrow over-refusal: a command that passes the literal string
+ * `test` or `build` as the value of an option this table does not list is
+ * refused and told to run the Make target. That direction is deliberate. The
+ * escape hatch exists for the case the rule gets wrong, and there is no escape
+ * from a rule that silently did not fire.
+ */
+fn stage_runs_verb(argv: list<string>, verb: string) -> bool {
+  let consumes_next = false
   for token in argv.slice(1, len(argv)) {
+    if consumes_next {
+      consumes_next = false
+      continue
+    }
+    if VALUE_TAKING_OPTIONS.contains(token) {
+      consumes_next = true
+      continue
+    }
     if token.starts_with("-") {
       continue
     }
-    return token
+    if token == verb {
+      return true
+    }
   }
-  return ""
+  return false
+}
+
+/**
+ * Whether this stage itself sets `assignment` in the environment it runs with.
+ *
+ * The escape used to be honoured with a substring search over the whole command
+ * text, so `echo HARN_ALLOW_RAW_SWIFT=1; swift test` released the `swift` stage
+ * although nothing set the variable for it. An escape is only an escape where
+ * it actually applies, which is the stage that runs the guarded program.
+ *
+ * `command_risk_scan` strips a leading assignment prefix and an `env` wrapper
+ * out of `argv` but keeps both in `text`, so the prefix is read back from the
+ * stage's own text and stops at the first word that is neither an assignment
+ * nor `env`.
+ */
+fn stage_declares_assignment(stage: ShellCommandStage, assignment: string) -> bool {
+  for token in stage.text.split(" ") {
+    if token == "" {
+      continue
+    }
+    if token == assignment {
+      return true
+    }
+    if token == "env" || token.contains("=") {
+      continue
+    }
+    return false
+  }
+  return false
 }
 
 /**
@@ -189,15 +284,14 @@ pub fn make_owned_command_violation(command: string, census: MakeTargetCensus) -
     for stage in group {
       const argv = launched_argv(stage.argv, 0)
       const program = argv_program(argv)
-      const verb = stage_verb(argv)
       for rule in MAKE_OWNED_COMMAND_RULES {
-        if program != rule.program || verb != rule.verb {
+        if program != rule.program || !stage_runs_verb(argv, rule.verb) {
           continue
         }
         if !census.targets.contains(rule.target) {
           continue
         }
-        if command.contains(rule.escape) {
+        if stage_declares_assignment(stage, rule.escape) {
           continue
         }
         return "`" + rule.program + " " + rule.verb + "` bypasses the repository Make target, "
@@ -720,11 +814,9 @@ pub fn decision(
       }
     }
   }
-  if !command.contains("HARN_ALLOW_RAW_CARGO=1") {
-    const cargo = cargo_violation(command)
-    if cargo != "" {
-      return {allow: false, reason: cargo}
-    }
+  const cargo = cargo_violation(command)
+  if cargo != "" {
+    return {allow: false, reason: cargo}
   }
   const make_owned = make_owned_command_violation(command, make_targets)
   if make_owned != "" {
