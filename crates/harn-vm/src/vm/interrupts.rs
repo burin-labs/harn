@@ -1,3 +1,4 @@
+use crate::cancellation::{cancelled_error, HandlerDispatch};
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -146,7 +147,9 @@ impl Vm {
             self.interrupted = true;
 
             if self.dispatching_interrupt {
-                return Err(Self::cancelled_error());
+                // Already inside a dispatch: handlers are running for this
+                // cancellation on the frame below.
+                return Err(cancelled_error(HandlerDispatch::Dispatched));
             }
 
             let matching: Vec<(i64, bool, Option<u64>, VmValue)> = self
@@ -294,8 +297,10 @@ impl Vm {
 
             match self.cancel_grace_instructions_remaining.as_mut() {
                 Some(0) => {
+                    // The owner was consulted above and reported that no
+                    // handler matched; the decision was still its own.
                     self.cancel_spawned_tasks();
-                    return Some(Self::cancelled_error());
+                    return Some(cancelled_error(HandlerDispatch::Dispatched));
                 }
                 Some(remaining) => *remaining -= 1,
                 None => self.cancel_grace_instructions_remaining = Some(CANCEL_GRACE_INSTRUCTIONS),

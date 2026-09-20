@@ -50,6 +50,7 @@ mod bounded_files;
 pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
+pub(crate) mod cancellation;
 pub mod canonical_json;
 pub mod channel_guardrails;
 pub mod channels;
