@@ -204,6 +204,7 @@ diagnostic_codes! {
     PredicateSiteInvalid, "HARN-TYP-033", Typ, "probabilistic predicate site identity must be literal and unique";
     PredicateOutcomeUnnarrowed, "HARN-TYP-034", Typ, "probabilistic predicate variant fields require outcome narrowing";
     PredicateModelOperationMissing, "HARN-TYP-035", Typ, "probabilistic predicate model must declare the decision operation";
+    PredicateQuestionSetInvalid, "HARN-TYP-036", Typ, "probabilistic evaluation question set must be a literal with unique ids and labels";
     ParserUnexpectedToken, "HARN-PAR-001", Par, "parser found an unexpected token";
     ParserUnexpectedEof, "HARN-PAR-002", Par, "parser reached end of file while expecting syntax";
     ParserUnexpectedCharacter, "HARN-PAR-003", Par, "lexer found an unexpected character";

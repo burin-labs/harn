@@ -13,6 +13,7 @@ use super::{DiagnosticSeverity, TypeChecker, TypeDiagnostic};
 
 mod acp_ambient_globals;
 mod attributes;
+mod batched_evaluation;
 mod callable_attributes;
 mod calls_and_generics;
 mod coalesce;

@@ -1,0 +1,5 @@
+import {boolean} from "std/predicate"
+
+fn invalid(llm: HarnessLlm, policy: EvaluationPolicy) {
+  const answers = llm.evaluate("test.unused", {value: 1}, {a: boolean("Supported?")}, policy)
+}
