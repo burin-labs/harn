@@ -35,7 +35,7 @@ pipeline test(harness: Harness, task: unknown) {
   const hosted_claude = harness.llm.model_info("anthropic/claude-sonnet-4-6")
   assert_eq(hosted_claude.provider, "openrouter")
   assert_eq(hosted_claude.family, "anthropic-claude")
-  assert_eq(mid.catalog.pricing.input_per_mtok, 0.11)
+  assert_eq(mid.catalog.pricing.input_per_mtok, 0.12)
   assert_eq(mid.catalog.family, "qwen")
   assert(mid.capabilities.native_tools != nil, "capability lookup is present")
   const mid_route_model = mid.catalog?.wire_model ?? mid.id

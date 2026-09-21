@@ -58,11 +58,13 @@ pipeline default(harness: Harness) {
   harness.stdio.println("unknown_known=" + to_string(unknown.pricing_known))
   harness.stdio.println("unknown_cost_nil=" + to_string(unknown.cost_usd == nil))
   // The route has priced input and prompt caching, but no published cached-read
-  // tier. Cached usage is therefore explicitly unpriceable.
+  // tier. Cached usage is therefore explicitly unpriceable. DeepInfra started
+  // publishing a cached-read rate for DeepSeek V3.2, which this case used to
+  // name; Qwen3-235B is the DeepInfra route that still publishes none.
   const unknown_cache_tier = estimate_call_cost(
     {
       provider: "deepinfra",
-      model: "deepinfra/deepseek-ai/DeepSeek-V3.2",
+      model: "deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507",
       input_tokens: 1000,
       cache_read_tokens: 800,
     },
