@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-        "line": 56,
         "reader": "__should_skip"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-        "line": 60,
         "reader": "__should_skip"
       }
     ],
@@ -45,7 +43,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-        "line": 64,
         "reader": "__should_skip"
       }
     ],
@@ -62,7 +59,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-        "line": 70,
         "reader": "__should_skip"
       }
     ],
@@ -80,7 +76,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-        "line": 78,
         "reader": "__invoke"
       }
     ],
@@ -98,7 +93,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-        "line": 96,
         "reader": "__invoke"
       }
     ],
@@ -116,7 +110,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-        "line": 131,
         "reader": "__invoke"
       }
     ],
@@ -134,7 +127,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-        "line": 242,
         "reader": "agent_step_judge"
       }
     ],

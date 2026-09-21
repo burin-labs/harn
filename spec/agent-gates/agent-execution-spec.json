@@ -10,12 +10,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-        "line": 150,
         "reader": "__agent_loop_turn_setup"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 745,
         "reader": "agent_build_turn_system_fragments"
       }
     ],
@@ -33,7 +31,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn",
-        "line": 57,
         "reader": "__agent_loop_call_budget_new"
       }
     ],
@@ -51,12 +48,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 70,
-        "reader": "__context_profile_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 71,
         "reader": "__context_profile_options"
       }
     ],
@@ -74,7 +65,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 1269,
         "reader": "__dispatch_tool_calls"
       }
     ],
@@ -92,12 +82,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
-        "line": 65,
         "reader": "agent_loop_run_settings"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 121,
         "reader": "__agent_loop_run"
       }
     ],
@@ -139,12 +127,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 67,
-        "reader": "__context_profile_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 68,
         "reader": "__context_profile_options"
       }
     ],
@@ -162,7 +144,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 62,
         "reader": "__context_profile_root"
       }
     ],
@@ -180,7 +161,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-        "line": 57,
         "reader": "__agent_loop_apply_deadline"
       }
     ],
@@ -198,12 +178,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 574,
         "reader": "__agent_decorate_turn_message"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 886,
         "reader": "agent_build_turn_messages"
       }
     ],
@@ -221,17 +199,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-        "line": 173,
         "reader": "__agent_loop_turn_setup"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 749,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 750,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -249,12 +220,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 36,
         "reader": "__resolve_intra_turn_failure_fanout_cap"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 1354,
         "reader": "__dispatch_tool_calls_with_middleware"
       }
     ],
@@ -272,12 +241,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 44,
         "reader": "__resolve_intra_turn_resource_fail_fast"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 1340,
         "reader": "__dispatch_tool_calls_with_middleware"
       }
     ],
@@ -307,22 +274,18 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 352,
         "reader": "workflow-loop-key-domain"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
-        "line": 36,
         "reader": "agent_loop_run_settings"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 102,
         "reader": "__agent_loop_run"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 48,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -340,32 +303,22 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
-        "line": 236,
         "reader": "__dispatch_invoke_once"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 737,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 738,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 441,
         "reader": "__missing_tool_call_recovery_classifier"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
-        "line": 88,
         "reader": "agent_prefill_eligibility"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
-        "line": 214,
         "reader": "agent_apply_default_retry"
       }
     ],
@@ -383,7 +336,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
-        "line": 89,
         "reader": "agent_prefill_eligibility"
       }
     ],
@@ -401,27 +353,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
-        "line": 349,
         "reader": "__judge_run_checkpoint"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
-        "line": 148,
         "reader": "__agent_loop_llm_overrides"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
-        "line": 39,
-        "reader": "agent_take_one_shot_prefill"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
-        "line": 49,
-        "reader": "agent_take_one_shot_prefill"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
-        "line": 38,
         "reader": "agent_take_one_shot_prefill"
       }
     ],
@@ -439,27 +378,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
-        "line": 238,
         "reader": "__dispatch_invoke_once"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
-        "line": 125,
         "reader": "__agent_loop_retry_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
-        "line": 107,
-        "reader": "__validate_agent_loop_retry"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
-        "line": 108,
-        "reader": "__validate_agent_loop_retry"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
-        "line": 110,
         "reader": "__validate_agent_loop_retry"
       }
     ],
@@ -477,17 +403,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/control.harn",
-        "line": 354,
         "reader": "agent_loop_control_invoke"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 731,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 732,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -505,32 +424,18 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
-        "line": 472,
-        "reader": "agent_primitive_option_int"
-      },
-      {
-        "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
-        "line": 473,
         "reader": "agent_primitive_option_int"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 7,
         "reader": "__resolve_max_concurrent_tools"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 243,
         "reader": "__tool_envelope"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 758,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 759,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -548,22 +453,14 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
-        "line": 136,
         "reader": "opt_int"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
-        "line": 39,
-        "reader": "agent_loop_run_settings"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
-        "line": 40,
         "reader": "agent_loop_run_settings"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 49,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -581,7 +478,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 505,
         "reader": "__agent_mcp_initialize_advisory_prompt"
       }
     ],
@@ -599,7 +495,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 505,
         "reader": "__agent_mcp_initialize_advisory_prompt"
       }
     ],
@@ -617,12 +512,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 574,
         "reader": "__agent_decorate_turn_message"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 886,
         "reader": "agent_build_turn_messages"
       }
     ],
@@ -640,12 +533,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 571,
         "reader": "__agent_decorate_turn_message"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 887,
         "reader": "agent_build_turn_messages"
       }
     ],
@@ -663,7 +554,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-        "line": 149,
         "reader": "__agent_loop_turn_setup"
       }
     ],
@@ -693,7 +583,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 1347,
         "reader": "__detect_native_fallback"
       }
     ],
@@ -711,7 +600,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 347,
         "reader": "workflow-loop-key-domain"
       }
     ],
@@ -729,7 +617,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 53,
         "reader": "__post_turn_callback_verdict"
       }
     ],
@@ -747,17 +634,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-        "line": 201,
         "reader": "__agent_loop_turn_setup"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 752,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 753,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -775,22 +655,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 1275,
         "reader": "__dispatch_tool_calls"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 244,
         "reader": "__tool_envelope"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 761,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 762,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -808,7 +680,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 239,
         "reader": "agent_loop_options"
       }
     ],
@@ -826,12 +697,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 657,
         "reader": "__agent_context_profile_fragments"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
-        "line": 221,
         "reader": "__context_profile"
       }
     ],
@@ -849,7 +718,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 62,
         "reader": "__context_profile_root"
       }
     ],
@@ -867,12 +735,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
-        "line": 98,
         "reader": "__validate_agent_loop_retry"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
-        "line": 116,
         "reader": "__agent_loop_retry_config"
       }
     ],
@@ -890,12 +756,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 239,
         "reader": "__tool_envelope"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 375,
         "reader": "__run_structural_validator"
       }
     ],
@@ -913,7 +777,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 416,
         "reader": "__agent_text_tool_contract_prompt"
       }
     ],
@@ -931,7 +794,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 750,
         "reader": "agent_build_turn_system_fragments"
       }
     ],
@@ -949,17 +811,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 365,
         "reader": "__agent_loop_run"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 746,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 747,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -977,7 +832,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
-        "line": 813,
         "reader": "agent_primitive_option_int"
       }
     ],
@@ -995,27 +849,18 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 1273,
         "reader": "__dispatch_tool_calls"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 898,
         "reader": "__agent_loop_run"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 535,
         "reader": "__invoke_tool"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 743,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 744,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -1033,12 +878,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 348,
         "reader": "workflow-loop-key-domain"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 415,
         "reader": "__agent_text_tool_contract_prompt"
       }
     ],
@@ -1056,17 +899,14 @@
     "readers": [
       {
         "file": "crates/harn-builtin-meta/src/llm_options.rs",
-        "line": 153,
         "reader": "model-registry-key-domain"
       },
       {
         "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
-        "line": 493,
         "reader": "opt_str"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
-        "line": 530,
         "reader": "agent_tool_format_resolution"
       }
     ],
@@ -1084,7 +924,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
-        "line": 810,
         "reader": "agent_primitive_option_int"
       }
     ],
@@ -1102,17 +941,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 764,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 765,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
-        "line": 359,
         "reader": "__tool_surface_narrowing_post_turn"
       }
     ],
@@ -1130,12 +962,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 349,
         "reader": "workflow-loop-key-domain"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 402,
         "reader": "__agent_text_tool_contract_prompt"
       }
     ],

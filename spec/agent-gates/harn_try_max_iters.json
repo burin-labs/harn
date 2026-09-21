@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/cli/try.harn",
-        "line": 30,
         "reader": "get_or"
       }
     ],

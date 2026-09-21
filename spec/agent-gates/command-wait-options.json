@@ -10,12 +10,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 113,
         "reader": "command_wait_normalize"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 663,
         "reader": "command_ledger_apply_ceiling"
       }
     ],
@@ -33,17 +31,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 206,
         "reader": "__cl_new_row"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 207,
-        "reader": "__cl_new_row"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 120,
         "reader": "command_wait_normalize"
       }
     ],
@@ -61,17 +52,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 422,
         "reader": "__cl_advance_schedule_row"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 122,
         "reader": "command_wait_normalize"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 584,
         "reader": "command_ledger_after_digest"
       }
     ],
@@ -89,17 +77,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 422,
         "reader": "__cl_advance_schedule_row"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 121,
         "reader": "command_wait_normalize"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 583,
         "reader": "command_ledger_after_digest"
       }
     ],
@@ -117,12 +102,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 783,
         "reader": "command_ledger_hold"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 130,
         "reader": "command_wait_normalize"
       }
     ],
@@ -140,17 +123,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 127,
         "reader": "command_wait_normalize"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 774,
-        "reader": "command_ledger_hold"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 805,
         "reader": "command_ledger_hold"
       }
     ],
@@ -168,7 +144,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 119,
         "reader": "command_wait_normalize"
       }
     ],
@@ -186,17 +161,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 125,
         "reader": "command_wait_normalize"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 468,
         "reader": "__cl_earliest_deadline"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 618,
         "reader": "__cl_ceiling_breaches"
       }
     ],
@@ -214,12 +186,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 123,
         "reader": "command_wait_normalize"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 415,
         "reader": "__cl_row_fires"
       }
     ],
@@ -237,22 +207,18 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 409,
         "reader": "__cl_row_fires"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 124,
         "reader": "command_wait_normalize"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 514,
         "reader": "__cl_decision_wording"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 593,
         "reader": "command_ledger_after_digest"
       }
     ],
@@ -270,22 +236,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 133,
         "reader": "command_wait_normalize"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 132,
-        "reader": "command_wait_normalize"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 525,
-        "reader": "__cl_decision_wording"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 519,
         "reader": "__cl_decision_wording"
       }
     ],

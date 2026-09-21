@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 1262,
         "reader": "__dispatch_tool_calls"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 1268,
         "reader": "__dispatch_tool_calls"
       }
     ],
@@ -58,7 +56,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
-        "line": 9,
         "reader": "agent_mcp_bootstrap_if_needed"
       }
     ],
@@ -76,22 +73,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
-        "line": 192,
         "reader": "__agent_loop_next_tool_output_contract"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 755,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 756,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "line": 410,
         "reader": "__missing_tool_call_recovery_config"
       }
     ],
@@ -109,7 +98,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 1270,
         "reader": "__dispatch_tool_calls"
       }
     ],
@@ -127,97 +115,66 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
-        "line": 99,
-        "reader": "__judge_tool_descriptor"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
-        "line": 100,
         "reader": "__judge_tool_descriptor"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 100,
         "reader": "__tool_batch_call_classification"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 918,
         "reader": "__intra_turn_resource_keys"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 939,
         "reader": "__intra_turn_resource_guard"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "line": 1261,
         "reader": "__dispatch_tool_calls"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
-        "line": 201,
         "reader": "__agent_loop_next_tool_output_contract"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 212,
         "reader": "__tool_envelope"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "line": 353,
         "reader": "__run_structural_validator"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
-        "line": 168,
         "reader": "__with_mcp_tool_ceiling"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 356,
         "reader": "agent_monologue_actuation_take_for_turn"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
-        "line": 75,
         "reader": "__stance_policy_patch"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
-        "line": 284,
         "reader": "agent_stance_prepare"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
-        "line": 316,
-        "reader": "agent_stance_apply"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
-        "line": 320,
         "reader": "agent_stance_apply"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_annotations.harn",
-        "line": 209,
         "reader": "agent_collapse_duplicate_read_calls"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
-        "line": 92,
         "reader": "__tool_surface_claim_authority"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
-        "line": 504,
-        "reader": "agent_apply_tool_surface_narrowing"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
-        "line": 518,
         "reader": "agent_apply_tool_surface_narrowing"
       }
     ],
@@ -235,7 +192,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/progress.harn",
-        "line": 401,
         "reader": "agent_progress_apply_options"
       }
     ],
@@ -253,7 +209,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
-        "line": 32,
         "reader": "__stance_config"
       }
     ],
@@ -271,7 +226,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
-        "line": 254,
         "reader": "__agent_lifecycle_has_subagent_capability"
       }
     ],
@@ -289,7 +243,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
-        "line": 251,
         "reader": "__agent_lifecycle_has_subagent_capability"
       }
     ],

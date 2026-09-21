@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
-        "line": 157,
         "reader": "opt_str"
       }
     ],
@@ -28,12 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 740,
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 741,
         "reader": "__validate_agent_loop_callback_options"
       }
     ],
@@ -51,17 +44,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-        "line": 69,
         "reader": "agent_loop"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_purpose_labels.harn",
-        "line": 41,
         "reader": "__purpose_label_arm"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-        "line": 167,
         "reader": "__agent_loop_turn_setup"
       }
     ],

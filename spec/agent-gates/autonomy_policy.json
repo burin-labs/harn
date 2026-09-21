@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 193,
         "reader": "autonomy_policy"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 191,
         "reader": "autonomy_policy"
       }
     ],
@@ -46,7 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 195,
         "reader": "autonomy_policy"
       }
     ],
@@ -64,7 +61,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 191,
         "reader": "autonomy_policy"
       }
     ],
@@ -82,7 +78,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 194,
         "reader": "autonomy_policy"
       }
     ],
@@ -100,7 +95,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 196,
         "reader": "autonomy_policy"
       }
     ],

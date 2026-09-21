@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/cli/try.harn",
-        "line": 41,
         "reader": "__trimmed_env"
       }
     ],
