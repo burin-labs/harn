@@ -15,7 +15,6 @@
  *
  * A twelfth site then cannot compile past this gate.
  */
-import { help_requested, parse, parser } from "std/cli/argparse"
 import { iter_literals_text } from "./check_rust_prompt_prose.harn"
 import { scan_files } from "./path_visibility.harn"
 
@@ -35,16 +34,15 @@ const CANCELLATION_PAYLOAD = "kind:cancelled:VM cancelled by host"
  * the defect this gate exists to prevent.
  */
 const OWNER_PATH = "crates/harn-vm/src/cancellation.rs"
+
 const SCAN_ROOT = "crates"
 
 pipeline main(harness: Harness, task: unknown) {
   if argv.contains("--self-test") {
     return run_self_test(harness.stdio)
   }
-
   // scan-refused: scan_files is the refusal; it throws on an empty result.
   const files = scan_files(harness.fs, CHECK_NAME, SCAN_ROOT, "**/*.rs")
-
   let findings: list<string> = []
   for rel in files {
     if rel.ends_with(OWNER_PATH) {
@@ -56,7 +54,6 @@ pipeline main(harness: Harness, task: unknown) {
       }
     }
   }
-
   if findings.count > 0 {
     harness.stdio.eprintln(
       "${CHECK_NAME}: the host-cancellation payload is written outside its one owner.",
@@ -76,10 +73,7 @@ pipeline main(harness: Harness, task: unknown) {
     }
     return 1
   }
-
-  harness.stdio.println(
-    "${CHECK_NAME}: OK (${files.count} Rust sources, one owner)",
-  )
+  harness.stdio.println("${CHECK_NAME}: OK (${files.count} Rust sources, one owner)")
   return 0
 }
 
@@ -92,7 +86,6 @@ pipeline main(harness: Harness, task: unknown) {
 fn run_self_test(stdio: HarnessStdio) -> int {
   const bad = "fn f() -> E { E::Thrown(\"${CANCELLATION_PAYLOAD}\".into()) }"
   const good = "// the host cancellation payload lives in cancellation.rs\nfn f() {}"
-
   let bad_hits = 0
   for lit in iter_literals_text(bad) {
     if lit.text == CANCELLATION_PAYLOAD {
@@ -105,7 +98,6 @@ fn run_self_test(stdio: HarnessStdio) -> int {
       good_hits = good_hits + 1
     }
   }
-
   if bad_hits != 1 {
     stdio.eprintln("self-test failed: payload in a literal was not found (${bad_hits})")
     return 1
