@@ -495,3 +495,187 @@ fn a_dependencys_import_of_an_uninstalled_package_stays_unresolved() {
         "no project provides this package, so the fallback must report nothing"
     );
 }
+
+/// Positive control: a dependency COPIED into the consumer's packages root,
+/// which is how a git or registry dependency installs. Its module is under the
+/// consumer's project root, so the consumer's own snapshot has always covered
+/// it. This case was green before the fix and must stay green; it is the
+/// reason the report's "any dependency with a dependency" reading was too
+/// broad.
+#[test]
+fn a_copied_dependency_resolves_its_own_package_import() {
+    let tmp = tempfile::tempdir().unwrap();
+    let consumer = tmp.path().join("consumer");
+    fs::create_dir_all(consumer.join("src")).unwrap();
+    fs::write(
+        consumer.join("src/lib.harn"),
+        "import { middle_value } from \"middle/middle\"\npub fn top() { middle_value() }\n",
+    )
+    .unwrap();
+    let packages_root = package_fixture(&consumer);
+
+    fs::create_dir_all(packages_root.join("middle/src")).unwrap();
+    fs::write(
+        packages_root.join("middle/harn.toml"),
+        "[exports]\nmiddle = \"src/middle.harn\"\n",
+    )
+    .unwrap();
+    fs::write(
+        packages_root.join("middle/src/middle.harn"),
+        "import { leaf_value } from \"leaf/default\"\npub fn middle_value() { leaf_value() }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(packages_root.join("leaf/src")).unwrap();
+    fs::write(
+        packages_root.join("leaf/harn.toml"),
+        "[exports]\ndefault = \"src/leaf.harn\"\n",
+    )
+    .unwrap();
+    fs::write(
+        packages_root.join("leaf/src/leaf.harn"),
+        "pub fn leaf_value() { 3 }\n",
+    )
+    .unwrap();
+
+    let entry = consumer.join("src/lib.harn");
+    let graph = build(std::slice::from_ref(&entry));
+    let leaf_import = graph
+        .imports_for_module(&packages_root.join("middle/src/middle.harn"))
+        .into_iter()
+        .find(|import| import.raw_path == "leaf/default")
+        .expect("the copied dependency's own import must appear");
+    assert!(
+        leaf_import.resolved_path.is_some(),
+        "a copied dependency lives under the consumer's project root and always resolved"
+    );
+}
+
+/// Positive control: a path dependency whose source tree lives INSIDE the
+/// consumer's project root. The symlink canonicalizes to a location the
+/// consumer's snapshot still contains, so this resolved before the fix too.
+/// Only a path dependency outside that root reproduces the defect.
+#[test]
+fn an_inside_tree_path_dependency_resolves_its_own_package_import() {
+    let tmp = tempfile::tempdir().unwrap();
+    let consumer = tmp.path().join("consumer");
+    fs::create_dir_all(consumer.join("src")).unwrap();
+    fs::write(
+        consumer.join("src/lib.harn"),
+        "import { middle_value } from \"middle/middle\"\npub fn top() { middle_value() }\n",
+    )
+    .unwrap();
+
+    // The dependency's own source tree, inside the consumer's tree and not a
+    // project of its own.
+    let vendored = consumer.join("vendor/middle");
+    fs::create_dir_all(vendored.join("src")).unwrap();
+    fs::write(
+        vendored.join("harn.toml"),
+        "[exports]\nmiddle = \"src/middle.harn\"\n",
+    )
+    .unwrap();
+    fs::write(
+        vendored.join("src/middle.harn"),
+        "import { leaf_value } from \"leaf/default\"\npub fn middle_value() { leaf_value() }\n",
+    )
+    .unwrap();
+
+    let packages_root = package_fixture(&consumer);
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&vendored, packages_root.join("middle")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&vendored, packages_root.join("middle")).unwrap();
+    fs::create_dir_all(packages_root.join("leaf/src")).unwrap();
+    fs::write(
+        packages_root.join("leaf/harn.toml"),
+        "[exports]\ndefault = \"src/leaf.harn\"\n",
+    )
+    .unwrap();
+    fs::write(
+        packages_root.join("leaf/src/leaf.harn"),
+        "pub fn leaf_value() { 3 }\n",
+    )
+    .unwrap();
+
+    let entry = consumer.join("src/lib.harn");
+    let graph = build(std::slice::from_ref(&entry));
+    let leaf_import = graph
+        .imports_for_module(&vendored.join("src/middle.harn"))
+        .into_iter()
+        .find(|import| import.raw_path == "leaf/default")
+        .expect("the inside-tree dependency's own import must appear");
+    assert!(
+        leaf_import.resolved_path.is_some(),
+        "an inside-tree path dependency stays under the consumer's snapshot"
+    );
+}
+
+/// Depth two. The fallback has to hold at every hop, not only the first: the
+/// innermost module is two symlinks away from the file the caller named, and
+/// each hop is resolved against a different project root.
+#[test]
+fn a_two_level_chain_of_path_dependencies_resolves_at_every_hop() {
+    let tmp = tempfile::tempdir().unwrap();
+    let leaf = installed_project(
+        tmp.path(),
+        "leaf",
+        "[package]\nname = \"leaf\"\n[exports]\ndefault = \"src/leaf.harn\"\n",
+        &[("src/leaf.harn", "pub fn leaf_value() { 3 }\n")],
+        &[],
+    );
+    let inner = installed_project(
+        tmp.path(),
+        "inner",
+        "[package]\nname = \"inner\"\n[exports]\ninner = \"src/inner.harn\"\n",
+        &[(
+            "src/inner.harn",
+            "import { leaf_value } from \"leaf/default\"\npub fn inner_value() { leaf_value() }\n",
+        )],
+        &[("leaf", leaf.as_path())],
+    );
+    let middle = installed_project(
+        tmp.path(),
+        "middle",
+        "[package]\nname = \"middle\"\n[exports]\nmiddle = \"src/middle.harn\"\n",
+        &[(
+            "src/middle.harn",
+            "import { inner_value } from \"inner/inner\"\npub fn middle_value() { inner_value() }\n",
+        )],
+        &[("inner", inner.as_path()), ("leaf", leaf.as_path())],
+    );
+    let consumer = installed_project(
+        tmp.path(),
+        "consumer",
+        "[package]\nname = \"consumer\"\n",
+        &[(
+            "src/lib.harn",
+            "import { middle_value } from \"middle/middle\"\npub fn top() { middle_value() }\n",
+        )],
+        &[
+            ("middle", middle.as_path()),
+            ("inner", inner.as_path()),
+            ("leaf", leaf.as_path()),
+        ],
+    );
+
+    let entry = consumer.join("src/lib.harn");
+    let graph = build(std::slice::from_ref(&entry));
+    for (module, raw_path) in [
+        (middle.join("src/middle.harn"), "inner/inner"),
+        (inner.join("src/inner.harn"), "leaf/default"),
+    ] {
+        let import = graph
+            .imports_for_module(&module)
+            .into_iter()
+            .find(|import| import.raw_path == raw_path)
+            .unwrap_or_else(|| panic!("{raw_path} must appear in the graph"));
+        assert!(
+            import.resolved_path.is_some(),
+            "{raw_path} must resolve at its own hop"
+        );
+    }
+    assert!(graph
+        .imported_names_for_file(&inner.join("src/inner.harn"))
+        .expect("the innermost module must type-check its own import")
+        .contains("leaf_value"));
+}
