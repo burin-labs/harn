@@ -97,10 +97,7 @@ pipeline test(harness: Harness) {
     !paths.contains(path_join(root, "shared/style.md")),
     "that imported file is not a source, which is why sources alone is not enough",
   )
-  assert(
-    dep_paths.contains(path_join(root, "AGENTS.md")),
-    "a selected source is a dependency too",
-  )
+  assert(dep_paths.contains(path_join(root, "AGENTS.md")), "a selected source is a dependency too")
   assert(
     dep_paths.contains(path_join(root, "CLAUDE.md")),
     "a file read and then deduped was still read",
@@ -111,10 +108,7 @@ pipeline test(harness: Harness) {
     !dep_paths.contains(path_join(outside, "AGENTS.md")),
     "a file that is neither selected nor imported is never a dependency",
   )
-  assert(
-    dep_paths.count() == dep_paths.to_set().to_list().count(),
-    "dependencies are deduplicated",
-  )
+  assert(dep_paths.count() == dep_paths.to_set().to_list().count(), "dependencies are deduplicated")
   // A refused import is still a dependency: creating the file later changes
   // the answer, so absence from the list has to mean the resolver never
   // looked, never that the path does not matter.
@@ -125,9 +119,9 @@ pipeline test(harness: Harness) {
     harness.fs,
     {workspace_root: broken, home_dir: home, include_ancestors: false},
   )
-  const refused_entry = refused
-    .dependencies
-    .filter({ entry -> return entry.path == path_join(broken, "missing/absent.md") })
+  const refused_entry = refused.dependencies.filter(
+    { entry -> return entry.path == path_join(broken, "missing/absent.md") },
+  )
     .to_list()
   assert(refused_entry.count() == 1, "an import that could not be read is still named")
   assert(
