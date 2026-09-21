@@ -56,6 +56,18 @@ Agent shell calls cannot run raw `git worktree add`. Use the owning
 joined ledger and recovery receipts before it creates the worktree. The guard
 does not expose an environment-variable bypass for this rule.
 
+The guard answers for the repository the command targets, not for the one it is
+installed in. A `git -C <path>` invocation names that repository, and so does an
+absolute `cd` earlier in the same command, which holds for everything after it.
+A relative `cd` is ignored: the hook payload carries no working directory to
+resolve it against.
+
+A repository that carries no admission command of its own is not exempt. An
+admission command admits whichever repository it is pointed at, so the refusal
+names the one configured for another measured repository together with the
+argument that points it at the target. Where no measured repository carries one
+there is nothing to name, and raw creation is allowed.
+
 This restriction does not affect people, continuous integration, repository
 scripts, `git worktree list`, or retirement through `git worktree remove`.
 
