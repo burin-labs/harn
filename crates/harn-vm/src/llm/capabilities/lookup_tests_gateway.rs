@@ -28,10 +28,7 @@ fn catalog_ids_inherit_upstream_model_capabilities() {
     assert!(anthropic.audio);
     assert!(anthropic.pdf);
 
-    let gemini = lookup(
-        "vercel_ai_gateway",
-        "vercel/google/gemini-3.1-flash-lite",
-    );
+    let gemini = lookup("vercel_ai_gateway", "vercel/google/gemini-3.1-flash-lite");
     assert!(gemini.native_tools);
     assert!(gemini.vision_supported);
     assert!(gemini.pdf);
