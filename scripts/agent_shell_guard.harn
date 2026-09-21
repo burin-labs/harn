@@ -462,16 +462,49 @@ type WorktreeAddAttempt = {reason: string, target: string}
 
 const NO_WORKTREE_ADD: WorktreeAddAttempt = {reason: "", target: ""}
 
+/**
+ * The directory an absolute `cd` moves the rest of the command into.
+ *
+ * A relative one answers "", for the same reason `git_directory_argument` is
+ * only consulted when absolute: the hook payload carries no working directory
+ * to resolve it against, and inventing one would be the error this rule
+ * exists to prevent.
+ */
+fn cd_target(argv: list<string>) -> string {
+  if argv_program(argv) != "cd" {
+    return ""
+  }
+  const target = to_string(argv[1] ?? "")
+  if target.starts_with("/") {
+    return target
+  }
+  return ""
+}
+
 fn raw_worktree_add_attempt_at(command: string, depth: int) -> WorktreeAddAttempt {
+  // A `cd` names the repository as plainly as `-C` does, and unlike `-C` it
+  // holds for every stage after it rather than for one invocation. So it is
+  // carried across groups in command order, and `-C` still wins on the
+  // invocation that names one.
+  let working_directory = ""
   for group in command_groups(command) {
     for stage in group {
       const argv = launched_argv(stage.argv, 0)
+      const moved = cd_target(argv)
+      if moved != "" {
+        working_directory = moved
+      }
       if argv_program(argv) == "git" && is_git_worktree_add(argv) {
+        const named = git_directory_argument(argv)
+        let target = named
+        if target == "" {
+          target = working_directory
+        }
         return {
           reason: "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
             + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
             + "and records the joined ledger and recovery receipts before returning success.",
-          target: git_directory_argument(argv),
+          target: target,
         }
       }
       if depth < 4 {
@@ -764,6 +797,22 @@ pub fn worktree_admission_for(
   return admission_of(chosen)
 }
 
+/**
+ * A measured repository whose admission command can admit another repository.
+ *
+ * Any row with a command will do: an admission command takes the repository it
+ * acts on as an argument, so which one lends it does not change the outcome.
+ * The first is taken to keep the answer stable across runs.
+ */
+fn admission_lender(census: WorktreeAdmissionCensus) -> WorktreeAdmissionRow {
+  for row in census.rows {
+    if row.command != "" {
+      return row
+    }
+  }
+  return {root: "", command: ""}
+}
+
 fn admission_of(row: WorktreeAdmissionRow) -> WorktreeAdmission {
   if row.command == "" {
     return {available: false, command: "", denial: ""}
@@ -811,6 +860,28 @@ pub fn decision(
       return {
         allow: false,
         reason: attempt.reason + " That repository provides it at " + admission.command + ".",
+      }
+    }
+    // The repository owns no admission command. It is not exempt: an
+    // admission command admits whichever repository it is pointed at, so a
+    // measured repository that owns one can admit this one. Only when no
+    // measured repository owns any is there nothing to name, and only then
+    // does the raw command stay allowed.
+    const lender = admission_lender(census)
+    if lender.command != "" && attempt.target != "" {
+      return {
+        allow: false,
+        reason: attempt.reason
+          + " The repository it targets carries none of its own, so run the admission command "
+          + "configured at "
+          + lender.root
+          + "/"
+          + lender.command
+          + " with `"
+          + WORKTREE_ADMISSION_POLICY.borrowed_root_argument
+          + " "
+          + attempt.target
+          + "`; it admits whichever repository it is pointed at.",
       }
     }
   }

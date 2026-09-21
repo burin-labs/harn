@@ -35,20 +35,29 @@ pub const DISPOSABLE_PATH_POLICY: DisposablePathPolicy = {
  *
  * The worktree rule is pure argv analysis and therefore fires in every
  * repository that wires this guard, including one that has no admission
- * command to offer. Refusing there names a command the operator cannot run.
- * The guard looks for one of these paths under the repository root and only
- * refuses when it finds one.
+ * command to offer. The guard looks for one of these paths under the
+ * repository root.
+ *
+ * A repository that owns none is not thereby exempt. An admission command
+ * takes the repository it acts on as an argument, so one measured repository
+ * can admit a repository that owns no command of its own, and the refusal
+ * names that command with `borrowed_root_argument` pointing it at the target.
+ * The argument is configured here rather than written into the rule, because
+ * a guard that hard-codes one consumer's command line is a guard that names
+ * the wrong remedy in the next repository that wires it.
  */
 pub type WorktreeAdmissionPolicy = {
   admission_command_paths: list<string>,
   repository_markers: list<string>,
   max_root_walk: int,
+  borrowed_root_argument: string,
 }
 
 pub const WORKTREE_ADMISSION_POLICY: WorktreeAdmissionPolicy = {
   admission_command_paths: ["scripts/fleet-worktree-admit.ts"],
   repository_markers: [".git"],
   max_root_walk: 12,
+  borrowed_root_argument: "--repository-root",
 }
 
 /**
