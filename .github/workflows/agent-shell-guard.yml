@@ -79,7 +79,13 @@ jobs:
           fi
           "$binary" --version
           echo "HARN_BIN=$binary" >> "$GITHUB_ENV"
-          echo "HARN_RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          # NOT `HARN_RELEASE_TAG`. The runtime refuses any unrecognised
+          # `HARN_`-prefixed variable with HARN-ENV-001 and exits before doing
+          # anything, so a bookkeeping name in that namespace replaces every
+          # test's output with an environment complaint. The lane's first run
+          # failed exactly this way, which is the kind of thing it exists to
+          # catch, and it caught it in its own workflow first.
+          echo "GUARD_RUNTIME_TAG=$tag" >> "$GITHUB_ENV"
 
       # BOTH TESTS, AND THEY ARE NOT INTERCHANGEABLE. Measured against the
       # guard as it stood when the default branch went red: the adapter test
@@ -99,5 +105,5 @@ jobs:
       - name: Say which runtime judged this change
         if: always()
         run: |
-          echo "The guard was exercised against $HARN_RELEASE_TAG, the runtime a" \
+          echo "The guard was exercised against $GUARD_RUNTIME_TAG, the runtime a" \
             "consumer pinned to the previous release runs." >> "$GITHUB_STEP_SUMMARY"
