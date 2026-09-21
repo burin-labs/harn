@@ -28,7 +28,7 @@ open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
 
 # Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."claude-haiku-4-5-20251001"]
 name = "Claude Haiku 4.5"
 provider = "anthropic"

@@ -6,10 +6,15 @@
 # three decision endpoints are not interchangeable chat endpoints and the
 # protocol picks the URL and body shape before transport.
 #
-# Every row here is `extends = true`, and the file sorts first among
-# `20-providers/` so the decision fields are contributed before any blanket
-# provider row can terminate resolution. Nothing here changes a chat
-# capability; a row contributes only the decision fields it sets.
+# Every row here is `extends = true`, and the file lives in its own
+# `10-decisions/` directory so it loads before `20-providers/`. That placement
+# is load-bearing, not tidiness: capability resolution is first-match-wins, and
+# several provider files carry a broad terminating row (`claude-haiku-*` in
+# `20-providers/00-anthropic.toml`, for one). Contributed from a later file,
+# the decision fields were never reached for those routes and
+# `decision_contract_for_route` returned `None` for a row that plainly declared
+# the operation. Nothing here changes a chat capability; a row contributes only
+# the decision fields it sets.
 #
 # `decision_protocol` is a closed enum. An unknown value fails the capability
 # load rather than falling back to the structured-output chat backend, because
@@ -64,8 +69,12 @@ decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels
 # reached: OpenRouter publishes the endpoint and a TypeSafe provider page, but
 # its model list did not carry Jev when the route was checked on 2026-09-20.
 # https://openrouter.ai/typesafe
+# The match pattern carries the `openrouter/` prefix because OpenRouter does
+# not declare `wire_model_capabilities`: its rules are matched against the
+# CATALOG id, which is `openrouter/typesafe/jev-1.13`, not against the wire
+# model `typesafe/jev-1.13`.
 [[provider.openrouter]]
-model_match = "typesafe/jev*"
+model_match = "openrouter/typesafe/jev*"
 extends = true
 decision_protocol = "openrouter_decisions"
 decision_question_kinds = ["boolean", "choice", "score"]
@@ -101,8 +110,12 @@ extends = true
 decision_protocol = "structured_llm"
 decision_question_kinds = ["boolean", "choice", "score"]
 
-[[provider.openrouter]]
-model_match = ["openai/gpt-5.4-nano", "openai/gpt-5.4-mini"]
-extends = true
-decision_protocol = "structured_llm"
-decision_question_kinds = ["boolean", "choice", "score"]
+# Not declared here: the OpenRouter and Vercel gateway chat routes. The gateway
+# resolves capabilities by WIRE model and inherits OpenRouter's rules
+# (`provider_family`: vercel_ai_gateway -> openrouter -> openai), so an
+# OpenRouter rule on `openai/gpt-5.4-nano` is also matched by the Vercel row
+# whose wire model is the same string. That row's `operations` set lives in
+# `catalog_sources/60-models/99-vercel-ai-gateway.toml`, which this change does
+# not own, and a protocol without the operation that admits it is refused by
+# `no_route_names_a_decision_protocol_without_declaring_the_operation`. Adding
+# the two gateway families is a follow-up that edits both files together.

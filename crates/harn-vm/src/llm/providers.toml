@@ -2746,7 +2746,7 @@ open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
 
 # Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."claude-haiku-4-5-20251001"]
 name = "Claude Haiku 4.5"
 provider = "anthropic"
@@ -3318,7 +3318,7 @@ open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 # Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."gpt-5.4-mini"]
 name = "GPT-5.4 Mini"
 provider = "openai"
@@ -3331,7 +3331,7 @@ open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 # Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."gpt-5.4-nano"]
 name = "GPT-5.4 Nano"
 provider = "openai"
@@ -3650,7 +3650,7 @@ serving_tiers = [
 ]
 
 # Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."gemini-3.1-flash-lite"]
 name = "Gemini 3.1 Flash-Lite"
 provider = "gemini"
@@ -6509,12 +6509,9 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
 
-# Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."openai/gpt-5.4-mini"]
 name = "GPT-5.4 Mini (via OpenRouter)"
 provider = "openrouter"
-operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
@@ -6522,12 +6519,9 @@ tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "cheap"]
 
-# Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
 [models."openai/gpt-5.4-nano"]
 name = "GPT-5.4 Nano (via OpenRouter)"
 provider = "openrouter"
-operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
@@ -6822,7 +6816,7 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 # `ModelTypeMismatchError` on `/v1/chat/completions` (observed 2026-09-20).
 #
 # How the operation is dialled per route lives in the capability rules, not
-# here: see `capability_sources/20-providers/04-decision-contracts.toml`. These
+# here: see `capability_sources/10-decisions/00-decision-contracts.toml`. These
 # three endpoints are not interchangeable chat endpoints, so the protocol is a
 # typed capability rather than something inferred from the provider id.
 #

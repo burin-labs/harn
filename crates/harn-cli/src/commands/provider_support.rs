@@ -511,21 +511,24 @@ fn recommended_model_id(
         })
         .or_else(|| {
             // Last resort: a capability row naming a route that tools work on.
-            // A row's `model` is a match pattern, not necessarily a model id,
-            // so only a concrete text route in this provider's own catalog is
-            // accepted. Everything else leaves the recommendation unset, which
-            // the caller renders as `*`.
-            let text_models = models_by_provider.get(provider)?;
+            // Its `model` is a match pattern, not necessarily a model id, and
+            // it is how a provider with no cataloged rows at all (Azure, for
+            // one) still gets a recommendation.
+            //
+            // It must not rescue a provider whose rows exist and are all
+            // non-text: that provider has a researched answer, and the answer
+            // is that it serves no chat route. Leaving the recommendation
+            // unset renders as `*`, which every consumer already reads as
+            // "none".
+            if models_by_provider
+                .get(provider)
+                .is_some_and(|models| !models.is_empty())
+            {
+                return None;
+            }
             capability_rows_by_provider
                 .get(provider)
-                .and_then(|rows| {
-                    rows.iter().find(|row| {
-                        row.tools
-                            && text_models
-                                .iter()
-                                .any(|model| model.id == row.model && serves_text(model))
-                    })
-                })
+                .and_then(|rows| rows.iter().find(|row| row.tools))
                 .map(|row| row.model.clone())
         })
 }
