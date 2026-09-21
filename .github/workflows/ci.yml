@@ -581,7 +581,7 @@ jobs:
         with:
           components: clippy
       - name: Install cargo-machete
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: cargo-machete@0.9.2
       - uses: ./.github/actions/rust-cache
@@ -797,7 +797,7 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
@@ -1001,7 +1001,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: nextest@0.9.132
       - name: Start workspace test archive download timer
@@ -1089,7 +1089,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: nextest@0.9.132
       - name: Download security test archive
@@ -2035,7 +2035,7 @@ jobs:
         shell: bash
         run: ./scripts/ci/windows_storage_budget.sh report after_restore
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: nextest@0.9.132
       # The `burin-mini` playground fixtures shell out to `node` from inside
@@ -2194,7 +2194,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
       - name: Install pinned cross CLI
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: cross@0.2.5
           fallback: none
