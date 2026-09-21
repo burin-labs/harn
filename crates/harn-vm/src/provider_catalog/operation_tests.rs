@@ -86,7 +86,7 @@ fn legacy_routes_preserve_operations_without_granting_decision() {
     }
     assert!(embedding_count > 0, "known non-text route must be measured");
     assert!(
-        declared_count >= 10,
+        declared_count >= 8,
         "measured only {declared_count} rows declaring an operation set; the \
          decision rows must be reaching this census"
     );

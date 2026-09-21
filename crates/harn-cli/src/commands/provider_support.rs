@@ -1318,8 +1318,9 @@ mod tests {
     /// provider whose whole catalog is decision-only must recommend nothing at
     /// all rather than fall back to a capability-rule match pattern.
     ///
-    /// The count is asserted non-zero first: with no decision-only row in the
-    /// catalog this test would otherwise pass without measuring anything.
+    /// The number of text-free providers measured is asserted non-zero, and
+    /// TypeSafe is named explicitly, so a catalog that stopped shipping a
+    /// decision-only provider fails here instead of passing vacuously.
     #[test]
     fn no_provider_recommends_a_route_that_cannot_answer_a_prompt() {
         let report = build_report(Path::new(DEFAULT_NOTES_PATH), &[]).expect("report");
@@ -1337,14 +1338,21 @@ mod tests {
                 entry.recommended.model
             );
         }
+        let catalog = harn_vm::llm_config::model_catalog_entries();
         for entry in &report.providers {
-            let serves_any_text = harn_vm::llm_config::model_catalog_entries()
-                .into_iter()
+            let rows: Vec<_> = catalog
+                .iter()
                 .filter(|(_, model)| model.provider == entry.catalog_provider)
-                .any(|(_, model)| {
+                .collect();
+            // A provider with no cataloged rows at all (Azure OpenAI, for one)
+            // has made no operation claim, and its recommendation legitimately
+            // comes from a capability match pattern. The rule here is about a
+            // provider whose rows exist and all refuse text.
+            if rows.is_empty()
+                || rows.iter().any(|(_, model)| {
                     model.supports_operation(harn_vm::llm_config::ModelOperation::TextGeneration)
-                });
-            if serves_any_text {
+                })
+            {
                 continue;
             }
             decision_only_providers += 1;
