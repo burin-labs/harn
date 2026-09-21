@@ -85,5 +85,71 @@ pipeline test(harness: Harness) {
     tight.omitted.map({ entry -> return entry.reason }).to_list().contains("budget_exhausted"),
     "budget drops are recorded with a reason",
   )
+  // The dependency set: every file the resolution read, not just the ones it
+  // selected. A caller watching for staleness stats this list, so a path the
+  // resolver opened and left out is a cache that goes quietly wrong.
+  const dep_paths = resolved.dependencies.map({ entry -> return entry.path }).to_list()
+  assert(
+    dep_paths.contains(path_join(root, "shared/style.md")),
+    "a file reached through an @path import is named as a dependency",
+  )
+  assert(
+    !paths.contains(path_join(root, "shared/style.md")),
+    "that imported file is not a source, which is why sources alone is not enough",
+  )
+  assert(
+    dep_paths.contains(path_join(root, "AGENTS.md")),
+    "a selected source is a dependency too",
+  )
+  assert(
+    dep_paths.contains(path_join(root, "CLAUDE.md")),
+    "a file read and then deduped was still read",
+  )
+  // Negative control, the load-bearing half: a resolver that reported every
+  // path it could think of would pass all of the above.
+  assert(
+    !dep_paths.contains(path_join(outside, "AGENTS.md")),
+    "a file that is neither selected nor imported is never a dependency",
+  )
+  assert(
+    dep_paths.count() == dep_paths.to_set().to_list().count(),
+    "dependencies are deduplicated",
+  )
+  // A refused import is still a dependency: creating the file later changes
+  // the answer, so absence from the list has to mean the resolver never
+  // looked, never that the path does not matter.
+  const broken = path_join(base, "broken")
+  harness.fs.mkdir(broken)
+  harness.fs.write_text(path_join(broken, "AGENTS.md"), "Root rule.\n@missing/absent.md\n")
+  const refused = resolve_workspace_guidance(
+    harness.fs,
+    {workspace_root: broken, home_dir: home, include_ancestors: false},
+  )
+  const refused_entry = refused
+    .dependencies
+    .filter({ entry -> return entry.path == path_join(broken, "missing/absent.md") })
+    .to_list()
+  assert(refused_entry.count() == 1, "an import that could not be read is still named")
+  assert(
+    refused_entry[0]?.state == "unreadable",
+    "a refused import is distinguishable from one that was read",
+  )
+  // A workspace with no imports names its selected sources and nothing more.
+  const plain = path_join(base, "plain")
+  harness.fs.mkdir(plain)
+  harness.fs.write_text(path_join(plain, "AGENTS.md"), "Plain rule.")
+  const plain_resolved = resolve_workspace_guidance(
+    harness.fs,
+    {workspace_root: plain, home_dir: home, include_ancestors: false},
+  )
+  const plain_deps = plain_resolved.dependencies.map({ entry -> return entry.path }).to_list()
+  assert(
+    plain_deps.contains(path_join(plain, "AGENTS.md")),
+    "the one source of an import-free workspace is its one dependency",
+  )
+  assert(
+    !plain_deps.contains(path_join(root, "shared/style.md")),
+    "an import-free workspace names nothing from another resolution",
+  )
   harness.stdio.log("workspace_guidance_resolution passed")
 }
