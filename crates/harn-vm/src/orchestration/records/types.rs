@@ -436,6 +436,14 @@ pub struct ExecutionEvidenceRecord {
     /// A saved gap is preferable to silently presenting a partial record as
     /// complete evidence.
     pub gaps: Vec<RunEvidenceGapRecord>,
+    /// What reasoning directive each LLM call actually put on the wire.
+    ///
+    /// `None` and `Some([])` are different facts and must stay so: `None` is a
+    /// producer that never reported (an older runtime, or a record built from
+    /// a source that does not observe calls), while `Some([])` is a run that
+    /// made no LLM call. A consumer that treats the absent case as agreement
+    /// would read every old record as proof the wire carried what was asked.
+    pub reasoning_receipts: Option<Vec<crate::llm::ReasoningReceipt>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

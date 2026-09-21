@@ -205,6 +205,18 @@ impl OpenAiResponsesProvider {
         }
 
         crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);
+        // The Responses API does not lower through `DialectContract`, so it
+        // records its own reasoning receipt. Its one reasoning-bearing field
+        // is the `reasoning` object, which carries `effort` and the
+        // catalog-declared mode knob.
+        crate::llm::reasoning_receipt::record(
+            &opts.provider,
+            &opts.model,
+            "openai_responses",
+            &opts.thinking,
+            &["reasoning"],
+            &body,
+        );
         body
     }
 
