@@ -13,6 +13,8 @@
  * no-op that still reads as a saving.
  */
 
+import { scan_glob } from "../path_visibility.harn"
+
 const WORKSPACE_LANES = [
   ".github/workflows/macos-nightly.yml",
   ".github/workflows/windows-nightly.yml",
@@ -60,7 +62,11 @@ pipeline test_every_excluded_crate_has_no_test_to_lose(harness: Harness, task: u
         harness.fs.exists(source_root),
         workflow + " excludes `" + name + "`, which is not a crate in this workspace",
       )
-      for file in harness.fs.glob(path_join(source_root, "src/**/*.rs")) {
+      // Every enumeration goes through the scanner that refuses a zero result.
+      // A bare glob reads empty under a confined test and each loop below then
+      // passes by never running, which is the failure this whole case exists to
+      // prevent, one level up.
+      for file in scan_glob(harness.fs, "nextest-exclusions", "src/**/*.rs", source_root) {
         const body = harness.fs.read_text(file)
         assert(
           !contains(body, "#[test]") && !contains(body, "#[cfg(test)]"),
@@ -78,8 +84,8 @@ pipeline test_every_excluded_crate_has_no_test_to_lose(harness: Harness, task: u
       )
       // A workspace dependent would rebuild it anyway, so the exclusion would
       // buy nothing while still reading as a saving.
-      for manifest in harness.fs.glob(path_join(root, "crates/*/Cargo.toml")) {
-        if manifest == path_join(source_root, "Cargo.toml") {
+      for manifest in scan_glob(harness.fs, "nextest-exclusions", "crates/*/Cargo.toml", root) {
+        if contains(manifest, "/" + name + "/Cargo.toml") {
           continue
         }
         assert(
