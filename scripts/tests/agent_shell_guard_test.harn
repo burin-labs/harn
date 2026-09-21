@@ -576,6 +576,98 @@ pipeline test_absolute_cd_names_the_repository_the_creation_targets(
 }
 
 @test
+pipeline test_a_cd_survives_a_shell_launched_after_it(harness: Harness, task: unknown) {
+  // The directory a `cd` established holds for a shell launched after it, the
+  // same way it holds for the next stage. Scanning the nested payload from a
+  // fresh directory judged the creation against the repository this guard is
+  // installed in, so the refusal named a command the target repository cannot
+  // run, which is the defect the directory tracking exists to remove.
+  const mixed: WorktreeAdmissionCensus = {
+    rows: [
+      {root: "/repo/admitted", command: "scripts/fleet-worktree-admit.ts"},
+      {root: "/repo/unadmitted", command: ""},
+    ],
+    denial: "",
+  }
+  const nested = decision(
+    codex_payload("cd /repo/unadmitted && bash -lc 'git worktree add ../lane origin/main'"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!nested.allow, "a creation inside a nested shell must still be refused")
+  assert(
+    nested.reason.contains(WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/unadmitted"),
+    "the nested scan must inherit the directory the cd established: " + nested.reason,
+  )
+  // Two levels deep, so the inheritance is carried rather than special-cased
+  // for the first nesting.
+  const deeper = decision(
+    codex_payload(
+      "cd /repo/unadmitted && bash -lc \"sh -c 'git worktree add ../lane origin/main'\"",
+    ),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!deeper.allow)
+  assert(
+    deeper.reason.contains(WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/unadmitted"),
+    "the directory must survive more than one nesting: " + deeper.reason,
+  )
+  // A `cd` inside the nested payload still wins, so inheriting a directory
+  // never overrides one the inner shell names for itself.
+  const inner = decision(
+    codex_payload(
+      "cd /repo/admitted && bash -lc 'cd /repo/unadmitted && git worktree add ../lane'",
+    ),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!inner.allow)
+  assert(
+    inner.reason.contains(WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/unadmitted"),
+    "a cd inside the nested payload must win over the inherited one: " + inner.reason,
+  )
+}
+
+@test
+pipeline test_the_cd_option_separator_is_not_the_directory(harness: Harness, task: unknown) {
+  // `cd -- <path>` is the standard spelling for a directory that could be read
+  // as an option. Taking `--` as the argument answers "no absolute target" and
+  // sends the refusal back to this guard's own repository, naming a command the
+  // target cannot run. A test on the plain form cannot reach this.
+  const mixed: WorktreeAdmissionCensus = {
+    rows: [
+      {root: "/repo/admitted", command: "scripts/fleet-worktree-admit.ts"},
+      {root: "/repo/unadmitted", command: ""},
+    ],
+    denial: "",
+  }
+  const separated = decision(
+    codex_payload("cd -- /repo/unadmitted && git worktree add ../lane origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!separated.allow)
+  assert(
+    separated.reason.contains(
+      WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/unadmitted",
+    ),
+    "`cd --` must name the directory after the separator: " + separated.reason,
+  )
+  // The separator does not invent a target either: with nothing after it there
+  // is no directory, and the answer falls back rather than reading `--`.
+  const bare = decision(
+    codex_payload("cd -- && git worktree add ../lane origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(
+    !bare.reason.contains("--repository-root --"),
+    "a bare separator must never be read as a directory: " + bare.reason,
+  )
+}
+
+@test
 pipeline test_relative_cd_is_not_resolved_into_a_repository(harness: Harness, task: unknown) {
   // The hook payload carries no working directory, so a relative cd cannot be
   // resolved. Guessing a root is the error this rule exists to prevent, and it

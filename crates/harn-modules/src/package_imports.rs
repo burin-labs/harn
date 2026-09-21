@@ -186,9 +186,48 @@ pub(crate) fn resolve_import_path_with_snapshots(
         LocalResolution::Resolved(path) => Some(path),
         LocalResolution::Rejected => None,
         LocalResolution::NotPackage => {
-            resolve_package_import(current_file, import_path, package_snapshots)
+            resolve_package_import(current_file, import_path, package_snapshots).or_else(|| {
+                // The supplied snapshots cover the files the caller set out to
+                // process, and `resolve_package_import` only consults a
+                // snapshot whose project root CONTAINS the importing file. A
+                // path dependency is installed as a symlink to its source
+                // rather than a copy, so a module reached through one
+                // canonicalizes to a location outside every supplied snapshot,
+                // and its own package imports resolve to nothing. That was
+                // invisible until something asked a dependency's module for
+                // its imports.
+                //
+                // Fall back to the importing file's own nearest project root,
+                // which is the context that actually owns that module and the
+                // one the single-file path in `resolve_import_path` has always
+                // used. The two resolvers agreeing is the point: the same
+                // import resolved one way when checked directly and another
+                // way when reached through a consumer.
+                //
+                // Only reached once the supplied snapshots have already failed,
+                // so the ancestor walk this costs is paid on unresolved
+                // imports rather than on the hot path.
+                resolve_with_nearest_snapshot(current_file, import_path)
+            })
         }
     }
+}
+
+/// Resolve a package import against the snapshot nearest the importing file,
+/// retaining it only when it answered.
+fn resolve_with_nearest_snapshot(current_file: &Path, import_path: &str) -> Option<PathBuf> {
+    let snapshots = PackageSnapshot::acquire_nearest(current_file)
+        .ok()
+        .flatten()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let resolved = resolve_package_import(current_file, import_path, &snapshots);
+    if resolved.is_some() {
+        for snapshot in snapshots {
+            snapshot.retain_for_process();
+        }
+    }
+    resolved
 }
 
 pub fn resolve_import_path_with_snapshot(

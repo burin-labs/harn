@@ -474,19 +474,53 @@ fn cd_target(argv: list<string>) -> string {
   if argv_program(argv) != "cd" {
     return ""
   }
-  const target = to_string(argv[1] ?? "")
+  // `cd -- <path>` is the standard spelling for a directory that could
+  // otherwise be read as an option, so the separator is stepped over rather
+  // than taken as the argument. Reading `--` as the directory answers "no
+  // absolute target" and sends the refusal back to the guard's own
+  // repository, which is the failure this rule exists to remove.
+  let target = ""
+  for token in argv.slice(1, len(argv)) {
+    if token == "--" {
+      target = ""
+      continue
+    }
+    target = token
+    break
+  }
   if target.starts_with("/") {
     return target
   }
   return ""
 }
 
-fn raw_worktree_add_attempt_at(command: string, depth: int) -> WorktreeAddAttempt {
+/**
+ * NO DEFAULT PARAMETER VALUE HERE, and the empty string at the two outer call
+ * sites is the whole reason.
+ *
+ * A default value compiles to an `__assert_schema` call at the call site, and
+ * this guard runs under an allow list naming only its two policy builtins. A
+ * runtime that does not exempt that builtin from the list refuses it, the guard
+ * faults before it reaches a verdict, and every command it is asked about gets
+ * the same generic "policy faulted" refusal instead of the answer. Worse, the
+ * guard's sources are rendered onto consumers pinned to the previous release,
+ * so the floor a construct has to clear is the OLDEST runtime any consumer
+ * pins, not this branch's.
+ */
+fn raw_worktree_add_attempt_at(
+  command: string,
+  depth: int,
+  inherited_directory: string,
+) -> WorktreeAddAttempt {
   // A `cd` names the repository as plainly as `-C` does, and unlike `-C` it
   // holds for every stage after it rather than for one invocation. So it is
   // carried across groups in command order, and `-C` still wins on the
   // invocation that names one.
-  let working_directory = ""
+  //
+  // It also holds across a shell launched after it. A nested payload scanned
+  // from a fresh directory is judged against the repository this guard is
+  // installed in, so the directory travels into the recursion as well.
+  let working_directory = inherited_directory
   for group in command_groups(command) {
     for stage in group {
       const argv = launched_argv(stage.argv, 0)
@@ -510,7 +544,7 @@ fn raw_worktree_add_attempt_at(command: string, depth: int) -> WorktreeAddAttemp
       if depth < 4 {
         const nested = nested_shell_payload(argv)
         if nested != "" {
-          const attempt = raw_worktree_add_attempt_at(nested, depth + 1)
+          const attempt = raw_worktree_add_attempt_at(nested, depth + 1, working_directory)
           if attempt.reason != "" {
             return attempt
           }
@@ -523,12 +557,12 @@ fn raw_worktree_add_attempt_at(command: string, depth: int) -> WorktreeAddAttemp
 
 /** Reject only Git's worktree-creation subcommand, including shell wrappers. */
 pub fn raw_worktree_add_violation(command: string) -> string {
-  return raw_worktree_add_attempt_at(command, 0).reason
+  return raw_worktree_add_attempt_at(command, 0, "").reason
 }
 
 /** The same walk, keeping the directory the attempt targets. */
 pub fn raw_worktree_add_attempt(command: string) -> WorktreeAddAttempt {
-  return raw_worktree_add_attempt_at(command, 0)
+  return raw_worktree_add_attempt_at(command, 0, "")
 }
 
 /** True only for a path rooted in an OS-temp or known generated-output tree. */
