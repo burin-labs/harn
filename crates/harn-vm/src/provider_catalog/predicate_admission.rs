@@ -4,7 +4,6 @@
 use harn_lexer::Span;
 use harn_parser::{diagnostic_codes::Code, DiagnosticSeverity, PredicateSite, TypeDiagnostic};
 
-use crate::llm::capabilities::DecisionProtocol;
 use crate::llm_config::{self, ModelOperation};
 use crate::provider_catalog::decision_contract::decision_contract_for_route;
 
@@ -70,9 +69,7 @@ fn admission_gap(provider: &str, model: &str) -> Option<AdmissionGap> {
     // else. `structured_llm` dials the ordinary chat endpoint, so that one
     // route shape additionally needs text generation — and a decision-only row
     // must never inherit a generic chat transport to get there.
-    if contract.protocol == DecisionProtocol::StructuredLlm
-        && !entry.supports_operation(ModelOperation::TextGeneration)
-    {
+    if !contract.protocol.is_native() && !entry.supports_operation(ModelOperation::TextGeneration) {
         return Some(AdmissionGap::Operation(ModelOperation::TextGeneration));
     }
     None

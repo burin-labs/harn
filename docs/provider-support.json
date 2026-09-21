@@ -572,29 +572,27 @@
         "AZURE_OPENAI_BEARER_TOKEN"
       ],
       "recommended": {
-        "selector": "azure_openai:gpt-*",
+        "selector": "azure_openai",
         "provider": "azure_openai",
-        "model": "gpt-*",
+        "model": "*",
         "display_name": null,
-        "tool_format": "native",
+        "tool_format": "text",
         "harn_options": [
-          "provider = \"azure_openai\"",
-          "tool_format = \"native\"",
-          "structured_output_mode = \"native_json\""
+          "provider = \"azure_openai\""
         ]
       },
       "capabilities": {
-        "native_tools": true,
+        "native_tools": false,
         "text_tools": true,
-        "preferred_tool_format": "native",
+        "preferred_tool_format": "auto",
         "tool_mode_parity": "unknown",
         "structured_output_transport": "none",
-        "structured_output_mode": "native_json",
+        "structured_output_mode": "none",
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
         "batch_api": true,
-        "batch_discount_percent": 50,
+        "batch_discount_percent": null,
         "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },
@@ -2700,28 +2698,24 @@
       "id": "typesafe",
       "display_name": "TypeSafe",
       "catalog_provider": "typesafe",
-      "endpoint_style": "OpenAI-compatible chat completions",
+      "endpoint_style": "TypeSafe System One decisions",
       "classification": "hosted",
       "auth_env": [
         "TYPESAFE_API_KEY"
       ],
       "recommended": {
-        "selector": "typesafe:typesafe/jev-1.13.0",
+        "selector": "typesafe",
         "provider": "typesafe",
-        "model": "typesafe/jev-1.13.0",
-        "display_name": "Jev 1.13.0 (TypeSafe)",
-        "tool_format": "json",
-        "harn_options": [
-          "provider = \"typesafe\"",
-          "model = \"typesafe/jev-1.13.0\"",
-          "tool_format = \"json\""
-        ]
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": []
       },
       "capabilities": {
         "native_tools": false,
         "text_tools": true,
-        "preferred_tool_format": "json",
-        "tool_mode_parity": "text_only",
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
         "structured_output_transport": "none",
         "structured_output_mode": "none",
         "streaming": true,
@@ -2730,7 +2724,7 @@
         "batch_api": false,
         "batch_discount_percent": null,
         "serving_tiers": [],
-        "usage_accounting_confidence": "high"
+        "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
         "status": "not_recorded",
@@ -2743,8 +2737,14 @@
         "native_text_parity": null,
         "evidence": []
       },
-      "notes": [],
-      "caveats": [],
+      "notes": [
+        "Decision-only. Every TypeSafe route answers typed questions over a shared state and returns probabilities; none serves text generation, so this provider has no recommended chat route.",
+        "Run `harn models recommend --operation decision` to list the decision routes and their credential status."
+      ],
+      "caveats": [
+        "Direct access was waitlisted on 2026-09-20 and Harn holds no TYPESAFE_API_KEY; the reachable route today is `vercel/typesafe-ai/jev` on the Vercel AI Gateway.",
+        "Retention and training posture is unresearched; TypeSafe is listed in the catalog's `data_controls_audit.unverified` queue rather than claimed as zero-retention."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     },
@@ -2759,27 +2759,32 @@
         "VERCEL_AI_GATEWAY_API_KEY"
       ],
       "recommended": {
-        "selector": "vercel_ai_gateway:vercel/typesafe-ai/jev",
+        "selector": "vercel_ai_gateway:vercel/openai/gpt-5.4-nano",
         "provider": "vercel_ai_gateway",
-        "model": "vercel/typesafe-ai/jev",
-        "display_name": "Jev (Vercel AI Gateway)",
-        "tool_format": "json",
+        "model": "vercel/openai/gpt-5.4-nano",
+        "display_name": "GPT-5.4 Nano (Vercel AI Gateway)",
+        "tool_format": "native",
         "harn_options": [
           "provider = \"vercel_ai_gateway\"",
-          "model = \"vercel/typesafe-ai/jev\"",
-          "tool_format = \"json\""
+          "model = \"vercel/openai/gpt-5.4-nano\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
-        "native_tools": false,
+        "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "json",
-        "tool_mode_parity": "text_only",
-        "structured_output_transport": "none",
-        "structured_output_mode": "none",
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
         "streaming": true,
-        "reasoning_knobs": [],
-        "prompt_or_context_cache": false,
+        "reasoning_knobs": [
+          "effort",
+          "reasoning_effort",
+          "reasoning_none"
+        ],
+        "prompt_or_context_cache": true,
         "batch_api": false,
         "batch_discount_percent": null,
         "serving_tiers": [],
