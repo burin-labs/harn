@@ -183,7 +183,7 @@ open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 # Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."gpt-5.4-mini"]
 name = "GPT-5.4 Mini"
 provider = "openai"
@@ -196,7 +196,7 @@ open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 # Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."gpt-5.4-nano"]
 name = "GPT-5.4 Nano"
 provider = "openai"
@@ -520,7 +520,7 @@ serving_tiers = [
 ]
 
 # Also serves the `decision` operation through strict JSON-schema structured
-# output; the protocol binding is in capability_sources/20-providers/04-decision-contracts.toml.
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."gemini-3.1-flash-lite"]
 name = "Gemini 3.1 Flash-Lite"
 provider = "gemini"

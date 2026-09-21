@@ -70,7 +70,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 |---|---|---|---|---:|---:|---|---|---:|---|---|---|---|
 | `Anthropic` | Anthropic Messages API | `haiku` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | Yes (50%) | `fast:premium` | `high` | `not_recorded` |
 | `Atlas` | OpenAI-compatible chat completions | `atlas` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
-| `Azure Openai` | OpenAI-compatible chat completions | `azure_openai` | `text` | no | yes | `none` / `none` | none | no | Yes | none | `provider_default` | `not_recorded` |
+| `Azure Openai` | OpenAI-compatible chat completions | `azure_openai:gpt-*` | `native` | yes | yes | `none` / `native_json` | none | no | Yes (50%) | none | `provider_default` | `not_recorded` |
 | `Baseten` | OpenAI-compatible chat completions | `baseten:baseten/deepseek-ai/DeepSeek-V4-Flash-0731` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
 | `Bedrock` | AWS Bedrock Converse | `bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0` | `native` | yes | yes | `none` / `xml_tagged` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |

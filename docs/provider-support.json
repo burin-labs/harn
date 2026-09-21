@@ -572,27 +572,29 @@
         "AZURE_OPENAI_BEARER_TOKEN"
       ],
       "recommended": {
-        "selector": "azure_openai",
+        "selector": "azure_openai:gpt-*",
         "provider": "azure_openai",
-        "model": "*",
+        "model": "gpt-*",
         "display_name": null,
-        "tool_format": "text",
+        "tool_format": "native",
         "harn_options": [
-          "provider = \"azure_openai\""
+          "provider = \"azure_openai\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
-        "native_tools": false,
+        "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "auto",
+        "preferred_tool_format": "native",
         "tool_mode_parity": "unknown",
         "structured_output_transport": "none",
-        "structured_output_mode": "none",
+        "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
         "batch_api": true,
-        "batch_discount_percent": null,
+        "batch_discount_percent": 50,
         "serving_tiers": [],
         "usage_accounting_confidence": "provider_default"
       },

@@ -20763,8 +20763,7 @@
       "id": "openai/gpt-5.4-mini",
       "name": "GPT-5.4 Mini (via OpenRouter)",
       "operations": [
-        "text_generation",
-        "decision"
+        "text_generation"
       ],
       "display_name": "GPT-5.4 Mini",
       "provider": "openrouter",
@@ -20776,8 +20775,7 @@
           "image"
         ],
         "output": [
-          "text",
-          "decision"
+          "text"
         ]
       },
       "tool_support": {
@@ -20850,8 +20848,7 @@
       "id": "openai/gpt-5.4-nano",
       "name": "GPT-5.4 Nano (via OpenRouter)",
       "operations": [
-        "text_generation",
-        "decision"
+        "text_generation"
       ],
       "display_name": "GPT-5.4 Nano",
       "provider": "openrouter",
@@ -20863,8 +20860,7 @@
           "image"
         ],
         "output": [
-          "text",
-          "decision"
+          "text"
         ]
       },
       "tool_support": {

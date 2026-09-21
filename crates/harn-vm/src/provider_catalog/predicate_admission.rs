@@ -62,14 +62,23 @@ fn admission_gap(provider: &str, model: &str) -> Option<AdmissionGap> {
     if !entry.supports_operation(ModelOperation::Decision) {
         return Some(AdmissionGap::Operation(ModelOperation::Decision));
     }
+    let serves_text = entry.supports_operation(ModelOperation::TextGeneration);
     let Some(contract) = decision_contract_for_route(provider, model) else {
-        return Some(AdmissionGap::Protocol);
+        // No capability rule names a protocol. A row that also serves text
+        // generation is a chat route and there is exactly one way to ask it a
+        // decision: the ordinary chat endpoint under a strict schema. Admitting
+        // that is reading the row, not defaulting.
+        //
+        // A decision-ONLY row with no protocol is the dangerous case, and the
+        // one this refuses: it names no chat endpoint and no decision
+        // endpoint, so there is literally nothing to dial.
+        return (!serves_text).then_some(AdmissionGap::Protocol);
     };
     // A native decision endpoint needs the `decision` operation and nothing
     // else. `structured_llm` dials the ordinary chat endpoint, so that one
-    // route shape additionally needs text generation — and a decision-only row
+    // route shape additionally needs text generation, and a decision-only row
     // must never inherit a generic chat transport to get there.
-    if !contract.protocol.is_native() && !entry.supports_operation(ModelOperation::TextGeneration) {
+    if !contract.protocol.is_native() && !serves_text {
         return Some(AdmissionGap::Operation(ModelOperation::TextGeneration));
     }
     None
