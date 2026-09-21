@@ -500,6 +500,7 @@ fn recommended_model_id(
                         .filter(|model| {
                             matches!(&model.deprecation.status, DeprecationStatus::Active)
                         })
+                        .filter(|model| serves_text(model))
                         .min_by(|a, b| {
                             model_price_rank(a)
                                 .cmp(&model_price_rank(b))
@@ -509,11 +510,38 @@ fn recommended_model_id(
                 .map(|model| model.id.clone())
         })
         .or_else(|| {
+            // Last resort: a capability row naming a route that tools work on.
+            // A row's `model` is a match pattern, not necessarily a model id,
+            // so only a concrete text route in this provider's own catalog is
+            // accepted. Everything else leaves the recommendation unset, which
+            // the caller renders as `*`.
+            let text_models = models_by_provider.get(provider)?;
             capability_rows_by_provider
                 .get(provider)
-                .and_then(|rows| rows.iter().find(|row| row.tools))
+                .and_then(|rows| {
+                    rows.iter().find(|row| {
+                        row.tools
+                            && text_models
+                                .iter()
+                                .any(|model| model.id == row.model && serves_text(model))
+                    })
+                })
                 .map(|row| row.model.clone())
         })
+}
+
+/// Whether a catalog row is one a reader can send a prompt to.
+///
+/// The provider-support doc recommends exactly one route per provider, and
+/// every consumer of that field treats it as a chat route. Ranking by price
+/// alone put a decision-only row at the top of the Vercel gateway the moment
+/// one was cataloged: Jev is the cheapest thing there and cannot hold a
+/// conversation. A provider with no text route at all gets no recommendation
+/// rather than its nearest non-text row.
+fn serves_text(model: &CatalogModel) -> bool {
+    model
+        .operations
+        .contains(&harn_vm::llm_config::ModelOperation::TextGeneration)
 }
 
 fn model_price_rank(model: &CatalogModel) -> u64 {
@@ -1280,6 +1308,63 @@ mod tests {
                 model.superseded_by
             );
         }
+    }
+
+    /// A recommended route is a route a reader sends a prompt to, so no
+    /// provider may recommend a row that does not serve text generation, and a
+    /// provider whose whole catalog is decision-only must recommend nothing at
+    /// all rather than fall back to a capability-rule match pattern.
+    ///
+    /// The count is asserted non-zero first: with no decision-only row in the
+    /// catalog this test would otherwise pass without measuring anything.
+    #[test]
+    fn no_provider_recommends_a_route_that_cannot_answer_a_prompt() {
+        let report = build_report(Path::new(DEFAULT_NOTES_PATH), &[]).expect("report");
+        let mut decision_only_providers = 0_usize;
+        for entry in &report.providers {
+            if entry.recommended.model == "*" || entry.recommended.model.contains('*') {
+                continue;
+            }
+            let model = harn_vm::llm_config::model_catalog_entry(&entry.recommended.model)
+                .unwrap_or_else(|| panic!("{} recommends missing catalog model", entry.id));
+            assert!(
+                model.supports_operation(harn_vm::llm_config::ModelOperation::TextGeneration),
+                "{} recommends {}, which does not serve text generation",
+                entry.id,
+                entry.recommended.model
+            );
+        }
+        for entry in &report.providers {
+            let serves_any_text = harn_vm::llm_config::model_catalog_entries()
+                .into_iter()
+                .filter(|(_, model)| model.provider == entry.catalog_provider)
+                .any(|(_, model)| {
+                    model.supports_operation(harn_vm::llm_config::ModelOperation::TextGeneration)
+                });
+            if serves_any_text {
+                continue;
+            }
+            decision_only_providers += 1;
+            assert_eq!(
+                entry.recommended.model, "*",
+                "{} serves no text route but recommends {}",
+                entry.id, entry.recommended.model
+            );
+        }
+        assert!(
+            decision_only_providers > 0,
+            "no provider in the catalog is text-free, so this test measured nothing"
+        );
+        // The concrete case this rule was written for, named so a future
+        // catalog that drops every text-free provider fails here loudly
+        // instead of leaving the rule measuring only empty providers.
+        let typesafe = report
+            .providers
+            .iter()
+            .find(|entry| entry.catalog_provider == "typesafe")
+            .expect("typesafe support row");
+        assert_eq!(typesafe.recommended.model, "*");
+        assert_eq!(typesafe.recommended.display_name, None);
     }
 
     #[test]

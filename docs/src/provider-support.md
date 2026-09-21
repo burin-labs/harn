@@ -70,7 +70,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 |---|---|---|---|---:|---:|---|---|---:|---|---|---|---|
 | `Anthropic` | Anthropic Messages API | `haiku` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | Yes (50%) | `fast:premium` | `high` | `not_recorded` |
 | `Atlas` | OpenAI-compatible chat completions | `atlas` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
-| `Azure Openai` | OpenAI-compatible chat completions | `azure_openai:gpt-*` | `native` | yes | yes | `none` / `native_json` | none | no | Yes (50%) | none | `provider_default` | `not_recorded` |
+| `Azure Openai` | OpenAI-compatible chat completions | `azure_openai` | `text` | no | yes | `none` / `none` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Baseten` | OpenAI-compatible chat completions | `baseten:baseten/deepseek-ai/DeepSeek-V4-Flash-0731` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
 | `Bedrock` | AWS Bedrock Converse | `bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0` | `native` | yes | yes | `none` / `xml_tagged` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
@@ -107,8 +107,8 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Siliconflow` | OpenAI-compatible chat completions | `siliconflow` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Tgi` | OpenAI-compatible chat completions | `tgi` | `text` | no | yes | `none` / `none` | none | no | No | none | `local_zero_cost` | `not_recorded` |
 | `Together` | OpenAI-compatible chat completions | `together:openai/gpt-oss-20b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
-| `TypeSafe` | OpenAI-compatible chat completions | `typesafe:typesafe/jev-1.13.0` | `json` | no | yes | `none` / `none` | none | no | No | none | `high` | `not_recorded` |
-| `Vercel AI Gateway` | OpenAI-compatible chat completions | `vercel_ai_gateway:vercel/typesafe-ai/jev` | `json` | no | yes | `none` / `none` | none | no | No | none | `high` | `not_recorded` |
+| `TypeSafe` | TypeSafe System One decisions | `typesafe` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
+| `Vercel AI Gateway` | OpenAI-compatible chat completions | `vercel_ai_gateway:vercel/openai/gpt-5.4-nano` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | No | none | `high` | `not_recorded` |
 | `Vertex` | Gemini generateContent | `vertex:vertex/gemini-2.5-flash` | `native` | yes | yes | `none` / `native_json` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | No | none | `local_zero_cost` | `not_recorded` |
 | `Volcengine Ark` | OpenAI-compatible chat completions | `volcengine_ark` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
@@ -425,3 +425,19 @@ structured_output_mode = "native_json"
 Caveats:
 
 - 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.
+
+### TypeSafe
+
+- catalog provider: `typesafe`
+- recommended route: `typesafe` (`*`)
+- endpoint style: TypeSafe System One decisions
+
+Notes:
+
+- Decision-only. Every TypeSafe route answers typed questions over a shared state and returns probabilities; none serves text generation, so this provider has no recommended chat route.
+- Run `harn models recommend --operation decision` to list the decision routes and their credential status.
+
+Caveats:
+
+- Direct access was waitlisted on 2026-09-20 and Harn holds no TYPESAFE_API_KEY; the reachable route today is `vercel/typesafe-ai/jev` on the Vercel AI Gateway.
+- Retention and training posture is unresearched; TypeSafe is listed in the catalog's `data_controls_audit.unverified` queue rather than claimed as zero-retention.
