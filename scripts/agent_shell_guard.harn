@@ -474,19 +474,40 @@ fn cd_target(argv: list<string>) -> string {
   if argv_program(argv) != "cd" {
     return ""
   }
-  const target = to_string(argv[1] ?? "")
+  // `cd -- <path>` is the standard spelling for a directory that could
+  // otherwise be read as an option, so the separator is stepped over rather
+  // than taken as the argument. Reading `--` as the directory answers "no
+  // absolute target" and sends the refusal back to the guard's own
+  // repository, which is the failure this rule exists to remove.
+  let target = ""
+  for token in argv.slice(1, len(argv)) {
+    if token == "--" {
+      target = ""
+      continue
+    }
+    target = token
+    break
+  }
   if target.starts_with("/") {
     return target
   }
   return ""
 }
 
-fn raw_worktree_add_attempt_at(command: string, depth: int) -> WorktreeAddAttempt {
+fn raw_worktree_add_attempt_at(
+  command: string,
+  depth: int,
+  inherited_directory: string = "",
+) -> WorktreeAddAttempt {
   // A `cd` names the repository as plainly as `-C` does, and unlike `-C` it
   // holds for every stage after it rather than for one invocation. So it is
   // carried across groups in command order, and `-C` still wins on the
   // invocation that names one.
-  let working_directory = ""
+  //
+  // It also holds across a shell launched after it. A nested payload scanned
+  // from a fresh directory is judged against the repository this guard is
+  // installed in, so the directory travels into the recursion as well.
+  let working_directory = inherited_directory
   for group in command_groups(command) {
     for stage in group {
       const argv = launched_argv(stage.argv, 0)
@@ -510,7 +531,7 @@ fn raw_worktree_add_attempt_at(command: string, depth: int) -> WorktreeAddAttemp
       if depth < 4 {
         const nested = nested_shell_payload(argv)
         if nested != "" {
-          const attempt = raw_worktree_add_attempt_at(nested, depth + 1)
+          const attempt = raw_worktree_add_attempt_at(nested, depth + 1, working_directory)
           if attempt.reason != "" {
             return attempt
           }
