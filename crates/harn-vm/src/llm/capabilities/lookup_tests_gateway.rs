@@ -30,7 +30,7 @@ fn catalog_ids_inherit_upstream_model_capabilities() {
 
     let gemini = lookup(
         "vercel_ai_gateway",
-        "vercel/google/gemini-3.1-flash-lite-preview",
+        "vercel/google/gemini-3.1-flash-lite",
     );
     assert!(gemini.native_tools);
     assert!(gemini.vision_supported);

@@ -56,16 +56,28 @@ thinking_block_style = "reasoning_summary"
 # grounds, but the meter must budget for the throughput ceiling.
 serving_precision = "throttled"
 
-# Gemma 4 31B is Cerebras's current multimodal serverless model. The public
-# record reports native tools, JSON schema output, vision, and reasoning;
-# streaming tool and schema controls verified the native OpenAI-compatible
-# paths on 2026-08-25. The chat API documents no reasoning-effort parameter
-# for this model, so Harn exposes enabled thinking without inventing a knob.
+# Qwen 3.8 27B replaced Gemma 4 31B as Cerebras's multimodal serverless model
+# (Cerebras retired the Gemma route; see 60-models/30-cerebras.toml). The
+# public record at https://api.cerebras.ai/public/v1/models, read 2026-09-20,
+# reports native tools with parallel tool calls, JSON-schema structured
+# outputs, vision, and reasoning. The chat API documents no reasoning-effort
+# parameter for this model, so Harn exposes enabled thinking without inventing
+# a knob. The `qwen-*` rule further down would otherwise catch this row and
+# understate it as a non-reasoning, text-only route.
+#
+# Unverified here: the streaming tool and schema paths were confirmed live for
+# the retired Gemma row on 2026-08-25, not for this one.
 [[provider.cerebras]]
-model_match = "gemma-4-31b"
+model_match = "qwen-3.8-27b"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+# The tools-plus-response_format rejection is a Cerebras request-shape fact,
+# stated for the provider at the top of this file, but only the gpt-oss rule
+# carried it; the retired Gemma rule this one replaces did not. Declared here
+# so both live Cerebras routes agree. Source is that provider-level statement,
+# not a per-model probe of this route.
+tools_exclude_response_format = true
 thinking_modes = ["enabled"]
 vision_supported = true
 prefers_xml_scaffolding = false
@@ -76,32 +88,10 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Cerebras GLM 4.7 is a public preview model with native tools, native
-# structured output, and top-level `reasoning_effort`; `none` is the documented
-# no-thinking value, while the older `disable_reasoning` knob is deprecated.
-#
-# This row has always pinned native, and the 2026-08-15 cross-host sweep
-# confirmed it: `zai-glm-4.7` returned a single clean `message.tool_calls` under
-# tool_choice=auto and required, sync and streaming. It only ever escaped the
-# (now retired) `glm-5` family gate because `zai-glm-*` does not contain the
-# literal `glm-5` — an accident that happened to land on the correct answer.
-[[provider.cerebras]]
-model_match = "zai-glm-*"
-native_tools = true
-preferred_tool_format = "native"
-structured_output = "native"
-tools_exclude_response_format = true
-thinking_modes = ["effort"]
-reasoning_effort_supported = true
-reasoning_none_supported = true
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-
+# Removed 2026-09-20 with the catalog rows they served: the `zai-glm-*` rule
+# (Cerebras retired its GLM 4.7 preview) and the `llama-*` rule below stays
+# only as the fallback for a provisioned dedicated Llama endpoint. Cerebras
+# public discovery lists exactly gpt-oss-120b and qwen-3.8-27b.
 [[provider.cerebras]]
 model_match = "llama-*"
 native_tools = true

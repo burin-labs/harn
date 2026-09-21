@@ -76,14 +76,14 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Cloudflare Ai Gateway` | OpenAI-compatible chat completions | `cloudflare_ai_gateway` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Cohere` | OpenAI-compatible chat completions | `cohere:command-a-plus-05-2026` | `native` | yes | yes | `native` / `native_json` | `adaptive` | no | No | none | `high` | `not_recorded` |
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:dashscope/qwen3-coder-next` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | yes | No | none | `high` | `not_recorded` |
-| `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507` | `native` | yes | yes | `native` / `native_json` | none | no | No | none | `high` | `not_recorded` |
+| `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/openai/gpt-oss-120b` | `text` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
 | `DeepSeek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Friendli` | OpenAI-compatible chat completions | `friendli` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Gemini API` | Gemini generateContent | `gemini:gemini-3.5-flash-lite` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled,reasoning_effort` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
 | `Github Models` | OpenAI-compatible chat completions | `github_models` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
-| `Groq` | OpenAI-compatible chat completions | `groq:qwen/qwen3.6-27b` | `native` | yes | yes | `native` / `native_json` | `toggle` | yes | Yes (50%) | none | `high` | `not_recorded` |
+| `Groq` | OpenAI-compatible chat completions | `groq:qwen/qwen3.8-27b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | Yes (50%) | none | `high` | `not_recorded` |
 | `Hugging Face Inference Providers` | OpenAI-compatible chat completions through the HF router | `huggingface-qwen3-coder` | `native` | yes | yes | `native` / `delimited` | none | no | No | none | `medium` | `not_recorded` |
 | `Hunyuan` | OpenAI-compatible chat completions | `hunyuan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Hyperbolic` | OpenAI-compatible chat completions | `hyperbolic` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
@@ -96,7 +96,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `MLX OpenAI-compatible server` | OpenAI-compatible MLX server | `mlx-qwen3.6` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
 | `Moonshot` | OpenAI-compatible chat completions | `moonshot:moonshot/kimi-k2.6` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Nebius` | OpenAI-compatible chat completions | `nebius` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
-| `Nvidia` | OpenAI-compatible chat completions | `nvidia:nvidia/minimax-m3` | `native` | yes | yes | `delimited` / `delimited` | `adaptive` | yes | No | none | `high` | `not_recorded` |
+| `Nvidia` | OpenAI-compatible chat completions | `nvidia:nvidia/kimi-k2.6` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Ollama` | Ollama native chat API | `devstral-small-2` | `text` | no | yes | `format_kw` / `delimited` | none | no | No | none | `high` | `not_recorded` |
 | `OpenAI` | OpenAI chat completions / Responses-compatible routes | `openai:gpt-5.4-mini` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | Yes (50%) | `fast:premium`, `flex:discounted` | `high` | `not_recorded` |
 | `OpenRouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
@@ -168,6 +168,24 @@ Caveats:
 MCP notes:
 
 - MCP tools are normalized through Harn tool definitions before they become OpenAI-compatible Cerebras tool schemas.
+
+### Deepinfra
+
+- catalog provider: `deepinfra`
+- recommended route: `deepinfra:deepinfra/openai/gpt-oss-120b` (`deepinfra/openai/gpt-oss-120b`)
+- endpoint style: OpenAI-compatible chat completions
+- recommended Harn options:
+
+```toml
+provider = "deepinfra"
+model = "deepinfra/openai/gpt-oss-120b"
+tool_format = "text"
+structured_output_mode = "native_json"
+```
+
+Caveats:
+
+- 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): DeepInfra native billed completion_tokens=86 with no dispatchable tool call or answer (Harmony reasoning-channel-only / upstream contract violation), repeated ~10x -> run unusable. Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.
 
 ### Gemini API
 

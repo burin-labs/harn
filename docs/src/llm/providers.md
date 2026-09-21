@@ -1098,7 +1098,7 @@ harness.llm.call("Summarize the change.", nil, {
     providerOptions: {
       gateway: {
         sort: "cost",
-        models: ["google/gemini-3.1-flash-lite-preview"],
+        models: ["google/gemini-3.1-flash-lite"],
       },
     },
   },

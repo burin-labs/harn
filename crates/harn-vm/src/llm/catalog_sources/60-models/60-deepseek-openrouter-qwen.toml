@@ -3,6 +3,10 @@
 # cap. DeepSeek's 2026-04-24 V4 notice says to keep the base_url and use
 # `deepseek-v4-flash` or `deepseek-v4-pro`; `deepseek-chat` and
 # `deepseek-reasoner` become inaccessible after 2026-07-24 15:59 UTC.
+#
+# Every OpenRouter, Together and DeepInfra row in this file was re-read
+# against the provider's live models endpoint on 2026-09-20; rates and
+# context windows below are that read.
 [models."deepseek-v4-flash"]
 name = "DeepSeek V4 Flash"
 provider = "deepseek"
@@ -27,7 +31,7 @@ benchmarks = { aa_intelligence_index = 68.0 }
 # rate card and a binary 1M-token context window for these routes.
 #
 # Prices below are the live OpenRouter rate card read from
-# `GET /api/v1/models` on 2026-08-15. The undated `deepseek/deepseek-v4-*`
+# `GET /api/v1/models` on 2026-09-20. The undated `deepseek/deepseek-v4-*`
 # aliases previously carried DeepSeek's DIRECT rate card, which understated
 # OpenRouter V4 Pro by ~2.7x ($0.435 recorded vs $1.168 charged per MTok in).
 # The dated snapshot rows further below are the ones that actually match the
@@ -37,7 +41,7 @@ name = "DeepSeek V4 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.06426, output_per_mtok = 0.12852, cache_read_per_mtok = 0.012852 }
+pricing = { input_per_mtok = 0.089866, output_per_mtok = 0.179732, cache_read_per_mtok = 0.0179732 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
@@ -46,7 +50,7 @@ name = "DeepSeek V4 Pro (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 1.168, output_per_mtok = 2.336, cache_read_per_mtok = 0.09855 }
+pricing = { input_per_mtok = 0.9483, output_per_mtok = 1.8966, cache_read_per_mtok = 0.079025 }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
@@ -63,16 +67,23 @@ name = "DeepSeek V4 Pro 0813 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.003625 }
+# OpenRouter bills this route on a UTC clock: $0.66 / $1.98 / $0.022 per MTok
+# off peak, and exactly double during the weekday peak windows 01:00-04:00 and
+# 06:00-10:00 UTC (the `overrides` array on the model record, read 2026-09-20).
+# The rate card has no hour-of-day band — `input_token_bands` keys off prompt
+# size and `promotions` off calendar dates — so the row records the peak rate.
+# Over-recording by 2x off peak is the safe direction; the alternative
+# understates the peak, which is the error this file's header warns about.
+pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.044 }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
 [models."deepseek/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
+context_window = 1310720
 capabilities = ["tools", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.028 }
+pricing = { input_per_mtok = 0.04, output_per_mtok = 0.16, cache_read_per_mtok = 0.016 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
@@ -82,8 +93,12 @@ strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 name = "Qwen3.5 9B"
 provider = "openrouter"
 wire_model = "qwen/qwen3.5-9b"
-context_window = 131072
+context_window = 262144
 capabilities = ["tools", "streaming"]
+# The row carried no rate card at all. OpenRouter publishes $0.10 in /
+# $0.15 out per MTok and no cache rate for it
+# (https://openrouter.ai/api/v1/models, read 2026-09-20).
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.15 }
 # Inline metadata keeps this row independent of fragment-order defaults.
 tier = "small"
 open_weight = true
@@ -111,7 +126,9 @@ name = "Qwen3.6 Plus (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.325, output_per_mtok = 1.95 }
+# Cache write added 2026-09-20: OpenRouter publishes $0.40625 per MTok and no
+# cache-read rate for this route.
+pricing = { input_per_mtok = 0.325, output_per_mtok = 1.95, cache_write_per_mtok = 0.40625 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -124,7 +141,7 @@ context_window = 262144
 logical_model = "qwen3.6-35b-a3b"
 equivalence_group = "qwen3.6-35b-a3b"
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.14, output_per_mtok = 1.00 }
+pricing = { input_per_mtok = 0.15, output_per_mtok = 1.00, cache_read_per_mtok = 0.05 }
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "coding", "tool_use", "reasoning"]

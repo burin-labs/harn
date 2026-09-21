@@ -169,15 +169,17 @@ fn scorecard_does_not_complete_mode_both_plan_with_non_streaming_only_reports() 
 
 #[test]
 fn scorecard_matches_catalog_claims_by_wire_model() {
+    // NIM stopped serving GPT-OSS 120B and its row is gone; the 20B sibling is
+    // the NIM route whose catalog claim this fixture reads.
     let scorecard = scorecard_from_tool_reports(complete_success_reports(
         "nvidia",
-        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
         ToolProbeClassification::StructuredNativeToolCall,
     ));
 
     let route = &scorecard.routes[0];
     assert_eq!(route.provider, "nvidia");
-    assert_eq!(route.model, "openai/gpt-oss-120b");
+    assert_eq!(route.model, "openai/gpt-oss-20b");
     assert!(route.catalog_claim.is_some());
     assert!(route
         .catalog_mismatches

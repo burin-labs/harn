@@ -1,7 +1,7 @@
 //! Open-weight routed families (Qwen, GLM, DeepSeek, Kimi, MiniMax) and
 //! the tool-channel verdicts their rows carry across rehosting providers.
 
-use super::lookup_tests_support::{assert_cerebras_effort_reasoning, reset};
+use super::lookup_tests_support::reset;
 use super::*;
 
 #[test]
@@ -236,14 +236,18 @@ fn openrouter_qwen_coder_defaults_to_text_tools() {
 }
 
 #[test]
-fn cerebras_glm_47_supports_reasoning_none() {
-    // Cerebras documents GLM 4.7's no-reasoning value as
-    // reasoning_effort="none"; the older disable_reasoning knob is
-    // deprecated. Keep the route on the same policy path as GPT-OSS.
+fn cerebras_qwen_38_is_multimodal_without_an_effort_knob() {
+    // Cerebras retired its GLM 4.7 preview and its Gemma 4 route; Qwen 3.8 is
+    // the multimodal serverless slot. Its public model record reports vision,
+    // native tools and reasoning but documents no reasoning-effort parameter,
+    // so the row must not claim one. Without an explicit rule the `qwen-*`
+    // family default would strip vision and thinking from this route.
     reset();
-    let caps = lookup("cerebras", "zai-glm-4.7");
-    assert_cerebras_effort_reasoning("zai-glm-4.7", "inline");
-    assert!(caps.reasoning_none_supported);
+    let caps = lookup("cerebras", "qwen-3.8-27b");
+    assert!(caps.native_tools);
+    assert!(caps.vision_supported);
+    assert_eq!(caps.thinking_modes, vec!["enabled"]);
+    assert!(!caps.reasoning_effort_supported);
 }
 
 #[test]
