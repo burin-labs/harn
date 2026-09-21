@@ -166,6 +166,17 @@ pub const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 
 pub const HOSTED_LINUX_RUNNER = "ubuntu-latest"
 
+/**
+ * The producer's hosted rung, which is deliberately not the shared one.
+ *
+ * The persistent compile lane is the only job whose work is bounded by the
+ * box rather than by waiting, so it is the only one worth paying a larger
+ * vendor runner for. Every other hosted Linux job stays on the shared
+ * default, which is what keeps a change here from quietly moving the whole
+ * workflow onto paid capacity.
+ */
+pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-8core"
+
 pub const HOSTED_RUNNER_TIER = "github-hosted"
 
 pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
@@ -1649,7 +1660,7 @@ pub fn producer_runner_expression(runner: string) -> string {
   return producer_rung_expression(
     "'${runner}'",
     "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')",
-    "'${HOSTED_LINUX_RUNNER}'",
+    "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
   )
 }
 

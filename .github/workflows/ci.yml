@@ -693,7 +693,7 @@ jobs:
         && needs.runner-availability.outputs.capacity != ''
         && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
-        || 'ubuntu-latest' }}
+        || 'ubuntu-8core' }}
     timeout-minutes: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
@@ -825,10 +825,18 @@ jobs:
         timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 16 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
-        run: >-
-          ./scripts/ci/rust_artifact.sh build-security
-          "$RUNNER_TEMP/harn-security.tar.zst"
-          "$GITHUB_SHA"
+        run: |
+          # Log-only: report the largest resident process this build reached,
+          # so a later kill can be read against a measured peak instead of a
+          # guess. Printed by GNU time after the command returns, so a runner
+          # shutdown mid-step still leaves nothing.
+          timer=()
+          if [ -x /usr/bin/time ]; then
+            timer=(/usr/bin/time -v)
+          fi
+          "${timer[@]}" ./scripts/ci/rust_artifact.sh build-security \
+            "$RUNNER_TEMP/harn-security.tar.zst" \
+            "$GITHUB_SHA"
       # This step has been killed by a signal at around 330 seconds on hosted
       # runners, well inside its own budget, leaving only ordinary Compiling
       # lines and exit 143. Nothing on this path installs a signal handler, so
