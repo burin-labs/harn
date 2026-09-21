@@ -188,7 +188,7 @@ pub(super) fn host_agent_session_record_assistant_builtin(
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_pop_last_assistant(session_id: string) -> dict",
+    sig = "__host_agent_session_pop_last_assistant(session_id: string, replacement?: string, reason?: string) -> dict",
     category = "agent.host",
     runtime_only = true
 )]
@@ -197,9 +197,43 @@ fn host_agent_session_pop_last_assistant_builtin(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    let replacement = args
+        .get(1)
+        .map(VmValue::display)
+        .filter(|text| !text.is_empty());
     let popped =
         crate::agent_sessions::pop_last_if_assistant(&session_id).map_err(VmError::Runtime)?;
+    if popped {
+        if let Some(replacement) = replacement {
+            crate::agent_sessions::inject_message(
+                &session_id,
+                bookkeeping_assistant_turn(&replacement),
+            )
+            .map_err(VmError::Runtime)?;
+            let reason = args.get(2).map(VmValue::display).unwrap_or_default();
+            crate::agent_sessions::set_last_withdrawal_reason(&session_id, &reason);
+        }
+    }
     Ok(VmValue::Bool(popped))
+}
+
+/// An assistant turn the loop writes for its own bookkeeping.
+///
+/// Built here rather than by the caller so the flag the answer projection
+/// reads has exactly one writer. A caller that assembled the dict itself would
+/// be a second place the key name has to stay right, and the failure mode of
+/// getting it wrong is silent: the turn reads back as something the model
+/// said.
+fn bookkeeping_assistant_turn(text: &str) -> VmValue {
+    use crate::value::VmDictExt;
+    let mut message = crate::value::DictMap::new();
+    message.put_str("role", "assistant");
+    message.put_str("content", text);
+    message.put_bool(
+        crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY,
+        true,
+    );
+    VmValue::dict(message)
 }
 
 /// True when the trailing message in the session transcript is an assistant
