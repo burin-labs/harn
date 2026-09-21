@@ -453,6 +453,46 @@ mod toolchain_home_tests {
     use std::ffi::OsString;
     use std::path::PathBuf;
 
+    /// An absolute path for the platform the test is running on.
+    ///
+    /// `/opt/cargo` is absolute on Unix and is NOT on Windows, where a leading
+    /// separator without a drive letter is rooted but relative to the current
+    /// drive. The function under test asks `is_absolute`, correctly, so a
+    /// fixture written with Unix spellings makes every case here read as "no
+    /// absolute input" on Windows and the derivation branch answers `None`.
+    /// The production behaviour is right on both; only the fixture was Unix.
+    fn absolute(parts: &[&str]) -> PathBuf {
+        let mut path = if cfg!(windows) {
+            PathBuf::from("C:\\")
+        } else {
+            PathBuf::from("/")
+        };
+        for part in parts {
+            path.push(part);
+        }
+        assert!(path.is_absolute(), "the fixture root must be absolute here");
+        path
+    }
+
+    /// What `absolute` renders to, so an expectation never hard-codes `/`.
+    fn absolute_string(parts: &[&str]) -> String {
+        absolute(parts).display().to_string()
+    }
+
+    /// The premise every fixture here rests on, asserted rather than assumed.
+    ///
+    /// This is the case that would have caught the defect these fixtures had.
+    /// A Unix-spelled path is rooted but NOT absolute on Windows, so fixtures
+    /// written that way silently stopped exercising the inherited branch there
+    /// and the derivation answered nothing at all. Both halves are asserted on
+    /// both platforms, so neither can quietly become vacuous again.
+    #[test]
+    fn the_fixture_root_is_absolute_and_a_unix_spelling_is_not_portable() {
+        assert!(absolute(&["opt", "cargo"]).is_absolute());
+        assert!(absolute_string(&["users", "real", ".cargo"]).ends_with(".cargo"));
+        assert_eq!(PathBuf::from("/opt/cargo").is_absolute(), !cfg!(windows));
+    }
+
     /// An explicitly set toolchain home is kept, not recomputed.
     ///
     /// This is the whole defect. A confined child was handed
@@ -463,12 +503,12 @@ mod toolchain_home_tests {
     #[test]
     fn an_explicit_toolchain_home_is_inherited_not_derived() {
         let resolved = toolchain_home_from(
-            Some(&OsString::from("/opt/cargo")),
-            Some(PathBuf::from("/relocated/home")),
+            Some(&OsString::from(absolute(&["opt", "cargo"]))),
+            Some(absolute(&["relocated", "home"])),
             ".cargo",
         )
         .expect("a set value always resolves");
-        assert_eq!(resolved.path, "/opt/cargo");
+        assert_eq!(resolved.path, absolute_string(&["opt", "cargo"]));
         assert_eq!(resolved.source, ToolchainHomeSource::Inherited);
     }
 
@@ -476,9 +516,12 @@ mod toolchain_home_tests {
     /// not turn into "the child gets nothing".
     #[test]
     fn an_unset_toolchain_home_is_derived_from_the_home_directory() {
-        let resolved = toolchain_home_from(None, Some(PathBuf::from("/users/real")), ".rustup")
+        let resolved = toolchain_home_from(None, Some(absolute(&["users", "real"])), ".rustup")
             .expect("an absolute home always resolves");
-        assert_eq!(resolved.path, "/users/real/.rustup");
+        assert_eq!(
+            resolved.path,
+            absolute_string(&["users", "real", ".rustup"])
+        );
         assert_eq!(resolved.source, ToolchainHomeSource::DerivedFromHome);
     }
 
@@ -488,10 +531,10 @@ mod toolchain_home_tests {
     /// wrong reason, which is why the source is asserted beside it.
     #[test]
     fn a_set_value_is_never_overwritten_by_the_derived_one() {
-        let derived_would_be = "/relocated/home/.rustup";
+        let derived_would_be = absolute_string(&["relocated", "home", ".rustup"]);
         let resolved = toolchain_home_from(
-            Some(&OsString::from("/opt/rustup")),
-            Some(PathBuf::from("/relocated/home")),
+            Some(&OsString::from(absolute(&["opt", "rustup"]))),
+            Some(absolute(&["relocated", "home"])),
             ".rustup",
         )
         .expect("a set value always resolves");
@@ -512,11 +555,11 @@ mod toolchain_home_tests {
         for setting in ["", "relative/cargo"] {
             let resolved = toolchain_home_from(
                 Some(&OsString::from(setting)),
-                Some(PathBuf::from("/users/real")),
+                Some(absolute(&["users", "real"])),
                 ".cargo",
             )
             .expect("the home directory still resolves");
-            assert_eq!(resolved.path, "/users/real/.cargo");
+            assert_eq!(resolved.path, absolute_string(&["users", "real", ".cargo"]));
             assert_eq!(resolved.source, ToolchainHomeSource::DerivedFromHome);
         }
     }
