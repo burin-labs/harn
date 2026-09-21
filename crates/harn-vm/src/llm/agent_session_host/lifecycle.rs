@@ -448,7 +448,13 @@ pub(super) async fn host_agent_session_finalize(
     // durable marker, the hooks and the checkpoint are derived, so every record
     // agrees. Deciding it later, beside the visible text, would leave the
     // published stop reason and the returned one disagreeing about one run.
-    let withdrawal_reason = crate::agent_sessions::transcript(&session_id)
+    // A run that sealed `done` accepted its own completion, so whatever reason
+    // it carries explains a finished run and must survive. Only a run that did
+    // NOT finish can be one the withdrawal explains.
+    let finished = final_status.is_empty() || final_status == "done";
+    let withdrawal_reason = (!finished)
+        .then(|| crate::agent_sessions::transcript(&session_id))
+        .flatten()
         .as_ref()
         .is_some_and(crate::llm::agent_result_projection::answer_was_withdrawn)
         .then(|| {

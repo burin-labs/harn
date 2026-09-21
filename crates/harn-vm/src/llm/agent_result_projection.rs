@@ -143,13 +143,15 @@ fn is_bookkeeping_turn(message: &VmValue) -> bool {
 /// accepted, and a run where nothing was accepted answers with nothing at all
 /// rather than handing a reader the placeholder as if the model had written
 /// it.
-/// True when this run has no answer to report BECAUSE every closing draft was
-/// withdrawn.
+/// True when this run has no answer to report BECAUSE the loop ended on the
+/// round that withdrew one.
 ///
-/// False for a run that has an answer, and for a run that has none for any
-/// other reason. The distinction matters because an empty answer is otherwise
-/// indistinguishable from a run that simply said nothing, and a reader given
-/// no reason would be told less than the run knows.
+/// Two conditions, and both are load-bearing. There must be no answer, and the
+/// LAST assistant turn must be the bookkeeping one. Asking only whether the
+/// run holds a withdrawn turn somewhere is too wide: a run that was vetoed,
+/// carried on, and later ended on a turn that happened to carry no prose would
+/// be reported as withdrawn when it was nothing of the kind. Requiring the
+/// withdrawal to be the trailing turn is what says the loop stopped on it.
 pub(crate) fn answer_was_withdrawn(snapshot: &VmValue) -> bool {
     if last_assistant_text(snapshot).is_some() {
         return false;
@@ -157,7 +159,16 @@ pub(crate) fn answer_was_withdrawn(snapshot: &VmValue) -> bool {
     let Some(messages_value) = dict_get(snapshot, "messages") else {
         return false;
     };
-    list_items(messages_value).iter().any(is_bookkeeping_turn)
+    list_items(messages_value)
+        .iter()
+        .rev()
+        .find(|message| {
+            dict_get(message, "role")
+                .map(VmValue::display)
+                .unwrap_or_default()
+                == "assistant"
+        })
+        .is_some_and(|last| is_bookkeeping_turn(last))
 }
 
 pub(crate) fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
