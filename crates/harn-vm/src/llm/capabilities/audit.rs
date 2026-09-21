@@ -175,7 +175,13 @@ where
     let mut audited_models = 0;
 
     for (model_id, model) in models {
-        if model.pricing.is_none() || model.is_embedding_model() {
+        // Tool capabilities are a chat fact. A priced row that does not serve
+        // text generation has no tool surface to declare, so reading the
+        // operation contract covers embedding and decision routes alike
+        // instead of naming one non-chat operation and missing the next.
+        if model.pricing.is_none()
+            || !model.supports_operation(crate::llm_config::ModelOperation::TextGeneration)
+        {
             continue;
         }
         audited_models += 1;
