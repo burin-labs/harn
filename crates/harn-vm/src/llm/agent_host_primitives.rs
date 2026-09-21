@@ -2022,6 +2022,8 @@ mod auto_review_decider_tests;
 #[cfg(test)]
 mod denied_tool_routing_tests;
 #[cfg(test)]
+mod host_rejected_names_the_call_tests;
+#[cfg(test)]
 mod mcp_bootstrap_tests;
 #[cfg(test)]
 mod parse_tool_call_id_tests;
