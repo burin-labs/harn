@@ -205,7 +205,12 @@ jobs:
         # No package filter — the whole workspace runs. Tests gated to
         # `#![cfg(unix)]` are excluded at compile time, so the nightly
         # surface is exactly what is portable.
-        run: cargo nextest run --locked --workspace --profile ci
+        # `harn-wasm` is excluded for the same reason as on the macOS lane: it
+        # carries no `#[test]`, produces no test binary here, declares
+        # `wasm-bindgen-test` as its framework, and has no workspace dependents,
+        # so it was pure compile cost. Its own wasm32 workflow and the Linux
+        # workspace lane keep it covered.
+        run: cargo nextest run --locked --workspace --exclude harn-wasm --profile ci
       - name: Smoke test harn run
         shell: bash
         run: |

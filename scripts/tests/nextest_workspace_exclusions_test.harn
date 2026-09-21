@@ -1,0 +1,101 @@
+/*
+ * A workspace nextest lane may exclude a crate only while that crate has no
+ * tests to lose.
+ *
+ * `--exclude` on a `--workspace` run is an optimization that silently becomes a
+ * coverage hole. The crate is excluded because it contributes nothing; the day
+ * somebody adds a `#[test]` to it, that test is dropped from the lane and every
+ * gate stays green, because a test that never ran cannot fail.
+ *
+ * So the exclusion carries its own premise here. Each excluded crate must carry
+ * no test attribute in its sources, and no workspace member may depend on it,
+ * since a dependent would drag it back into the build and make the exclusion a
+ * no-op that still reads as a saving.
+ */
+import { scan_glob } from "../path_visibility.harn"
+
+const WORKSPACE_LANES = [
+  ".github/workflows/macos-nightly.yml",
+  ".github/workflows/windows-nightly.yml",
+]
+
+/** Every crate named by `--exclude` in a workspace nextest command. */
+pub fn excluded_crates(workflow_text: string) -> list<string> {
+  let names: list<string> = []
+  for line in workflow_text.split("\n") {
+    if !contains(line, "nextest run") || !contains(line, "--workspace") {
+      continue
+    }
+    const tokens = line.split(" ").filter(fn(token) { token != "" })
+    let index = 0
+    for token in tokens {
+      if token == "--exclude" {
+        const name = tokens[index + 1] ?? ""
+        if name != "" && !names.contains(name) {
+          names = names + [name]
+        }
+      }
+      index = index + 1
+    }
+  }
+  return names
+}
+
+@test
+pipeline test_every_excluded_crate_has_no_test_to_lose(harness: Harness, task: unknown) {
+  const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  let checked = 0
+  for workflow in WORKSPACE_LANES {
+    const text = harness.fs.read_text(path_join(root, workflow))
+    // A lane that stopped naming the workspace, or stopped running nextest at
+    // all, would report zero exclusions and pass while measuring nothing. The
+    // premise is asserted instead of assumed.
+    assert(
+      contains(text, "nextest run") && contains(text, "--workspace"),
+      workflow + " no longer runs a workspace nextest command",
+    )
+    for name in excluded_crates(text) {
+      checked = checked + 1
+      const source_root = path_join(root, path_join("crates", name))
+      assert(
+        harness.fs.exists(source_root),
+        workflow + " excludes `" + name + "`, which is not a crate in this workspace",
+      )
+      // Every enumeration goes through the scanner that refuses a zero result.
+      // A bare glob reads empty under a confined test and each loop below then
+      // passes by never running, which is the failure this whole case exists to
+      // prevent, one level up.
+      for file in scan_glob(harness.fs, "nextest-exclusions", "src/**/*.rs", source_root) {
+        const body = harness.fs.read_text(file)
+        assert(
+          !contains(body, "#[test]") && !contains(body, "#[cfg(test)]"),
+          workflow
+            + " excludes `"
+            + name
+            + "`, but "
+            + file
+            + " carries a test the lane would silently drop",
+        )
+      }
+      assert(
+        !harness.fs.exists(path_join(source_root, "tests")),
+        workflow + " excludes `" + name + "`, which has an integration test directory",
+      )
+      // A workspace dependent would rebuild it anyway, so the exclusion would
+      // buy nothing while still reading as a saving.
+      for manifest in scan_glob(harness.fs, "nextest-exclusions", "crates/*/Cargo.toml", root) {
+        if contains(manifest, "/" + name + "/Cargo.toml") {
+          continue
+        }
+        assert(
+          !contains(harness.fs.read_text(manifest), name),
+          manifest + " depends on excluded crate `" + name + "`",
+        )
+      }
+    }
+  }
+  // A measured zero is not the same as measuring nothing: if the lanes stop
+  // excluding anything this case has no premise left to hold, and saying so is
+  // better than passing quietly.
+  assert(checked > 0, "no workspace nextest lane excludes a crate; this case now proves nothing")
+}
