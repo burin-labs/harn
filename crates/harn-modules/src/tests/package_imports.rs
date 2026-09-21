@@ -354,3 +354,144 @@ fn unknown_stdlib_import_is_unresolved() {
         "unknown std module should fail resolution and disable strict check"
     );
 }
+
+/// Build one installed project root whose package set is `installed`.
+///
+/// Mirrors what an install actually produces: a path dependency is a SYMLINK
+/// to its own source tree, so a module reached through one canonicalizes
+/// outside the consumer's project root. A registry or git dependency is a copy
+/// and canonicalizes inside it. That difference is the whole defect.
+fn installed_project(
+    parent: &Path,
+    name: &str,
+    manifest: &str,
+    sources: &[(&str, &str)],
+    installed: &[(&str, &Path)],
+) -> PathBuf {
+    let root = parent.join(name);
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("harn.toml"), manifest).unwrap();
+    for (relative, contents) in sources {
+        fs::write(root.join(relative), contents).unwrap();
+    }
+    let packages_root = package_fixture(&root);
+    for (alias, target) in installed {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, packages_root.join(alias)).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(target, packages_root.join(alias)).unwrap();
+    }
+    root
+}
+
+/// A consumer's graph must resolve the imports its dependency makes of ITS own
+/// dependency. Resolution used to consult only the snapshots acquired for the
+/// files the caller asked about, and it keeps a snapshot only for a file
+/// underneath that snapshot's project root. The middle module lives outside the
+/// consumer's root, so every acquired snapshot was filtered away and its own
+/// package import resolved to nothing — while the same file checked directly
+/// resolved fine. A census that refuses an unresolved import then refused the
+/// whole consumer.
+#[test]
+fn a_dependencys_own_package_import_resolves_through_the_consumers_graph() {
+    let tmp = tempfile::tempdir().unwrap();
+    let leaf = installed_project(
+        tmp.path(),
+        "leaf",
+        "[package]\nname = \"leaf\"\n[exports]\ndefault = \"src/leaf.harn\"\n",
+        &[("src/leaf.harn", "pub fn leaf_value() { 3 }\n")],
+        &[],
+    );
+    let middle = installed_project(
+        tmp.path(),
+        "middle",
+        "[package]\nname = \"middle\"\n[exports]\nmiddle = \"src/middle.harn\"\n",
+        &[(
+            "src/middle.harn",
+            "import { leaf_value } from \"leaf/default\"\npub fn middle_value() { leaf_value() }\n",
+        )],
+        &[("leaf", leaf.as_path())],
+    );
+    let consumer = installed_project(
+        tmp.path(),
+        "consumer",
+        "[package]\nname = \"consumer\"\n",
+        &[(
+            "src/lib.harn",
+            "import { middle_value } from \"middle/middle\"\npub fn top() { middle_value() }\n",
+        )],
+        // An install flattens the transitive dependency into the consumer too.
+        // Its presence is what makes the failure confusing rather than obvious:
+        // the leaf IS installed here, and the middle module still could not see
+        // it, because the middle module is not under this project root.
+        &[("middle", middle.as_path()), ("leaf", leaf.as_path())],
+    );
+
+    let entry = consumer.join("src/lib.harn");
+    let graph = build(std::slice::from_ref(&entry));
+
+    let middle_module = middle.join("src/middle.harn");
+    let leaf_import = graph
+        .imports_for_module(&middle_module)
+        .into_iter()
+        .find(|import| import.raw_path == "leaf/default")
+        .expect("the dependency's own package import must appear in the graph");
+    assert!(
+        leaf_import.resolved_path.is_some(),
+        "a dependency reached through a path install must still resolve its own \
+         package imports; unresolved here is what refused the census"
+    );
+    assert!(graph
+        .imported_names_for_file(&middle_module)
+        .expect("the middle module must type-check its own import")
+        .contains("leaf_value"));
+
+    // Control: the consumer's own import was never the broken one, so an
+    // assertion that only read the entry file would pass on the defect.
+    let middle_import = graph
+        .imports_for_module(&entry)
+        .into_iter()
+        .find(|import| import.raw_path == "middle/middle")
+        .expect("the consumer's direct import must appear");
+    assert!(middle_import.resolved_path.is_some());
+}
+
+/// Control for the fallback's blast radius: it must not invent a resolution
+/// for an import no project provides. Absence has to stay absence, or the
+/// census would go from refusing a real module to accepting a missing one.
+#[test]
+fn a_dependencys_import_of_an_uninstalled_package_stays_unresolved() {
+    let tmp = tempfile::tempdir().unwrap();
+    let middle = installed_project(
+        tmp.path(),
+        "middle",
+        "[package]\nname = \"middle\"\n[exports]\nmiddle = \"src/middle.harn\"\n",
+        &[(
+            "src/middle.harn",
+            "import { absent } from \"never-installed/default\"\npub fn middle_value() { absent() }\n",
+        )],
+        &[],
+    );
+    let consumer = installed_project(
+        tmp.path(),
+        "consumer",
+        "[package]\nname = \"consumer\"\n",
+        &[(
+            "src/lib.harn",
+            "import { middle_value } from \"middle/middle\"\npub fn top() { middle_value() }\n",
+        )],
+        &[("middle", middle.as_path())],
+    );
+
+    let entry = consumer.join("src/lib.harn");
+    let graph = build(std::slice::from_ref(&entry));
+    let absent = graph
+        .imports_for_module(&middle.join("src/middle.harn"))
+        .into_iter()
+        .find(|import| import.raw_path == "never-installed/default")
+        .expect("the unresolvable import must still be recorded");
+    assert_eq!(
+        absent.resolved_path, None,
+        "no project provides this package, so the fallback must report nothing"
+    );
+}
