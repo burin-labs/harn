@@ -246,6 +246,14 @@ where
             json!({
                 "cwd": runtime.cwd.clone(),
                 "mcpServers": runtime.mcp_servers.clone(),
+                // Harn is the client here, and the agent on the other end may
+                // not be Harn. State the policy anyway: this is the one place
+                // Harn would otherwise depend on somebody else's default for
+                // what its own session's children can read. `isolated` is what
+                // a Harn server already resolved an omission to, so nothing
+                // changes against one, and a peer that does not know the field
+                // ignores it.
+                "environmentPolicy": {"kind": "isolated", "grants": []},
             }),
             None,
         )

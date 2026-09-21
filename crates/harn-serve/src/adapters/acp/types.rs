@@ -467,8 +467,8 @@ pub struct AcpSessionEnvironmentConfig {
 pub struct AcpSessionNewParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// The session's environment policy. Omitted means `inherited`. See
-    /// [`AcpSessionEnvironmentConfig`].
+    /// The session's environment policy. Required: `session/new` refuses a
+    /// request that omits it (harn#8566). See [`AcpSessionEnvironmentConfig`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "environmentPolicy")]
     pub environment_policy: Option<AcpSessionEnvironmentConfig>,
@@ -477,12 +477,33 @@ pub struct AcpSessionNewParams {
 }
 
 impl AcpSessionNewParams {
-    pub fn cwd(cwd: impl Into<String>) -> Self {
+    /// Build a `session/new` request.
+    ///
+    /// The policy is a parameter rather than a field left for the caller to
+    /// remember, because the field is optional on the wire and a request that
+    /// omits it is refused (harn#8566). Requiring it here means a caller
+    /// cannot express the refused shape and find out at runtime.
+    pub fn new(cwd: impl Into<String>, environment_policy: AcpSessionEnvironmentConfig) -> Self {
         Self {
             cwd: Some(cwd.into()),
-            environment_policy: None,
+            environment_policy: Some(environment_policy),
             extra: BTreeMap::new(),
         }
+    }
+
+    /// A session whose children see only the runtime essentials.
+    ///
+    /// The named shorthand exists so that choosing the most restrictive policy
+    /// is the shortest thing to write, and so a reader of the call site can
+    /// see which policy was chosen without opening this file.
+    pub fn isolated(cwd: impl Into<String>) -> Self {
+        Self::new(
+            cwd,
+            AcpSessionEnvironmentConfig {
+                kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+                grants: Vec::new(),
+            },
+        )
     }
 }
 
