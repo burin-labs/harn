@@ -168,7 +168,7 @@ pub(crate) fn answer_was_withdrawn(snapshot: &VmValue) -> bool {
                 .unwrap_or_default()
                 == "assistant"
         })
-        .is_some_and(|last| is_bookkeeping_turn(last))
+        .is_some_and(is_bookkeeping_turn)
 }
 
 pub(crate) fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
