@@ -807,3 +807,235 @@ await(handle)
         })
         .await;
 }
+
+/// A cancellation first observed inside an async builtin still runs the
+/// program's interrupt handlers.
+///
+/// The cancellation is armed from inside the builtin, after the machine's
+/// last between-operations poll. The builtin is therefore the first observer
+/// by construction, with no window in which the poll could dispatch instead.
+/// An earlier version of this test armed the cancellation before the program
+/// started, so the poll dispatched and the test passed with the production
+/// dispatch deleted.
+///
+/// The program does not catch, so it stops at that builtin and no later poll
+/// can run the handler either. Deleting the dispatch from the frame that
+/// awaits the builtin makes this fail.
+#[test]
+fn test_handler_runs_when_an_async_builtin_observes_the_cancel() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let cancel_token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let arm = std::sync::Arc::clone(&cancel_token);
+    // Counted outside the machine, because the program stops on the
+    // cancellation and its output buffer does not come back with the error.
+    let handler_runs = std::sync::Arc::new(AtomicUsize::new(0));
+    let continued = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_counter = std::sync::Arc::clone(&handler_runs);
+    let continued_counter = std::sync::Arc::clone(&continued);
+
+    let source = r"
+pipeline t(harness: Harness) {
+  cancel_from_inside()
+  mark_continued()
+}
+";
+
+    let result = run_harn_with_setup(source, move |vm| {
+        vm.register_builtin("cancel_marker", move |_, _| {
+            handler_counter.fetch_add(1, Ordering::SeqCst);
+            Ok(VmValue::Nil)
+        });
+        vm.register_builtin("mark_continued", move |_, _| {
+            continued_counter.fetch_add(1, Ordering::SeqCst);
+            Ok(VmValue::Nil)
+        });
+        vm.register_interrupt_handler(
+            VmValue::BuiltinRef(arcstr::ArcStr::from("cancel_marker")),
+            None,
+        )
+        .unwrap();
+        vm.install_cancel_token(std::sync::Arc::clone(&cancel_token));
+
+        // Arms the cancellation only once the builtin is running, then
+        // observes it itself, exactly as a blocking builtin does.
+        vm.register_async_builtin("cancel_from_inside", move |_ctx, _args| {
+            let arm = std::sync::Arc::clone(&arm);
+            async move {
+                arm.store(true, Ordering::SeqCst);
+                Err(crate::cancellation::cancelled_error(
+                    crate::cancellation::HandlerDispatch::NotDispatched(
+                        crate::cancellation::NotDispatchedReason::NoMachineInScope,
+                    ),
+                ))
+            }
+        });
+    });
+
+    match result {
+        Err(error) => assert!(
+            crate::cancellation::is_cancellation(&error),
+            "the program must stop on the cancellation, not another error: {error:?}"
+        ),
+        Ok((output, _)) => panic!("the cancellation must not be swallowed: {output}"),
+    }
+
+    assert_eq!(
+        continued.load(Ordering::SeqCst),
+        0,
+        "the program must stop at the cancelled builtin, so no later poll can \
+         dispatch on its behalf"
+    );
+    assert_eq!(
+        handler_runs.load(Ordering::SeqCst),
+        1,
+        "the handler must run exactly once for a cancellation first observed \
+         inside a builtin"
+    );
+}
+
+/// The trap this design exists to avoid, pinned as a test rather than prose.
+///
+/// A child machine inherits the cancellation token but is constructed with an
+/// empty handler list. So a dispatch placed inside the builtin would find
+/// nothing to run and report success, which is indistinguishable from having
+/// run the handlers. If a future change makes a child carry handlers, this
+/// test fails and the dispatch can move closer to the observer.
+#[test]
+fn test_a_child_machine_carries_the_cancel_token_and_no_handlers() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mut parent = Vm::new();
+                register_vm_stdlib(&mut parent);
+                parent.register_builtin("never_runs", |_, out| {
+                    out.push_str("[harn] child dispatched\n");
+                    Ok(VmValue::Nil)
+                });
+                parent
+                    .register_interrupt_handler(
+                        VmValue::BuiltinRef(arcstr::ArcStr::from("never_runs")),
+                        None,
+                    )
+                    .unwrap();
+                parent.install_cancel_token(std::sync::Arc::new(
+                    std::sync::atomic::AtomicBool::new(true),
+                ));
+
+                assert!(
+                    parent.has_unfiltered_interrupt_handler(),
+                    "the parent is the machine the handler is registered on"
+                );
+
+                let mut child = parent.child_vm_inline();
+                assert!(
+                    child.is_cancel_requested(),
+                    "a child observes the cancellation perfectly well"
+                );
+                assert!(
+                    !child.has_unfiltered_interrupt_handler(),
+                    "a child carries no handlers, which is why the builtin cannot dispatch"
+                );
+
+                let dispatched = child
+                    .dispatch_handlers_for_observed_cancel()
+                    .await
+                    .expect("dispatching on a child is not an error, which is the trap");
+                assert!(
+                    !dispatched,
+                    "dispatching on a child runs nothing and reports success"
+                );
+                assert!(
+                    !child.output().contains("child dispatched"),
+                    "nothing ran on the child"
+                );
+            })
+            .await;
+    });
+}
+
+/// A replayed cancellation must not run the handlers again.
+///
+/// Handlers ran when the run was live and their effects are already recorded,
+/// so re-running them on replay repeats those effects. The replay fact is read
+/// from its single owner at the same seam that dispatches, and the test enters
+/// through that owner rather than setting a flag of its own. Removing the
+/// replay check from the seam makes this test fail.
+#[test]
+fn test_a_replayed_cancellation_runs_no_handler() {
+    let source = r#"
+pipeline t(harness: Harness) {
+  const ch = harness.runtime.channel("cancel-probe", 1)
+  replay_probe()
+  const outcome = try {
+    harness.runtime.receive(ch)
+    "received"
+  } catch (e) {
+    "caught"
+  }
+  harness.stdio.log(outcome)
+}
+"#;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let output = rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mut lexer = Lexer::new(source);
+                let tokens = lexer.tokenize().unwrap();
+                let mut parser = Parser::new(tokens);
+                let program = parser.parse().unwrap();
+                let chunk = Compiler::new().compile(&program).unwrap();
+
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
+                vm.register_builtin("replay_probe", |_, out| {
+                    out.push_str(&format!(
+                        "[harn] probe is_replay={}\n",
+                        crate::triggers::dispatcher::is_replay()
+                    ));
+                    Ok(VmValue::Nil)
+                });
+                vm.register_builtin("replay_marker", |_, out| {
+                    out.push_str("[harn] handler ran\n");
+                    Ok(VmValue::Nil)
+                });
+                vm.register_interrupt_handler(
+                    VmValue::BuiltinRef(arcstr::ArcStr::from("replay_marker")),
+                    None,
+                )
+                .unwrap();
+                vm.install_cancel_token(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                    true,
+                )));
+
+                crate::triggers::dispatcher::with_replay_scope(true, async {
+                    // Positive control on the fixture itself: if the scope did
+                    // not take, the test would be asserting nothing.
+                    assert!(
+                        crate::triggers::dispatcher::is_replay(),
+                        "the replay scope must be visible to the code under test"
+                    );
+                    let _ = vm.execute(&chunk).await;
+                })
+                .await;
+                vm.output().to_string()
+            })
+            .await
+    });
+
+    assert!(
+        !output.contains("handler ran"),
+        "a replayed cancellation must not re-run handlers: {output}"
+    );
+}

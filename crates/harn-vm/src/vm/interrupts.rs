@@ -1,3 +1,4 @@
+use crate::cancellation::{cancelled_error, HandlerDispatch};
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -146,7 +147,9 @@ impl Vm {
             self.interrupted = true;
 
             if self.dispatching_interrupt {
-                return Err(Self::cancelled_error());
+                // Already inside a dispatch: handlers are running for this
+                // cancellation on the frame below.
+                return Err(cancelled_error(HandlerDispatch::Dispatched));
             }
 
             let matching: Vec<(i64, bool, Option<u64>, VmValue)> = self
@@ -219,6 +222,17 @@ impl Vm {
     ///
     /// Returns whether handlers ran.
     pub(crate) async fn dispatch_handlers_for_observed_cancel(&mut self) -> Result<bool, VmError> {
+        // Replay is refused here, in the one function every observer calls,
+        // rather than at each caller. Handlers ran when the run was live and
+        // their effects are recorded; running them again repeats those
+        // effects. The replay fact is read from its single owner.
+        if crate::triggers::dispatcher::is_replay() {
+            crate::cancellation::note_not_dispatched(
+                crate::cancellation::NotDispatchedReason::ReplayPath,
+            );
+            return Ok(false);
+        }
+
         let delivered = self
             .pending_interrupt_signal
             .take()
@@ -294,8 +308,10 @@ impl Vm {
 
             match self.cancel_grace_instructions_remaining.as_mut() {
                 Some(0) => {
+                    // The owner was consulted above and reported that no
+                    // handler matched; the decision was still its own.
                     self.cancel_spawned_tasks();
-                    return Some(Self::cancelled_error());
+                    return Some(cancelled_error(HandlerDispatch::Dispatched));
                 }
                 Some(remaining) => *remaining -= 1,
                 None => self.cancel_grace_instructions_remaining = Some(CANCEL_GRACE_INSTRUCTIONS),

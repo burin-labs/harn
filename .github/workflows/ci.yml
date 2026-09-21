@@ -171,6 +171,8 @@ jobs:
               - 'scripts/allowed_long_strings.txt'
               - 'scripts/check_no_rust_prompt_prose.sh'
               - 'scripts/check_rust_prompt_prose.harn'
+              - 'scripts/check_cancellation_owner.sh'
+              - 'scripts/check_cancellation_owner.harn'
             setup_action:
               - '.github/actions/setup-harn/**'
               - '.github/workflows/ci.yml'

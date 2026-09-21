@@ -357,9 +357,8 @@ mod tests {
             ToolInvocationError::Runtime(VmError::Thrown(_))
         ));
 
-        let cancellation = VmError::Thrown(VmValue::String(
-            "kind:cancelled:VM cancelled by host".into(),
-        ));
+        let cancellation =
+            crate::cancellation::cancelled_error(crate::cancellation::HandlerDispatch::Dispatched);
         let error = classify_tool_result(
             &prepared(Some(json!({"type": "string"}))),
             "widgets.create",
@@ -367,9 +366,8 @@ mod tests {
         )
         .expect_err("host cancellation remains runtime control flow");
         assert!(matches!(
-            error,
-            ToolInvocationError::Runtime(VmError::Thrown(VmValue::String(message)))
-                if message.as_str() == "kind:cancelled:VM cancelled by host"
+            &error,
+            ToolInvocationError::Runtime(inner) if crate::cancellation::is_cancellation(inner)
         ));
 
         let business = VmError::Thrown(VmValue::String("customer cancelled order".into()));

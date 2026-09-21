@@ -99,6 +99,8 @@ pub fn build_batched_event_public(
     util::build_batched_event(events)
 }
 
+#[cfg(test)]
+pub(crate) use state::with_replay_scope;
 pub(crate) use state::{
     current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease, is_replay,
 };
