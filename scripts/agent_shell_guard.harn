@@ -494,10 +494,23 @@ fn cd_target(argv: list<string>) -> string {
   return ""
 }
 
+/**
+ * NO DEFAULT PARAMETER VALUE HERE, and the empty string at the two outer call
+ * sites is the whole reason.
+ *
+ * A default value compiles to an `__assert_schema` call at the call site, and
+ * this guard runs under an allow list naming only its two policy builtins. A
+ * runtime that does not exempt that builtin from the list refuses it, the guard
+ * faults before it reaches a verdict, and every command it is asked about gets
+ * the same generic "policy faulted" refusal instead of the answer. Worse, the
+ * guard's sources are rendered onto consumers pinned to the previous release,
+ * so the floor a construct has to clear is the OLDEST runtime any consumer
+ * pins, not this branch's.
+ */
 fn raw_worktree_add_attempt_at(
   command: string,
   depth: int,
-  inherited_directory: string = "",
+  inherited_directory: string,
 ) -> WorktreeAddAttempt {
   // A `cd` names the repository as plainly as `-C` does, and unlike `-C` it
   // holds for every stage after it rather than for one invocation. So it is
@@ -544,12 +557,12 @@ fn raw_worktree_add_attempt_at(
 
 /** Reject only Git's worktree-creation subcommand, including shell wrappers. */
 pub fn raw_worktree_add_violation(command: string) -> string {
-  return raw_worktree_add_attempt_at(command, 0).reason
+  return raw_worktree_add_attempt_at(command, 0, "").reason
 }
 
 /** The same walk, keeping the directory the attempt targets. */
 pub fn raw_worktree_add_attempt(command: string) -> WorktreeAddAttempt {
-  return raw_worktree_add_attempt_at(command, 0)
+  return raw_worktree_add_attempt_at(command, 0, "")
 }
 
 /** True only for a path rooted in an OS-temp or known generated-output tree. */
