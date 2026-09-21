@@ -1,0 +1,11 @@
+nothing_accepted.vetoes=1
+nothing_accepted.text_is_marker=false
+nothing_accepted.visible_is_marker=false
+nothing_accepted.text_empty=true
+nothing_accepted.stop_reason=turn_withdrawn
+nothing_accepted.status=stuck
+earlier_accepted.vetoes=1
+earlier_accepted.stop_reason_is_withdrawn=false
+earlier_accepted.text_is_marker=false
+earlier_accepted.text_is_accepted_draft=true
+control.marker_reaches_model=true

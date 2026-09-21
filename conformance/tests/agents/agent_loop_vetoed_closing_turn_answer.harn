@@ -1,0 +1,143 @@
+/* A vetoed closing turn is bookkeeping, not the run's answer.
+
+   When the completion adjudicator vetoes a closing turn, the loop retires that
+   draft and leaves a fixed placeholder in its place so the turn count stays
+   stable and the pending directive still lands on the next round. If the loop
+   then ends on that same round, nothing later is accepted and the placeholder
+   is the trailing assistant message.
+
+   The run's `text` must not be that placeholder. A run with an earlier
+   accepted draft answers with that draft; a run where nothing was accepted
+   answers with nothing, and the stop reason carries the meaning. Otherwise
+   every consumer reads a bookkeeping line as the model's closing report. */
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/** The placeholder text, so the assertions below name what they forbid. */
+const WITHDRAWN = "[withdrawn: this closing report was rejected; see the directive that follows]"
+
+/** Nothing was ever accepted: the only draft the model produced was vetoed. */
+fn run_nothing_accepted(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("The only draft, and the adjudicator rejects it. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\"}"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Answer once; the adjudicator vetoes the closing turn.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 1,
+          max_nudges: 0,
+          done_sentinel: "##DONE##",
+          verify_completion_judge: true,
+        },
+      )
+      harness.stdio.println("nothing_accepted.vetoes=${result.completion_judge.vetoes}")
+      harness.stdio.println("nothing_accepted.text_is_marker=${result.text == WITHDRAWN}")
+      harness.stdio.println(
+        "nothing_accepted.visible_is_marker=${result.visible_text == WITHDRAWN}",
+      )
+      harness.stdio.println("nothing_accepted.text_empty=${trim(result.text) == ""}")
+      // An empty answer with no reason tells a reader less than the transcript
+      // knows. The stop reason is what carries the meaning here, and the
+      // adjudicator's own words are what it carries.
+      harness.stdio.println("nothing_accepted.stop_reason=${result.stop_reason}")
+      harness.stdio.println("nothing_accepted.status=${result.status}")
+    },
+  )
+}
+
+/**
+ * An earlier draft was accepted; a later one is vetoed and the loop then ends.
+ * The accepted draft is the answer.
+ */
+fn run_earlier_accepted(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Accepted progress report."),
+      llm_text("Closing draft the adjudicator rejects. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\"}"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Report progress, then let the adjudicator veto the closing turn.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 2,
+          max_nudges: 3,
+          done_sentinel: "##DONE##",
+          verify_completion_judge: true,
+        },
+      )
+      harness.stdio.println("earlier_accepted.vetoes=${result.completion_judge.vetoes}")
+      // A run that DOES have an answer keeps whatever ended it as its reason.
+      // The withdrawal reason is for runs with nothing left to report.
+      harness.stdio.println(
+        "earlier_accepted.stop_reason_is_withdrawn="
+          + to_string(result.stop_reason == "turn_withdrawn"),
+      )
+      harness.stdio.println("earlier_accepted.text_is_marker=${result.text == WITHDRAWN}")
+      harness.stdio.println(
+        "earlier_accepted.text_is_accepted_draft="
+          + to_string(result.text.contains("Accepted progress report")),
+      )
+    },
+  )
+}
+
+/**
+ * The negative control for the fix above.
+ *
+ * Hiding the placeholder from the ANSWER must not hide it from the MODEL. The
+ * placeholder exists to hold the withdrawn turn's slot so the adjudicator's
+ * directive still lands on the next round; a fix that dropped it from the
+ * provider request would pass both assertions above while reintroducing the
+ * delay the placeholder prevents. So the round after a veto must still carry
+ * it.
+ */
+fn run_marker_still_reaches_the_model(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("First draft, which the adjudicator rejects. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\"}"),
+      llm_text("Second draft, written after the directive."),
+    ],
+    { ->
+      const _ = agent_loop(
+        harness,
+        "Let the adjudicator veto once, then write again.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 2,
+          max_nudges: 3,
+          done_sentinel: "##DONE##",
+          verify_completion_judge: true,
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      const after_veto = json_stringify(calls[len(calls) - 1].messages)
+      harness.stdio.println(
+        "control.marker_reaches_model=" + to_string(after_veto.contains(WITHDRAWN)),
+      )
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  run_nothing_accepted(harness)
+  run_earlier_accepted(harness)
+  run_marker_still_reaches_the_model(harness)
+}

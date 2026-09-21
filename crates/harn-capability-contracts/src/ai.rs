@@ -655,8 +655,8 @@ capability_method!(
     // runtime-owned, not model-facing state effects. Inflated contracts
     // reject under agent-loop execution policy and abort turns mid-flight.
     [],
-    "__cap_agent_session_pop_last_assistant(session_id: string) -> dict",
-    "Remove and return the last assistant message."
+    "__cap_agent_session_pop_last_assistant(session_id: string, replacement?: string, reason?: string) -> dict",
+    "Remove the last assistant message, optionally leaving a bookkeeping turn in its place."
 );
 capability_method!(
     agent_session_record_tool_results,
