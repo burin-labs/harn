@@ -353,26 +353,17 @@ pipeline test_worktree_rule_answers_for_the_repository_the_command_targets(
     "/repo/owner\tscripts/fleet-worktree-admit.ts\n/repo/plain\t",
   )
   assert_eq(census.denial, "")
-  // A target that owns no admission command is refused with a borrowed one.
-  // This used to be allowed, on the reasoning that refusing would name a
-  // command the operator cannot run. An admission command takes the repository
-  // it acts on as an argument, so one that exists can admit this target, and
-  // the allowance left the rule off in exactly the repositories an unowned
-  // worktree is most likely to be created in.
-  const borrowed = decision(
+  // A target that owns no admission command is not policed by this rule, even
+  // when another measured repository owns one. The guard briefly borrowed the
+  // other root's command and pointed it at the target, which produced a
+  // refusal rooted at a repository the operator never named and a remedy
+  // nothing established would work. The target's own row is the contract.
+  const unowned = decision(
     codex_payload("git -C /repo/plain worktree add /tmp/lane origin/main"),
     census,
     NO_MAKE_TARGETS,
   )
-  assert(!borrowed.allow, "a target with no admission command must be refused with a borrowed one")
-  assert(
-    borrowed.reason.contains("/repo/owner/scripts/fleet-worktree-admit.ts"),
-    "the refusal must name the command that exists: " + borrowed.reason,
-  )
-  assert(
-    borrowed.reason.contains(WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/plain"),
-    "the borrowed command must be pointed at the target: " + borrowed.reason,
-  )
+  assert(unowned.allow, "a target that owns no admission command is not this rule's: " + unowned.reason)
   // A target that owns one is still refused, and names that repository's path.
   const refused = decision(
     codex_payload("git -C /repo/owner worktree add /tmp/lane origin/main"),
@@ -406,22 +397,27 @@ pipeline test_worktree_rule_answers_for_the_repository_the_command_targets(
     "1",
     "/repo/owner\tscripts/fleet-worktree-admit.ts\n/repo/owner/vendor\t",
   )
-  // The inner root owns no command, so the refusal borrows one and points it
-  // at the directory the command named. That the borrowed remedy fires at all
-  // is what shows the inner root was chosen: the outer root owns a command and
-  // would have been told to use its own.
+  // The inner root owns no command, so the command is allowed. THAT is what
+  // shows the inner root was chosen: the outer root owns a command, so a
+  // resolution that fell back to it would refuse and name it. An allow here
+  // is only reachable by matching the longer root.
   const deep = decision(
     codex_payload("git -C /repo/owner/vendor/deep worktree add /tmp/lane origin/main"),
     nested,
     NO_MAKE_TARGETS,
   )
-  assert(!deep.allow)
-  assert(
-    deep.reason.contains(
-      WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/owner/vendor/deep",
-    ),
-    "the longest matching root must win: " + deep.reason,
+  assert(deep.allow, "the longest matching root must win: " + deep.reason)
+  // The control for it, on the same census: the outer root DOES own a command,
+  // so a target under it alone is refused and names that command. Without this
+  // the assertion above would pass against a guard that had stopped reading
+  // the census at all.
+  const outer = decision(
+    codex_payload("git -C /repo/owner/src worktree add /tmp/lane origin/main"),
+    nested,
+    NO_MAKE_TARGETS,
   )
+  assert(!outer.allow, "the outer root still owns admission: " + outer.reason)
+  assert(outer.reason.contains("scripts/fleet-worktree-admit.ts"), outer.reason)
 }
 
 @test
@@ -536,43 +532,61 @@ pipeline test_absolute_cd_names_the_repository_the_creation_targets(
 ) {
   // A command that reaches another repository by changing directory first used
   // to be judged against the repository this guard is installed in, so the
-  // refusal answered for the wrong root and offered the wrong remedy.
+  // rule answered for the wrong root entirely.
+  // INVERTED ON PURPOSE. These cases prove that a `cd` selected the repository
+  // the command lands in, and the proof has to be a refusal that could only
+  // come from that repository's own row. So the repository the `cd` moves to
+  // is the one that owns the admission command, and the other root owns none:
+  // a scan that lost the directory falls back to a root with nothing to name
+  // and ALLOWS, which is exactly the defect these cases now catch.
   const mixed: WorktreeAdmissionCensus = {
     rows: [
+      {root: "/repo/plain", command: ""},
       {root: "/repo/admitted", command: "scripts/fleet-worktree-admit.ts"},
-      {root: "/repo/unadmitted", command: ""},
     ],
     denial: "",
   }
   const moved = decision(
-    codex_payload("cd /repo/unadmitted && git worktree add ../lane origin/main"),
+    codex_payload("cd /repo/admitted && git worktree add ../lane origin/main"),
     mixed,
     NO_MAKE_TARGETS,
   )
   assert(!moved.allow, "a creation in a repository reached by cd must be refused")
   assert(
-    moved.reason.contains("/repo/admitted/scripts/fleet-worktree-admit.ts"),
-    "the refusal must name the command that exists: " + moved.reason,
+    moved.reason.contains("scripts/fleet-worktree-admit.ts"),
+    "the refusal must name the target's own command: " + moved.reason,
   )
-  assert(
-    moved.reason.contains(WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/unadmitted"),
-    "the refusal must point the borrowed command at the target: " + moved.reason,
-  )
-  // `-C` names one invocation and still wins over the directory a cd moved to.
-  const named = decision(
-    codex_payload("cd /repo/unadmitted && git -C /repo/admitted worktree add ../lane"),
+  // AN OPTION IS NOT THE DESTINATION. `-P` is what a script writes when it
+  // wants the physical path. Read as the directory it answers "not absolute",
+  // the working directory stays empty, and the raw creation is ALLOWED in a
+  // repository that advertises admission.
+  for spelling in [
+    "cd -P /repo/admitted && git worktree add ../lane origin/main",
+    "cd -L -P /repo/admitted && git worktree add ../lane origin/main",
+    "cd -- /repo/admitted && git worktree add ../lane origin/main",
+  ] {
+    const optioned = decision(codex_payload(spelling), mixed, NO_MAKE_TARGETS)
+    assert(!optioned.allow, "cd options must be stepped over: " + spelling)
+    assert(
+      optioned.reason.contains("scripts/fleet-worktree-admit.ts"),
+      "the refusal must name the target's own command: " + optioned.reason,
+    )
+  }
+  // `--` ENDS options rather than being one, so a directory literally named
+  // `-P` is still reachable and is not mistaken for an option to skip.
+  const literal = decision(
+    codex_payload("cd -- -P && git worktree add ../lane origin/main"),
     mixed,
     NO_MAKE_TARGETS,
   )
-  assert(!named.allow)
-  assert(
-    named.reason.contains("That repository provides it at"),
-    "an explicit -C into a repository that owns admission uses its own: " + named.reason,
+  assert(literal.allow, "a relative operand after -- names no measured root: " + literal.reason)
+  // `-C` names one invocation and still wins over the directory a cd moved to.
+  const named = decision(
+    codex_payload("cd /repo/admitted && git -C /repo/plain worktree add ../lane"),
+    mixed,
+    NO_MAKE_TARGETS,
   )
-  assert(
-    !named.reason.contains(WORKTREE_ADMISSION_POLICY.borrowed_root_argument),
-    "a repository that owns admission is never told to borrow one: " + named.reason,
-  )
+  assert(named.allow, "an explicit -C wins over the directory a cd established: " + named.reason)
 }
 
 @test
@@ -580,51 +594,53 @@ pipeline test_a_cd_survives_a_shell_launched_after_it(harness: Harness, task: un
   // The directory a `cd` established holds for a shell launched after it, the
   // same way it holds for the next stage. Scanning the nested payload from a
   // fresh directory judged the creation against the repository this guard is
-  // installed in, so the refusal named a command the target repository cannot
-  // run, which is the defect the directory tracking exists to remove.
+  // installed in, which is the defect the directory tracking exists to remove.
+  // Inverted for the reason given above: the repository the `cd` reaches is
+  // the one that owns the admission command, so only a refusal naming that
+  // command proves the directory was carried in.
   const mixed: WorktreeAdmissionCensus = {
     rows: [
+      {root: "/repo/plain", command: ""},
       {root: "/repo/admitted", command: "scripts/fleet-worktree-admit.ts"},
-      {root: "/repo/unadmitted", command: ""},
     ],
     denial: "",
   }
   const nested = decision(
-    codex_payload("cd /repo/unadmitted && bash -lc 'git worktree add ../lane origin/main'"),
+    codex_payload("cd /repo/admitted && bash -lc 'git worktree add ../lane origin/main'"),
     mixed,
     NO_MAKE_TARGETS,
   )
   assert(!nested.allow, "a creation inside a nested shell must still be refused")
   assert(
-    nested.reason.contains(WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/unadmitted"),
+    nested.reason.contains("scripts/fleet-worktree-admit.ts"),
     "the nested scan must inherit the directory the cd established: " + nested.reason,
   )
   // Two levels deep, so the inheritance is carried rather than special-cased
   // for the first nesting.
   const deeper = decision(
     codex_payload(
-      "cd /repo/unadmitted && bash -lc \"sh -c 'git worktree add ../lane origin/main'\"",
+      "cd /repo/admitted && bash -lc \"sh -c 'git worktree add ../lane origin/main'\"",
     ),
     mixed,
     NO_MAKE_TARGETS,
   )
   assert(!deeper.allow)
   assert(
-    deeper.reason.contains(WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/unadmitted"),
+    deeper.reason.contains("scripts/fleet-worktree-admit.ts"),
     "the directory must survive more than one nesting: " + deeper.reason,
   )
   // A `cd` inside the nested payload still wins, so inheriting a directory
   // never overrides one the inner shell names for itself.
   const inner = decision(
     codex_payload(
-      "cd /repo/admitted && bash -lc 'cd /repo/unadmitted && git worktree add ../lane'",
+      "cd /repo/plain && bash -lc 'cd /repo/admitted && git worktree add ../lane'",
     ),
     mixed,
     NO_MAKE_TARGETS,
   )
   assert(!inner.allow)
   assert(
-    inner.reason.contains(WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/unadmitted"),
+    inner.reason.contains("scripts/fleet-worktree-admit.ts"),
     "a cd inside the nested payload must win over the inherited one: " + inner.reason,
   )
 }
@@ -632,26 +648,27 @@ pipeline test_a_cd_survives_a_shell_launched_after_it(harness: Harness, task: un
 @test
 pipeline test_the_cd_option_separator_is_not_the_directory(harness: Harness, task: unknown) {
   // `cd -- <path>` is the standard spelling for a directory that could be read
-  // as an option. Taking `--` as the argument answers "no absolute target" and
-  // sends the refusal back to this guard's own repository, naming a command the
-  // target cannot run. A test on the plain form cannot reach this.
+  // as an option. Taking `--` as the argument answers "no absolute target",
+  // which leaves the rule with no repository to judge and lets the raw
+  // creation through. A test on the plain form cannot reach this.
+  // Inverted for the reason given above: the repository the `cd` reaches is
+  // the one that owns the admission command, so only a refusal naming that
+  // command proves the directory was carried in.
   const mixed: WorktreeAdmissionCensus = {
     rows: [
+      {root: "/repo/plain", command: ""},
       {root: "/repo/admitted", command: "scripts/fleet-worktree-admit.ts"},
-      {root: "/repo/unadmitted", command: ""},
     ],
     denial: "",
   }
   const separated = decision(
-    codex_payload("cd -- /repo/unadmitted && git worktree add ../lane origin/main"),
+    codex_payload("cd -- /repo/admitted && git worktree add ../lane origin/main"),
     mixed,
     NO_MAKE_TARGETS,
   )
   assert(!separated.allow)
   assert(
-    separated.reason.contains(
-      WORKTREE_ADMISSION_POLICY.borrowed_root_argument + " /repo/unadmitted",
-    ),
+    separated.reason.contains("scripts/fleet-worktree-admit.ts"),
     "`cd --` must name the directory after the separator: " + separated.reason,
   )
   // The separator does not invent a target either: with nothing after it there
@@ -662,7 +679,7 @@ pipeline test_the_cd_option_separator_is_not_the_directory(harness: Harness, tas
     NO_MAKE_TARGETS,
   )
   assert(
-    !bare.reason.contains("--repository-root --"),
+    bare.allow,
     "a bare separator must never be read as a directory: " + bare.reason,
   )
 }
@@ -674,7 +691,7 @@ pipeline test_relative_cd_is_not_resolved_into_a_repository(harness: Harness, ta
   // must fall back to the answer it had before rather than invent one.
   const mixed: WorktreeAdmissionCensus = {
     rows: [
-      {root: "/repo/unadmitted", command: ""},
+      {root: "/repo/plain", command: ""},
       {root: "/repo/admitted", command: "scripts/fleet-worktree-admit.ts"},
     ],
     denial: "",
@@ -694,7 +711,7 @@ pipeline test_relative_cd_is_not_resolved_into_a_repository(harness: Harness, ta
   // allowance above is about the relative path and not about the rule being
   // off on this census.
   const absolute = decision(
-    codex_payload("cd /repo/unadmitted && git worktree add ../lane origin/main"),
+    codex_payload("cd /repo/admitted && git worktree add ../lane origin/main"),
     mixed,
     NO_MAKE_TARGETS,
   )
@@ -725,37 +742,50 @@ pipeline test_no_measured_repository_owning_admission_still_allows(
 }
 
 @test
-pipeline test_borrowed_admission_command_named_in_a_refusal_exists(
+pipeline test_the_admission_command_named_in_a_refusal_exists(
   harness: Harness,
   task: unknown,
 ) {
   // The defect this rule exists to remove is a refusal naming a path that is
   // not there, so the assertion reads the path back out of the refusal and
-  // checks it, rather than trusting the sentence. Fixture repositories, never
-  // a real checkout: a test that passes because the host happens to be laid
-  // out a certain way measures the host.
+  // checks it on disk, rather than trusting the sentence. The path is read
+  // relative to the repository the refusal is about, which is the only
+  // repository the sentence offers it in. Fixture repositories, never a real
+  // checkout: a test that passes because the host happens to be laid out a
+  // certain way measures the host.
   const fixtures = harness.fs.mkdtemp_in_workspace("shell-guard-admission-")
-  const lender = path_join(fixtures, "lender")
-  const borrower = path_join(fixtures, "borrower")
-  const command_path = path_join(lender, WORKTREE_ADMISSION_POLICY.admission_command_paths[0] ?? "")
-  harness.fs.write_text(command_path, "// fixture admission command\n")
-  harness.fs.write_text(path_join(borrower, "README.md"), "no admission command here\n")
+  const target = path_join(fixtures, "target")
+  const other = path_join(fixtures, "other")
+  const relative = WORKTREE_ADMISSION_POLICY.admission_command_paths[0] ?? ""
+  harness.fs.write_text(path_join(target, relative), "// fixture admission command\n")
+  harness.fs.write_text(path_join(other, "README.md"), "no admission command here\n")
   const census: WorktreeAdmissionCensus = {
-    rows: [
-      {root: lender, command: WORKTREE_ADMISSION_POLICY.admission_command_paths[0] ?? ""},
-      {root: borrower, command: ""},
-    ],
+    rows: [{root: other, command: ""}, {root: target, command: relative}],
     denial: "",
   }
   const refused = decision(
-    codex_payload("cd " + borrower + " && git worktree add ../lane origin/main"),
+    codex_payload("cd " + target + " && git worktree add ../lane origin/main"),
     census,
     NO_MAKE_TARGETS,
   )
-  assert(!refused.allow, "a borrower repository must be refused")
-  const after = refused.reason.split("configured at ")
-  assert_eq(len(after), 2, "the refusal must name one configured command: " + refused.reason)
-  const named = to_string(after[1] ?? "").split(" with `")[0] ?? ""
-  assert(named != "", "the refusal must name a path: " + refused.reason)
-  assert(harness.fs.exists(named), "the refusal named a command that does not exist: " + named)
+  assert(!refused.allow, "a repository that owns admission must be refused")
+  assert_eq(
+    len(refused.reason.split("provides it at ")),
+    2,
+    "the refusal must name one command: " + refused.reason,
+  )
+  // The path is matched against the paths this policy knows rather than cut
+  // out of the sentence, so the assertion also proves the refusal names one
+  // of them and never an improvised path.
+  let named = ""
+  for candidate in WORKTREE_ADMISSION_POLICY.admission_command_paths {
+    if refused.reason.contains("provides it at " + candidate + ".") {
+      named = candidate
+    }
+  }
+  assert(named != "", "the refusal must name a path this policy knows: " + refused.reason)
+  assert(
+    harness.fs.exists(path_join(target, named)),
+    "the refusal named a command that does not exist in the repository it is about: " + named,
+  )
 }

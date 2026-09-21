@@ -474,15 +474,29 @@ fn cd_target(argv: list<string>) -> string {
   if argv_program(argv) != "cd" {
     return ""
   }
-  // `cd -- <path>` is the standard spelling for a directory that could
-  // otherwise be read as an option, so the separator is stepped over rather
-  // than taken as the argument. Reading `--` as the directory answers "no
-  // absolute target" and sends the refusal back to the guard's own
-  // repository, which is the failure this rule exists to remove.
+  // OPTIONS ARE NOT THE DESTINATION. `cd` takes option words, and reading the
+  // first one as the directory answers "no absolute target", which leaves the
+  // working directory empty and the raw command ALLOWED in a repository that
+  // advertises an admission command. `-P` is what a script writes when it
+  // wants the physical path, so this is an ordinary spelling rather than an
+  // exotic one.
+  //
+  // `--` ends option processing rather than being skipped like an option: a
+  // directory literally named `-P` is reachable as `cd -- -P`, and treating
+  // the token after `--` as another option would lose it.
+  //
+  // A bare `-` is an operand, not an option. It means the previous directory,
+  // which this guard has no way to resolve, so it falls through to the
+  // not-absolute answer below rather than being stepped over in search of a
+  // later token that was never the destination.
+  let options_ended = false
   let target = ""
   for token in argv.slice(1, len(argv)) {
-    if token == "--" {
-      target = ""
+    if !options_ended && token == "--" {
+      options_ended = true
+      continue
+    }
+    if !options_ended && token != "-" && token.starts_with("-") {
       continue
     }
     target = token
@@ -808,6 +822,10 @@ pub fn worktree_admission_for(
   if census.denial != "" {
     return {available: false, command: "", denial: census.denial}
   }
+  // Row zero is not an arbitrary row: the wrapper reports its own repository
+  // root first, so a command with no directory of its own is judged against
+  // the repository this guard is installed in, which is where it will run.
+  // That is the target, not a stand-in for one.
   if target == "" || !target.starts_with("/") {
     return admission_of(census.rows[0] ?? {root: "", command: ""})
   }
@@ -832,21 +850,11 @@ pub fn worktree_admission_for(
 }
 
 /**
- * A measured repository whose admission command can admit another repository.
+ * The admission command a measured repository configures for itself.
  *
- * Any row with a command will do: an admission command takes the repository it
- * acts on as an argument, so which one lends it does not change the outcome.
- * The first is taken to keep the answer stable across runs.
+ * A row with no command is a repository that has stated it configures none.
+ * That answer is its own, and it is never filled in from another row.
  */
-fn admission_lender(census: WorktreeAdmissionCensus) -> WorktreeAdmissionRow {
-  for row in census.rows {
-    if row.command != "" {
-      return row
-    }
-  }
-  return {root: "", command: ""}
-}
-
 fn admission_of(row: WorktreeAdmissionRow) -> WorktreeAdmission {
   if row.command == "" {
     return {available: false, command: "", denial: ""}
@@ -874,12 +882,23 @@ pub fn decision(
   }
   const attempt = raw_worktree_add_attempt(command)
   if attempt.reason != "" {
+    // ONE RULE, FOUR ANSWERS. The refusal rests on the admission command of
+    // the repository the command targets, and on no other repository's:
+    //
+    //   the census could not be read      -> deny, saying so
+    //   the target row has a command      -> deny, naming that command
+    //   the target row has none           -> allow, and do not police it
+    //   no target resolves                -> answer for row zero, which the
+    //                                        wrapper reports as its own root
+    //
+    // Row zero is not a stand-in for an unresolved target. The wrapper puts
+    // its own repository first, so a command that names no directory will run
+    // there, and that repository is the target.
+    //
     // The rule is pure argv analysis, so it fires wherever this guard is
-    // wired. Only the repository the command actually targets can be told to
-    // use an admission command, and only if that repository has one: the
-    // census used to be taken against the guard's own installation, so a
-    // command pointing at another repository was refused and sent to a path
-    // that does not exist there.
+    // wired. The census used to be taken against the guard's own installation
+    // whatever the command targeted, so a command pointing at another
+    // repository was refused and sent to a path that does not exist there.
     const admission = worktree_admission_for(census, attempt.target)
     if admission.denial != "" {
       return {
@@ -896,28 +915,18 @@ pub fn decision(
         reason: attempt.reason + " That repository provides it at " + admission.command + ".",
       }
     }
-    // The repository owns no admission command. It is not exempt: an
-    // admission command admits whichever repository it is pointed at, so a
-    // measured repository that owns one can admit this one. Only when no
-    // measured repository owns any is there nothing to name, and only then
-    // does the raw command stay allowed.
-    const lender = admission_lender(census)
-    if lender.command != "" && attempt.target != "" {
-      return {
-        allow: false,
-        reason: attempt.reason
-          + " The repository it targets carries none of its own, so run the admission command "
-          + "configured at "
-          + lender.root
-          + "/"
-          + lender.command
-          + " with `"
-          + WORKTREE_ADMISSION_POLICY.borrowed_root_argument
-          + " "
-          + attempt.target
-          + "`; it admits whichever repository it is pointed at.",
-      }
-    }
+    // THE TARGET'S OWN COMMAND, OR NONE. A measured repository that advertises
+    // no admission command has stated its own contract, and the guard cannot
+    // establish that some other root's command admits it. Reaching into
+    // another row produced a refusal rooted at a repository the operator had
+    // not named, pointed at one the lender may know nothing about: a remedy
+    // that costs the operator an attempt and then fails where this guard
+    // cannot see it.
+    //
+    // So the raw command stays allowed here, which is the behaviour this rule
+    // had before the borrowing was added. That is a real loosening and worth
+    // naming: a repository the fleet measures but gives no admission command
+    // is one the fleet has not asked this rule to police.
   }
   const cargo = cargo_violation(command)
   if cargo != "" {
