@@ -65,6 +65,17 @@ pub(crate) fn cancelled_error(dispatch: HandlerDispatch) -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(CANCELLATION_PAYLOAD)))
 }
 
+/// The cancellation for an observer that holds no machine to dispatch through.
+///
+/// Named rather than spelled out at each site, because the three
+/// token-holding families repeat it and the name says the same thing the
+/// variant does. The frame that awaits the operation dispatches on its behalf.
+pub(crate) fn cancelled_without_machine() -> VmError {
+    cancelled_error(HandlerDispatch::NotDispatched(
+        NotDispatchedReason::NoMachineInScope,
+    ))
+}
+
 /// Whether this error is the host cancellation.
 ///
 /// The payload is matched here and nowhere else, so a caller asking "was this

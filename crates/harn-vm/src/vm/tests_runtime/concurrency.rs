@@ -834,12 +834,12 @@ fn test_handler_runs_when_an_async_builtin_observes_the_cancel() {
     let handler_counter = std::sync::Arc::clone(&handler_runs);
     let continued_counter = std::sync::Arc::clone(&continued);
 
-    let source = r#"
+    let source = r"
 pipeline t(harness: Harness) {
   cancel_from_inside()
   mark_continued()
 }
-"#;
+";
 
     let result = run_harn_with_setup(source, move |vm| {
         vm.register_builtin("cancel_marker", move |_, _| {

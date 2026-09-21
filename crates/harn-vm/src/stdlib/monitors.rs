@@ -1,4 +1,4 @@
-use crate::cancellation::{cancelled_error, HandlerDispatch, NotDispatchedReason};
+use crate::cancellation::cancelled_without_machine;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -566,9 +566,7 @@ fn monitor_headers(wait_id: &str, source_label: Option<&str>) -> BTreeMap<String
 
 fn monitor_record_to_value(record: MonitorWaitRecord) -> Result<VmValue, VmError> {
     if record.status == MonitorWaitStatus::Interrupted {
-        return Err(cancelled_error(HandlerDispatch::NotDispatched(
-            NotDispatchedReason::NoMachineInScope,
-        )));
+        return Err(cancelled_without_machine());
     }
     serde_json::to_value(record)
         .map_err(|error| VmError::Runtime(error.to_string()))

@@ -1,4 +1,4 @@
-use crate::cancellation::{cancelled_error, HandlerDispatch, NotDispatchedReason};
+use crate::cancellation::cancelled_without_machine;
 use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -828,9 +828,7 @@ where
     let mut waited_ms = 0_u64;
     loop {
         if is_cancelled() {
-            return Err(cancelled_error(HandlerDispatch::NotDispatched(
-                NotDispatchedReason::NoMachineInScope,
-            )));
+            return Err(cancelled_without_machine());
         }
 
         let now_ms = now_wall_ms();
@@ -921,9 +919,7 @@ where
                 .await?;
                 waiter.ticket_id = None;
             }
-            return Err(cancelled_error(HandlerDispatch::NotDispatched(
-                NotDispatchedReason::NoMachineInScope,
-            )));
+            return Err(cancelled_without_machine());
         }
 
         let now_ms = now_wall_ms();

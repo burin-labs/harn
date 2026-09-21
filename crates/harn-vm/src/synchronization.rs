@@ -1,4 +1,4 @@
-use crate::cancellation::{cancelled_error, HandlerDispatch, NotDispatchedReason};
+use crate::cancellation::cancelled_without_machine;
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -138,9 +138,7 @@ impl VmSyncRuntime {
         {
             let primitive = self.primitive(kind, key, capacity)?;
             primitive.record_cancel();
-            return Err(cancelled_error(HandlerDispatch::NotDispatched(
-                NotDispatchedReason::NoMachineInScope,
-            )));
+            return Err(cancelled_without_machine());
         }
 
         let primitive = self.primitive(kind, key, capacity)?;
@@ -169,40 +167,36 @@ impl VmSyncRuntime {
             let mut cancel_poll = tokio::time::interval(Duration::from_millis(10));
             loop {
                 tokio::select! {
-                        permit = &mut acquire => break permit.map(Some),
-                        _ = &mut timeout => break Ok(None),
-                        _ = cancel_poll.tick(), if cancel_token.is_some() => {
-                            if cancel_token
-                                .as_ref()
-                                .is_some_and(|token| token.load(Ordering::SeqCst))
-                            {
-                                primitive.record_dequeued();
-                                primitive.record_cancel();
-                                return Err(cancelled_error(HandlerDispatch::NotDispatched(
-                    NotDispatchedReason::NoMachineInScope,
-                )));
-                            }
+                    permit = &mut acquire => break permit.map(Some),
+                    _ = &mut timeout => break Ok(None),
+                    _ = cancel_poll.tick(), if cancel_token.is_some() => {
+                        if cancel_token
+                            .as_ref()
+                            .is_some_and(|token| token.load(Ordering::SeqCst))
+                        {
+                            primitive.record_dequeued();
+                            primitive.record_cancel();
+                            return Err(cancelled_without_machine());
                         }
                     }
+                }
             }
         } else {
             let mut cancel_poll = tokio::time::interval(Duration::from_millis(10));
             loop {
                 tokio::select! {
-                        permit = &mut acquire => break permit.map(Some),
-                        _ = cancel_poll.tick(), if cancel_token.is_some() => {
-                            if cancel_token
-                                .as_ref()
-                                .is_some_and(|token| token.load(Ordering::SeqCst))
-                            {
-                                primitive.record_dequeued();
-                                primitive.record_cancel();
-                                return Err(cancelled_error(HandlerDispatch::NotDispatched(
-                    NotDispatchedReason::NoMachineInScope,
-                )));
-                            }
+                    permit = &mut acquire => break permit.map(Some),
+                    _ = cancel_poll.tick(), if cancel_token.is_some() => {
+                        if cancel_token
+                            .as_ref()
+                            .is_some_and(|token| token.load(Ordering::SeqCst))
+                        {
+                            primitive.record_dequeued();
+                            primitive.record_cancel();
+                            return Err(cancelled_without_machine());
                         }
                     }
+                }
             }
         };
 

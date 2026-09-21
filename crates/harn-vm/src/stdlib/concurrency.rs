@@ -1,4 +1,4 @@
-use crate::cancellation::{cancelled_error, HandlerDispatch, NotDispatchedReason};
+use crate::cancellation::cancelled_without_machine;
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -1028,9 +1028,7 @@ async fn mailbox_receive_builtin(
             .as_ref()
             .is_some_and(|token| token.load(Ordering::SeqCst))
         {
-            return Err(cancelled_error(HandlerDispatch::NotDispatched(
-                NotDispatchedReason::NoMachineInScope,
-            )));
+            return Err(cancelled_without_machine());
         }
         if channel.is_closed() {
             let mut rx = channel.receiver.lock().await;
@@ -1318,9 +1316,7 @@ async fn sleep_builtin(
             _ = &mut sleep => break,
             _ = poll.tick() => {
                 if vm.is_cancel_requested() {
-                    return Err(cancelled_error(HandlerDispatch::NotDispatched(
-                NotDispatchedReason::NoMachineInScope,
-            )));
+                    return Err(cancelled_without_machine());
                 }
             }
         }
@@ -1479,9 +1475,7 @@ async fn receive_builtin(
                 }
                 _ = cancel_poll.tick() => {
                     if vm.is_cancel_requested() {
-                        return Err(cancelled_error(HandlerDispatch::NotDispatched(
-                NotDispatchedReason::NoMachineInScope,
-            )));
+                        return Err(cancelled_without_machine());
                     }
                 }
             }
