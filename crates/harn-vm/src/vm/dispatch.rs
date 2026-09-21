@@ -1053,18 +1053,9 @@ impl Vm {
         // here, once, for every builtin.
         let result = match result {
             Err(error) if crate::cancellation::is_cancellation(&error) => {
-                // Replay is the one case that must not dispatch. The handlers
-                // ran when the run was live and their effects are already
-                // recorded; running them again would repeat those effects.
-                // The replay fact has a single owner, which is read here
-                // rather than re-derived per call site.
-                if crate::triggers::dispatcher::is_replay() {
-                    crate::cancellation::note_not_dispatched(
-                        crate::cancellation::NotDispatchedReason::ReplayPath,
-                    );
-                } else {
-                    self.dispatch_handlers_for_observed_cancel().await?;
-                }
+                // The dispatcher itself decides whether handlers run, including
+                // refusing to on a replay, so this frame only has to reach it.
+                self.dispatch_handlers_for_observed_cancel().await?;
                 Err(error)
             }
             other => other,

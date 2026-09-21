@@ -222,6 +222,17 @@ impl Vm {
     ///
     /// Returns whether handlers ran.
     pub(crate) async fn dispatch_handlers_for_observed_cancel(&mut self) -> Result<bool, VmError> {
+        // Replay is refused here, in the one function every observer calls,
+        // rather than at each caller. Handlers ran when the run was live and
+        // their effects are recorded; running them again repeats those
+        // effects. The replay fact is read from its single owner.
+        if crate::triggers::dispatcher::is_replay() {
+            crate::cancellation::note_not_dispatched(
+                crate::cancellation::NotDispatchedReason::ReplayPath,
+            );
+            return Ok(false);
+        }
+
         let delivered = self
             .pending_interrupt_signal
             .take()
