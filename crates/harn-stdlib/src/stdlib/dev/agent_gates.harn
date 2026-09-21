@@ -8,11 +8,13 @@ pub type AgentGateEntry = {
   kind: string,
   layer: "runner" | "stop decision" | "stall handler",
   default: string,
-  // `line` is a human hint only. The checker compares file and reader symbol,
-  // never the line, because an edit anywhere above a reader moves it without
-  // changing what reads what. A refreshed registry carries current lines; a
-  // registry that has not been regenerated since an unrelated edit does not.
-  readers: list<{file: string, line: int, reader: string}>,
+  // File and reader symbol, and nothing that moves when unrelated code moves.
+  // `line` was persisted here and was a human hint only: the checker never
+  // compared it, no projection rendered it, and an edit anywhere above a
+  // reader changed it without changing what reads what. So it rotted on every
+  // unrelated commit while nothing asserted it. It is accepted on read so
+  // registries written before it was dropped still decode, and never written.
+  readers: list<{file: string, line?: int, reader: string}>,
   reachability: "yes" | "no" | "unknown",
   evidence: string,
   verdict: "DELETE" | "PROMOTE-TO-DEFAULT" | "KEEP-with-expiry",
@@ -336,24 +338,21 @@ fn cell(text: string) -> string {
 }
 
 /**
- * The stable identity of a reader: the file it lives in and the symbol that
- * does the reading.
+ * The text an entry shard is supposed to contain.
  *
- * Deliberately excludes the line. Comparing whole reader records made this
- * gate fail on line movement alone, and it reported dozens of stale entries
- * while every reader was exactly where the registry said it was. A gate that
- * fails on nothing is one people learn to skip, and this one sat in a job
- * whose later checks a failure skips.
+ * One owner for both directions. `--write` writes this and the check compares
+ * the committed file against it, so the checker asserts everything the writer
+ * writes. It used to assert a subset, comparing readers by file and symbol
+ * only, and the field it skipped was the one the writer kept changing.
  * @effects: []
- * @errors: []
+ * @errors: [io]
  * @api_stability: experimental
  */
-fn reader_identities(readers: list<{file: string, line: int, reader: string}>) -> list<string> {
-  let identities: list<string> = []
-  for reader in readers {
-    identities = identities + [reader.file + "::" + reader.reader]
-  }
-  return identities
+fn intended_entry_shard(fs: HarnessFs, file: string, entries: list<AgentGateEntry>) -> string {
+  const previous = schema_expect(json_parse(fs.read_text(file)), schema_of(AgentGateEntries))
+  const names = previous.map(fn(entry) { return entry.name })
+  return json_stringify_pretty(entries.filter(fn(entry) { return contains(names, entry.name) }))
+    + "\n"
 }
 
 /**
@@ -422,13 +421,13 @@ fn observed_entries(
 ) -> list<AgentGateEntry> {
   return entries.map(
     fn(entry) {
-      let readers: list<{file: string, line: int, reader: string}> = []
+      let readers: list<{file: string, line?: int, reader: string}> = []
       let seen: list<string> = []
       for read in reads {
         if read.name != entry.name {
           continue
         }
-        const reader = {file: read.file, line: read.line, reader: read.reader}
+        const reader = {file: read.file, reader: read.reader}
         const identity = json_stringify(reader)
         if !contains(seen, identity) {
           readers = readers + [reader]
@@ -443,13 +442,7 @@ fn observed_entries(
 
 fn write_observed_entries(fs: HarnessFs, files: list<string>, entries: list<AgentGateEntry>) {
   for file in files {
-    const previous = schema_expect(json_parse(fs.read_text(file)), schema_of(AgentGateEntries))
-    const names = previous.map(fn(entry) { return entry.name })
-    fs.write_text(
-      file,
-      json_stringify_pretty(entries.filter(fn(entry) { return contains(names, entry.name) }))
-        + "\n",
-    )
+    fs.write_text(file, intended_entry_shard(fs, file, entries))
   }
 }
 
@@ -603,15 +596,9 @@ pub fn agent_gate_audit(
   if write {
     write_observed_entries(harness.fs, registry.entry_files, observed)
   } else {
-    for index in range(0, len(entries)) {
-      const expected_entry = entries[index]
-      const observed_entry = observed[index]
-      if expected_entry == nil || observed_entry == nil {
-        throw "missing observed entry"
-      }
-      if reader_identities(expected_entry.readers)
-        != reader_identities(observed_entry.readers) {
-        failures = failures + ["stale readers " + expected_entry.name]
+    for file in registry.entry_files {
+      if harness.fs.read_text(file) != intended_entry_shard(harness.fs, file, observed) {
+        failures = failures + ["stale entry shard " + file]
       }
     }
   }

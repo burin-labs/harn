@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 277,
         "reader": "__normalize_consecutive_failure_budget"
       }
     ],
@@ -28,12 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 269,
-        "reader": "__normalize_consecutive_failure_budget"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 273,
         "reader": "__normalize_consecutive_failure_budget"
       }
     ],
@@ -51,7 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 294,
         "reader": "__normalize_consecutive_failure_budget"
       }
     ],

@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/cost.rs",
-        "line": 333,
         "reader": "get"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/cost.rs",
-        "line": 339,
         "reader": "get"
       }
     ],
@@ -46,7 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/cost.rs",
-        "line": 342,
         "reader": "get"
       }
     ],
@@ -64,7 +61,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/helpers/options/routing.rs",
-        "line": 234,
         "reader": "get"
       }
     ],
@@ -82,7 +78,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/helpers/options/routing.rs",
-        "line": 220,
         "reader": "get"
       }
     ],
@@ -100,7 +95,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/routing.rs",
-        "line": 833,
         "reader": "native-model-step-identity"
       }
     ],
@@ -118,7 +112,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/routing.rs",
-        "line": 839,
         "reader": "native-model-step-identity"
       }
     ],
@@ -136,7 +129,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/routing.rs",
-        "line": 840,
         "reader": "native-model-step-identity"
       }
     ],
@@ -154,7 +146,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/routing.rs",
-        "line": 841,
         "reader": "get"
       }
     ],
@@ -194,7 +185,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/helpers/options/system_prompt.rs",
-        "line": 109,
         "reader": "get"
       }
     ],
@@ -212,7 +202,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/helpers/options/system_prompt.rs",
-        "line": 128,
         "reader": "get"
       }
     ],

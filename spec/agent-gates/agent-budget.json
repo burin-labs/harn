@@ -10,22 +10,10 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/cost.rs",
-        "line": 336,
         "reader": "get"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
-        "line": 47,
-        "reader": "agent_budget_post_call_stop_reason"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
-        "line": 50,
-        "reader": "agent_budget_post_call_stop_reason"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
-        "line": 55,
         "reader": "agent_budget_post_call_stop_reason"
       }
     ],
@@ -43,17 +31,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
-        "line": 34,
-        "reader": "agent_budget_post_call_stop_reason"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
-        "line": 37,
-        "reader": "agent_budget_post_call_stop_reason"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
-        "line": 38,
         "reader": "agent_budget_post_call_stop_reason"
       }
     ],
@@ -71,7 +48,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/cost.rs",
-        "line": 319,
         "reader": "get"
       }
     ],

@@ -22,7 +22,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/stage.harn",
-        "line": 546,
         "reader": "__stage_compaction_options"
       }
     ],
@@ -184,7 +183,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/stage.harn",
-        "line": 545,
         "reader": "__stage_compaction_options"
       }
     ],
@@ -274,7 +272,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/stage.harn",
-        "line": 836,
         "reader": "__stage_max_attempts"
       }
     ],

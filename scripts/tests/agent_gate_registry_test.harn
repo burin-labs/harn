@@ -290,6 +290,48 @@ pipeline test_audit_regenerates_reader_locations_and_refuses_drift(
 }
 
 @test
+pipeline test_audit_compares_every_byte_the_writer_wrote(harness: Harness, task: unknown) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-shard-drift")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const source = path_join(dir, "source.harn")
+  const entries = path_join(dir, "entries.json")
+  const manifest = path_join(dir, "registry.json")
+  let config = registry(source)
+  config.entry_files = [entries]
+  config.projections = [
+    {layer: "runner", file: path_join(dir, "runner.md")},
+    {layer: "stop decision", file: path_join(dir, "stop.md")},
+    {layer: "stall handler", file: path_join(dir, "stall.md")},
+  ]
+  harness.fs.write_text(entries, json_stringify([entry()]))
+  harness.fs.write_text(manifest, json_stringify(config))
+  harness.fs.write_text(source, "fn example(options: dict) { return options.enabled }\n")
+  const capabilities = pick(harness, ["ast", "fs", "process"])
+  assert_eq(agent_gate_audit(capabilities, manifest, true).pending, 0)
+  // The writer records what reads what, and nothing that moves when unrelated
+  // code moves. A persisted line was neither compared nor rendered anywhere,
+  // so it went stale on every edit above a reader while nothing asserted it.
+  const written = harness.fs.read_text(entries)
+  assert(!contains(written, "\"line\""), "a shard must not persist a reader line: ${written}")
+  // The positive control. Without it a checker that refuses every shard would
+  // pass the assertion below and look like a working gate.
+  assert_eq(agent_gate_audit(capabilities, manifest).pending, 0)
+  // The regression. A shard edited away from what the writer would write is
+  // refused and named. The old checker compared readers by file and symbol
+  // only, so anything else a shard carried could differ without being seen.
+  const edited = replace(written, "\"reader\": \"options\"", "\"reader\": \"renamed\"")
+  assert(edited != written, "the edit must change the shard or the rerun proves nothing")
+  harness.fs.write_text(entries, edited)
+  const drifted = agent_gate_audit(capabilities, manifest)
+  assert(
+    contains(drifted.failures, "stale entry shard ${entries}"),
+    "an edited shard must be refused by name: ${json_stringify(drifted.failures)}",
+  )
+}
+
+@test
 pipeline test_binding_source_files_are_required_and_audited(harness: Harness, task: unknown) {
   const dir = harness.fs.mkdtemp_in_workspace("gate-binding-source")
   defer {

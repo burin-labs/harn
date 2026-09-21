@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 285,
         "reader": "__compaction_enabled"
       }
     ],
@@ -28,12 +27,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 8,
         "reader": "__compaction_strategy_label"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 295,
         "reader": "__compaction_enabled"
       }
     ],
@@ -51,7 +48,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 153,
         "reader": "__compaction_keep_last"
       }
     ],

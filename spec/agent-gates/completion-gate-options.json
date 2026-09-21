@@ -10,12 +10,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 313,
         "reader": "__completion_gate_evaluate"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 183,
         "reader": "__completion_gate_validate_options"
       }
     ],
@@ -33,28 +31,11 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 193,
         "reader": "__completion_gate_validate_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 383,
         "reader": "__completion_gate_evaluate"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 198,
-        "reader": "__completion_gate_validate_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 194,
-        "reader": "__completion_gate_validate_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 195,
-        "reader": "__completion_gate_validate_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -71,28 +52,11 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 186,
         "reader": "__completion_gate_validate_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 382,
         "reader": "__completion_gate_evaluate"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 191,
-        "reader": "__completion_gate_validate_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 187,
-        "reader": "__completion_gate_validate_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 188,
-        "reader": "__completion_gate_validate_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -109,22 +73,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 315,
         "reader": "__completion_gate_evaluate"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 180,
         "reader": "__completion_gate_validate_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 183,
-        "reader": "__completion_gate_validate_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 458,
         "reader": "agent_completion_gate"
       }
     ],
@@ -142,7 +98,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 422,
         "reader": "__completion_gate_evaluate"
       }
     ],
@@ -160,12 +115,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 206,
         "reader": "__completion_gate_validate_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 408,
         "reader": "__completion_gate_evaluate"
       }
     ],
@@ -183,7 +136,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 469,
         "reader": "agent_completion_gate"
       }
     ],
@@ -201,28 +153,11 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 200,
         "reader": "__completion_gate_validate_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 202,
-        "reader": "__completion_gate_validate_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 476,
         "reader": "agent_completion_gate"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 201,
-        "reader": "__completion_gate_validate_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 204,
-        "reader": "__completion_gate_validate_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -239,12 +174,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 316,
         "reader": "__completion_gate_evaluate"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 465,
         "reader": "agent_completion_gate"
       }
     ],
@@ -262,12 +195,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 371,
         "reader": "__completion_gate_evaluate"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 466,
         "reader": "agent_completion_gate"
       }
     ],
@@ -285,12 +216,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 366,
-        "reader": "__completion_gate_evaluate"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 367,
         "reader": "__completion_gate_evaluate"
       }
     ],
@@ -308,12 +233,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 314,
         "reader": "__completion_gate_evaluate"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 458,
         "reader": "agent_completion_gate"
       }
     ],
@@ -331,17 +254,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 180,
         "reader": "__completion_gate_validate_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 362,
         "reader": "__completion_gate_evaluate"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "line": 456,
         "reader": "agent_completion_gate"
       }
     ],

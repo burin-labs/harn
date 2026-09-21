@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
-        "line": 120,
         "reader": "__agent_stop_options"
       }
     ],
@@ -28,12 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
-        "line": 124,
-        "reader": "__agent_stop_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
-        "line": 127,
         "reader": "__agent_stop_options"
       }
     ],

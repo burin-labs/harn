@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-        "line": 326,
         "reader": "__agent_loop_context_overflow_max_recoveries"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-        "line": 101,
         "reader": "__autocontinue_max_continuations"
       }
     ],
@@ -46,17 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-        "line": 121,
-        "reader": "__autocontinue_raised_cap"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-        "line": 118,
-        "reader": "__autocontinue_raised_cap"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-        "line": 119,
         "reader": "__autocontinue_raised_cap"
       }
     ],
@@ -74,17 +61,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-        "line": 128,
-        "reader": "__autocontinue_raised_cap"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-        "line": 125,
-        "reader": "__autocontinue_raised_cap"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-        "line": 126,
         "reader": "__autocontinue_raised_cap"
       }
     ],

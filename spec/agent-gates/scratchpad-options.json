@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-        "line": 78,
         "reader": "agent_scratchpad_options"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-        "line": 97,
         "reader": "agent_scratchpad_options"
       }
     ],
@@ -46,7 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-        "line": 81,
         "reader": "agent_scratchpad_options"
       }
     ],
@@ -64,7 +61,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-        "line": 84,
         "reader": "agent_scratchpad_options"
       }
     ],
@@ -82,7 +78,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-        "line": 89,
         "reader": "agent_scratchpad_options"
       }
     ],
@@ -100,7 +95,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-        "line": 94,
         "reader": "agent_scratchpad_options"
       }
     ],
@@ -118,7 +112,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-        "line": 98,
         "reader": "agent_scratchpad_options"
       }
     ],
