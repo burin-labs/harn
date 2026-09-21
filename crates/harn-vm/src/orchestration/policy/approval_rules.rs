@@ -1180,7 +1180,7 @@ fn path_entry_json(entry: &WorkspacePathInfo) -> JsonValue {
     })
 }
 
-fn command_candidates(args: &JsonValue) -> (Vec<String>, Vec<String>) {
+pub(crate) fn command_candidates(args: &JsonValue) -> (Vec<String>, Vec<String>) {
     let mut commands = Vec::new();
     let mut identities = Vec::new();
     if let Some(command) = string_field(args, "command").or_else(|| string_field(args, "cmd")) {
