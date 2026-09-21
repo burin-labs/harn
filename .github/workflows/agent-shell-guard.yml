@@ -1,0 +1,103 @@
+name: Agent shell guard
+
+# THE GUARD'S TESTS, WHERE THE GUARD IS REVIEWED.
+#
+# They already existed and already worked. What they could not do is run on a
+# pull request: their only caller is a broad sweep gated on a push to the
+# default branch, so three consecutive guard changes were reviewed with nothing
+# exercising them, the middle one reddened the default branch, and the fix for
+# that redness was itself merged without the adapter test having run against it
+# once.
+#
+# So this lane is narrow on purpose. It starts only for a change to the guard,
+# its adapter, or their two tests, and it is the whole cost such a change pays.
+# Nothing else starts it.
+on:
+  pull_request:
+    paths:
+      - 'scripts/agent_shell_guard.harn'
+      - 'scripts/agent_shell_guard_policy.harn'
+      - 'scripts/agent-shell-guard.sh'
+      - 'scripts/tests/agent_shell_guard_adapter_test.sh'
+      - 'scripts/tests/agent_shell_guard_test.harn'
+      - 'scripts/harn_test_env.sh'
+      - '.github/workflows/agent-shell-guard.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-shell-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Run the guard's tests on the runtime its consumers pin
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # THE PUBLISHED RELEASE, NOT THIS BRANCH'S BUILD, and that is the point
+      # rather than a saving. The guard's sources are rendered onto consumers
+      # that pin the previous release, so the floor a construct has to clear is
+      # the oldest runtime any consumer runs, never the one this branch would
+      # produce. A lane that built from source here would go green on exactly
+      # the construct that breaks every consumer the day it is rendered.
+      #
+      # It is also what keeps the lane cheap enough to be narrow: no toolchain,
+      # no compile, one download.
+      - name: Fetch the published runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/harn-release"
+          mkdir -p "$dir"
+          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          echo "released runtime: $tag"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'harn-x86_64-unknown-linux-gnu.tar.gz' \
+            --pattern 'SHA256SUMS' --dir "$dir"
+          cd "$dir"
+          # A downloaded executable is checked before it is run, and the check
+          # is scoped to the one asset: `sha256sum -c` on the whole file would
+          # fail on every asset this job deliberately did not download.
+          grep 'harn-x86_64-unknown-linux-gnu.tar.gz' SHA256SUMS | sha256sum -c -
+          tar -xzf harn-x86_64-unknown-linux-gnu.tar.gz
+          # Located rather than assumed: the archive's internal layout is the
+          # release pipeline's to change, and a hard-coded path would fail as a
+          # missing file long after the reason was forgotten.
+          binary="$(find "$dir" -type f -name harn -perm -u+x | head -1)"
+          if [ -z "$binary" ]; then
+            echo "::error::The released archive contained no executable named harn." >&2
+            exit 1
+          fi
+          "$binary" --version
+          echo "HARN_BIN=$binary" >> "$GITHUB_ENV"
+          echo "HARN_RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      # BOTH TESTS, AND THEY ARE NOT INTERCHANGEABLE. Measured against the
+      # guard as it stood when the default branch went red: the adapter test
+      # fails on the released runtime and the interface test passes. Only the
+      # adapter runs the guard through its real allow list, which is where a
+      # construct the runtime refuses turns every verdict into the same generic
+      # fault. Dropping it would leave this lane green on the defect it exists
+      # to catch.
+      - name: Run the guard through its adapter and its allow list
+        run: ./scripts/tests/agent_shell_guard_adapter_test.sh
+
+      - name: Run the guard's interface tests
+        run: >-
+          bash ./scripts/harn_test_env.sh "$HARN_BIN"
+          test scripts/tests/agent_shell_guard_test.harn
+
+      - name: Say which runtime judged this change
+        if: always()
+        run: |
+          echo "The guard was exercised against $HARN_RELEASE_TAG, the runtime a" \
+            "consumer pinned to the previous release runs." >> "$GITHUB_STEP_SUMMARY"
