@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use crate::orchestration::CapabilityPolicy;
@@ -81,6 +82,74 @@ fn inherited_workspace_cache_path(policy: &CapabilityPolicy, key: &str) -> Optio
         .iter()
         .any(|root| path_is_within(&resolved, root))
         .then(|| resolved.display().to_string())
+}
+
+/// Where a toolchain home came from, so a caller can say which it did rather
+/// than reporting only the value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ToolchainHomeSource {
+    /// The variable was already set, and that value is kept.
+    Inherited,
+    /// The variable was unset, so it is derived from the home directory.
+    DerivedFromHome,
+}
+
+/// A toolchain home and the reason it holds that value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ToolchainHome {
+    pub path: String,
+    pub source: ToolchainHomeSource,
+}
+
+/// Resolve one toolchain home for a confined child.
+///
+/// An explicitly set value wins. Deriving from the home directory is the
+/// fallback for a name nobody set, never an override of one somebody did.
+///
+/// The order matters, and not only for a relocated home. A value that is
+/// recomputed is not a value that is inherited, and the difference is
+/// invisible in the result: both are absolute paths that look plausible. It
+/// shows up one layer down as a toolchain that is not there.
+///
+/// An empty or relative setting is treated as unset. A relative toolchain home
+/// resolves against the child's working directory, which is not where the
+/// caller meant, and silently honouring one would be a third answer nobody
+/// asked for.
+pub(crate) fn toolchain_home(name: &str, suffix: &str) -> Option<ToolchainHome> {
+    toolchain_home_from(
+        std::env::var_os(name).as_deref(),
+        crate::user_dirs::home_dir(),
+        suffix,
+    )
+}
+
+/// The resolution itself, taking what it reads.
+///
+/// Split from the reader the same way [`crate::user_dirs::home_dir_from`] is,
+/// and for the same reason: a rule that consults the process environment can
+/// only be asserted by mutating it, and a test that mutates the process
+/// environment is a test that races every other test in the binary. This one
+/// takes its inputs, so the rule is provable without touching the process at
+/// all.
+pub(crate) fn toolchain_home_from(
+    explicit: Option<&OsStr>,
+    home: Option<PathBuf>,
+    suffix: &str,
+) -> Option<ToolchainHome> {
+    if let Some(explicit) = explicit
+        .map(PathBuf::from)
+        .filter(|value| value.is_absolute())
+    {
+        return Some(ToolchainHome {
+            path: explicit.display().to_string(),
+            source: ToolchainHomeSource::Inherited,
+        });
+    }
+    let home = home.filter(|home| home.is_absolute())?;
+    Some(ToolchainHome {
+        path: home.join(suffix).display().to_string(),
+        source: ToolchainHomeSource::DerivedFromHome,
+    })
 }
 
 fn workspace_toolchain_env_with_package_cache(
@@ -174,15 +243,20 @@ fn workspace_toolchain_env_with_package_cache(
     // has the narrowly scoped write grants added in #5170; keeping CARGO_HOME
     // there also preserves private-registry configuration without copying
     // credentials into the workspace.
+    //
+    // An explicitly set value is kept rather than recomputed, which is what
+    // makes the sentence above true. Deriving these from the home directory
+    // was the opposite of resolving the user's real toolchains whenever the
+    // home was the relocated one: the derivation follows the relocation, so
+    // the child was pointed at a toolchain that does not exist. It is also
+    // wrong for anyone whose toolchain simply lives somewhere else, which is
+    // ordinary on a shared or containerized machine.
+    for (name, suffix) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+        if let Some(resolved) = toolchain_home(name, suffix) {
+            env.push((name.to_string(), resolved.path));
+        }
+    }
     if let Some(home) = crate::user_dirs::home_dir().filter(|home| home.is_absolute()) {
-        env.push((
-            "CARGO_HOME".to_string(),
-            home.join(".cargo").display().to_string(),
-        ));
-        env.push((
-            "RUSTUP_HOME".to_string(),
-            home.join(".rustup").display().to_string(),
-        ));
         for (key, candidate) in [
             ("GIT_CONFIG_GLOBAL", home.join(".gitconfig")),
             ("PIP_CONFIG_FILE", home.join(".config/pip/pip.conf")),
@@ -371,6 +445,89 @@ pub fn active_workspace_process_env() -> Vec<(String, String)> {
     let mut env = Vec::new();
     inject_workspace_process_env(&mut env, &policy);
     env
+}
+
+#[cfg(test)]
+mod toolchain_home_tests {
+    use super::{toolchain_home_from, ToolchainHomeSource};
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    /// An explicitly set toolchain home is kept, not recomputed.
+    ///
+    /// This is the whole defect. A confined child was handed
+    /// `<home>/.cargo` whatever the caller had set, so an outer harness that
+    /// relocated the home pointed the child at a toolchain that does not
+    /// exist, and an operator whose toolchain lives elsewhere had theirs
+    /// silently replaced.
+    #[test]
+    fn an_explicit_toolchain_home_is_inherited_not_derived() {
+        let resolved = toolchain_home_from(
+            Some(&OsString::from("/opt/cargo")),
+            Some(PathBuf::from("/relocated/home")),
+            ".cargo",
+        )
+        .expect("a set value always resolves");
+        assert_eq!(resolved.path, "/opt/cargo");
+        assert_eq!(resolved.source, ToolchainHomeSource::Inherited);
+    }
+
+    /// And the derivation still happens for a name nobody set, so the fix does
+    /// not turn into "the child gets nothing".
+    #[test]
+    fn an_unset_toolchain_home_is_derived_from_the_home_directory() {
+        let resolved = toolchain_home_from(None, Some(PathBuf::from("/users/real")), ".rustup")
+            .expect("an absolute home always resolves");
+        assert_eq!(resolved.path, "/users/real/.rustup");
+        assert_eq!(resolved.source, ToolchainHomeSource::DerivedFromHome);
+    }
+
+    /// The negative control for the overwrite: with both inputs present the
+    /// derived path must not be what comes back. Asserting only the value
+    /// would pass against a version that returned the explicit path for the
+    /// wrong reason, which is why the source is asserted beside it.
+    #[test]
+    fn a_set_value_is_never_overwritten_by_the_derived_one() {
+        let derived_would_be = "/relocated/home/.rustup";
+        let resolved = toolchain_home_from(
+            Some(&OsString::from("/opt/rustup")),
+            Some(PathBuf::from("/relocated/home")),
+            ".rustup",
+        )
+        .expect("a set value always resolves");
+        assert_ne!(
+            resolved.path, derived_would_be,
+            "the derivation overwrote a value the caller set"
+        );
+        assert_eq!(resolved.source, ToolchainHomeSource::Inherited);
+    }
+
+    /// A relative or empty setting is not a third answer.
+    ///
+    /// A relative toolchain home resolves against the child's working
+    /// directory, which is not where whoever set it meant. Honouring it would
+    /// be worse than either branch, so it reads as unset.
+    #[test]
+    fn a_relative_or_empty_setting_reads_as_unset() {
+        for setting in ["", "relative/cargo"] {
+            let resolved = toolchain_home_from(
+                Some(&OsString::from(setting)),
+                Some(PathBuf::from("/users/real")),
+                ".cargo",
+            )
+            .expect("the home directory still resolves");
+            assert_eq!(resolved.path, "/users/real/.cargo");
+            assert_eq!(resolved.source, ToolchainHomeSource::DerivedFromHome);
+        }
+    }
+
+    /// With nothing set and no usable home there is no answer to give, and
+    /// inventing a relative one would point the child at its own workspace.
+    #[test]
+    fn no_setting_and_no_absolute_home_resolves_to_nothing() {
+        assert!(toolchain_home_from(None, None, ".cargo").is_none());
+        assert!(toolchain_home_from(None, Some(PathBuf::from("relative")), ".cargo").is_none());
+    }
 }
 
 #[cfg(test)]
