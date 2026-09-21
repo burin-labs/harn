@@ -31,10 +31,23 @@ pub type GuidanceSource = {
 /** A source that was discovered but did not reach the model, and why. */
 pub type GuidanceOmission = {path: string, reason: string, bytes: int}
 
+/**
+ * One file the resolution depended on, and what became of it.
+ *
+ * `state` is `"read"` when the file was opened and its text used, and
+ * otherwise names why an import was not followed: `"hop_limit"` when the
+ * import budget was spent, `"cycle"` when the path was already being
+ * expanded, `"unreadable"` when it could not be opened. A refused import is
+ * still a dependency, because creating or fixing that file changes the next
+ * resolution. Absence from this list means the resolver never looked.
+ */
+pub type GuidanceDependency = {path: string, state: string}
+
 /** The complete resolution: what loaded, in order, and what did not. */
 pub type GuidanceResolution = {
   sources: list<GuidanceSource>,
   omitted: list<GuidanceOmission>,
+  dependencies: list<GuidanceDependency>,
   total_bytes: int,
   budget_bytes: int,
   dirs_scanned: int,
@@ -167,6 +180,9 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
   let seen_bodies: list<string> = []
   let seen_paths: list<string> = []
   let omitted: list<GuidanceOmission> = []
+  // Every file opened, plus every import resolved, whether or not it was
+  // followed. A caller watching for staleness needs all of them.
+  let dependencies: list<GuidanceDependency> = []
   for candidate in candidates {
     const names = if candidate.file != nil {
       [to_string(candidate.file)]
@@ -183,19 +199,21 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
         continue
       }
       seen_paths = seen_paths + [full]
+      dependencies = dependencies + [{path: full, state: "read"}]
       const text = to_string(raw)
       if len(text) > MAX_SINGLE_FILE_BYTES {
         omitted = omitted + [{path: full, reason: "file_too_large", bytes: len(text)}]
         continue
       }
-      const expanded = __guidance_expand(
+      const expansion = __guidance_expand(
         fs,
         __guidance_strip_comments(text),
         candidate.dir,
         hops,
         [full],
       )
-      const body = trim(expanded)
+      dependencies = dependencies + expansion.dependencies
+      const body = trim(expansion.text)
       if body == "" {
         continue
       }
@@ -256,6 +274,7 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
   return __guidance_apply_budget(
     sources,
     omitted,
+    __guidance_dedupe_dependencies(dependencies),
     request.max_bytes ?? DEFAULT_MAX_BYTES,
     dirs_scanned,
   )
@@ -493,10 +512,17 @@ fn __guidance_expand(
   base_dir: string,
   hops: int,
   seen: list<string>,
-) -> string {
-  if hops <= 0 || !text.contains("@") {
-    return text
+) -> GuidanceExpansion {
+  if !text.contains("@") {
+    return {text: text, dependencies: []}
   }
+  if hops <= 0 {
+    // The budget is spent, so the imports on this text are dependencies that
+    // were deliberately not followed. Naming them keeps "not followed" apart
+    // from "not present".
+    return {text: text, dependencies: __guidance_unfollowed(text, base_dir, "hop_limit")}
+  }
+  let deps: list<GuidanceDependency> = []
   let out: list<string> = []
   let in_fence = false
   for line in text.lines() {
@@ -522,26 +548,69 @@ fn __guidance_expand(
       path_join(base_dir, spec)
     }
     if seen.contains(resolved) {
+      deps = deps + [{path: resolved, state: "cycle"}]
       out = out + [line]
       continue
     }
     const body = __guidance_read(fs, resolved)
     if body == nil {
+      deps = deps + [{path: resolved, state: "unreadable"}]
       out = out + [line]
       continue
     }
-    out = out
-      + [
-        __guidance_expand(
-          fs,
-          __guidance_strip_comments(to_string(body)),
-          __guidance_parent(resolved) ?? base_dir,
-          hops - 1,
-          seen + [resolved],
-        ),
-      ]
+    deps = deps + [{path: resolved, state: "read"}]
+    const nested = __guidance_expand(
+      fs,
+      __guidance_strip_comments(to_string(body)),
+      __guidance_parent(resolved) ?? base_dir,
+      hops - 1,
+      seen + [resolved],
+    )
+    deps = deps + nested.dependencies
+    out = out + [nested.text]
   }
-  return join(out, "\n")
+  return {text: join(out, "\n"), dependencies: deps}
+}
+
+/** The expanded text and every path the expansion depended on. */
+type GuidanceExpansion = {text: string, dependencies: list<GuidanceDependency>}
+
+/**
+ * The imports named by `text` that were not followed, all with one state.
+ *
+ * Used when the hop budget is spent: the paths are still dependencies, and a
+ * caller that cannot see them cannot tell a resolution that stopped early
+ * from one that had nothing more to read.
+ */
+fn __guidance_unfollowed(
+  text: string,
+  base_dir: string,
+  state: string,
+) -> list<GuidanceDependency> {
+  let found: list<GuidanceDependency> = []
+  let in_fence = false
+  for line in text.lines() {
+    const trimmed = trim(line)
+    if starts_with(trimmed, "```") || starts_with(trimmed, "~~~") {
+      in_fence = !in_fence
+      continue
+    }
+    if in_fence || !line.contains("@") {
+      continue
+    }
+    const target = __guidance_import_target(line)
+    if target == nil {
+      continue
+    }
+    const spec = to_string(target)
+    const resolved = if starts_with(spec, "/") {
+      spec
+    } else {
+      path_join(base_dir, spec)
+    }
+    found = found + [{path: resolved, state: state}]
+  }
+  return found
 }
 
 /**
@@ -589,10 +658,42 @@ fn __guidance_import_target(line: string) -> string? {
   return value
 }
 
+/**
+ * One entry per path, first mention wins, discovery order preserved.
+ *
+ * A path can be reached twice, as a selected source and as somebody's import,
+ * or as an import from two files. `"read"` outranks a refusal, because a file
+ * that was read once is a dependency that was read, whatever a later hop
+ * budget said about reaching it again.
+ */
+fn __guidance_dedupe_dependencies(entries: list<GuidanceDependency>) -> list<GuidanceDependency> {
+  let seen: list<string> = []
+  let read_paths: list<string> = []
+  for entry in entries {
+    if entry.state == "read" {
+      read_paths = read_paths + [entry.path]
+    }
+  }
+  let out: list<GuidanceDependency> = []
+  for entry in entries {
+    if seen.contains(entry.path) {
+      continue
+    }
+    seen = seen + [entry.path]
+    if entry.state != "read" && read_paths.contains(entry.path) {
+      out = out + [{path: entry.path, state: "read"}]
+      continue
+    }
+    out = out + [entry]
+  }
+  return out
+}
+
 /** Keep whole sources until the budget is spent; name every drop. */
 fn __guidance_apply_budget(
   sources: list<GuidanceSource>,
   omitted: list<GuidanceOmission>,
+  dependencies: list<GuidanceDependency>,
   budget: int,
   dirs_scanned: int,
 ) -> GuidanceResolution {
@@ -610,6 +711,8 @@ fn __guidance_apply_budget(
   return {
     sources: kept,
     omitted: dropped,
+    // A source dropped for budget was still read, so it stays a dependency.
+    dependencies: dependencies,
     total_bytes: used,
     budget_bytes: budget,
     dirs_scanned: dirs_scanned,
