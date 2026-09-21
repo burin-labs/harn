@@ -32,12 +32,35 @@ if grep -Fq "github.event_name != 'pull_request' && 'blacksmith" "$workflow"; th
   exit 1
 fi
 
-if ! grep -Fq \
-  'scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci' \
-  "$workflow"; then
-  echo "macOS workspace tests must use the canonical Rust test environment" >&2
+# THE FACTS, NOT ONE CONCATENATED LITERAL. This used to grep for the whole
+# command as a single string, so it asserted the flags' exact spelling AND
+# their exact order AND that nothing sat between them. Adding `--exclude
+# harn-wasm` in the middle of that run line therefore reddened the default
+# branch while changing nothing this test exists to protect, and the lane the
+# test lives in runs only on a push to the default branch, so the pull request
+# that added the flag could not have been told.
+#
+# Each fact is now checked on its own, on the one line that carries them, so a
+# flag inserted between two of them passes and a missing one still fails.
+nextest_command="$(grep -F 'run_rust_test_lane.sh cargo nextest run' "$workflow" || true)"
+if [[ -z "$nextest_command" ]]; then
+  echo "macOS workspace tests must run through scripts/ci/run_rust_test_lane.sh" >&2
   exit 1
 fi
+if [[ "$(grep -Fc 'run_rust_test_lane.sh cargo nextest run' "$workflow")" != "1" ]]; then
+  # Two such lines and the checks below could each be satisfied by a different
+  # one, which would report a canonical environment nothing actually runs.
+  echo "macOS workspace tests must have exactly one workspace nextest invocation" >&2
+  exit 1
+fi
+for required in '--locked' '--workspace' '--profile ci'; do
+  if ! grep -Fq -- "$required" <<<"$nextest_command"; then
+    echo "macOS workspace tests must use the canonical Rust test environment" >&2
+    echo "  the workspace nextest step is missing ${required}" >&2
+    echo "  the line reads: ${nextest_command}" >&2
+    exit 1
+  fi
+done
 
 if ! grep -Fq \
   'uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0' \
@@ -50,7 +73,7 @@ performance_id_line="$(grep -Fn 'id: release-test-case-performance' "$workflow" 
 performance_command_line="$(grep -Fn 'make check-test-case-performance' "$workflow" | cut -d: -f1)"
 performance_binary_line="$(grep -Fn 'export HARN_BIN="${CARGO_TARGET_DIR:-./target}/debug/harn"' "$workflow" | cut -d: -f1)"
 performance_profile_line="$(grep -Fn "HARN_TEST_CASE_PERFORMANCE_PROFILE: \${{ runner.environment == 'self-hosted' && 'macos_owned_arm64' || 'macos_hosted_arm64' }}" "$workflow" | cut -d: -f1)"
-nextest_line="$(grep -Fn 'scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci' "$workflow" | cut -d: -f1)"
+nextest_line="$(grep -Fn 'run_rust_test_lane.sh cargo nextest run' "$workflow" | cut -d: -f1)"
 
 if [[ -z "$performance_id_line" || -z "$performance_command_line" || -z "$performance_binary_line" || -z "$performance_profile_line" ]]; then
   echo "macOS workspace tests must own the exact release test-case performance proof" >&2
