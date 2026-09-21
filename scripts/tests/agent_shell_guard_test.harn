@@ -363,7 +363,10 @@ pipeline test_worktree_rule_answers_for_the_repository_the_command_targets(
     census,
     NO_MAKE_TARGETS,
   )
-  assert(unowned.allow, "a target that owns no admission command is not this rule's: " + unowned.reason)
+  assert(
+    unowned.allow,
+    "a target that owns no admission command is not this rule's: " + unowned.reason,
+  )
   // A target that owns one is still refused, and names that repository's path.
   const refused = decision(
     codex_payload("git -C /repo/owner worktree add /tmp/lane origin/main"),
@@ -618,9 +621,7 @@ pipeline test_a_cd_survives_a_shell_launched_after_it(harness: Harness, task: un
   // Two levels deep, so the inheritance is carried rather than special-cased
   // for the first nesting.
   const deeper = decision(
-    codex_payload(
-      "cd /repo/admitted && bash -lc \"sh -c 'git worktree add ../lane origin/main'\"",
-    ),
+    codex_payload("cd /repo/admitted && bash -lc \"sh -c 'git worktree add ../lane origin/main'\""),
     mixed,
     NO_MAKE_TARGETS,
   )
@@ -632,9 +633,7 @@ pipeline test_a_cd_survives_a_shell_launched_after_it(harness: Harness, task: un
   // A `cd` inside the nested payload still wins, so inheriting a directory
   // never overrides one the inner shell names for itself.
   const inner = decision(
-    codex_payload(
-      "cd /repo/plain && bash -lc 'cd /repo/admitted && git worktree add ../lane'",
-    ),
+    codex_payload("cd /repo/plain && bash -lc 'cd /repo/admitted && git worktree add ../lane'"),
     mixed,
     NO_MAKE_TARGETS,
   )
@@ -678,10 +677,7 @@ pipeline test_the_cd_option_separator_is_not_the_directory(harness: Harness, tas
     mixed,
     NO_MAKE_TARGETS,
   )
-  assert(
-    bare.allow,
-    "a bare separator must never be read as a directory: " + bare.reason,
-  )
+  assert(bare.allow, "a bare separator must never be read as a directory: " + bare.reason)
 }
 
 @test
@@ -742,10 +738,7 @@ pipeline test_no_measured_repository_owning_admission_still_allows(
 }
 
 @test
-pipeline test_the_admission_command_named_in_a_refusal_exists(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_the_admission_command_named_in_a_refusal_exists(harness: Harness, task: unknown) {
   // The defect this rule exists to remove is a refusal naming a path that is
   // not there, so the assertion reads the path back out of the refusal and
   // checks it on disk, rather than trusting the sentence. The path is read
