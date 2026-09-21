@@ -378,7 +378,7 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
                     "jsonrpc": "2.0",
                     "id": 2,
                     "method": "session/new",
-                    "params": {"cwd": "."},
+                    "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send session/new");
             let created = recv_json(&mut response_rx).await;
@@ -474,7 +474,7 @@ async fn acp_session_list_filters_by_workspace_anchor_and_cwd() {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "session/new",
-                    "params": {"cwd": primary.display().to_string()},
+                    "params": {"cwd": primary.display().to_string(), "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send first session/new");
             let first = recv_json(&mut response_rx).await;
@@ -487,7 +487,7 @@ async fn acp_session_list_filters_by_workspace_anchor_and_cwd() {
                     "jsonrpc": "2.0",
                     "id": 2,
                     "method": "session/new",
-                    "params": {"cwd": sibling.display().to_string()},
+                    "params": {"cwd": sibling.display().to_string(), "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send second session/new");
             let second = recv_json(&mut response_rx).await;
@@ -1124,7 +1124,7 @@ async fn acp_session_close_and_stop_alias_free_active_session() {
                         "jsonrpc": "2.0",
                         "id": request_base,
                         "method": "session/new",
-                        "params": {"cwd": "."},
+                        "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
                     }))
                     .expect("send session/new");
                 let created = recv_json(&mut response_rx).await;

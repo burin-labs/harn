@@ -6,7 +6,7 @@ async fn new_session(server: &mut AcpServer, rx: &mut mpsc::UnboundedReceiver<St
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     recv_json(rx).await["result"]["sessionId"]
