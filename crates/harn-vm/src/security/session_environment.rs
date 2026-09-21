@@ -54,6 +54,8 @@ pub enum GrantSource {
     Env,
     /// A pointer into the `secret_store` facade, resolved on use.
     SecretStore,
+    /// A value stated outright by the declaration.
+    Literal,
 }
 
 impl GrantSource {
@@ -62,6 +64,7 @@ impl GrantSource {
         match self {
             GrantSource::Env => "env",
             GrantSource::SecretStore => "secret_store",
+            GrantSource::Literal => "literal",
         }
     }
 }
@@ -76,6 +79,22 @@ pub enum GrantSourceSpec {
     Env { var: String },
     /// A `secret_store` account/key pointer, resolved lazily on exposure.
     SecretStore { account: String, key: String },
+    /// A value the declaration states outright, used verbatim.
+    ///
+    /// The other two sources name where a value will come from. This one is
+    /// the value, which is why it exists: a host sometimes has to say what a
+    /// child should hold rather than hope the launcher holds it. The case
+    /// that forced it is the empty string, because several developer tools
+    /// read an empty variable as an explicit "off" that differs from the
+    /// variable being absent, and a snapshot source cannot express "off" for
+    /// a name the launcher has never set.
+    ///
+    /// Not a secret channel. A literal is written in the declaration and
+    /// travels with it, so it is exactly as visible as the declaration is.
+    /// Credentials belong in [`GrantSourceSpec::SecretStore`], which stays a
+    /// pointer and stays revocable, and a literal that states a secret
+    /// reference is refused at launch rather than trusted to a reader.
+    Literal { value: String },
 }
 
 impl GrantSourceSpec {
@@ -83,6 +102,7 @@ impl GrantSourceSpec {
         match self {
             GrantSourceSpec::Env { .. } => GrantSource::Env,
             GrantSourceSpec::SecretStore { .. } => GrantSource::SecretStore,
+            GrantSourceSpec::Literal { .. } => GrantSource::Literal,
         }
     }
 }
@@ -186,6 +206,31 @@ impl GrantSpec {
                     key: key.to_string(),
                 }
             }
+            GrantSourceSpec::Literal { value } => {
+                // A secret reference is not a constant. The vocabulary has a
+                // source for credentials and it stays a pointer, so the store
+                // remains the single source of truth and the grant remains
+                // revocable. A credential written here would be laundered
+                // into the declaration, where it is as durable as the
+                // declaration is. There is no registry of names the secret
+                // vocabulary claims, so this keys on the reference scheme,
+                // which is the one structural marker that exists.
+                if value
+                    .trim_start()
+                    .starts_with(crate::secrets::SECRET_REF_SCHEME)
+                {
+                    return Err(EnvironmentPolicyError::LiteralSecretReference {
+                        name: name.to_string(),
+                    });
+                }
+                // Otherwise verbatim, including an empty value and including
+                // surrounding whitespace. The other two sources trim because
+                // they carry a NAME, where whitespace is a typo. This one
+                // carries a VALUE, where whitespace may be the point, and
+                // trimming would be the vocabulary quietly editing what the
+                // host said.
+                ResolvedRef::Literal(value)
+            }
         };
         Ok(SessionGrant {
             name: name.to_string(),
@@ -210,6 +255,8 @@ enum ResolvedRef {
     /// a pointer (not a snapshot) so the upstream source stays the single
     /// source of truth and the grant remains revocable.
     SecretStore { account: String, key: String },
+    /// A value the declaration stated. Held as given.
+    Literal(String),
 }
 
 /// A grant validated and resolved once at the launch boundary. Consumers read
@@ -282,7 +329,7 @@ impl SessionGrant {
     ) -> Option<Result<(String, String), EnvironmentPolicyError>> {
         let var = self.expose_as_env.as_ref()?;
         let value = match &self.resolved_ref {
-            ResolvedRef::EnvSnapshot(value) => value.clone(),
+            ResolvedRef::EnvSnapshot(value) | ResolvedRef::Literal(value) => value.clone(),
             ResolvedRef::SecretStore { account, key } => match resolve_secret(account, key) {
                 Some(value) => value,
                 None => {
@@ -753,6 +800,9 @@ pub enum EnvironmentPolicyError {
     EmptyName,
     /// An `env` source named an empty variable.
     EmptyEnvVar { name: String },
+    /// A `literal` source stated a secret reference as its value. Credentials
+    /// belong in a `secret_store` source, which stays a revocable pointer.
+    LiteralSecretReference { name: String },
     /// A `secret_store` source named an empty account or key.
     EmptySecretRef { name: String },
     /// An `expose_as_env` target was an empty variable name.
@@ -793,6 +843,12 @@ impl fmt::Display for EnvironmentPolicyError {
                 f,
                 "[environment_policy.empty_grant_name] grant spec has an empty name"
             ),
+            EnvironmentPolicyError::LiteralSecretReference { name } => {
+                write!(
+                    f,
+                    "[environment_policy.literal_secret_reference] grant '{name}' literal source states a secret reference; declare it as a secret_store source instead"
+                )
+            }
             EnvironmentPolicyError::EmptyEnvVar { name } => {
                 write!(
                     f,
@@ -875,6 +931,7 @@ impl EnvironmentPolicyError {
         match self {
             Self::EmptyName => "environment_policy.empty_grant_name",
             Self::EmptyEnvVar { .. } => "environment_policy.empty_source_variable",
+            Self::LiteralSecretReference { .. } => "environment_policy.literal_secret_reference",
             Self::EmptySecretRef { .. } => "environment_policy.empty_secret_reference",
             Self::EmptyExposeVar { .. } => "environment_policy.empty_exposure_target",
             Self::EmptyForCommand { .. } => "environment_policy.empty_for_command",
@@ -899,7 +956,8 @@ impl EnvironmentPolicyError {
             .as_object_mut()
             .expect("environment policy diagnostic is an object");
         match self {
-            Self::EmptyEnvVar { name }
+            Self::LiteralSecretReference { name }
+            | Self::EmptyEnvVar { name }
             | Self::EmptySecretRef { name }
             | Self::EmptyExposeVar { name }
             | Self::EmptyForCommand { name }
