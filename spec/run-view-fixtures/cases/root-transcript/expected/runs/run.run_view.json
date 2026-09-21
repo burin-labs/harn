@@ -43,6 +43,7 @@
         "message": "The durable record remains complete while telemetry is unavailable."
       }
     ],
+    "reasoning_receipts": null,
     "schema_version": 1,
     "trace_spans": [
       {
@@ -106,8 +107,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:e7728b4e8e5439f9681f12f9b71915864de0091a04bc626eaa7e11ad32894e62",
-    "projection_id": "run_view:run_root_transcript:e7728b4e8e54"
+    "projection_hash": "sha256:c601c0de0b0a595294a6a0148b31c06d7550ab9164af15ec161928b4cb24cdb4",
+    "projection_id": "run_view:run_root_transcript:c601c0de0b0a"
   },
   "providers": [
     {

@@ -354,6 +354,7 @@
         "execution_id": "run_fixture_session_bundle",
         "flight_recording": null,
         "gaps": [],
+        "reasoning_receipts": null,
         "schema_version": 1,
         "trace_spans": [
           {

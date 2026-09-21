@@ -142,6 +142,18 @@ impl BedrockProvider {
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
         strip_anthropic_sampling_params(&mut body, request);
+        // Converse does not lower through `DialectContract`, and its only
+        // reasoning-bearing field arrives through provider overrides, so the
+        // receipt is taken here — after overrides and the sampling strip —
+        // rather than at the body builder, which never sets one.
+        crate::llm::reasoning_receipt::record(
+            &request.provider,
+            &request.model,
+            "bedrock_converse",
+            &request.thinking,
+            &["additionalModelRequestFields.thinking"],
+            &body,
+        );
         let body_bytes = serde_json::to_vec(&body)
             .map_err(|error| vm_err(format!("bedrock request serialization failed: {error}")))?;
         let path = format!(
