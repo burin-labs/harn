@@ -9,6 +9,211 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.140
+
+### Breaking
+
+- **An ACP session that names no environment policy is now `isolated`
+  (#8444).** Omission used to select `inherited`, which hands the launcher's
+  whole environment to the session and to every child process it spawns for a
+  tool call. Those children run model-authored commands, and an operator shell
+  routinely carries credentials for services the task has nothing to do with.
+  The default now resolves through the environment allowlist instead.
+  `inherited` is unchanged and still available; a client that wants it asks
+  for it by name. A client that relied on ambient provider credentials without
+  declaring grants will no longer resolve them, and should declare a grant for
+  each credential the run actually needs.
+- **An inheriting process spawn now requires a session environment (#8477).**
+  The process host builds a tool child's environment from the session
+  environment when one is installed. When none is installed, the
+  `inherit_clean` and `patch` modes refuse with a typed error naming the mode
+  instead of handing the child the calling process's own environment. Absence
+  used to select the most permissive outcome available, and nothing reported
+  it. An embedder that spawns process tools outside a session must now launch
+  an environment policy first; `SessionEnvironment::inherited()` reproduces
+  the previous behaviour exactly, and the `replace` mode, which supplies the
+  child's environment outright, is unaffected.
+- **Generated session-update bindings follow the emitted metadata envelope (#8478).** Extension fields live in typed
+  `_meta.harn` records, derived from the owning ACP schema. TypeScript `ACPTypedSessionUpdate`, Rust
+  `ACPTypedSessionUpdate` and Swift `HarnACPTypedSessionUpdate` decode the advertised variants and reject missing or
+  invalid identity; the TypeScript alias `ACPHarnExtensionUpdate` names the same union. Root-field payload shapes and
+  the obsolete `HARN_TYPED_SESSION_UPDATE_PAYLOADS` field-table constant are removed; a TypeScript consumer that read
+  a payload shape out of that table reads the union member instead, and a Rust consumer reads the enum variant.
+  Standard `available_commands_update.availableCommands` remains at the update root.
+- Provider catalog schema 11 exports a closed model-operation set (`text_generation`, `embedding`, `decision`) through JSON,
+  Harn, TypeScript, and Swift. Legacy text and embedding rows retain their operations; decision support must be declared
+  explicitly. Predicate checking rejects unsupported or nonconstant model routes with `HARN-TYP-035`, including imported
+  sites and cached checks after catalog changes. Generic text calls refuse known catalog routes without `text_generation`
+  before transport.
+
+### Added
+
+- **Run records name the environment variables a run exposed (#8444).** The
+  new `admitted_environment` field lists every variable name the run's child
+  processes could see, sorted and deduplicated. Names only; values never
+  appear. The policy kind already said how the set was chosen, but not what it
+  was, which is the question a reader auditing a run actually has.
+- **The agent shell guard now refuses a bare build command whose Make target
+  the repository owns (#8472).** `cargo build` was already redirected to
+  `make build`, but a build tool that only some repositories wrap went past the
+  guard untouched. `swift build` and `swift test` are now refused wherever the
+  root `Makefile` declares `swift-build` or `swift-test`, naming the target to
+  run instead; `HARN_ALLOW_RAW_SWIFT=1` releases one command. The refusal is
+  conditional on that measurement, so a repository that declares no such target
+  is left alone rather than sent to a command it does not have.
+- Add a checked predicate-evaluation capability with closed outcome types and a
+  source-site manifest in `harn check --json`. The checker rejects nonserializable
+  inputs, truthy outcome branches, and unused outcomes. Execution explicitly
+  refuses until the budgeted evaluator is available; no new expression syntax or
+  model request is introduced.
+- **`keep_ruleset_across_exec` is now part of the process-sandbox API
+  (#8486).** An embedder that builds a `TransferableConfinement` and hands
+  the payload to a helper process must keep the Landlock ruleset descriptor
+  open across the `exec`; every descriptor the runtime opens is
+  close-on-exec, so without this the helper enters no ruleset while the layer
+  above still reports the filesystem boundary as enforced. The function that
+  does it was previously crate-private, leaving that documented requirement
+  with no public way to satisfy it.
+- **A build step killed by a signal now reports the host instead of going
+  quiet (#8516).** The security test archive build has twice been terminated
+  at around 330 seconds on hosted runners, well inside its own budget, leaving
+  only ordinary compile output and exit 143. Nothing on that path installed a
+  signal handler, so each occurrence produced silence and the absence of an
+  out-of-memory message was mistaken for evidence that memory was fine. A
+  failure-only step now reports free memory, the largest resident processes
+  and the kernel ring buffer, and says so explicitly when the ring buffer is
+  not readable rather than passing over it.
+
+### Fixed
+
+- Host lease status now shows pending admission requests alongside active
+  ownership. Default CLI status observes all resource classes and domains,
+  so a waiting Cargo worker cannot be hidden by an idle whole-machine lease.
+  CLI envelopes advance to version 4 and scoped status records to version 5;
+  pass `--resource-class` to retain a single-resource status response.
+- Cold-start CI now distinguishes release setup failures, incomplete measurements, and measured startup-budget regressions.
+  Its terminal evidence refuses missing, empty, partial, or wrong-source measurement receipts
+  instead of treating them as passes.
+- Loopback-only child networking is now available on Linux. A confined child
+  that is granted it runs inside a private network namespace with only loopback
+  raised, built by an installed helper the embedder names; the grant was
+  previously refused outright, so build tools that talk to a daemon on
+  `127.0.0.1` could not start. Egress is closed by the namespace rather than by
+  the syscall filter, which closes datagrams as well as streams and needs no
+  address matching. A grant with no helper to build the namespace is refused
+  rather than weakened, and the run receipt names which mechanism enforced
+  loopback rather than only that it was requested.
+- **A refusal names the rule that refused it (#8463).** Every `deny` the tool
+  approval policy returned was reported under one gate, `approval_policy`, and
+  one rendered signature. Two of those refusals never consult a configured
+  rule: the deny-by-default sensitive-path guard, and the workspace path
+  boundary refusing a declared path that is malformed or resolves outside the
+  workspace with no external root admitting it. Both announced themselves as
+  approval decisions, so an operator who had deliberately turned interactive
+  approval off read a refusal naming the control they had just disabled and
+  went to inspect the wrong thing. The gate now comes from the deciding rule,
+  the two path guards carry their own gates and signatures, and a path
+  refusal reports the path that actually refused in `denied_paths`, where the
+  dispatch seam used to backfill every path the call declared. A configured
+  deny still reports `approval_policy`.
+- The checker now rejects references to a skill or eval-pack binding declared only inside another function, pipeline,
+  or tool body. Module-level bindings retain forward-reference support.
+- Sealed agent runs now report an explicit unknown cause when terminal evidence conflicts, and their legacy reason and class
+  fields follow the typed outcome. Run records also retain structured terminal errors instead of silently dropping them.
+- Run records now join tool results using the journal's canonical call identity and retain the loop's exposed budget account,
+  including extension decisions. The returned result and durable terminal record receive the same account before sealing.
+- **The shell guard's disposable-path rule reaches a verdict again in the hook
+  host (#8472).** The rule folds case before matching Windows temp spellings,
+  and `lowercase` was never granted to the standalone host the hook runs the
+  policy in. An ungranted builtin throws rather than degrading, so the adapter
+  failed closed: every `trash` command outside a POSIX temp root was refused
+  with an interpreter error in place of a rule, including the user files the
+  rule exists to keep recoverable. The unit tests could not see it because they
+  run in a full host, so the adapter test now exercises both arms end to end.
+- Agent terminal callbacks now run for natural completion, deadlines, exhausted
+  rescue allowances, and errors, including throws that escape the turn loop.
+  The callback receives the terminal error alongside the existing status and
+  reason. Terminal reporting cannot reopen a forced stop or spend a second
+  rescue allowance, and a callback that throws is not retried.
+- **A granted credential is no longer stripped back out of its own child
+  (#8477).** The name denylist ran over the environment the policy had just
+  composed, so a session that deliberately granted a provider credential to a
+  tool saw it removed again on the way to the child, and the run failed to
+  authenticate with nothing naming the cause. A name-shaped guess no longer
+  overrules an explicit grant.
+- New canonical session recordings retain public narration before native tool calls
+  and keep harness context-directive frames internal. Tool timelines also preserve
+  recorded raw arguments when normalized input is absent.
+- Package export aliases now resolve to their declared source file when a
+  same-named directory has no `lib.harn` entry. This restores package verification
+  and imported function checking without treating an unreadable directory as an
+  empty module.
+- **An inherited session environment is now proved to carry `PATH` to a real
+  child on every platform (#8494).** The probe that checked this shelled out
+  to the platform command interpreter and returned early when a well-known
+  program was absent from the machine, so on most machines it asserted
+  nothing while still reporting success, and it ran on one platform only. It
+  now spawns the hermetic helper binary built from this workspace and
+  compares the value the child actually received against the parent's, byte
+  for byte, with nothing to skip and no host shell involved.
+- SwiftPM commands launched through macOS project scripts now share direct-call
+  sandbox and cache defaults through workspace-local `swift` and `xcrun` launchers.
+- The test-pattern lint now selects the files it scans by content as well as by
+  path, so tests written inline in a runtime source are covered by the same
+  rules as tests in a dedicated test file. Findings name the file they came
+  from, not just a line number.
+- **The test-pattern gate now finds a file's inline test module rather than
+  its first `#[cfg(test)]` attribute (#8507).** A test-only helper function
+  carries that attribute too, and one sitting high in a runtime file ended the
+  runtime region there: everything below it was scanned under the test rules
+  and withheld from the runtime rules, so a wall-clock read below such a
+  helper was judged by nothing and reported clean. 172 of the 1151 files with
+  inline tests were split at the wrong line. The marker must now precede a
+  `mod` declaration. Thirty of the fifty-two grandfathered findings turned out
+  to be runtime code counted as tests and their rows are gone.
+- **The compile budget reads the box's memory, not only its cores (#8516).** A
+  four-core vendor runner with 16 GB was allowed three concurrent compilers,
+  and the security test archive's link phase was signalled dead there
+  repeatedly. The budget now takes the smaller of what the cores allow and what
+  the memory allows, divided by the listeners sharing the host, and refuses by
+  name when memory cannot be read rather than falling back to the cores-only
+  answer.
+- **The stdlib type-safety policy now refuses a pull request instead of
+  reporting after the merge (#8518).** It lived only in the push-only policy
+  lane, so a stdlib type error could not fail any branch check: the first
+  thing to report it was `main` going red, and every branch cut afterwards
+  inherited a failure it did not cause. The policies that read only committed
+  source through the bundled CLI now also run on pull requests, from a list
+  the Makefile owns so the two lanes cannot disagree about it. The agent
+  loop's terminal-callback failure, which tripped this, is reported from a
+  helper so its record no longer conflicts with the error type its binding
+  infers; the record callers read is unchanged.
+- **Interrupt handlers run on every observed cancellation (#8522).** A handler
+  registered with `on_interrupt` used to run only if the program kept
+  executing after the cancelled call threw, because the operation that
+  noticed the cancellation did not dispatch and merely left the signal for a
+  later poll to find. A cancelled call that was not caught skipped the handler
+  entirely and reported nothing. Cancellation now has one owner that runs the
+  handlers, and every observer goes through it before throwing.
+- **`on_interrupt` without a `signals` option now means every signal, not
+  `SIGINT` (#8522).** The default filter was `SIGINT`, so the plain
+  registration used for cleanup was silently specific to one signal and did
+  not run when a host cancelled a session without one. A handler that names
+  signals is still limited to them, and is now reported when it is skipped
+  because no signal was delivered. The `signals` field of the returned
+  registration is `nil` for an unfiltered handler.
+
+### Security
+
+- **The sensitive-name denylist is no longer the credential boundary for tool
+  subprocesses (#8477).** It matched an explicit list of names, a set of
+  provider prefixes, and seven suffixes, so any credential variable named
+  outside those reached a child running a model-authored command. A probe
+  named `..._CREDENTIAL` passed straight through, because the list carries
+  `_CREDENTIALS`. The allowlist plus the session's declared grants is the
+  boundary now, and the denylist remains as a second layer over what the
+  policy admitted.
+
 ## v0.10.139
 
 ### Fixed
