@@ -948,27 +948,30 @@
         "DEEPINFRA_TOKEN"
       ],
       "recommended": {
-        "selector": "deepinfra:deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507",
+        "selector": "deepinfra:deepinfra/openai/gpt-oss-120b",
         "provider": "deepinfra",
-        "model": "deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507",
-        "display_name": "Qwen3 235B A22B Instruct 2507 (DeepInfra)",
-        "tool_format": "native",
+        "model": "deepinfra/openai/gpt-oss-120b",
+        "display_name": "GPT-OSS 120B (DeepInfra)",
+        "tool_format": "text",
         "harn_options": [
           "provider = \"deepinfra\"",
-          "model = \"deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507\"",
-          "tool_format = \"native\"",
+          "model = \"deepinfra/openai/gpt-oss-120b\"",
+          "tool_format = \"text\"",
           "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
-        "native_tools": true,
+        "native_tools": false,
         "text_tools": true,
-        "preferred_tool_format": "native",
-        "tool_mode_parity": "unknown",
+        "preferred_tool_format": "text",
+        "tool_mode_parity": "native_unreliable",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
-        "reasoning_knobs": [],
+        "reasoning_knobs": [
+          "effort",
+          "reasoning_effort"
+        ],
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
@@ -987,7 +990,9 @@
         "evidence": []
       },
       "notes": [],
-      "caveats": [],
+      "caveats": [
+        "2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): DeepInfra native billed completion_tokens=86 with no dispatchable tool call or answer (Harmony reasoning-channel-only / upstream contract violation), repeated ~10x -> run unusable. Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     },
@@ -1370,14 +1375,14 @@
         "GROQ_API_KEY"
       ],
       "recommended": {
-        "selector": "groq:qwen/qwen3.6-27b",
+        "selector": "groq:qwen/qwen3.8-27b",
         "provider": "groq",
-        "model": "qwen/qwen3.6-27b",
-        "display_name": "Qwen3.6 27B (Groq)",
+        "model": "qwen/qwen3.8-27b",
+        "display_name": "Qwen3.8 27B (Groq)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"groq\"",
-          "model = \"qwen/qwen3.6-27b\"",
+          "model = \"qwen/qwen3.8-27b\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]
@@ -1391,7 +1396,9 @@
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "toggle"
+          "effort",
+          "reasoning_effort",
+          "reasoning_none"
         ],
         "prompt_or_context_cache": true,
         "batch_api": true,
@@ -2102,16 +2109,16 @@
         "NIM_API_KEY"
       ],
       "recommended": {
-        "selector": "nvidia:nvidia/minimax-m3",
+        "selector": "nvidia:nvidia/kimi-k2.6",
         "provider": "nvidia",
-        "model": "nvidia/minimax-m3",
-        "display_name": "MiniMax M3 (NVIDIA NIM)",
+        "model": "nvidia/kimi-k2.6",
+        "display_name": "Kimi K2.6 (NVIDIA NIM)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"nvidia\"",
-          "model = \"nvidia/minimax-m3\"",
+          "model = \"nvidia/kimi-k2.6\"",
           "tool_format = \"native\"",
-          "structured_output_mode = \"delimited\""
+          "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
@@ -2119,11 +2126,11 @@
         "text_tools": true,
         "preferred_tool_format": "native",
         "tool_mode_parity": "unknown",
-        "structured_output_transport": "delimited",
-        "structured_output_mode": "delimited",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "adaptive"
+          "enabled"
         ],
         "prompt_or_context_cache": true,
         "batch_api": false,

@@ -196,18 +196,20 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
     };
     assert_eq!(levels, ["none", "low", "medium", "high", "xhigh", "max"]);
 
-    let retired_together_route = models
+    // Together retired the DeepSeek V4 Pro preview this fixture used to read,
+    // and its row is gone. OpenAI's o1 is the bundled route that now carries a
+    // typed retirement date, sourced from the `shutdown_date` on its live
+    // model record.
+    let retired_route = models
         .iter()
         .filter_map(VmValue::as_dict)
-        .find(|model| {
-            model.get("id").map(VmValue::display) == Some("deepseek-ai/DeepSeek-V4-Pro".to_string())
-        })
-        .expect("deprecated Together DeepSeek V4 Pro route");
+        .find(|model| model.get("id").map(VmValue::display) == Some("o1".to_string()))
+        .expect("deprecated OpenAI o1 route");
     assert_eq!(
-        retired_together_route
+        retired_route
             .get("sunset_date")
             .map(VmValue::display)
             .as_deref(),
-        Some("2026-08-27")
+        Some("2026-10-23")
     );
 }

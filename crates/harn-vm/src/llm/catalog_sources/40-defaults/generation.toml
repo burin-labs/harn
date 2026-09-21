@@ -22,10 +22,6 @@ _unset = ["top_p"]
 [model_defaults."groq/compound*"]
 max_tokens = 8192
 
-# Moonshot's direct Kimi K2.5 route accepts only temperature 1.
-[model_defaults."moonshot/kimi-k2.5"]
-temperature = 1.0
-
 # K3 always reasons and accepts low, high, or maximum effort. Sampling is
 # omitted by the capability row; this default preserves Moonshot's documented
 # maximum-effort default without leaking route-specific logic into callers.

@@ -857,7 +857,7 @@ mod tests {
             "providerOptions": {
                 "gateway": {
                     "sort": "cost",
-                    "models": ["google/gemini-3.1-flash-lite-preview"]
+                    "models": ["google/gemini-3.1-flash-lite"]
                 }
             }
         }));
@@ -873,7 +873,7 @@ mod tests {
         assert_eq!(body["providerOptions"]["gateway"]["sort"], "cost");
         assert_eq!(
             body["providerOptions"]["gateway"]["models"][0],
-            "google/gemini-3.1-flash-lite-preview"
+            "google/gemini-3.1-flash-lite"
         );
     }
 
