@@ -12,7 +12,6 @@
  * since a dependent would drag it back into the build and make the exclusion a
  * no-op that still reads as a saving.
  */
-
 import { scan_glob } from "../path_visibility.harn"
 
 const WORKSPACE_LANES = [
