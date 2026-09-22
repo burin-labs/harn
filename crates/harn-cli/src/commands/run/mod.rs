@@ -3,8 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use crate::commands::time::{self, RunTiming};
@@ -48,6 +47,7 @@ pub(crate) use self::eval_source::prepare_eval_temp_file;
 #[cfg(test)]
 use self::eval_source::{eval_source_for_code, split_eval_header};
 use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
+pub use self::interrupts::RunInterruptTokens;
 use self::interrupts::{
     install_signal_shutdown_handler, start_run_deadline_watchdog, RunDeadlineGuard,
 };
@@ -69,9 +69,10 @@ pub(crate) use self::reporting::{
     render_trace_summary, run_aux_options_from_args, run_control_options_from_args,
 };
 pub use self::reporting::{
-    FlightRecorderOptions, RunAuxOptions, RunControlOptions, RunExecutionOptions, RunJsonOptions,
-    RunJsonSink, RunJsonSinkTarget, RunPhaseOptions, RunRusageOptions, RunSummaryOptions,
-    RUN_PHASE_SCHEMA_VERSION, RUN_RUSAGE_SCHEMA_VERSION, RUN_SUMMARY_SCHEMA_VERSION,
+    FlightRecorderOptions, RunAttestationOptions, RunAuxOptions, RunControlOptions,
+    RunExecutionOptions, RunJsonOptions, RunJsonSink, RunJsonSinkTarget, RunPhaseOptions,
+    RunRusageOptions, RunSummaryOptions, RUN_PHASE_SCHEMA_VERSION, RUN_RUSAGE_SCHEMA_VERSION,
+    RUN_SUMMARY_SCHEMA_VERSION,
 };
 pub use self::sandbox::RunSandboxOptions;
 #[cfg(test)]
@@ -140,18 +141,6 @@ pub(crate) fn build_denied_builtins(
     } else {
         HashSet::new()
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RunAttestationOptions {
-    pub receipt_out: Option<PathBuf>,
-    pub agent_id: Option<String>,
-}
-
-#[derive(Clone)]
-pub struct RunInterruptTokens {
-    pub cancel_token: Arc<AtomicBool>,
-    pub signal_token: Arc<Mutex<Option<String>>>,
 }
 
 /// Whether a run inherits configuration discovered from the entry file's
