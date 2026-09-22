@@ -863,3 +863,58 @@ pipeline test_a_cd_the_shell_may_skip_never_relaxes_the_rule(harness: Harness, t
   )
   assert(!nested.allow, "the ambiguity must travel into a nested shell: " + nested.reason)
 }
+
+@test
+pipeline test_a_nested_scan_asks_about_every_reachable_directory(harness: Harness, task: unknown) {
+  // A DIRECTORY THAT ALLOWS MUST NOT END THE SEARCH. The nested-shell scan
+  // ran once per reachable directory and returned as soon as one produced a
+  // match, carrying only that one directory into the decision. Whichever
+  // candidate came first ended the loop, and a candidate that ALLOWS is
+  // exactly the one that then hid every other reachable directory that would
+  // have refused.
+  const mixed: WorktreeAdmissionCensus = {
+    rows: [
+      {root: "/repo/guard", command: "scripts/fleet-worktree-admit.ts"},
+      {root: "/repo/other", command: ""},
+    ],
+    denial: "",
+  }
+  // Unnested, this is already refused: `|| true` swallows the failure of the
+  // second `cd`, so both directories stay reachable and one owns a command.
+  const flat = decision(
+    codex_payload(
+      "cd /repo/other; cd /repo/guard || true; git worktree add ../unowned origin/main",
+    ),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!flat.allow, "the unnested form must be refused or this pair proves nothing")
+  // Wrapping the creation in a shell described the same situation and passed.
+  const nested = decision(
+    codex_payload(
+      "bash -lc 'cd /repo/other; cd /repo/guard || true; bash -lc \"git worktree add ../unowned origin/main\"'",
+    ),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!nested.allow, "a nested creation must be judged against every reachable directory")
+  assert(
+    nested.reason.contains("scripts/fleet-worktree-admit.ts"),
+    "the refusal must name the command of the repository that owns one: " + nested.reason,
+  )
+  // THE CONTROL. Without this the fix would be indistinguishable from
+  // refusing every nested creation. Here the `cd` is unconditional, so one
+  // directory is reachable, it owns no admission command, and the rule does
+  // not police it.
+  const single = decision(
+    codex_payload(
+      "bash -lc 'cd /repo/other; bash -lc \"git worktree add ../unowned origin/main\"'",
+    ),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(
+    single.allow,
+    "one reachable directory that owns no command is still not this rule's: " + single.reason,
+  )
+}

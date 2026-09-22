@@ -642,14 +642,31 @@ fn raw_worktree_add_attempt_at(
       if depth < 4 {
         const nested = nested_shell_payload(argv)
         if nested != "" {
-          // The nested shell inherits every directory this one could be in.
-          // Scanning it once per candidate keeps the ambiguity rather than
-          // resolving it on the way in.
+          // EVERY CANDIDATE, NOT THE FIRST THAT MATCHES. The nested shell
+          // inherits every directory this one could be in, and the scan used
+          // to return as soon as one of them produced a match. The candidate
+          // that ends the loop early is whichever comes first, and a
+          // directory that ALLOWS is exactly the one that then hid every
+          // other reachable directory that would have refused.
+          //
+          // So the candidates are scanned to the end and their targets are
+          // unioned. The caller refuses if any one of them refuses, which is
+          // the same rule the unnested path already followed.
+          let nested_reason = ""
+          let nested_targets: list<string> = []
           for candidate in reachable {
             const attempt = raw_worktree_add_attempt_at(nested, depth + 1, candidate)
             if attempt.reason != "" {
-              return attempt
+              nested_reason = attempt.reason
+              for found in attempt.targets {
+                if !nested_targets.contains(found) {
+                  nested_targets = nested_targets + [found]
+                }
+              }
             }
+          }
+          if nested_reason != "" {
+            return {reason: nested_reason, targets: nested_targets}
           }
         }
       }
