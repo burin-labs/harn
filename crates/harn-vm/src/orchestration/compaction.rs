@@ -465,13 +465,6 @@ async fn llm_compaction_summary(
     summarize_prompt: Option<&str>,
     policy: &CompactionPolicy,
 ) -> Result<CompactionSummary, VmError> {
-    let mut compact_opts = llm_opts.clone();
-    compact_opts.system = None;
-    compact_opts.transcript_summary = None;
-    compact_opts.native_tools = None;
-    compact_opts.tool_choice = None;
-    compact_opts.output_format = crate::llm::api::OutputFormat::Text;
-    compact_opts.output_schema = None;
     let prompt = render_llm_compaction_prompt(
         summarize_prompt,
         old_messages,
@@ -479,13 +472,7 @@ async fn llm_compaction_summary(
         archived_count,
         policy,
     )?;
-    compact_opts.messages = vec![serde_json::json!({
-        "role": "user",
-        "content": prompt,
-    })];
-    let manifest = &mut compact_opts.context_manifest;
-    manifest.record_system_transform("compaction", "stdlib:compaction", "removed system", None);
-    compact_opts.set_call_attribution("compaction", "compact");
+    let compact_opts = llm_opts.isolated_request(prompt, "compaction", "compact");
     let result = vm_call_llm_full(&compact_opts).await?;
     let summary = result.text.trim();
     if summary.is_empty() {
