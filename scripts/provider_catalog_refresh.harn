@@ -253,9 +253,11 @@ fn __catalog_model_by_route(catalog: dict) {
   return by_id
 }
 
-// Rates are USD per million tokens. Source adapters publish six fractional
-// digits, so compare both sides at that same 0.000001 USD/MTok precision.
-// Decimal conversion alone preserves floating-point conversion noise.
+/**
+ * Rates are USD per million tokens. Source adapters publish six fractional
+ * digits, so compare both sides at that same 0.000001 USD/MTok precision.
+ * Decimal conversion alone preserves floating-point conversion noise.
+ */
 fn __normalized_rate(value: any) -> float {
   return round(to_float(value) * 1000000.0) / 1000000.0
 }
