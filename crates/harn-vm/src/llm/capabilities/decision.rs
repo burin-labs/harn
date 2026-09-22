@@ -85,7 +85,8 @@ impl DecisionQuestionKind {
 
 /// Declared request ceilings for a decision route.
 ///
-/// Every field but `max_questions` is required: a route that publishes no
+/// All fields except the optional question-count and total-request ceilings
+/// are required: a route that publishes no
 /// question ceiling is a real, documented state, whereas an invented choice or
 /// score bound would be read by callers as researched. Unknown keys are
 /// refused so a typo cannot read as an unset ceiling.
@@ -101,8 +102,11 @@ pub struct DecisionLimits {
     pub score_levels_min: u32,
     /// Most ordered levels a `score` question may declare.
     pub score_levels_max: u32,
-    /// Token ceiling on the shared state a request may carry.
+    /// Token ceiling on the state plus its longest question.
     pub state_window_tokens: u64,
+    /// Token ceiling on state plus all questions, when published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_window_tokens: Option<u64>,
 }
 
 #[cfg(test)]

@@ -38,6 +38,7 @@ mod guard;
 mod host;
 mod init;
 mod lint_fmt;
+mod llm;
 mod local;
 mod mcp;
 mod merge_captain;
@@ -145,6 +146,7 @@ pub(crate) use host::{
 };
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
+pub(crate) use llm::{LlmArgs, LlmCommand, LlmEvaluateArgs};
 pub(crate) use local::{
     LocalArgs, LocalCommand, LocalLaunchArgs, LocalListArgs, LocalProfileArgs, LocalStatusArgs,
     LocalStopArgs, LocalSwitchArgs,
@@ -494,6 +496,8 @@ SCRIPTING
     Replay(ReplayArgs),
     /// Evaluate a run record, run directory, or eval manifest.
     Eval(EvalArgs),
+    /// Evaluate typed model questions and inspect the resulting receipt.
+    Llm(LlmArgs),
     /// Start the interactive REPL.
     Repl,
     /// Benchmark Harn execution, portable-kernel paths, or deterministic replay.

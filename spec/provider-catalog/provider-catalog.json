@@ -1319,7 +1319,7 @@
           "https://openrouter.ai/docs/features/provider-routing",
           "https://openrouter.ai/docs/features/privacy-and-logging"
         ],
-        "note": "Both controls restrict which upstream providers may serve the call; retention and training behavior is otherwise the routed provider's.",
+        "note": "Both controls restrict which upstream providers may serve the call; retention and training behavior is otherwise the routed provider's. The alpha decisions endpoint has not been verified to honor these chat controls, so native decisions do not apply them.",
         "request_controls": [
           {
             "location": "body",
@@ -1327,6 +1327,9 @@
             "value_kind": "string",
             "value": "deny",
             "effect": "training",
+            "applies_to": [
+              "open_ai_sse"
+            ],
             "caveat": "Defaults to allow. Restricts routing to providers that do not collect prompts; it does not retroactively bind one that does."
           },
           {
@@ -1334,7 +1337,10 @@
             "name": "provider.zdr",
             "value_kind": "bool",
             "value": "true",
-            "effect": "retention"
+            "effect": "retention",
+            "applies_to": [
+              "open_ai_sse"
+            ]
           }
         ]
       },
@@ -1595,6 +1601,17 @@
         "method": "GET",
         "path": "/models"
       },
+      "data_controls": {
+        "control_scope": "account",
+        "retention_default": "retained",
+        "training_default": "does_not_train",
+        "checked_on": "2026-09-22",
+        "sources": [
+          "https://docs.typesafe.ai/legal",
+          "https://typesafe.ai/legal/privacy-policy"
+        ],
+        "note": "The privacy policy excludes training and fine-tuning on inputs but permits retention for service and business purposes. Zero data retention is offered to enterprise customers by agreement, not as the default or a documented per-request control. This direct-provider posture does not establish gateway decision-route controls."
+      },
       "protocols": [
         "typesafe_system_one"
       ],
@@ -1622,6 +1639,41 @@
       "healthcheck": {
         "method": "GET",
         "path": "/models"
+      },
+      "data_controls": {
+        "control_scope": "per_request",
+        "retention_default": "unspecified",
+        "training_default": "unspecified",
+        "checked_on": "2026-09-22",
+        "sources": [
+          "https://vercel.com/blog/zdr-on-ai-gateway",
+          "https://vercel.com/docs/ai-gateway/security-and-compliance/disallow-prompt-training",
+          "https://vercel.com/docs/ai-gateway/modalities/evaluation"
+        ],
+        "note": "The native evaluation route honors providerOptions.gateway privacy filters. These are routing restrictions, not proof of storage behavior. Chat dialect controls are not declared by this evaluation-route probe; default upstream retention and training remain unspecified.",
+        "request_controls": [
+          {
+            "location": "body",
+            "name": "providerOptions.gateway.zeroDataRetention",
+            "value_kind": "bool",
+            "value": "true",
+            "effect": "retention",
+            "applies_to": [
+              "vercel_evaluate"
+            ],
+            "caveat": "Routes only to providers with gateway ZDR agreements; per-request ZDR availability depends on the gateway account plan."
+          },
+          {
+            "location": "body",
+            "name": "providerOptions.gateway.disallowPromptTraining",
+            "value_kind": "bool",
+            "value": "true",
+            "effect": "training",
+            "applies_to": [
+              "vercel_evaluate"
+            ]
+          }
+        ]
       },
       "protocols": [
         "openai_chat_completions"
@@ -23001,7 +23053,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "unknown",
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",

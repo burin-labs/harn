@@ -41,7 +41,7 @@ impl QuestionRefusalReason {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum QuestionBody {
     Boolean,
     /// Label to the description the model judges against, in declared order.
@@ -70,7 +70,7 @@ impl QuestionBody {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Question {
     pub id: String,
     pub instructions: String,
@@ -79,7 +79,7 @@ pub struct Question {
 
 /// A whole question set, in declared order. Order is significant: it is part
 /// of the request and part of the cache identity.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize)]
 pub struct QuestionSet {
     pub questions: Vec<Question>,
 }

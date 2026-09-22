@@ -381,7 +381,7 @@ model_match = ["jev-*", "typesafe/jev-*"]
 extends = true
 decision_protocol = "typesafe_system_one"
 decision_question_kinds = ["boolean", "choice", "score"]
-decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000 }
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000, request_window_tokens = 64000 }
 
 # Vercel AI Gateway evaluation modality. The gateway serves Jev on two paths:
 # `POST /v1/evaluate` (Vercel-native, documented under the evaluation modality)
@@ -399,11 +399,10 @@ model_match = "typesafe-ai/jev*"
 extends = true
 decision_protocol = "vercel_evaluate"
 decision_question_kinds = ["boolean", "choice", "score"]
-decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000 }
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000, request_window_tokens = 64000 }
 
-# OpenRouter alpha decisions, POST /api/alpha/decisions. Documented, not
-# reached: OpenRouter publishes the endpoint and a TypeSafe provider page, but
-# its model list did not carry Jev when the route was checked on 2026-09-20.
+# OpenRouter alpha decisions, POST /api/alpha/decisions. All three question
+# kinds answered through the canonical native evaluator on 2026-09-22.
 # https://openrouter.ai/typesafe
 # The match pattern carries the `openrouter/` prefix because OpenRouter does
 # not declare `wire_model_capabilities`: its rules are matched against the
@@ -414,7 +413,7 @@ model_match = "openrouter/typesafe/jev*"
 extends = true
 decision_protocol = "openrouter_decisions"
 decision_question_kinds = ["boolean", "choice", "score"]
-decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000 }
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000, request_window_tokens = 64000 }
 
 # ---------- Chat routes serving decisions through structured output ----------
 #

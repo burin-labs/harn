@@ -530,6 +530,13 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             }
         }
         Command::Models(args) => commands::models::run(args).await,
+        Command::Llm(args) => {
+            let crate::cli::LlmCommand::Evaluate(args) = args.command;
+            let exit = commands::llm_evaluate::run(args).await;
+            if exit != 0 {
+                process::exit(exit);
+            }
+        }
         Command::Local(args) => commands::local::run(args).await,
         Command::Provider(args) => match args.command {
             ProviderCommand::Capabilities(capabilities) => {

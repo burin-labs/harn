@@ -15,9 +15,10 @@ pub(crate) mod backend;
 pub(crate) mod contract;
 #[cfg(test)]
 pub(crate) mod mock;
+pub(crate) mod native;
 pub(crate) mod outcome;
 pub(crate) mod question;
-pub(crate) mod receipt;
+pub mod receipt;
 pub(crate) mod structured;
 pub(crate) mod transport;
 
@@ -45,6 +46,7 @@ pub(crate) struct EvaluationPolicy {
     pub model: String,
     pub effort: String,
     pub temperature: f64,
+    pub native_options_supplied: bool,
     pub threshold: f64,
     pub evaluation_cost_limit: f64,
     pub run_cost_limit: f64,
@@ -70,11 +72,9 @@ impl EvaluationPolicy {
         let fields = value
             .as_dict()
             .ok_or_else(|| "evaluation policy must be a record".to_string())?;
-        let text = |key: &str| {
-            fields
-                .get(key)
-                .map(|value| value.as_str_cow().into_owned())
-                .ok_or_else(|| format!("evaluation policy has no `{key}`"))
+        let text = |key: &str| match fields.get(key) {
+            Some(VmValue::String(value)) => Ok(value.to_string()),
+            _ => Err(format!("evaluation policy has no string `{key}`")),
         };
         let number = |key: &str| match fields.get(key) {
             Some(VmValue::Float(value)) => Ok(*value),
@@ -86,16 +86,40 @@ impl EvaluationPolicy {
             "native_decision" => BackendKind::NativeDecision,
             other => return Err(format!("unknown evaluation backend `{other}`")),
         };
-        Ok(Self {
+        let policy = Self {
             backend,
             provider: text("provider")?,
             model: text("model")?,
-            effort: text("effort")?,
-            temperature: number("temperature")?,
+            effort: if fields.contains_key("effort") {
+                text("effort")?
+            } else {
+                "none".into()
+            },
+            temperature: if fields.contains_key("temperature") {
+                number("temperature")?
+            } else {
+                0.0
+            },
+            native_options_supplied: fields.contains_key("effort")
+                || fields.contains_key("temperature"),
             threshold: number("threshold")?,
             evaluation_cost_limit: number("evaluation_cost_limit")?,
             run_cost_limit: number("run_cost_limit")?,
-        })
+        };
+        if !policy.threshold.is_finite()
+            || !(0.0..=1.0).contains(&policy.threshold)
+            || !policy.temperature.is_finite()
+            || !policy.evaluation_cost_limit.is_finite()
+            || policy.evaluation_cost_limit < 0.0
+            || !policy.run_cost_limit.is_finite()
+            || policy.run_cost_limit < 0.0
+        {
+            return Err(
+                "evaluation policy requires finite nonnegative budgets and a threshold in [0, 1]"
+                    .into(),
+            );
+        }
+        Ok(policy)
     }
 
     /// A digest of every policy fact that changes what was asked. The
@@ -109,7 +133,10 @@ impl EvaluationPolicy {
             self.model.clone(),
             self.effort.clone(),
             format!("{:?}", self.temperature),
+            self.native_options_supplied.to_string(),
             format!("{:?}", self.threshold),
+            format!("{:?}", self.evaluation_cost_limit),
+            format!("{:?}", self.run_cost_limit),
         ];
         digest_parts(parts.iter().map(String::as_str))
     }
@@ -126,19 +153,9 @@ fn digest_parts<'a>(parts: impl Iterator<Item = &'a str>) -> String {
 }
 
 fn question_set_digest(questions: &QuestionSet) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for question in &questions.questions {
-        parts.push(question.id.clone());
-        parts.push(question.body.kind().as_str().to_string());
-        parts.push(question.instructions.clone());
-        for label in question.body.labels() {
-            parts.push(label);
-        }
-        // A separator the labels cannot contain, so a question whose last
-        // label is another question's id cannot shift the boundary.
-        parts.push("\u{0}end".to_string());
-    }
-    digest_parts(parts.iter().map(String::as_str))
+    let value = serde_json::to_value(questions).expect("normalized questions are serializable");
+    let encoded = crate::canonical_json::to_vec(&value);
+    format!("blake3:{}", blake3::hash(&encoded).to_hex())
 }
 
 /// Everything the dispatch step needs, admitted before anything dispatches.
@@ -309,6 +326,43 @@ pub(crate) async fn evaluate(
     ctx: &crate::vm::AsyncBuiltinCtx,
     args: &[VmValue],
 ) -> Result<(Outcome, Vec<Answer>, EvaluationPolicy), VmError> {
+    let (outcome, answers, policy, _) = evaluate_internal(ctx, args).await?;
+    Ok((outcome, answers, policy))
+}
+
+/// The complete result of one evaluation, for CLI and host consumers.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct EvaluationResult {
+    pub outcome: serde_json::Value,
+    pub receipt: EvaluationReceipt,
+}
+
+/// Evaluate through the same admission, transport, accounting and receipt path
+/// as `harness.llm.evaluate`. Hosts supply their execution context explicitly.
+pub async fn evaluate_json(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    site_id: &str,
+    state: serde_json::Value,
+    questions: serde_json::Value,
+    policy: serde_json::Value,
+) -> Result<EvaluationResult, VmError> {
+    let args = [
+        VmValue::string(site_id),
+        crate::schema::json_to_vm_value(&state),
+        crate::schema::json_to_vm_value(&questions),
+        crate::schema::json_to_vm_value(&policy),
+    ];
+    let (outcome, _, _, receipt) = evaluate_internal(ctx, &args).await?;
+    Ok(EvaluationResult {
+        outcome: crate::llm::helpers::vm_value_to_json(&outcome.into_value()),
+        receipt,
+    })
+}
+
+async fn evaluate_internal(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    args: &[VmValue],
+) -> Result<(Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt), VmError> {
     let [id, state, questions, policy] = args else {
         return Err(VmError::Runtime(
             "evaluate expects (id, state, questions, policy)".into(),
@@ -319,6 +373,10 @@ pub(crate) async fn evaluate(
     let questions = QuestionSet::from_value(questions).map_err(VmError::Runtime)?;
     let state = crate::llm::helpers::vm_value_to_json(state);
     let started = decision_started();
+    let publish = |receipt: &EvaluationReceipt| {
+        ctx.record_evaluation_receipt(receipt.clone());
+        publish(receipt);
+    };
 
     let route = resolve_route(&policy.provider, &policy.model);
     let canonical_state = crate::canonical_json::to_vec(&state);
@@ -329,7 +387,14 @@ pub(crate) async fn evaluate(
         canonical_input_type: state_type_name(&state).into(),
         question_set_digest: question_set_digest(&questions),
         policy_digest: policy.digest(),
-        evaluator_instruction_version: structured::EVALUATOR_INSTRUCTION_VERSION.into(),
+        evaluator_instruction_version: if route
+            .as_ref()
+            .is_some_and(|route| route.protocol.is_native())
+        {
+            "harn.evaluator.native.v1".into()
+        } else {
+            structured::EVALUATOR_INSTRUCTION_VERSION.into()
+        },
         output_schema_version: structured::OUTPUT_SCHEMA_VERSION.into(),
         backend_kind: policy.backend.as_str().into(),
         protocol: route
@@ -371,7 +436,7 @@ pub(crate) async fn evaluate(
         let outcome = outcome::unavailable(&reference, "model_unconfigured");
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
-        return Ok((outcome, Vec::new(), policy));
+        return Ok((outcome, Vec::new(), policy, receipt));
     };
 
     // The checker refuses an empty set (HARN-TYP-036), and the outcome union
@@ -388,7 +453,7 @@ pub(crate) async fn evaluate(
             outcome::question_invalid(&reference, &refusal.question, refusal.reason.as_str());
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
-        return Ok((outcome, Vec::new(), policy));
+        return Ok((outcome, Vec::new(), policy, receipt));
     }
 
     // The estimate is the evaluator's own, and it is on the receipt whether or
@@ -402,16 +467,74 @@ pub(crate) async fn evaluate(
             outcome::state_too_large(&reference, route.limits.state_window_tokens, estimated);
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
-        return Ok((outcome, Vec::new(), policy));
+        return Ok((outcome, Vec::new(), policy, receipt));
     }
 
     // A price the route does not declare cannot be admitted, and an
     // unadmitted charge is not a free one.
-    let Some(bound) = admitted_cost_bound(&route, estimated) else {
+    // Native input-only billing covers the entire request, including every
+    // question. Encoded UTF-8 bytes bound token count without trusting a
+    // tokenizer estimate for budget admission.
+    let budget_input = if route.protocol.is_native() {
+        let request = DecisionRequest {
+            model: &policy.model,
+            provider: &policy.provider,
+            state: &state,
+            questions: &questions,
+            contract: &route,
+            effort: &policy.effort,
+            temperature: policy.temperature,
+        };
+        match native::request_body(&request) {
+            Ok(body) => {
+                let longest = body["questions"]
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|questions| questions.values())
+                    .map(estimate_state_tokens)
+                    .max()
+                    .unwrap_or(0);
+                let combined = estimated.saturating_add(longest);
+                let total = estimate_state_tokens(&body);
+                receipt.estimated_longest_question_tokens = Some(longest);
+                receipt.estimated_request_tokens = Some(total);
+                let exceeded = if combined > route.limits.state_window_tokens {
+                    Some((route.limits.state_window_tokens, combined))
+                } else {
+                    route
+                        .limits
+                        .request_window_tokens
+                        .filter(|limit| total > *limit)
+                        .map(|limit| (limit, total))
+                };
+                if let Some((limit, estimated_tokens)) = exceeded {
+                    receipt.limit_tokens = Some(limit);
+                    let outcome = refuse(
+                        &mut receipt,
+                        outcome::state_too_large(&reference, limit, estimated_tokens),
+                    );
+                    publish(&receipt);
+                    return Ok((outcome, Vec::new(), policy, receipt));
+                }
+                crate::canonical_json::to_vec(&body).len()
+            }
+            Err(_) => {
+                let outcome = refuse(
+                    &mut receipt,
+                    outcome::unavailable(&reference, "unsupported_options"),
+                );
+                publish(&receipt);
+                return Ok((outcome, Vec::new(), policy, receipt));
+            }
+        }
+    } else {
+        estimated
+    };
+    let Some(bound) = admitted_cost_bound(&route, budget_input) else {
         let outcome = outcome::unavailable(&reference, "unsupported_options");
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
-        return Ok((outcome, Vec::new(), policy));
+        return Ok((outcome, Vec::new(), policy, receipt));
     };
     if bound > policy.evaluation_cost_limit {
         let outcome = outcome::budget_cut(
@@ -422,7 +545,7 @@ pub(crate) async fn evaluate(
         );
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
-        return Ok((outcome, Vec::new(), policy));
+        return Ok((outcome, Vec::new(), policy, receipt));
     }
     let spent = crate::llm::cost::peek_total_cost();
     if spent + bound > policy.run_cost_limit {
@@ -434,7 +557,7 @@ pub(crate) async fn evaluate(
         );
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
-        return Ok((outcome, Vec::new(), policy));
+        return Ok((outcome, Vec::new(), policy, receipt));
     }
 
     // An accepted stop is observed before dispatch, so a cancelled run does
@@ -447,28 +570,97 @@ pub(crate) async fn evaluate(
         let outcome = outcome::cancelled(&reference, "interrupt");
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
-        return Ok((outcome, Vec::new(), policy));
+        return Ok((outcome, Vec::new(), policy, receipt));
     }
     if deadline.is_some_and(|deadline| deadline <= std::time::Instant::now()) {
         let outcome = outcome::budget_cut(&reference, "deadline", 0.0, 0.0);
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
-        return Ok((outcome, Vec::new(), policy));
+        return Ok((outcome, Vec::new(), policy, receipt));
     }
 
     // --- One dispatch. ---
+
+    let reservation = if policy.backend == BackendKind::NativeDecision {
+        match super::admission::reserve_decision(
+            bound,
+            policy.evaluation_cost_limit,
+            policy.run_cost_limit,
+        ) {
+            Ok(hold) => Some(hold),
+            Err(_) => {
+                let outcome = refuse(
+                    &mut receipt,
+                    outcome::budget_cut(&reference, "run_cost", bound, policy.run_cost_limit),
+                );
+                publish(&receipt);
+                return Ok((outcome, Vec::new(), policy, receipt));
+            }
+        }
+    } else {
+        None
+    };
 
     let evaluation = Evaluation {
         state,
         questions,
         policy,
     };
-    let (outcome, answers) = dispatch(&evaluation, &route, &mut receipt, &reference).await;
+    let (mut outcome, answers) = dispatch(&evaluation, &route, &mut receipt, &reference).await;
+    if let Some(hold) = reservation {
+        let settled = if receipt.physical_attempts == 0 {
+            Some(0.0)
+        } else {
+            receipt.cost_usd
+        };
+        if receipt
+            .native_transport
+            .as_ref()
+            .is_some_and(|transport| transport.provider_attempts_reported.is_some_and(|n| n > 1))
+        {
+            // A failed durable invalidation still fails this evaluation closed.
+            if hold.retain_contract_violation().is_err() {
+                outcome = outcome::budget_cut(
+                    &reference,
+                    "run_cost",
+                    bound,
+                    evaluation.policy.run_cost_limit,
+                );
+            }
+        } else if hold.settle(settled).is_err() {
+            outcome = outcome::budget_cut(
+                &reference,
+                "run_cost",
+                bound,
+                evaluation.policy.run_cost_limit,
+            );
+        }
+    }
+    if evaluation.policy.backend == BackendKind::NativeDecision && receipt.physical_attempts > 0 {
+        // Unknown usage keeps the admitted amount, never a free failed call.
+        let charged = receipt.cost_usd.unwrap_or(bound);
+        receipt.cost_usd = Some(charged);
+        if crate::llm::cost::accumulate_llm_usage(
+            &evaluation.policy.model,
+            receipt.input_tokens.unwrap_or(0).min(i64::MAX as u64) as i64,
+            receipt.output_tokens.unwrap_or(0).min(i64::MAX as u64) as i64,
+            charged,
+        )
+        .is_err()
+        {
+            outcome = outcome::budget_cut(
+                &reference,
+                "run_cost",
+                charged,
+                evaluation.policy.run_cost_limit,
+            );
+        }
+    }
     receipt.outcome_kind = outcome.kind.into();
     receipt.elapsed_ms = started.elapsed().as_millis() as u64;
     receipt.record_answers(&answers);
     publish(&receipt);
-    Ok((outcome, answers, evaluation.policy))
+    Ok((outcome, answers, evaluation.policy, receipt))
 }
 
 async fn dispatch(
@@ -477,37 +669,50 @@ async fn dispatch(
     receipt: &mut EvaluationReceipt,
     reference: &str,
 ) -> (Outcome, Vec<Answer>) {
+    if evaluation.policy.backend == BackendKind::NativeDecision
+        && evaluation.policy.native_options_supplied
+    {
+        return (
+            outcome::unavailable(reference, "unsupported_options"),
+            Vec::new(),
+        );
+    }
+    if (evaluation.policy.backend == BackendKind::NativeDecision) != route.protocol.is_native() {
+        return (
+            outcome::unavailable(reference, "unsupported_options"),
+            Vec::new(),
+        );
+    }
     let backend: Arc<dyn DecisionBackend> = match installed::get() {
         Some(installed) => installed,
         None => match evaluation.policy.backend {
             BackendKind::StructuredLlm => Arc::new(structured::StructuredLlmBackend),
-            // The native adapter is #8538. Refusing here is the honest answer:
-            // serving a native policy through the structured transport would
-            // silently change what was measured and what it cost.
-            BackendKind::NativeDecision => {
-                return (
-                    outcome::unavailable(reference, "model_unconfigured"),
-                    Vec::new(),
-                )
-            }
+            BackendKind::NativeDecision => Arc::new(native::NativeDecisionBackend),
         },
     };
-    let response = backend
-        .evaluate(DecisionRequest {
-            model: &evaluation.policy.model,
-            provider: &evaluation.policy.provider,
-            state: &evaluation.state,
-            questions: &evaluation.questions,
-            contract: route,
-            effort: &evaluation.policy.effort,
-            temperature: evaluation.policy.temperature,
-        })
-        .await;
+    let request = DecisionRequest {
+        model: &evaluation.policy.model,
+        provider: &evaluation.policy.provider,
+        state: &evaluation.state,
+        questions: &evaluation.questions,
+        contract: route,
+        effort: &evaluation.policy.effort,
+        temperature: evaluation.policy.temperature,
+    };
+    if evaluation.policy.backend == BackendKind::NativeDecision {
+        receipt.native_transport = Some(receipt::NativeTransportReceipt {
+            data_controls: native::privacy_plan(&request).receipt,
+            provider_attempts_reported: None,
+            final_provider_reported: None,
+        });
+    }
+    let response = backend.evaluate(request).await;
     let response = match response {
         Ok(response) => response,
         Err(error) => {
             receipt.physical_attempts = physical_attempts_for(&error);
             receipt.accounting_status = if receipt.physical_attempts == 0 {
+                receipt.native_transport = None;
                 AccountingStatus::NotDispatched
             } else {
                 AccountingStatus::UsageUnknown
@@ -516,10 +721,21 @@ async fn dispatch(
         }
     };
     receipt.physical_attempts = response.physical_attempts;
+    receipt.native_transport = response.native_transport.clone();
     receipt.served_model = response.served_model.clone();
     receipt.input_tokens = response.input_tokens;
     receipt.output_tokens = response.output_tokens;
     receipt.source = EvaluationSource::Live;
+    if response.physical_attempts != 1 {
+        return (
+            outcome::refused(
+                reference,
+                "schema_invalid",
+                "decision backend violated the single-request contract",
+            ),
+            Vec::new(),
+        );
+    }
     match (response.input_tokens, response.output_tokens) {
         // Unknown usage keeps its reservation and says so. It is never
         // recorded as a free attempt.
@@ -528,6 +744,23 @@ async fn dispatch(
             receipt.cost_usd = settled_cost(route, input, output);
         }
         _ => receipt.accounting_status = AccountingStatus::UsageUnknown,
+    }
+
+    if receipt.native_transport.as_ref().is_some_and(|transport| {
+        transport
+            .provider_attempts_reported
+            .is_some_and(|attempts| attempts > 1)
+    }) {
+        receipt.accounting_status = AccountingStatus::UsageUnknown;
+        receipt.cost_usd = None;
+        return (
+            outcome::refused(
+                reference,
+                "provider_refusal",
+                "gateway reported multiple downstream attempts",
+            ),
+            Vec::new(),
+        );
     }
 
     // A partial answer set is a schema failure, not a smaller `answered`.
@@ -592,7 +825,8 @@ async fn dispatch(
 /// have billed.
 fn physical_attempts_for(error: &DecisionTransportError) -> u32 {
     match error {
-        DecisionTransportError::UnsupportedOptions { .. } => 0,
+        DecisionTransportError::UnsupportedOptions { .. }
+        | DecisionTransportError::AuthorityDenied => 0,
         _ => 1,
     }
 }
@@ -603,6 +837,9 @@ fn transport_outcome(
     reference: &str,
 ) -> Outcome {
     match error {
+        DecisionTransportError::AuthorityDenied => {
+            outcome::unavailable(reference, "authority_denied")
+        }
         DecisionTransportError::Refused { reason, diagnostic } => {
             outcome::refused(reference, reason.as_str(), &diagnostic)
         }
@@ -647,6 +884,11 @@ fn transport_outcome(
 /// The upper bound this evaluation may cost under the route's declared price.
 /// `None` when the price is unknown, which refuses dispatch.
 fn admitted_cost_bound(route: &DecisionContract, estimated_state_tokens: usize) -> Option<f64> {
+    // Native protocols here have no output-token cap. Their monetary bound
+    // is valid only for an explicitly declared input-only billing contract.
+    if route.protocol.is_native() && route.output_price_per_mtok != Some(0.0) {
+        return None;
+    }
     let input = route.input_price_per_mtok?;
     let output = route.output_price_per_mtok.unwrap_or(0.0);
     if !input.is_finite() || !output.is_finite() {
@@ -690,6 +932,7 @@ fn publish(receipt: &EvaluationReceipt) {
     let Ok(serde_json::Value::Object(payload)) = serde_json::to_value(receipt) else {
         return;
     };
+    #[cfg(test)]
     last_receipt::record(receipt.clone());
     crate::events::log_info_meta(
         "llm.evaluation",
@@ -703,6 +946,7 @@ fn publish(receipt: &EvaluationReceipt) {
 
 /// The most recent receipt this process produced. A test reads it to assert on
 /// what was recorded, because the journal sink is not available to one.
+#[cfg(test)]
 mod last_receipt {
     use super::receipt::EvaluationReceipt;
     use std::sync::{Mutex, OnceLock};
