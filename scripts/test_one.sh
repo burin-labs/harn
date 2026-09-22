@@ -103,9 +103,8 @@ if [[ ! -x "$cargo_runner" ]]; then
 fi
 
 metadata=$(mktemp "${TMPDIR:-/tmp}/harn-test-one-metadata.XXXXXX")
-listing=$(mktemp "${TMPDIR:-/tmp}/harn-test-one-listing.XXXXXX")
 receipt=$(mktemp "${TMPDIR:-/tmp}/harn-test-one.XXXXXX")
-trap 'rm -f "$metadata" "$listing" "$receipt"' EXIT
+trap 'rm -f "$metadata" "$receipt"' EXIT
 
 if [[ "$target_kind" == "lib" ]]; then
   requested_target="library target"
@@ -115,8 +114,9 @@ fi
 
 # A Rust test name is reachable only through the target that compiled it, and a
 # selector aimed at the wrong kind filters to nothing rather than failing. Both
-# checks below exist so that shape is refused with a cause instead of running an
-# empty filter and leaving the receipt check to infer one.
+# checks below refuse an invalid declared target before compilation and require
+# exactly one executed test afterward. Enumeration would acquire another heavy
+# lease for the same artifact without strengthening the final receipt.
 #
 # The first check reads the package's declared targets. That is manifest
 # metadata, not a build, so a request naming a target the package does not have
@@ -169,36 +169,6 @@ if ! has_target "$target_kind" "$target_name"; then
   exit 2
 fi
 
-# The second check asks the resolved target to name the test. Listing is the
-# same selector the run uses, so a name it cannot produce is a name the run
-# cannot execute — the mismatch surfaces here, with both sides of it named,
-# rather than as a silent zero-match filter.
-set +e
-"$cargo_runner" test --package "$package" "${selector[@]}" "$test_name" -- \
-  --exact --list --format terse > "$listing"
-listing_status=$?
-set -e
-if ((listing_status != 0)); then
-  echo "error: could not enumerate tests in the $requested_target of package $package" >&2
-  exit "$listing_status"
-fi
-if ! grep -Fqx -- "$test_name: test" "$listing"; then
-  {
-    echo "error: the $requested_target of package $package defines no test named:"
-    echo "  $test_name"
-    echo "package $package declares:"
-    describe_targets
-    if [[ "$target_kind" == "lib" ]]; then
-      echo "a name defined under the package's tests/ directory belongs to an"
-      echo "integration-test binary; select it with --test <binary> instead of --lib."
-    else
-      echo "a name defined under the package's src/ directory belongs to the"
-      echo "library target; select it with --lib instead of --test $target_name."
-    fi
-  } >&2
-  exit 2
-fi
-
 echo "test_one: running $test_name in the $requested_target of package $package" >&2
 
 if ! exec 3> "$receipt"; then
@@ -229,5 +199,20 @@ if ((runner_status != 0)); then
 fi
 if ! grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured;' "$receipt"; then
   echo "error: exact test did not produce a one-test success receipt: $test_name" >&2
+  if grep -Eq '^test result: ok\. 0 passed; 0 failed; 0 ignored; 0 measured;' "$receipt"; then
+    {
+      echo "error: the $requested_target of package $package ran no test named:"
+      echo "  $test_name"
+      echo "package $package declares:"
+      describe_targets
+      if [[ "$target_kind" == "lib" ]]; then
+        echo "a name defined under the package's tests/ directory belongs to an"
+        echo "integration-test binary; select it with --test <binary> instead of --lib."
+      else
+        echo "a name defined under the package's src/ directory belongs to the"
+        echo "library target; select it with --lib instead of --test $target_name."
+      fi
+    } >&2
+  fi
   exit 1
 fi
