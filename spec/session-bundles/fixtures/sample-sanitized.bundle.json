@@ -215,6 +215,7 @@
         "answer"
       ],
       "evidence": {
+        "evaluation_receipts": null,
         "execution_id": "run_fixture_session_bundle",
         "flight_recording": null,
         "gaps": [],
