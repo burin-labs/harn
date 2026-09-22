@@ -1,0 +1,52 @@
+import { classify_compaction_round } from "std/agent/compaction_classify"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        json_stringify(
+          {
+            answers: {
+              message_3: {choice: "keep", confidence: 0.95, evidence: "explicit fixture"},
+              message_5: {choice: "drop", confidence: 0.2, evidence: "explicit fixture"},
+            },
+          },
+        ),
+      ),
+    ],
+    { ->
+      const result = classify_compaction_round(
+        pick(harness, ["fs", "llm"]),
+        {
+          items: [
+            {index: 3, role: "tool", content: "Opaque first fixture"},
+            {index: 5, role: "assistant", content: "Opaque second fixture"},
+          ],
+          anchor: "Complete the bounded fixture",
+          round: 1,
+          budget_tokens: 1000,
+          max_questions: 8,
+          policy: {
+            backend: "structured_llm",
+            provider: "openai",
+            model: "gpt-4.1-mini",
+            temperature: 0.0,
+            threshold: 0.8,
+            evaluation_cost_limit: 1.0,
+          },
+        },
+      )
+      assert_eq(result.kind, "answered")
+      assert_eq(len(result.decisions), 2)
+      assert_eq(result.decisions[0]?.index, 3)
+      assert_eq(result.decisions[0]?.choice, "keep")
+      assert_eq(result.decisions[1]?.index, 5)
+      assert_eq(result.decisions[1]?.choice, "drop")
+      assert_eq(result.decisions[1]?.confidence, 0.2)
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+  harness.stdio.println("compaction round preserves typed answers in one evaluation")
+}
