@@ -58,6 +58,17 @@ pub struct RunControlOptions {
     pub flight_recorder: FlightRecorderOptions,
 }
 
+/// Complete in-process execution configuration. Embedded and headless hosts
+/// use this seam for a non-default runtime without forking CLI behavior.
+#[derive(Clone, Debug, Default)]
+pub struct RunExecutionOptions {
+    pub evaluation: super::EvaluationReplayOptions,
+    pub sandbox: super::RunSandboxOptions,
+    pub harnpack: super::HarnpackRunOptions,
+    pub project_runtime: super::ProjectRuntimeMode,
+    pub flight_recorder: FlightRecorderOptions,
+}
+
 #[derive(Clone, Debug)]
 pub struct FlightRecorderOptions {
     pub enabled: bool,

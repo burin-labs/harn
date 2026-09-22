@@ -50,7 +50,10 @@ but cannot be upgraded by applying a newer identity contract.
 Verification checks canonical input, normalized questions and rubric text,
 requested policy, site, route, evaluator contract, and stable request identity.
 JSON whitespace and object-key order do not change the binding. Stable identity
-does not distinguish repeated invocations. Cache or tape provenance is separate.
+does not distinguish repeated invocations: `evaluation_id` is the stable request
+identity, while `invocation_id` identifies each occurrence and its outcome handle.
+Cache or tape provenance is separate and retains the original receipt in
+`reused_from`; reused answers report zero current provider attempts and cost.
 This check does not authenticate a provider, validate answer quality, or certify
 accounting; consumers must evaluate those facts from the original receipt.
 

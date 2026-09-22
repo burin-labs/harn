@@ -39,13 +39,14 @@ impl AsyncBuiltinCtx {
         &self,
         receipt: crate::llm::decision::receipt::EvaluationReceipt,
     ) {
-        self.child.lock().evaluation_journal.lock().record(receipt);
+        self.child.lock().evaluation.journal.lock().record(receipt);
     }
 
     pub(crate) fn evaluation_invocation_id(&self) -> String {
         let vm = self.child.lock();
         let id = vm
-            .evaluation_journal
+            .evaluation
+            .journal
             .lock()
             .invocation_id(&vm.execution_id().to_string());
         id
@@ -54,7 +55,7 @@ impl AsyncBuiltinCtx {
     pub(crate) fn evaluation_replay(
         &self,
     ) -> Option<crate::llm::decision::replay::EvaluationReplayScope> {
-        self.child.lock().evaluation_replay.clone()
+        self.child.lock().evaluation.replay.clone()
     }
 
     /// Construct a context for host work that the current VM awaits inline.
