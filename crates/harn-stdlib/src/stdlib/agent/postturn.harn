@@ -435,12 +435,10 @@ fn __missing_tool_call_recovery_classifier(harness: Harness, opts: dict) {
   }
   const options = recovery.options
   const has_test_classifier = type_of(options?.classifier) == "closure"
-  const has_decision_policy = options?.decision_policy != nil
-  if lowercase(to_string(opts?.provider ?? "")) == "mock" && !has_test_classifier
-    && !has_decision_policy {
+  if lowercase(to_string(opts?.provider ?? "")) == "mock" && !has_test_classifier {
     return nil
   }
-  if opts?._llm_caller != nil && !has_test_classifier && !has_decision_policy {
+  if opts?._llm_caller != nil && !has_test_classifier {
     return nil
   }
   return missing_tool_call_classifier(harness, options)
