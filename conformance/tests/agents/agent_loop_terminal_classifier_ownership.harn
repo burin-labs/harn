@@ -110,16 +110,26 @@ pipeline default(harness: Harness) {
       )
     },
   )
-  // Remaining classifier calls put every stable byte before assistant text.
+  // Stable evaluator instructions and tool schema stay separate from state.
   with_llm_script(
     harness.llm,
     [
       llm_text(
-        "{\"action\":\"tool_call_intended\",\"tool_name\":\"edit\",\"confidence\":0.9,\"evidence\":\"explicit intent\",\"language\":\"en\"}",
+        json_stringify(
+          {
+            answers: {
+              intended: {verdict: true, confidence: 0.9, evidence: "explicit intent"},
+              tool: {choice: "edit", confidence: 0.9, evidence: "explicit intent"},
+            },
+          },
+        ),
       ),
     ],
     { ->
-      const classify = missing_tool_call_classifier(harness, {provider: "mock"})
+      const classify = missing_tool_call_classifier(
+        harness,
+        {provider: "openai", model: "gpt-5.4-nano"},
+      )
       const verdict = classify(
         {
           session_id: "prefix-order",
@@ -131,14 +141,17 @@ pipeline default(harness: Harness) {
           tool_format: "native",
         },
       )
-      const prompt = harness.llm.mock_calls()[0].messages[0].content
-      const rules_at = prompt.index_of("Rules:")
-      const tools_at = prompt.index_of("Candidate tools JSON:")
-      const text_at = prompt.index_of("VARIABLE_ASSISTANT_TAIL")
-      require rules_at >= 0 && tools_at > rules_at && text_at > tools_at,
-        "stable rules and candidate tools must precede assistant text"
+      assert_eq(len(harness.llm.mock_calls()), 1)
+      const call = harness.llm.mock_calls()[0]
+      const schema = json_stringify(call.output_format.schema)
+      require call.system.index_of("bounded questions") >= 0
+        && call.system.index_of("VARIABLE_ASSISTANT_TAIL") < 0
+        && schema.index_of("Edit a file.") >= 0
+        && schema.index_of("VARIABLE_ASSISTANT_TAIL") < 0
+        && json_stringify(call.messages).index_of("VARIABLE_ASSISTANT_TAIL") >= 0,
+        "stable evaluator semantics must be separate from assistant state"
       harness.stdio.println("prefix.action=" + verdict.action)
-      harness.stdio.println("prefix.stable_first=true")
+      harness.stdio.println("prefix.separated_state=true")
     },
   )
 }
