@@ -337,7 +337,7 @@ plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/llm/trace.rs"
-statics = ["LLM_TRACE", "LLM_TRACING_ENABLED"]
+statics = ["LLM_TRACE", "LLM_TRACING_ENABLED", "LLM_USAGE_SUMMARY"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
