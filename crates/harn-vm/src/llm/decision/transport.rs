@@ -73,7 +73,7 @@ pub async fn one_structured_call(
 
 /// Build the one request. Split from the dispatch so the request's own
 /// scratch space is released before the call is awaited.
-pub(super) fn prepare(
+fn prepare(
     request: &DecisionRequest<'_>,
     prompt: &str,
     system: &str,

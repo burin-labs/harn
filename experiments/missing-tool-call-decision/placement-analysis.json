@@ -1,6 +1,6 @@
 {
   "design": "Fixed curated 12-row corpus, five repeated trials. Descriptive fidelity only; bootstrap clusters rows, not repeats. Primary assistant/tool execution replayed, classifier paid.",
-  "completed": 180,
+  "completed": 240,
   "arms": {
     "legacy_structured": {
       "rows": 60,
@@ -11,11 +11,11 @@
       "failures": 0,
       "completed_runs": 60,
       "classifier_latency_ms": {
-        "median": 1244.5,
-        "max": 1858
+        "median": 1210.5,
+        "max": 2420
       },
-      "run_latency_ms_median": 1475,
-      "cost_usd": 0.009997250000000001,
+      "run_latency_ms_median": 1503.5,
+      "cost_usd": 0.010217500000000001,
       "cache": {
         "reported_rows": 60,
         "unavailable_rows": 0,
@@ -24,11 +24,11 @@
       "by_language": {
         "en": {
           "rows": 20,
-          "correct": 15
+          "correct": 20
         },
         "es": {
           "rows": 20,
-          "correct": 20
+          "correct": 15
         },
         "fr": {
           "rows": 20,
@@ -41,15 +41,15 @@
       "correct_recovery_and_tool": 60,
       "false_recovery": 0,
       "missed_recovery": 0,
-      "ambiguous": 10,
+      "ambiguous": 0,
       "failures": 0,
       "completed_runs": 60,
       "classifier_latency_ms": {
-        "median": 202.5,
-        "max": 993
+        "median": 203.5,
+        "max": 354
       },
-      "run_latency_ms_median": 470,
-      "cost_usd": 0.0016968000000000011,
+      "run_latency_ms_median": 479,
+      "cost_usd": 0.0018853800000000003,
       "cache": {
         "reported_rows": 0,
         "unavailable_rows": 60,
@@ -70,20 +70,20 @@
         }
       }
     },
-    "structured_decision": {
+    "original_structured": {
       "rows": 60,
-      "correct_recovery_and_tool": 57,
-      "false_recovery": 3,
-      "missed_recovery": 0,
-      "ambiguous": 17,
+      "correct_recovery_and_tool": 47,
+      "false_recovery": 0,
+      "missed_recovery": 13,
+      "ambiguous": 15,
       "failures": 0,
       "completed_runs": 60,
       "classifier_latency_ms": {
-        "median": 1315,
-        "max": 1915
+        "median": 1370.5,
+        "max": 3150
       },
-      "run_latency_ms_median": 1566,
-      "cost_usd": 0.014180999999999994,
+      "run_latency_ms_median": 1637,
+      "cost_usd": 0.014675249999999999,
       "cache": {
         "reported_rows": 60,
         "unavailable_rows": 0,
@@ -96,11 +96,45 @@
         },
         "es": {
           "rows": 20,
-          "correct": 17
+          "correct": 12
         },
         "fr": {
           "rows": 20,
-          "correct": 20
+          "correct": 15
+        }
+      }
+    },
+    "structured_decision": {
+      "rows": 60,
+      "correct_recovery_and_tool": 42,
+      "false_recovery": 0,
+      "missed_recovery": 18,
+      "ambiguous": 23,
+      "failures": 0,
+      "completed_runs": 60,
+      "classifier_latency_ms": {
+        "median": 1390,
+        "max": 3704
+      },
+      "run_latency_ms_median": 1667,
+      "cost_usd": 0.018590500000000003,
+      "cache": {
+        "reported_rows": 60,
+        "unavailable_rows": 0,
+        "positive_rows": 0
+      },
+      "by_language": {
+        "en": {
+          "rows": 20,
+          "correct": 16
+        },
+        "es": {
+          "rows": 20,
+          "correct": 10
+        },
+        "fr": {
+          "rows": 20,
+          "correct": 16
         }
       }
     }
@@ -116,44 +150,70 @@
         "independent_row_clusters": 12
       },
       "latency_ms": {
-        "difference": -1021.9000000000002,
+        "difference": -1074.9666666666667,
         "paired_row_bootstrap_95": [
-          -1073.7175,
-          -970.215
+          -1154.4191666666666,
+          -1010.0150000000001
         ],
         "independent_row_clusters": 12
       },
       "cost_usd": {
-        "difference": -0.00013834083333333334,
+        "difference": -0.0001388686666666667,
         "paired_row_bootstrap_95": [
-          -0.00014248785,
-          -0.00013451150833333333
+          -0.00014366319583333337,
+          -0.00013388427500000003
         ],
         "independent_row_clusters": 12
       }
     },
     "structured_decision_minus_legacy": {
       "accuracy": {
-        "difference": 0.03333333333333333,
+        "difference": -0.21666666666666667,
         "paired_row_bootstrap_95": [
-          -0.15,
-          0.25
+          -0.44999999999999996,
+          0
         ],
         "independent_row_clusters": 12
       },
       "latency_ms": {
-        "difference": 94.06666666666665,
+        "difference": 197.9,
         "paired_row_bootstrap_95": [
-          32.59624999999999,
-          151.40041666666667
+          78.24791666666665,
+          353.65125000000006
         ],
         "independent_row_clusters": 12
       },
       "cost_usd": {
-        "difference": 0.00006972916666666668,
+        "difference": 0.00013954999999999998,
         "paired_row_bootstrap_95": [
-          0.00006099947916666668,
-          0.00007860416666666667
+          0.00013102916666666664,
+          0.00014809166666666666
+        ],
+        "independent_row_clusters": 12
+      }
+    },
+    "revised_structured_minus_original": {
+      "accuracy": {
+        "difference": -0.08333333333333336,
+        "paired_row_bootstrap_95": [
+          -0.23333333333333336,
+          0.03333333333333333
+        ],
+        "independent_row_clusters": 12
+      },
+      "latency_ms": {
+        "difference": 76.55000000000001,
+        "paired_row_bootstrap_95": [
+          -54.48708333333329,
+          239.0016666666666
+        ],
+        "independent_row_clusters": 12
+      },
+      "cost_usd": {
+        "difference": 0.00006525416666666667,
+        "paired_row_bootstrap_95": [
+          0.00005921249999999999,
+          0.00007244218750000003
         ],
         "independent_row_clusters": 12
       }
@@ -161,15 +221,18 @@
   },
   "backend_agreement": {
     "paired_rows": 60,
-    "same_action": 47,
-    "same_recovery": 57,
-    "both_recover_pairs": 30,
-    "matching_tool_when_both_recover": 30
+    "same_action": 37,
+    "same_recovery": 42,
+    "both_recover_pairs": 12,
+    "matching_tool_when_both_recover": 12
   },
   "served_models": {
     "legacy_structured": [],
     "native_decision": [
       "typesafe/jev-1.13-20260917"
+    ],
+    "original_structured": [
+      "gpt-5.4-nano-2026-03-17"
     ],
     "structured_decision": [
       "gpt-5.4-nano-2026-03-17"
