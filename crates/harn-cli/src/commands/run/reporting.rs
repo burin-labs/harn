@@ -17,7 +17,13 @@ use harn_vm::clock::{now_wall_ms, RealClock};
 use harn_vm::event_log::EventLog;
 use harn_vm::llm::usage::{summarize_usage_cost_certainty, UsageCostCertainty};
 
-use super::{RunAttestationOptions, RunProfileOptions};
+use super::RunProfileOptions;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RunAttestationOptions {
+    pub receipt_out: Option<PathBuf>,
+    pub agent_id: Option<String>,
+}
 
 /// JSON event-stream configuration for `--json` runs.
 #[derive(Clone, Default)]
