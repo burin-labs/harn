@@ -270,6 +270,8 @@ mod tests {
 
     #[test]
     fn question_prompt_and_schema_share_semantics_and_both_count_toward_admission() {
+        // Prepare the real route's options without credentials or dispatch.
+        crate::llm::mock::install_cli_llm_mocks(Vec::new());
         let questions = QuestionSet {
             questions: vec![
                 Question {
@@ -363,6 +365,7 @@ mod tests {
                 strategy == super::super::contract::StructuredOutputStrategy::NativeSchema
             );
         }
+        crate::llm::mock::clear_cli_llm_mock_mode();
     }
 
     #[test]
