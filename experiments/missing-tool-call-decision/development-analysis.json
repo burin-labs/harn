@@ -11,10 +11,10 @@
       "failures": 0,
       "completed_runs": 60,
       "classifier_latency_ms": {
-        "median": 1245,
+        "median": 1244.5,
         "max": 1858
       },
-      "run_latency_ms_median": 1479,
+      "run_latency_ms_median": 1475,
       "cost_usd": 0.009997250000000001,
       "cache": {
         "reported_rows": 60,
@@ -45,7 +45,7 @@
       "failures": 0,
       "completed_runs": 60,
       "classifier_latency_ms": {
-        "median": 203,
+        "median": 202.5,
         "max": 993
       },
       "run_latency_ms_median": 470,
@@ -79,10 +79,10 @@
       "failures": 0,
       "completed_runs": 60,
       "classifier_latency_ms": {
-        "median": 1318,
+        "median": 1315,
         "max": 1915
       },
-      "run_latency_ms_median": 1578,
+      "run_latency_ms_median": 1566,
       "cost_usd": 0.014180999999999994,
       "cache": {
         "reported_rows": 60,
@@ -118,16 +118,16 @@
       "latency_ms": {
         "difference": -1021.9000000000002,
         "paired_row_bootstrap_95": [
-          -1073.7166666666667,
-          -970.1500000000001
+          -1073.7175,
+          -970.215
         ],
         "independent_row_clusters": 12
       },
       "cost_usd": {
         "difference": -0.00013834083333333334,
         "paired_row_bootstrap_95": [
-          -0.00014248783333333333,
-          -0.00013450533333333333
+          -0.00014248785,
+          -0.00013451150833333333
         ],
         "independent_row_clusters": 12
       }
@@ -144,15 +144,15 @@
       "latency_ms": {
         "difference": 94.06666666666665,
         "paired_row_bootstrap_95": [
-          32.59999999999999,
-          151.41666666666663
+          32.59624999999999,
+          151.40041666666667
         ],
         "independent_row_clusters": 12
       },
       "cost_usd": {
         "difference": 0.00006972916666666668,
         "paired_row_bootstrap_95": [
-          0.00006100000000000001,
+          0.00006099947916666668,
           0.00007860416666666667
         ],
         "independent_row_clusters": 12
