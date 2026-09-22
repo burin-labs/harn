@@ -371,8 +371,8 @@ use self::stream_builtins::{llm_stream_builtin, llm_stream_call_impl, llm_stream
 use self::trace::trace_llm_call;
 
 pub use self::api::{
-    normalize_ollama_keep_alive, ollama_readiness, OllamaReadinessOptions, OllamaReadinessResult,
-    OllamaWarmupResult,
+    normalize_ollama_keep_alive, ollama_readiness, ollama_readiness_for_provider,
+    OllamaReadinessOptions, OllamaReadinessResult, OllamaWarmupResult,
 };
 
 #[cfg(feature = "llm-bench-internals")]

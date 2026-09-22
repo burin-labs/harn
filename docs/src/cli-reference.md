@@ -2320,6 +2320,13 @@ takes precedence over catalog limits; when discovery is unavailable, only an
 explicit catalog `runtime_context_window` is used for local routes. Unknown
 limits are reported as `null`.
 
+For Ollama-compatible providers, `context_window` is the `num_ctx` Harn configures
+for requests, using environment overrides and the selected provider's catalog
+defaults. It is not the architecture limit from `/api/show`. With `--verify`,
+`readiness.loaded_runner.context_length` separately reports the loaded runner's
+observed context; `readiness.context_drift` identifies a mismatch with the
+configured request limit.
+
 ```bash
 harn models info llama3.2:latest
 harn models info --verify llama3.2
