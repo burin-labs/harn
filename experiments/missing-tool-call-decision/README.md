@@ -128,3 +128,55 @@ row-cluster paired intervals. Thresholds and tools remain unchanged. The 240-cal
 study has a $1 total ceiling, fixed rotating arm order and deterministic row
 order. Instrument failures abort; behavioral mistakes remain observations. It
 measures curated fidelity and overhead only, never deployment qualification.
+
+### Placement result
+
+All 240 calls completed with no transport or accounting failures, costing
+$0.04536863. The API slot was released after completion. Candidate source is
+`3f38fa8c4f59a6d4d47d71bb08c22fc6e4a965e6`; the immutable executable is
+`/tmp/harn-8543-v4-3f38fa8c4/harn`, SHA-256
+`dbac8b1fd5d65def4fe33164fcda92fee3fb12e6648ec2f9cee8c5105816cd83`.
+The v3 control uses the revised rubric at `d6564e6e0926525225999191bf254301750f4f5e`.
+Their input, question-set, and policy digests match; instruction version differs.
+Both report the same GPT-5.4 nano snapshot. Legacy served revision remains unknown.
+
+| Arm | Correct recovery and tool | False recoveries | Missed recoveries | Median classifier ms | Cost for 60 runs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy structured | 55/60 | 0 | 5 | 1,210.5 | $0.01021750 |
+| Revised rubric, structured v3 | 47/60 | 0 | 13 | 1,370.5 | $0.01467525 |
+| Same rubric, structured v4 | 42/60 | 0 | 18 | 1,390 | $0.01859050 |
+| Native evaluator | 60/60 | 0 | 0 | 203.5 | $0.00188538 |
+
+The v4 minus v3 recovery difference is -8.3 percentage points (paired row-cluster
+95% interval -23.3 to +3.3). Every v4 miss has a wrong false intent label; none
+has correct labels rejected only by the confidence floor. Tool labels remain
+correct. All 18 wrong intent labels have low confidence and become ambiguous.
+The v3 control also has wrong false intent labels on all 13 misses, including
+confident false answers. Lowering the floor would not correct those labels.
+
+The production v4 projection is reverted. Schema descriptions were already
+present, so instruction duplication was an empirical treatment, not a repair
+for missing question semantics. It increased cost without a demonstrated quality
+benefit. Production retains the matching v3 instruction identity. The exact v4
+source remains in the signed commit above; `instruction-budget-v4.harn` and its
+expected output preserve the canonical admission proof for that executable.
+It refuses the expanded request before dispatch and admits a short control; the
+v3 executable fails the expanded-request assertion. That accounting proof does
+not establish classification quality.
+
+`placement-analysis.json`, `placement-calibration.json`, and
+`placement-miss-analysis.json` preserve the results. This final corpus remains
+evaluation evidence and will not be used to tune thresholds or rubrics.
+Native's 60/60 consists of twelve unique texts with five repeats, not a
+deployment reliability estimate. Total spend across all three studies and
+retained instrument pilots is $0.11270597 for 664 calls.
+
+### Agreement instrument correction
+
+All three analysis reports now count tool agreement only when both backends
+actually recover. Earlier output vacuously counted non-recovery pairs as tool
+matches. Eligible and matching counts are respectively 30/30 in development,
+15/15 in the conditional holdout, and 12/12 in the placement study. Recovery
+and action agreement counts are unchanged. `agreement-control.mjs` exercises
+the same analyzer with a nonempty zero-eligible case, a measured match, and a
+measured mismatch. None is a model-quality trial.

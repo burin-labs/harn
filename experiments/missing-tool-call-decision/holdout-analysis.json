@@ -223,7 +223,8 @@
     "paired_rows": 60,
     "same_action": 35,
     "same_recovery": 45,
-    "matching_tool_when_both_recover": 60
+    "both_recover_pairs": 15,
+    "matching_tool_when_both_recover": 15
   },
   "served_models": {
     "legacy_structured": [],

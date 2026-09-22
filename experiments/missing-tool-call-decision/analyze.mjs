@@ -51,9 +51,9 @@ report.paired = Object.fromEntries(['native_decision','structured_decision'].map
 if (arms.includes('original_structured')) report.paired.revised_structured_minus_original = {accuracy: paired('structured_decision','original_structured', x => Number(correct(x))), latency_ms: paired('structured_decision','original_structured', x => observation(x).elapsed_ms), cost_usd: paired('structured_decision','original_structured', x => x.cost_usd)};
 const pairs = items.filter(x => x.arm === 'native_decision').flatMap(native => {
   const structured = items.find(x => x.arm === 'structured_decision' && x.repeat === native.repeat && x.row_id === native.row_id);
-  return structured ? [{same_action: observation(native).verdict.action === observation(structured).verdict.action, same_recovery: recovery(native) === recovery(structured), same_positive_tool: !recovery(native) || !recovery(structured) || observation(native).verdict.tool_name === observation(structured).verdict.tool_name}] : [];
+  return structured ? [{same_action: observation(native).verdict.action === observation(structured).verdict.action, same_recovery: recovery(native) === recovery(structured), both_recover: recovery(native) && recovery(structured), same_positive_tool: observation(native).verdict.tool_name === observation(structured).verdict.tool_name}] : [];
 });
-report.backend_agreement = {paired_rows: pairs.length, same_action: pairs.filter(x => x.same_action).length, same_recovery: pairs.filter(x => x.same_recovery).length, matching_tool_when_both_recover: pairs.filter(x => x.same_positive_tool).length};
+report.backend_agreement = {paired_rows: pairs.length, same_action: pairs.filter(x => x.same_action).length, same_recovery: pairs.filter(x => x.same_recovery).length, both_recover_pairs: pairs.filter(x => x.both_recover).length, matching_tool_when_both_recover: pairs.filter(x => x.both_recover && x.same_positive_tool).length};
 report.served_models = Object.fromEntries(arms.map(arm => [arm, [...new Set(items.filter(x => x.arm === arm).flatMap(x => x.receipts.map(r => r.served_model)))]]));
 fs.writeFileSync(path.join(root,'analysis.json'), JSON.stringify(report,null,2));
 fs.writeFileSync(path.join(root,'calibration-rows.json'), JSON.stringify(calibration));
