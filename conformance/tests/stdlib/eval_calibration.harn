@@ -271,5 +271,33 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(scored.groups[0].mean_absolute_level_error, 0.75)
   assert_eq(scored.groups[0].accuracy, 0.5)
   assert_eq(scored.groups[0].level_order, ["low", "medium", "high"])
+  // Invalid probability settings refuse before computing a quantile or group.
+  for invalid in [-1.0, 0.0, 1.0, 2.0] {
+    const rejected = calibration_report(monotonic_corpus(5), {target_error: invalid})
+    assert_eq(rejected.kind, "refused")
+    assert_eq(rejected.reason, "invalid_options")
+  }
+  for invalid in [-0.1, 1.1] {
+    const rejected = calibration_report(monotonic_corpus(5), {thresholds: [invalid]})
+    assert_eq(rejected.kind, "refused")
+    assert_eq(rejected.reason, "invalid_options")
+  }
+  const endpoints = calibration_report(monotonic_corpus(5), {thresholds: [0.0, 1.0]})
+  assert_eq(endpoints.kind, "report")
+  assert_eq(endpoints.thresholds, [0.0, 1.0])
+  for invalid in [to_float("NaN"), to_float("inf")] {
+    // Typed option fields already reject nonfinite floats at call admission.
+    const option_refused = try {
+      calibration_report(monotonic_corpus(5), {target_error: invalid})
+      false
+    } catch (e) {
+      true
+    }
+    assert_eq(option_refused, true)
+    const rejected = calibration_report(
+      [row(1, "true", "true", invalid), row(2, "true", "true", 0.9)],
+    )
+    assert_eq(rejected.reason, "invalid_confidence")
+  }
   harness.stdio.log("stdlib eval calibration ok")
 }
