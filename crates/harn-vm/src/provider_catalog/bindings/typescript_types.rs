@@ -260,8 +260,25 @@ export interface HarnModelPricing {
   output_per_mtok: number
   cache_read_per_mtok?: number | null
   cache_write_per_mtok?: number | null
+  cache_write_1h_per_mtok?: number | null
   input_token_bands?: HarnInputTokenPricingBand[]
   promotions?: HarnPromotionalPricing[]
+  schedules?: HarnRecurringPricingWindow[]
+}
+
+export interface HarnRecurringPricingWindow {
+  id: string
+  days: string[]
+  start: string
+  end: string
+  utc_offset: string
+  input_multiplier: number
+  output_multiplier: number
+  cache_read_multiplier?: number | null
+  cache_write_multiplier?: number | null
+  source_url: string
+  review_after?: string
+  note?: string
 }
 
 export interface HarnPromotionalPricing {
@@ -276,6 +293,7 @@ export interface HarnPromotionalPricing {
   output_per_mtok: number
   cache_read_per_mtok?: number | null
   cache_write_per_mtok?: number | null
+  cache_write_1h_per_mtok?: number | null
 }
 
 export interface HarnInputTokenPricingBand {

@@ -158,6 +158,23 @@ pub struct ProviderTelemetry {
     /// call regardless of provider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_wall_ms: Option<u64>,
+    /// Wall-clock instant the request left the client, in milliseconds since
+    /// the UNIX epoch, read from the active (mock-aware) clock at the same
+    /// origin as `client_wall_ms`.
+    ///
+    /// Cost settlement resolves the rate card at this instant, not at the
+    /// instant the response is priced: a promotion that expired mid-call, or a
+    /// time-of-day window the call started inside, must price the call the way
+    /// the provider billed it. A provider path with its own reader that leaves
+    /// this absent settles at the pricing clock's "now" instead, which differs
+    /// only by the call's own latency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<i64>,
+    /// Prompt-cache lifetime the request asked for (`5m` or `1h`), carried so
+    /// settlement can bill a one-hour cache write at its own rate. Absent
+    /// means the request asked for no particular lifetime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_ttl: Option<String>,
     /// Client-side latency from request dispatch to the first well-formed
     /// provider stream frame. Present only for streamed calls: a single-shot
     /// request has no first frame, so this stays absent rather than reporting
@@ -261,6 +278,8 @@ impl ProviderTelemetry {
             server_output_tokens,
             server_total_tokens,
             client_wall_ms,
+            started_at_ms,
+            prompt_cache_ttl,
             client_first_frame_ms,
             runtime_context_length,
             runtime_loaded_model,
@@ -288,6 +307,8 @@ impl ProviderTelemetry {
             && server_output_tokens.is_none()
             && server_total_tokens.is_none()
             && client_wall_ms.is_none()
+            && started_at_ms.is_none()
+            && prompt_cache_ttl.is_none()
             && client_first_frame_ms.is_none()
             && runtime_context_length.is_none()
             && runtime_loaded_model.is_none()
@@ -577,6 +598,10 @@ impl ProviderTelemetry {
         insert_opt_i64(&mut dict, "server_output_tokens", self.server_output_tokens);
         insert_opt_i64(&mut dict, "server_total_tokens", self.server_total_tokens);
         insert_opt_u64(&mut dict, "client_wall_ms", self.client_wall_ms);
+        insert_opt_i64(&mut dict, "started_at_ms", self.started_at_ms);
+        if let Some(ttl) = self.prompt_cache_ttl.as_deref() {
+            dict.put_str("prompt_cache_ttl", ttl);
+        }
         insert_opt_u64(
             &mut dict,
             "client_first_frame_ms",
@@ -948,6 +973,8 @@ mod tests {
             serving_base_url: Some("https://provider.example/v1".to_string()),
             server_total_ms: Some(100),
             client_wall_ms: Some(120),
+            started_at_ms: Some(1_780_000_000_000),
+            prompt_cache_ttl: Some("5m".to_string()),
             runtime_loaded_model: Some("qwen".to_string()),
             ..Default::default()
         };
@@ -1023,6 +1050,8 @@ mod tests {
             server_output_tokens: Some(5),
             server_total_tokens: Some(9),
             client_wall_ms: Some(2_000),
+            started_at_ms: Some(1_780_000_000_000),
+            prompt_cache_ttl: Some("1h".to_string()),
             client_first_frame_ms: Some(1_500),
             runtime_context_length: Some(8_192),
             runtime_loaded_model: Some("served-model".to_string()),
@@ -1079,6 +1108,8 @@ mod tests {
         let telemetry = ProviderTelemetry {
             source: source::OLLAMA_CHAT.to_string(),
             client_wall_ms: Some(2_000),
+            started_at_ms: Some(1_780_000_000_000),
+            prompt_cache_ttl: Some("1h".to_string()),
             ..Default::default()
         };
         let value = telemetry.as_vm_dict().expect("dict present");

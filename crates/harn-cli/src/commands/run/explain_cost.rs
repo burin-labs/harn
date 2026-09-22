@@ -518,6 +518,7 @@ fn estimate_cost(model: &ResolvedModel, input_tokens: i64) -> (Option<f64>, Cost
         &model.model,
         input_tokens.max(0),
         0,
+        harn_vm::llm_config::pricing_clock_now(),
     ) {
         Some(cost) => (Some(cost), CostCell::Amount),
         None => (None, CostCell::Unpriced),

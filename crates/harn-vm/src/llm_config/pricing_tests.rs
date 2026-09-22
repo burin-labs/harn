@@ -9,6 +9,7 @@ fn promotional_pricing_resolves_at_injected_date_boundaries() {
         output_per_mtok: 20.0,
         cache_read_per_mtok: Some(1.0),
         cache_write_per_mtok: None,
+        cache_write_1h_per_mtok: None,
         input_token_bands: Vec::new(),
         promotions: vec![PromotionalPricing {
             id: "intro".to_string(),
@@ -22,7 +23,9 @@ fn promotional_pricing_resolves_at_injected_date_boundaries() {
             output_per_mtok: 8.0,
             cache_read_per_mtok: Some(0.4),
             cache_write_per_mtok: Some(5.0),
+            cache_write_1h_per_mtok: None,
         }],
+        schedules: Vec::new(),
     };
 
     let date = |value| NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap();

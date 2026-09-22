@@ -930,6 +930,7 @@ mod tests {
             "claude-sonnet-4-20250514",
             1_000,
             1_000,
+            crate::llm::cost::settlement_now(),
         )
         .expect("catalog-priced result");
 

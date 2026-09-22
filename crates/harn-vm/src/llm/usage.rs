@@ -177,6 +177,39 @@ pub struct LlmUsage {
     /// from `cost_usd` rather than letting the absent field read as clean.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unpriced: Option<Box<UnpricedFacts>>,
+    /// Which rate card settled this ledger's priced calls, and when.
+    ///
+    /// `None` is a ledger whose cost did not come from the catalog at all
+    /// (a provider-authoritative cost, a self-hosted zero, or an unpriced
+    /// attempt), or one recorded before this field existed. Boxed so the
+    /// ledger's own frame stays inside the stack-frame budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<Box<PricingFacts>>,
+}
+
+/// How settlement picked the rate card for one ledger.
+///
+/// This exists so per-call spend is auditable after the fact: a reader can see
+/// which card, which whole-request band and which serving tier produced the
+/// recorded `cost_usd`, without re-resolving a catalog that may have moved.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PricingFacts {
+    /// `base`, `promotion:<id>`, or `schedule:<id>`.
+    pub rate_card: String,
+    /// The instant the card was resolved at: the call's start, not the moment
+    /// it was priced.
+    pub settled_at_ms: i64,
+    /// Whole-request input band applied, named by its lower bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_band_minimum: Option<u64>,
+    /// Serving tier whose rates applied, when the call was served on one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serving_tier: Option<String>,
+    /// True when the request asked for a cache lifetime this route publishes
+    /// no rate for, so the write settled at the short-lifetime rate. Naming it
+    /// keeps an under-count visible instead of silent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cache_ttl_unpriced: bool,
 }
 
 impl LlmUsage {
@@ -347,6 +380,35 @@ fn unpriced_facts(
     })
 }
 
+/// The one card every priced member of an aggregate settled on, or `None` when
+/// they disagree or none of them carries one.
+fn aggregate_pricing_facts(usages: &[LlmUsage]) -> Option<Box<PricingFacts>> {
+    let mut members = usages.iter().filter_map(|usage| usage.pricing.as_ref());
+    let first = members.next()?;
+    members
+        .all(|other| other.rate_card == first.rate_card)
+        .then(|| first.clone())
+}
+
+/// Record which card, band and tier produced a catalog-settled cost.
+fn pricing_facts(
+    detail: &super::cost::PricingDetail,
+    settled_at_ms: i64,
+    cache_ttl: Option<super::api::PromptCacheTtl>,
+) -> PricingFacts {
+    PricingFacts {
+        rate_card: detail.rate_card.label(),
+        settled_at_ms,
+        input_band_minimum: detail.input_band_minimum,
+        serving_tier: matches!(
+            detail.source,
+            super::cost::PricingSource::CatalogServingTier
+        )
+        .then(|| super::serving_tiers::FAST_TIER_ID.to_string()),
+        cache_ttl_unpriced: !detail.cache_write_priced(cache_ttl),
+    }
+}
+
 /// Tokens attributable to an attempt only when that attempt went unpriced.
 const fn unpriced_token_count(cost_usd: Option<f64>, input: i64, output: i64) -> i64 {
     if cost_usd.is_some() {
@@ -423,6 +485,11 @@ impl LlmUsage {
                 certainty.unpriced_reason,
                 (!certainty.unprojectable).then_some(certainty.unpriced_projection_usd),
             ),
+            // Members of an aggregate may have settled on different cards, and
+            // a single label would claim one of them for the whole. The
+            // aggregate keeps the card only when every priced member named the
+            // same one; otherwise the per-attempt ledgers remain the record.
+            pricing: aggregate_pricing_facts(usages),
         }
     }
 
@@ -511,6 +578,8 @@ impl LlmUsage {
                 reason: UnpricedReason::NoResponse,
                 projection_usd: None,
             })),
+            // Nothing was priced, so no card settled anything.
+            pricing: None,
         }
     }
 
@@ -553,22 +622,37 @@ impl LlmUsage {
         // ceiling whole. `usage_unknown_calls` still records that the token
         // counts were missing: that stays unknown, only the cost does not.
         let free_route = crate::llm_config::provider_is_self_hosted(&result.provider);
+        // Settle at the instant the request left the client. A promotion that
+        // expired, or a time-of-day window the call started inside, priced the
+        // call as it began, not as it was accounted for.
+        let settled_at_ms = result
+            .telemetry
+            .started_at_ms
+            .unwrap_or_else(crate::stdlib::clock::now_wall_ms_unrecorded);
+        let at = super::cost::instant_from_wall_ms(settled_at_ms);
+        let cache_ttl = result
+            .telemetry
+            .prompt_cache_ttl
+            .as_deref()
+            .and_then(super::api::PromptCacheTtl::parse);
         // The price table is looked up whether or not the counts are usable,
         // because it is what separates an unpriced attempt that still has a
         // worst case from one that has none at any token count.
-        let table_cost = super::cost::pricing_detail_for_tier(
+        let detail = super::cost::pricing_detail_for_tier(
             &result.provider,
             &result.model,
             result.served_fast,
             result.input_tokens,
-        )
-        .map(|detail| {
+            at,
+        );
+        let table_cost = detail.as_ref().map(|detail| {
             super::cost::project_call_cost(
-                &detail,
+                detail,
                 result.input_tokens,
                 result.output_tokens,
                 result.cache_read_tokens,
                 result.cache_write_tokens,
+                cache_ttl,
             )
         });
         let cost_usd = authoritative_cost
@@ -594,6 +678,8 @@ impl LlmUsage {
                 result.input_tokens,
                 result.cache_read_tokens,
                 result.cache_write_tokens,
+                at,
+                cache_ttl,
             ),
             cache_hit: result.cache_read_tokens > 0,
             served_fast: result.served_fast,
@@ -611,6 +697,17 @@ impl LlmUsage {
                 unpriced_reason,
                 projected_cost_usd,
             ),
+            // Only a catalog-settled cost has a card to name. A provider's own
+            // cost figure and a self-hosted zero did not come from one, and
+            // claiming a card for them would put the catalog's name on a
+            // number it did not produce.
+            pricing: (cost_usd.is_some() && authoritative_cost.is_none() && !free_route)
+                .then(|| {
+                    detail
+                        .as_ref()
+                        .map(|detail| Box::new(pricing_facts(detail, settled_at_ms, cache_ttl)))
+                })
+                .flatten(),
         }
     }
 
@@ -627,19 +724,28 @@ impl LlmUsage {
         let output_tokens = receipt.output_tokens.unwrap_or(0);
         let complete_counts = receipt.has_complete_token_counts();
         let free_route = crate::llm_config::provider_is_self_hosted(provider);
-        let table_cost = super::cost::pricing_detail_for_tier(
+        // A provider receipt carries counters and no clock. These arrive on the
+        // error and probe paths right after the call they describe, so the
+        // pricing clock's now is within that call's own latency of its start.
+        // A call that straddles a promotion boundary is the one case this
+        // settles on the later card; `LlmResult` settlement does not.
+        let settled_at_ms = crate::stdlib::clock::now_wall_ms_unrecorded();
+        let at = super::cost::instant_from_wall_ms(settled_at_ms);
+        let detail = super::cost::pricing_detail_for_tier(
             provider,
             model,
             receipt.served_fast,
             input_tokens,
-        )
-        .map(|detail| {
+            at,
+        );
+        let table_cost = detail.as_ref().map(|detail| {
             super::cost::project_call_cost(
-                &detail,
+                detail,
                 input_tokens,
                 output_tokens,
                 receipt.cache_read_tokens,
                 receipt.cache_write_tokens,
+                None,
             )
         });
         let cost_usd = receipt
@@ -666,6 +772,8 @@ impl LlmUsage {
                 input_tokens,
                 receipt.cache_read_tokens,
                 receipt.cache_write_tokens,
+                at,
+                None,
             ),
             cache_hit: receipt.cache_read_tokens > 0,
             served_fast: receipt.served_fast,
@@ -683,6 +791,13 @@ impl LlmUsage {
                 unpriced_reason,
                 projected_cost_usd,
             ),
+            pricing: (cost_usd.is_some() && receipt.provider_cost_usd.is_none() && !free_route)
+                .then(|| {
+                    detail
+                        .as_ref()
+                        .map(|detail| Box::new(pricing_facts(detail, settled_at_ms, None)))
+                })
+                .flatten(),
         }
     }
 
@@ -758,6 +873,40 @@ impl LlmUsage {
             self.projected_cost_usd()
                 .map_or(VmValue::Nil, VmValue::Float),
         );
+        // Present only when the catalog settled this ledger, so a consumer can
+        // tell "no card applied" from "a base card applied".
+        if let Some(pricing) = self.pricing.as_deref() {
+            let mut card = crate::value::DictMap::new();
+            card.insert(
+                crate::value::intern_key("rate_card"),
+                VmValue::string(pricing.rate_card.as_str()),
+            );
+            card.insert(
+                crate::value::intern_key("settled_at_ms"),
+                VmValue::Int(pricing.settled_at_ms),
+            );
+            card.insert(
+                crate::value::intern_key("input_band_minimum"),
+                pricing
+                    .input_band_minimum
+                    .map_or(VmValue::Nil, |band| VmValue::Int(band as i64)),
+            );
+            card.insert(
+                crate::value::intern_key("serving_tier"),
+                pricing
+                    .serving_tier
+                    .as_deref()
+                    .map_or(VmValue::Nil, VmValue::string),
+            );
+            card.insert(
+                crate::value::intern_key("cache_ttl_unpriced"),
+                VmValue::Bool(pricing.cache_ttl_unpriced),
+            );
+            usage.insert(
+                crate::value::intern_key("pricing"),
+                VmValue::Dict(std::sync::Arc::new(card)),
+            );
+        }
         usage.insert(
             crate::value::intern_key("cache_read_tokens"),
             VmValue::Int(self.cache_read_tokens),
@@ -857,6 +1006,12 @@ impl LlmUsage {
             self.projected_cost_usd()
                 .map_or(Value::Null, serde_json::Value::from),
         );
+        if let Some(pricing) = self.pricing.as_deref() {
+            fields.insert(
+                "pricing".to_string(),
+                serde_json::to_value(pricing).unwrap_or(Value::Null),
+            );
+        }
         fields.insert(
             "cache_read_tokens".to_string(),
             self.cache_read_tokens.into(),
@@ -940,6 +1095,21 @@ impl LlmUsage {
         }
         if let Some(total_tokens) = self.reported_total_tokens {
             pairs.push((meta::REPORTED_TOTAL_TOKENS, serde_json::json!(total_tokens)));
+        }
+        // A recorded `cost_usd` is only auditable alongside the card that
+        // produced it: the same route settles at two prices on either side of
+        // an off-peak boundary, and the number alone cannot say which.
+        if let Some(pricing) = self.pricing.as_deref() {
+            pairs.push((meta::RATE_CARD, serde_json::json!(pricing.rate_card)));
+            if let Some(band) = pricing.input_band_minimum {
+                pairs.push((meta::PRICING_BAND, serde_json::json!(band)));
+            }
+            if let Some(tier) = pricing.serving_tier.as_deref() {
+                pairs.push((meta::PRICING_TIER, serde_json::json!(tier)));
+            }
+            if pricing.cache_ttl_unpriced {
+                pairs.push((meta::CACHE_TTL_UNPRICED, serde_json::json!(true)));
+            }
         }
         pairs
     }

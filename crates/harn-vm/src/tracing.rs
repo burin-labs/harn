@@ -117,6 +117,16 @@ pub mod meta {
     pub const CACHE_READ_TOKENS: &str = "cache_read_tokens";
     pub const CACHE_WRITE_TOKENS: &str = "cache_write_tokens";
     pub const COST_USD: &str = "cost_usd";
+    /// Which rate card settled `cost_usd`: `base`, `promotion:<id>`, or
+    /// `schedule:<id>`. Absent when the cost did not come from the catalog.
+    pub const RATE_CARD: &str = "rate_card";
+    /// Whole-request input band applied, named by its lower token bound.
+    pub const PRICING_BAND: &str = "pricing_band";
+    /// Serving tier whose rates applied, when the call was served on one.
+    pub const PRICING_TIER: &str = "pricing_tier";
+    /// Set when the request asked for a cache lifetime the route publishes no
+    /// rate for, so the write settled at the short-lifetime rate.
+    pub const CACHE_TTL_UNPRICED: &str = "cache_ttl_unpriced";
 
     // model_route.
     pub const FROM_MODEL: &str = "from_model";
@@ -1162,6 +1172,7 @@ mod tests {
             unpriced_calls: 0,
             usage_unknown_calls: 0,
             unpriced: None,
+            pricing: None,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("anthropic", "claude-sonnet-4")
@@ -1202,6 +1213,7 @@ mod tests {
                 reason: crate::llm::usage::UnpricedReason::PricingUnknown,
                 projection_usd: None,
             })),
+            pricing: None,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("local", "local-model")

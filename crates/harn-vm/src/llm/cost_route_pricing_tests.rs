@@ -16,12 +16,14 @@ fn install_banded_pricing_model() {
         output_per_mtok: 10.0,
         cache_read_per_mtok: Some(0.1),
         cache_write_per_mtok: Some(1.25),
+        cache_write_1h_per_mtok: None,
         input_token_bands: vec![crate::llm_config::InputTokenPricingBand {
             minimum_input_tokens: 1_000,
             input_multiplier: 2.0,
             output_multiplier: 1.5,
         }],
         promotions: Vec::new(),
+        schedules: Vec::new(),
     });
     overlay
         .models
@@ -34,13 +36,33 @@ fn whole_request_pricing_band_drives_cost_and_cache_accounting() {
     let _guard = super::env_guard();
     install_banded_pricing_model();
 
-    let below = calculate_cost_for_provider("openai", "test/banded-pricing", 999, 100);
-    let at_band = calculate_cost_for_provider("openai", "test/banded-pricing", 1_000, 100);
+    let below = calculate_cost_for_provider(
+        "openai",
+        "test/banded-pricing",
+        999,
+        100,
+        super::cost::settlement_now(),
+    );
+    let at_band = calculate_cost_for_provider(
+        "openai",
+        "test/banded-pricing",
+        1_000,
+        100,
+        super::cost::settlement_now(),
+    );
     assert!((below - 0.001999).abs() < 1e-12);
     assert!((at_band - 0.0035).abs() < 1e-12);
-    let cached =
-        pricing_aware_call_cost_with_cache("openai", "test/banded-pricing", 1_000, 100, 800, 0)
-            .expect("fixture model is priced");
+    let cached = pricing_aware_call_cost_with_cache(
+        "openai",
+        "test/banded-pricing",
+        1_000,
+        100,
+        800,
+        0,
+        super::cost::settlement_now(),
+        None,
+    )
+    .expect("fixture model is priced");
     assert!((cached - 0.00206).abs() < 1e-12);
     crate::llm_config::clear_user_overrides();
 }
@@ -49,14 +71,23 @@ fn whole_request_pricing_band_drives_cost_and_cache_accounting() {
 fn provider_wire_model_uses_collision_free_route_pricing() {
     let _guard = super::env_guard();
     crate::llm_config::clear_user_overrides();
-    let detail = pricing_detail_for("vercel_ai_gateway", "anthropic/claude-haiku-4.5")
-        .expect("Vercel wire model should resolve to its catalog route");
+    let detail = pricing_detail_for(
+        "vercel_ai_gateway",
+        "anthropic/claude-haiku-4.5",
+        super::cost::settlement_now(),
+    )
+    .expect("Vercel wire model should resolve to its catalog route");
     assert_eq!(detail.source, PricingSource::CatalogModel);
     assert!((detail.input_per_1k - 0.001).abs() < f64::EPSILON);
     assert!((detail.output_per_1k - 0.005).abs() < f64::EPSILON);
 
-    let cost =
-        calculate_cost_for_provider("vercel_ai_gateway", "anthropic/claude-haiku-4.5", 696, 40);
+    let cost = calculate_cost_for_provider(
+        "vercel_ai_gateway",
+        "anthropic/claude-haiku-4.5",
+        696,
+        40,
+        super::cost::settlement_now(),
+    );
     assert!((cost - 0.000896).abs() < 1e-12);
     crate::llm_config::clear_user_overrides();
 }
