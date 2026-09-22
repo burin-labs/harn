@@ -177,6 +177,7 @@ pub(crate) fn parse_llm_response(
             telemetry.provider_cost_usd,
             crate::llm::serving_tiers::served_fast(model, json),
         )
+        .with_billing(telemetry.billing.clone())
         .with_cache(
             cache_read_tokens,
             cache_write_tokens,

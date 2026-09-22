@@ -381,6 +381,20 @@ pub(crate) async fn vm_call_llm_api_with_body(
     if let Ok(result) = result.as_mut() {
         result.telemetry.data_controls = Some(Box::new(data_controls_receipt));
     }
+    if let Err(VmError::Thrown(VmValue::Dict(fields))) = &mut result {
+        if let Some(VmValue::Dict(receipt)) = fields.get("provider_usage") {
+            let mut receipt = (**receipt).clone();
+            receipt.insert("started_at_ms".into(), VmValue::Int(started_at_ms));
+            receipt.insert(
+                "prompt_cache_ttl".into(),
+                opts.prompt_cache_ttl
+                    .map_or(VmValue::Nil, |ttl| VmValue::String(ttl.as_str().into())),
+            );
+            let mut updated = (**fields).clone();
+            updated.insert("provider_usage".into(), VmValue::dict(receipt));
+            *fields = updated.into();
+        }
+    }
     let mut result = result?;
     crate::llm::managed_supply::apply_terminal_receipt(&mut result, &opts.provider, &opts.model)?;
     // Reserved-token tool-call delimiter remap (single boundary).

@@ -3,7 +3,7 @@
 // Language: typescript declarations.
 
 export interface HarnProviderCatalog {
-  schema_version: 11
+  schema_version: 12
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -27,6 +27,7 @@ export interface HarnCatalogProvider {
   cache_usage_accounting?: boolean
   data_controls?: HarnProviderDataControls
   stream_usage_accounting?: boolean
+  platform_fee_percent?: number | null
   protocols: string[]
   features: string[]
   caveats: string[]
@@ -262,6 +263,20 @@ export interface HarnModelPricing {
   input_token_bands?: HarnInputTokenPricingBand[]
   promotions?: HarnPromotionalPricing[]
   schedules?: HarnRecurringPricingWindow[]
+  hosted_tool_fees?: Record<string, HarnHostedToolFee>
+  modality_rates?: HarnModalityRates | null
+}
+
+export interface HarnHostedToolFee {
+  per_1k_calls: number
+  free_per_month?: number | null
+  source_url: string
+}
+
+export interface HarnModalityRates {
+  audio_input_per_mtok?: number | null
+  audio_output_per_mtok?: number | null
+  cached_audio_input_per_mtok?: number | null
 }
 
 export interface HarnRecurringPricingWindow {

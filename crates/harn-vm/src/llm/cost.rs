@@ -670,6 +670,7 @@ pub fn calculate_cost_for_provider(
     };
     (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)
         / 1000.0
+        * (1.0 + detail.platform_fee_percent / 100.0)
 }
 
 /// Per-call USD cost with cache accounting, preserving unknown pricing.
@@ -720,7 +721,8 @@ pub fn pricing_aware_call_cost(
     let detail = pricing_detail_for_usage(provider, model, input_tokens, at)?;
     Some(
         (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)
-            / 1000.0,
+            / 1000.0
+            * (1.0 + detail.platform_fee_percent / 100.0),
     )
 }
 
@@ -1317,6 +1319,7 @@ pub(crate) fn project_call_cost(
         + cache_read_tokens as f64 * cache_read_rate
         + cache_write_tokens as f64 * cache_write_rate)
         / 1000.0
+        * (1.0 + detail.platform_fee_percent / 100.0)
 }
 
 fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerInfo) -> VmValue {

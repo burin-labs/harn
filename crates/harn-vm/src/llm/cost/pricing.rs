@@ -28,9 +28,18 @@ pub(crate) struct PricingDetail {
     pub rate_card: RateCard,
     /// Whole-request input band that applied, named by its lower bound.
     pub input_band_minimum: Option<u64>,
+    pub hosted_tool_fees: std::collections::BTreeMap<String, crate::llm_config::HostedToolFee>,
+    pub modality_rates: Option<crate::llm_config::ModalityRates>,
+    pub platform_fee_percent: f64,
 }
 
 impl PricingDetail {
+    fn for_provider(mut self, provider: &str) -> Self {
+        self.platform_fee_percent = crate::llm_config::provider_config(provider)
+            .and_then(|provider| provider.platform_fee_percent)
+            .unwrap_or(0.0);
+        self
+    }
     fn from_pricing(
         pricing: &crate::llm_config::ModelPricing,
         rate_card: RateCard,
@@ -46,6 +55,9 @@ impl PricingDetail {
             source,
             rate_card,
             input_band_minimum,
+            hosted_tool_fees: pricing.hosted_tool_fees.clone(),
+            modality_rates: pricing.modality_rates.clone(),
+            platform_fee_percent: 0.0,
         }
     }
 
@@ -59,7 +71,7 @@ impl PricingDetail {
         self.cache_write_rate(ttl).1
     }
 
-    fn cache_write_rate(&self, ttl: Option<PromptCacheTtl>) -> (f64, bool) {
+    pub(super) fn cache_write_rate(&self, ttl: Option<PromptCacheTtl>) -> (f64, bool) {
         let short = self.cache_write_per_1k.unwrap_or(self.input_per_1k);
         match ttl {
             Some(PromptCacheTtl::OneHour) => match self.cache_write_1h_per_1k {
@@ -137,25 +149,34 @@ pub(crate) fn pricing_detail_for(
     at: OffsetDateTime,
 ) -> Option<PricingDetail> {
     if let Some(resolved) = model_pricing_for_observed_route(provider, model, at) {
-        return Some(PricingDetail::from_pricing(
-            &resolved.pricing,
-            resolved.rate_card,
-            None,
-            PricingSource::CatalogModel,
-        ));
+        return Some(
+            PricingDetail::from_pricing(
+                &resolved.pricing,
+                resolved.rate_card,
+                None,
+                PricingSource::CatalogModel,
+            )
+            .for_provider(provider),
+        );
     }
     let (input, output, _) = crate::llm_config::provider_economics(provider);
     match (input, output) {
-        (Some(input_per_1k), Some(output_per_1k)) => Some(PricingDetail {
-            input_per_1k,
-            output_per_1k,
-            cache_read_per_1k: None,
-            cache_write_per_1k: None,
-            cache_write_1h_per_1k: None,
-            source: PricingSource::ProviderEconomics,
-            rate_card: RateCard::Base,
-            input_band_minimum: None,
-        }),
+        (Some(input_per_1k), Some(output_per_1k)) => Some(
+            PricingDetail {
+                input_per_1k,
+                output_per_1k,
+                cache_read_per_1k: None,
+                cache_write_per_1k: None,
+                cache_write_1h_per_1k: None,
+                source: PricingSource::ProviderEconomics,
+                rate_card: RateCard::Base,
+                input_band_minimum: None,
+                hosted_tool_fees: Default::default(),
+                modality_rates: None,
+                platform_fee_percent: 0.0,
+            }
+            .for_provider(provider),
+        ),
         _ => None,
     }
 }
@@ -171,12 +192,15 @@ pub(super) fn pricing_detail_for_usage(
             Some((minimum, banded)) => (Some(minimum), banded),
             None => (None, resolved.pricing),
         };
-        return Some(PricingDetail::from_pricing(
-            &pricing,
-            resolved.rate_card,
-            band,
-            PricingSource::CatalogModel,
-        ));
+        return Some(
+            PricingDetail::from_pricing(
+                &pricing,
+                resolved.rate_card,
+                band,
+                PricingSource::CatalogModel,
+            )
+            .for_provider(provider),
+        );
     }
     pricing_detail_for(provider, model, at)
 }
@@ -213,12 +237,15 @@ pub(crate) fn pricing_detail_for_tier(
                 Some((minimum, banded)) => (Some(minimum), banded),
                 None => (None, resolved.pricing),
             };
-            return Some(PricingDetail::from_pricing(
-                &pricing,
-                resolved.rate_card,
-                band,
-                PricingSource::CatalogServingTier,
-            ));
+            return Some(
+                PricingDetail::from_pricing(
+                    &pricing,
+                    resolved.rate_card,
+                    band,
+                    PricingSource::CatalogServingTier,
+                )
+                .for_provider(provider),
+            );
         }
     }
     pricing_detail_for_usage(provider, model, input_tokens, at)

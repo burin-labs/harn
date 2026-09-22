@@ -667,6 +667,7 @@ mod trace_summary_pricing_tests {
                 usage_unknown_calls: 0,
                 unpriced: None,
                 pricing: None,
+                billing: None,
             },
             duration_ms: 5,
         }

@@ -641,6 +641,8 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
                 input_token_bands: Vec::new(),
                 promotions: Vec::new(),
                 schedules: Vec::new(),
+                hosted_tool_fees: Default::default(),
+                modality_rates: None,
             }),
             deprecated: false,
             deprecation_note: None,

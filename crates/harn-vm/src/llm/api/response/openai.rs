@@ -430,6 +430,7 @@ pub(crate) fn parse_openai_responses_response(
         telemetry.provider_cost_usd,
         served_fast,
     )
+    .with_billing(telemetry.billing.clone())
     .with_cache(
         cache_read_tokens,
         cache_write_tokens,
@@ -663,6 +664,7 @@ pub(super) fn parse_chat_completions_response(
         telemetry.provider_cost_usd,
         served_fast,
     )
+    .with_billing(telemetry.billing.clone())
     .with_cache(
         cache_read_tokens,
         cache_write_tokens,

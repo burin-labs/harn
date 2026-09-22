@@ -20,6 +20,31 @@ discount in `pricing.promotions`. Harn uses an active promotion for cost
 estimates and returns to the durable rate when it ends. Use `review_after` when
 a provider gives a minimum duration but no firm end date.
 
+Recurring prices belong in `pricing.schedules`: named weekday windows with a
+fixed UTC offset, inclusive start, exclusive end, and rate multipliers. A
+window may cross midnight. Overlaps fail catalog validation. OpenRouter's
+`pricing.overrides` records are normalized to a peak base card and discount
+windows, including all-day records with omitted time bounds. DeepSeek's
+Chinese-public-holiday exemption remains an explicit approximation in the
+curated row; Harn does not maintain a holiday calendar.
+
+Completed calls resolve the card at request start, then apply the input band,
+cache lifetime, and serving tier. Usage receipts record the selected card and
+`cache_ttl_unpriced` when the route has no one-hour write price. Hosted tool
+counts and audio-token counts use `hosted_tool_fees` and `modality_rates`.
+Unpriced reported units keep the known token cost visible but leave the budget
+projection unbounded. Monthly free allowances are account state and remain
+unapplied, named on the receipt.
+
+`platform_fee_percent` allocates funding overhead when catalog prices estimate
+a request's cost. OpenRouter's 5.5 percent default assumes standard card-funded
+credits and excludes the minimum top-up fee. The receipt calls this
+`platform_fee_estimate_usd` with basis `catalog_estimate_funding_route_unknown`;
+it is not an invoice line, does not describe BYOK or
+alternate funding, and is never added to a provider-reported authoritative
+total. Override the provider field to zero when that funding assumption does
+not apply.
+
 The markdown report includes aggregator discoveries for awareness, but the
 candidate TOML contains only provider-owned, high-confidence changes and
 additions with actionable pricing or capability metadata. This

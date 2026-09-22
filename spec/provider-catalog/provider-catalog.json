@@ -1,6 +1,6 @@
 {
-  "schema_version": 11,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v11.json",
+  "schema_version": 12,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v12.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -1288,6 +1288,7 @@
       "latency_p50_ms": 1800
     },
     {
+      "platform_fee_percent": 5.5,
       "id": "openrouter",
       "display_name": "OpenRouter",
       "classification": "hosted",
@@ -1931,7 +1932,8 @@
         "input_per_mtok": 0.8,
         "output_per_mtok": 4.0,
         "cache_read_per_mtok": 0.08,
-        "cache_write_per_mtok": 1.0
+        "cache_write_per_mtok": 1.0,
+        "cache_write_1h_per_mtok": 1.6
       },
       "deprecation": {
         "status": "deprecated",
@@ -2040,7 +2042,8 @@
         "input_per_mtok": 3.0,
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.3,
-        "cache_write_per_mtok": 3.75
+        "cache_write_per_mtok": 3.75,
+        "cache_write_1h_per_mtok": 6.0
       },
       "deprecation": {
         "status": "deprecated",
@@ -2151,7 +2154,8 @@
         "input_per_mtok": 3.0,
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.3,
-        "cache_write_per_mtok": 3.75
+        "cache_write_per_mtok": 3.75,
+        "cache_write_1h_per_mtok": 6.0
       },
       "deprecation": {
         "status": "deprecated",
@@ -2262,7 +2266,8 @@
         "input_per_mtok": 15.0,
         "output_per_mtok": 75.0,
         "cache_read_per_mtok": 1.5,
-        "cache_write_per_mtok": 18.75
+        "cache_write_per_mtok": 18.75,
+        "cache_write_1h_per_mtok": 30.0
       },
       "deprecation": {
         "status": "deprecated",
@@ -2382,7 +2387,14 @@
         "input_per_mtok": 10.0,
         "output_per_mtok": 50.0,
         "cache_read_per_mtok": 1.0,
-        "cache_write_per_mtok": 12.5
+        "cache_write_per_mtok": 12.5,
+        "cache_write_1h_per_mtok": 20.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -2515,7 +2527,14 @@
         "input_per_mtok": 10.0,
         "output_per_mtok": 50.0,
         "cache_read_per_mtok": 0.25,
-        "cache_write_per_mtok": 12.5
+        "cache_write_per_mtok": 12.5,
+        "cache_write_1h_per_mtok": 20.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -2639,7 +2658,14 @@
         "input_per_mtok": 1.0,
         "output_per_mtok": 5.0,
         "cache_read_per_mtok": 0.1,
-        "cache_write_per_mtok": 1.25
+        "cache_write_per_mtok": 1.25,
+        "cache_write_1h_per_mtok": 2.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -2752,7 +2778,14 @@
         "input_per_mtok": 15.0,
         "output_per_mtok": 75.0,
         "cache_read_per_mtok": 1.5,
-        "cache_write_per_mtok": 18.75
+        "cache_write_per_mtok": 18.75,
+        "cache_write_1h_per_mtok": 30.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "deprecated",
@@ -2869,7 +2902,14 @@
         "input_per_mtok": 15.0,
         "output_per_mtok": 75.0,
         "cache_read_per_mtok": 1.5,
-        "cache_write_per_mtok": 18.75
+        "cache_write_per_mtok": 18.75,
+        "cache_write_1h_per_mtok": 30.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "deprecated",
@@ -2986,7 +3026,14 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 25.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": 6.25
+        "cache_write_per_mtok": 6.25,
+        "cache_write_1h_per_mtok": 10.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active",
@@ -3099,7 +3146,14 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 25.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": 6.25
+        "cache_write_per_mtok": 6.25,
+        "cache_write_1h_per_mtok": 10.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active",
@@ -3224,7 +3278,14 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 25.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": 6.25
+        "cache_write_per_mtok": 6.25,
+        "cache_write_1h_per_mtok": 10.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active",
@@ -3278,7 +3339,8 @@
             "input_per_mtok": 30.0,
             "output_per_mtok": 150.0,
             "cache_read_per_mtok": 3.0,
-            "cache_write_per_mtok": 37.5
+            "cache_write_per_mtok": 37.5,
+            "cache_write_1h_per_mtok": 60.0
           },
           "latency": "higher output-token throughput than standard Claude serving",
           "reliability": "research preview, account-manager gated",
@@ -3379,7 +3441,14 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 25.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": 6.25
+        "cache_write_per_mtok": 6.25,
+        "cache_write_1h_per_mtok": 10.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active",
@@ -3440,7 +3509,8 @@
             "input_per_mtok": 10.0,
             "output_per_mtok": 50.0,
             "cache_read_per_mtok": 1.0,
-            "cache_write_per_mtok": 12.5
+            "cache_write_per_mtok": 12.5,
+            "cache_write_1h_per_mtok": 20.0
           },
           "latency": "higher output-token throughput than standard Claude serving",
           "reliability": "research preview, account-manager gated",
@@ -3541,7 +3611,14 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 25.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": 6.25
+        "cache_write_per_mtok": 6.25,
+        "cache_write_1h_per_mtok": 10.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active",
@@ -3598,7 +3675,8 @@
             "input_per_mtok": 10.0,
             "output_per_mtok": 50.0,
             "cache_read_per_mtok": 1.0,
-            "cache_write_per_mtok": 12.5
+            "cache_write_per_mtok": 12.5,
+            "cache_write_1h_per_mtok": 20.0
           },
           "latency": "higher output-token throughput than standard Claude serving",
           "reliability": "research preview, account-manager gated",
@@ -3850,7 +3928,14 @@
         "input_per_mtok": 3.0,
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.3,
-        "cache_write_per_mtok": 3.75
+        "cache_write_per_mtok": 3.75,
+        "cache_write_1h_per_mtok": 6.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "deprecated",
@@ -3967,7 +4052,14 @@
         "input_per_mtok": 3.0,
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.3,
-        "cache_write_per_mtok": 3.75
+        "cache_write_per_mtok": 3.75,
+        "cache_write_1h_per_mtok": 6.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "deprecated",
@@ -4087,7 +4179,14 @@
         "input_per_mtok": 3.0,
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.3,
-        "cache_write_per_mtok": 3.75
+        "cache_write_per_mtok": 3.75,
+        "cache_write_1h_per_mtok": 6.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -4208,7 +4307,14 @@
         "input_per_mtok": 3.0,
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.3,
-        "cache_write_per_mtok": 3.75
+        "cache_write_per_mtok": 3.75,
+        "cache_write_1h_per_mtok": 6.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -4344,7 +4450,14 @@
         "input_per_mtok": 2.0,
         "output_per_mtok": 10.0,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": 2.5
+        "cache_write_per_mtok": 2.5,
+        "cache_write_1h_per_mtok": 4.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -8993,7 +9106,14 @@
         "input_per_mtok": 0.25,
         "output_per_mtok": 1.5,
         "cache_read_per_mtok": 0.025,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -9143,7 +9263,14 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -9294,7 +9421,14 @@
         "input_per_mtok": 1.5,
         "output_per_mtok": 9.0,
         "cache_read_per_mtok": 0.15,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -9446,7 +9580,14 @@
         "input_per_mtok": 0.3,
         "output_per_mtok": 2.5,
         "cache_read_per_mtok": 0.03,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -9604,7 +9745,14 @@
             "cache_read_per_mtok": 0.075,
             "cache_write_per_mtok": null
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -9773,7 +9921,14 @@
             "cache_read_per_mtok": 0.075,
             "cache_write_per_mtok": null
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -9944,7 +10099,14 @@
             "cache_read_per_mtok": 0.075,
             "cache_write_per_mtok": null
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -15426,7 +15588,17 @@
         "input_per_mtok": 1.75,
         "output_per_mtok": 14.0,
         "cache_read_per_mtok": 0.175,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -15536,7 +15708,17 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -15650,7 +15832,17 @@
         "input_per_mtok": 0.75,
         "output_per_mtok": 4.5,
         "cache_read_per_mtok": 0.075,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -15764,7 +15956,17 @@
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.25,
         "cache_read_per_mtok": 0.02,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -15875,7 +16077,17 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -15995,7 +16207,17 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -16168,7 +16390,17 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -16297,7 +16529,17 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active",
@@ -16534,7 +16776,17 @@
             "cache_read_per_mtok": 0.4,
             "cache_write_per_mtok": 5.0
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active",
@@ -16744,7 +16996,17 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active",
@@ -16967,7 +17229,17 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -18093,7 +18365,8 @@
         "input_per_mtok": 10.0,
         "output_per_mtok": 50.0,
         "cache_read_per_mtok": 1.0,
-        "cache_write_per_mtok": 12.5
+        "cache_write_per_mtok": 12.5,
+        "cache_write_1h_per_mtok": 20.0
       },
       "deprecation": {
         "status": "active"
@@ -18256,7 +18529,8 @@
         "input_per_mtok": 1.0,
         "output_per_mtok": 5.0,
         "cache_read_per_mtok": 0.1,
-        "cache_write_per_mtok": 1.25
+        "cache_write_per_mtok": 1.25,
+        "cache_write_1h_per_mtok": 2.0
       },
       "deprecation": {
         "status": "active"
@@ -18336,7 +18610,8 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 25.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": 6.25
+        "cache_write_per_mtok": 6.25,
+        "cache_write_1h_per_mtok": 10.0
       },
       "deprecation": {
         "status": "active"
@@ -18419,7 +18694,8 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 25.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": 6.25
+        "cache_write_per_mtok": 6.25,
+        "cache_write_1h_per_mtok": 10.0
       },
       "deprecation": {
         "status": "active",
@@ -18582,7 +18858,8 @@
         "input_per_mtok": 3.0,
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.3,
-        "cache_write_per_mtok": 3.75
+        "cache_write_per_mtok": 3.75,
+        "cache_write_1h_per_mtok": 6.0
       },
       "deprecation": {
         "status": "active"
@@ -18670,7 +18947,8 @@
         "input_per_mtok": 2.0,
         "output_per_mtok": 10.0,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": 2.5
+        "cache_write_per_mtok": 2.5,
+        "cache_write_1h_per_mtok": 4.0
       },
       "deprecation": {
         "status": "active"
@@ -19241,7 +19519,77 @@
         "input_per_mtok": 1.32,
         "output_per_mtok": 3.96,
         "cache_read_per_mtok": 0.044,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "schedules": [
+          {
+            "id": "deepseek-offpeak-weekday-0000",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "00:00",
+            "end": "01:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://openrouter.ai/api/v1/models",
+            "review_after": "2026-12-20",
+            "note": "Chinese public holidays are excluded from DeepSeek's peak hours and are not modeled; a holiday weekday settles at the peak rate."
+          },
+          {
+            "id": "deepseek-offpeak-weekday-0400",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "04:00",
+            "end": "06:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://openrouter.ai/api/v1/models",
+            "review_after": "2026-12-20",
+            "note": "Chinese public holidays are excluded from DeepSeek's peak hours and are not modeled; a holiday weekday settles at the peak rate."
+          },
+          {
+            "id": "deepseek-offpeak-weekday-1000",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "10:00",
+            "end": "24:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://openrouter.ai/api/v1/models",
+            "review_after": "2026-12-20",
+            "note": "Chinese public holidays are excluded from DeepSeek's peak hours and are not modeled; a holiday weekday settles at the peak rate."
+          },
+          {
+            "id": "deepseek-offpeak-weekend",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "start": "00:00",
+            "end": "24:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://openrouter.ai/api/v1/models",
+            "review_after": "2026-12-20"
+          }
+        ]
       },
       "deprecation": {
         "status": "active"

@@ -50,7 +50,7 @@ fn a_peak_weekday_instant_settles_on_the_base_card() {
     // 2026-09-21 is a Monday. 02:00Z falls in DeepSeek's 01:00-04:00 peak
     // block, so the base (peak) card applies: 1.32 + 3.96.
     let _guard = super::env_guard();
-    assert!((deepseek_cost("2026-09-21T02:00:00Z") - 5.28).abs() < 1e-9);
+    assert!((deepseek_cost("2026-09-21T02:00:00Z") - 5.28 * 1.055).abs() < 1e-9);
     assert_eq!(deepseek_card("2026-09-21T02:00:00Z"), "base");
 }
 
@@ -58,7 +58,7 @@ fn a_peak_weekday_instant_settles_on_the_base_card() {
 fn an_off_peak_weekday_instant_settles_at_half_the_base_card() {
     // Same Monday, 05:00Z, inside the 04:00-06:00 off-peak window.
     let _guard = super::env_guard();
-    assert!((deepseek_cost("2026-09-21T05:00:00Z") - 2.64).abs() < 1e-9);
+    assert!((deepseek_cost("2026-09-21T05:00:00Z") - 2.64 * 1.055).abs() < 1e-9);
     assert_eq!(
         deepseek_card("2026-09-21T05:00:00Z"),
         "schedule:deepseek-offpeak-weekday-0400"
@@ -70,7 +70,7 @@ fn a_weekend_instant_settles_off_peak_at_a_weekday_peak_hour() {
     // 2026-09-26 is a Saturday. 02:00Z is peak on a weekday and off-peak here,
     // which is the fact a day-blind window could not express.
     let _guard = super::env_guard();
-    assert!((deepseek_cost("2026-09-26T02:00:00Z") - 2.64).abs() < 1e-9);
+    assert!((deepseek_cost("2026-09-26T02:00:00Z") - 2.64 * 1.055).abs() < 1e-9);
     assert_eq!(
         deepseek_card("2026-09-26T02:00:00Z"),
         "schedule:deepseek-offpeak-weekend"

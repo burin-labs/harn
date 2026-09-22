@@ -26,6 +26,8 @@ fn promotional_pricing_resolves_at_injected_date_boundaries() {
             cache_write_1h_per_mtok: None,
         }],
         schedules: Vec::new(),
+        hosted_tool_fees: Default::default(),
+        modality_rates: None,
     };
 
     let date = |value| NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap();

@@ -24,6 +24,8 @@ fn install_banded_pricing_model() {
         }],
         promotions: Vec::new(),
         schedules: Vec::new(),
+        hosted_tool_fees: Default::default(),
+        modality_rates: None,
     });
     overlay
         .models

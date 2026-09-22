@@ -48,6 +48,86 @@ fn accounted_result() -> LlmResult {
     }
 }
 
+#[test]
+fn reported_hosted_search_is_billed_or_explicitly_unpriced() {
+    let _guard = crate::llm::env_guard();
+    let mut response = accounted_result();
+    response.model = "claude-sonnet-4-5-20250929".into();
+    let plain = LlmUsage::from_result(&response).cost_usd.unwrap();
+    response.telemetry = ProviderTelemetry::from_anthropic_usage(
+        &json!({
+            "input_tokens": 1000, "output_tokens": 100,
+            "server_tool_use": {"web_search_requests": 1}
+        }),
+        Some("search-receipt"),
+    );
+    let searched = LlmUsage::from_result(&response);
+    assert!((searched.cost_usd.unwrap() - plain - 0.01).abs() < 1e-12);
+    assert_eq!(
+        searched.billing.as_ref().unwrap().hosted_tool_calls["web_search"],
+        1
+    );
+    assert!(searched
+        .pricing
+        .as_ref()
+        .unwrap()
+        .hosted_tool_unpriced
+        .is_empty());
+
+    // An unknown hosted tool cannot look fully priced.
+    response
+        .telemetry
+        .billing
+        .as_mut()
+        .unwrap()
+        .hosted_tool_calls = std::collections::BTreeMap::from([("unknown_hosted_tool".into(), 1)]);
+    let unpriced = LlmUsage::from_result(&response);
+    assert_eq!(unpriced.accounting_status, UsageAccountingStatus::Partial);
+    assert_eq!(unpriced.unpriced_calls, 1);
+    assert_eq!(unpriced.projected_cost_usd(), None);
+    let aggregate = LlmUsage::aggregate(&[unpriced.clone()]);
+    assert_eq!(aggregate.cost_usd, unpriced.cost_usd);
+    assert_eq!(aggregate.accounting_status, UsageAccountingStatus::Partial);
+    assert_eq!(
+        unpriced.pricing.as_ref().unwrap().hosted_tool_unpriced,
+        ["unknown_hosted_tool"]
+    );
+
+    // An authoritative provider total is retained without a second surcharge.
+    response.telemetry.provider_cost_usd = Some(0.123);
+    let authoritative = LlmUsage::from_result(&response);
+    assert_eq!(authoritative.cost_usd, Some(0.123));
+    assert_eq!(authoritative.unpriced_calls, 0);
+}
+
+#[test]
+fn receipt_retains_request_instant_and_audio_counts_without_inventing_rates() {
+    let _guard = crate::llm::env_guard();
+    let wire = json!({
+        "input_tokens": 1000, "output_tokens": 100,
+        "input_tokens_details": {"audio_tokens": 200, "cached_tokens": 0},
+        "output_tokens_details": {"audio_tokens": 50}
+    });
+    let mut receipt = ProviderUsageReceipt::from_openai_usage_tokens(&wire).unwrap();
+    receipt.started_at_ms = Some(1_790_000_000_000);
+    let roundtrip = ProviderUsageReceipt::from_vm_value(&receipt.to_vm_value()).unwrap();
+    assert_eq!(roundtrip, receipt);
+    let usage = LlmUsage::from_provider_receipt("openai", "gpt-5.6-luna", &roundtrip);
+    assert_eq!(
+        usage.pricing.as_ref().unwrap().settled_at_ms,
+        1_790_000_000_000
+    );
+    assert_eq!(
+        usage.billing.as_ref().unwrap().audio_input_tokens,
+        Some(200)
+    );
+    assert_eq!(
+        usage.pricing.as_ref().unwrap().modality_unpriced,
+        ["audio_input", "audio_output"]
+    );
+    assert_eq!(usage.projected_cost_usd(), None);
+}
+
 /// A locally served call that reports no token usage at all, which is what
 /// a streaming llama.cpp server sends. Its cost is still known, because the
 /// route bills nothing; only its token counts are missing.

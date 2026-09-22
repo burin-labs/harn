@@ -43,6 +43,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public var cacheUsageAccounting: Bool { encodedCacheUsageAccounting ?? false }
     private let encodedStreamUsageAccounting: Bool?
     public var streamUsageAccounting: Bool? { encodedStreamUsageAccounting }
+    public let platformFeePercent: Double?
     public let dataControls: HarnProviderDataControls?
     public let protocols: [String]
     public let features: [String]
@@ -64,6 +65,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case healthcheck
         case encodedCacheUsageAccounting = "cache_usage_accounting"
         case encodedStreamUsageAccounting = "stream_usage_accounting"
+        case platformFeePercent = "platform_fee_percent"
         case dataControls = "data_controls"
         case protocols
         case features
@@ -583,6 +585,8 @@ public struct HarnModelPricing: Codable, Sendable, Equatable {
     public let inputTokenBands: [HarnInputTokenPricingBand]?
     public let promotions: [HarnPromotionalPricing]?
     public let schedules: [HarnRecurringPricingWindow]?
+    public let hostedToolFees: [String: HarnHostedToolFee]?
+    public let modalityRates: HarnModalityRates?
 
     enum CodingKeys: String, CodingKey {
         case inputPerMTok = "input_per_mtok"
@@ -593,6 +597,30 @@ public struct HarnModelPricing: Codable, Sendable, Equatable {
         case inputTokenBands = "input_token_bands"
         case promotions
         case schedules
+        case hostedToolFees = "hosted_tool_fees"
+        case modalityRates = "modality_rates"
+    }
+}
+
+public struct HarnHostedToolFee: Codable, Sendable, Equatable {
+    public let per1kCalls: Double
+    public let freePerMonth: UInt64?
+    public let sourceUrl: String
+    enum CodingKeys: String, CodingKey {
+        case per1kCalls = "per_1k_calls"
+        case freePerMonth = "free_per_month"
+        case sourceUrl = "source_url"
+    }
+}
+
+public struct HarnModalityRates: Codable, Sendable, Equatable {
+    public let audioInputPerMTok: Double?
+    public let audioOutputPerMTok: Double?
+    public let cachedAudioInputPerMTok: Double?
+    enum CodingKeys: String, CodingKey {
+        case audioInputPerMTok = "audio_input_per_mtok"
+        case audioOutputPerMTok = "audio_output_per_mtok"
+        case cachedAudioInputPerMTok = "cached_audio_input_per_mtok"
     }
 }
 

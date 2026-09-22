@@ -54,6 +54,8 @@ fn artifact_with_schedules(
         input_token_bands: Vec::new(),
         promotions: Vec::new(),
         schedules,
+        hosted_tool_fees: Default::default(),
+        modality_rates: None,
     });
     artifact
 }

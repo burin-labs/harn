@@ -971,7 +971,19 @@ pub fn model_serving_tier_pricing_per_mtok(
     let model = config.models.get(model_id)?;
     let tier = model.serving_tiers.iter().find(|tier| tier.id == tier_id)?;
     if let Some(pricing) = &tier.pricing {
-        return Some(pricing.resolve_at(at));
+        let mut resolved = pricing.resolve_at(at);
+        if let Some(standard) = &model.pricing {
+            // Explicit tier token rates do not erase independently billed
+            // hosted tools. A tier may override an individual tool's fee.
+            for (tool, fee) in &standard.hosted_tool_fees {
+                resolved
+                    .pricing
+                    .hosted_tool_fees
+                    .entry(tool.clone())
+                    .or_insert_with(|| fee.clone());
+            }
+        }
+        return Some(resolved);
     }
     let standard = model.pricing.as_ref()?.resolve_at(at);
     let multiplier = tier.cost_multiplier.or_else(|| {

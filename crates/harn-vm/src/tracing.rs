@@ -1173,6 +1173,7 @@ mod tests {
             usage_unknown_calls: 0,
             unpriced: None,
             pricing: None,
+            billing: None,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("anthropic", "claude-sonnet-4")
@@ -1214,6 +1215,7 @@ mod tests {
                 projection_usd: None,
             })),
             pricing: None,
+            billing: None,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("local", "local-model")

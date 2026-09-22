@@ -1286,6 +1286,33 @@
             "null"
           ]
         },
+        "hosted_tool_fees": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "free_per_month": {
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "per_1k_calls": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "source_url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "per_1k_calls",
+              "source_url"
+            ],
+            "type": "object"
+          },
+          "type": "object"
+        },
         "input_per_mtok": {
           "minimum": 0,
           "type": "number"
@@ -1315,6 +1342,36 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "modality_rates": {
+          "additionalProperties": false,
+          "properties": {
+            "audio_input_per_mtok": {
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "audio_output_per_mtok": {
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_mtok": {
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "output_per_mtok": {
           "minimum": 0,
@@ -1471,6 +1528,13 @@
         },
         "performance": {
           "$ref": "#/$defs/performance"
+        },
+        "platform_fee_percent": {
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "protocols": {
           "items": {

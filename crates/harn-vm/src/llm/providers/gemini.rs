@@ -616,7 +616,8 @@ pub(crate) fn parse_response(
     let request_id = json["responseId"]
         .as_str()
         .filter(|value| !value.is_empty());
-    let telemetry = ProviderTelemetry::from_gemini_usage(&json["usageMetadata"], request_id);
+    let mut telemetry = ProviderTelemetry::from_gemini_usage(&json["usageMetadata"], request_id);
+    telemetry.billing = crate::llm::usage::BillingUsage::from_gemini(json);
     Ok(LlmResult {
         attempts: Default::default(),
         text_projection: None,

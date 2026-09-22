@@ -8,6 +8,7 @@
 
 use chrono::{NaiveDate, TimeZone as _, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset, Weekday};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -42,6 +43,35 @@ pub struct ModelPricing {
     /// validation error.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schedules: Vec<RecurringPricingWindow>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hosted_tool_fees: BTreeMap<String, HostedToolFee>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modality_rates: Option<ModalityRates>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct HostedToolFee {
+    pub per_1k_calls: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_per_month: Option<u64>,
+    pub source_url: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ModalityRates {
+    pub audio_input_per_mtok: Option<f64>,
+    pub audio_output_per_mtok: Option<f64>,
+    pub cached_audio_input_per_mtok: Option<f64>,
+}
+
+impl ModalityRates {
+    fn scaled(&self, input: f64, output: f64, cache: f64) -> Self {
+        Self {
+            audio_input_per_mtok: self.audio_input_per_mtok.map(|rate| rate * input),
+            audio_output_per_mtok: self.audio_output_per_mtok.map(|rate| rate * output),
+            cached_audio_input_per_mtok: self.cached_audio_input_per_mtok.map(|rate| rate * cache),
+        }
+    }
 }
 
 /// A day of the week, as the provider publishes its schedule.
@@ -272,6 +302,8 @@ impl ModelPricing {
                     input_token_bands: self.input_token_bands.clone(),
                     promotions: self.promotions.clone(),
                     schedules: self.schedules.clone(),
+                    hosted_tool_fees: self.hosted_tool_fees.clone(),
+                    modality_rates: self.modality_rates.clone(),
                 },
                 RateCard::Promotion(promotion.id.clone()),
             ),
@@ -300,6 +332,13 @@ impl ModelPricing {
                 cache_write_1h_per_mtok: pricing
                     .cache_write_1h_per_mtok
                     .map(|rate| rate * cache_write),
+                modality_rates: pricing.modality_rates.as_ref().map(|rates| {
+                    rates.scaled(
+                        window.input_multiplier,
+                        window.output_multiplier,
+                        cache_read,
+                    )
+                }),
                 ..pricing
             };
             rate_card = RateCard::Schedule(window.id.clone());
@@ -318,6 +357,11 @@ impl ModelPricing {
             // Schedules carry multipliers, not rates, so scaling the card
             // leaves them alone: scaling them too would square the discount.
             schedules: self.schedules.clone(),
+            hosted_tool_fees: self.hosted_tool_fees.clone(),
+            modality_rates: self
+                .modality_rates
+                .as_ref()
+                .map(|rates| rates.scaled(multiplier, multiplier, multiplier)),
             promotions: self
                 .promotions
                 .iter()
@@ -375,6 +419,14 @@ impl ModelPricing {
                 input_token_bands: self.input_token_bands.clone(),
                 promotions: self.promotions.clone(),
                 schedules: self.schedules.clone(),
+                hosted_tool_fees: self.hosted_tool_fees.clone(),
+                modality_rates: self.modality_rates.as_ref().map(|rates| {
+                    rates.scaled(
+                        band.input_multiplier,
+                        band.output_multiplier,
+                        band.input_multiplier,
+                    )
+                }),
             },
         ))
     }
@@ -551,6 +603,8 @@ mod pricing_schedule_tests {
                 window("deepseek-offpeak-weekday-1000", &weekdays, "10:00", "24:00"),
                 window("deepseek-offpeak-weekend", &[Sat, Sun], "00:00", "24:00"),
             ],
+            hosted_tool_fees: Default::default(),
+            modality_rates: None,
         }
     }
 
@@ -763,6 +817,8 @@ mod pricing_schedule_tests {
             input_token_bands: Vec::new(),
             promotions: Vec::new(),
             schedules: Vec::new(),
+            hosted_tool_fees: Default::default(),
+            modality_rates: None,
         };
         let json = serde_json::to_string(&card).expect("serialize");
         assert_eq!(
