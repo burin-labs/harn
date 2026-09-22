@@ -1052,7 +1052,7 @@ not yet supported. These host scopes still do not allocate across processes.
 | Function | Description |
 |---|---|
 | `llm_cost(model, input_tokens, output_tokens)` | Estimate USD cost from embedded pricing table |
-| `harness.llm.session_cost()` | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `harness.llm.session_cost()` | Session usage and certainty, independent of diagnostic tracing: logical `call_count`, physical `provider_call_count`, tokens, nullable `cost_usd`, `known_cost_usd`, `unpriced_calls`, `usage_unknown_calls`. `total_cost` retains the budget charge, including uncertain reservations. |
 | `harness.llm.budget(max_cost)` | Set session budget in USD. LLM calls throw if exceeded |
 | `harness.llm.budget_remaining()` | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | Count text with the selected tiktoken encoder for known OpenAI/Claude/Gemini model families |

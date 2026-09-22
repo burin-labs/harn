@@ -945,16 +945,46 @@ fn llm_cost_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-ledger"], sig = "__llm_session_cost() -> dict", category = "llm.economics")]
 fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let (total_input, total_output, _duration, call_count) = super::trace::peek_trace_summary();
+    let summary = super::trace::peek_trace_usage_summary();
     let total_cost = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
     let mut result = BTreeMap::new();
     if let Some(admission) = super::admission::receipt() {
         result.insert("admission".to_string(), admission);
     }
     result.insert("total_cost".to_string(), VmValue::Float(total_cost));
-    result.insert("input_tokens".to_string(), VmValue::Int(total_input));
-    result.insert("output_tokens".to_string(), VmValue::Int(total_output));
-    result.insert("call_count".to_string(), VmValue::Int(call_count));
+    result.insert(
+        "input_tokens".to_string(),
+        VmValue::Int(summary.input_tokens),
+    );
+    result.insert(
+        "output_tokens".to_string(),
+        VmValue::Int(summary.output_tokens),
+    );
+    result.insert("call_count".to_string(), VmValue::Int(summary.call_count));
+    result.insert(
+        "provider_call_count".to_string(),
+        VmValue::Int(summary.cost.provider_call_count),
+    );
+    result.insert(
+        "known_cost_usd".to_string(),
+        VmValue::Float(summary.cost.known_cost_usd),
+    );
+    result.insert(
+        "cost_usd".to_string(),
+        summary
+            .cost
+            .cost_usd()
+            .map(VmValue::Float)
+            .unwrap_or(VmValue::Nil),
+    );
+    result.insert(
+        "unpriced_calls".to_string(),
+        VmValue::Int(summary.cost.unpriced_calls),
+    );
+    result.insert(
+        "usage_unknown_calls".to_string(),
+        VmValue::Int(summary.cost.usage_unknown_calls),
+    );
     Ok(VmValue::dict(result))
 }
 
