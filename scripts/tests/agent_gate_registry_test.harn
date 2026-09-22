@@ -259,7 +259,7 @@ pipeline test_classification_batch_preserves_identity_and_missing_positions() {
     owner: "resolver",
     evidence: "Resolver validates the dynamic key.",
   }
-  const other_boundary = boundary + {scope: other.scope, file: other.file}
+  const other_boundary = boundary + pick(other, ["scope", "file"])
   const missing = read + {expression: "missing"}
   const result = agent_gate_findings([entry()], [missing, read, other], [boundary, other_boundary])
   assert_eq(result.forwarded, 2)
