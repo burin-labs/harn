@@ -6,6 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::value::{VmError, VmValue};
 
+mod application;
+pub(super) use application::{apply_round, ClassificationRewrite};
+mod evaluation;
+pub(super) use evaluation::{evaluate_round, ClassificationItem, ClassificationRoundKind};
+
 #[derive(Clone, Debug)]
 pub struct ClassificationConfig {
     pub policy: VmValue,
