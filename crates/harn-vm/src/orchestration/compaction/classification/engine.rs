@@ -15,6 +15,7 @@ pub(crate) struct ClassificationInputs<'a> {
     pub config: &'a ClassificationConfig,
     pub archived: &'a [serde_json::Value],
     pub retained: &'a [serde_json::Value],
+    pub anchor: &'a str,
     pub first_index: usize,
     pub budget_bytes: usize,
     pub active: Option<&'a crate::llm::api::LlmCallOptions>,
@@ -72,14 +73,6 @@ pub(crate) async fn classify_window(
             )
         })
         .collect();
-    let anchor = input
-        .retained
-        .iter()
-        .rev()
-        .chain(input.archived.iter().rev())
-        .find(|message| message.get("role").and_then(serde_json::Value::as_str) == Some("user"))
-        .map(message_body)
-        .unwrap_or_default();
     let mut eligible: BTreeSet<_> = surviving
         .keys()
         .copied()
@@ -92,6 +85,7 @@ pub(crate) async fn classify_window(
         budget_bytes: input.budget_bytes,
         result_bytes: 0,
         budget_met: false,
+        summary_applied: false,
         decisions: Vec::new(),
         fallback_reason: None,
     };
@@ -107,7 +101,7 @@ pub(crate) async fn classify_window(
                 content: surviving[index].clone(),
             })
             .collect();
-        let result = evaluate_round(input.ctx, input.config, &items, &anchor, round).await?;
+        let result = evaluate_round(input.ctx, input.config, &items, input.anchor, round).await?;
         if result.kind == ClassificationRoundKind::WindowRefused && round == 1 {
             // Only the explicit, all-windows predispatch refusal permits the
             // existing positional fallback. Later failures never override an
@@ -203,6 +197,7 @@ pub(crate) async fn classify_window(
                 .into_iter()
                 .filter(|(index, _)| protected.contains(index))
                 .collect();
+            receipt.summary_applied = true;
             let kept = render(&pinned, &roles);
             let scaffold = generated.scaffold_bytes + kept.scaffold_bytes + 1;
             summary =
@@ -216,6 +211,15 @@ pub(crate) async fn classify_window(
         receipt: Box::new(receipt),
         fallback_recap: None,
     })
+}
+
+pub(crate) fn latest_user_anchor(messages: &[serde_json::Value]) -> String {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.get("role").and_then(serde_json::Value::as_str) == Some("user"))
+        .map(message_body)
+        .unwrap_or_default()
 }
 
 fn message_body(message: &serde_json::Value) -> String {

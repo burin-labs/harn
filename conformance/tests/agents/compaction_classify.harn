@@ -1,8 +1,10 @@
+import { agent_autocompact_if_needed } from "std/agent/autocompact"
 import {
   CompactionClassifyDecision,
   CompactionClassifyItem,
   CompactionFixtureInput,
 } from "std/agent/compaction_classify"
+import { agent_session_init } from "std/agent/state"
 
 fn drop_low(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
   let decisions: list<CompactionClassifyDecision> = []
@@ -28,6 +30,25 @@ fn rewrite(items: list<CompactionClassifyItem>) -> list<{index: int, text: strin
     rewritten = rewritten + [{index: item.index, text: "retained " + to_string(item.index)}]
   }
   return rewritten
+}
+
+fn keep_with_latest_anchor(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  assert_eq(input.anchor, "Latest archived user", "anchor is selected before draining the window")
+  let decisions: list<CompactionClassifyDecision> = []
+  for item in input.items {
+    decisions = decisions
+      + [
+        {
+          index: item.index,
+          question_id: "message_" + to_string(item.index),
+          choice: "keep",
+          confidence: 0.9,
+          confidence_kind: "model_rationale",
+          evaluation_receipt: "explicit typed fixture",
+        },
+      ]
+  }
+  return decisions
 }
 
 pipeline test(harness: Harness) {
@@ -92,6 +113,10 @@ pipeline test(harness: Harness) {
     harness.agent.compaction_run(session, {provider: "mock", model: "mock"})
   }
   assert(is_err(empty), "all-drop replacement must reach the lifecycle refusal")
+  assert(
+    to_string(unwrap_err(empty)).contains("carried 0"),
+    "refusal must be the source-loss guard",
+  )
   assert_eq(harness.agent.compaction_check(session).message_count, before.message_count)
   const oversize = harness.agent.transcript_auto_compact(
     messages,
@@ -109,6 +134,60 @@ pipeline test(harness: Harness) {
   assert_eq(oversize.receipt.classification.rounds, 0)
   assert(oversize.receipt.classification.fallback_reason != nil)
   assert_eq(len(harness.llm.mock_calls()), 0, "window refusal happens before dispatch")
+  const protected = harness.agent.transcript_auto_compact(
+    [
+      {role: "user", content: "[no-compact] pinned original"},
+      {role: "user", content: result.summary},
+      {role: "user", content: "Eligible source"},
+      {role: "user", content: "Latest task"},
+    ],
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_last: 1,
+      recap_budget_bytes: 1,
+      provider: "mock",
+      model: "mock",
+      classify: classify,
+    },
+  )
+  assert_eq(len(protected.receipt.classification.decisions), 1)
+  assert_eq(protected.receipt.classification.decisions[0].index, 2)
+  assert(protected.summary.contains("[no-compact] pinned original"))
+  assert(protected.summary.contains(result.summary), "prior recap is carried verbatim")
+  const anchored = harness.agent.transcript_auto_compact(
+    [
+      {role: "user", content: "Old pinned head"},
+      {role: "user", content: "Latest archived user"},
+      {role: "assistant", content: "Latest evidence"},
+    ],
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_first: 1,
+      keep_last: 0,
+      provider: "mock",
+      model: "mock",
+      classify: {policy: policy, fixture: keep_with_latest_anchor},
+    },
+  )
+  assert_eq(anchored.receipt.classification.rounds, 1)
+  assert(anchored.summary.contains("Latest evidence"))
+  const loop_session = agent_session_init(harness.agent, "Opaque loop task", nil, {model: "mock"})
+  harness.agent.session_replace_messages(loop_session.session_id, messages, "")
+  agent_autocompact_if_needed(
+    harness.agent,
+    loop_session,
+    {
+      provider: "mock",
+      model: "mock",
+      compaction: {strategy: "classify", classify: classify},
+      auto_compact: {token_threshold: 0, keep_last: 1, recap_budget_bytes: 1},
+    },
+  )
+  const loop_messages = harness.agent.session_messages(loop_session.session_id)
+  assert(loop_messages[0].content.contains("retained 0"), "agent loop reached classification")
+  assert_eq(len(harness.llm.mock_calls()), 0)
   harness.stdio.println(
     "classified compaction preserves low-confidence source and reports window fallback",
   )

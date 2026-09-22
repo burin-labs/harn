@@ -27,6 +27,9 @@ fn __compaction_engine_strategy(label: string) {
   if label == "observation_mask" {
     return "observation_mask"
   }
+  if label == "classify" {
+    return "classify"
+  }
   return "observation_mask"
 }
 
@@ -183,6 +186,10 @@ fn __compact_options(opts: dict, engine_strategy: string, keep_last: any) {
   }
   if !contains(compact_opts.keys(), "compact_callback") && opts?.compact_callback != nil {
     compact_opts = compact_opts + {compact_callback: opts.compact_callback}
+  }
+  if !contains(compact_opts.keys(), "classify") && type_of(opts?.compaction) == "dict"
+    && opts.compaction?.classify != nil {
+    compact_opts = compact_opts + {classify: opts.compaction.classify}
   }
   if !contains(compact_opts.keys(), "provider") && opts?.provider != nil {
     compact_opts = compact_opts + {provider: opts.provider}
