@@ -643,11 +643,11 @@ fn token_budget_raises_categorized_error_when_exhausted() {
     let _budget = install_llm_token_budget(10);
 
     // First call within budget — admits.
-    let first = accumulate_llm_usage("claude-sonnet-4-20250514", 5, 0, 0.0);
+    let first = accumulate_llm_usage("claude-sonnet-4-20250514", 5, 0, 0.001);
     assert!(first.is_ok());
 
     // Second call pushes over — raises BudgetExceeded.
-    let second = accumulate_llm_usage("claude-sonnet-4-20250514", 8, 0, 0.0);
+    let second = accumulate_llm_usage("claude-sonnet-4-20250514", 8, 0, 0.002);
     match second {
         Err(VmError::CategorizedError { category, message }) => {
             assert_eq!(category, ErrorCategory::BudgetExceeded);
@@ -655,7 +655,47 @@ fn token_budget_raises_categorized_error_when_exhausted() {
         }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
+    assert_eq!(peek_total_tokens(), 13);
+    assert_eq!(
+        peek_total_cost(),
+        0.003,
+        "the completed response remains charged"
+    );
 
+    reset_cost_state();
+}
+
+#[test]
+fn step_budget_failure_keeps_completed_usage_and_first_error() {
+    let _guard_outer = crate::llm::env_guard();
+    reset_cost_state();
+    crate::step_runtime::reset_thread_local_state();
+    let _tokens = install_llm_token_budget(10);
+    let _cost = install_llm_cost_budget(0.001);
+    crate::step_runtime::register_step(
+        "paid",
+        crate::step_runtime::StepDefinition {
+            name: "paid".into(),
+            function: "paid".into(),
+            max_tokens: Some(5),
+            ..Default::default()
+        },
+    );
+    assert!(crate::step_runtime::maybe_push_active_step("paid", 1, &[]));
+    let error = accumulate_llm_usage("fixture", 100, 20, 0.003).unwrap_err();
+    assert!(
+        crate::step_runtime::is_step_budget_exhausted(&error),
+        "the first failure is preserved: {error:?}"
+    );
+    assert_eq!(peek_total_tokens(), 120);
+    assert_eq!(peek_total_cost(), 0.003);
+    crate::step_runtime::with_active_step(|step| {
+        assert_eq!(step.input_tokens, 100);
+        assert_eq!(step.output_tokens, 20);
+        assert_eq!(step.cost_usd, 0.003);
+    })
+    .expect("step remains active until its owning frame exits");
+    crate::step_runtime::reset_thread_local_state();
     reset_cost_state();
 }
 
