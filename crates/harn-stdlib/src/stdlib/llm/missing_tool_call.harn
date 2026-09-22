@@ -342,6 +342,13 @@ pub fn missing_tool_call_classifier(
       return __missing_tool_call_normalize(unwrap(custom), candidate_tools, threshold)
         + {classifier_kind: "custom"}
     }
+    if cfg.decision_policy != nil && (cfg.effort != nil || cfg.temperature != nil) {
+      return __missing_tool_call_fail_open(
+        "put effort and temperature in decision_policy when it is supplied",
+        threshold,
+      )
+        + {classifier_kind: "llm", model: model}
+    }
     for key in ["max_tokens", "top_p", "seed", "timeout_ms"] {
       if cfg[key] != nil {
         return __missing_tool_call_fail_open("unsupported evaluator option: " + key, threshold)
