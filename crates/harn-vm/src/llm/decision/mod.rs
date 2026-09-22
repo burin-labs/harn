@@ -439,15 +439,6 @@ async fn evaluate_internal(
         return Ok((outcome, Vec::new(), policy, receipt));
     };
 
-    // The checker refuses an empty set (HARN-TYP-036), and the outcome union
-    // has no reason that honestly names one. An unchecked caller gets a type
-    // error rather than a receipt carrying a cause that is not the cause.
-    if questions.is_empty() {
-        return Err(VmError::Runtime(
-            "evaluate requires at least one question".into(),
-        ));
-    }
-
     if let Err(refusal) = questions.admit(&route) {
         let outcome =
             outcome::question_invalid(&reference, &refusal.question, refusal.reason.as_str());

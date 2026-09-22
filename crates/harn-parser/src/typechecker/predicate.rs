@@ -14,6 +14,8 @@ pub enum PredicateSiteKind {
     Predicate,
     /// `harness.llm.evaluate`: a declared question set over one state.
     Evaluation,
+    /// `harness.llm.evaluate_request`: questions and route admitted at runtime.
+    RuntimeEvaluation,
 }
 
 impl PredicateSiteKind {
@@ -21,7 +23,7 @@ impl PredicateSiteKind {
     pub fn outcome_schema(self) -> &'static str {
         match self {
             Self::Predicate => "harn.predicate.outcome.v1",
-            Self::Evaluation => "harn.evaluation.outcome.v1",
+            Self::Evaluation | Self::RuntimeEvaluation => "harn.evaluation.outcome.v1",
         }
     }
 }
@@ -187,6 +189,7 @@ impl TypeChecker {
         )
         .is_some_and(|signature| {
             signature.name == harn_builtin_meta::predicate::EVALUATE.name
+                || signature.name == harn_builtin_meta::predicate::EVALUATE_REQUEST.name
                 || signature.name == harn_builtin_meta::predicate::EVALUATE_PREDICATE.name
         })
     }
@@ -341,6 +344,45 @@ impl TypeChecker {
             PredicateSiteKind::Evaluation,
             id,
             questions,
+            state,
+            policy,
+            scope,
+            span,
+        );
+    }
+
+    pub(super) fn check_evaluation_request_call(
+        &mut self,
+        args: &[SNode],
+        scope: &TypeScope,
+        span: Span,
+    ) {
+        let [id, state, questions, policy] = args else {
+            return;
+        };
+        let Some(id) = literal_text(id) else {
+            self.error_at(
+                Code::PredicateSiteInvalid,
+                "evaluation id must be a nonempty string literal".into(),
+                span,
+            );
+            return;
+        };
+        if !self
+            .infer_type(questions, scope)
+            .is_some_and(|ty| serializable(&self.resolve_alias(&ty, scope)))
+        {
+            self.error_at(
+                Code::PredicateQuestionSetInvalid,
+                "runtime evaluation questions must have a closed typed question map".into(),
+                questions.span,
+            );
+            return;
+        }
+        self.record_predicate_site(
+            PredicateSiteKind::RuntimeEvaluation,
+            id,
+            Vec::new(),
             state,
             policy,
             scope,
