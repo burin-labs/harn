@@ -12,7 +12,11 @@ use crate::value::VmDictExt;
 
 #[tokio::test(flavor = "current_thread")]
 async fn compaction_fallback_does_not_override_cancellation() {
-    for category in ["invalid_request", "cancelled"] {
+    for (category, allow_fallback) in [
+        ("invalid_request", true),
+        ("cancelled", true),
+        ("invalid_request", false),
+    ] {
         crate::llm::reset_llm_state();
         crate::llm::push_llm_mock(
             crate::llm::parse_llm_mock_value(&serde_json::json!({
@@ -39,7 +43,7 @@ async fn compaction_fallback_does_not_override_cancellation() {
             token_threshold: 0,
             keep_last: 1,
             compact_strategy: CompactStrategy::Llm,
-            fallback_strategy: Some(CompactStrategy::Truncate),
+            fallback_strategy: allow_fallback.then_some(CompactStrategy::Truncate),
             ..Default::default()
         };
         let result = run_compaction_lifecycle(
@@ -54,13 +58,13 @@ async fn compaction_fallback_does_not_override_cancellation() {
             1,
             "primary strategy reached"
         );
-        if category == "cancelled" {
-            let error = result.expect_err("cancellation must propagate");
+        if category == "cancelled" || !allow_fallback {
+            let error = result.expect_err("uncaught failure must propagate");
             assert_eq!(
                 crate::value::error_to_category(&error),
-                crate::value::ErrorCategory::Cancelled
+                crate::value::ErrorCategory::parse(category)
             );
-            assert_eq!(messages, original, "fallback cannot mutate after stop");
+            assert_eq!(messages, original, "failed compaction cannot mutate source");
         } else {
             let outcome = result
                 .expect("ordinary error falls back")
