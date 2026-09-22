@@ -28,6 +28,8 @@ command arguments, executes the resolved binary. No-build auto-resolution
 requires the Cargo dependency and Git content receipt written by a successful
 build-mode resolution; explicit HARN_BIN remains a caller-owned exact pin.
 The build-freshness print mode verifies that receipt before returning its ID.
+Downloaded CI artifacts instead use the verified exact-commit manifest and
+binary digest, and require the checkout to remain clean.
 
 Environment:
   HARN_BIN           explicit executable to validate and use; the resolved path
@@ -99,7 +101,18 @@ fi
 
 bin="$(harn_resolve_binary "$mode")"
 if [[ "$print_build_freshness" = "1" ]]; then
-  harn_verified_build_freshness_id "$bin"
+  if [[ "${GITHUB_ACTIONS:-false}" = "true" ]] && \
+     [[ ! -r "$(harn_binary_freshness_receipt_path "$bin")" ]]; then
+    # Hosted artifact provenance already has one owner. Local absolute Cargo
+    # dependency paths cannot travel with this independently verified binary.
+    # shellcheck source=scripts/lib/source_gate_receipt.sh
+    source "$script_dir/lib/source_gate_receipt.sh"
+    repo_root="$(harn_repo_root)"
+    harn_source_gate_require_clean "$repo_root"
+    harn_source_gate_binary_identity "$bin" "$(git -C "$repo_root" rev-parse --verify HEAD)"
+  else
+    harn_verified_build_freshness_id "$bin"
+  fi
   exit 0
 fi
 if [[ "$print_only" = "1" ]]; then
