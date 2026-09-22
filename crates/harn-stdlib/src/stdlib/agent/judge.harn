@@ -7,6 +7,7 @@ import {
   completion_evidence_id,
   completion_requirement_evidence_packet,
 } from "std/agent/completion_evidence"
+import { CompletionPrecheckResult } from "std/agent/completion_precheck"
 import {
   CompletionRequirementBoundary,
   CompletionRequirementEvidencePacket,
@@ -54,6 +55,7 @@ import {
   __judge_run_checkpoint_bounded,
 } from "std/agent/judge_internals"
 import { __judge_resolve_itemization } from "std/agent/judge_itemization"
+import { completion_precheck_from_snapshot } from "std/agent/judge_precheck"
 pub import {
   CompletionJudgeGapItem,
   CompletionJudgeVerdict,
@@ -123,6 +125,7 @@ pub type CompletionDirectiveReceipt = {
   checkpoint?: dict?,
   requirements?: CompletionRequirementReport?,
   completion_claim?: CompletionClaim,
+  precheck?: CompletionPrecheckResult?,
 }
 
 pub type CompletionDirective = {
@@ -862,6 +865,7 @@ fn __judge_directive(
     verification: payload.verification,
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,
+    precheck: verdict?.precheck,
     // A receipt describes the whole boundary, not only the last adjudicator.
     // Explicit emptiness on a done distinguishes no declarations from lost data.
     requirements: if ledger.required_count > 0 || ledger.pending_count > 0
@@ -1125,13 +1129,45 @@ fn __completion_policy_run_stage(
           // skip decision for it.
         }
       }
+      const precheck = if config.precheck == nil {
+        nil
+      } else {
+        completion_precheck_from_snapshot(harness.llm, config.precheck, payload, ledger)
+      }
+      if precheck?.action == "continue" || precheck?.action == "control_stop" {
+        const stopped = precheck.action == "control_stop"
+        const skipped: CompletionStageVerdict = {
+          vetoed: !stopped,
+          verdict: "continue",
+          source: "completion_precheck",
+          judge_outcome: "skipped_precheck",
+          reason: precheck.reason,
+          feedback: if stopped {
+            ""
+          } else {
+            "Complete and verify: ${precheck.gap_name}"
+          },
+          next_step: precheck.gap_name ?? "",
+          trigger: trigger,
+          terminal_judge_reason: if stopped {
+            "completion_precheck_${precheck.reason}"
+          } else {
+            nil
+          },
+          terminal_evidence_preserved: stopped,
+          requirement_report: ledger,
+          precheck: precheck,
+        }
+        __judge_emit_decision(harness.agent, payload.session_id, iteration, skipped)
+        return evaluation + {verdict: skipped}
+      }
       __judge_emit_started(harness.agent, payload.session_id, iteration, trigger)
       let verdict = __judge_invoke_structured(harness, config, opts, payload)
       verdict = __completion_arbitrate_contradiction(
         __completion_arbitrate_verification(verdict, evaluation),
         evaluation,
       )
-        + {trigger: trigger}
+        + {trigger: trigger, precheck: precheck}
       __judge_emit_decision(harness.agent, payload.session_id, iteration, verdict)
       const report = verdict.requirement_report
       let boundary = evaluation.requirement_boundary
