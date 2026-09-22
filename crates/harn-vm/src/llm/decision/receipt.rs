@@ -147,8 +147,9 @@ pub struct EvaluationReceipt {
     pub identity: EvaluationIdentity,
     pub requested_provider: String,
     pub requested_model: String,
-    /// The identity the provider served, exactly as it returned it. Absent
-    /// when nothing was dispatched or the provider named nothing.
+    /// Provider-reported model that produced the answer. On reuse this is
+    /// answer provenance; reused_from names the original call. Absent when
+    /// the original evaluation never dispatched or the provider named nothing.
     pub served_model: Option<String>,
     pub questions: Vec<EvaluationQuestionReceipt>,
     pub outcome_kind: String,

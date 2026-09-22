@@ -7,6 +7,7 @@
 //! cannot quietly change how a run is driven.
 
 use super::*;
+use std::sync::Arc;
 
 /// State for a single `harn run --json` invocation. `execute_run_inner`
 /// attaches its sink to the run's ambient execution scope, including setup and

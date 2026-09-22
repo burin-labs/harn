@@ -18,6 +18,9 @@ fn checked_in_decision_recipe_replays_offline_and_missing_record_fails() {
             .arg(&source)
             .arg("--evaluation-tape")
             .arg(tape)
+            .arg("--emit-summary-json")
+            .arg("--summary-file")
+            .arg(root.path().join("summary.json"))
             .arg("--json")
             .output()
             .unwrap()
@@ -45,6 +48,14 @@ fn checked_in_decision_recipe_replays_offline_and_missing_record_fails() {
     assert_eq!(answers["title"]["choice"], "first");
     assert_eq!(answers["done"]["verdict"], false);
     assert_eq!(values[1]["kind"], "state_too_large");
+    let summary: Value =
+        serde_json::from_slice(&std::fs::read(root.path().join("summary.json")).unwrap()).unwrap();
+    assert_eq!(
+        summary["llm"]["call_count"], 1,
+        "local refusal is not an LLM call"
+    );
+    assert_eq!(summary["llm"]["provider_call_count"], 0);
+    assert_eq!(summary["llm"]["cost_usd"], 0.0);
 
     let mut incomplete = harn_vm::testbench::tape::EventTape::load(&tape_path).unwrap();
     assert_eq!(incomplete.records.len(), 2);
@@ -124,6 +135,7 @@ fn canonical_tape_replay_has_new_occurrence_and_refuses_missing_changed_extra_re
     assert_eq!(reused["receipt"]["source"], "tape");
     assert_eq!(reused["receipt"]["reused_from"], original["receipt"]);
     assert_eq!(reused["receipt"]["physical_attempts"], 0);
+    assert!(reused["receipt"]["usage"].is_null());
     assert_eq!(reused["receipt"]["cost_usd"], 0.0);
     assert_ne!(
         reused["receipt"]["invocation_id"],
