@@ -122,7 +122,12 @@ impl OllamaProvider {
         // false for fast tool-call-shaped turns; callers who want
         // reasoning set `thinking` explicitly.
         body["think"] = serde_json::json!(opts.thinking.is_enabled());
-        crate::llm::api::apply_ollama_runtime_settings(&mut body, opts.provider_overrides.as_ref());
+        crate::llm::api::apply_ollama_runtime_settings(
+            &mut body,
+            &opts.provider,
+            &opts.model,
+            opts.provider_overrides.as_ref(),
+        );
         body
     }
 
@@ -177,7 +182,12 @@ impl OllamaProvider {
                 body["format"] = schema.clone();
             }
         }
-        crate::llm::api::apply_ollama_runtime_settings(&mut body, opts.provider_overrides.as_ref());
+        crate::llm::api::apply_ollama_runtime_settings(
+            &mut body,
+            &opts.provider,
+            &opts.model,
+            opts.provider_overrides.as_ref(),
+        );
         body
     }
 

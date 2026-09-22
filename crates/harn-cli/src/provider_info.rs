@@ -82,7 +82,8 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
                 .keep_alive
                 .as_deref()
                 .and_then(harn_vm::llm::normalize_ollama_keep_alive);
-            let result = harn_vm::llm::ollama_readiness(readiness).await;
+            let result =
+                harn_vm::llm::ollama_readiness_for_provider(&resolved.provider, readiness).await;
             ok = result.valid;
             payload["readiness"] = serde_json::to_value(&result).unwrap_or_else(|error| {
                 serde_json::json!({

@@ -19,18 +19,31 @@ fn context_window_cache() -> &'static ContextWindowCache {
     CACHE.get_or_init(|| StdMutex::new(StdHashMap::new()))
 }
 
-/// Resolve context from the owning provider catalog for hosted models, or
-/// discover the configured server limit for local and uncatalogued routes.
+/// Resolve context from the owning provider catalog for hosted models, use
+/// effective request settings for Ollama, or discover other server limits.
 /// Discovery is cached per (provider, base_url, model_id).
 ///
 /// Returns `None` when neither discovery nor an applicable catalog limit is
-/// available. Local routes may fall back only to an explicit runtime limit,
-/// not the model's advertised architecture limit.
+/// available. Other local routes may fall back only to an explicit runtime
+/// limit, not the model's advertised architecture limit. Ollama's configured
+/// request limit is distinct from an already-loaded runner's observed context.
 pub async fn fetch_provider_max_context(
     provider: &str,
     model: &str,
     api_key: &str,
 ) -> Option<usize> {
+    // Ollama requests always inject num_ctx. Architecture metadata from
+    // /api/show does not describe that setting, nor an already-loaded runner.
+    // Resolve on each call so environment/catalog changes cannot be cached out.
+    if crate::llm::capabilities::lookup(provider, model)
+        .message_wire_format
+        .is_ollama()
+    {
+        return usize::try_from(
+            super::ollama::OllamaRuntimeSettings::for_route(provider, Some(model), None).num_ctx,
+        )
+        .ok();
+    }
     let (local, catalog_window, base_url) = {
         let pdef = crate::llm_config::provider_config(provider);
         let catalog = crate::llm_config::model_catalog_entry_for_route(provider, model);
@@ -71,38 +84,6 @@ pub async fn fetch_provider_max_context(
         cache.insert(cache_key, fetched);
     }
     fetched.or(catalog_window)
-}
-
-/// Fetch context window from Ollama's `/api/show` endpoint.
-/// Returns the num_ctx from model parameters, or the default 2048 if not set.
-async fn fetch_ollama_context_window(model: &str, base_url: &str) -> Option<usize> {
-    let client = crate::llm::utility_client_for_base_url(base_url);
-    let url = format!("{}/api/show", base_url.trim_end_matches('/'));
-    let body = serde_json::json!({"name": model});
-    // Ollama is typically local — tight per-request timeout so we fail
-    // fast when it isn't running.
-    let response = client
-        .post(&url)
-        .json(&body)
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await
-        .ok()?;
-    if !response.status().is_success() {
-        return None;
-    }
-    let json: serde_json::Value = response.json().await.ok()?;
-    if let Some(n) = json
-        .pointer("/model_info/general.context_length")
-        .or_else(|| json.pointer("/model_info/context_length"))
-        .and_then(|v| v.as_u64())
-    {
-        return Some(n as usize);
-    }
-    Some(
-        super::ollama::OllamaRuntimeSettings::from_env_overrides_and_model(None, Some(model))
-            .num_ctx as usize,
-    )
 }
 
 /// Fetch context window from an OpenAI-compatible `/models` endpoint.
@@ -168,11 +149,6 @@ async fn fetch_provider_max_context_uncached(
     api_key: &str,
     base_url: &str,
 ) -> Option<usize> {
-    let caps = crate::llm::capabilities::lookup(provider, model);
-    if caps.message_wire_format.is_ollama() {
-        return fetch_ollama_context_window(model, base_url).await;
-    }
-
     let endpoint = crate::llm::helpers::ResolvedProvider::resolve(provider).endpoint;
     let is_openai_compatible = endpoint.contains("/chat/completions")
         || endpoint.contains("/responses")
