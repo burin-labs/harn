@@ -334,6 +334,95 @@ pipeline test_admission_is_read_from_the_wrappers_measurement(harness: Harness, 
   // Refusing by name beats silently treating the rename as "no command here".
   const drifted = worktree_admission_census("1", "/repo/owner\tscripts/renamed-admit.ts")
   assert(drifted.denial.contains("does not know"))
+  // A REPOSITORY ADMITTED FROM OUTSIDE ITSELF. One repository owns the script
+  // and admits others by naming them, which the row could not express while
+  // the whole invocation had to be one allowlisted string. The program is
+  // still pinned to the allowlist, by its tail when it is absolute.
+  const pointed = worktree_admission_census(
+    "1",
+    "/repo/plain\t/repo/owner/scripts/fleet-worktree-admit.ts --repository-root /repo/plain",
+  )
+  assert_eq(pointed.denial, "", "a command pointed at the row's own root is a known shape")
+  assert(worktree_admission_for(pointed, "").available)
+  assert_eq(
+    worktree_admission_for(pointed, "").command,
+    "/repo/owner/scripts/fleet-worktree-admit.ts --repository-root /repo/plain",
+  )
+  // AND EVERY WAY THAT ROW COULD LIE. Each of these is a census refusal, not
+  // an allow: widening the shape must not become a hole that a wrapper can
+  // walk arbitrary arguments, or another repository's root, through.
+  const elsewhere = worktree_admission_census(
+    "1",
+    "/repo/plain\t/repo/owner/scripts/fleet-worktree-admit.ts --repository-root /repo/other",
+  )
+  assert(
+    elsewhere.denial.contains("does not know"),
+    "a root the row is not about must be refused: " + elsewhere.denial,
+  )
+  // A PATH BOUNDARY, not a suffix. `.../notscripts/fleet-worktree-admit.ts`
+  // ends with the known path as TEXT while naming a different directory, and
+  // a tail match with no separator in front of it is the substring bug this
+  // guard keeps having to not make.
+  const unbounded_tail = worktree_admission_census(
+    "1",
+    "/repo/plain\t/repo/owner/notscripts/fleet-worktree-admit.ts --repository-root /repo/plain",
+  )
+  assert(
+    unbounded_tail.denial.contains("does not know"),
+    "the known path must end a directory, not just the string: " + unbounded_tail.denial,
+  )
+  const renamed_absolute = worktree_admission_census(
+    "1",
+    "/repo/plain\t/repo/owner/scripts/renamed-admit.ts --repository-root /repo/plain",
+  )
+  assert(
+    renamed_absolute.denial.contains("does not know"),
+    "a renamed program is refused wherever it lives: " + renamed_absolute.denial,
+  )
+  const extra_argument = worktree_admission_census(
+    "1",
+    "/repo/plain\tscripts/fleet-worktree-admit.ts --force --repository-root /repo/plain",
+  )
+  assert(
+    extra_argument.denial.contains("does not know"),
+    "an argument this policy never heard of is refused: " + extra_argument.denial,
+  )
+  // AFTER the valid pair, not before it. A trailing argument is the only shape
+  // that tests the count rather than the flag: put the unknown word first and
+  // the flag check refuses it and the count is never reached, which is a
+  // control that passes without measuring what it names.
+  const trailing_argument = worktree_admission_census(
+    "1",
+    "/repo/plain\tscripts/fleet-worktree-admit.ts --repository-root /repo/plain --force",
+  )
+  assert(
+    trailing_argument.denial.contains("does not know"),
+    "nothing may follow the one admitted pair: " + trailing_argument.denial,
+  )
+  const unknown_flag = worktree_admission_census(
+    "1",
+    "/repo/plain\tscripts/fleet-worktree-admit.ts --repo-root /repo/plain",
+  )
+  assert(
+    unknown_flag.denial.contains("does not know"),
+    "only the policy's own flag is admitted: " + unknown_flag.denial,
+  )
+  const relative_root = worktree_admission_census(
+    "1",
+    "/repo/plain\tscripts/fleet-worktree-admit.ts --repository-root plain",
+  )
+  assert(
+    relative_root.denial.contains("does not know"),
+    "a relative root cannot be checked against the row: " + relative_root.denial,
+  )
+  const bare_flag = worktree_admission_census(
+    "1",
+    "/repo/plain\tscripts/fleet-worktree-admit.ts --repository-root",
+  )
+  assert(
+    bare_flag.denial.contains("does not know"),
+    "a flag with no value is refused: " + bare_flag.denial,
+  )
   // An empty census is nobody having looked, which is also a denial. Without
   // this the rule switches itself off the moment the wrapper reports nothing.
   assert(worktree_admission_census("1", "").denial != "")
@@ -763,7 +852,7 @@ pipeline test_the_admission_command_named_in_a_refusal_exists(harness: Harness, 
   )
   assert(!refused.allow, "a repository that owns admission must be refused")
   assert_eq(
-    len(refused.reason.split("provides it at ")),
+    len(refused.reason.split("Run it as `")),
     2,
     "the refusal must name one command: " + refused.reason,
   )
@@ -772,7 +861,7 @@ pipeline test_the_admission_command_named_in_a_refusal_exists(harness: Harness, 
   // of them and never an improvised path.
   let named = ""
   for candidate in WORKTREE_ADMISSION_POLICY.admission_command_paths {
-    if refused.reason.contains("provides it at " + candidate + ".") {
+    if refused.reason.contains("Run it as `" + candidate + "`.") {
       named = candidate
     }
   }

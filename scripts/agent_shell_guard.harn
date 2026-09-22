@@ -906,12 +906,83 @@ pub type WorktreeAdmissionRow = {root: string, command: string}
 pub type WorktreeAdmissionCensus = {rows: list<WorktreeAdmissionRow>, denial: string}
 
 /**
+ * Whether a row's invocation is one this policy admits.
+ *
+ * Two shapes and no others. A bare program, which is a repository holding the
+ * command itself; or that program followed by the root flag and an absolute
+ * path equal to the row's own root, which is a repository admitted by a
+ * command living elsewhere.
+ *
+ * The second shape is pinned to the row's own root on purpose. Without that,
+ * a wrapper could name any directory and the refusal would send the operator
+ * at a repository nobody asked about, which is the failure this rule exists to
+ * avoid. Anything else, including a renamed program or an argument this policy
+ * has never heard of, is a census refusal rather than an allow: a rule that
+ * cannot read its own input must not answer "nothing here".
+ */
+/**
+ * Whether a row's program is one this policy knows.
+ *
+ * The exact path, which is a repository holding the command itself; or an
+ * absolute path ending in one, which is that same command named from outside
+ * the repository it is admitting.
+ *
+ * The absolute form is what makes the refusal checkable. A relative path is
+ * only meaningful from the repository that holds the command, so a sentence
+ * carrying one tells an operator standing somewhere else nothing they can run
+ * and nothing anyone can verify on disk. The allowlist still pins the tail, so
+ * a renamed program is refused wherever it lives.
+ */
+fn admission_program_known(program: string) -> bool {
+  for known in WORKTREE_ADMISSION_POLICY.admission_command_paths {
+    if program == known {
+      return true
+    }
+    if program.starts_with("/") && program.ends_with("/" + known) {
+      return true
+    }
+  }
+  return false
+}
+
+fn admission_invocation_known(command: string, root: string) -> bool {
+  let tokens: list<string> = []
+  for token in command.split(" ") {
+    const trimmed = token.trim()
+    if trimmed != "" {
+      tokens = tokens + [trimmed]
+    }
+  }
+  if len(tokens) == 0 {
+    return false
+  }
+  if !admission_program_known(to_string(tokens[0] ?? "")) {
+    return false
+  }
+  if len(tokens) == 1 {
+    return true
+  }
+  if len(tokens) != 3 {
+    return false
+  }
+  if to_string(tokens[1] ?? "") != WORKTREE_ADMISSION_POLICY.admission_root_flag {
+    return false
+  }
+  const named = to_string(tokens[2] ?? "")
+  return named.starts_with("/") && named == root
+}
+
+/**
  * Parse the census the wrapper reports.
  *
  * One row per line, root and command separated by a tab, the command empty
- * when that repository owns none. A row naming a command this policy does not
- * know is a refusal rather than an allow, because a renamed admission command
- * would otherwise turn the rule off silently.
+ * when that repository owns none. A row naming an invocation this policy does
+ * not know is a refusal rather than an allow, because a renamed admission
+ * command would otherwise turn the rule off silently.
+ *
+ * The command is an invocation, not only a path, so that a repository admitted
+ * by a command living elsewhere can be expressed at all. What may appear in it
+ * is the policy's to say, not this decoder's; see `admission_invocation_known`.
  */
 pub fn worktree_admission_census(checked: string, reported: string) -> WorktreeAdmissionCensus {
   if checked != "1" {
@@ -937,7 +1008,7 @@ pub fn worktree_admission_census(checked: string, reported: string) -> WorktreeA
     if root == "" {
       return {rows: [], denial: "the wrapper reported an admission row with no repository root"}
     }
-    if command != "" && !WORKTREE_ADMISSION_POLICY.admission_command_paths.contains(command) {
+    if command != "" && !admission_invocation_known(command, root) {
       return {
         rows: [],
         denial: "the wrapper reported an admission command this policy does not know: `"
@@ -1081,7 +1152,12 @@ pub fn decision(
       if admission.available {
         return {
           allow: false,
-          reason: attempt.reason + " That repository provides it at " + admission.command + ".",
+          // WHAT TO RUN, not where it lives. The command may be the target's
+          // own or one pointed at it from elsewhere, and a sentence asserting
+          // the target provides it is false in the second case. Naming a path
+          // the operator is not standing next to is the failure this rule
+          // exists to avoid, so the sentence states the invocation only.
+          reason: attempt.reason + " Run it as `" + admission.command + "`.",
         }
       }
     }
