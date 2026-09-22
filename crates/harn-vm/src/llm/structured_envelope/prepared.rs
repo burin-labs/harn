@@ -57,7 +57,7 @@ fn prepare(
     } else {
         prompt
     };
-    let mut options = active.isolated_request(prompt, role, stage);
+    let mut options = active.isolated_request(prompt, role, stage)?;
     options.output_validation = Some("error".into());
     options.output_schema = Some(schema.clone());
     if strategy != StructuredOutputStrategy::PromptValidation {

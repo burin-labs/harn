@@ -13,7 +13,7 @@ pub(super) use evaluation::{evaluate_round, ClassificationItem, ClassificationRo
 mod rewrite;
 pub(super) use rewrite::rewrite_items;
 mod engine;
-pub(super) use engine::{classify_window, ClassificationInputs};
+pub(super) use engine::{classify_window, latest_user_anchor, ClassificationInputs};
 
 #[derive(Clone, Debug)]
 pub struct ClassificationConfig {
@@ -161,6 +161,7 @@ pub struct ClassificationReceipt {
     pub budget_bytes: usize,
     pub result_bytes: usize,
     pub budget_met: bool,
+    pub summary_applied: bool,
     pub decisions: Vec<ClassificationDecisionReceipt>,
     pub fallback_reason: Option<String>,
 }

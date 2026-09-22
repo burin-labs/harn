@@ -8,7 +8,19 @@ impl LlmCallOptions {
     /// settings. Replace the conversation and all fields that can supply
     /// hidden conversation state or executable tools. The caller installs its
     /// own output contract after this boundary.
-    pub(crate) fn isolated_request(&self, prompt: String, role: &str, stage: &str) -> Self {
+    pub(crate) fn isolated_request(
+        &self,
+        prompt: String,
+        role: &str,
+        stage: &str,
+    ) -> Result<Self, crate::value::VmError> {
+        if self.provider_overrides.as_ref().is_some_and(|value| {
+            !value.is_null() && !value.as_object().is_some_and(serde_json::Map::is_empty)
+        }) {
+            return Err(crate::value::VmError::Runtime(
+                "isolated request cannot safely inherit raw provider wire overrides".into(),
+            ));
+        }
         let mut options = self.clone();
         options.messages = vec![serde_json::json!({"role": "user", "content": prompt})];
         options.system = None;
@@ -38,8 +50,8 @@ impl LlmCallOptions {
         options.background = None;
         options.truncation = None;
         options.compact = None;
-        // Arbitrary provider-body overrides can carry messages or tools. The
-        // typed data_controls field above remains the privacy authority.
+        // Only an absent/empty override reaches this point. Never silently
+        // drop provider-specific authority or guess an override allowlist.
         options.provider_overrides = None;
         options.structural_experiment = None;
         options.applied_structural_experiment = None;
@@ -48,13 +60,39 @@ impl LlmCallOptions {
         options.output_validation = None;
         options.schema_stream_abort = false;
         options.set_call_attribution(role, stage);
-        options
+        Ok(options)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opaque_wire_overrides_are_refused_instead_of_dropped() {
+        for overrides in [
+            serde_json::json!({"model": "other-route"}),
+            serde_json::json!({"messages": [{"role": "user", "content": "hidden history"}]}),
+            serde_json::json!({"tools": [{"name": "mutate"}]}),
+            serde_json::json!({"provider_specific_policy": true}),
+        ] {
+            let active = LlmCallOptions {
+                provider_overrides: Some(overrides.clone()),
+                ..Default::default()
+            };
+            assert!(active
+                .isolated_request("selected source".into(), "compaction", "compact")
+                .is_err());
+            assert_eq!(active.provider_overrides, Some(overrides));
+        }
+        let active = LlmCallOptions {
+            provider_overrides: Some(serde_json::json!({})),
+            ..Default::default()
+        };
+        assert!(active
+            .isolated_request("selected source".into(), "compaction", "compact")
+            .is_ok());
+    }
 
     #[test]
     fn isolated_request_replaces_context_but_preserves_authority() {
@@ -71,15 +109,15 @@ mod tests {
             provider_tools: vec![serde_json::json!({"type": "web_search"})],
             previous_response_id: Some("previous-provider-conversation".into()),
             prefill: Some("continue the old answer".into()),
-            provider_overrides: Some(serde_json::json!({"tools": ["injected"]})),
             budget: Some(crate::llm::cost::LlmBudgetEnvelope {
                 max_cost_usd: Some(0.01),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        let isolated =
-            active.isolated_request("selected source only".into(), "compaction", "compact");
+        let isolated = active
+            .isolated_request("selected source only".into(), "compaction", "compact")
+            .unwrap();
         assert_eq!(
             isolated.messages,
             vec![serde_json::json!({"role": "user", "content": "selected source only"})]

@@ -406,7 +406,7 @@ pub struct DaemonEventRecord {
     pub payload_summary: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RunObservabilityRecord {
     pub schema_version: usize,

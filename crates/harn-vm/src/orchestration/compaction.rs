@@ -472,7 +472,7 @@ async fn llm_compaction_summary(
         archived_count,
         policy,
     )?;
-    let compact_opts = llm_opts.isolated_request(prompt, "compaction", "compact");
+    let compact_opts = llm_opts.isolated_request(prompt, "compaction", "compact")?;
     let result = vm_call_llm_full(&compact_opts).await?;
     let summary = result.text.trim();
     if summary.is_empty() {
@@ -1202,6 +1202,11 @@ async fn compact_selected_window(
     compact_start: usize,
     split_at: usize,
 ) -> Result<AutoCompactResult, VmError> {
+    let classification_anchor = if config.compact_strategy == CompactStrategy::Classify {
+        classification::latest_user_anchor(messages)
+    } else {
+        String::new()
+    };
     let old_messages: Vec<_> = messages.drain(compact_start..split_at).collect();
     let archived_count = old_messages.len();
 
@@ -1227,6 +1232,7 @@ async fn compact_selected_window(
                     })?,
                     archived: &old_messages,
                     retained: messages,
+                    anchor: &classification_anchor,
                     first_index: compact_start,
                     budget_bytes: config.recap_budget_bytes,
                     active: llm_opts,
