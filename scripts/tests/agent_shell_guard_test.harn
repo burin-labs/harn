@@ -782,3 +782,84 @@ pipeline test_the_admission_command_named_in_a_refusal_exists(harness: Harness, 
     "the refusal named a command that does not exist in the repository it is about: " + named,
   )
 }
+
+@test
+pipeline test_a_cd_the_shell_may_skip_never_relaxes_the_rule(harness: Harness, task: unknown) {
+  // THE DISARM WAS TWO WORDS. The rule refused a bare creation in a repository
+  // that owns an admission command, and `true || cd /repo/plain` in front of
+  // the same command made it pass. The right side of `||` never runs, so the
+  // creation happened in the admission-owning repository after all, and the
+  // guard had answered for a directory the shell never entered.
+  //
+  // The fix is not a better model of the shell. A `cd` whose execution depends
+  // on control flow leaves the directory AMBIGUOUS, every directory the
+  // command could be in is asked about, and the first refusal wins.
+  const mixed: WorktreeAdmissionCensus = {
+    rows: [
+      {root: "/repo/guard", command: "scripts/fleet-worktree-admit.ts"},
+      {root: "/repo/plain", command: ""},
+    ],
+    denial: "",
+  }
+  // Row zero is where a command that names no directory runs, and it owns the
+  // command, so the bare form is the refusal these cases must not lose.
+  const bare = decision(
+    codex_payload("git worktree add ../unowned origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!bare.allow, "the bare creation must be refused or this fixture proves nothing")
+  for skipped in [
+    "true || cd /repo/plain; git worktree add ../unowned origin/main",
+    "false && cd /repo/plain; git worktree add ../unowned origin/main",
+    "true || cd /repo/plain && git worktree add ../unowned origin/main",
+  ] {
+    const verdict = decision(codex_payload(skipped), mixed, NO_MAKE_TARGETS)
+    assert(!verdict.allow, "a cd the shell may skip must not relax the rule: " + skipped)
+    assert(
+      verdict.reason.contains("scripts/fleet-worktree-admit.ts"),
+      "the refusal must name the command of the repository it could be in: " + verdict.reason,
+    )
+  }
+  // A cd whose FAILURE is swallowed is the same ambiguity from the other side:
+  // it runs, it may not succeed, and the command after it runs either way.
+  const tolerated = decision(
+    codex_payload("cd /repo/plain || true; git worktree add ../unowned origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!tolerated.allow, "a cd whose failure is swallowed leaves two directories reachable")
+  // A cd inside a pipeline runs in a subshell and never reaches what follows.
+  const piped = decision(
+    codex_payload("cd /repo/plain | cat; git worktree add ../unowned origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!piped.allow, "a cd inside a pipeline cannot move the directory of a later stage")
+  // THE OTHER SIDE OF THE RULE, or this test would pass with the directory
+  // tracking deleted. An unconditional cd still carries, and the creation is
+  // judged where it lands.
+  const unconditional = decision(
+    codex_payload("cd /repo/plain && git worktree add ../unowned origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(
+    unconditional.allow,
+    "an unconditional cd still answers for the repository it moves to: " + unconditional.reason,
+  )
+  const sequential = decision(
+    codex_payload("cd /repo/plain; git worktree add ../unowned origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(sequential.allow, "a plain sequential cd always runs: " + sequential.reason)
+  // A nested shell launched after a skipped cd inherits the ambiguity rather
+  // than the skipped directory.
+  const nested = decision(
+    codex_payload("true || cd /repo/plain; bash -lc 'git worktree add ../unowned origin/main'"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!nested.allow, "the ambiguity must travel into a nested shell: " + nested.reason)
+}
