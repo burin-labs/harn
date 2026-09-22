@@ -12,7 +12,10 @@ use super::answer::{AnswerBody, ConfidenceKind, EvidenceKind};
 use super::backend::{
     ConfidenceProvenance, DecisionTransportError, RawAnswer, RawDecisionResponse, RefusalReason,
 };
-use super::contract::{DecisionContract, DecisionLimits, DecisionProtocol, DecisionQuestionKind};
+use super::contract::{
+    DecisionContract, DecisionLimits, DecisionProtocol, DecisionQuestionKind,
+    StructuredOutputStrategy,
+};
 use super::mock::MockDecisionBackend;
 use super::question::{Question, QuestionBody, QuestionRefusalReason, QuestionSet};
 use super::*;
