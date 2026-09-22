@@ -458,9 +458,64 @@ fn nested_shell_payload(argv: list<string>) -> string {
  * command actually points at rather than the one this guard happens to be
  * installed in.
  */
-type WorktreeAddAttempt = {reason: string, target: string}
+/**
+ * A raw creation, and every directory it could be running in.
+ *
+ * `targets` is a list because a `cd` the shell may skip leaves the directory
+ * AMBIGUOUS, and the guard must not pick one. `true || cd /elsewhere` never
+ * runs its right side, so the command runs where it started; a guard that
+ * remembered the skipped `cd` answered for a repository the command never
+ * reached, and two words disarmed the rule. Every reachable directory is
+ * carried and the caller denies if any of them denies.
+ */
+type WorktreeAddAttempt = {reason: string, targets: list<string>}
 
-const NO_WORKTREE_ADD: WorktreeAddAttempt = {reason: "", target: ""}
+const NO_WORKTREE_ADD: WorktreeAddAttempt = {reason: "", targets: []}
+
+/**
+ * The shell operator joining each stage to the one before it, read off the
+ * raw text.
+ *
+ * `command_risk_scan` groups by PIPELINE, so `&&`, `||` and `;` all produce
+ * separate groups and are indistinguishable in its output. The operators are
+ * exactly what decides whether a `cd` runs, so they are read here from the
+ * command itself, anchored on each stage's own text and scanned forward only.
+ *
+ * The first stage has no operator and answers "". A stage whose text cannot be
+ * located answers "?", which every caller treats as the ambiguous case rather
+ * than as a missing operator.
+ */
+fn stage_operators(command: string, texts: list<string>) -> list<string> {
+  let operators: list<string> = []
+  let rest = command
+  let first = true
+  for text in texts {
+    if text == "" {
+      operators = operators + ["?"]
+      continue
+    }
+    const at = rest.index_of(text)
+    if at < 0 {
+      operators = operators + ["?"]
+      continue
+    }
+    const between = rest.slice(0, at)
+    if first {
+      operators = operators + [""]
+      first = false
+    } else if between.contains("&&") {
+      operators = operators + ["&&"]
+    } else if between.contains("||") {
+      operators = operators + ["||"]
+    } else if between.contains(";") || between.contains("\n") {
+      operators = operators + [";"]
+    } else {
+      operators = operators + ["?"]
+    }
+    rest = rest.slice(at + len(text), len(rest))
+  }
+  return operators
+}
 
 /**
  * The directory an absolute `cd` moves the rest of the command into.
@@ -534,36 +589,71 @@ fn raw_worktree_add_attempt_at(
   // It also holds across a shell launched after it. A nested payload scanned
   // from a fresh directory is judged against the repository this guard is
   // installed in, so the directory travels into the recursion as well.
-  let working_directory = inherited_directory
-  for group in command_groups(command) {
+  // A `cd` is only carried forward when the shell is certain to run it and
+  // certain that its failure is not being swallowed. Otherwise BOTH the
+  // directory before it and its target stay reachable, and the rule is
+  // answered for each.
+  const groups = command_groups(command)
+  let texts: list<string> = []
+  for group in groups {
+    for stage in group {
+      texts = texts + [stage.text]
+    }
+  }
+  const operators = stage_operators(command, texts)
+  let reachable: list<string> = [inherited_directory]
+  let index = 0
+  for group in groups {
     for stage in group {
       const argv = launched_argv(stage.argv, 0)
       const moved = cd_target(argv)
       if moved != "" {
-        working_directory = moved
+        const before = to_string(operators[index] ?? "?")
+        const after = to_string(operators[index + 1] ?? "")
+        // Runs at all: only when nothing conditions it. After `&&` or `||` the
+        // shell may skip it outright.
+        const always_runs = before == "" || before == ";"
+        // Its failure is swallowed, so the command after it runs either way.
+        const failure_tolerated = after == "||"
+        // A stage inside a pipeline runs in a subshell, so its `cd` never
+        // reaches the stages that follow the pipeline at all.
+        const in_pipeline = len(group) > 1
+        if always_runs && !failure_tolerated && !in_pipeline {
+          reachable = [moved]
+        } else if !reachable.contains(moved) {
+          reachable = reachable + [moved]
+        }
       }
       if argv_program(argv) == "git" && is_git_worktree_add(argv) {
         const named = git_directory_argument(argv)
-        let target = named
-        if target == "" {
-          target = working_directory
+        // `-C` names the directory for this one invocation whatever the shell
+        // did, so it is the single answer rather than one candidate.
+        let targets = reachable
+        if named != "" {
+          targets = [named]
         }
         return {
           reason: "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
             + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
             + "and records the joined ledger and recovery receipts before returning success.",
-          target: target,
+          targets: targets,
         }
       }
       if depth < 4 {
         const nested = nested_shell_payload(argv)
         if nested != "" {
-          const attempt = raw_worktree_add_attempt_at(nested, depth + 1, working_directory)
-          if attempt.reason != "" {
-            return attempt
+          // The nested shell inherits every directory this one could be in.
+          // Scanning it once per candidate keeps the ambiguity rather than
+          // resolving it on the way in.
+          for candidate in reachable {
+            const attempt = raw_worktree_add_attempt_at(nested, depth + 1, candidate)
+            if attempt.reason != "" {
+              return attempt
+            }
           }
         }
       }
+      index = index + 1
     }
   }
   return NO_WORKTREE_ADD
@@ -890,6 +980,9 @@ pub fn decision(
     //   the target row has none           -> allow, and do not police it
     //   no target resolves                -> answer for row zero, which the
     //                                        wrapper reports as its own root
+    //   the directory is ambiguous        -> ask for EVERY reachable
+    //                                        directory and take the first
+    //                                        refusal
     //
     // Row zero is not a stand-in for an unresolved target. The wrapper puts
     // its own repository first, so a command that names no directory will run
@@ -899,20 +992,27 @@ pub fn decision(
     // wired. The census used to be taken against the guard's own installation
     // whatever the command targeted, so a command pointing at another
     // repository was refused and sent to a path that does not exist there.
-    const admission = worktree_admission_for(census, attempt.target)
-    if admission.denial != "" {
-      return {
-        allow: false,
-        reason: "Raw `git worktree add` is refused because this guard could not tell whether "
-          + "the repository it targets owns a Fleet admission command, and an unreadable census "
-          + "must not read as an absent one: "
-          + admission.denial,
+    // AMBIGUOUS RESOLVES TO THE MOST RESTRICTIVE ANSWER. `attempt.targets` is
+    // every directory the command could be running in, so the rule is asked
+    // about each and the first refusal wins. Picking one of them would be
+    // modelling the shell, and the guard already lost that argument once: it
+    // believed a `cd` the shell had skipped.
+    for candidate in attempt.targets {
+      const admission = worktree_admission_for(census, candidate)
+      if admission.denial != "" {
+        return {
+          allow: false,
+          reason: "Raw `git worktree add` is refused because this guard could not tell whether "
+            + "the repository it targets owns a Fleet admission command, and an unreadable census "
+            + "must not read as an absent one: "
+            + admission.denial,
+        }
       }
-    }
-    if admission.available {
-      return {
-        allow: false,
-        reason: attempt.reason + " That repository provides it at " + admission.command + ".",
+      if admission.available {
+        return {
+          allow: false,
+          reason: attempt.reason + " That repository provides it at " + admission.command + ".",
+        }
       }
     }
     // THE TARGET'S OWN COMMAND, OR NONE. A measured repository that advertises
