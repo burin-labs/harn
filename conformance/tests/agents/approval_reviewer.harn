@@ -1,5 +1,6 @@
 import {
   approval_allow_all_reviewer,
+  approval_review_floor_decision,
   approval_review_system_prompt,
   approval_reviewer_for,
 } from "std/agent/approval_review"
@@ -57,6 +58,22 @@ fn raising_reviewer() {
 }
 
 pipeline default(harness: Harness) {
+  const floor_guard = approval_review_floor_decision({}, {category: " credential_exfiltration "})
+  assert(floor_guard != nil, "the public guard must resolve the bundled floor")
+  assert(floor_guard.approved == false, "a floor decision cannot authorize the action")
+  assert(floor_guard.authorization == "unknown", "eligibility cannot claim operator authorization")
+  assert(
+    approval_review_floor_decision({}, {category: " ", tool: "destructive_root_delete"}) != nil,
+    "a blank category must retain the existing tool fallback",
+  )
+  assert(
+    approval_review_floor_decision({}, {category: "secret_material_read", action: "deny"}) == nil,
+    "a presumptive denial remains eligible for review",
+  )
+  assert(
+    approval_review_floor_decision({}, {tool: "read_file", action: "ask"}) == nil,
+    "ordinary ask remains eligible without manufacturing an approval",
+  )
   // The caller supplies only a host overlay. Harn must project its bundled
   // policy before the first decision so an omitted floor cannot read as an
   // empty floor and an omitted threshold table cannot deny every valid review.
