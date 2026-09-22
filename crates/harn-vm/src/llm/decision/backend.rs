@@ -84,7 +84,7 @@ pub enum RawAnswer {
     },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReportedSelection {
     Boolean(bool),
     Choice(String),
