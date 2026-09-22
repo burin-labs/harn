@@ -6,4 +6,4 @@ judge.calls=2
 judge.classifier_events=0
 judge.decisions=1
 prefix.action=tool_call_intended
-prefix.separated_state=true
+prefix.stable_first=true

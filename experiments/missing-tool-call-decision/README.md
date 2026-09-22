@@ -180,3 +180,15 @@ matches. Eligible and matching counts are respectively 30/30 in development,
 and action agreement counts are unchanged. `agreement-control.mjs` exercises
 the same analyzer with a nonempty zero-eligible case, a measured match, and a
 measured mismatch. None is a model-quality trial.
+
+## Production scope
+
+The default missing-call classifier retains its existing typed-output checkpoint
+and prompt. The attempted decision-backed cutover is archived at signed commit
+`4c7ff80ba8707536a50f5d61402ca474f4c2bdd6` on
+`codex/experiment-missing-call-cutover-8543`. The quality outcome of issue #8543
+remains incomplete. Its intent/target prompts and evaluator fixture are
+retained here with the experiment, not registered as production assets. The
+typed custom-fixture seam and invalid-confidence refusal remain independently
+verified. Generic dynamic evaluator, transport admission, answer projection,
+settlement, and provenance fixes are separate from promoting this consumer.

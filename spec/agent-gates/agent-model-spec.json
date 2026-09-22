@@ -95,10 +95,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
         "reader": "__budget_envelope"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "reader": "__with_missing_call_admission"
       }
     ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",

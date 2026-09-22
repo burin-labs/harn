@@ -113,9 +113,9 @@ The policy requires a `backend` of `"structured_llm"` or `"native_decision"`, st
 and `model`, and a floating-point `threshold`. Optional finite nonnegative
 `evaluation_cost_limit` and `run_cost_limit` tighten inherited authority. Omitting
 them does not create budget authority: native calls require an existing
-conservative ledger ceiling and retain a finite per-call price bound. A native
-classifier configured on an agent loop installs its explicit run ceiling before
-the first chat turn; earlier unreserved calls cannot be retroactively covered.
+conservative ledger ceiling and retain a finite per-call price bound. Install
+that authority before the first model call; earlier unreserved calls cannot be
+retroactively covered.
 Checking validates this shape and the resolved `decision` operation. A route
 with a supported structured transport and text generation derives structured
 decision support at the catalog owner. An explicit unsupported schema override

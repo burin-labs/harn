@@ -1,68 +1,5 @@
 [
   {
-    "default": "required when an explicit decision policy is supplied",
-    "evidence": "The agent options owner recognizes native decision admission before the first agent call; the evaluator validates the closed backend enum.",
-    "expiry": "2026-10-22",
-    "kind": "configuration",
-    "layer": "runner",
-    "name": "MissingToolCallRecoveryOptions.decision_policy.backend",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "reader": "__with_missing_call_admission"
-      }
-    ],
-    "reason": "Retain explicit evaluator backend routing and admission.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "absent; inherit existing finite conservative authority",
-    "evidence": "The agent options owner tightens run authority to the smaller declared or inherited limit before any provider call.",
-    "expiry": "2026-10-22",
-    "kind": "limit or threshold",
-    "layer": "runner",
-    "name": "MissingToolCallRecoveryOptions.decision_policy.run_cost_limit",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "reader": "__with_missing_call_admission"
-      }
-    ],
-    "reason": "Retain finite run budget authority and reject late activation.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "absent; resolve the existing structured classifier route",
-    "evidence": "The classifier uses one evaluator owner; an explicit typed policy selects the backend and finite budget authority before dispatch.",
-    "expiry": "2026-10-22",
-    "kind": "configuration",
-    "layer": "runner",
-    "name": "MissingToolCallRecoveryOptions.decision_policy",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "reader": "__with_missing_call_admission"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-        "reader": "__missing_tool_call_recovery_classifier"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "__missing_tool_call_policy"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": ""
-      }
-    ],
-    "reason": "Retain explicit backend selection and budget policy; live caller reachability is separately measured.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
     "default": "absent; use the built-in typed model checkpoint",
     "evidence": "llm.missing_tool_call.missing_tool_call_classifier invokes the custom closure only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
@@ -71,10 +8,6 @@
     "name": "MissingToolCallRecoveryOptions.classifier",
     "reachability": "unknown",
     "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "reader": "__with_missing_call_admission"
-      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "reader": "__validate_missing_tool_call_recovery"
@@ -119,11 +52,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "__missing_tool_call_policy"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": ""
+        "reader": "missing-tool-recovery-key-domain"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -138,10 +67,6 @@
     "name": "MissingToolCallRecoveryOptions.enabled",
     "reachability": "unknown",
     "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "reader": "__with_missing_call_admission"
-      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "reader": "__validate_missing_tool_call_recovery"
@@ -169,7 +94,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "missing-tool-recovery-key-domain"
+        "reader": ""
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -191,10 +116,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
         "reader": "missing_tool_call_classifier"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -215,7 +136,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "__missing_tool_call_policy"
+        "reader": ""
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -247,10 +168,6 @@
     "name": "MissingToolCallRecoveryOptions.temperature",
     "reachability": "unknown",
     "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "__missing_tool_call_policy"
-      },
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
         "reader": ""

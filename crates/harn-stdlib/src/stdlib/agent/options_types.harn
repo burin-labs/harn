@@ -7,7 +7,6 @@ import { AgentStallCheckpoint } from "std/agent/stall_types"
 // parity is pinned by `crates/harn-vm/src/orchestration/typed_options_parity.rs`.
 import { LlmBudget, Logprobs, Mirostat, PredictedOutput } from "std/llm/options"
 import { TokenBias } from "std/llm/tokenizer"
-import { EvaluationOutcome, EvaluationPolicy } from "std/predicate"
 
 /** The shared provider budget plus the agent loop's aggregate token limit. */
 pub type AgentLlmBudget = LlmBudget & {max_total_tokens?: int}
@@ -40,7 +39,6 @@ pub type MissingToolCallVerdict = {
   classifier_kind?: string,
   model?: string,
   typed_checkpoint?: any,
-  decision?: EvaluationOutcome,
   error?: string,
 }
 
@@ -55,7 +53,6 @@ pub type MissingToolCallRecoveryOptions = {
   provider?: string,
   model?: string,
   confidence_threshold?: float,
-  decision_policy?: EvaluationPolicy,
   max_tokens?: int,
   temperature?: float,
   classifier?: MissingToolCallCustomClassifier,
