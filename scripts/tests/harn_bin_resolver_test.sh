@@ -754,6 +754,9 @@ fn main() {
 RS
 printf 'tracked-v1\n' > "$cargo_fixture/embedded tracked.harn"
 printf 'ignored-v1\n' > "$cargo_fixture/embedded ignored.harn"
+mkdir -p "$cargo_fixture/docs/src"
+printf 'tracked-v1\n:ignored-v1\n\n' > "$cargo_fixture/docs/src/diagnostics.md"
+cp "$cargo_fixture/docs/src/diagnostics.md" "$cargo_fixture/docs/diagnostics-catalog.json"
 cat > "$cargo_fixture/.gitignore" <<'EOF'
 /build output with spaces/
 /embedded ignored.harn
@@ -790,7 +793,7 @@ git -C "$cargo_fixture" config extensions.worktreeConfig true
 git -C "$cargo_fixture" config diff.hostile.command "$hostile_diff"
 git -C "$cargo_fixture" config diff.hostile.textconv "$hostile_diff"
 git -C "$cargo_fixture" add Cargo.toml src/main.rs 'embedded tracked.harn' \
-  .gitignore .gitattributes
+  .gitignore .gitattributes docs
 git -C "$cargo_fixture" commit -qm 'fixture'
 # Establish old timestamps before the first build. Later edits preserve both
 # size and these exact mtimes, so producer provenance and ignored-dependency
@@ -1016,8 +1019,37 @@ replace_executable_with_marker "$cargo_fixture_cargo_checker" legitimate-cargo-r
 # A tracked content edit remains stale even when its mtime is forced older than
 # the executable. This is the blind spot of a timestamp-only depfile query and
 # the reason the receipt composes Git content identity with Cargo recency.
+run_diagnostics_target() {
+  make --no-print-directory -C "$cargo_fixture" -f "$repo_root/Makefile" \
+    HARN_BIN="$cargo_fixture_bin" HARN_BIN_CMD="$repo_root/scripts/harn_bin.sh" "$1"
+}
+# Positive control: both canonical targets reach catalog output with proven
+# inputs, including an explicit HARN_BIN (the ordinary resolver's escape hatch).
+run_diagnostics_target check-diagnostics-catalog > "$tmp_root/catalog-fresh.out"
+run_diagnostics_target sync-diagnostics-catalog > "$tmp_root/catalog-sync-fresh.out"
 printf 'tracked-v2\n' > "$cargo_fixture/embedded tracked.harn"
 touch -t 200001010000 "$cargo_fixture/embedded tracked.harn"
+for catalog_target in check-diagnostics-catalog sync-diagnostics-catalog; do
+  if run_diagnostics_target "$catalog_target" > "$tmp_root/$catalog_target.out" \
+    2> "$tmp_root/$catalog_target.err"; then
+    echo "$catalog_target accepted the binary built before its registry input changed" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'manifest input content changed' "$tmp_root/$catalog_target.err" || \
+    ! grep -Fq 'embedded tracked.harn' "$tmp_root/$catalog_target.err"; then
+    echo "$catalog_target did not name the stale input" >&2
+    cat "$tmp_root/$catalog_target.err" >&2
+    exit 1
+  fi
+  if grep -Fq 'Diagnostic-code catalog OK.' "$tmp_root/$catalog_target.out"; then
+    echo "$catalog_target reported success after its freshness refusal" >&2
+    exit 1
+  fi
+done
+if ! git -C "$cargo_fixture" diff --quiet -- docs; then
+  echo "stale diagnostics sync changed the committed catalog" >&2
+  exit 1
+fi
 if (
   cd "$cargo_fixture"
   CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \

@@ -1101,12 +1101,13 @@ check-docs-cookbook-entrypoints:
 # code or its repair template.
 sync-diagnostics-catalog:
 	@set -e; \
-	tmp_dir=$$(mktemp -d "$(CURDIR)/.diagnostics-catalog.XXXXXX"); \
+	tmp_dir=$$(mktemp -d); \
 	tmp_md="$$tmp_dir/diagnostics.md"; \
 	tmp_json="$$tmp_dir/diagnostics-catalog.json"; \
 	trap 'rm -f "$$tmp_md" "$$tmp_json"; rmdir "$$tmp_dir" 2>/dev/null || true' EXIT; \
 	$(HARN_BIN_ASSIGN); \
 	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	HARN_BIN="$$harn_bin" $(HARN_BIN_CMD) --print-build-freshness >/dev/null; \
 	"$$harn_bin" explain --catalog --format markdown > "$$tmp_md"; \
 	"$$harn_bin" explain --catalog --format json > "$$tmp_json"; \
 	mv "$$tmp_md" docs/src/diagnostics.md; \
@@ -1122,6 +1123,7 @@ check-diagnostics-catalog:
 	trap 'rm -f "$$tmp_md" "$$tmp_json"' EXIT; \
 	$(HARN_BIN_ASSIGN); \
 	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	HARN_BIN="$$harn_bin" $(HARN_BIN_CMD) --print-build-freshness >/dev/null; \
 	"$$harn_bin" explain --catalog --format markdown > "$$tmp_md"; \
 	"$$harn_bin" explain --catalog --format json > "$$tmp_json"; \
 	if ! diff -u docs/src/diagnostics.md "$$tmp_md" >/dev/null; then \
