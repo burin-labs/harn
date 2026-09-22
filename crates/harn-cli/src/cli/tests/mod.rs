@@ -9,8 +9,8 @@ use super::{
     Cli, Command, ConnectCommand, HostCommand, HostLeaseCommand, HostLeasePriorityArg,
     HostLeaseRunCommand, LocalCommand, MergeCaptainCommand, ModelsCommand, ModelsLoraCommand,
     OrchestratorCommand, OrchestratorQueueCommand, PersonaCommand, ProjectTemplate,
-    ProviderCommand, SessionCommand, SkillCommand, TimeCommand, ToolCommand, ToolSchemaSurface,
-    TriggerCommand,
+    ProviderCommand, ProviderPortableOptionArg, SessionCommand, SkillCommand, TimeCommand,
+    ToolCommand, ToolSchemaSurface, TriggerCommand,
 };
 pub(crate) use crate::cli::runs::RunsCommand;
 

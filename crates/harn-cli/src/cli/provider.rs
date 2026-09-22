@@ -784,7 +784,7 @@ pub(crate) struct ProviderOptionProbeArgs {
     pub json: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProviderPortableOptionArg {
     Temperature,
     TopP,
@@ -795,7 +795,43 @@ pub(crate) enum ProviderPortableOptionArg {
     Stop,
 }
 
+/// The accepted flag value is `name()`, not clap's rendering of the variant.
+///
+/// `name()` is the portable option vocabulary, the same spelling the typed
+/// union declares and the same one the capability field is built from. Deriving
+/// `ValueEnum` gave the flag a second, kebab-case spelling of that vocabulary,
+/// so a caller passing a canonical id was refused before any request was made.
+/// This implementation reads the one list, and keeps the kebab-case spelling as
+/// an alias so callers written against the derived form still work.
+impl ValueEnum for ProviderPortableOptionArg {
+    fn value_variants<'a>() -> &'a [Self] {
+        &Self::ALL
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        let canonical = self.name();
+        let value = clap::builder::PossibleValue::new(canonical);
+        let hyphenated = canonical.replace('_', "-");
+        if hyphenated == canonical {
+            Some(value)
+        } else {
+            Some(value.alias(hyphenated))
+        }
+    }
+}
+
 impl ProviderPortableOptionArg {
+    /// Every variant, in declaration order.
+    pub(crate) const ALL: [Self; 7] = [
+        Self::Temperature,
+        Self::TopP,
+        Self::TopK,
+        Self::Seed,
+        Self::FrequencyPenalty,
+        Self::PresencePenalty,
+        Self::Stop,
+    ];
+
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Temperature => "temperature",
