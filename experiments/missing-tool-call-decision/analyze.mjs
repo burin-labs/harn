@@ -1,10 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 const root = process.argv[2];
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+const corpus = fs.readFileSync(path.join(root, 'corpus.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
 const items = fs.readdirSync(root).flatMap(name => {
   const file = path.join(root, name, 'result.json');
   return fs.existsSync(file) ? [JSON.parse(fs.readFileSync(file, 'utf8'))] : [];
 });
+const expectedRows = manifest.repetitions * manifest.arms.length * corpus.length;
+if (items.length !== expectedRows) throw Error(`incomplete study: ${items.length}/${expectedRows}`);
+const keys = new Set(items.map(x => `${x.repeat}:${x.row_id}:${x.arm}`));
+for (let repeat = 0; repeat < manifest.repetitions; repeat++) for (const row of corpus) for (const arm of manifest.arms) {
+  if (!keys.has(`${repeat}:${row.row_id}:${arm.id}`)) throw Error('missing study cell');
+}
 const mean = xs => xs.reduce((a,b) => a+b, 0) / xs.length;
 const quantile = (xs, p) => { const sorted = [...xs].sort((a,b) => a-b), at = (sorted.length - 1) * p, low = Math.floor(at); return sorted[low] + (sorted[Math.ceil(at)] - sorted[low]) * (at - low); };
 const rowIds = [...new Set(items.map(x => x.row_id))].sort();
