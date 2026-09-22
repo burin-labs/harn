@@ -2,8 +2,8 @@
 //!
 //! Every check here is local. A question the route's declared limits refuse is
 //! refused before dispatch, so the caller gets `question_invalid` having made
-//! zero provider requests and paid nothing. The checker already proved the set
-//! is a literal; this layer proves it fits the route.
+//! zero provider requests and paid nothing. Static and runtime-declared
+//! vocabularies share these semantic and route-limit checks.
 
 use crate::value::VmValue;
 
@@ -20,6 +20,10 @@ pub struct QuestionRefusal {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuestionRefusalReason {
+    EmptyQuestions,
+    EmptyOptions,
+    EmptyIdentifier,
+    DuplicateLabels,
     TooManyOptions,
     TooFewLevels,
     TooManyLevels,
@@ -31,6 +35,10 @@ pub enum QuestionRefusalReason {
 impl QuestionRefusalReason {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::EmptyQuestions => "empty_questions",
+            Self::EmptyOptions => "empty_options",
+            Self::EmptyIdentifier => "empty_identifier",
+            Self::DuplicateLabels => "duplicate_labels",
             Self::TooManyOptions => "too_many_options",
             Self::TooFewLevels => "too_few_levels",
             Self::TooManyLevels => "too_many_levels",
@@ -164,10 +172,6 @@ impl QuestionSet {
         Ok(Self { questions })
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.questions.is_empty()
-    }
-
     /// The declared ids, in order. Read by the mock backend's request log.
     #[cfg(test)]
     pub fn ids(&self) -> Vec<String> {
@@ -182,6 +186,12 @@ impl QuestionSet {
     /// outcome instead of an error to catch.
     pub fn admit(&self, contract: &DecisionContract) -> Result<(), QuestionRefusal> {
         let limits = &contract.limits;
+        if self.questions.is_empty() {
+            return Err(QuestionRefusal {
+                question: String::new(),
+                reason: QuestionRefusalReason::EmptyQuestions,
+            });
+        }
         if let Some(max) = limits.max_questions {
             if self.questions.len() > max {
                 return Err(QuestionRefusal {
@@ -197,6 +207,9 @@ impl QuestionSet {
                     reason,
                 })
             };
+            if question.id.trim().is_empty() {
+                return refuse(QuestionRefusalReason::EmptyIdentifier);
+            }
             if question.instructions.trim().is_empty() {
                 return refuse(QuestionRefusalReason::EmptyInstructions);
             }
@@ -206,16 +219,29 @@ impl QuestionSet {
             match &question.body {
                 QuestionBody::Boolean => {}
                 QuestionBody::Choice(criteria) => {
+                    if criteria.is_empty() {
+                        return refuse(QuestionRefusalReason::EmptyOptions);
+                    }
+                    if criteria.iter().any(|(label, _)| label.trim().is_empty()) {
+                        return refuse(QuestionRefusalReason::EmptyIdentifier);
+                    }
                     if criteria.len() > limits.max_choice_options {
                         return refuse(QuestionRefusalReason::TooManyOptions);
                     }
-                    // A degenerate one-label choice is not refused here. The
-                    // union has no `too_few_options` reason, and labelling it
-                    // `too_many_options` would put a false cause on the
-                    // receipt. The checker already refuses a choice with no
-                    // labels at all, which is the case that types no answer.
+                    // One label remains a legitimate bounded vocabulary.
                 }
                 QuestionBody::Score(levels) => {
+                    if levels.iter().any(|label| label.trim().is_empty()) {
+                        return refuse(QuestionRefusalReason::EmptyIdentifier);
+                    }
+                    if levels
+                        .iter()
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        != levels.len()
+                    {
+                        return refuse(QuestionRefusalReason::DuplicateLabels);
+                    }
                     if levels.len() < limits.score_levels_min {
                         return refuse(QuestionRefusalReason::TooFewLevels);
                     }

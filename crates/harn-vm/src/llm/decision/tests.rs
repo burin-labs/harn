@@ -198,6 +198,41 @@ fn empty_instructions_are_refused_before_dispatch() {
     );
 }
 
+#[test]
+fn runtime_vocabularies_refuse_unbound_and_duplicate_labels() {
+    let route = contract(32_000, None);
+    for (questions, reason) in [
+        (set(vec![]), QuestionRefusalReason::EmptyQuestions),
+        (
+            set(vec![choice("tool", &[])]),
+            QuestionRefusalReason::EmptyOptions,
+        ),
+        (
+            set(vec![boolean("")]),
+            QuestionRefusalReason::EmptyIdentifier,
+        ),
+        (
+            set(vec![choice("tool", &[" "])]),
+            QuestionRefusalReason::EmptyIdentifier,
+        ),
+        (
+            set(vec![score("risk", &["low", "low"])]),
+            QuestionRefusalReason::DuplicateLabels,
+        ),
+    ] {
+        assert_eq!(
+            questions
+                .admit(&route)
+                .expect_err("invalid runtime vocabulary")
+                .reason,
+            reason
+        );
+    }
+    set(vec![choice("tool", &["one"])])
+        .admit(&route)
+        .expect("one label is a valid vocabulary");
+}
+
 // --- Answer projection ------------------------------------------------------
 
 #[test]
@@ -667,6 +702,19 @@ fn an_invalid_question_refuses_before_dispatch() {
     );
     assert_eq!(kind, "question_invalid");
     assert_eq!(requests, 0, "a local refusal dispatches nothing");
+    assert_eq!(receipt.physical_attempts, 0);
+}
+
+#[test]
+fn an_empty_runtime_question_set_refuses_with_a_receipt_and_zero_requests() {
+    let (kind, receipt, requests) = run(
+        VmValue::dict(vec![("text", VmValue::String("short".into()))]),
+        VmValue::dict(Vec::<(&str, VmValue)>::new()),
+        policy_value(0.5, 1.0),
+        vec![Ok(answering(0.95))],
+    );
+    assert_eq!(kind, "question_invalid");
+    assert_eq!(requests, 0);
     assert_eq!(receipt.physical_attempts, 0);
 }
 

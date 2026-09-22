@@ -149,6 +149,29 @@ untyped map does not bypass site checking. Dynamically computed property calls
 do not declare admitted sites. Runtime admission owns the route's declared
 limits and question kinds; checking establishes neither.
 
+## Runtime vocabulary and routes
+
+`harness.llm.evaluate_request(id, state, questions, policy)` accepts a typed
+question map and policy computed at runtime, for registries such as tools and
+skills. The site id remains literal and unique, and the state, questions and
+policy require closed serializable types. Its answers use the generic
+`EvaluationAnswer` union: match the outcome and answer kinds before reading
+their values. Runtime vocabulary does not produce a compile-time union of
+choice labels.
+
+The source manifest marks these sites `runtime_admission: true`; their empty
+question census and null question digest mean not yet bound, not no questions.
+The execution receipt binds the actual question set, input, policy and route.
+The same evaluator validates catalog support, authority, limits and budgets
+before sending at most one request. Static `evaluate` retains its literal
+question and route admission and its precisely typed answer labels.
+
+Structured decision eligibility is resolved from the route's text-generation
+operation and native structured-schema capability. It is projected into the
+catalog and used by both static admission and execution. Explicit unsupported
+schema capabilities prevent this derivation; native decision protocols retain
+their separately declared limits and operation requirements.
+
 ## Outcome
 
 `EvaluationOutcome` and `PredicateOutcome` are closed tagged unions over the

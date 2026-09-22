@@ -762,6 +762,9 @@ impl TypeChecker {
         if sig.name == harn_builtin_meta::predicate::EVALUATE.name {
             self.check_evaluation_call(args, scope, span);
         }
+        if sig.name == harn_builtin_meta::predicate::EVALUATE_REQUEST.name {
+            self.check_evaluation_request_call(args, scope, span);
+        }
         if !has_spread {
             if let Some(projection) = sig.projection {
                 self.check_record_projection(name, projection, args, scope);

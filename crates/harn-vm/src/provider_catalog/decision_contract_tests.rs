@@ -14,9 +14,29 @@ fn decision_rows() -> Vec<(String, String)> {
     llm_config::embedded_config(None)
         .models
         .iter()
-        .filter(|(_, entry)| entry.supports_operation(ModelOperation::Decision))
+        .filter(|(id, entry)| {
+            entry.supports_operation(ModelOperation::Decision)
+                || decision_contract_for_route(&entry.provider, id).is_some()
+        })
         .map(|(id, entry)| (id.clone(), entry.provider.clone()))
         .collect()
+}
+
+#[test]
+fn native_schema_gateway_derives_decision_but_explicit_unsupported_does_not() {
+    let id = "vercel/openai/gpt-5.4-nano";
+    let entry = llm_config::model_catalog_entry(id).expect("gateway route exists");
+    let mut caps = capabilities::lookup(&entry.provider, id);
+    let contract = decision_contract::resolved_decision_contract(id, &entry, &caps)
+        .expect("native schema supports structured decisions");
+    assert_eq!(contract.protocol, DecisionProtocol::StructuredLlm);
+    assert!(decision_contract::resolved_operations(id, &entry, &caps)
+        .contains(&ModelOperation::Decision));
+    caps.structured_output = Some("none".into());
+    caps.json_schema = Some("native".into());
+    assert!(decision_contract::resolved_decision_contract(id, &entry, &caps).is_none());
+    assert!(!decision_contract::resolved_operations(id, &entry, &caps)
+        .contains(&ModelOperation::Decision));
 }
 
 #[test]
