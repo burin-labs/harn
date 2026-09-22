@@ -1073,6 +1073,12 @@ async fn apply_compaction_strategy_with_fallback(
     match apply_compaction_strategy(input).await {
         Ok((summary, metrics)) => Ok((summary, input.strategy.clone(), metrics)),
         Err(primary_error) => {
+            if primary_error.is_uncatchable_control_flow()
+                || crate::value::error_to_category(&primary_error)
+                    == crate::value::ErrorCategory::Cancelled
+            {
+                return Err(primary_error);
+            }
             let Some(fallback) = fallback_strategy.filter(|fallback| *fallback != input.strategy)
             else {
                 return Err(primary_error);
