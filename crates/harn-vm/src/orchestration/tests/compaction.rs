@@ -59,7 +59,9 @@ async fn compaction_fallback_does_not_override_cancellation() {
             "primary strategy reached"
         );
         if category == "cancelled" || !allow_fallback {
-            let error = result.expect_err("uncaught failure must propagate");
+            let Err(error) = result else {
+                panic!("uncaught failure must propagate");
+            };
             assert_eq!(
                 crate::value::error_to_category(&error),
                 crate::value::ErrorCategory::parse(category)
