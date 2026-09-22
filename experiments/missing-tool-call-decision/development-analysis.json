@@ -1,0 +1,177 @@
+{
+  "design": "Fixed curated 12-row corpus, five repeated trials. Descriptive fidelity only; bootstrap clusters rows, not repeats. Primary assistant/tool execution replayed, classifier paid.",
+  "completed": 180,
+  "arms": {
+    "legacy_structured": {
+      "rows": 60,
+      "correct_recovery_and_tool": 55,
+      "false_recovery": 0,
+      "missed_recovery": 5,
+      "ambiguous": 5,
+      "failures": 0,
+      "completed_runs": 60,
+      "classifier_latency_ms": {
+        "median": 1245,
+        "max": 1858
+      },
+      "run_latency_ms_median": 1479,
+      "cost_usd": 0.009997250000000001,
+      "cache": {
+        "reported_rows": 60,
+        "unavailable_rows": 0,
+        "positive_rows": 0
+      },
+      "by_language": {
+        "en": {
+          "rows": 20,
+          "correct": 15
+        },
+        "es": {
+          "rows": 20,
+          "correct": 20
+        },
+        "fr": {
+          "rows": 20,
+          "correct": 20
+        }
+      }
+    },
+    "native_decision": {
+      "rows": 60,
+      "correct_recovery_and_tool": 60,
+      "false_recovery": 0,
+      "missed_recovery": 0,
+      "ambiguous": 10,
+      "failures": 0,
+      "completed_runs": 60,
+      "classifier_latency_ms": {
+        "median": 203,
+        "max": 993
+      },
+      "run_latency_ms_median": 470,
+      "cost_usd": 0.0016968000000000011,
+      "cache": {
+        "reported_rows": 0,
+        "unavailable_rows": 60,
+        "positive_rows": 0
+      },
+      "by_language": {
+        "en": {
+          "rows": 20,
+          "correct": 20
+        },
+        "es": {
+          "rows": 20,
+          "correct": 20
+        },
+        "fr": {
+          "rows": 20,
+          "correct": 20
+        }
+      }
+    },
+    "structured_decision": {
+      "rows": 60,
+      "correct_recovery_and_tool": 57,
+      "false_recovery": 3,
+      "missed_recovery": 0,
+      "ambiguous": 17,
+      "failures": 0,
+      "completed_runs": 60,
+      "classifier_latency_ms": {
+        "median": 1318,
+        "max": 1915
+      },
+      "run_latency_ms_median": 1578,
+      "cost_usd": 0.014180999999999994,
+      "cache": {
+        "reported_rows": 60,
+        "unavailable_rows": 0,
+        "positive_rows": 0
+      },
+      "by_language": {
+        "en": {
+          "rows": 20,
+          "correct": 20
+        },
+        "es": {
+          "rows": 20,
+          "correct": 17
+        },
+        "fr": {
+          "rows": 20,
+          "correct": 20
+        }
+      }
+    }
+  },
+  "paired": {
+    "native_decision_minus_legacy": {
+      "accuracy": {
+        "difference": 0.08333333333333333,
+        "paired_row_bootstrap_95": [
+          0,
+          0.25
+        ],
+        "independent_row_clusters": 12
+      },
+      "latency_ms": {
+        "difference": -1021.9000000000002,
+        "paired_row_bootstrap_95": [
+          -1073.7166666666667,
+          -970.1500000000001
+        ],
+        "independent_row_clusters": 12
+      },
+      "cost_usd": {
+        "difference": -0.00013834083333333334,
+        "paired_row_bootstrap_95": [
+          -0.00014248783333333333,
+          -0.00013450533333333333
+        ],
+        "independent_row_clusters": 12
+      }
+    },
+    "structured_decision_minus_legacy": {
+      "accuracy": {
+        "difference": 0.03333333333333333,
+        "paired_row_bootstrap_95": [
+          -0.15,
+          0.25
+        ],
+        "independent_row_clusters": 12
+      },
+      "latency_ms": {
+        "difference": 94.06666666666665,
+        "paired_row_bootstrap_95": [
+          32.59999999999999,
+          151.41666666666663
+        ],
+        "independent_row_clusters": 12
+      },
+      "cost_usd": {
+        "difference": 0.00006972916666666668,
+        "paired_row_bootstrap_95": [
+          0.00006100000000000001,
+          0.00007860416666666667
+        ],
+        "independent_row_clusters": 12
+      }
+    }
+  },
+  "backend_agreement": {
+    "paired_rows": 60,
+    "same_action": 47,
+    "same_recovery": 57,
+    "matching_tool_when_both_recover": 60
+  },
+  "served_models": {
+    "legacy_structured": [],
+    "native_decision": [
+      "typesafe/jev-1.13-20260917"
+    ],
+    "structured_decision": [
+      "gpt-5.4-nano-2026-03-17"
+    ]
+  }
+}
