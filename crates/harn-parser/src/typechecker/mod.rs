@@ -14,6 +14,7 @@ mod format;
 mod inference;
 pub mod method_registry;
 mod predicate;
+mod predicate_questions;
 mod schema_inference;
 mod scope;
 mod union;
@@ -22,7 +23,9 @@ pub use exits::{block_definitely_exits, stmt_definitely_exits};
 pub use format::{format_type, shape_mismatch_detail};
 pub use predicate::{
     canonical_type as canonical_predicate_type, PredicateModelRoute, PredicateSite,
+    PredicateSiteKind,
 };
+pub use predicate_questions::{PredicateQuestionKind, PredicateQuestionSpec};
 
 /// Substitute generic bindings with the same open-row folding used by type
 /// inference. Schema compilation calls this instead of carrying a second type

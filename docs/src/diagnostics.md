@@ -35,7 +35,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 | Category | Title | Codes |
 |---|---|---:|
-| [`TYP`](#typ--type-checker) | Type checker | 35 |
+| [`TYP`](#typ--type-checker) | Type checker | 36 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
@@ -98,6 +98,7 @@ Harn's static type checker rejects programs whose types do not unify. Type error
 | [`HARN-TYP-033`](#harn-typ-033) | probabilistic predicate site identity must be literal and unique | — | — |
 | [`HARN-TYP-034`](#harn-typ-034) | probabilistic predicate variant fields require outcome narrowing | — | — |
 | [`HARN-TYP-035`](#harn-typ-035) | probabilistic predicate model must declare the decision operation | — | — |
+| [`HARN-TYP-036`](#harn-typ-036) | probabilistic evaluation question set must be a literal with unique ids and labels | — | — |
 
 ## PAR — Parser / lexer
 
@@ -919,6 +920,43 @@ evidence that the route supports it.
 This check makes no provider request and establishes neither credential
 availability nor model quality. Runtime admission still owns provider options,
 authority, resource reservations, and the evaluation outcome.
+
+### `HARN-TYP-036`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+probabilistic evaluation question set must be a literal with unique ids and labels
+
+`harness.llm.evaluate` reads its question set at check time. Two obligations
+depend on it. The site manifest records which questions a site asks, so tooling
+can identify hidden model work through a helper. The checker types each answer
+from its own question, so a choice answer's `choice` is the literal union of
+that question's criteria keys and a `match` on it is exhaustive.
+
+Declare the questions as a dict literal at the call, with each value built by
+`boolean`, `choice`, or `score` from `std/predicate` and each label list
+written out:
+
+```harn,ignore
+const answers = harness.llm.evaluate("triage.v1", window, {
+  disposition: choice("Keep, reword, or drop?", {
+    keep: "Still load-bearing",
+    drop: "Superseded",
+  }),
+  risk: score("How much blast radius?", ["none", "low", "high"]),
+  safe: boolean("Safe to run without asking?"),
+}, policy)
+```
+
+Question ids must be unique within a site and each question's labels unique
+within that question, because answers are keyed by id and probabilities by
+label. A question built elsewhere, assembled in a loop, or passed in as a
+parameter cannot be read here; move the literal to the call and pass the parts
+that vary as state instead.
+
+This check makes no provider request. It establishes neither that a question is
+suitable for machine judgment nor that the route supports the question kinds it
+declares; runtime admission owns the route's declared limits and kinds.
 
 ### `HARN-PAR-001`
 

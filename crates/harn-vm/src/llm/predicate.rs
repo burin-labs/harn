@@ -5,28 +5,46 @@ use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
-const PREDICATE_BUILTINS: &[&VmBuiltinDef] = &[&EVALUATE_PREDICATE_BUILTIN_DEF];
+const PREDICATE_BUILTINS: &[&VmBuiltinDef] =
+    &[&EVALUATE_PREDICATE_BUILTIN_DEF, &EVALUATE_BUILTIN_DEF];
 
 pub(super) fn register(vm: &mut Vm) {
     register_builtin_defs(vm, PREDICATE_BUILTINS);
 }
 
-/// Predicate execution requires the dedicated budgeted evaluator.
+/// The single-boolean projection of `harness.llm.evaluate`: one boolean
+/// question, named by the site, through the same budgeted evaluator.
 #[harn_builtin(
     exposure = "harness.llm.evaluate_predicate",
+    effects = ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    sig_expr = harn_builtin_meta::predicate::EVALUATE_PREDICATE,
+    kind = "async",
+    category = "llm.predicate"
+)]
+async fn evaluate_predicate_builtin(
+    ctx: AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let batched = super::decision::predicate_arguments(&args)?;
+    let (outcome, answers, policy) = super::decision::evaluate(&ctx, &batched).await?;
+    Ok(
+        super::decision::outcome::project_to_predicate(outcome, &answers, policy.threshold)
+            .into_value(),
+    )
+}
+
+/// The batched entry point. The single-boolean one above is its projection,
+/// so both run the same evaluator and cannot refuse differently.
+#[harn_builtin(
+    exposure = "harness.llm.evaluate",
     effects = ["llm.write@arg3.provider", "llm.write@arg3.model"],
     sig_expr = harn_builtin_meta::predicate::EVALUATE,
     kind = "async",
     category = "llm.predicate"
 )]
-async fn evaluate_predicate_builtin(
-    _ctx: AsyncBuiltinCtx,
-    _args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    Err(VmError::Runtime(
-        "predicate execution is unavailable: this runtime has no budgeted predicate evaluator"
-            .into(),
-    ))
+async fn evaluate_builtin(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let (outcome, _, _) = super::decision::evaluate(&ctx, &args).await?;
+    Ok(outcome.into_value())
 }
 
 #[cfg(test)]
@@ -39,8 +57,32 @@ mod tests {
             harn_stdlib::get_stdlib_source("predicate").expect("embedded predicate types");
         for (name, contract) in [
             ("PredicateVerdict", harn_builtin_meta::predicate::VERDICT),
-            ("PredicatePolicy", harn_builtin_meta::predicate::POLICY),
+            ("EvaluationPolicy", harn_builtin_meta::predicate::POLICY),
             ("PredicateOutcome", harn_builtin_meta::predicate::OUTCOME),
+            (
+                "BooleanQuestion",
+                harn_builtin_meta::predicate::BOOLEAN_QUESTION,
+            ),
+            (
+                "ChoiceQuestion",
+                harn_builtin_meta::predicate::CHOICE_QUESTION,
+            ),
+            (
+                "ScoreQuestion",
+                harn_builtin_meta::predicate::SCORE_QUESTION,
+            ),
+            ("EvaluationQuestion", harn_builtin_meta::predicate::QUESTION),
+            (
+                "BooleanAnswer",
+                harn_builtin_meta::predicate::BOOLEAN_ANSWER,
+            ),
+            ("ChoiceAnswer", harn_builtin_meta::predicate::CHOICE_ANSWER),
+            ("ScoreAnswer", harn_builtin_meta::predicate::SCORE_ANSWER),
+            ("EvaluationAnswer", harn_builtin_meta::predicate::ANSWER),
+            (
+                "EvaluationOutcome",
+                harn_builtin_meta::predicate::EVALUATION_OUTCOME,
+            ),
         ] {
             let structural = harn_parser::format_type(&contract.to_type_expr());
             let source = format!("{declarations}\nfn to_contract(value: {name}) -> {structural} {{ return value }}\nfn from_contract(value: {structural}) -> {name} {{ return value }}");

@@ -13,16 +13,12 @@
 use std::{collections::BTreeMap, ops::ControlFlow};
 
 use crate::ast::*;
-use crate::builtin_signatures;
-use crate::builtin_signatures::{BuiltinSignatureExt, TyExt};
+use crate::builtin_signatures::BuiltinSignatureExt;
 use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
 use super::super::binary_ops::{infer_binary_op_type, merge_shape_fields};
 use super::super::format::format_type;
-use super::super::schema_inference::{
-    output_schema_type_expr_from_node, output_validation_is_required,
-};
 use super::super::scope::{builtin_return_type, InferredType, PathNarrowing, TypeScope};
 use super::super::union::{
     intersect_types, narrow_to_single, reference_path_key, reference_path_key_for_subscript,
@@ -277,60 +273,6 @@ impl TypeChecker {
         inferred
             .map(|item_type| TypeExpr::List(Box::new(item_type)))
             .unwrap_or_else(|| TypeExpr::Named("list".into()))
-    }
-
-    fn infer_llm_call_result_type(
-        &self,
-        name: &str,
-        args: &[SNode],
-        scope: &TypeScope,
-    ) -> InferredType {
-        let data = self.llm_call_schema_data_type(args, scope)?;
-        Some(Self::narrow_schema_data_field(
-            builtin_return_type(name)?,
-            data,
-        ))
-    }
-
-    /// Replace the envelope's `data` field with the type an `output` schema
-    /// promises. Both the ambient `llm_call` form and the `harness.llm.*`
-    /// capability method resolve through here so they cannot disagree.
-    fn narrow_schema_data_field(
-        mut result: TypeExpr,
-        (data_type, data_required): (TypeExpr, bool),
-    ) -> TypeExpr {
-        let TypeExpr::Shape(fields) = &mut result else {
-            return result;
-        };
-        if let Some(field) = fields.iter_mut().find(|field| field.name == "data") {
-            field.type_expr = data_type;
-            field.optional = !data_required;
-        }
-        result
-    }
-
-    fn llm_call_schema_data_type(
-        &self,
-        args: &[SNode],
-        scope: &TypeScope,
-    ) -> Option<(TypeExpr, bool)> {
-        let opts = args.get(2)?;
-        let Node::DictLiteral(entries) = &opts.node else {
-            return None;
-        };
-        let mut data_type = None;
-        let mut data_required = false;
-        for entry in entries {
-            let key = match &entry.key.node {
-                Node::StringLiteral(key) | Node::Identifier(key) => key.as_str(),
-                _ => continue,
-            };
-            if key == "output" {
-                data_type = output_schema_type_expr_from_node(&entry.value, scope);
-                data_required = output_validation_is_required(&entry.value);
-            }
-        }
-        data_type.map(|ty| (ty, data_required))
     }
 
     /// Infer the type of an expression.
@@ -1738,33 +1680,6 @@ impl TypeChecker {
             TypeExpr::List(inner) | TypeExpr::Iter(inner) => *inner,
             TypeExpr::Tuple(elements) => Self::tuple_element_type(&elements),
             other => other,
-        }
-    }
-
-    fn harness_method_return_type(
-        &self,
-        receiver: &TypeExpr,
-        method: &str,
-        args: &[SNode],
-        scope: &TypeScope,
-    ) -> InferredType {
-        let receiver = self.resolve_alias(receiver, scope);
-        match receiver {
-            TypeExpr::Named(name) => {
-                let capability = harn_builtin_meta::CapabilityId::from_type_name(name.as_str())?;
-                let declared = builtin_signatures::lookup_capability_method(capability, method)
-                    .and_then(|sig| (!sig.returns.is_any()).then(|| sig.returns.to_type_expr()))?;
-                if capability != harn_builtin_meta::CapabilityId::Llm
-                    || !matches!(method, "call" | "completion")
-                {
-                    return Some(declared);
-                }
-                let Some(data) = self.llm_call_schema_data_type(args, scope) else {
-                    return Some(declared);
-                };
-                Some(Self::narrow_schema_data_field(declared, data))
-            }
-            _ => None,
         }
     }
 

@@ -191,7 +191,7 @@ same limits.
 ### Model execution
 
 The initial implementation uses the existing structured LLM transport. A
-`PredicatePolicy` fixes the provider route, resolved model ID, threshold,
+`EvaluationPolicy` fixes the provider route, resolved model ID, threshold,
 resource bounds, deadline and admitted budget handle. Its backend configuration
 is a closed variant: `structured_llm` or, when implemented, `native_decision`.
 There is no ambient actor-model fallback. The `structured_llm` variant requires

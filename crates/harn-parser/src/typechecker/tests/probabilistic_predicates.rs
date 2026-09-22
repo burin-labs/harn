@@ -46,7 +46,8 @@ fn predicate_library_call_emits_typed_site_and_narrows_verdict() {
     assert_eq!(facts.predicate_sites.len(), 1);
     let site = &facts.predicate_sites[0];
     assert_eq!(site.id, "finding.v1");
-    assert_eq!(site.question, "Is this supported?");
+    assert_eq!(site.questions.len(), 1);
+    assert_eq!(site.questions[0].instructions, "Is this supported?");
     assert!(matches!(&site.input_type, crate::TypeExpr::Shape(fields) if fields.len() == 2));
     assert!(site.start < site.end && site.line > 1);
 }

@@ -1,0 +1,8 @@
+import {choice} from "std/predicate"
+
+fn invalid(llm: HarnessLlm, policy: EvaluationPolicy, criteria: dict<string, string>) {
+  const answers = llm.evaluate("test.questions", {value: 1}, {a: choice("Which?", criteria)}, policy)
+  match answers.kind {
+    _ -> { return answers.receipt }
+  }
+}

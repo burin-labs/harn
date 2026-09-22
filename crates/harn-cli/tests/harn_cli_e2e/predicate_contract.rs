@@ -6,7 +6,7 @@ const HELPER: &str = r#"
 import "std/predicate"
 
 pub fn assess(llm: HarnessLlm, input: {text: string}) -> PredicateOutcome {
-  const policy: PredicatePolicy = {
+  const policy: EvaluationPolicy = {
     backend: "structured_llm", provider: "mock", model: "fixture",
     effort: "low", temperature: 0.0, threshold: 0.8,
     evaluation_cost_limit: 0.0, run_cost_limit: 0.0,
@@ -23,7 +23,7 @@ fn main(harness: Harness) {
   const result = assess(harness.llm, {text: "observation"})
   match result.kind {
     "verdict" -> { if result.value.verdict { harness.stdio.println("accepted") } }
-    _ -> { harness.stdio.println(result.receipt) }
+    _ -> { harness.stdio.println("${result.kind} ${result.receipt}") }
   }
 }
 "#;
@@ -81,7 +81,7 @@ pub(super) fn predicate_helper_manifest_survives_warm_cache_and_tracks_changed_q
         .find(|file| file["path"].as_str().unwrap().ends_with("main.harn"))
         .unwrap();
     let manifest = &helper["predicate_manifest"];
-    assert_eq!(manifest["schema"], "harn.predicate_sites.v1");
+    assert_eq!(manifest["schema"], "harn.predicate_sites.v2");
     assert_eq!(manifest["sites"].as_array().unwrap().len(), 1);
     assert_eq!(manifest["sites"][0]["id"], "finding.v1");
     assert!(manifest["sites"][0]["source"]
@@ -89,7 +89,7 @@ pub(super) fn predicate_helper_manifest_survives_warm_cache_and_tracks_changed_q
         .unwrap()
         .ends_with("helper.harn"));
     assert_eq!(
-        manifest["sites"][0]["question_sha256"],
+        manifest["sites"][0]["questions"][0]["instructions_sha256"],
         harn_kernel::pure::sha256_hex(b"Is this supported?")
     );
     let (passed, warm) = check(root.path(), cache.path());
@@ -145,8 +145,8 @@ pub(super) fn predicate_helper_manifest_survives_warm_cache_and_tracks_changed_q
         .find(|file| file["path"].as_str().unwrap().ends_with("main.harn"))
         .unwrap();
     assert_ne!(
-        manifest["sites"][0]["question_sha256"],
-        changed_helper["predicate_manifest"]["sites"][0]["question_sha256"]
+        manifest["sites"][0]["questions"][0]["instructions_sha256"],
+        changed_helper["predicate_manifest"]["sites"][0]["questions"][0]["instructions_sha256"]
     );
     assert_eq!(
         changed_helper["predicate_manifest"]["sites"][0]["id"],
@@ -294,12 +294,26 @@ pub(super) fn predicate_operation_admission_invalidates_cached_success() {
         .env("HARN_LLM_CALLS_DISABLED", "1")
         .output()
         .expect("execute the admitted predicate source");
-    assert!(!execution.status.success());
+    // The unavailable-runtime contract is still here; it stopped being fatal.
+    // A predicate with no budgeted evaluator used to abort the run with a
+    // `VmError`, which a program could not branch on. It now closes with the
+    // typed `unavailable` outcome and its receipt, so the run completes and
+    // the caller decides what to do. Asserting the old error text would pin
+    // exactly the behaviour this change exists to replace.
+    let stdout = String::from_utf8_lossy(&execution.stdout);
     assert!(
+        execution.status.success(),
+        "an unavailable evaluator must close the predicate, not fail the run: {:?} {}",
+        execution.status.code(),
         String::from_utf8_lossy(&execution.stderr)
-            .contains("this runtime has no budgeted predicate evaluator"),
-        "{}",
-        String::from_utf8_lossy(&execution.stderr)
+    );
+    assert!(
+        stdout.starts_with("unavailable blake3:"),
+        "expected the typed unavailable outcome and its receipt, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("accepted"),
+        "no evaluator ran, so no verdict may be reported: {stdout}"
     );
 }
 
