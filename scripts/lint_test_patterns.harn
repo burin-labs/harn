@@ -186,7 +186,7 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // agree on the status the caller scripts against.
   "crates/harn-cli/tests/harn_cli_e2e/eval_calibrate_cli.rs",
   // Saved-receipt verification checks the actual CLI's exit codes and a
-    // credential-free process against a receipt emitted by canonical evaluation.
+  // credential-free process against a receipt emitted by canonical evaluation.
   "crates/harn-cli/tests/harn_cli_e2e/evaluation_receipt_verification.rs",
   // The decision-route operation gate fires inside `harn run`, before credential
   // resolution, against a script file on disk. Only a real process in a scratch
