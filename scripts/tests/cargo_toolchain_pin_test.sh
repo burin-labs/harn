@@ -20,6 +20,15 @@ cat > "$fake_bin/cargo" <<'SH'
 echo "fake cargo ran"
 SH
 chmod +x "$fake_bin/cargo"
+cat > "$fake_bin/rustup" <<'SH'
+#!/usr/bin/env bash
+if [[ -n "${FAKE_PINNED_RUSTC:-}" ]]; then
+  printf '%s\n' "$FAKE_PINNED_RUSTC"
+else
+  exit 1
+fi
+SH
+chmod +x "$fake_bin/rustup"
 
 write_fake_rustc() {
   cat > "$fake_bin/rustc" <<SH
@@ -72,6 +81,27 @@ hatch_status=$?
 set -e
 if [[ "$hatch_status" -ne 0 ]] || ! grep -q "fake cargo ran" <<<"$hatch_output"; then
   echo "FAIL: the documented escape hatch did not reach Cargo" >&2
+  exit 1
+fi
+
+# The installed pinned toolchain wins over a Homebrew-style PATH entry, and
+# Cargo and rustc must come from the same selected toolchain directory.
+pinned_bin="$tmp_root/pinned/bin"
+mkdir -p "$pinned_bin"
+write_fake_rustc "$pinned"
+cp "$fake_bin/rustc" "$pinned_bin/rustc"
+cat > "$pinned_bin/cargo" <<'SH'
+#!/usr/bin/env bash
+printf 'pinned cargo: %s\n' "$(rustc --version)"
+SH
+chmod +x "$pinned_bin/cargo"
+write_fake_rustc "9.99.0"
+selected=$(FAKE_PINNED_RUSTC="$pinned_bin/rustc" run_wrapper)
+[[ "$selected" = "pinned cargo: rustc $pinned (deadbeef 2026-01-01)" ]] \
+  || { echo "FAIL: installed pin did not select matching Cargo and rustc: $selected" >&2; exit 1; }
+if RUSTC="$fake_bin/rustc" FAKE_PINNED_RUSTC="$pinned_bin/rustc" run_wrapper \
+  > "$tmp_root/explicit.out" 2>&1; then
+  echo "FAIL: automatic toolchain selection hid an explicit mismatched RUSTC" >&2
   exit 1
 fi
 
