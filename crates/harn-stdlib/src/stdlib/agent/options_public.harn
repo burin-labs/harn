@@ -14,6 +14,41 @@ import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
+// Native post-turn decisions share the chat admission ledger. Install their
+// finite ceiling before the first chat call; late activation cannot account
+// conservatively for earlier unreserved calls.
+fn __with_missing_call_admission(opts: dict) {
+  const recovery = opts?.missing_tool_call_recovery
+  if type_of(recovery) != "dict" || !(recovery?.enabled ?? true)
+    || recovery?.classifier != nil
+    || recovery?.decision_policy?.backend != "native_decision" {
+    return opts
+  }
+  const policy = recovery.decision_policy
+  const raw = opts?.budget
+  let budget = if type_of(raw) == "dict" {
+    raw
+  } else if raw != nil {
+    {max_cost_usd: raw}
+  } else {
+    {}
+  }
+  const declared = policy?.run_cost_limit
+  const inherited = budget?.total_budget_usd
+  const ceiling = if declared == nil {
+    inherited
+  } else if inherited == nil {
+    declared
+  } else {
+    min(declared, inherited)
+  }
+  if ceiling == nil || is_nan(ceiling) || is_infinite(ceiling) || ceiling < 0.0 {
+    throw "agent_loop: native missing-tool-call recovery requires a finite run_cost_limit or budget.total_budget_usd before the first turn"
+  }
+  budget = budget + {admission: "conservative", total_budget_usd: ceiling}
+  return opts + {budget: budget}
+}
+
 pub fn agent_merge_llm_options(base: dict? = nil, overrides: dict? = nil) {
   let merged = (base ?? {}) + (overrides ?? {})
   if __explicit_tool_format(overrides ?? {}) != nil {
@@ -239,6 +274,7 @@ pub fn agent_loop_options(harness: Harness, options: any = nil) {
   const profile = opts?.profile ?? "tool_using"
   const defaults = __profile_defaults(profile)
   opts = defaults + opts
+  opts = __with_missing_call_admission(opts)
   opts = agent_apply_default_retry(harness, opts)
   const llm_caller = opts?.llm_caller
   const llm_caller_transport = __normalize_llm_caller_transport(opts?.llm_caller_transport)
