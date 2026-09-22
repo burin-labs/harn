@@ -14,7 +14,7 @@ define HARN_REQUIRE_NEXTEST
 		echo "cargo-nextest is required; run 'make setup' or 'cargo install cargo-nextest --locked'" >&2; \
 		exit 1; \
 	fi
-	@$(HARN_CARGO_CMD) nextest --version >/dev/null
+	@cargo-nextest nextest --version >/dev/null
 endef
 # Rust tests start from a known security-policy environment. Focused tests may
 # still seed these variables explicitly after process startup. Harn script
@@ -742,6 +742,7 @@ test-pr-gate-scripts:
 	./scripts/tests/check_stdlib_strict_types_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh
+	./scripts/tests/test_nextest_readiness_test.sh
 
 # Rust/Harn-backed shell integration tests run only after CI restores the Rust
 # toolchain/caches and exports the one warmed binary. Pure Harn semantics remain
