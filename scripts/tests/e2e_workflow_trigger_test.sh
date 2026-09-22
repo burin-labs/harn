@@ -26,8 +26,12 @@ require_text() {
 # head. With only `labeled` and `synchronize` it would wait for a later push
 # that may never come.
 require_line '    types: [opened, reopened, labeled, synchronize]'
-require_line "  group: \${{ github.workflow }}-\${{ github.event.pull_request.number || github.ref }}"
-require_line "  cancel-in-progress: \${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}"
+
+# The concurrency group and cancel policy are NOT restated here. They belong to
+# the per-commit concurrency contract in scripts/ci_cache_policy, which owns the
+# same rule for the main CI workflow and reads this workflow to enforce it. A
+# second literal copy here is how a correct change to the group reads as a
+# policy violation: the two owners disagree and the one that restates loses.
 
 # The label remains the opt-in for every change outside the watched paths.
 require_text "contains(github.event.pull_request.labels.*.name, 'e2e')" \
