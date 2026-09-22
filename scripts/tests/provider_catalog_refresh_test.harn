@@ -80,6 +80,7 @@ const SAMPLE_CATALOG = {
 @test
 pipeline test_price_conversion_noise_preserves_real_drift(harness: Harness, task: unknown) {
   const model = SAMPLE_CATALOG.models[0]
+  require model != nil, "the price-noise control measures a real catalog row"
   const catalog = {models: [model + {pricing: {cache_write_per_mtok: 0.083}}]}
   const same = provider_obs(model.id, {cache_write_per_mtok: 0.08300000000000002}, 200000)
   assert_eq(len(build_drift([same], catalog).changed), 0)
