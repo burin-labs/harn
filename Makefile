@@ -2,7 +2,7 @@
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache gh-check-state
 .PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
 .PHONY: check-typescript-protocol-binding check-swift-protocol-binding
-.PHONY: check-scheduled-workflows
+.PHONY: check-scheduled-workflows check-e2e-trigger-contract
 .PHONY: sync-docs-diagnostics
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
 
@@ -669,7 +669,6 @@ test-pr-gate-scripts:
 	./scripts/tests/native_platform_ci_plan_test.sh
 	./scripts/tests/release_ref_matcher_test.sh
 	./scripts/tests/ci_merge_group_proof_test.sh
-	./scripts/tests/e2e_workflow_trigger_test.sh
 	./scripts/tests/check_sdk_release_artifacts_test.sh
 	./scripts/tests/generate_sdk_clients_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
@@ -1395,6 +1394,7 @@ verify-tree-sitter-parse:
 # and the one below as the single owner of what `repository-policies` runs, so
 # the two sides cannot drift.
 SOURCE_REPOSITORY_POLICIES := \
+  check-e2e-trigger-contract \
   lint-agent-path-normalization \
   check-stdlib-host-neutral \
   check-public-product-names \
@@ -1434,6 +1434,15 @@ WARM_REPOSITORY_POLICIES := \
 # need nothing but the tree. Before this existed, a stdlib type error could
 # only be reported by the push-only lane, which meant main went red and every
 # branch downstream inherited a failure it did not cause.
+# The slow E2E suite decides for itself whether a pull request runs it. Both
+# halves of that decision are checked here, from the tree alone: the workflow
+# contract, and the reporter that has to say what it decided. This lived only
+# in `test-pr-gate-scripts`, which no CI job calls, so the guard on a
+# suite-that-does-not-run did not run either.
+check-e2e-trigger-contract:
+	./scripts/tests/e2e_workflow_trigger_test.sh
+	./scripts/tests/e2e_pull_request_reason_test.sh
+
 repository-policies-source:
 	@$(MAKE) --no-print-directory run-policy-list POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES)"
 
