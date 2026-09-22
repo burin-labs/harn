@@ -300,8 +300,8 @@ pub const POLICY: Ty = Ty::Shape(&[
     Field::optional("effort", STRING),
     Field::optional("temperature", FLOAT),
     Field::new("threshold", FLOAT),
-    Field::new("evaluation_cost_limit", FLOAT),
-    Field::new("run_cost_limit", FLOAT),
+    Field::optional("evaluation_cost_limit", FLOAT),
+    Field::optional("run_cost_limit", FLOAT),
 ]);
 
 pub const EVALUATE: BuiltinSignature = BuiltinSignature::simple(

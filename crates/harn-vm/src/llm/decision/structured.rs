@@ -315,6 +315,7 @@ mod tests {
         let native = Answer::project(
             &questions.questions[1],
             &RawAnswer::Choice {
+                selected: None,
                 probabilities: BTreeMap::from([("left".into(), 0.1), ("right".into(), 0.9)]),
                 reported_confidence: None,
                 evidence: None,

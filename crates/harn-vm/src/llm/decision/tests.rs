@@ -263,6 +263,7 @@ fn a_model_reported_number_is_never_labelled_as_a_measured_distribution() {
     let answer = Answer::project(
         &choice("q", &["keep", "drop"]),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 0.9), ("drop", 0.1)]),
             reported_confidence: Some(0.9),
             evidence: Some("cited".into()),
@@ -276,6 +277,7 @@ fn a_model_reported_number_is_never_labelled_as_a_measured_distribution() {
     let measured = Answer::project(
         &choice("q", &["keep", "drop"]),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 0.9), ("drop", 0.1)]),
             reported_confidence: Some(0.9),
             evidence: None,
@@ -294,6 +296,7 @@ fn a_distribution_that_does_not_match_its_question_is_rejected() {
     let rejection = Answer::project(
         &choice("q", &["keep", "drop"]),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 0.6), ("delete", 0.4)]),
             reported_confidence: None,
             evidence: None,
@@ -319,6 +322,7 @@ fn a_distribution_that_does_not_match_its_question_is_rejected() {
     Answer::project(
         &boolean("q"),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 1.0)]),
             reported_confidence: None,
             evidence: None,
@@ -331,6 +335,7 @@ fn a_distribution_that_does_not_match_its_question_is_rejected() {
     Answer::project(
         &choice("q", &["keep", "drop"]),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 0.6), ("drop", 0.4)]),
             reported_confidence: None,
             evidence: None,
@@ -433,13 +438,32 @@ fn the_policy_digest_covers_the_threshold() {
         temperature: 0.0,
         native_options_supplied: false,
         threshold,
-        evaluation_cost_limit: 1.0,
-        run_cost_limit: 1.0,
+        evaluation_cost_limit: Some(1.0),
+        run_cost_limit: Some(1.0),
     };
     // The same answers under a different threshold are a different decision. A
     // cache keyed without it would reuse an acceptance the caller withdrew.
     assert_ne!(policy(0.8).digest(), policy(0.9).digest());
     assert_eq!(policy(0.8).digest(), policy(0.8).digest());
+}
+
+#[test]
+fn runtime_policy_uses_the_closed_registry_and_optional_caps_are_explicit_in_identity() {
+    let value = policy_value(0.5, 1.0);
+    let explicit = EvaluationPolicy::from_value(&value).unwrap();
+    let mut fields = value.as_dict().unwrap().clone();
+    fields.remove("evaluation_cost_limit");
+    fields.remove("run_cost_limit");
+    let inherited = EvaluationPolicy::from_value(&VmValue::dict(fields.clone())).unwrap();
+    assert_eq!(inherited.evaluation_cost_limit, None);
+    assert_eq!(inherited.run_cost_limit, None);
+    assert_ne!(explicit.digest(), inherited.digest());
+    fields.insert(
+        crate::value::intern_key("run_cost_limti"),
+        VmValue::Float(1.0),
+    );
+    let error = EvaluationPolicy::from_value(&VmValue::dict(fields)).unwrap_err();
+    assert!(error.contains("unknown field `run_cost_limti`"));
 }
 
 // --- Through the evaluator, with the request counter as the instrument ------
