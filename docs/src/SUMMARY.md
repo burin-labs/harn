@@ -323,6 +323,7 @@
 - [`std/cli/render`](./cli-render-reference.md)
 - [`std/cli/paths`](./cli-paths-reference.md)
 - [`std/eval/calibration`](./eval-calibration-reference.md)
+- [`std/eval/selective_risk`](./eval-selective-risk-reference.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
 - [SQLite](./sqlite.md)

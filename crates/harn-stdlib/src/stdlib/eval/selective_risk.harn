@@ -1,0 +1,226 @@
+import { calibration_report } from "./calibration.harn"
+
+/**
+ * Conditional error certification over a fixed threshold family.
+ *
+ * Learn then Test (https://arxiv.org/abs/2110.01052): simultaneous one-sided
+ * exact binomial bounds allow selecting a candidate after measuring it.
+ * Bonferroni covers every threshold and question/backend group in this call.
+ * Rows must be IID from the deployment distribution; the model and threshold
+ * grid must be fixed before observing calibration labels or confidence scores.
+ * Include every consequence tier as a distinct question_id in the same call.
+ * This does not replace evaluation on an independent final holdout.
+ */
+pub type SelectiveRiskOptions = {
+  thresholds: list<float>,
+  target_error?: float,
+  delta?: float,
+  model_revision?: string,
+  served_model_id?: string,
+}
+
+pub type SelectiveRiskCandidate = {
+  threshold: float,
+  rows: int,
+  accepted: int,
+  errors: int,
+  coverage: float,
+  error_upper_bound: float,
+  certified: bool,
+}
+
+pub type SelectiveRiskRecommendation = {
+  kind: "threshold",
+  threshold: float,
+  accepted: int,
+  errors: int,
+  error_upper_bound: float,
+  coverage: float,
+} \
+  | {kind: "no_threshold", reason: "no_accepted_rows" | "risk_not_certified"}
+
+pub type SelectiveRiskGroup = {
+  question_id: string,
+  backend: string,
+  rows: int,
+  candidates: list<SelectiveRiskCandidate>,
+  recommendation: SelectiveRiskRecommendation,
+}
+
+pub type SelectiveRiskReport = {
+  kind: "report",
+  contract: "harn.selective_risk.v1",
+  corpus_digest: string,
+  report_digest: string,
+  model_revision: string,
+  served_model_id: string,
+  rows: int,
+  target_error: float,
+  delta: float,
+  family_size: int,
+  groups: list<SelectiveRiskGroup>,
+} \
+  | {kind: "refused", contract: "harn.selective_risk.v1", reason: string, detail: string, rows: int}
+
+const CONTRACT = "harn.selective_risk.v1"
+
+fn __refuse(reason: string, detail: string, rows: int) -> SelectiveRiskReport {
+  return {kind: "refused", contract: CONTRACT, reason: reason, detail: detail, rows: rows}
+}
+
+/**
+ * P(Binomial(n, p) <= errors). Compute each mass in log space, so a tiny
+ * first term cannot underflow the entire recurrence near its central mass.
+ */
+fn __binomial_cdf(n: int, errors: int, p: float) -> float {
+  const log_failure = ln(1.0 - p)
+  let log_mass = to_float(n) * log_failure
+  let total = exp(log_mass)
+  let i = 1
+  while i <= errors {
+    log_mass = log_mass + ln(to_float(n - i + 1)) - ln(to_float(i)) + ln(p) - log_failure
+    total = total + exp(log_mass)
+    i = i + 1
+  }
+  return min(1.0, total)
+}
+
+/**
+ * One-sided Clopper-Pearson bound: invert the exact lower binomial tail.
+ * Return the upper bisection endpoint and a small conservative numeric guard;
+ * never round a bound down for presentation before the certification decision.
+ */
+fn __error_upper_bound(accepted: int, errors: int, delta: float) -> float {
+  if accepted == 0 || errors == accepted {
+    return 1.0
+  }
+  let lower = 0.0
+  let upper = 1.0
+  let iteration = 0
+  while iteration < 60 {
+    const middle = (lower + upper) / 2.0
+    if middle == lower || middle == upper {
+      break
+    }
+    if __binomial_cdf(accepted, errors, middle) <= delta {
+      upper = middle
+    } else {
+      lower = middle
+    }
+    iteration = iteration + 1
+  }
+  return min(1.0, upper + 0.000000000001)
+}
+
+/**
+ * Certify conditional accepted-answer error at a family-wise confidence level.
+ * Candidate grids are caller-declared, never learned from these rows. A second
+ * target_error over the same family reuses the same simultaneous bounds, so
+ * act/verify risk budgets need no additional multiplicity correction.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: selective_risk_report([], {thresholds: [0.5, 0.9]})
+ */
+pub fn selective_risk_report(rows: list, options: SelectiveRiskOptions) -> SelectiveRiskReport {
+  const delta = options.delta ?? 0.05
+  if is_nan(delta) || is_infinite(delta) || delta <= 0.0 || delta >= 1.0 {
+    return __refuse(
+      "invalid_options",
+      "delta must be finite and strictly between 0 and 1",
+      len(rows),
+    )
+  }
+  if len(options.thresholds) == 0 {
+    return __refuse(
+      "empty_family",
+      "declare at least one threshold before observing calibration data",
+      len(rows),
+    )
+  }
+  const report = calibration_report(
+    rows,
+    {
+      thresholds: options.thresholds,
+      target_error: options.target_error ?? 0.05,
+      model_revision: options.model_revision ?? "",
+      served_model_id: options.served_model_id ?? "",
+    },
+  )
+  if report.kind == "refused" {
+    return __refuse(report.reason, report.detail, report.rows)
+  }
+  const family_size = len(report.thresholds) * len(report.groups)
+  if family_size == 0 {
+    return __refuse("empty_family", "the report has no threshold/group hypotheses", len(rows))
+  }
+  const per_candidate_delta = delta / to_float(family_size)
+  let groups: list<SelectiveRiskGroup> = []
+  for group in report.groups {
+    let candidates: list<SelectiveRiskCandidate> = []
+    let recommendation: SelectiveRiskRecommendation = {
+      kind: "no_threshold",
+      reason: "no_accepted_rows",
+    }
+    let best_accepted = 0
+    for candidate in group.thresholds {
+      const bound = __error_upper_bound(
+        candidate.accepted,
+        candidate.false_accept,
+        per_candidate_delta,
+      )
+      const certified = candidate.accepted > 0 && bound <= report.target_error
+      candidates = candidates
+        + [
+          {
+            threshold: candidate.threshold,
+            rows: candidate.rows,
+            accepted: candidate.accepted,
+            errors: candidate.false_accept,
+            coverage: candidate.coverage,
+            error_upper_bound: bound,
+            certified: certified,
+          },
+        ]
+      if candidate.accepted > 0 && recommendation.kind == "no_threshold" {
+        recommendation = {kind: "no_threshold", reason: "risk_not_certified"}
+      }
+      // Thresholds are ascending. Keep the lower threshold on equal coverage.
+      if certified && candidate.accepted > best_accepted {
+        best_accepted = candidate.accepted
+        recommendation = {
+          kind: "threshold",
+          threshold: candidate.threshold,
+          accepted: candidate.accepted,
+          errors: candidate.false_accept,
+          error_upper_bound: bound,
+          coverage: candidate.coverage,
+        }
+      }
+    }
+    groups = groups
+      + [
+        {
+          question_id: group.question_id,
+          backend: group.backend,
+          rows: group.rows,
+          candidates: candidates,
+          recommendation: recommendation,
+        },
+      ]
+  }
+  const body = {
+    kind: "report",
+    contract: CONTRACT,
+    corpus_digest: report.corpus_digest,
+    report_digest: "",
+    model_revision: report.model_revision,
+    served_model_id: report.served_model_id,
+    rows: report.rows,
+    target_error: report.target_error,
+    delta: delta,
+    family_size: family_size,
+    groups: groups,
+  }
+  return body + {report_digest: sha256(json_stringify(body))}
+}

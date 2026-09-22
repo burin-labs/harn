@@ -295,7 +295,7 @@ pipeline test(harness: Harness, task: unknown) {
     }
     assert_eq(option_refused, true)
     const rejected = calibration_report(
-      [row(1, "true", "true", invalid), row(2, "true", "true", 0.9)],
+      [row(1, "true", "true", 0.9) + {confidence: invalid}, row(2, "true", "true", 0.9)],
     )
     assert_eq(rejected.reason, "invalid_confidence")
   }
