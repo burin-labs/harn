@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
 
 use super::host_agent_dispatch_tool_call;
-use super::side_effect_ceiling::{request_side_effect_permission, SideEffectPermissionOutcome};
+use super::side_effect_ceiling::{
+    request_side_effect_permission, SideEffectPermissionOutcome, SideEffectPermissionRequest,
+};
 use crate::agent_events::{DenialGate, SideEffectCeilingRemedy};
 use crate::bridge::HostBridge;
 use crate::orchestration::SideEffectCeilingViolation;
@@ -234,19 +236,42 @@ async fn side_effect_ceiling_rejection_stays_terminal() {
     let captured = Arc::new(StdMutex::new(Vec::new()));
     let bridge = responding_bridge(
         crate::llm::acp_permission::reject_response(Some("user declined".to_string())),
-        captured,
+        captured.clone(),
     );
+    let review = crate::orchestration::DecisionReview::parse(&crate::stdlib::json_to_vm_value(
+        &serde_json::json!({
+            "disposition": "needs_review",
+            "rule": "low_confidence",
+            "outcome": {
+                "kind": "low_confidence", "receipt": "side-effect-review",
+                "candidates": {}, "threshold": 0.99, "question_ids": [],
+            },
+        }),
+    ))
+    .expect("typed review evidence");
     let outcome = request_side_effect_permission(
         Some(&bridge),
-        "side-effect-reject",
-        "call-reject",
-        "read_file",
-        &serde_json::json!({"path": "proof.txt"}),
-        side_effect_violation(),
-        "side effect blocked".to_string(),
-        (None, None),
+        SideEffectPermissionRequest {
+            session_id: "side-effect-reject",
+            tool_call_id: "call-reject",
+            tool_name: "read_file",
+            tool_args: &serde_json::json!({"path": "proof.txt"}),
+            violation: side_effect_violation(),
+            reason: "side effect blocked".to_string(),
+            tool_context: (None, None),
+        },
+        Some(Box::new(review)),
     )
     .await;
+
+    let requests = captured.lock().expect("captured requests");
+    let review =
+        &requests[0]["params"]["toolCall"]["_meta"]["harn"]["policyDecision"]["auto_review"];
+    assert_eq!(review["reviewer_answered"], false);
+    assert_eq!(
+        review["evaluation_review"]["outcome"]["kind"],
+        "low_confidence"
+    );
 
     match outcome {
         SideEffectPermissionOutcome::Denied {
@@ -302,13 +327,16 @@ async fn side_effect_ceiling_transport_failure_stays_terminal() {
     ));
     let outcome = request_side_effect_permission(
         Some(&bridge),
-        "side-effect-transport",
-        "call-transport",
-        "read_file",
-        &serde_json::json!({"path": "proof.txt"}),
-        side_effect_violation(),
-        "side effect blocked".to_string(),
-        (None, None),
+        SideEffectPermissionRequest {
+            session_id: "side-effect-transport",
+            tool_call_id: "call-transport",
+            tool_name: "read_file",
+            tool_args: &serde_json::json!({"path": "proof.txt"}),
+            violation: side_effect_violation(),
+            reason: "side effect blocked".to_string(),
+            tool_context: (None, None),
+        },
+        None,
     )
     .await;
 

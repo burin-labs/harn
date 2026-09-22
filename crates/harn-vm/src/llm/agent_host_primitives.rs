@@ -34,7 +34,10 @@ use primitive_args::{
     options_value as agent_primitive_options_value_arg, tools as agent_primitive_tools_arg,
     tools_value as agent_primitive_tools_value_arg,
 };
-use side_effect_ceiling::{request_side_effect_permission, SideEffectPermissionOutcome};
+use side_effect_ceiling::{
+    review_or_request_side_effect_permission, SideEffectPermissionOutcome,
+    SideEffectPermissionRequest,
+};
 use tool_catalog::{
     annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
     permission_context_for,
@@ -853,33 +856,20 @@ pub(super) async fn host_agent_dispatch_tool_call(
             // same order the approval-policy path uses. Without this a run
             // carrying both a capability policy and a reviewer refuses the
             // call and never asks (harn#7982), which is every product loop.
-            let reviewer_decision = crate::orchestration::maybe_grant_side_effect_by_auto_review(
-                Some(&ctx),
-                &tool_name,
-                &tool_args,
-                &session_id,
-                violation.ceiling.as_str(),
-                violation.required_level.as_str(),
-                &policy_denial.reason,
+            let (reviewer_granted, ceiling_outcome) = review_or_request_side_effect_permission(
+                &ctx,
+                bridge.as_ref(),
+                SideEffectPermissionRequest {
+                    session_id: &session_id,
+                    tool_call_id: &tool_id,
+                    tool_name: &tool_name,
+                    tool_args: &tool_args,
+                    violation,
+                    reason: policy_denial.reason.clone(),
+                    tool_context: permission_context_for(tools, &tool_name),
+                },
             )
             .await;
-            let reviewer_granted = reviewer_decision.is_some();
-            let ceiling_outcome = match reviewer_decision {
-                Some(policy_decision) => SideEffectPermissionOutcome::Allowed { policy_decision },
-                None => {
-                    request_side_effect_permission(
-                        bridge.as_ref(),
-                        &session_id,
-                        &tool_id,
-                        &tool_name,
-                        &tool_args,
-                        violation,
-                        policy_denial.reason.clone(),
-                        permission_context_for(tools, &tool_name),
-                    )
-                    .await
-                }
-            };
             match ceiling_outcome {
                 SideEffectPermissionOutcome::Allowed { policy_decision } => {
                     let Some(grant) = policy_denial.side_effect_grant_for(&tool_name) else {

@@ -647,6 +647,33 @@ export interface HarnExternalActionPolicyEvaluation {
   outcome: HarnExternalActionPolicyEvaluationOutcome
   reason_code: string
   policy_id?: string
+  review?: HarnExternalActionDecisionReview
+}
+
+export interface HarnExternalActionReviewProbability {
+  label: string
+  probability: number
+}
+
+export interface HarnExternalActionReviewAnswer {
+  question_id: string
+  kind: string
+  confidence: number
+  confidence_kind: string
+  verdict?: boolean
+  probability?: number
+  label?: string
+  score?: number
+  probabilities: HarnExternalActionReviewProbability[]
+}
+
+export interface HarnExternalActionDecisionReview {
+  receipt: string
+  outcome: string
+  rule: string
+  applied: boolean
+  minimum_confidence?: number
+  answers: HarnExternalActionReviewAnswer[]
 }
 
 export interface HarnExternalActionDecision {

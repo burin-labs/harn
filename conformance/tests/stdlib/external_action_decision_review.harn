@@ -1,0 +1,87 @@
+import { external_action_decision_review } from "std/external_action"
+import { EvaluationOutcome } from "std/predicate"
+
+pipeline default(harness: Harness) {
+  const sentinel = "PRIVATE_MODEL_EVIDENCE_SENTINEL"
+  const outcome: EvaluationOutcome = {
+    kind: "low_confidence",
+    receipt: "evaluation-reference",
+    threshold: 0.99,
+    question_ids: ["safe", "blast_radius"],
+    candidates: {
+      safe: {
+        kind: "boolean",
+        verdict: true,
+        probability: 0.6,
+        confidence: 0.6,
+        confidence_kind: "binary_probability",
+        evidence: sentinel,
+        evidence_kind: "input_reference",
+      },
+      blast_radius: {
+        kind: "score",
+        level: "low",
+        score: 1.0,
+        probabilities: {none: 0.4, low: 0.6},
+        confidence: 0.6,
+        confidence_kind: "distribution_shape",
+        evidence: sentinel,
+        evidence_kind: "input_reference",
+      },
+    },
+  }
+  const review = external_action_decision_review(outcome, "confidence_floor", false, 0.99)
+  assert(
+    review.outcome == "low_confidence" && !review.applied,
+    "uncertainty cannot become authority",
+  )
+  assert(review.receipt == "evaluation-reference", "the evaluation reference must survive")
+  assert(
+    review.rule == "confidence_floor" && review.minimum_confidence == 0.99,
+    "the rule must survive",
+  )
+  assert(len(review.answers) == 2, "both typed questions must survive the projection")
+  for answer in review.answers {
+    assert(answer.confidence == 0.6, "numeric confidence must survive without rounding")
+    if answer.question_id == "safe" {
+      assert(answer.verdict == true && answer.probability == 0.6, "the boolean answer must survive")
+      assert(answer.confidence_kind == "binary_probability", "confidence provenance must survive")
+    } else {
+      assert(answer.label == "low" && answer.score == 1.0, "the score answer must survive")
+      assert(len(answer.probabilities) == 2, "the complete distribution must survive")
+    }
+  }
+  const text = json_stringify(review)
+  assert(!text.contains(sentinel), "raw model evidence must never enter the activity projection")
+  assert(!text.contains("evidence_kind"), "the projection must use a structural allowlist")
+  const invalid = try {
+    external_action_decision_review(outcome, "invalid_grant", true)
+  }
+  assert(is_err(invalid), "a caller cannot mark a non-answer as applied authorization")
+  if outcome.kind == "low_confidence" {
+    const answered: EvaluationOutcome = {
+      kind: "answered",
+      receipt: "answered",
+      value: outcome.candidates,
+    }
+    assert(
+      external_action_decision_review(answered, "approved", true).applied,
+      "positive control must apply",
+    )
+  } else {
+    assert(false, "the manufactured uncertainty must be reached")
+  }
+  const refused: EvaluationOutcome = {
+    kind: "refused",
+    reason: "provider_refusal",
+    diagnostic: sentinel,
+    receipt: "refused",
+  }
+  const refusal = external_action_decision_review(refused, "human_review")
+  assert(refusal.outcome == "refused" && len(refusal.answers) == 0, "non-answer kind must survive")
+  assert(
+    !json_stringify(refusal).contains(sentinel),
+    "provider diagnostics must not enter the ledger",
+  )
+  harness.stdio.println("external_action_decision_review_ok")
+}
