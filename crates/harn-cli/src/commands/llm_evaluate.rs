@@ -118,11 +118,7 @@ fn verify(request: &Request, path: &Path, json: bool) -> i32 {
                         .expect("verification refusals serialize")
                 );
             }
-            if report.verified {
-                0
-            } else {
-                1
-            }
+            i32::from(!report.verified)
         }
         Err(error) => {
             eprintln!("error: {error}");
