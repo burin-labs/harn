@@ -1,14 +1,6 @@
 [
   {
     "scope": "MissingToolCallRecoveryOptions",
-    "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-    "expression": "__missing_tool_call_policy(harness.llm, cfg)",
-    "owner": "__missing_tool_call_policy",
-    "evidence": "The typed policy owner resolves the explicit decision policy or structured route defaults.",
-    "consumers": [{"scope": "MissingToolCallRecoveryOptions", "function": "__missing_tool_call_policy", "parameter": "cfg"}]
-  },
-  {
-    "scope": "MissingToolCallRecoveryOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
     "expression": "type_of(value)",
     "owner": "type_of",

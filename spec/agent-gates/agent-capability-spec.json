@@ -76,10 +76,6 @@
         "reader": "__agent_loop_next_tool_output_contract"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "reader": "__with_missing_call_admission"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "reader": "__validate_agent_loop_callback_options"
       },
