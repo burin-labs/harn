@@ -1,0 +1,104 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
+
+fn main(harness: Harness) {
+  const config = json_parse(harness.fs.read_text(argv[0]))
+  const row = json_parse(harness.fs.read_text(argv[1]))
+  let tools = tool_registry()
+  const session = "missing-call-study-" + harness.random.uuid()
+  const observations_key = session + ".observations"
+  harness.runtime.store_set(observations_key, [])
+  for entry in [
+    {name: "read", description: "Read a file's contents."},
+    {name: "edit", description: "Modify a source or configuration file."},
+    {name: "shell", description: "Run a terminal command, including tests."},
+  ] {
+    tools = tool_define(
+      tools,
+      entry.name,
+      entry.description,
+      {handler: { _args -> "fixture tool completed" }, parameters: {}, returns: {type: "string"}},
+    )
+  }
+  const classifier = missing_tool_call_classifier(harness, config)
+  const recording_classifier = { payload ->
+    const before = harness.llm.session_cost()
+    const started = harness.clock.monotonic_ms()
+    const verdict = classifier(payload)
+    harness.runtime.store_set(
+      observations_key,
+      harness.runtime.store_get(observations_key).appending(
+        {
+          verdict: verdict,
+          elapsed_ms: harness.clock.monotonic_ms() - started,
+          cost_usd: harness.llm.session_cost().total_cost - before.total_cost,
+        },
+      ),
+    )
+    return verdict
+  }
+  const replay = { call ->
+    const turn = call.turn.iteration
+    const content = if turn == 1 {
+      {text: row.assistant_text}
+    } else if turn == 2 && (row?.intended ?? false) {
+      {text: "", tool_calls: [{id: "replayed-tool", name: row.tool, arguments: {}}]}
+    } else {
+      {text: "Completed. ##DONE##"}
+    }
+    return {
+      ok: true,
+      value: content
+        + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  const started = harness.clock.monotonic_ms()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      agent_loop(
+        harness,
+        "Replay this fixed assistant turn.",
+        nil,
+        {
+          session_id: session,
+          provider: "mock",
+          tool_format: "native",
+          tools: tools,
+          llm_caller: replay,
+          missing_tool_call_recovery: {classifier: recording_classifier},
+          max_iterations: 3,
+          loop_until_done: true,
+          max_nudges: 1,
+          budget: {admission: "conservative", total_budget_usd: 0.5},
+        },
+      )
+    },
+  )
+  const observations = harness.runtime.store_get(observations_key)
+  require len(observations) > 0, json_stringify(captured)
+  harness.stdio.println(
+    json_stringify(
+      {
+        row_id: row.row_id,
+        status: captured.result.status,
+        stop_reason: captured.result?.stop_reason,
+        elapsed_ms: harness.clock.monotonic_ms() - started,
+        observations: observations,
+        executed_tools: captured.result.tools.successful,
+        cost: harness.llm.session_cost(),
+        verdict_events: captured.events.filter(
+          { event -> event.type == "missing_tool_call_verdict" },
+        ),
+        recovery_nudges: captured.events.filter(
+          { event ->
+            event.type == "feedback_injected" && event?.kind == "missing_tool_call_nudge"
+          },
+        )
+          .to_list(),
+      },
+    ),
+  )
+}
