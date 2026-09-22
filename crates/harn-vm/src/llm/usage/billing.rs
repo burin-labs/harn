@@ -115,9 +115,11 @@ impl BillingUsage {
         let usage = &response["usage"];
         let input = usage
             .get("input_tokens_details")
+            .or_else(|| usage.get("input_token_details"))
             .or_else(|| usage.get("prompt_tokens_details"));
         let output = usage
             .get("output_tokens_details")
+            .or_else(|| usage.get("output_token_details"))
             .or_else(|| usage.get("completion_tokens_details"));
         let mut facts = Self {
             audio_input_tokens: input.and_then(|v| v["audio_tokens"].as_u64()),
