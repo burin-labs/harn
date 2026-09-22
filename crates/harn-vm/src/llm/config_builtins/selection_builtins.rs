@@ -150,7 +150,7 @@ pub(super) fn llm_model_defaults_builtin(
     Ok(VmValue::dict(dict))
 }
 
-/// Return the fully-merged llm_call options for `opts`. Requires opts.model.
+/// Return merged call options. An omitted model uses normal dispatch defaults.
 #[harn_builtin(
     exposure = "harness.llm.resolved_options",
     effects = ["llm.read@dynamic"],
@@ -168,18 +168,28 @@ pub(super) fn llm_resolved_options_builtin(
     let model = opts
         .get("model")
         .map(|v| v.display())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            VmError::Runtime("llm_resolved_options: opts.model is required".to_string())
-        })?;
+        .filter(|s| !s.is_empty());
     let user_provider = opts
         .get("provider")
         .map(|v| v.display())
         .filter(|s| !s.is_empty());
-    let (resolved_id, provider_from_alias) = llm_config::resolve_model(&model);
-    let final_provider = user_provider.unwrap_or_else(|| {
-        provider_from_alias.unwrap_or_else(|| llm_config::infer_provider(&resolved_id))
-    });
+    let (resolved_id, final_provider) = if let Some(model) = model {
+        let (resolved_id, provider_from_alias) = llm_config::resolve_model(&model);
+        let provider = user_provider.unwrap_or_else(|| {
+            provider_from_alias.unwrap_or_else(|| llm_config::infer_provider(&resolved_id))
+        });
+        (resolved_id, provider)
+    } else {
+        let mut defaults_options = opts.clone();
+        defaults_options.remove("model");
+        if user_provider.is_none() {
+            defaults_options.remove("provider");
+        }
+        let options = Some(defaults_options);
+        let provider = crate::llm::helpers::vm_resolve_provider(&options);
+        let model = crate::llm::helpers::vm_resolve_model(&options, &provider);
+        (model, provider)
+    };
     let defaults = llm_config::model_params_for_route(&final_provider, &resolved_id);
     let mut out = opts.clone();
     for (k, v) in &defaults {

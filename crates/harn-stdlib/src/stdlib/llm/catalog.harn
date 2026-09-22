@@ -55,7 +55,7 @@ pub fn execution_contract(llm: HarnessLlm, selector: string) -> ModelExecutionCo
 }
 
 /**
- * Wraps harness.llm.resolved_options(opts). opts.model is required; throws otherwise.
+ * Resolve call options through the dispatch defaults when opts.model is absent.
  *
  * @effects: []
  * @errors: []
@@ -63,9 +63,6 @@ pub fn execution_contract(llm: HarnessLlm, selector: string) -> ModelExecutionCo
 pub fn resolved_options(llm: HarnessLlm, opts: dict) {
   if type_of(opts) != "dict" {
     throw "resolved_options: opts must be a dict"
-  }
-  if opts?.model == nil || opts.model == "" {
-    throw "resolved_options: opts.model is required"
   }
   return llm.resolved_options(opts)
 }
