@@ -46,14 +46,15 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:b34c6eca9e12dac5ef48fbb4e1e474f3299599c24b3b59dd36a708b627014a8f",
-    "projection_id": "session_view:session_stage_transcript:b34c6eca9e12"
+    "projection_hash": "sha256:4750ad0a62d8f1b2e3281d7452363b4b417d8ca1bfe42026e127b96e427d3a77",
+    "projection_id": "session_view:session_stage_transcript:4750ad0a62d8"
   },
   "runs": [
     {
       "artifacts": [],
       "checkpoints": [],
       "evidence": {
+        "evaluation_receipts": null,
         "execution_id": null,
         "flight_recording": null,
         "gaps": [],
@@ -104,8 +105,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:25fe10aad3d08e0a17ba0c83a5d8bae7830bd747c95d2060362e5534db915da9",
-        "projection_id": "run_view:run_stage_transcript_active:25fe10aad3d0"
+        "projection_hash": "sha256:56849d2b7f50318112a2de500afbcb72bf7419322b3de380c6b1f1fe67f90b61",
+        "projection_id": "run_view:run_stage_transcript_active:56849d2b7f50"
       },
       "providers": [],
       "run": {
