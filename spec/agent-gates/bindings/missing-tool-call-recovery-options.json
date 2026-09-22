@@ -8,6 +8,7 @@
       "MissingToolCallRecoveryOptions"
     ],
     "parameters": [
+      {"function": "__missing_tool_call_policy", "name": "cfg"},
       {
         "function": "__missing_tool_call_recovery_config",
         "name": "opts",

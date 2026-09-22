@@ -17,6 +17,7 @@
       "AgentObservabilitySpec"
     ],
     "parameters": [
+      {"function": "__with_missing_call_admission", "name": "opts"},
       {
         "function": "__collect_unread_keys",
         "name": "value"
@@ -1187,6 +1188,7 @@
       }
     ],
     "normalizers": [
+      {"function": "__with_missing_call_admission", "argument": 0},
       {
         "function": "__fresh_skill_projection_inputs",
         "path": [
