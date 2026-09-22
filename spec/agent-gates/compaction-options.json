@@ -7,10 +7,12 @@
     "layer": "runner",
     "name": "AgentSpec.compaction.classify",
     "reachability": "yes",
-    "readers": [{
-      "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-      "reader": "__compact_options"
-    }],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "reader": "__compact_options"
+      }
+    ],
     "reason": "Keep explicit evaluator and confidence-floor authority; fixture evidence establishes application semantics, not model quality or default promotion.",
     "verdict": "KEEP-with-expiry"
   },
