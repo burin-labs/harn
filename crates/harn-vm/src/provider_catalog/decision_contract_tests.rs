@@ -264,7 +264,13 @@ operations = ["decision"]
 fn predicate_site(provider: &str, model: &str) -> harn_parser::PredicateSite {
     harn_parser::PredicateSite {
         id: "site".to_string(),
-        question: "is this ready".to_string(),
+        kind: harn_parser::PredicateSiteKind::Predicate,
+        questions: vec![harn_parser::PredicateQuestionSpec {
+            id: "site".to_string(),
+            kind: harn_parser::PredicateQuestionKind::Boolean,
+            instructions: "is this ready".to_string(),
+            labels: Vec::new(),
+        }],
         input_type: harn_parser::TypeExpr::Named("dict".to_string()),
         line: 1,
         column: 1,
