@@ -9,7 +9,7 @@ name = "Gemma 4 31B (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.12, output_per_mtok = 0.37 }
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.34, cache_read_per_mtok = 0.05 }
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "reasoning", "coding", "cheap"]
@@ -18,7 +18,7 @@ name = "Gemma 4 26B MoE (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.06, output_per_mtok = 0.33 }
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.30, cache_read_per_mtok = 0.05 }
 tier = "mid"
 open_weight = true
 strengths = ["vision", "cheap", "speed"]
@@ -43,7 +43,7 @@ name = "Gemma 4 31B (Together)"
 provider = "together"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 0.50 }
+pricing = { input_per_mtok = 0.39, output_per_mtok = 0.97 }
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "reasoning", "coding"]
@@ -183,26 +183,11 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
 
-[models."qwen/qwen3.6-27b"]
-name = "Qwen3.6 27B (Groq)"
-provider = "groq"
-context_window = 131072
-logical_model = "qwen3.6-27b"
-equivalence_group = "qwen3.6-27b"
-served_variant = "groq-lpu"
-wire_model = "qwen/qwen3.6-27b"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking"]
-# ~500 output tok/s on Groq LPUs; rate verified 2026-07-02 on
-# groq.com/pricing. Dense 27B, hybrid Gated DeltaNet+Attention; SWE-bench
-# Verified 77.2 per the Qwen3.6-27B model card.
-pricing = { input_per_mtok = 0.60, output_per_mtok = 3.00, cache_read_per_mtok = 0.30 }
-architecture = { parameter_count_b = 27.0, moe = false, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.6-27B", last_verified = "2026-07-02" }
-benchmarks = { swe_bench_verified = 77.2 }
-tier = "mid"
-open_weight = true
-strengths = ["speed", "coding", "tool_use", "agentic"]
-
+# Removed 2026-09-20: qwen/qwen3.6-27b. Groq's live /models index
+# (https://api.groq.com/openai/v1/models, observed 2026-09-20) no longer
+# lists it; qwen/qwen3.8-27b below is Groq's only Qwen route. The
+# `groq-qwen3.6` alias, the `groq` QC default, and both escalation ladder
+# rungs were re-pointed at qwen/qwen3.8-27b.
 [models."qwen/qwen3.8-27b"]
 name = "Qwen3.8 27B (Groq)"
 provider = "groq"
@@ -216,7 +201,9 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 # Groq's public preview model page supplied the route, context limit, feature
 # list, and rates. Native tools, strict JSON Schema, reasoning effort, and the
 # tools-plus-JSON rejection were verified against the live route on 2026-08-26.
-pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00 }
+# The cache-read rate was missing; Groq's live /models record publishes
+# $0.40 per MTok for it (https://api.groq.com/openai/v1/models, 2026-09-20).
+pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.40 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "tool_use", "reasoning", "vision"]

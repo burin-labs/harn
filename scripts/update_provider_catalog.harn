@@ -120,6 +120,7 @@ fn __install_live_egress_policy(harness: Harness) -> Harness {
         "api.siliconflow.cn",
         "api.parasail.io",
         "api.atlascloud.ai",
+        "ai-gateway.vercel.sh",
       ],
       default: "deny",
     },
@@ -179,7 +180,13 @@ fn __openrouter_mapper(payload: dict) {
   return entries
 }
 
-fn __pricing_from_per_token_record(pricing: dict) {
+/**
+ * `dict?`, not `dict`: every caller passes `record?.pricing`, and a provider
+ * record without a rate card yields nil. A non-nullable parameter is refused
+ * at the call boundary before the body runs, so the guard below was dead code
+ * and the whole live run died on the first priceless record.
+ */
+fn __pricing_from_per_token_record(pricing: dict?) {
   if pricing == nil {
     return nil
   }
@@ -210,7 +217,8 @@ fn __pricing_from_per_token_record(pricing: dict) {
   return pricing_dict
 }
 
-fn __pricing_from_mtok_record(record: dict) {
+/** `dict?` for the same reason as `__pricing_from_per_token_record` above. */
+fn __pricing_from_mtok_record(record: dict?) {
   if record == nil {
     return nil
   }
@@ -282,6 +290,78 @@ fn __gemini_models_mapper(payload: dict) {
       entries = entries
         + [{model_id: id, name: record?.displayName ?? id, context_window: record?.inputTokenLimit}]
     }
+  }
+  return entries
+}
+
+/**
+ * Cerebras publishes a richer keyless index at `/public/v1/models` than the
+ * key-scoped `/v1/models`, which returns bare ids. The public record carries
+ * per-token pricing, capabilities, a `deprecated` flag, and the context
+ * window — but nested under `limits.max_context_length`, which the generic
+ * mapper does not reach.
+ */
+fn __cerebras_models_mapper(payload: dict) {
+  let entries = []
+  for record in payload?.data ?? [] {
+    const id = record?.id
+    if id == nil || id == "" {
+      continue
+    }
+    entries = entries
+      + [
+        {
+          model_id: id,
+          name: record?.name ?? id,
+          context_window: record?.limits?.max_context_length,
+          pricing: __pricing_from_per_token_record(record?.pricing),
+        },
+      ]
+  }
+  return entries
+}
+
+/**
+ * xAI reports per-token rates as integers in units of 1e-10 USD per token,
+ * which is 1e-4 USD per million tokens: `prompt_text_token_price: 12500`
+ * is $1.25/MTok. The generic mapper reads neither that scale nor the field
+ * names, so an xAI run without this mapper observes ids and context windows
+ * with every rate missing — and a missing rate is not a drift, so the report
+ * reads clean.
+ */
+fn __xai_models_mapper(payload: dict) {
+  let entries = []
+  for record in payload?.data ?? [] {
+    const id = record?.id
+    if id == nil || id == "" {
+      continue
+    }
+    let pricing_dict = {}
+    if record?.prompt_text_token_price != nil {
+      pricing_dict = pricing_dict
+        + {input_per_mtok: to_float(record.prompt_text_token_price) / 10000.0}
+    }
+    if record?.completion_text_token_price != nil {
+      pricing_dict = pricing_dict
+        + {output_per_mtok: to_float(record.completion_text_token_price) / 10000.0}
+    }
+    if record?.cached_prompt_text_token_price != nil {
+      pricing_dict = pricing_dict
+        + {cache_read_per_mtok: to_float(record.cached_prompt_text_token_price) / 10000.0}
+    }
+    entries = entries
+      + [
+        {
+          model_id: id,
+          name: record?.id,
+          context_window: record?.context_length,
+          pricing: if len(pricing_dict) == 0 {
+            nil
+          } else {
+            pricing_dict
+          },
+        },
+      ]
   }
   return entries
 }
@@ -512,7 +592,10 @@ fn __live_adapter_specs() {
       "xai",
       "https://api.x.ai/v1/models",
       ["XAI_API_KEY"],
-      {terms_notes: "Provider-owned /v1/models endpoint."},
+      {
+        mapper: __xai_models_mapper,
+        terms_notes: "Provider-owned /v1/models endpoint; rates are 1e-4 USD per MTok.",
+      },
     ),
     __keyed_models_spec(
       "together-models-api",
@@ -534,9 +617,13 @@ fn __live_adapter_specs() {
     __keyed_models_spec(
       "cerebras-models-api",
       "cerebras",
-      "https://api.cerebras.ai/v1/models",
+      "https://api.cerebras.ai/public/v1/models",
       ["CEREBRAS_API_KEY"],
-      {terms_notes: "Provider-owned /v1/models endpoint."},
+      {
+        mapper: __cerebras_models_mapper,
+        terms_notes:
+          "Provider-owned public model index. `/v1/models` returns bare ids; `/public/v1/models` adds pricing, limits and a deprecated flag.",
+      },
     ),
     __keyed_models_spec(
       "deepseek-models-api",
@@ -648,6 +735,22 @@ fn __live_adapter_specs() {
       "https://api.atlascloud.ai/v1/models",
       ["ATLAS_API_KEY", "ATLASCLOUD_API_KEY"],
       {terms_notes: "Atlas Cloud OpenAI-compatible /models endpoint."},
+    ),
+    // The catalog carries curated `vercel_ai_gateway` rows but had no adapter,
+    // so a Vercel-only price or route change could not be observed by a refresh
+    // run at all. The gateway index is a plain OpenAI-shaped `/v1/models` with
+    // top-level `context_window` and per-token `pricing.input` / `.output`,
+    // which the generic mapper already reads. It is an aggregator, so its
+    // confidence matches OpenRouter's rather than a first-party endpoint's.
+    __keyed_models_spec(
+      "vercel-ai-gateway-models-api",
+      "vercel_ai_gateway",
+      "https://ai-gateway.vercel.sh/v1/models",
+      ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"],
+      {
+        confidence: "medium",
+        terms_notes: "Vercel AI Gateway public /v1/models index; aggregator source.",
+      },
     ),
   ]
 }

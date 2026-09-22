@@ -14,7 +14,12 @@ local = "gemma-4-26b-a4b-it"
 mistral = "mistral-small-2603"
 cohere = "command-a-plus-05-2026"
 xai = "grok-build-0.1"
-groq = "qwen/qwen3.6-27b"
+# Groq retired qwen/qwen3.6-27b (absent from its live /models index on
+# 2026-09-20). Qwen3.8 27B is Groq's only remaining Qwen route, at a higher
+# rate ($0.80/$4.00 per MTok versus $0.60/$3.00). If the QC rate matters more
+# than staying in the Qwen family, groq/openai/gpt-oss-20b is catalogued at
+# $0.075/$0.30.
+groq = "qwen/qwen3.8-27b"
 minimax = "MiniMax-M2.5-highspeed"
 # GLM-4.6 is Z.AI's cheap coding route, confirmed serving at paas/v4.
 zai = "glm-4.6"
