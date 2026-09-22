@@ -258,23 +258,12 @@ struct OrchestratorLogLineWriter {
 impl Write for OrchestratorLogLineWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // The log exporter is a diagnostic, so a host that owns the terminal
-        // owns it too. Only whole UTF-8 lines are offered: a sink takes text,
-        // and a subscriber writing a partial code point has nothing valid to
-        // hand it, so those bytes keep the descriptor rather than being lost.
+        // owns it too.
         let stream = match self.format {
             LogFormat::Json => crate::host_stdio::HostStdioStream::Stdout,
             LogFormat::Text | LogFormat::Pretty => crate::host_stdio::HostStdioStream::Stderr,
         };
-        let routed = match std::str::from_utf8(buf) {
-            Ok(text) => crate::host_stdio::emit(stream, text),
-            Err(_) => false,
-        };
-        if !routed {
-            match self.format {
-                LogFormat::Json => io::stdout().write_all(buf)?,
-                LogFormat::Text | LogFormat::Pretty => io::stderr().write_all(buf)?,
-            }
-        }
+        crate::host_stdio::write_bytes(stream, buf);
         if let Some(file) = self.file.as_ref() {
             file.lock()
                 .expect("orchestrator log file poisoned")

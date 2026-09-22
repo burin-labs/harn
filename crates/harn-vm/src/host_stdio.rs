@@ -102,20 +102,44 @@ fn current() -> Option<Arc<dyn HostStdioSink>> {
     }
 }
 
-/// Offer one write to the host's sink.
+/// Send one diagnostic write to wherever it belongs.
 ///
-/// Returns whether the sink took it. A `false` means no sink is installed and
-/// the caller must fall through to the descriptor, which is the default this
-/// preserves for every embedding that installs nothing.
+/// The host's sink when one is installed, and the process descriptor when none
+/// is, which is the default every embedding that installs nothing keeps. Every
+/// routed call site goes through here rather than deciding for itself, so the
+/// fallthrough exists once.
 ///
 /// The lock is released before the sink runs, so a sink that writes through
 /// the runtime again cannot deadlock against its own installation.
-pub(crate) fn emit(stream: HostStdioStream, text: &str) -> bool {
-    match current() {
-        Some(sink) => {
-            sink.write(stream, text);
-            true
-        }
-        None => false,
+pub(crate) fn write(stream: HostStdioStream, text: &str) {
+    if let Some(sink) = current() {
+        sink.write(stream, text);
+        return;
     }
+    write_descriptor(stream, text.as_bytes());
+}
+
+/// As [`write`], for a caller holding bytes that may not be whole UTF-8. A
+/// sink takes text, so a fragment with no valid reading keeps the descriptor
+/// rather than being dropped or replaced.
+pub(crate) fn write_bytes(stream: HostStdioStream, bytes: &[u8]) {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => write(stream, text),
+        Err(_) => write_descriptor(stream, bytes),
+    }
+}
+
+fn write_descriptor(stream: HostStdioStream, bytes: &[u8]) {
+    use std::io::Write as _;
+    let result = match stream {
+        HostStdioStream::Stdout => {
+            let mut handle = std::io::stdout().lock();
+            handle.write_all(bytes).and_then(|()| handle.flush())
+        }
+        HostStdioStream::Stderr => {
+            let mut handle = std::io::stderr().lock();
+            handle.write_all(bytes).and_then(|()| handle.flush())
+        }
+    };
+    let _ = result;
 }

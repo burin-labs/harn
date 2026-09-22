@@ -62,14 +62,22 @@ struct ChildOutput {
     stderr: String,
 }
 
+/// The mode this process was launched in, when it is a child.
+///
+/// A child is this same test executable running this same test: re-entering
+/// one test under an environment variable keeps the measurement in the default
+/// suite, where an `#[ignore]`d helper would not run at all.
+fn child_mode() -> Option<String> {
+    std::env::var(MODE_VARIABLE).ok()
+}
+
 /// Run the child in one mode and collect what reached each descriptor.
 fn run_child(mode: &str) -> ChildOutput {
     let executable = std::env::current_exe().expect("test executable path");
     let output = Command::new(executable)
         .args([
             "--exact",
-            "host_stdio_sink::host_sink_child",
-            "--ignored",
+            "host_stdio_sink::host_sink_takes_the_diagnostic_and_descriptor_two_stays_silent",
             "--nocapture",
             "--test-threads",
             "1",
@@ -99,6 +107,11 @@ fn run_child(mode: &str) -> ChildOutput {
 /// descriptor 2 in that process must carry none of it.
 #[test]
 fn host_sink_takes_the_diagnostic_and_descriptor_two_stays_silent() {
+    if let Some(mode) = child_mode() {
+        run_as_child(&mode);
+        return;
+    }
+
     let child = run_child("sink");
 
     assert!(
@@ -120,6 +133,10 @@ fn host_sink_takes_the_diagnostic_and_descriptor_two_stays_silent() {
 /// real zero rather than reading nothing at all.
 #[test]
 fn without_a_sink_the_diagnostic_reaches_descriptor_two() {
+    if child_mode().is_some() {
+        return;
+    }
+
     let child = run_child("descriptor");
 
     assert!(
@@ -138,6 +155,10 @@ fn without_a_sink_the_diagnostic_reaches_descriptor_two() {
 /// back rather than leaving the process permanently diverted.
 #[test]
 fn clearing_the_sink_returns_the_descriptor() {
+    if child_mode().is_some() {
+        return;
+    }
+
     let sink = Arc::new(RecordingSink::default());
     assert!(!host_stdio_sink_installed());
 
@@ -150,11 +171,8 @@ fn clearing_the_sink_returns_the_descriptor() {
     assert!(!host_stdio_sink_installed());
 }
 
-/// The child. Ignored so it runs only when the parent names it.
-#[test]
-#[ignore = "driven by the parent test, which measures this process's descriptors"]
-fn host_sink_child() {
-    let mode = std::env::var(MODE_VARIABLE).unwrap_or_default();
+/// The child's half: produce the diagnostic and report what the sink saw.
+fn run_as_child(mode: &str) {
     let sink = Arc::new(RecordingSink::default());
     if mode == "sink" {
         install_host_stdio_sink(sink.clone());
