@@ -12,6 +12,13 @@ use super::question::QuestionSet;
 
 pub const EVALUATION_RECEIPT_SCHEMA: &str = "harn.evaluation.receipt.v1";
 
+/// Execution-owned evaluation state inherited by child VMs.
+#[derive(Clone, Default)]
+pub(crate) struct EvaluationExecutionState {
+    pub journal: std::sync::Arc<parking_lot::Mutex<EvaluationJournal>>,
+    pub replay: Option<super::replay::EvaluationReplayScope>,
+}
+
 /// Bounded execution-owned journal shared by a VM and its children.
 #[derive(Default)]
 pub(crate) struct EvaluationJournal {

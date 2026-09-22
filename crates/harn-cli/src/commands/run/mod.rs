@@ -69,8 +69,8 @@ pub(crate) use self::reporting::{
     render_trace_summary, run_aux_options_from_args, run_control_options_from_args,
 };
 pub use self::reporting::{
-    FlightRecorderOptions, RunAuxOptions, RunControlOptions, RunJsonOptions, RunJsonSink,
-    RunJsonSinkTarget, RunPhaseOptions, RunRusageOptions, RunSummaryOptions,
+    FlightRecorderOptions, RunAuxOptions, RunControlOptions, RunExecutionOptions, RunJsonOptions,
+    RunJsonSink, RunJsonSinkTarget, RunPhaseOptions, RunRusageOptions, RunSummaryOptions,
     RUN_PHASE_SCHEMA_VERSION, RUN_RUSAGE_SCHEMA_VERSION, RUN_SUMMARY_SCHEMA_VERSION,
 };
 pub use self::sandbox::RunSandboxOptions;
@@ -598,18 +598,6 @@ pub async fn execute_run_with_harnpack_options(
     .await
 }
 
-/// Complete in-process execution configuration. Existing convenience wrappers
-/// use its default; embedded and headless hosts use this seam when they need a
-/// non-default project runtime without forking CLI behavior.
-#[derive(Clone, Debug, Default)]
-pub struct RunExecutionOptions {
-    pub evaluation: EvaluationReplayOptions,
-    pub sandbox: RunSandboxOptions,
-    pub harnpack: HarnpackRunOptions,
-    pub project_runtime: ProjectRuntimeMode,
-    pub flight_recorder: FlightRecorderOptions,
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_run_with_options(
     path: &str,
@@ -983,31 +971,19 @@ async fn execute_run_inner_scoped(
     // lives for the rest of this function, so recording ends with the run on
     // every exit path below.
     let _builtin_profile_guard = profile.is_enabled().then(harn_vm::builtin_profile::enable);
-    if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
-        stderr.push_str(&format!("error: {error}\n"));
-        time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
-        return finalize_run_error(
-            stdout,
-            stderr,
-            json_session,
-            summary.as_ref(),
-            phase.as_ref(),
-            rusage.as_ref(),
-            run_started,
-            None,
-            timing.as_deref(),
-            0,
-            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-            crate::exit::RunFailure::Setup,
-            "llm_mock_install",
-            error,
-        );
-    }
-
     let mut vm = harn_vm::Vm::new();
-    let evaluation_session = match evaluation.install(&mut vm) {
+    let setup_result = install_cli_llm_mock_mode(&llm_mock_mode)
+        .map_err(|error| ("llm_mock_install", error))
+        .and_then(|()| {
+            evaluation
+                .install(&mut vm)
+                .map_err(|error| ("evaluation_tape_install", error))
+        });
+    let evaluation_session = match setup_result {
         Ok(session) => session,
-        Err(error) => {
+        Err((code, error)) => {
+            stderr.push_str(&format!("error: {error}\n"));
+            time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
             return finalize_run_error(
                 stdout,
                 stderr,
@@ -1021,7 +997,7 @@ async fn execute_run_inner_scoped(
                 0,
                 cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
                 crate::exit::RunFailure::Setup,
-                "evaluation_tape_install",
+                code,
                 error,
             );
         }
