@@ -172,19 +172,23 @@ fn lookup_inner(
     receipt.cost_admission = None;
     receipt.native_transport = None;
     receipt.elapsed_ms = 0;
-    let mut usage = crate::llm::usage::LlmUsage::from_provider_receipt(
-        &receipt.requested_provider,
-        &receipt.requested_model,
-        &crate::llm::usage::ProviderUsageReceipt::new(Some(0), Some(0), Some(0.0), false),
-    );
-    usage.provider_call_count = Some(0);
-    crate::llm::trace::trace_llm_call(crate::llm::trace::LlmTraceEntry {
-        provider: receipt.requested_provider.clone(),
-        model: receipt.requested_model.clone(),
-        usage: usage.clone(),
-        duration_ms: 0,
-    });
-    receipt.usage = Some(Box::new(usage));
+    // A replayed local refusal is still an evaluation occurrence, but never
+    // becomes a logical LLM call merely because it came from a tape.
+    if receipt.usage.is_some() {
+        let mut usage = crate::llm::usage::LlmUsage::from_provider_receipt(
+            &receipt.requested_provider,
+            &receipt.requested_model,
+            &crate::llm::usage::ProviderUsageReceipt::new(Some(0), Some(0), Some(0.0), false),
+        );
+        usage.provider_call_count = Some(0);
+        crate::llm::trace::trace_llm_call(crate::llm::trace::LlmTraceEntry {
+            provider: receipt.requested_provider.clone(),
+            model: receipt.requested_model.clone(),
+            usage: usage.clone(),
+            duration_ms: 0,
+        });
+        receipt.usage = Some(Box::new(usage));
+    }
     let mut value = recorded.outcome;
     value["receipt"] = receipt.reference().into();
     let outcome = Outcome::from_recorded(crate::schema::json_to_vm_value(&value))?;
