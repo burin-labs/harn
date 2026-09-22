@@ -34,7 +34,7 @@ impl EvaluationJournal {
 }
 
 /// Requested routing restrictions are distinct from what the gateway reports.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeTransportReceipt {
     pub data_controls: crate::llm::api::DataControlsReceipt,
     /// Gateway-reported downstream attempts, absent when unreported. This is
