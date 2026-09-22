@@ -4,11 +4,7 @@
 //! rendering all run on the real path. The three cases that matter are the
 //! three exit codes: a report, a typed refusal, and inputs that do not join.
 
-use std::process::Command;
-
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
+use crate::test_util::process::{run_harn_e2e, HarnCliOutput};
 
 fn write(dir: &std::path::Path, name: &str, lines: &[String]) -> std::path::PathBuf {
     let path = dir.join(name);
@@ -35,11 +31,8 @@ fn calibrated_corpus() -> (Vec<String>, Vec<String>) {
     (corpus, answers)
 }
 
-fn run(args: &[&str]) -> std::process::Output {
-    Command::new(binary_path())
-        .args(args)
-        .output()
-        .expect("spawn harn eval calibrate")
+fn run(args: &[&str]) -> HarnCliOutput {
+    run_harn_e2e(args, &[])
 }
 
 #[test]
@@ -61,8 +54,8 @@ fn calibrate_reports_in_plain_language_and_json() {
         "--served-model-id",
         "example/model@1",
     ]);
-    assert_eq!(text.status.code(), Some(0));
-    let rendered = String::from_utf8_lossy(&text.stdout);
+    assert_eq!(text.exit_code, 0);
+    let rendered = text.stdout;
     assert!(
         rendered.contains("tool-safety question"),
         "rendering names the question: {rendered}"
@@ -85,13 +78,13 @@ fn calibrate_reports_in_plain_language_and_json() {
         "example/model@1",
         "--json",
     ]);
-    assert_eq!(json.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&json.stdout);
-    let start = stdout
-        .find('{')
+    assert_eq!(json.exit_code, 0);
+    let stdout = json.stdout;
+    let json_text = stdout
+        .split_once('{')
+        .map(|(_, rest)| format!("{{{rest}"))
         .unwrap_or_else(|| panic!("no JSON: {stdout}"));
-    let report: serde_json::Value =
-        serde_json::from_str(stdout[start..].trim()).expect("report json");
+    let report: serde_json::Value = serde_json::from_str(json_text.trim()).expect("report json");
     assert_eq!(report["kind"], "report");
     assert_eq!(report["contract"], "harn.calibration_report.v1");
     assert_eq!(report["served_model_id"], "example/model@1");
@@ -142,8 +135,8 @@ fn calibrate_exits_one_on_a_typed_refusal() {
         "--answers",
         &answers.to_string_lossy(),
     ]);
-    assert_eq!(out.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.exit_code, 1);
+    let stderr = out.stderr;
     assert!(
         stderr.contains("invalid_confidence"),
         "refusal names its reason: {stderr}"
@@ -179,8 +172,8 @@ fn calibrate_refuses_inputs_that_do_not_join() {
         "--answers",
         &answers.to_string_lossy(),
     ]);
-    assert_eq!(out.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.exit_code, 2);
+    let stderr = out.stderr;
     assert!(
         stderr.contains("do not line up") && stderr.contains("corpus rows with no answer"),
         "the gap is named, not swallowed: {stderr}"
