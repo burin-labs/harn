@@ -663,7 +663,12 @@ fn settled_cost(route: &DecisionContract, input: u64, output: u64) -> Option<f64
     Some((input as f64 * input_price + output as f64 * output_price) / 1_000_000.0)
 }
 
-fn estimate_state_tokens(state: &serde_json::Value) -> usize {
+/// The evaluator's estimate of a state, and the only one.
+///
+/// `harness.llm.estimate_state_tokens` calls this, and so does the ceiling a
+/// few hundred lines up. A second implementation anywhere would let a caller
+/// size its input against a ruler the refusal never uses.
+pub(crate) fn estimate_state_tokens(state: &serde_json::Value) -> usize {
     let encoded = crate::canonical_json::to_vec(state);
     crate::llm::estimate_text_tokens(&String::from_utf8_lossy(&encoded)).max(0) as usize
 }

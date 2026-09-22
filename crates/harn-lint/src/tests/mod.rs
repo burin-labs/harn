@@ -210,6 +210,7 @@ mod stdlib_metadata;
 mod stdlib_return_types;
 mod tool_handler_host_call;
 mod tool_handler_result;
+mod unbounded_decision_state;
 mod unnecessary_cast;
 mod unnecessary_parentheses;
 mod unreachable;

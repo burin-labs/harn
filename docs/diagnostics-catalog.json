@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 77
+      "count": 78
     },
     {
       "id": "FMT",
@@ -2580,6 +2580,15 @@
       "code": "HARN-LNT-078",
       "category": "LNT",
       "summary": "tool descriptor spells its per-parameter map as a JSON Schema document",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-079",
+      "category": "LNT",
+      "summary": "evaluation site hands a native decision route an input whose declared type has no finite size bound",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

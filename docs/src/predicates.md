@@ -162,6 +162,48 @@ grant authority.
 Variant-specific property reads, indexed reads, and destructuring also require
 narrowing. Common `kind` and `receipt` fields remain available on every outcome.
 
+## Fitting the ceiling
+
+`state_too_large` tells a caller the state did not fit. It does not make it
+fit, and the cases that hit it first are the ones where retrying cannot help:
+a session that needs compacting has by definition outgrown the window, so the
+whole transcript can never be judged at once.
+
+`evaluation_windows` in `std/predicate` splits a list into windows that each
+fit a budget:
+
+```harn
+import { evaluation_windows } from "std/predicate"
+
+const windowing = evaluation_windows(harness.llm, items, {
+  anchor: latest_user_message,
+  budget_tokens: 28000,
+  overlap_items: 2,
+})
+```
+
+Each window carries its index range into the original list, the number of
+items it holds, and the size it was planned at. `anchor` is repeated in every
+window and counted against every window's budget. `overlap_items` repeats that
+many trailing items at the front of the next window, so a question needing
+local context does not lose it at a seam. `primary_first_index` is where a
+window's own items start, after the repeated ones. The primary ranges
+partition the list, so per-item answers join back by index with exactly one
+answer per item.
+
+The helper measures with `harness.llm.estimate_state_tokens`, which is the
+same call the ceiling compares against the route's window. That is the whole
+point of the helper: a chars-per-token approximation produces windows that
+measure fine where they are built and are refused where they are sent, which
+is the failure the ceiling already reports and the helper exists to prevent.
+An item that cannot fit the budget on its own throws, because there is no
+window that would hold it.
+
+A native decision route has no equivalent escape. Its admission bounds encoded
+input and question count as a condition of being usable, so an evaluation site
+whose declared input type has no finite size bound is reported at check time
+as `HARN-LNT-079`.
+
 ## Site manifest
 
 `harn check --json` includes `files[].predicate_manifest`. A successful analysis
@@ -192,6 +234,7 @@ and model answers do not appear in this manifest.
 | `HARN-TYP-034` | A variant field is read before narrowing the outcome. |
 | `HARN-TYP-035` | A model lacks a required operation, or its route cannot be determined at check time. |
 | `HARN-TYP-036` | A question set is not a readable literal, or its ids or labels are not unique. |
+| `HARN-LNT-079` | A native decision route is given an input whose declared type has no finite size bound. |
 
 The [design explanation](design/probabilistic-branching.md) defines the remaining
 runtime, replay, budget, and provider contracts.

@@ -313,6 +313,18 @@ pub const EVALUATE: BuiltinSignature = BuiltinSignature::simple(
     EVALUATION_OUTCOME,
 );
 
+/// Measure a state the way the evaluator's own ceiling measures it.
+///
+/// The `state_too_large` arm compares a route's declared window against this
+/// number, so a caller that sizes its input with anything else is sizing it
+/// against a different ruler. Exposing the evaluator's own estimate is what
+/// lets a windowing helper promise a fit rather than approximate one.
+pub const ESTIMATE_STATE_TOKENS: BuiltinSignature = BuiltinSignature::simple(
+    "__cap_llm_estimate_state_tokens",
+    &[Param::new("state", Ty::Any)],
+    INT,
+);
+
 pub const EVALUATE_PREDICATE: BuiltinSignature = BuiltinSignature::simple(
     "__cap_llm_evaluate_predicate",
     &[

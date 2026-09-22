@@ -1,0 +1,95 @@
+import { disclosure_token_estimate } from "std/context/disclosure"
+import { evaluation_window_state, evaluation_windows } from "std/predicate"
+
+/**
+ * One ruler: a window the helper builds fits under the ceiling when the
+ * ceiling measures it, because both sides call the same estimator.
+ *
+ * The control below builds the same greedy fill with a stdlib character
+ * approximation instead. It reports a window inside the budget that the
+ * ceiling's own call then refuses, which is the defect this helper exists
+ * to prevent.
+ */
+pipeline test(harness: Harness, task: unknown) {
+  const items = sample_items()
+  const anchor = "shared anchor text"
+  const budget = 400
+  const windowing = evaluation_windows(
+    harness.llm,
+    items,
+    {anchor: anchor, budget_tokens: budget, overlap_items: 1},
+  )
+  // Every window the helper produced measures under the ceiling when the
+  // ceiling itself measures it, and the helper's planned size is that
+  // measurement rather than an approximation of it.
+  let every_window_fits = true
+  let every_plan_matches = true
+  for window in windowing.windows {
+    const measured = harness.llm.estimate_state_tokens(
+      evaluation_window_state(items.slice(window.first_index, window.last_index + 1), anchor),
+    )
+    if measured > budget {
+      every_window_fits = false
+    }
+    if measured != window.estimated_tokens {
+      every_plan_matches = false
+    }
+  }
+  harness.stdio.println(len(windowing.windows) > 1)
+  harness.stdio.println(every_window_fits)
+  harness.stdio.println(every_plan_matches)
+  // The control. A different ruler admits a window the ceiling refuses.
+  let taken = 0
+  while taken < len(items) {
+    const candidate = evaluation_window_state(items.slice(0, taken + 1), anchor)
+    if disclosure_token_estimate(json_stringify(candidate)) > budget {
+      break
+    }
+    taken = taken + 1
+  }
+  const control_window = evaluation_window_state(items.slice(0, taken), anchor)
+  const approximated = disclosure_token_estimate(json_stringify(control_window))
+  const measured = harness.llm.estimate_state_tokens(control_window)
+  harness.stdio.println(approximated <= budget)
+  harness.stdio.println(measured > budget)
+  // Coverage: the primary ranges partition the list, so a caller joining
+  // per-item answers by index keeps exactly one answer per item even though
+  // the overlap hands some items to two windows.
+  let covered = 0
+  let partitioned = true
+  let next_expected = 0
+  let anchor_in_every_window = true
+  for window in windowing.windows {
+    if window.primary_first_index != next_expected {
+      partitioned = false
+    }
+    covered = covered + (window.last_index - window.primary_first_index + 1)
+    next_expected = window.last_index + 1
+    const without_anchor = harness.llm.estimate_state_tokens(
+      evaluation_window_state(items.slice(window.first_index, window.last_index + 1), ""),
+    )
+    if without_anchor >= window.estimated_tokens {
+      anchor_in_every_window = false
+    }
+  }
+  harness.stdio.println(partitioned)
+  harness.stdio.println(covered == len(items))
+  harness.stdio.println(next_expected == len(items))
+  harness.stdio.println(anchor_in_every_window)
+  harness.stdio.println(
+    windowing.receipt
+      == "${to_string(len(windowing.windows))} window(s) over ${to_string(len(items))} item(s), "
+        + "budget ${to_string(budget)} token(s), anchor of ${to_string(windowing.anchor_tokens)} "
+        + "token(s) repeated in every window, 1 item(s) of overlap",
+  )
+}
+
+fn sample_items() -> list<any> {
+  let items: list<any> = []
+  let index = 0
+  while index < 80 {
+    items = items + [{id: index, text: "candidate ${to_string(index)} under review"}]
+    index = index + 1
+  }
+  return items
+}

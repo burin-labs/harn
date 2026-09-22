@@ -20,6 +20,13 @@ capability_method!(
     "Evaluate a declared question set over one shared state and require an explicit outcome disposition."
 );
 capability_method!(
+    llm_estimate_state_tokens,
+    "harness.llm.estimate_state_tokens",
+    [],
+    harn_builtin_meta::predicate::ESTIMATE_STATE_TOKENS,
+    "Measure a state with the evaluator's own token estimator, the one its state ceiling compares against."
+);
+capability_method!(
     llm_catalog_refresh,
     "harness.llm.catalog_refresh",
     ["llm.mutate@const=catalog"],

@@ -5,8 +5,11 @@ use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
-const PREDICATE_BUILTINS: &[&VmBuiltinDef] =
-    &[&EVALUATE_PREDICATE_BUILTIN_DEF, &EVALUATE_BUILTIN_DEF];
+const PREDICATE_BUILTINS: &[&VmBuiltinDef] = &[
+    &EVALUATE_PREDICATE_BUILTIN_DEF,
+    &EVALUATE_BUILTIN_DEF,
+    &ESTIMATE_STATE_TOKENS_BUILTIN_DEF,
+];
 
 pub(super) fn register(vm: &mut Vm) {
     register_builtin_defs(vm, PREDICATE_BUILTINS);
@@ -45,6 +48,27 @@ async fn evaluate_predicate_builtin(
 async fn evaluate_builtin(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let (outcome, _, _) = super::decision::evaluate(&ctx, &args).await?;
     Ok(outcome.into_value())
+}
+
+/// What the evaluator thinks a state costs, before sending it.
+///
+/// This is the number the `state_too_large` arm compares against a route's
+/// declared window, reached through the same two calls the ceiling makes. A
+/// caller sizing an input against any other estimate is sizing it against a
+/// ruler the refusal does not use, which is how a window that "fits" comes
+/// back refused.
+#[harn_builtin(
+    exposure = "harness.llm.estimate_state_tokens",
+    effects = [],
+    sig_expr = harn_builtin_meta::predicate::ESTIMATE_STATE_TOKENS,
+    category = "llm.predicate"
+)]
+fn estimate_state_tokens_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let state = args.first().cloned().unwrap_or(VmValue::Nil);
+    let json = super::helpers::vm_value_to_json(&state);
+    Ok(VmValue::Int(
+        super::decision::estimate_state_tokens(&json) as i64
+    ))
 }
 
 #[cfg(test)]
