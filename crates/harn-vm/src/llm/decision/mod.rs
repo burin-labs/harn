@@ -732,6 +732,7 @@ async fn dispatch(
     if let Some(usage) = response.usage {
         apply_structured_usage(receipt, usage);
     } else {
+        receipt.cost_admission = Some(receipt::CostAdmission::ConservativeUpperBound);
         match (response.input_tokens, response.output_tokens) {
             // Unknown usage keeps its reservation and says so. It is never
             // recorded as a free attempt.
@@ -900,6 +901,11 @@ fn apply_structured_usage(
     receipt: &mut EvaluationReceipt,
     usage: Box<crate::llm::usage::LlmUsage>,
 ) {
+    receipt.cost_admission = Some(if super::admission::remaining_allowance().is_some() {
+        receipt::CostAdmission::ConservativeUpperBound
+    } else {
+        receipt::CostAdmission::AdaptiveProjection
+    });
     receipt.cost_usd = usage.cost_usd;
     receipt.accounting_status = if usage.cost_usd.is_some() && usage.usage_unknown_calls == 0 {
         AccountingStatus::Settled

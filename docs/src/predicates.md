@@ -117,7 +117,7 @@ conservative ledger ceiling and retain a finite per-call price bound. A native
 classifier configured on an agent loop installs its explicit run ceiling before
 the first chat turn; earlier unreserved calls cannot be retroactively covered.
 Checking validates this shape and the resolved `decision` operation. A route
-with native structured-output support and text generation derives structured
+with a supported structured transport and text generation derives structured
 decision support at the catalog owner. An explicit unsupported schema override
 prevents that derivation. The checker makes no provider request and does
 not establish credential availability or a resource reservation. Unknown routes
@@ -173,10 +173,26 @@ before sending at most one request. Static `evaluate` retains its literal
 question and route admission and its precisely typed answer labels.
 
 Structured decision eligibility is resolved from the route's text-generation
-operation and native structured-schema capability. It is projected into the
-catalog and used by both static admission and execution. Explicit unsupported
-schema capabilities prevent this derivation; native decision protocols retain
-their separately declared limits and operation requirements.
+operation and typed transport strategy: native schema, tool schema, format
+schema, or prompt validation. Prompt validation is Harn's completed-response
+validation, not provider-native enforcement. Absent transport declarations
+retain prompt compatibility; explicit unsupported or unknown declarations
+refuse. The catalog, static admission, and execution share this owner. Native
+decision protocols retain precedence and their published limits.
+
+Structured calls use ordinary shared monetary admission. Without conservative
+authority, `evaluation_cost_limit` is an adaptive pre-call projection including
+messages, tools, and the provider-projected output schema. It is not a hard
+invoice ceiling. An explicit `run_cost_limit` requests conservative admission;
+that mode reserves a supported upper bound and refuses unsupported billing
+shapes. A completed receipt records `cost_admission` as `adaptive_projection`
+or `conservative_upper_bound`. Native decisions require conservative authority.
+
+Structured receipts carry the authoritative settled `usage`, including reported
+cache fields, on valid and malformed completed responses. Missing telemetry
+stays unavailable, and native receipts do not invent cache measurements. The
+identity's `structured_output_strategy` distinguishes provider schema enforcement
+from Harn prompt validation; native protocols leave it null.
 
 ## Outcome
 
