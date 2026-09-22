@@ -52,6 +52,7 @@ mod eval_coding_agent_dispatch;
 mod eval_context_cli;
 mod eval_prompt_dispatch;
 mod eval_skill_gate_cli;
+mod evaluation_receipt_verification;
 mod explain_dispatch;
 mod graph_cli;
 mod harn_script_lint_rules_dispatch;

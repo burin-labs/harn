@@ -13,6 +13,7 @@
 pub(crate) mod answer;
 pub(crate) mod backend;
 pub(crate) mod contract;
+pub mod identity;
 #[cfg(test)]
 pub(crate) mod mock;
 pub(crate) mod native;
@@ -33,7 +34,7 @@ use backend::{DecisionBackend, DecisionRequest, DecisionTransportError, RefusalR
 use contract::DecisionContract;
 use outcome::Outcome;
 use question::QuestionSet;
-use receipt::{AccountingStatus, EvaluationIdentity, EvaluationReceipt, EvaluationSource};
+use receipt::{AccountingStatus, EvaluationReceipt, EvaluationSource};
 
 use crate::value::{VmError, VmValue};
 
@@ -182,6 +183,24 @@ struct Evaluation {
     state: serde_json::Value,
     questions: QuestionSet,
     policy: EvaluationPolicy,
+}
+
+impl Evaluation {
+    fn from_arguments(args: &[VmValue]) -> Result<(String, Self), VmError> {
+        let [id, state, questions, policy] = args else {
+            return Err(VmError::Runtime(
+                "evaluate expects (id, state, questions, policy)".into(),
+            ));
+        };
+        Ok((
+            id.as_str_cow().into_owned(),
+            Self {
+                policy: EvaluationPolicy::from_value(policy).map_err(VmError::Runtime)?,
+                questions: QuestionSet::from_value(questions).map_err(VmError::Runtime)?,
+                state: crate::llm::helpers::vm_value_to_json(state),
+            },
+        ))
+    }
 }
 
 /// A backend installed for the current process, replacing live transport.
@@ -363,12 +382,13 @@ pub async fn evaluate_json(
     questions: serde_json::Value,
     policy: serde_json::Value,
 ) -> Result<EvaluationResult, VmError> {
-    let args = [
-        VmValue::string(site_id),
-        crate::schema::json_to_vm_value(&state),
-        crate::schema::json_to_vm_value(&questions),
-        crate::schema::json_to_vm_value(&policy),
-    ];
+    let args = identity::EvaluationRequest {
+        site_id: site_id.into(),
+        state,
+        questions,
+        policy,
+    }
+    .arguments();
     let (outcome, _, _, receipt) = evaluate_internal(ctx, &args).await?;
     Ok(EvaluationResult {
         outcome: crate::llm::helpers::vm_value_to_json(&outcome.into_value()),
@@ -380,15 +400,14 @@ async fn evaluate_internal(
     ctx: &crate::vm::AsyncBuiltinCtx,
     args: &[VmValue],
 ) -> Result<(Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt), VmError> {
-    let [id, state, questions, policy] = args else {
-        return Err(VmError::Runtime(
-            "evaluate expects (id, state, questions, policy)".into(),
-        ));
-    };
-    let id = id.as_str_cow().into_owned();
-    let policy = EvaluationPolicy::from_value(policy).map_err(VmError::Runtime)?;
-    let questions = QuestionSet::from_value(questions).map_err(VmError::Runtime)?;
-    let state = crate::llm::helpers::vm_value_to_json(state);
+    let (
+        id,
+        Evaluation {
+            policy,
+            questions,
+            state,
+        },
+    ) = Evaluation::from_arguments(args)?;
     let started = decision_started();
     let publish = |receipt: &EvaluationReceipt| {
         ctx.record_evaluation_receipt(receipt.clone());
@@ -396,36 +415,8 @@ async fn evaluate_internal(
     };
 
     let route = resolve_route(&policy.provider, &policy.model);
-    let canonical_state = crate::canonical_json::to_vec(&state);
-    let identity = EvaluationIdentity {
-        contract_version: receipt::EVALUATION_IDENTITY_CONTRACT.into(),
-        structured_output_strategy: route
-            .as_ref()
-            .and_then(|route| route.structured_output_strategy)
-            .map(|strategy| strategy.as_str().to_string()),
-        input_digest: digest_parts(std::iter::once(
-            std::str::from_utf8(&canonical_state).unwrap_or(""),
-        )),
-        canonical_input_type: state_type_name(&state).into(),
-        question_set_digest: question_set_digest(&questions),
-        policy_digest: policy.digest(),
-        evaluator_instruction_version: if route
-            .as_ref()
-            .is_some_and(|route| route.protocol.is_native())
-        {
-            "harn.evaluator.native.v2".into()
-        } else {
-            structured::EVALUATOR_INSTRUCTION_VERSION.into()
-        },
-        output_schema_version: structured::OUTPUT_SCHEMA_VERSION.into(),
-        backend_kind: policy.backend.as_str().into(),
-        protocol: route
-            .as_ref()
-            .map(|route| route.protocol.as_str().to_string())
-            .unwrap_or_else(|| "unresolved".into()),
-    };
-    let identity_json = serde_json::to_string(&identity).expect("evaluation identity serializes");
-    let evaluation_id = digest_parts([id.as_str(), identity_json.as_str()].into_iter());
+    let identity = identity::request_identity(&state, &questions, &policy, route.as_ref());
+    let evaluation_id = identity::request_id(&id, &identity);
 
     let mut receipt = EvaluationReceipt::not_dispatched(
         evaluation_id,
