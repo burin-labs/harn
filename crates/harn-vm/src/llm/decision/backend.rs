@@ -54,6 +54,13 @@ pub enum ConfidenceProvenance {
 /// distribution over exactly the question's declared labels.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawAnswer {
+    /// A structured model names an answer and separately estimates its
+    /// confidence. The name must not be reconstructed from that estimate.
+    ModelReported {
+        selection: ReportedSelection,
+        confidence: f64,
+        evidence: Option<String>,
+    },
     Boolean {
         probability: f64,
         /// Present only when the backend reports its own number.
@@ -71,6 +78,13 @@ pub enum RawAnswer {
         reported_confidence: Option<f64>,
         evidence: Option<String>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReportedSelection {
+    Boolean(bool),
+    Choice(String),
+    Score(String),
 }
 
 /// What a backend returns. `answers` is keyed by question id and is not
