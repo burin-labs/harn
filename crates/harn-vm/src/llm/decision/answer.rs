@@ -15,7 +15,8 @@ use super::question::{Question, QuestionBody};
 
 /// The provenance of a confidence number. These are different quantities and
 /// one threshold does not equalize their error rates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ConfidenceKind {
     /// Derived by the evaluator from a single yes-probability.
     BinaryProbability,

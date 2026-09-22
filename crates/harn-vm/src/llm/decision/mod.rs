@@ -70,7 +70,7 @@ impl BackendKind {
 }
 
 impl EvaluationPolicy {
-    fn from_value(value: &VmValue) -> Result<Self, String> {
+    pub(crate) fn from_value(value: &VmValue) -> Result<Self, String> {
         let fields = value
             .as_dict()
             .ok_or_else(|| "evaluation policy must be a record".to_string())?;
