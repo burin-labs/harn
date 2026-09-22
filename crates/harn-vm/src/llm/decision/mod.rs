@@ -10,6 +10,7 @@
 //! the single-boolean projection of `harness.llm.evaluate`, projected at the
 //! end rather than implemented twice, so the two cannot refuse differently.
 
+mod accounting;
 pub(crate) mod answer;
 pub(crate) mod backend;
 pub(crate) mod contract;
@@ -629,6 +630,9 @@ async fn evaluate_internal(
     }
     receipt.outcome_kind = outcome.kind.into();
     receipt.elapsed_ms = started.elapsed().as_millis() as u64;
+    if evaluation.policy.backend == BackendKind::NativeDecision {
+        accounting::record_native(&mut receipt);
+    }
     receipt.record_answers(&answers);
     publish(&receipt);
     Ok((outcome, answers, evaluation.policy, receipt))

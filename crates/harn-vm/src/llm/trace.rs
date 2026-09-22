@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use super::usage::{summarize_usage_cost_certainty, UsageCostCertainty};
+use super::usage::UsageCostCertainty;
 
 /// A single LLM call trace entry.
 #[derive(Debug, Clone)]
@@ -18,15 +18,17 @@ pub struct LlmTraceEntry {
     pub duration_ms: u64,
 }
 
-/// Canonical aggregate of the current thread's completed LLM trace.
+/// Canonical aggregate of the current thread's completed LLM calls.
 ///
-/// The trace owns this reduction so terminal receipts, workflow accounting,
-/// and CLI summaries cannot each add tokens and price certainty differently.
+/// Always collected in constant space, independently of detailed trace capture,
+/// so session accounting cannot change when diagnostics are enabled or drained.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct LlmTraceUsageSummary {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub duration_ms: i64,
+    /// Completed logical calls. Physical attempts, including retries and
+    /// explicit zero-dispatch reuse, come from each ledger's cost certainty.
     pub call_count: i64,
     pub cost: UsageCostCertainty,
 }
@@ -34,6 +36,7 @@ pub struct LlmTraceUsageSummary {
 thread_local! {
     static LLM_TRACE: RefCell<Vec<LlmTraceEntry>> = const { RefCell::new(Vec::new()) };
     static LLM_TRACING_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+    static LLM_USAGE_SUMMARY: RefCell<LlmTraceUsageSummary> = RefCell::new(LlmTraceUsageSummary::default());
 }
 
 /// Enable LLM tracing for the current thread.
@@ -41,7 +44,7 @@ pub fn enable_tracing() {
     LLM_TRACING_ENABLED.with(|v| *v.borrow_mut() = true);
 }
 
-/// Get and clear the trace log.
+/// Get and clear the detailed trace log. Session accounting remains intact.
 pub fn take_trace() -> Vec<LlmTraceEntry> {
     LLM_TRACE.with(|v| std::mem::take(&mut *v.borrow_mut()))
 }
@@ -51,7 +54,7 @@ pub fn peek_trace() -> Vec<LlmTraceEntry> {
     LLM_TRACE.with(|v| v.borrow().clone())
 }
 
-/// Summarize trace usage without consuming entries.
+/// Read session usage without consuming detailed trace entries.
 pub fn peek_trace_summary() -> (i64, i64, i64, i64) {
     let summary = peek_trace_usage_summary();
     (
@@ -62,31 +65,33 @@ pub fn peek_trace_summary() -> (i64, i64, i64, i64) {
     )
 }
 
-/// Summarize trace usage and its pricing certainty without consuming entries.
+/// Read session usage and certainty, including calls made with tracing disabled.
 pub fn peek_trace_usage_summary() -> LlmTraceUsageSummary {
-    LLM_TRACE.with(|v| {
-        let entries = v.borrow();
-        let mut summary = LlmTraceUsageSummary {
-            call_count: entries.len() as i64,
-            ..LlmTraceUsageSummary::default()
-        };
-        for e in entries.iter() {
-            summary.input_tokens += e.usage.input_tokens;
-            summary.output_tokens += e.usage.output_tokens;
-            summary.duration_ms += e.duration_ms as i64;
-        }
-        summary.cost = summarize_usage_cost_certainty(entries.iter().map(|entry| &entry.usage));
-        summary
-    })
+    LLM_USAGE_SUMMARY.with(|summary| *summary.borrow())
 }
 
 /// Reset thread-local trace state. Call between test runs.
 pub(crate) fn reset_trace_state() {
     LLM_TRACE.with(|v| v.borrow_mut().clear());
     LLM_TRACING_ENABLED.with(|v| *v.borrow_mut() = false);
+    LLM_USAGE_SUMMARY.with(|summary| *summary.borrow_mut() = LlmTraceUsageSummary::default());
 }
 
 pub(crate) fn trace_llm_call(entry: LlmTraceEntry) {
+    LLM_USAGE_SUMMARY.with(|summary| {
+        let mut summary = summary.borrow_mut();
+        summary.call_count = summary.call_count.saturating_add(1);
+        summary.input_tokens = summary
+            .input_tokens
+            .saturating_add(entry.usage.input_tokens);
+        summary.output_tokens = summary
+            .output_tokens
+            .saturating_add(entry.usage.output_tokens);
+        summary.duration_ms = summary
+            .duration_ms
+            .saturating_add(i64::try_from(entry.duration_ms).unwrap_or(i64::MAX));
+        summary.cost.record(&entry.usage);
+    });
     LLM_TRACING_ENABLED.with(|enabled| {
         if *enabled.borrow() {
             LLM_TRACE.with(|v| v.borrow_mut().push(entry));
@@ -351,4 +356,56 @@ fn agent_trace_summary_inner(facts: Option<&AgentLoopFacts>) -> serde_json::Valu
 /// Reset agent trace state. Call between test runs.
 pub(crate) fn reset_agent_trace_state() {
     AGENT_TRACE.with(|v| v.borrow_mut().clear());
+}
+
+#[cfg(test)]
+mod accounting_tests {
+    use super::*;
+    use crate::llm::usage::LlmUsage;
+
+    fn record(usage: LlmUsage) {
+        trace_llm_call(LlmTraceEntry {
+            model: "fixture".into(),
+            provider: "fixture".into(),
+            usage,
+            duration_ms: 7,
+        });
+    }
+
+    #[test]
+    fn accounting_survives_disabled_capture_and_trace_drain() {
+        reset_trace_state();
+        let mut settled = LlmUsage::known_zero_attempt();
+        settled.input_tokens = 100;
+        settled.output_tokens = 20;
+        settled.cost_usd = Some(0.003);
+        settled.known_cost_usd = 0.003;
+        record(LlmUsage::aggregate(&[settled, LlmUsage::unknown_attempt()]));
+        assert!(peek_trace().is_empty(), "detailed capture remains opt-in");
+        let retry = peek_trace_usage_summary();
+        assert_eq!(retry.call_count, 1, "one logical completion");
+        assert_eq!(retry.cost.provider_call_count, 2, "two physical attempts");
+        assert_eq!((retry.input_tokens, retry.output_tokens), (100, 20));
+        assert_eq!(retry.cost.known_cost_usd, 0.003);
+        assert_eq!(retry.cost.unpriced_calls, 1);
+        assert_eq!(retry.cost.usage_unknown_calls, 1);
+        assert!(retry.cost.projected_cost_usd().is_none());
+
+        enable_tracing();
+        record(LlmUsage::no_provider_request());
+        let complete = peek_trace_usage_summary();
+        assert_eq!(complete.call_count, 2);
+        assert_eq!(
+            complete.cost.provider_call_count, 2,
+            "reuse adds no dispatch"
+        );
+        assert_eq!(take_trace().len(), 1, "only the captured call is retained");
+        assert_eq!(
+            peek_trace_usage_summary(),
+            complete,
+            "draining diagnostics cannot erase accounting"
+        );
+        reset_trace_state();
+        assert_eq!(peek_trace_usage_summary(), LlmTraceUsageSummary::default());
+    }
 }

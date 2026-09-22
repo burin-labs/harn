@@ -112,8 +112,9 @@ pub struct EvaluationReceipt {
     /// actual bill; conservative admission reserves a supported upper bound.
     #[serde(default)]
     pub cost_admission: Option<CostAdmission>,
-    /// Authoritative structured-call settlement. Absence is unavailable
-    /// telemetry, never a measured zero or a native cache claim.
+    /// Canonical observed call usage. Native unknown usage remains unpriced
+    /// even when cost_usd retains an admission reservation. Absent cache
+    /// declarations never imply a measured native cache hit or miss.
     #[serde(default)]
     pub usage: Option<Box<crate::llm::usage::LlmUsage>>,
     pub native_transport: Option<NativeTransportReceipt>,

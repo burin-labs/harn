@@ -280,7 +280,7 @@ fn run_summary_llm_from_parts(
         input_tokens,
         output_tokens,
         time_ms,
-        cost_usd: (certainty.unpriced_calls == 0).then_some(certainty.known_cost_usd),
+        cost_usd: certainty.cost_usd(),
         known_cost_usd: certainty.known_cost_usd,
         unpriced_calls: certainty.unpriced_calls,
         usage_unknown_calls: certainty.usage_unknown_calls,
