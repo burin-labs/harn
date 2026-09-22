@@ -8,6 +8,7 @@ const items = fs.readdirSync(root).flatMap(name => {
   return fs.existsSync(file) ? [JSON.parse(fs.readFileSync(file, 'utf8'))] : [];
 });
 const expectedRows = manifest.repetitions * manifest.arms.length * corpus.length;
+if (items.some(item => !Number.isFinite(item.cost_usd))) throw Error('study contains unmeasured cost');
 if (items.length !== expectedRows) throw Error(`incomplete study: ${items.length}/${expectedRows}`);
 const keys = new Set(items.map(x => `${x.repeat}:${x.row_id}:${x.arm}`));
 for (let repeat = 0; repeat < manifest.repetitions; repeat++) for (const row of corpus) for (const arm of manifest.arms) {
@@ -47,6 +48,7 @@ for (const arm of arms) {
   report.arms[arm] = {rows: subset.length, correct_recovery_and_tool: subset.filter(correct).length, false_recovery: subset.filter(x => recovery(x) && !x.expected.intended).length, missed_recovery: subset.filter(x => !recovery(x) && x.expected.intended).length, ambiguous: subset.filter(x => observation(x).verdict.action === 'ambiguous').length, failures: subset.filter(x => observation(x).verdict.error).length, completed_runs: subset.filter(x => x.observed.status === 'done').length, classifier_latency_ms: {median: quantile(subset.map(x => observation(x).elapsed_ms), .5), max: Math.max(...subset.map(x => observation(x).elapsed_ms))}, run_latency_ms_median: quantile(subset.map(x => x.observed.elapsed_ms), .5), cost_usd: subset.reduce((n,x) => n+x.cost_usd,0), cache: {reported_rows: cache.filter(x => x !== null).length, unavailable_rows: cache.filter(x => x === null).length, positive_rows: cache.filter(x => x > 0).length}, by_language: Object.fromEntries(['en','es','fr'].map(lang => {const xs = subset.filter(x => x.language === lang); return [lang,{rows:xs.length,correct:xs.filter(correct).length}]}))};
 }
 report.paired = Object.fromEntries(['native_decision','structured_decision'].map(arm => [arm + '_minus_legacy', {accuracy: paired(arm,'legacy_structured', x => Number(correct(x))), latency_ms: paired(arm,'legacy_structured', x => observation(x).elapsed_ms), cost_usd: paired(arm,'legacy_structured', x => x.cost_usd)}]));
+if (arms.includes('original_structured')) report.paired.revised_structured_minus_original = {accuracy: paired('structured_decision','original_structured', x => Number(correct(x))), latency_ms: paired('structured_decision','original_structured', x => observation(x).elapsed_ms), cost_usd: paired('structured_decision','original_structured', x => x.cost_usd)};
 const pairs = items.filter(x => x.arm === 'native_decision').flatMap(native => {
   const structured = items.find(x => x.arm === 'structured_decision' && x.repeat === native.repeat && x.row_id === native.row_id);
   return structured ? [{same_action: observation(native).verdict.action === observation(structured).verdict.action, same_recovery: recovery(native) === recovery(structured), same_positive_tool: !recovery(native) || !recovery(structured) || observation(native).verdict.tool_name === observation(structured).verdict.tool_name}] : [];
