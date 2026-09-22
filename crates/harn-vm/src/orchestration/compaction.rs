@@ -1112,15 +1112,21 @@ pub(crate) async fn auto_compact_messages_with_result(
     config: &AutoCompactConfig,
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
 ) -> Result<Option<AutoCompactResult>, VmError> {
-    auto_compact_messages_with_result_with_ctx(None, messages, config, llm_opts).await
+    let Some((result, candidate)) =
+        prepare_compaction_messages_with_ctx(None, messages, config, llm_opts).await?
+    else {
+        return Ok(None);
+    };
+    *messages = candidate;
+    Ok(Some(result))
 }
 
-pub(crate) async fn auto_compact_messages_with_result_with_ctx(
+pub(crate) async fn prepare_compaction_messages_with_ctx(
     ctx: Option<&AsyncBuiltinCtx>,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &[serde_json::Value],
     config: &AutoCompactConfig,
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
-) -> Result<Option<AutoCompactResult>, VmError> {
+) -> Result<Option<(AutoCompactResult, Vec<serde_json::Value>)>, VmError> {
     if config.token_threshold > 0 && estimate_message_tokens(messages) <= config.token_threshold {
         return Ok(None);
     }
@@ -1168,6 +1174,30 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
     if split_at <= compact_start {
         return Ok(None);
     }
+    // Mutating the caller before an awaited strategy succeeds loses source
+    // context on refusal, cancellation, or a dropped future. Allocate only
+    // after compaction is admitted, then publish the complete candidate once.
+    let mut candidate = messages.to_vec();
+    let result = Box::pin(compact_selected_window(
+        ctx,
+        &mut candidate,
+        config,
+        llm_opts,
+        compact_start,
+        split_at,
+    ))
+    .await?;
+    Ok(Some((result, candidate)))
+}
+
+async fn compact_selected_window(
+    ctx: Option<&AsyncBuiltinCtx>,
+    messages: &mut Vec<serde_json::Value>,
+    config: &AutoCompactConfig,
+    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
+    compact_start: usize,
+    split_at: usize,
+) -> Result<AutoCompactResult, VmError> {
     let old_messages: Vec<_> = messages.drain(compact_start..split_at).collect();
     let archived_count = old_messages.len();
 
@@ -1251,11 +1281,9 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
     // A non-empty source window whose summary carried zero source bytes is a
     // failed compaction, not a small one. Every summarizer has already taken its
     // one bounded deterministic retry by this point, so this is the terminal
-    // path: put the source window back exactly as it was drained and refuse,
-    // rather than replacing real context with a bare header.
+    // path: refuse the candidate without publishing it, rather than replacing
+    // real context with a bare header.
     if measurement.discarded_source_context() {
-        let restored = old_messages;
-        messages.splice(compact_start..compact_start, restored);
         return Err(VmError::Runtime(format!(
             "transcript compaction refused: the summary carried 0 of {source_bytes} source \
              bytes across {archived_count} archived messages (summary was {} bytes, all \
@@ -1276,12 +1304,12 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
             "content": summary,
         }),
     );
-    Ok(Some(AutoCompactResult {
+    Ok(AutoCompactResult {
         summary,
         strategy,
         recap_metrics,
         measurement,
-    }))
+    })
 }
 
 /// Auto-compact a message list in place using two-tier compaction.
