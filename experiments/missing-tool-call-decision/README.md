@@ -17,9 +17,9 @@ classifier overhead, not whether a live coding agent subsequently solves a task.
 
 | Arm | Correct recovery and tool | False recoveries | Missed recoveries | Median classifier ms | Cost for 60 runs |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Legacy structured, GPT-5.4 nano | 55/60 | 0 | 5 | 1,245 | $0.00999725 |
-| Structured evaluator, GPT-5.4 nano | 57/60 | 3 | 0 | 1,318 | $0.01418100 |
-| Native evaluator, Jev 1.13 | 60/60 | 0 | 0 | 203 | $0.00169680 |
+| Legacy structured, GPT-5.4 nano | 55/60 | 0 | 5 | 1,244.5 | $0.00999725 |
+| Structured evaluator, GPT-5.4 nano | 57/60 | 3 | 0 | 1,315 | $0.01418100 |
+| Native evaluator, Jev 1.13 | 60/60 | 0 | 0 | 202.5 | $0.00169680 |
 
 All arms completed 60 replay runs with zero transport failures. Total measured
 study cost was $0.02587505 against a predeclared $2 ceiling. Provider-reported
