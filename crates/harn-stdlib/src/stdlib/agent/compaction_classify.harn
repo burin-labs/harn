@@ -19,6 +19,14 @@ pub type CompactionClassifyDecision = {
   evaluation_receipt: string,
 }
 
+pub type CompactionClassifyFixtureInput = {
+  items: list<CompactionClassifyItem>,
+  anchor: string,
+  round: int,
+}
+
+pub type CompactionClassifyFixture = fn(CompactionClassifyFixtureInput) -> list<CompactionClassifyDecision>
+
 pub type CompactionClassifyRequest = {
   items: list<CompactionClassifyItem>,
   anchor: string,
@@ -26,10 +34,11 @@ pub type CompactionClassifyRequest = {
   budget_tokens: int,
   max_questions: int,
   policy: EvaluationPolicy,
+  fixture?: CompactionClassifyFixture,
 }
 
 pub type CompactionClassifyRound = {
-  kind: "answered" | "unavailable",
+  kind: "answered" | "unavailable" | "window_refused",
   decisions: list<CompactionClassifyDecision>,
   reason: string,
 }
@@ -46,15 +55,28 @@ pub fn classify_compaction_round(
   harness: {fs: HarnessFs, llm: HarnessLlm},
   request: CompactionClassifyRequest,
 ) -> CompactionClassifyRound {
-  const planned = evaluation_windows(
-    harness.llm,
-    request.items,
-    {
-      anchor: request.anchor,
-      budget_tokens: request.budget_tokens,
-      max_items: request.max_questions,
-    },
-  )
+  const planning = try {
+    evaluation_windows(
+      harness.llm,
+      request.items,
+      {
+        anchor: request.anchor,
+        budget_tokens: request.budget_tokens,
+        max_items: request.max_questions,
+      },
+    )
+  }
+  if is_err(planning) {
+    return {kind: "window_refused", decisions: [], reason: to_string(unwrap_err(planning))}
+  }
+  const planned = unwrap(planning)
+  if request?.fixture != nil {
+    return {
+      kind: "answered",
+      decisions: request.fixture({items: request.items, anchor: request.anchor, round: request.round}),
+      reason: "",
+    }
+  }
   let decisions: list<CompactionClassifyDecision> = []
   for window in planned.windows {
     const items = request.items.slice(window.first_index, window.last_index + 1)
