@@ -398,6 +398,7 @@ async fn evaluate_internal(
     let route = resolve_route(&policy.provider, &policy.model);
     let canonical_state = crate::canonical_json::to_vec(&state);
     let identity = EvaluationIdentity {
+        contract_version: receipt::EVALUATION_IDENTITY_CONTRACT.into(),
         structured_output_strategy: route
             .as_ref()
             .and_then(|route| route.structured_output_strategy)

@@ -77,6 +77,11 @@ pub enum CostAdmission {
 /// consumer can see which facts a reuse decision rests on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvaluationIdentity {
+    /// Version of canonical request normalization and stable identity hashing.
+    /// An absent stamp remains readable historical evidence, but is not eligible
+    /// for verification under a later identity contract.
+    #[serde(default)]
+    pub contract_version: String,
     #[serde(default)]
     pub structured_output_strategy: Option<String>,
     pub input_digest: String,
@@ -88,6 +93,8 @@ pub struct EvaluationIdentity {
     pub backend_kind: String,
     pub protocol: String,
 }
+
+pub const EVALUATION_IDENTITY_CONTRACT: &str = "harn.evaluation_identity.v1";
 
 /// One question's raw answer as the backend reported it, before conversion.
 /// A calibration study reads these, not the derived confidence.
