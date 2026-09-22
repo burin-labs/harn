@@ -637,6 +637,35 @@ Available strategies:
 | `"summarize_middle"` | Summarize older messages and keep the latest suffix verbatim |
 | `"summarize_all"` | Summarize all compactable prompt-visible messages |
 | `"hybrid"` | Summarize older messages, keep the latest suffix, and use truncate as the hard-limit fallback |
+| `"classify"` | Classify eligible archived messages as keep, reword, or drop; preserve low-confidence content without a positional hard-limit pass |
+
+The `classify` strategy requires `compaction.classify.policy`, using the existing
+`EvaluationPolicy` contract from `std/predicate`. Its `threshold` is the confidence
+floor: below it, drop becomes reword and reword becomes keep. A failed rewrite
+keeps the original message. Pinned messages and the latest prior recap bypass
+classification; the latest user message anchors every evaluation window.
+
+| Classification option | Default | Meaning |
+|---|---|---|
+| `policy` | required | Evaluator route, backend, confidence floor, and budget authority |
+| `max_rounds` | `2` | Positive round limit; later rounds consider only raw keep decisions while the byte budget is unmet |
+| `window_tokens` | route state window | Positive tighter window bound; question counts also respect the route contract |
+| `fixture` | absent | Typed `CompactionClassifyFixture` from `std/agent/compaction_classify` for offline decisions |
+| `rewrite_fixture` | absent | Typed function from a list of `CompactionClassifyItem` to `{index, text}` records |
+
+Only a window-planning refusal before dispatch uses observation-mask fallback.
+Other classifier failures return an error without changing the transcript.
+An all-drop result still passes through the lifecycle's nonempty-source guard;
+setting the floor to zero does not authorize replacing nonempty source with an
+empty recap. Cancellation propagates before fallback and commits no transcript
+edit. An explicit `summarize_prompt` path runs the configured summary after
+classification, preserving protected text verbatim.
+
+Summary and rewrite calls retain admitted route, privacy, and budget settings
+while replacing conversation state and removing tool authority. Nonempty raw
+provider wire overrides cannot safely cross this isolated-request boundary and
+are refused. Rewrite refusal preserves source; ordinary summary failure follows
+its declared fallback policy.
 
 Compaction emits `TranscriptCompacted` live events and transcript
 `compaction` events with `reason`, `strategy`, `engine_strategy`,
@@ -646,6 +675,19 @@ Compaction emits `TranscriptCompacted` live events and transcript
 `compaction_policy`, so replay tools can verify which trigger, policy, engine,
 and host/user instruction lane ran. `source_measurement: nil` means the path did
 not measure source or summary bytes; contained zeroes are measured zeroes.
+
+Receipt schema 2 adds optional `classification` evidence: status, confidence
+floor, rounds, byte budget and result size, whether the budget was met, whether
+the configured summary ran, decisions, and any predispatch fallback reason.
+Each decision carries its source index, question id, reported choice and
+confidence provenance, evaluator receipt id, round, fixture/evaluation source,
+applied choice, and application reason. The byte result describes this stage
+before separately appended policy or repair guidance. The same typed evidence
+reaches transcript events, run records, and client notifications. Legacy receipts
+retain schema 1; absent classification means that stage was not measured.
+
+Offline fixtures prove application, admission, and lifecycle behavior. They do
+not establish classifier quality or improved task success on real conversations.
 
 Hosts can attach first-class compaction instructions without building custom
 prompt concatenation. The typed `CompactionPolicy` shape accepts

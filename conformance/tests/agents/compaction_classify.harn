@@ -4,7 +4,7 @@ import {
   CompactionClassifyItem,
   CompactionFixtureInput,
 } from "std/agent/compaction_classify"
-import { agent_session_init } from "std/agent/state"
+import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
 fn drop_low(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
   let decisions: list<CompactionClassifyDecision> = []
@@ -252,6 +252,13 @@ pipeline test(harness: Harness) {
   const loop_messages = harness.agent.session_messages(loop_session.session_id)
   assert(loop_messages[0].content.contains("retained 0"), "agent loop reached classification")
   assert_eq(len(harness.llm.mock_calls()), 0)
+  agent_session_finalize(
+    harness.agent,
+    loop_session.session_id,
+    {final_status: "done", stop_reason: "test", iterations: 0},
+  )
+  harness.agent.close(loop_session.session_id)
+  harness.agent.close(session)
   harness.stdio.println(
     "classified compaction preserves low-confidence source and reports window fallback",
   )
