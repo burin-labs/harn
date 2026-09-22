@@ -31,7 +31,7 @@ pub(crate) use reminders::{
     pending_reminders_from_session, render_pending_reminders, DIRECTIVE_IDS_KEY,
 };
 #[cfg(test)]
-pub(crate) use reminders::{strip_directive_commit_metadata, tracked_directive_envelope_message};
+pub(crate) use reminders::{strip_internal_message_metadata, tracked_directive_envelope_message};
 pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 
 #[cfg(test)]

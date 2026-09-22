@@ -20,7 +20,7 @@ pub(crate) use options::{
     system_prompt_metadata, uncommitted_directives, validate_llm_option_keys, validate_options,
 };
 #[cfg(test)]
-pub(crate) use options::{strip_directive_commit_metadata, tracked_directive_envelope_message};
+pub(crate) use options::{strip_internal_message_metadata, tracked_directive_envelope_message};
 pub(crate) use provider::{
     vm_resolve_model, vm_resolve_model_selector, vm_resolve_provider, ResolvedProvider,
 };

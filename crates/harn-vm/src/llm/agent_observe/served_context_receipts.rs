@@ -916,7 +916,7 @@ mod tests {
         );
         let lineage = crate::llm::message_lineage::take_from_messages(&mut messages)
             .expect("directive lineage");
-        crate::llm::helpers::strip_directive_commit_metadata(&mut messages);
+        crate::llm::helpers::strip_internal_message_metadata(&mut messages);
 
         assert_eq!(
             lineage.messages[0].semantic_kind,
@@ -1179,7 +1179,7 @@ mod tests {
         let message_lineage =
             crate::llm::message_lineage::take_from_messages(&mut provider_messages)
                 .expect("projection and visible-message owners attach complete lineage");
-        crate::llm::helpers::strip_directive_commit_metadata(&mut provider_messages);
+        crate::llm::helpers::strip_internal_message_metadata(&mut provider_messages);
 
         let mut opts = crate::llm::api::options::base_opts("openai");
         opts.model = "gpt-test".to_string();

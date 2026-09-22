@@ -178,13 +178,14 @@ pub(crate) fn tracked_directive_envelope_message(
     .expect("tracked directive is non-empty")
 }
 
-/// Remove durable placement receipts before a message array reaches any
-/// provider. The receipts distinguish reminder instances inside Harn; the
-/// model-facing directive text carries authority and lifetime, not IDs.
-pub(crate) fn strip_directive_commit_metadata(messages: &mut [serde_json::Value]) {
+/// Remove transcript-only metadata before admission and provider dispatch.
+/// The model-facing text retains the correction and directive authority;
+/// placement IDs and withdrawn-report markers remain in the durable transcript.
+pub(crate) fn strip_internal_message_metadata(messages: &mut [serde_json::Value]) {
     for message in messages {
         if let Some(object) = message.as_object_mut() {
             object.remove(DIRECTIVE_IDS_KEY);
+            object.remove(crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY);
         }
     }
 }

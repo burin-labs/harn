@@ -29,6 +29,7 @@
 // which is the exact reading harn#8229 exists to prevent, surviving on the half
 // of the ladder it did not reach.
 import { CompletionEvidenceSnapshot } from "std/agent/completion_evidence"
+import { CompletionPrecheckResult } from "std/agent/completion_precheck"
 import {
   CompletionRequirementBoundary,
   CompletionRequirementReport,
@@ -51,6 +52,7 @@ pub type CompletionJudgeInvocations = {
 /** Normalized result from either a deterministic or model completion check. */
 pub type CompletionStageVerdict = {
   vetoed: bool,
+  precheck?: CompletionPrecheckResult?,
   confirm?: bool,
   verdict?: string,
   feedback?: string?,
