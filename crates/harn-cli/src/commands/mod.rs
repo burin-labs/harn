@@ -27,6 +27,7 @@ pub(crate) mod dump_prompt_grammar;
 pub(crate) mod dump_protocol_artifacts;
 pub(crate) mod dump_trigger_quickref;
 pub(crate) mod embedded_report;
+pub(crate) mod eval_calibrate;
 pub mod eval_coding_agent;
 pub(crate) mod eval_coding_agent_preset;
 pub mod eval_context;
