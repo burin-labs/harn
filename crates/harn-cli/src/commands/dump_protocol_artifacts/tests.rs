@@ -44,6 +44,7 @@ mod plan;
 mod prepared_session;
 mod session_recap;
 mod session_update_payloads;
+mod swift_required_nullable_decoder;
 
 fn protocol_source() -> ProtocolArtifactSource {
     ProtocolArtifactSource::from_anchor(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))

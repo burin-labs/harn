@@ -3186,6 +3186,20 @@ public struct HarnACPArtifactUpdateMetaHarn: Codable, Sendable, Equatable {
         case sizeBytes
     }
 
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        artifactId = try values.decode(String.self, forKey: .artifactId)
+        title = try values.decode(String?.self, forKey: .title)
+        spec = try values.decode(HarnACPValue.self, forKey: .spec)
+        metadata = try values.decode(HarnACPValue.self, forKey: .metadata)
+        provenance = try values.decode(HarnACPValue.self, forKey: .provenance)
+        fallback = try values.decodeIfPresent(String.self, forKey: .fallback)
+        kind = try values.decodeIfPresent(String.self, forKey: .kind)
+        mimeType = try values.decodeIfPresent(String.self, forKey: .mimeType)
+        replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
+        sizeBytes = try values.decodeIfPresent(Int.self, forKey: .sizeBytes)
+    }
+
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(artifactId, forKey: .artifactId)
@@ -3449,6 +3463,18 @@ public struct HarnACPReminderEmittedUpdateMetaHarnReminder: Codable, Sendable, E
         case authority
     }
 
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        reminderId = try values.decode(String.self, forKey: .reminderId)
+        tags = try values.decode([String].self, forKey: .tags)
+        body = try values.decode(String.self, forKey: .body)
+        roleHint = try values.decode(String.self, forKey: .roleHint)
+        renderedRole = try values.decode(String.self, forKey: .renderedRole)
+        source = try values.decode(String.self, forKey: .source)
+        ttlTurns = try values.decode(Int?.self, forKey: .ttlTurns)
+        authority = try values.decodeIfPresent(String.self, forKey: .authority)
+    }
+
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(reminderId, forKey: .reminderId)
@@ -3699,6 +3725,30 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         case recap
         case sourceMeasurement
         case replayed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try values.decode(String.self, forKey: .mode)
+        strategy = try values.decode(String.self, forKey: .strategy)
+        snapshotAssetId = try values.decode(String?.self, forKey: .snapshotAssetId)
+        reason = try values.decode(String.self, forKey: .reason)
+        receiptId = try values.decode(String.self, forKey: .receiptId)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        engineStrategy = try values.decode(String.self, forKey: .engineStrategy)
+        requestedStrategy = try values.decode(String?.self, forKey: .requestedStrategy)
+        resolvedThresholdTokens = try values.decode(Int?.self, forKey: .resolvedThresholdTokens)
+        thresholdSource = try values.decode(String?.self, forKey: .thresholdSource)
+        hardLimitTokens = try values.decode(Int?.self, forKey: .hardLimitTokens)
+        archivedMessages = try values.decode(Int.self, forKey: .archivedMessages)
+        estimatedTokensBefore = try values.decode(Int.self, forKey: .estimatedTokensBefore)
+        estimatedTokensAfter = try values.decode(Int.self, forKey: .estimatedTokensAfter)
+        instructionMode = try values.decode(String?.self, forKey: .instructionMode)
+        instructionSource = try values.decode(String?.self, forKey: .instructionSource)
+        compactionPolicy = try values.decode(HarnACPValue.self, forKey: .compactionPolicy)
+        recap = try values.decode(HarnACPValue.self, forKey: .recap)
+        sourceMeasurement = try values.decode(HarnACPValue.self, forKey: .sourceMeasurement)
+        replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
     }
 
     public func encode(to encoder: Encoder) throws {

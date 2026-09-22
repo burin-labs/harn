@@ -275,7 +275,21 @@ impl Record {
             }
             out.push_str("    }\n");
         }
-        if explicit_swift_presence {
+        // A required-nullable field needs the custom decoder just as much as a
+        // present-versus-absent one does, and for a reason the synthesized
+        // decoder cannot express: the Swift property is `T?` either way, so
+        // Codable synthesis reaches for `decodeIfPresent` and an omitted key
+        // reads as `nil` rather than as the contract violation it is.
+        //
+        // Gating this on `explicit_swift_presence` alone was silently
+        // conditional on an unrelated fact. A struct keeps its enforcement
+        // only while some OTHER field happens to be a non-required JSON value,
+        // and loses it the moment those fields become required — which is what
+        // happened to the transcript-compacted meta struct, one of eleven,
+        // when its optional JSON fields were tightened. The encoder below
+        // stayed, so the artifact still wrote every key while no longer
+        // refusing a frame that omitted one.
+        if explicit_swift_nulls || explicit_swift_presence {
             out.push_str("\n    public init(from decoder: Decoder) throws {\n        let values = try decoder.container(keyedBy: CodingKeys.self)\n");
             for field in &self.fields {
                 let name = camel_ident(&field.wire_name);
