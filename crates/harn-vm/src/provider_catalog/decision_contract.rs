@@ -1,11 +1,9 @@
 //! The decision request contract for one catalog route.
 //!
-//! Two facts about a decision route live in two different owners, and this is
-//! the single place that joins them: the catalog model row says *whether* the
-//! route answers decision requests (`operations`) and what it costs, and the
-//! capability rule says *how* the request is dialled (`decision_protocol` and
-//! the declared ceilings). Callers read the joined value and never re-derive
-//! either half.
+//! This owner joins catalog operations and prices with resolved capabilities.
+//! Explicit native protocols take precedence. Text generation with native
+//! structured output mechanically supports the structured decision adapter.
+//! Catalog projections and evaluator admission read the same resolved contract.
 //!
 //! No provider request is made here.
 
@@ -37,11 +35,9 @@ pub struct DecisionContract {
 /// Resolve the decision contract for `(provider, model)`, or `None` when the
 /// route does not serve the decision operation.
 ///
-/// Returns `None` rather than a partial value when the row declares the
-/// operation but its capability rule names no protocol: a caller must not be
-/// handed a contract it could mistake for a dialable route. The repository
-/// test `every_decision_route_resolves_a_complete_contract` fails closed on
-/// that combination, so it cannot ship unnoticed.
+/// Returns `None` when neither a complete native contract nor a supported
+/// strict-schema text route is available. A raw operation label alone never
+/// grants evaluator admission.
 pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<DecisionContract> {
     let catalog_id = llm_config::model_catalog_id_for_route(provider, model)?;
     let entry = llm_config::model_catalog_entry(&catalog_id)?;

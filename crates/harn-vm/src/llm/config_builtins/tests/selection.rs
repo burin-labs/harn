@@ -5,7 +5,7 @@ use super::super::selection_builtins::{
 };
 use super::fixtures::build_dict;
 use crate::llm_config;
-use crate::value::{VmError, VmValue};
+use crate::value::VmValue;
 
 #[test]
 fn test_llm_model_defaults_returns_empty_for_unknown_model() {
@@ -45,20 +45,26 @@ fn test_llm_model_ladder_projects_catalog_owned_steps() {
 }
 
 #[test]
-fn test_llm_resolved_options_requires_model() {
+fn test_llm_resolved_options_uses_dispatch_defaults_without_model() {
+    let _guard = crate::llm::env_guard();
     llm_config::clear_user_overrides();
+    let expected_provider = crate::llm::helpers::vm_resolve_provider(&None);
+    let expected_model = crate::llm::helpers::vm_resolve_model(&None, &expected_provider);
     let mut out = String::new();
-    let args = vec![build_dict(vec![])];
-    let err =
-        llm_resolved_options_builtin(&args, &mut out).expect_err("missing model should error");
-    match err {
-        VmError::Runtime(message) => {
-            assert!(
-                message.contains("opts.model is required"),
-                "unexpected message: {message}"
-            );
-        }
-        other => panic!("expected Runtime error, got {other:?}"),
+    for options in [
+        build_dict(vec![]),
+        build_dict(vec![("model", VmValue::string(""))]),
+    ] {
+        let result = llm_resolved_options_builtin(&[options], &mut out).expect("default route");
+        let fields = result.as_dict().expect("resolved options");
+        assert_eq!(
+            fields.get("provider").map(VmValue::display),
+            Some(expected_provider.clone())
+        );
+        assert_eq!(
+            fields.get("model").map(VmValue::display),
+            Some(expected_model.clone())
+        );
     }
 }
 
