@@ -35,8 +35,20 @@ pub const DISPOSABLE_PATH_POLICY: DisposablePathPolicy = {
  *
  * The worktree rule is pure argv analysis and therefore fires in every
  * repository that wires this guard, including one that has no admission
- * command to offer. The guard looks for one of these paths under the
- * repository root.
+ * command to offer. The wrapper measures which repositories have one and
+ * reports it; this is what it may report.
+ *
+ * `admission_command_paths` is matched against the PROGRAM a row names, its
+ * first token, not against the whole invocation. One repository owning the
+ * script and admitting others by naming them is a normal arrangement, and
+ * matching the whole string made it unrepresentable: the only expressible
+ * answer was a bare path, which asserts the command sits inside the
+ * repository being admitted.
+ *
+ * Matching the program alone would let a row carry anything after it, so
+ * exactly one argument form is admitted: `admission_root_flag` followed by an
+ * absolute path equal to the row's own root. A renamed program is still
+ * refused by name, and a row still cannot smuggle arbitrary arguments.
  *
  * A repository that owns none is not policed by this rule. The guard once
  * borrowed another measured repository's command and pointed it at the
@@ -49,12 +61,14 @@ pub const DISPOSABLE_PATH_POLICY: DisposablePathPolicy = {
  */
 pub type WorktreeAdmissionPolicy = {
   admission_command_paths: list<string>,
+  admission_root_flag: string,
   repository_markers: list<string>,
   max_root_walk: int,
 }
 
 pub const WORKTREE_ADMISSION_POLICY: WorktreeAdmissionPolicy = {
   admission_command_paths: ["scripts/fleet-worktree-admit.ts"],
+  admission_root_flag: "--repository-root",
   repository_markers: [".git"],
   max_root_walk: 12,
 }
