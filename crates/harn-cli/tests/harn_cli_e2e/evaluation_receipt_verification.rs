@@ -2,6 +2,63 @@
 use serde_json::{json, Value};
 use std::path::Path;
 
+#[test]
+fn checked_in_decision_recipe_replays_offline_and_missing_record_fails() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/decision-probes");
+    let source = examples.join("probe.harn");
+    assert!(std::fs::read_to_string(&source).unwrap().lines().count() < 60);
+    let root = tempfile::tempdir().unwrap();
+    let invoke = |tape: &Path| {
+        crate::test_util::process::harn_e2e_command()
+            .env_clear()
+            .env("HOME", root.path())
+            .env("HARN_LLM_CALLS_DISABLED", "1")
+            .current_dir(root.path())
+            .arg("run")
+            .arg(&source)
+            .arg("--evaluation-tape")
+            .arg(tape)
+            .arg("--json")
+            .output()
+            .unwrap()
+    };
+    let tape_path = examples.join("probe.tape");
+    let positive = invoke(&tape_path);
+    assert!(positive.status.success(), "{positive:?}");
+    let values: Vec<Value> = String::from_utf8(positive.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|line| {
+            let envelope: Value = serde_json::from_str(line).unwrap();
+            (envelope["data"]["event_type"] == "stdout").then(|| {
+                serde_json::from_str(envelope["data"]["payload"].as_str().unwrap()).unwrap()
+            })
+        })
+        .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0]["kind"], "answered");
+    let answers = values[0]["value"].as_object().unwrap();
+    assert_eq!(answers.len(), 5);
+    assert_eq!(answers["safety"]["verdict"], true);
+    assert_eq!(answers["compaction"]["choice"], "keep");
+    assert_eq!(answers["skill"]["choice"], "review");
+    assert_eq!(answers["title"]["choice"], "first");
+    assert_eq!(answers["done"]["verdict"], false);
+    assert_eq!(values[1]["kind"], "state_too_large");
+
+    let mut incomplete = harn_vm::testbench::tape::EventTape::load(&tape_path).unwrap();
+    assert_eq!(incomplete.records.len(), 2);
+    incomplete.records.pop();
+    let missing_path = root.path().join("missing.tape");
+    incomplete.persist_new(&missing_path).unwrap();
+    let negative = invoke(&missing_path);
+    assert!(!negative.status.success(), "{negative:?}");
+    let failure =
+        String::from_utf8(negative.stdout).unwrap() + &String::from_utf8(negative.stderr).unwrap();
+    assert!(failure.contains("missing record"), "{failure}");
+    assert!(failure.contains("decision.ceiling.v1"), "{failure}");
+}
+
 fn run(root: &Path, args: &[&str]) -> (i32, Value) {
     let output = crate::test_util::process::harn_e2e_command()
         .env_clear()
