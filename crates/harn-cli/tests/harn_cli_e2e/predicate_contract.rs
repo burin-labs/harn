@@ -23,7 +23,7 @@ fn main(harness: Harness) {
   const result = assess(harness.llm, {text: "observation"})
   match result.kind {
     "verdict" -> { if result.value.verdict { harness.stdio.println("accepted") } }
-    _ -> { harness.stdio.println(result.receipt) }
+    _ -> { harness.stdio.println("${result.kind} ${result.receipt}") }
   }
 }
 "#;
@@ -294,12 +294,26 @@ pub(super) fn predicate_operation_admission_invalidates_cached_success() {
         .env("HARN_LLM_CALLS_DISABLED", "1")
         .output()
         .expect("execute the admitted predicate source");
-    assert!(!execution.status.success());
+    // The unavailable-runtime contract is still here; it stopped being fatal.
+    // A predicate with no budgeted evaluator used to abort the run with a
+    // `VmError`, which a program could not branch on. It now closes with the
+    // typed `unavailable` outcome and its receipt, so the run completes and
+    // the caller decides what to do. Asserting the old error text would pin
+    // exactly the behaviour this change exists to replace.
+    let stdout = String::from_utf8_lossy(&execution.stdout);
     assert!(
+        execution.status.success(),
+        "an unavailable evaluator must close the predicate, not fail the run: {:?} {}",
+        execution.status.code(),
         String::from_utf8_lossy(&execution.stderr)
-            .contains("this runtime has no budgeted predicate evaluator"),
-        "{}",
-        String::from_utf8_lossy(&execution.stderr)
+    );
+    assert!(
+        stdout.starts_with("unavailable blake3:"),
+        "expected the typed unavailable outcome and its receipt, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("accepted"),
+        "no evaluator ran, so no verdict may be reported: {stdout}"
     );
 }
 

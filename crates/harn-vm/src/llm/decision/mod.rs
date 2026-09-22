@@ -292,11 +292,16 @@ impl Drop for InstalledBackendGuard {
     }
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis() as u64)
-        .unwrap_or(0)
+/// When a decision started, for the elapsed time its receipt reports.
+///
+/// Monotonic rather than wall clock. `SystemTime` steps backwards whenever
+/// the host clock is adjusted, which is why reading it twice and subtracting
+/// had to saturate to hide a negative duration as zero. `Instant` cannot go
+/// backwards, so the number a receipt carries is the time that actually
+/// passed. This reaches no digest: a receipt's identity is built from the
+/// question and the policy, so replays stay reproducible either way.
+fn decision_started() -> std::time::Instant {
+    std::time::Instant::now()
 }
 
 /// Evaluate a question set. The single-boolean entry point calls this too.
@@ -313,7 +318,7 @@ pub(crate) async fn evaluate(
     let policy = EvaluationPolicy::from_value(policy).map_err(VmError::Runtime)?;
     let questions = QuestionSet::from_value(questions).map_err(VmError::Runtime)?;
     let state = crate::llm::helpers::vm_value_to_json(state);
-    let started = now_ms();
+    let started = decision_started();
 
     let route = resolve_route(&policy.provider, &policy.model);
     let canonical_state = crate::canonical_json::to_vec(&state);
@@ -358,7 +363,7 @@ pub(crate) async fn evaluate(
 
     let refuse = |receipt: &mut EvaluationReceipt, outcome: Outcome| {
         receipt.outcome_kind = outcome.kind.into();
-        receipt.elapsed_ms = now_ms().saturating_sub(started);
+        receipt.elapsed_ms = started.elapsed().as_millis() as u64;
         outcome
     };
 
@@ -460,7 +465,7 @@ pub(crate) async fn evaluate(
     };
     let (outcome, answers) = dispatch(&evaluation, &route, &mut receipt, &reference).await;
     receipt.outcome_kind = outcome.kind.into();
-    receipt.elapsed_ms = now_ms().saturating_sub(started);
+    receipt.elapsed_ms = started.elapsed().as_millis() as u64;
     receipt.record_answers(&answers);
     publish(&receipt);
     Ok((outcome, answers, evaluation.policy))
