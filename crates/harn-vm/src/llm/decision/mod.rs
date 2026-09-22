@@ -613,7 +613,7 @@ async fn evaluate_internal(
     if evaluation.policy.backend == BackendKind::NativeDecision && receipt.physical_attempts > 0 {
         // Unknown usage keeps the admitted amount, never a free failed call.
         let charged = receipt.cost_usd.unwrap_or(bound);
-        receipt.cost_usd = Some(charged);
+        receipt.budget_charge_usd = Some(charged);
         if crate::llm::cost::accumulate_llm_usage(
             &evaluation.policy.model,
             receipt.input_tokens.unwrap_or(0).min(i64::MAX as u64) as i64,

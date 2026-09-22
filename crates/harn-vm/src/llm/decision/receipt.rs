@@ -113,7 +113,7 @@ pub struct EvaluationReceipt {
     #[serde(default)]
     pub cost_admission: Option<CostAdmission>,
     /// Canonical observed call usage. Native unknown usage remains unpriced
-    /// even when cost_usd retains an admission reservation. Absent cache
+    /// even when budget_charge_usd retains an admission reservation. Absent cache
     /// declarations never imply a measured native cache hit or miss.
     #[serde(default)]
     pub usage: Option<Box<crate::llm::usage::LlmUsage>>,
@@ -135,9 +135,14 @@ pub struct EvaluationReceipt {
     pub physical_attempts: u32,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
-    /// Admitted from the route's declared price. Absent when the price is
-    /// unknown, which refuses dispatch rather than charging nothing.
+    /// Settled measured cost. Absent when provider usage is unknown; retained
+    /// admission reservations are reported separately, never as measured spend.
     pub cost_usd: Option<f64>,
+    /// Amount charged to the native admission budget, including a retained
+    /// upper bound when usage is unknown. Absent for historical receipts and
+    /// paths that do not report this accounting fact.
+    #[serde(default)]
+    pub budget_charge_usd: Option<f64>,
     pub accounting_status: AccountingStatus,
     pub source: EvaluationSource,
     pub elapsed_ms: u64,
@@ -190,6 +195,7 @@ impl EvaluationReceipt {
             input_tokens: None,
             output_tokens: None,
             cost_usd: None,
+            budget_charge_usd: None,
             accounting_status: AccountingStatus::NotDispatched,
             source: EvaluationSource::Live,
             elapsed_ms,

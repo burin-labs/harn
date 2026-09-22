@@ -946,12 +946,21 @@ fn llm_cost_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-ledger"], sig = "__llm_session_cost() -> dict", category = "llm.economics")]
 fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let summary = super::trace::peek_trace_usage_summary();
-    let total_cost = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
+    let budget_charged_usd = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
+    let measured_cost = summary
+        .cost
+        .cost_usd()
+        .map(VmValue::Float)
+        .unwrap_or(VmValue::Nil);
     let mut result = BTreeMap::new();
     if let Some(admission) = super::admission::receipt() {
         result.insert("admission".to_string(), admission);
     }
-    result.insert("total_cost".to_string(), VmValue::Float(total_cost));
+    result.insert("total_cost".to_string(), measured_cost.clone());
+    result.insert(
+        "budget_charged_usd".to_string(),
+        VmValue::Float(budget_charged_usd),
+    );
     result.insert(
         "input_tokens".to_string(),
         VmValue::Int(summary.input_tokens),
@@ -969,14 +978,7 @@ fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
         "known_cost_usd".to_string(),
         VmValue::Float(summary.cost.known_cost_usd),
     );
-    result.insert(
-        "cost_usd".to_string(),
-        summary
-            .cost
-            .cost_usd()
-            .map(VmValue::Float)
-            .unwrap_or(VmValue::Nil),
-    );
+    result.insert("cost_usd".to_string(), measured_cost);
     result.insert(
         "unpriced_calls".to_string(),
         VmValue::Int(summary.cost.unpriced_calls),
