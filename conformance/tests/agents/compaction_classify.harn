@@ -1,0 +1,115 @@
+import {
+  CompactionClassifyDecision,
+  CompactionClassifyItem,
+  CompactionFixtureInput,
+} from "std/agent/compaction_classify"
+
+fn drop_low(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  let decisions: list<CompactionClassifyDecision> = []
+  for item in input.items {
+    decisions = decisions
+      + [
+        {
+          index: item.index,
+          question_id: "message_" + to_string(item.index),
+          choice: "drop",
+          confidence: 0.2,
+          confidence_kind: "model_rationale",
+          evaluation_receipt: "explicit typed fixture",
+        },
+      ]
+  }
+  return decisions
+}
+
+fn rewrite(items: list<CompactionClassifyItem>) -> list<{index: int, text: string}> {
+  let rewritten: list<{index: int, text: string}> = []
+  for item in items {
+    rewritten = rewritten + [{index: item.index, text: "retained " + to_string(item.index)}]
+  }
+  return rewritten
+}
+
+pipeline test(harness: Harness) {
+  const policy = {
+    backend: "structured_llm",
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    temperature: 0.0,
+    threshold: 0.8,
+    evaluation_cost_limit: 1.0,
+  }
+  const messages = [
+    {role: "user", content: "Opaque evidence alpha"},
+    {role: "user", content: "Opaque constraint beta"},
+    {role: "user", content: "Current bounded task"},
+  ]
+  const classify = {policy: policy, fixture: drop_low, rewrite_fixture: rewrite}
+  const result = harness.agent.transcript_auto_compact(
+    messages,
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_last: 1,
+      recap_budget_bytes: 1,
+      hard_limit_tokens: 1,
+      provider: "mock",
+      model: "mock",
+      classify: classify,
+    },
+  )
+  assert_eq(result.receipt.engine_strategy, "classify")
+  assert_eq(result.receipt.schema_version, 2)
+  assert_eq(result.receipt.classification.rounds, 1)
+  assert_eq(result.receipt.classification.budget_met, false)
+  assert_eq(len(result.receipt.classification.decisions), 2)
+  for decision in result.receipt.classification.decisions {
+    assert_eq(decision.choice, "drop")
+    assert_eq(decision.applied, "reword")
+    assert_eq(decision.application_reason, "confidence_floor")
+  }
+  assert(result.summary.contains("retained 0"))
+  assert(result.summary.contains("retained 1"))
+  assert_eq(len(harness.llm.mock_calls()), 0, "explicit fixtures make no provider calls")
+  // Floor-off reaches removal at the application boundary (Rust control).
+  // The real lifecycle must then refuse the empty replacement and retain the
+  // source session; its nonempty-source guard is part of the product contract.
+  const session = harness.agent.open("classified-floor-off-" + harness.random.uuid())
+  harness.agent.compaction_policy(
+    {
+      session_id: session,
+      strategy: "classify",
+      max_tokens: 1,
+      keep_last: 1,
+      classify: classify + {policy: policy + {threshold: 0.0}},
+    },
+  )
+  for message in messages {
+    harness.agent.inject(session, message)
+  }
+  const before = harness.agent.compaction_check(session)
+  const empty = try {
+    harness.agent.compaction_run(session, {provider: "mock", model: "mock"})
+  }
+  assert(is_err(empty), "all-drop replacement must reach the lifecycle refusal")
+  assert_eq(harness.agent.compaction_check(session).message_count, before.message_count)
+  const oversize = harness.agent.transcript_auto_compact(
+    messages,
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_last: 1,
+      provider: "mock",
+      model: "mock",
+      classify: classify + {window_tokens: 1},
+    },
+  )
+  assert_eq(oversize.receipt.engine_strategy, "observation_mask")
+  assert_eq(oversize.receipt.classification.status, "fallback")
+  assert_eq(oversize.receipt.classification.rounds, 0)
+  assert(oversize.receipt.classification.fallback_reason != nil)
+  assert_eq(len(harness.llm.mock_calls()), 0, "window refusal happens before dispatch")
+  harness.stdio.println(
+    "classified compaction preserves low-confidence source and reports window fallback",
+  )
+}

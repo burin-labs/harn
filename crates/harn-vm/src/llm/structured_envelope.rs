@@ -35,6 +35,9 @@ use crate::value::{VmError, VmValue};
 use super::helpers::{extract_llm_options, vm_value_to_json};
 use super::{execute_schema_retry_loop, rewrite_structured_args, SchemaLoopOutcome};
 
+mod prepared;
+pub(crate) use prepared::run_prepared_structured_call;
+
 /// Build the `{ok, data, raw_text, error, error_category, attempts,
 /// repaired, repair_tier, extracted_json, usage, model, provider}`
 /// envelope. Never

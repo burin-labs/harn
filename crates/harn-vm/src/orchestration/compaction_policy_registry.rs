@@ -47,6 +47,7 @@ pub enum PolicyStrategy {
     ObservationMask,
     /// Caller-supplied closure decides the summary.
     Custom,
+    Classify,
 }
 
 impl PolicyStrategy {
@@ -58,6 +59,7 @@ impl PolicyStrategy {
             Self::Window => "window",
             Self::ObservationMask => "observation_mask",
             Self::Custom => "custom",
+            Self::Classify => "classify",
         }
     }
 
@@ -74,9 +76,10 @@ impl PolicyStrategy {
             "window" | "truncate" => Ok(Self::Window),
             "observation_mask" | "observation-mask" | "mask" => Ok(Self::ObservationMask),
             "custom" => Ok(Self::Custom),
+            "classify" => Ok(Self::Classify),
             other => Err(format!(
                 "unknown compaction policy strategy '{other}' (expected one of: summarize, \
-                 summarize-then-prune, head+tail, window, observation_mask, custom)"
+                 summarize-then-prune, head+tail, window, observation_mask, custom, classify)"
             )),
         }
     }
@@ -88,6 +91,7 @@ impl PolicyStrategy {
             Self::HeadAndTail | Self::Window => CompactStrategy::Truncate,
             Self::ObservationMask => CompactStrategy::ObservationMask,
             Self::Custom => CompactStrategy::Custom,
+            Self::Classify => CompactStrategy::Classify,
         }
     }
 
@@ -139,6 +143,7 @@ pub struct CompactionPolicyDeclaration {
     /// Author/scope/preserve/drop directives that the engine threads
     /// through the LLM compaction prompt and persisted metadata.
     pub instructions: CompactionPolicy,
+    pub classification: Option<Box<super::ClassificationConfig>>,
 }
 
 impl Default for CompactionPolicyDeclaration {
@@ -156,6 +161,7 @@ impl Default for CompactionPolicyDeclaration {
             summarize_fn: None,
             summarize_prompt: None,
             instructions: CompactionPolicy::default(),
+            classification: None,
         }
     }
 }
@@ -378,10 +384,15 @@ pub fn to_auto_compact_config(policy: &CompactionPolicyDeclaration) -> super::Au
         keep_last: policy.keep_last,
         keep_first: policy.keep_first,
         compact_strategy: engine_strategy.clone(),
-        hard_limit_strategy: engine_strategy,
+        hard_limit_strategy: if engine_strategy == CompactStrategy::Classify {
+            CompactStrategy::Llm
+        } else {
+            engine_strategy
+        },
         fallback_strategy: policy.strategy.engine_fallback(),
         summarize_prompt: policy.summarize_prompt.clone(),
         custom_compactor: policy.summarize_fn.clone(),
+        classification: policy.classification.clone(),
         policy: policy.instructions.clone(),
         policy_strategy: policy.strategy.as_str().to_string(),
         ..Default::default()
@@ -409,6 +420,12 @@ pub fn parse_policy_dict(
     dict: &crate::value::DictMap,
 ) -> Result<CompactionPolicyDeclaration, String> {
     let mut policy = CompactionPolicyDeclaration::default();
+    policy.classification = dict
+        .get("classify")
+        .map(super::ClassificationConfig::from_value)
+        .transpose()
+        .map_err(|error| format!("{builtin}: {}", display_vm_error(&error)))?
+        .map(Box::new);
     if let Some(value) = dict.get("strategy") {
         match value {
             VmValue::String(text) => {
@@ -494,6 +511,11 @@ pub fn parse_policy_dict(
     if matches!(policy.strategy, PolicyStrategy::Custom) && policy.summarize_fn.is_none() {
         return Err(format!(
             "{builtin}: `summarize_fn` is required when strategy is 'custom'"
+        ));
+    }
+    if policy.strategy == PolicyStrategy::Classify && policy.classification.is_none() {
+        return Err(format!(
+            "{builtin}: classify requires a classification policy"
         ));
     }
     if matches!(policy.strategy, PolicyStrategy::SummarizeThenPrune)

@@ -10,6 +10,10 @@ mod application;
 pub(super) use application::{apply_round, ClassificationRewrite};
 mod evaluation;
 pub(super) use evaluation::{evaluate_round, ClassificationItem, ClassificationRoundKind};
+mod rewrite;
+pub(super) use rewrite::rewrite_items;
+mod engine;
+pub(super) use engine::{classify_window, ClassificationInputs};
 
 #[derive(Clone, Debug)]
 pub struct ClassificationConfig {

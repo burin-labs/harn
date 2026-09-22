@@ -8,6 +8,7 @@ pub enum CompactStrategy {
     Truncate,
     Custom,
     ObservationMask,
+    Classify,
 }
 
 pub fn parse_compact_strategy(value: &str) -> Result<CompactStrategy, VmError> {
@@ -16,8 +17,9 @@ pub fn parse_compact_strategy(value: &str) -> Result<CompactStrategy, VmError> {
         "truncate" => Ok(CompactStrategy::Truncate),
         "custom" => Ok(CompactStrategy::Custom),
         "observation_mask" => Ok(CompactStrategy::ObservationMask),
+        "classify" => Ok(CompactStrategy::Classify),
         other => Err(VmError::Runtime(format!(
-            "unknown compact_strategy '{other}' (expected 'llm', 'truncate', 'custom', or 'observation_mask')"
+            "unknown compact_strategy '{other}' (expected 'llm', 'truncate', 'custom', 'observation_mask', or 'classify')"
         ))),
     }
 }
@@ -28,6 +30,7 @@ pub fn compact_strategy_name(strategy: &CompactStrategy) -> &'static str {
         CompactStrategy::Truncate => "truncate",
         CompactStrategy::Custom => "custom",
         CompactStrategy::ObservationMask => "observation_mask",
+        CompactStrategy::Classify => "classify",
     }
 }
 
@@ -107,6 +110,8 @@ pub struct AutoCompactConfig {
     pub policy: CompactionPolicy,
     /// Maximum observation-mask recap body size.
     pub recap_budget_bytes: usize,
+    /// Bounded decision policy for the Classify strategy.
+    pub classification: Option<Box<super::ClassificationConfig>>,
 }
 
 impl Default for AutoCompactConfig {
@@ -129,6 +134,7 @@ impl Default for AutoCompactConfig {
             fallback_strategy: None,
             policy: CompactionPolicy::default(),
             recap_budget_bytes: DEFAULT_RECAP_BUDGET_BYTES,
+            classification: None,
         }
     }
 }
