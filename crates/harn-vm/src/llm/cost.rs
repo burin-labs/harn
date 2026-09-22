@@ -866,13 +866,22 @@ pub(crate) fn accumulate_llm_usage(
     // Always attribute usage to the active `@step` (if any), even when
     // the per-call cost is zero — token-only step budgets need the
     // count regardless of pricing.
-    crate::step_runtime::record_step_llm_usage(model, input_tokens, output_tokens, cost)?;
+    let step_result =
+        crate::step_runtime::record_step_llm_usage(model, input_tokens, output_tokens, cost);
     let total_tokens = input_tokens.max(0) as u64 + output_tokens.max(0) as u64;
     if total_tokens > 0 {
         LLM_ACCUMULATED_TOKENS.with(|acc| {
             let mut slot = acc.borrow_mut();
             *slot = slot.saturating_add(total_tokens);
         });
+    }
+    // This response has already completed. Record every charge before any
+    // budget error can return, while preserving step/token/cost error priority.
+    LLM_ACCUMULATED_COST.with(|acc| {
+        *acc.borrow_mut() += cost;
+    });
+    step_result?;
+    if total_tokens > 0 {
         LLM_TOKEN_BUDGET.with(|budget| {
             if let Some(max) = *budget.borrow() {
                 let total = LLM_ACCUMULATED_TOKENS.with(|acc| *acc.borrow());
@@ -889,9 +898,6 @@ pub(crate) fn accumulate_llm_usage(
     if cost == 0.0 {
         return Ok(());
     }
-    LLM_ACCUMULATED_COST.with(|acc| {
-        *acc.borrow_mut() += cost;
-    });
     LLM_BUDGET.with(|budget| {
         if let Some(max) = *budget.borrow() {
             let total = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
