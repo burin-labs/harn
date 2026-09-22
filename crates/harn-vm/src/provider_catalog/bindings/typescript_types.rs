@@ -123,7 +123,7 @@ export interface HarnProviderDataControl {
   value_kind: "bool" | "string"
   value: string
   effect: "retention" | "training"
-  applies_to?: ("anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse")[]
+  applies_to?: (__HARN_DATA_CONTROL_DIALECTS__)[]
   caveat?: string
 }
 

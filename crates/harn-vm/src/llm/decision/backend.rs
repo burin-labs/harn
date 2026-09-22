@@ -28,6 +28,8 @@ pub struct DecisionRequest<'a> {
     /// honor both returns `UnsupportedOptions` rather than dropping one.
     pub effort: &'a str,
     pub temperature: f64,
+    pub evaluation_cost_limit: Option<f64>,
+    pub run_cost_limit: Option<f64>,
 }
 
 /// Where a backend's numbers come from. This is a property of the transport,
@@ -54,6 +56,13 @@ pub enum ConfidenceProvenance {
 /// distribution over exactly the question's declared labels.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawAnswer {
+    /// A structured model names an answer and separately estimates its
+    /// confidence. The name must not be reconstructed from that estimate.
+    ModelReported {
+        selection: ReportedSelection,
+        confidence: f64,
+        evidence: Option<String>,
+    },
     Boolean {
         probability: f64,
         /// Present only when the backend reports its own number.
@@ -61,6 +70,8 @@ pub enum RawAnswer {
         evidence: Option<String>,
     },
     Choice {
+        /// If the vendor also names a label, it must agree with projection.
+        selected: Option<String>,
         probabilities: BTreeMap<String, f64>,
         reported_confidence: Option<f64>,
         evidence: Option<String>,
@@ -73,11 +84,22 @@ pub enum RawAnswer {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReportedSelection {
+    Boolean(bool),
+    Choice(String),
+    Score(String),
+}
+
 /// What a backend returns. `answers` is keyed by question id and is not
 /// required to be complete: the evaluator refuses a partial set rather than
 /// projecting a smaller `answered`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawDecisionResponse {
+    /// The structured transport's authoritative settlement, including cache
+    /// visibility. Native billing has its separate declared flat-price owner.
+    pub usage: Option<Box<crate::llm::usage::LlmUsage>>,
+    pub native_transport: Option<super::receipt::NativeTransportReceipt>,
     pub answers: BTreeMap<String, RawAnswer>,
     pub provenance: ConfidenceProvenance,
     /// The identity the provider served, as returned. Not the requested id.
@@ -91,8 +113,19 @@ pub struct RawDecisionResponse {
 
 /// Why a dispatch produced no response. Each maps onto exactly one outcome
 /// arm, so a transport can never collapse a rate limit into a generic failure.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DecisionTransportError {
+    /// A paid response can fail validation while retaining its settlement.
+    Accounted {
+        error: Box<DecisionTransportError>,
+        usage: Box<crate::llm::usage::LlmUsage>,
+        served_model: Option<String>,
+    },
+    /// Credential admission refused locally, before a physical request.
+    AuthorityDenied,
+    LocalAdmissionDenied {
+        diagnostic: String,
+    },
     /// The provider refused the request or returned an unusable body.
     Refused {
         reason: RefusalReason,
@@ -116,6 +149,20 @@ pub enum DecisionTransportError {
     TransportFailed {
         diagnostic: String,
     },
+}
+
+impl DecisionTransportError {
+    pub fn with_usage(
+        self,
+        usage: crate::llm::usage::LlmUsage,
+        served_model: Option<String>,
+    ) -> Self {
+        Self::Accounted {
+            error: Box::new(self),
+            usage: Box::new(usage),
+            served_model,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

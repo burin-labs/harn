@@ -444,6 +444,9 @@ pub struct ExecutionEvidenceRecord {
     /// made no LLM call. A consumer that treats the absent case as agreement
     /// would read every old record as proof the wire carried what was asked.
     pub reasoning_receipts: Option<Vec<crate::llm::ReasoningReceipt>>,
+    /// Complete bounded evaluations, including local refusals. Absent means
+    /// the producer did not report; an empty list means none occurred.
+    pub evaluation_receipts: Option<Vec<crate::llm::decision::receipt::EvaluationReceipt>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

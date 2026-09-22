@@ -16,13 +16,13 @@ operations = ["decision"]
 
 #[test]
 fn decision_operation_survives_export_and_runtime_reload() {
-    let overlay = decision_overlay();
-    let catalog = artifact_embedded(Some(&overlay), None);
-    let model = catalog
-        .models
-        .iter()
-        .find(|model| model.id == "synthetic-decision-only")
-        .unwrap();
+    // An operation label is not a transport contract. Exercise a shipped
+    // native route whose protocol, question kinds, and limits are declared.
+    let id = "typesafe/jev-1.13.0";
+    let contract = decision_contract_for_route("typesafe", id).expect("native contract");
+    assert!(contract.protocol.is_native());
+    let catalog = artifact_embedded(None, None);
+    let model = catalog.models.iter().find(|model| model.id == id).unwrap();
     assert_eq!(model.operations, [ModelOperation::Decision]);
     assert_eq!(model.modalities.output, ["decision"]);
     assert!(!model.tool_support.native);
@@ -30,7 +30,7 @@ fn decision_operation_survives_export_and_runtime_reload() {
     let encoded = serde_json::to_value(&catalog).unwrap();
     let decoded: ProviderCatalogArtifact = serde_json::from_value(encoded).unwrap();
     let reloaded = config_from_artifact(&decoded);
-    let model = &reloaded.models["synthetic-decision-only"];
+    let model = &reloaded.models[id];
     assert!(model.supports_operation(ModelOperation::Decision));
     assert!(!model.supports_operation(ModelOperation::TextGeneration));
     assert!(!model.supports_operation(ModelOperation::Embedding));
@@ -39,7 +39,7 @@ fn decision_operation_survives_export_and_runtime_reload() {
         reexported
             .models
             .iter()
-            .find(|model| model.id == "synthetic-decision-only")
+            .find(|model| model.id == id)
             .unwrap()
             .operations,
         [ModelOperation::Decision]
@@ -47,7 +47,22 @@ fn decision_operation_survives_export_and_runtime_reload() {
 }
 
 #[test]
-fn legacy_routes_preserve_operations_without_granting_decision() {
+fn an_unbacked_decision_label_does_not_grant_evaluator_admission() {
+    let overlay = decision_overlay();
+    let id = "synthetic-decision-only";
+    let entry = &overlay.models[id];
+    assert!(entry.supports_operation(ModelOperation::Decision));
+    let caps = crate::llm::capabilities::lookup(&entry.provider, id);
+    assert!(super::decision_contract::resolved_decision_contract(id, entry, &caps).is_none());
+    let catalog = artifact_embedded(Some(&overlay), None);
+    let row = catalog.models.iter().find(|model| model.id == id).unwrap();
+    assert!(!row.operations.contains(&ModelOperation::Decision));
+    let reloaded = config_from_artifact(&catalog);
+    assert!(!reloaded.models[id].supports_operation(ModelOperation::Decision));
+}
+
+#[test]
+fn legacy_routes_derive_decision_from_supported_structured_strategies() {
     let config = llm_config::embedded_config(None);
     let catalog = artifact_embedded(None, None);
     assert!(
@@ -56,35 +71,37 @@ fn legacy_routes_preserve_operations_without_granting_decision() {
     );
     let mut embedding_count = 0;
     let mut declared_count = 0;
+    let mut derived_count = 0;
     for model in &catalog.models {
         let legacy = &config.models[&model.id];
-        // A row that declares its own operation set is not a legacy row. This
-        // test is about what an UNDECLARED row inherits, so a declared row is
-        // counted and skipped rather than folded into the text expectation.
-        if let Some(declared) = &legacy.operations {
+        if legacy.operations.is_some() {
             declared_count += 1;
-            assert_eq!(
-                model.operations,
-                declared.iter().copied().collect::<Vec<_>>(),
+        }
+        if legacy.embedding_dim.is_some() {
+            embedding_count += 1;
+        }
+        let caps = crate::llm::capabilities::lookup(&legacy.provider, &model.id);
+        assert_eq!(
+            model.operations,
+            super::decision_contract::resolved_operations(&model.id, legacy, &caps),
+            "{}",
+            model.id
+        );
+        if model.operations.contains(&ModelOperation::Decision)
+            && !legacy.supports_operation(ModelOperation::Decision)
+        {
+            derived_count += 1;
+            assert!(model.operations.contains(&ModelOperation::TextGeneration));
+            assert_ne!(
+                caps.structured_output_strategy,
+                crate::llm::capabilities::StructuredOutputStrategy::Unsupported,
                 "{}",
                 model.id
             );
-            continue;
         }
-        let expected = if legacy.embedding_dim.is_some() {
-            embedding_count += 1;
-            ModelOperation::Embedding
-        } else {
-            ModelOperation::TextGeneration
-        };
-        assert_eq!(model.operations, [expected], "{}", model.id);
-        assert!(
-            !model.operations.contains(&ModelOperation::Decision),
-            "{} inherited the decision operation without declaring it",
-            model.id
-        );
     }
     assert!(embedding_count > 0, "known non-text route must be measured");
+    assert!(derived_count > 0, "structured routes must reach the census");
     assert!(
         declared_count >= 8,
         "measured only {declared_count} rows declaring an operation set; the \

@@ -14,10 +14,14 @@ pub struct PredicateManifest {
 pub struct PredicateManifestSite {
     pub source: String,
     pub id: String,
+    /// Runtime-bound sites are declarations only; their actual questions and
+    /// route are bound by the execution receipt, not this source census.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub runtime_admission: bool,
     /// One digest over the whole question set. This is the cache identity
     /// component a site's questions contribute; a reordered, renamed, or
     /// relabelled question set is a different evaluation.
-    pub question_set_sha256: String,
+    pub question_set_sha256: Option<String>,
     pub questions: Vec<PredicateManifestQuestion>,
     pub input_type_sha256: String,
     pub outcome_schema: String,
@@ -70,7 +74,15 @@ impl PredicateManifest {
                 .map(|site| PredicateManifestSite {
                     source: source.into(),
                     id: site.id.clone(),
-                    question_set_sha256: question_set_digest(&site.questions),
+                    runtime_admission: site.kind
+                        == harn_parser::PredicateSiteKind::RuntimeEvaluation,
+                    question_set_sha256: if site.kind
+                        == harn_parser::PredicateSiteKind::RuntimeEvaluation
+                    {
+                        None
+                    } else {
+                        Some(question_set_digest(&site.questions))
+                    },
                     questions: site
                         .questions
                         .iter()
@@ -154,6 +166,22 @@ mod tests {
             serde_json::from_slice::<PredicateManifest>(&bytes).unwrap(),
             first
         );
+    }
+
+    #[test]
+    fn runtime_manifest_does_not_claim_an_empty_question_set_was_bound() {
+        let mut runtime = site(vec![ShapeField::synthetic(
+            "text",
+            TypeExpr::Named("string".into()),
+            false,
+        )]);
+        runtime.kind = PredicateSiteKind::RuntimeEvaluation;
+        runtime.questions.clear();
+        let manifest = PredicateManifest::from_checked_sites("runtime.harn", &[runtime]);
+        assert!(manifest.sites[0].runtime_admission);
+        assert_eq!(manifest.sites[0].question_set_sha256, None);
+        let json = serde_json::to_value(manifest).unwrap();
+        assert!(json["sites"][0]["question_set_sha256"].is_null());
     }
 
     fn choice(id: &str, labels: &[&str]) -> PredicateQuestionSpec {

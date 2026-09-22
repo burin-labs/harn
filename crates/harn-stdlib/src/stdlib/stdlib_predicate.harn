@@ -79,11 +79,11 @@ pub type EvaluationPolicy = {
   backend: "structured_llm" | "native_decision",
   provider: string,
   model: string,
-  effort: string,
-  temperature: float,
+  effort?: string,
+  temperature?: float,
   threshold: float,
-  evaluation_cost_limit: float,
-  run_cost_limit: float,
+  evaluation_cost_limit?: float,
+  run_cost_limit?: float,
 }
 
 pub type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: string} \
@@ -131,6 +131,10 @@ pub type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: 
   kind: "question_invalid",
   question: string,
   reason: "too_many_options" \
+    | "empty_questions" \
+    | "empty_options" \
+    | "empty_identifier" \
+    | "duplicate_labels" \
     | "too_few_levels" \
     | "too_many_levels" \
     | "empty_instructions" \
@@ -196,6 +200,10 @@ pub type EvaluationOutcome = {
   kind: "question_invalid",
   question: string,
   reason: "too_many_options" \
+    | "empty_questions" \
+    | "empty_options" \
+    | "empty_identifier" \
+    | "duplicate_labels" \
     | "too_few_levels" \
     | "too_many_levels" \
     | "empty_instructions" \

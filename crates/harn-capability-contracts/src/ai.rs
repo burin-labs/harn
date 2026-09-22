@@ -20,6 +20,13 @@ capability_method!(
     "Evaluate a declared question set over one shared state and require an explicit outcome disposition."
 );
 capability_method!(
+    llm_evaluate_request,
+    "harness.llm.evaluate_request",
+    ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    harn_builtin_meta::predicate::EVALUATE_REQUEST,
+    "Evaluate a typed runtime question set through shared decision admission."
+);
+capability_method!(
     llm_estimate_state_tokens,
     "harness.llm.estimate_state_tokens",
     [],

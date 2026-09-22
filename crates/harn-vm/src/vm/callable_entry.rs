@@ -80,6 +80,24 @@ impl TopLevelEntry {
 }
 
 impl Vm {
+    /// Host projection of the bounded Harness evaluator with the VM's ordinary
+    /// execution scope, accounting and receipt ownership.
+    pub async fn evaluate_decision(
+        &mut self,
+        site_id: &str,
+        state: serde_json::Value,
+        questions: serde_json::Value,
+        policy: serde_json::Value,
+    ) -> Result<crate::llm::decision::EvaluationResult, VmError> {
+        self.ensure_execution_available()?;
+        let ambient = self.prepare_top_level_ambient();
+        let ctx = super::AsyncBuiltinCtx::from_inline_parent(self);
+        crate::orchestration::scope_ambient(ambient, async {
+            crate::llm::decision::evaluate_json(&ctx, site_id, state, questions, policy).await
+        })
+        .await
+    }
+
     pub(super) fn prepare_top_level_ambient(
         &mut self,
     ) -> crate::orchestration::AmbientExecutionScope {

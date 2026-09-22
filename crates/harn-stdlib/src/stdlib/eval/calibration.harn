@@ -172,7 +172,12 @@ pub type CalibrationReport = {
   | {
   kind: "refused",
   contract: "harn.calibration_report.v1",
-  reason: "empty_corpus" | "single_row" | "missing_label" | "invalid_confidence" | "label_mismatch",
+  reason: "empty_corpus" \
+    | "single_row" \
+    | "missing_label" \
+    | "invalid_confidence" \
+    | "invalid_options" \
+    | "label_mismatch",
   detail: string,
   rows: int,
 }
@@ -258,7 +263,9 @@ fn __normalize(raw: any, index: int, level_order: list<string>) -> any {
     return "missing_label:row ${index} of question ${question_id} answered with no predicted label"
   }
   const confidence = to_float(raw?.confidence)
-  if confidence == nil || confidence < 0.0 || confidence > 1.0 {
+  if confidence == nil || is_nan(confidence) || is_infinite(confidence)
+    || confidence < 0.0
+    || confidence > 1.0 {
     return "invalid_confidence:row ${index} of question ${question_id} has confidence ${to_string(raw?.confidence)}, which is not a probability"
   }
   if len(level_order) > 0 {
@@ -680,6 +687,24 @@ pub fn calibration_report(rows: list, options: CalibrationOptions = {}) -> Calib
   if len(rows) == 1 {
     return __refuse("single_row", "one row cannot separate a reliability curve from a coin flip", 1)
   }
+  const target_error = options.target_error ?? DEFAULT_TARGET_ERROR
+  if is_nan(target_error) || is_infinite(target_error) || target_error <= 0.0
+    || target_error >= 1.0 {
+    return __refuse(
+      "invalid_options",
+      "target_error must be finite and strictly between 0 and 1",
+      len(rows),
+    )
+  }
+  for threshold in options.thresholds ?? [] {
+    if is_nan(threshold) || is_infinite(threshold) || threshold < 0.0 || threshold > 1.0 {
+      return __refuse(
+        "invalid_options",
+        "thresholds must be finite probabilities between 0 and 1 inclusive",
+        len(rows),
+      )
+    }
+  }
   const level_order = options.level_order ?? []
   let normalized = []
   let index = 0
@@ -697,7 +722,6 @@ pub fn calibration_report(rows: list, options: CalibrationOptions = {}) -> Calib
   } else {
     DEFAULT_THRESHOLDS
   }
-  const target_error = options.target_error ?? DEFAULT_TARGET_ERROR
   const seed = options.seed ?? DEFAULT_SEED
   let grouped = {}
   for row in normalized {

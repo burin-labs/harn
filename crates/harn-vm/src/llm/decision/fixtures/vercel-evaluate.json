@@ -1,0 +1,110 @@
+{
+  "request": {
+    "model": "typesafe-ai/jev",
+    "state": "The read-only command printed README.md.",
+    "questions": {
+      "safe": {
+        "type": "boolean",
+        "instructions": "Was the command read only?"
+      },
+      "action": {
+        "type": "choice",
+        "instructions": "What happened?",
+        "criteria": {
+          "read": "read file",
+          "write": "changed file"
+        }
+      },
+      "risk": {
+        "type": "score",
+        "instructions": "Risk of data loss?",
+        "criteria": [
+          "none",
+          "high"
+        ]
+      }
+    },
+    "providerOptions": {
+      "gateway": {
+        "zeroDataRetention": true,
+        "disallowPromptTraining": true,
+        "only": [
+          "typesafe-ai"
+        ]
+      }
+    }
+  },
+  "response": {
+    "model": "typesafe-ai/jev",
+    "answers": {
+      "safe": {
+        "type": "boolean",
+        "probability": 0.95
+      },
+      "action": {
+        "type": "choice",
+        "choice": "read",
+        "probabilities": {
+          "write": 0,
+          "read": 1
+        },
+        "confidence": 1
+      },
+      "risk": {
+        "type": "score",
+        "score": 0,
+        "probabilities": {
+          "0": 1,
+          "1": 0
+        },
+        "confidence": 1
+      }
+    },
+    "usage": {
+      "inputTokens": 356,
+      "outputTokens": 61
+    },
+    "providerMetadata": {
+      "typesafe": {
+        "confidence": {
+          "action": 1,
+          "risk": 1
+        }
+      },
+      "gateway": {
+        "routing": {
+          "originalModelId": "typesafe-ai/jev",
+          "resolvedProvider": "typesafe-ai",
+          "fallbacksAvailable": [],
+          "planningReasoning": "Provider set restricted to: typesafe-ai. System credentials planned for: typesafe-ai. ZDR requested: all 1 attempts support ZDR. Execution order: typesafe-ai(system). Disallow prompt training requested: all 1 attempts disallow prompt training",
+          "canonicalSlug": "typesafe-ai/jev",
+          "finalProvider": "typesafe-ai",
+          "modelAttemptCount": 1,
+          "modelAttempts": [
+            {
+              "canonicalSlug": "typesafe-ai/jev",
+              "success": true,
+              "providerAttemptCount": 1,
+              "providerAttempts": [
+                {
+                  "provider": "typesafe-ai",
+                  "credentialType": "system",
+                  "success": true,
+                  "startTime": 1790086848663,
+                  "endTime": 1790086848866,
+                  "statusCode": 200
+                }
+              ]
+            }
+          ],
+          "totalProviderAttemptCount": 1
+        },
+        "cost": "0",
+        "marketCost": "0.000014952",
+        "surchargeCost": "0",
+        "gatewayCost": "0",
+        "generationId": "gen_01M34QV7Q53WBXQ418MS5QG0GN"
+      }
+    }
+  }
+}

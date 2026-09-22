@@ -1,0 +1,12 @@
+{"row_id":"en-immediate-read","language":"en","assistant_text":"I will read the configuration file now to check the setting.","intended":true,"tool":"read"}
+{"row_id":"en-immediate-edit","language":"en","assistant_text":"I'm applying the change to the source file now.","intended":true,"tool":"edit"}
+{"row_id":"es-immediate-read","language":"es","assistant_text":"Voy a leer el archivo de configuración ahora para comprobar el valor.","intended":true,"tool":"read"}
+{"row_id":"es-immediate-shell","language":"es","assistant_text":"Ahora ejecutaré las pruebas en la terminal.","intended":true,"tool":"shell"}
+{"row_id":"fr-immediate-edit","language":"fr","assistant_text":"Je vais modifier le fichier source maintenant pour corriger cette erreur.","intended":true,"tool":"edit"}
+{"row_id":"fr-immediate-shell","language":"fr","assistant_text":"Je lance maintenant la commande de test dans le terminal.","intended":true,"tool":"shell"}
+{"row_id":"en-final","language":"en","assistant_text":"The change is complete. The tests passed, and the file is saved.","intended":false,"tool":null}
+{"row_id":"en-quoted","language":"en","assistant_text":"The documentation example says: 'I will edit the file now.' This is a quotation, not an action I am taking.","intended":false,"tool":null}
+{"row_id":"es-question","language":"es","assistant_text":"¿Quieres que lea el archivo de configuración? Espero tu respuesta antes de continuar.","intended":false,"tool":null}
+{"row_id":"es-summary","language":"es","assistant_text":"Ya ejecuté las pruebas y todas pasaron. No quedan cambios pendientes.","intended":false,"tool":null}
+{"row_id":"fr-hypothetical","language":"fr","assistant_text":"Si vous le souhaitez, je pourrais modifier le fichier plus tard. Pour le moment, voici seulement une explication.","intended":false,"tool":null}
+{"row_id":"fr-explanation","language":"fr","assistant_text":"La commande de test vérifie les fichiers du projet. Cette phrase explique son fonctionnement et ne demande aucune exécution.","intended":false,"tool":null}

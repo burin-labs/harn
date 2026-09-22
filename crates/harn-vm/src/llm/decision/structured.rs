@@ -18,13 +18,13 @@ use serde_json::{json, Map, Value as JsonValue};
 use super::answer::MAX_EVIDENCE_BYTES;
 use super::backend::{
     ConfidenceProvenance, DecisionBackend, DecisionRequest, DecisionTransportError, RawAnswer,
-    RawDecisionResponse, RefusalReason,
+    RawDecisionResponse, RefusalReason, ReportedSelection,
 };
 use super::question::QuestionBody;
 
-/// Bumped whenever the instruction or the emitted schema changes, because both
+/// Bumped whenever the instruction or answer interpretation changes, because both
 /// change what the model was asked and therefore the cache identity.
-pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v1";
+pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v3";
 pub const OUTPUT_SCHEMA_VERSION: &str = "harn.evaluation.answers.v1";
 
 const INSTRUCTION: &str = "\
@@ -133,17 +133,14 @@ impl DecisionBackend for StructuredLlmBackend {
             "State:\n{}\n\nAnswer every question in the schema.",
             serde_json::to_string(request.state).unwrap_or_else(|_| "{}".into())
         );
-        let response = super::transport::one_structured_call(
-            request.provider,
-            request.model,
-            request.effort,
-            &prompt,
-            INSTRUCTION,
-            &schema,
-        )
-        .await?;
-        let answers = read_answers(request.questions, &response.data)?;
+        let response =
+            super::transport::one_structured_call(&request, &prompt, INSTRUCTION, &schema).await?;
+        let answers = read_answers(request.questions, &response.data).map_err(|error| {
+            error.with_usage(response.usage.clone(), response.served_model.clone())
+        })?;
         Ok(RawDecisionResponse {
+            usage: Some(Box::new(response.usage)),
+            native_transport: None,
             answers,
             provenance: ConfidenceProvenance::ModelReported,
             served_model: response.served_model,
@@ -163,11 +160,8 @@ fn schema_invalid(diagnostic: impl Into<String>) -> DecisionTransportError {
 
 /// Read the validated body into raw answers.
 ///
-/// A chat model names one label; it does not measure a distribution. The
-/// degenerate distribution built here puts the model's reported confidence on
-/// the chosen label and spreads the remainder over the others, so the shape a
-/// consumer reads is honest about carrying no measurement. Its provenance says
-/// the same thing.
+/// Preserve the model's named answer separately from its confidence. A low
+/// self-reported confidence is not evidence that it selected another label.
 fn read_answers(
     questions: &super::question::QuestionSet,
     data: &JsonValue,
@@ -199,7 +193,7 @@ fn read_answers(
             .get("evidence")
             .and_then(JsonValue::as_str)
             .map(str::to_string);
-        let raw = match &question.body {
+        let selection = match &question.body {
             QuestionBody::Boolean => {
                 let verdict = answer
                     .get("verdict")
@@ -207,42 +201,26 @@ fn read_answers(
                     .ok_or_else(|| {
                         schema_invalid(format!("question `{}` has no verdict", question.id))
                     })?;
-                RawAnswer::Boolean {
-                    // The yes-probability implied by a named verdict at the
-                    // model's own stated confidence in it.
-                    probability: if verdict {
-                        confidence
-                    } else {
-                        1.0 - confidence
-                    },
-                    reported_confidence: Some(confidence),
-                    evidence,
-                }
+                ReportedSelection::Boolean(verdict)
             }
             QuestionBody::Choice(criteria) => {
                 let labels: Vec<String> = criteria.iter().map(|(label, _)| label.clone()).collect();
                 let choice = named_label(answer, "choice", &labels, &question.id)?;
-                RawAnswer::Choice {
-                    probabilities: degenerate(&labels, &choice, confidence),
-                    reported_confidence: Some(confidence),
-                    evidence,
-                }
+                ReportedSelection::Choice(choice)
             }
             QuestionBody::Score(levels) => {
                 let level = named_label(answer, "level", levels, &question.id)?;
-                let index = levels
-                    .iter()
-                    .position(|candidate| *candidate == level)
-                    .unwrap_or(0);
-                RawAnswer::Score {
-                    probabilities: degenerate(levels, &level, confidence),
-                    score: Some(index as f64),
-                    reported_confidence: Some(confidence),
-                    evidence,
-                }
+                ReportedSelection::Score(level)
             }
         };
-        answers.insert(question.id.clone(), raw);
+        answers.insert(
+            question.id.clone(),
+            RawAnswer::ModelReported {
+                selection,
+                confidence,
+                evidence,
+            },
+        );
     }
     Ok(answers)
 }
@@ -265,21 +243,82 @@ fn named_label(
     Ok(label.to_string())
 }
 
-fn degenerate(labels: &[String], chosen: &str, confidence: f64) -> BTreeMap<String, f64> {
-    let others = labels.len().saturating_sub(1);
-    let confidence = confidence.clamp(0.0, 1.0);
-    let spread = if others == 0 {
-        0.0
-    } else {
-        (1.0 - confidence) / others as f64
-    };
-    labels
-        .iter()
-        .map(|label| {
-            (
-                label.clone(),
-                if label == chosen { confidence } else { spread },
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::decision::answer::{Answer, AnswerBody, ConfidenceKind};
+    use crate::llm::decision::question::{Question, QuestionSet};
+
+    #[test]
+    fn low_confidence_named_answers_survive_projection_without_label_inversion() {
+        let questions = QuestionSet {
+            questions: vec![
+                Question {
+                    id: "safe".into(),
+                    instructions: "Safe?".into(),
+                    body: QuestionBody::Boolean,
+                },
+                Question {
+                    id: "tool".into(),
+                    instructions: "Which?".into(),
+                    body: QuestionBody::Choice(vec![
+                        ("left".into(), "Left".into()),
+                        ("right".into(), "Right".into()),
+                    ]),
+                },
+                Question {
+                    id: "risk".into(),
+                    instructions: "Risk?".into(),
+                    body: QuestionBody::Score(vec!["low".into(), "high".into()]),
+                },
+            ],
+        };
+        for verdict in [true, false] {
+            let raw = read_answers(
+                &questions,
+                &json!({"answers": {
+                    "safe": {"verdict": verdict, "confidence": 0.1, "evidence": "uncertain"},
+                    "tool": {"choice": "left", "confidence": 0.1, "evidence": "uncertain"},
+                    "risk": {"level": "low", "confidence": 0.1, "evidence": "uncertain"},
+                }}),
             )
-        })
-        .collect()
+            .unwrap();
+            let projected: Vec<_> = questions
+                .questions
+                .iter()
+                .map(|q| {
+                    Answer::project(q, &raw[&q.id], ConfidenceProvenance::ModelReported).unwrap()
+                })
+                .collect();
+            assert!(
+                matches!(projected[0].body, AnswerBody::Boolean { verdict: actual, .. } if actual == verdict)
+            );
+            assert!(
+                matches!(&projected[1].body, AnswerBody::Choice { choice, .. } if choice == "left")
+            );
+            assert!(
+                matches!(&projected[2].body, AnswerBody::Score { level, score, .. } if level == "low" && *score == 0.0)
+            );
+            for answer in projected {
+                assert_eq!(answer.confidence, 0.1);
+                assert_eq!(answer.confidence_kind, ConfidenceKind::ModelRationale);
+                assert!(
+                    answer.raw_probabilities.is_empty(),
+                    "a structured report measured no distribution"
+                );
+            }
+        }
+        let native = Answer::project(
+            &questions.questions[1],
+            &RawAnswer::Choice {
+                selected: None,
+                probabilities: BTreeMap::from([("left".into(), 0.1), ("right".into(), 0.9)]),
+                reported_confidence: None,
+                evidence: None,
+            },
+            ConfidenceProvenance::VendorDistribution,
+        )
+        .unwrap();
+        assert!(matches!(native.body, AnswerBody::Choice { choice, .. } if choice == "right"));
+    }
 }

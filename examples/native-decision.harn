@@ -1,0 +1,27 @@
+import { boolean, choice, score } from "std/predicate"
+
+fn main(harness: Harness) {
+  const policy = {
+    backend: "native_decision",
+    provider: "vercel_ai_gateway",
+    model: "vercel/typesafe-ai/jev",
+    threshold: 0.5,
+    evaluation_cost_limit: 0.01,
+    run_cost_limit: 0.01,
+  }
+  const result = harness.llm.evaluate(
+    "native.smoke.v1",
+    {observation: "The read-only command printed README.md."},
+    {
+      safe: boolean("Was the command read only?"),
+      action: choice("What happened?", {read: "read file", write: "changed file"}),
+      risk: score("Risk of data loss?", ["none", "high"]),
+    },
+    policy,
+  )
+  match result.kind {
+    "answered" -> { harness.stdio.println(to_string(result.value)) }
+    "low_confidence" -> { harness.stdio.println("low_confidence") }
+    _ -> { harness.stdio.println(to_string(result)) }
+  }
+}

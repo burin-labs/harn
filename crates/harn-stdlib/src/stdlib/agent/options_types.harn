@@ -27,8 +27,25 @@ pub type MissingToolCallRecoveryRequest = {
   confidence_threshold?: float,
 }
 
+/** Typed evidence returned by live and fixture missing-call classifiers. */
+pub type MissingToolCallVerdict = {
+  action: "tool_call_intended" | "no_tool_call_intended" | "ambiguous",
+  original_action?: string,
+  tool_name: string,
+  confidence: float,
+  confidence_threshold?: float,
+  evidence: string,
+  language?: string,
+  classifier_kind?: string,
+  model?: string,
+  typed_checkpoint?: any,
+  error?: string,
+}
+
 /** Custom recovery seam; nil means that no missing call was identified. */
-pub type MissingToolCallCustomClassifier = fn(MissingToolCallRecoveryRequest) -> dict?
+pub type MissingToolCallClassifier = fn(MissingToolCallRecoveryRequest) -> MissingToolCallVerdict?
+
+pub type MissingToolCallCustomClassifier = MissingToolCallClassifier
 
 /** Typed configuration for text-mode missing-tool-call recovery. */
 pub type MissingToolCallRecoveryOptions = {

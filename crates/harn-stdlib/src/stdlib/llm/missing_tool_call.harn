@@ -1,28 +1,10 @@
-import {
-  MissingToolCallRecoveryOptions,
-  MissingToolCallRecoveryRequest,
-} from "std/agent/options_types"
+pub import { MissingToolCallClassifier, MissingToolCallVerdict } from "std/agent/options_types"
+import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 
 type MissingToolCallAction = "tool_call_intended" | "no_tool_call_intended" | "ambiguous"
 
 type MissingToolCallTool = {name: string, description?: string}
-
-pub type MissingToolCallVerdict = {
-  action: MissingToolCallAction,
-  original_action?: string,
-  tool_name: string,
-  confidence: float,
-  confidence_threshold?: float,
-  evidence: string,
-  language?: string,
-  classifier_kind?: string,
-  model?: string,
-  typed_checkpoint?: any,
-  error?: string,
-}
-
-pub type MissingToolCallClassifier = fn(MissingToolCallRecoveryRequest) -> MissingToolCallVerdict?
 
 fn __missing_tool_call_string(value: any) -> string {
   if value == nil {
@@ -36,11 +18,8 @@ fn __missing_tool_call_float(value: float?, fallback: float) {
   if parsed == nil {
     return fallback
   }
-  if parsed < 0.0 {
-    return 0.0
-  }
-  if parsed > 1.0 {
-    return 1.0
+  if !(parsed >= 0.0 && parsed <= 1.0) {
+    return fallback
   }
   return parsed
 }
@@ -57,7 +36,7 @@ fn __missing_tool_call_config_error(code: string, message: string, fields: dict?
 
 fn __missing_tool_call_threshold(value: float?) -> float {
   const threshold = to_float(value ?? 0.65)
-  if threshold == nil || threshold < 0.0 || threshold > 1.0 {
+  if threshold == nil || !(threshold >= 0.0 && threshold <= 1.0) {
     throw __missing_tool_call_config_error(
       "missing_tool_call.invalid_confidence_threshold",
       "confidence_threshold must be between 0.0 and 1.0",

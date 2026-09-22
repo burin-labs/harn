@@ -422,7 +422,7 @@ fn catalog_model(
         capability_tags.push("batch".to_string());
     }
     let batch = catalog_batch_support(batch_api, &caps);
-    let operations = model.normalized_operations();
+    let operations = decision_contract::resolved_operations(&id, &model, &caps);
     let text_generation = operations.contains(&llm_config::ModelOperation::TextGeneration);
     CatalogModel {
         aliases,

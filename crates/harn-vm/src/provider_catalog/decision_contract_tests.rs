@@ -6,7 +6,7 @@
 //! count it measured so a vacuous zero cannot read as a pass.
 
 use super::*;
-use crate::llm::capabilities::{self, DecisionProtocol};
+use crate::llm::capabilities::{self, DecisionProtocol, StructuredOutputStrategy};
 use llm_config::ModelOperation;
 
 /// Every catalog route declaring `decision`, as `(catalog_id, provider)`.
@@ -14,9 +14,59 @@ fn decision_rows() -> Vec<(String, String)> {
     llm_config::embedded_config(None)
         .models
         .iter()
-        .filter(|(_, entry)| entry.supports_operation(ModelOperation::Decision))
+        .filter(|(id, entry)| {
+            entry.supports_operation(ModelOperation::Decision)
+                || decision_contract_for_route(&entry.provider, id).is_some()
+        })
         .map(|(id, entry)| (id.clone(), entry.provider.clone()))
         .collect()
+}
+
+#[test]
+fn native_schema_gateway_derives_decision_but_explicit_unsupported_does_not() {
+    let id = "vercel/openai/gpt-5.4-nano";
+    let entry = llm_config::model_catalog_entry(id).expect("gateway route exists");
+    let mut caps = capabilities::lookup(&entry.provider, id);
+    let contract = decision_contract::resolved_decision_contract(id, &entry, &caps)
+        .expect("native schema supports structured decisions");
+    assert_eq!(contract.protocol, DecisionProtocol::StructuredLlm);
+    assert!(decision_contract::resolved_operations(id, &entry, &caps)
+        .contains(&ModelOperation::Decision));
+    caps.structured_output = Some("none".into());
+    caps.json_schema = Some("native".into());
+    caps.structured_output_strategy = StructuredOutputStrategy::Unsupported;
+    assert!(decision_contract::resolved_decision_contract(id, &entry, &caps).is_none());
+    assert!(!decision_contract::resolved_operations(id, &entry, &caps)
+        .contains(&ModelOperation::Decision));
+}
+
+#[test]
+fn real_tool_schema_and_prompt_validation_routes_remain_decision_capable() {
+    for (provider, model, expected) in [
+        (
+            "openrouter",
+            "anthropic/claude-fable-5",
+            StructuredOutputStrategy::ToolSchema,
+        ),
+        (
+            "minimax",
+            "MiniMax-M2.5-highspeed",
+            StructuredOutputStrategy::PromptValidation,
+        ),
+        (
+            "fireworks",
+            "accounts/fireworks/models/gpt-oss-120b",
+            StructuredOutputStrategy::PromptValidation,
+        ),
+    ] {
+        let contract = decision_contract_for_route(provider, model)
+            .expect("real chat route remains supported");
+        assert_eq!(
+            contract.structured_output_strategy,
+            Some(expected),
+            "{provider}/{model}"
+        );
+    }
 }
 
 #[test]
@@ -87,15 +137,14 @@ fn a_structured_llm_route_can_actually_honour_a_schema() {
              text_generation operation"
         );
         let caps = capabilities::lookup(&provider, &id);
-        let mode = caps
-            .structured_output
-            .clone()
-            .or_else(|| caps.json_schema.clone())
-            .unwrap_or_else(|| "none".to_string());
+        assert_ne!(
+            caps.structured_output_strategy,
+            StructuredOutputStrategy::Unsupported,
+            "structured_llm route {id} must have a supported validation strategy"
+        );
         assert_eq!(
-            mode, "native",
-            "structured_llm route {id} resolves structured output {mode:?}; a \
-             decision answered by schema needs native structured output"
+            contract.structured_output_strategy,
+            Some(caps.structured_output_strategy)
         );
     }
     assert!(
@@ -216,7 +265,7 @@ fn a_predicate_site_naming_each_native_jev_route_is_admitted() {
 
     // Negative control through the same function: a chat-only route is still
     // refused, and the message names the operation it lacks.
-    let refused = validate_predicate_models(&[predicate_site("anthropic", "claude-sonnet-5")]);
+    let refused = validate_predicate_models(&[predicate_site("openai", "text-embedding-3-small")]);
     assert_eq!(refused.len(), 1);
     assert!(
         refused[0].message.contains("decision"),

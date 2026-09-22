@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::value::VmValue;
 
-use super::backend::{ConfidenceProvenance, RawAnswer};
+use super::backend::{ConfidenceProvenance, RawAnswer, ReportedSelection};
 use super::question::{Question, QuestionBody};
 
 /// The provenance of a confidence number. These are different quantities and
@@ -65,9 +65,8 @@ pub struct Answer {
     pub evidence: String,
     pub evidence_kind: EvidenceKind,
     pub body: AnswerBody,
-    /// The distribution as the backend reported it, before conversion. The
-    /// receipt keeps this so a calibration study reads measured probabilities
-    /// rather than the evaluator's derived confidence.
+    /// The distribution as the backend reported it, before conversion. Empty
+    /// for structured model reports, which contain no measured distribution.
     pub raw_probabilities: BTreeMap<String, f64>,
 }
 
@@ -177,6 +176,74 @@ impl Answer {
             diagnostic: diagnostic.to_string(),
         };
         let labels = question.body.labels();
+        if let RawAnswer::ModelReported {
+            selection,
+            confidence,
+            evidence,
+        } = raw
+        {
+            if provenance != ConfidenceProvenance::ModelReported {
+                return Err(reject(
+                    "a named model report requires model-reported provenance",
+                ));
+            }
+            let confidence = finite_probability(*confidence, "confidence", &question.id)?;
+            let distribution = |selected: &str| {
+                let others = labels.len().saturating_sub(1);
+                labels
+                    .iter()
+                    .map(|label| {
+                        let probability = if others == 0 {
+                            1.0
+                        } else if label == selected {
+                            confidence
+                        } else {
+                            (1.0 - confidence) / others as f64
+                        };
+                        (label.clone(), probability)
+                    })
+                    .collect()
+            };
+            let body = match (&question.body, selection) {
+                (QuestionBody::Boolean, ReportedSelection::Boolean(verdict)) => {
+                    AnswerBody::Boolean {
+                        verdict: *verdict,
+                        probability: if *verdict {
+                            confidence
+                        } else {
+                            1.0 - confidence
+                        },
+                    }
+                }
+                (QuestionBody::Choice(_), ReportedSelection::Choice(choice))
+                    if labels.contains(choice) =>
+                {
+                    AnswerBody::Choice {
+                        choice: choice.clone(),
+                        probabilities: distribution(choice),
+                    }
+                }
+                (QuestionBody::Score(_), ReportedSelection::Score(level))
+                    if labels.contains(level) =>
+                {
+                    AnswerBody::Score {
+                        level: level.clone(),
+                        score: labels.iter().position(|label| label == level).unwrap() as f64,
+                        probabilities: distribution(level),
+                    }
+                }
+                _ => return Err(reject("reported selection does not match the question")),
+            };
+            return Ok(Self {
+                question_id: question.id.clone(),
+                confidence,
+                confidence_kind: ConfidenceKind::ModelRationale,
+                evidence: bounded_evidence(evidence.clone()),
+                evidence_kind: EvidenceKind::ModelRationale,
+                body,
+                raw_probabilities: BTreeMap::new(),
+            });
+        }
         match (&question.body, raw) {
             (
                 QuestionBody::Boolean,
@@ -216,6 +283,7 @@ impl Answer {
             (
                 QuestionBody::Choice(_),
                 RawAnswer::Choice {
+                    selected,
                     probabilities,
                     reported_confidence,
                     evidence,
@@ -224,6 +292,14 @@ impl Answer {
                 admit_distribution(question, &labels, probabilities)?;
                 let (choice, _) = argmax(&labels, probabilities)
                     .ok_or_else(|| reject("distribution is empty"))?;
+                if selected
+                    .as_deref()
+                    .is_some_and(|selected| selected != choice)
+                {
+                    return Err(reject(
+                        "named choice contradicts the distribution's selected label",
+                    ));
+                }
                 let (confidence, confidence_kind) = distribution_confidence(
                     provenance,
                     reported_confidence,
