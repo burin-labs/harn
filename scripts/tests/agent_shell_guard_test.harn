@@ -784,6 +784,65 @@ pipeline test_the_admission_command_named_in_a_refusal_exists(harness: Harness, 
 }
 
 @test
+pipeline test_a_cd_narrows_only_through_an_unbroken_and_chain(harness: Harness, task: unknown) {
+  // THE REVIEWER'S SHAPE, and one negation per clause, in a case of its own
+  // so a control can measure each alone.
+  //
+  // A `cd` narrows only when (a) it carries one operand and is not in a
+  // pipeline, (b) it is reached unconditionally, and (c) every operator
+  // between it and the command is `&&`.
+  const mixed: WorktreeAdmissionCensus = {
+    rows: [
+      {root: "/repo/guard", command: "scripts/fleet-worktree-admit.ts"},
+      {root: "/repo/plain", command: ""},
+    ],
+    denial: "",
+  }
+  // Row zero owns the command, so the bare form is the refusal these shapes
+  // must not lose. Without this the whole case could pass on a census that
+  // refuses nothing.
+  const bare = decision(
+    codex_payload("git worktree add ../unowned origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(!bare.allow, "the bare creation must be refused or this fixture proves nothing")
+  // (a) negated, twice. Two operands make the `cd` FAIL, which is the
+  // reviewer's command: the `&&` then short-circuits and the `||` runs the
+  // creation from the ORIGINAL directory. A `cd` inside a pipeline runs in a
+  // subshell and never moves what follows.
+  //
+  // (b) negated: `||` before the `cd` means the shell may never reach it.
+  //
+  // (c) negated, twice: a `;` between the `cd` and the command runs the
+  // command either way, and a `||` between them catches the `cd`'s failure.
+  for routed in [
+    "cd /repo/plain extra && false || git worktree add ../unowned origin/main",
+    "cd /repo/plain extra && git worktree add ../unowned origin/main",
+    "cd /repo/plain | cat && git worktree add ../unowned origin/main",
+    "true || cd /repo/plain && git worktree add ../unowned origin/main",
+    "cd /repo/plain; git worktree add ../unowned origin/main",
+    "cd /repo/plain || true && git worktree add ../unowned origin/main",
+  ] {
+    const verdict = decision(codex_payload(routed), mixed, NO_MAKE_TARGETS)
+    assert(!verdict.allow, "a cd that is not proven to have taken effect must union: " + routed)
+    assert(
+      verdict.reason.contains("scripts/fleet-worktree-admit.ts"),
+      "the refusal must name the command of the repository it could be in: " + verdict.reason,
+    )
+  }
+  // ALL THREE CLAUSES SATISFIED, or every assertion above would hold with the
+  // directory tracking deleted. One operand, no pipeline, reached at the list
+  // start, and nothing but `&&` between the `cd` and the creation.
+  const chained = decision(
+    codex_payload("cd /repo/plain && true && git worktree add ../unowned origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(chained.allow, "an unbroken && chain from the cd narrows to its target: " + chained.reason)
+}
+
+@test
 pipeline test_a_cd_the_shell_may_skip_never_relaxes_the_rule(harness: Harness, task: unknown) {
   // THE DISARM WAS TWO WORDS. The rule refused a bare creation in a repository
   // that owns an admission command, and `true || cd /repo/plain` in front of
@@ -836,24 +895,32 @@ pipeline test_a_cd_the_shell_may_skip_never_relaxes_the_rule(harness: Harness, t
     NO_MAKE_TARGETS,
   )
   assert(!piped.allow, "a cd inside a pipeline cannot move the directory of a later stage")
-  // THE OTHER SIDE OF THE RULE, or this test would pass with the directory
-  // tracking deleted. An unconditional cd still carries, and the creation is
-  // judged where it lands.
-  const unconditional = decision(
-    codex_payload("cd /repo/plain && git worktree add ../unowned origin/main"),
-    mixed,
-    NO_MAKE_TARGETS,
-  )
-  assert(
-    unconditional.allow,
-    "an unconditional cd still answers for the repository it moves to: " + unconditional.reason,
-  )
+  // `;` IS NOT A NARROWING, and this case used to assert the opposite.
+  //
+  // `cd X; cmd` runs `cmd` whether or not the `cd` succeeded, so the original
+  // directory is still reachable. Only an unbroken `&&` chain proves the `cd`
+  // took effect.
   const sequential = decision(
     codex_payload("cd /repo/plain; git worktree add ../unowned origin/main"),
     mixed,
     NO_MAKE_TARGETS,
   )
-  assert(sequential.allow, "a plain sequential cd always runs: " + sequential.reason)
+  assert(
+    !sequential.allow,
+    "a `;` after a cd leaves the original directory reachable: " + sequential.reason,
+  )
+  // THE OTHER SIDE OF THE RULE, or this test would pass with the directory
+  // tracking deleted. `&&` runs the creation only when the `cd` succeeded, so
+  // it narrows and the creation is judged where it lands.
+  const conjunctive = decision(
+    codex_payload("cd /repo/plain && git worktree add ../unowned origin/main"),
+    mixed,
+    NO_MAKE_TARGETS,
+  )
+  assert(
+    conjunctive.allow,
+    "an unbroken && chain from the cd still answers for its target: " + conjunctive.reason,
+  )
   // A nested shell launched after a skipped cd inherits the ambiguity rather
   // than the skipped directory.
   const nested = decision(
@@ -903,12 +970,14 @@ pipeline test_a_nested_scan_asks_about_every_reachable_directory(harness: Harnes
     "the refusal must name the command of the repository that owns one: " + nested.reason,
   )
   // THE CONTROL. Without this the fix would be indistinguishable from
-  // refusing every nested creation. Here the `cd` is unconditional, so one
-  // directory is reachable, it owns no admission command, and the rule does
-  // not police it.
+  // refusing every nested creation. Here the `cd` reaches the nested shell
+  // through an unbroken `&&` chain, so one directory is reachable, it owns no
+  // admission command, and the rule does not police it. `&&` rather than `;`
+  // is the whole point: `;` would run the nested shell even if the `cd`
+  // failed, which leaves two directories reachable.
   const single = decision(
     codex_payload(
-      "bash -lc 'cd /repo/other; bash -lc \"git worktree add ../unowned origin/main\"'",
+      "bash -lc 'cd /repo/other && bash -lc \"git worktree add ../unowned origin/main\"'",
     ),
     mixed,
     NO_MAKE_TARGETS,

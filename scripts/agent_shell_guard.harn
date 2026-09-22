@@ -518,16 +518,14 @@ fn stage_operators(command: string, texts: list<string>) -> list<string> {
 }
 
 /**
- * The directory an absolute `cd` moves the rest of the command into.
+ * The operands a `cd` carries, with its option words removed.
  *
- * A relative one answers "", for the same reason `git_directory_argument` is
- * only consulted when absolute: the hook payload carries no working directory
- * to resolve it against, and inventing one would be the error this rule
- * exists to prevent.
+ * The count matters as much as the first value: `cd` accepts exactly one
+ * operand, so two is a `cd` that fails rather than a `cd` with a spare word.
  */
-fn cd_target(argv: list<string>) -> string {
+fn cd_operands(argv: list<string>) -> list<string> {
   if argv_program(argv) != "cd" {
-    return ""
+    return []
   }
   // OPTIONS ARE NOT THE DESTINATION. `cd` takes option words, and reading the
   // first one as the directory answers "no absolute target", which leaves the
@@ -544,8 +542,14 @@ fn cd_target(argv: list<string>) -> string {
   // which this guard has no way to resolve, so it falls through to the
   // not-absolute answer below rather than being stepped over in search of a
   // later token that was never the destination.
+  //
+  // EVERY operand is collected, not only the first. `cd` takes exactly one,
+  // so a second one is not extra information to ignore: it makes the `cd`
+  // FAIL, and a failing `cd` leaves the rest of the list running where it
+  // started. A reader that stops at the first operand reports a move that
+  // never happens.
   let options_ended = false
-  let target = ""
+  let operands: list<string> = []
   for token in argv.slice(1, len(argv)) {
     if !options_ended && token == "--" {
       options_ended = true
@@ -554,9 +558,21 @@ fn cd_target(argv: list<string>) -> string {
     if !options_ended && token != "-" && token.starts_with("-") {
       continue
     }
-    target = token
-    break
+    operands = operands + [token]
   }
+  return operands
+}
+
+/**
+ * The directory an absolute `cd` moves the rest of the command into.
+ *
+ * A relative one answers "", for the same reason `git_directory_argument` is
+ * only consulted when absolute: the hook payload carries no working directory
+ * to resolve it against, and inventing one would be the error this rule
+ * exists to prevent.
+ */
+fn cd_target(argv: list<string>) -> string {
+  const target = cd_operands(argv)[0] ?? ""
   if target.starts_with("/") {
     return target
   }
@@ -601,27 +617,64 @@ fn raw_worktree_add_attempt_at(
     }
   }
   const operators = stage_operators(command, texts)
+  // THREE CLAUSES, ALL REQUIRED, and each one closed a hole review found.
+  //
+  // A `cd` narrows the set of directories a later command could be running in
+  // only when all of these hold:
+  //
+  //   (a) the `cd` carries exactly one operand and is not inside a pipeline.
+  //       Two operands make `cd` FAIL, and a pipeline stage is a subshell
+  //       whose directory never reaches what follows.
+  //   (b) the `cd` is itself reached unconditionally: it is at the start of
+  //       the list, or only `&&` stands before it.
+  //   (c) every operator between the `cd` and the command is `&&`. This is
+  //       not a guess about the shell: `&&` runs the next element only when
+  //       every element before it succeeded, so reaching the command through
+  //       an unbroken `&&` chain proves the `cd` succeeded.
+  //
+  // Any `||` or `;` between the `cd` and the command, or before the `cd`,
+  // and the reachable set is the union of the directory before the `cd` and
+  // its target, with the first refusal winning. `cd X; cmd` unions because
+  // `;` runs `cmd` whether or not the `cd` succeeded.
   let reachable: list<string> = [inherited_directory]
+  // (b): every operator seen so far has been "" or `&&`.
+  let reached_unconditionally = true
+  // (c): a narrowing is live until a non-`&&` operator breaks the chain.
+  let narrowed = false
+  let before_narrow: list<string> = []
+  let narrow_target = ""
   let index = 0
   for group in groups {
     for stage in group {
+      const before = to_string(operators[index] ?? "?")
+      if before != "" && before != "&&" {
+        reached_unconditionally = false
+        if narrowed {
+          // (c) broken: the command after this operator can be reached
+          // without the `cd` having taken effect, so both are live again.
+          reachable = before_narrow
+          if !reachable.contains(narrow_target) {
+            reachable = reachable + [narrow_target]
+          }
+          narrowed = false
+        }
+      }
       const argv = launched_argv(stage.argv, 0)
       const moved = cd_target(argv)
       if moved != "" {
-        const before = to_string(operators[index] ?? "?")
-        const after = to_string(operators[index + 1] ?? "")
-        // Runs at all: only when nothing conditions it. After `&&` or `||` the
-        // shell may skip it outright.
-        const always_runs = before == "" || before == ";"
-        // Its failure is swallowed, so the command after it runs either way.
-        const failure_tolerated = after == "||"
-        // A stage inside a pipeline runs in a subshell, so its `cd` never
-        // reaches the stages that follow the pipeline at all.
+        // (a)
+        const single_operand = len(cd_operands(argv)) == 1
         const in_pipeline = len(group) > 1
-        if always_runs && !failure_tolerated && !in_pipeline {
+        if single_operand && !in_pipeline && reached_unconditionally {
+          before_narrow = reachable
+          narrow_target = moved
           reachable = [moved]
-        } else if !reachable.contains(moved) {
-          reachable = reachable + [moved]
+          narrowed = true
+        } else {
+          narrowed = false
+          if !reachable.contains(moved) {
+            reachable = reachable + [moved]
+          }
         }
       }
       if argv_program(argv) == "git" && is_git_worktree_add(argv) {
