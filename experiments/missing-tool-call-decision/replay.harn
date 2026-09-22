@@ -26,13 +26,19 @@ fn main(harness: Harness) {
     const before = harness.llm.session_cost()
     const started = harness.clock.monotonic_ms()
     const verdict = classifier(payload)
+    const after = harness.llm.session_cost()
+    const measured_cost = if before.total_cost != nil && after.total_cost != nil {
+      after.total_cost - before.total_cost
+    } else {
+      nil
+    }
     harness.runtime.store_set(
       observations_key,
       harness.runtime.store_get(observations_key).appending(
         {
           verdict: verdict,
           elapsed_ms: harness.clock.monotonic_ms() - started,
-          cost_usd: harness.llm.session_cost().total_cost - before.total_cost,
+          cost_usd: measured_cost,
         },
       ),
     )
