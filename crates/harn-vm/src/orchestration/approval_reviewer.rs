@@ -51,6 +51,11 @@ use crate::value::{VmClosure, VmError, VmValue};
 /// decision receipt without running a review at all.
 pub const NO_REVIEWER_INSTALLED: &str = "no_reviewer_installed";
 
+mod evaluation;
+pub use evaluation::{DecisionReview, ReviewDisposition};
+#[cfg(test)]
+mod evaluation_tests;
+
 thread_local! {
     static APPROVAL_REVIEWER_STACK: RefCell<Vec<Arc<VmClosure>>> = const { RefCell::new(Vec::new()) };
     /// Re-entrancy depth. The reviewer session dispatches its own tool calls;
@@ -92,6 +97,8 @@ impl BreakerCounts {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ApprovalReviewOutcome {
     pub approved: bool,
+    /// Validated evaluator outcome and the deterministic rule applied to it.
+    pub evaluation_review: Option<Box<DecisionReview>>,
     /// Whether a reviewer actually answered. `false` distinguishes "the
     /// reviewer considered this and said no" from "nothing answered, so it
     /// stays refused" — those are the same denial with very different meanings,
@@ -100,7 +107,7 @@ pub struct ApprovalReviewOutcome {
     pub rationale: String,
     pub risk: Option<String>,
     pub authorization: Option<String>,
-    /// Set when the reviewer never ran. Never set on a real verdict.
+    /// Why no conclusive review was applied, including an uncertain candidate.
     pub unavailable_reason: Option<String>,
 }
 
@@ -109,6 +116,7 @@ impl ApprovalReviewOutcome {
     fn unavailable(reason: &str) -> Self {
         Self {
             approved: false,
+            evaluation_review: None,
             reviewer_answered: false,
             rationale: String::new(),
             risk: None,
@@ -247,6 +255,32 @@ fn parse_review_verdict(value: VmValue) -> ApprovalReviewOutcome {
         return ApprovalReviewOutcome::unavailable("reviewer_unparseable");
     };
     let approved = matches!(map.get("approved"), Some(VmValue::Bool(true)));
+    if let Some(value) = map.get("evaluation_review") {
+        let review = match DecisionReview::parse(value) {
+            Ok(review) => review,
+            Err(reason) => return ApprovalReviewOutcome::unavailable(reason),
+        };
+        if approved != (review.disposition == ReviewDisposition::Approved) {
+            return ApprovalReviewOutcome::unavailable("inconsistent_review_disposition");
+        }
+        let reviewer_answered = review.disposition != ReviewDisposition::NeedsReview;
+        let unavailable_reason = (!reviewer_answered).then(|| {
+            if review.outcome_kind() == "answered" {
+                review.rule.clone()
+            } else {
+                review.outcome_kind().to_string()
+            }
+        });
+        return ApprovalReviewOutcome {
+            approved,
+            evaluation_review: Some(Box::new(review)),
+            reviewer_answered,
+            rationale: string_field(&map, "rationale").unwrap_or_default(),
+            risk: string_field(&map, "risk"),
+            authorization: string_field(&map, "authorization"),
+            unavailable_reason,
+        };
+    }
     // `reviewer_answered` comes from the record when present. Absent, a
     // well-formed decision (one that named an outcome) still counts as an
     // answer, so a reviewer that omits the field is not mistaken for a broken
@@ -262,6 +296,7 @@ fn parse_review_verdict(value: VmValue) -> ApprovalReviewOutcome {
     }
     ApprovalReviewOutcome {
         approved,
+        evaluation_review: None,
         reviewer_answered: true,
         rationale: string_field(&map, "rationale").unwrap_or_default(),
         risk: string_field(&map, "risk"),
@@ -314,10 +349,16 @@ pub fn decision_records_a_grant(decision: &crate::orchestration::PolicyEvaluatio
     decision.has_audit_signal() || granted_by_auto_review(decision)
 }
 
+/// A side-effect review retains evidence even when it cannot grant the call.
+#[derive(Default)]
+pub struct SideEffectApprovalReview {
+    pub grant: Option<serde_json::Value>,
+    pub evaluation_review: Option<Box<DecisionReview>>,
+}
+
 /// Offer one side-effect-ceiling refusal to the reviewer.
 ///
-/// Returns the policy decision to record on a grant, or `None` when there is
-/// no reviewer, the reviewer declined, or it could not answer.
+/// Returns a grant or decision evidence for the existing human fallback.
 ///
 /// A ceiling refusal is a static policy refusal that the dispatch site may
 /// already offer to a person, so it is exactly the kind of refusal this seam
@@ -336,9 +377,9 @@ pub async fn maybe_grant_side_effect_by_auto_review(
     ceiling: &str,
     required_level: &str,
     reason: &str,
-) -> Option<serde_json::Value> {
+) -> SideEffectApprovalReview {
     if !approval_reviewer_active() {
-        return None;
+        return SideEffectApprovalReview::default();
     }
     let policy_decision = serde_json::json!({
         "action": "ask",
@@ -359,13 +400,26 @@ pub async fn maybe_grant_side_effect_by_auto_review(
     });
     let outcome = run_approval_review(ctx, request, session_id).await;
     if !outcome.approved {
-        return None;
+        return SideEffectApprovalReview {
+            grant: None,
+            evaluation_review: outcome.evaluation_review,
+        };
     }
     let mut granted = policy_decision;
     granted["action"] = serde_json::Value::String("allow".to_string());
     granted["granted_by"] = serde_json::Value::String("approval_reviewer".to_string());
     granted["rationale"] = serde_json::Value::String(outcome.rationale);
-    Some(granted)
+    if let Some(review) = outcome.evaluation_review {
+        granted["auto_review"] = serde_json::json!({
+            "approved": true,
+            "reviewer_answered": true,
+            "evaluation_review": review,
+        });
+    }
+    SideEffectApprovalReview {
+        grant: Some(granted),
+        evaluation_review: None,
+    }
 }
 
 /// Record that this seam was reached for a refusal and did NOT grant it.
@@ -477,10 +531,27 @@ pub async fn maybe_grant_by_auto_review(
             &outcome.rationale,
             outcome.unavailable_reason.as_deref(),
         );
+        attach_evaluation_review(decision, outcome.evaluation_review.as_deref());
         return false;
     }
     decision.grant_by_auto_review(&outcome.rationale);
+    attach_evaluation_review(decision, outcome.evaluation_review.as_deref());
     true
+}
+
+fn attach_evaluation_review(
+    decision: &mut crate::orchestration::PolicyEvaluation,
+    review: Option<&DecisionReview>,
+) {
+    if let (Some(review), Some(auto_review)) = (
+        review,
+        decision
+            .receipt
+            .get_mut("auto_review")
+            .and_then(serde_json::Value::as_object_mut),
+    ) {
+        auto_review.insert("evaluation_review".to_string(), serde_json::json!(review));
+    }
 }
 
 #[cfg(test)]
