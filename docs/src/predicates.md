@@ -127,7 +127,7 @@ Which operations a route needs follows from the `decision_protocol` its
 capability rule names. `structured_llm` dials the ordinary chat endpoint, so a
 route using it needs `text_generation` as well. A route on a native protocol
 (`typesafe_system_one`, `vercel_evaluate`, `openrouter_decisions`) needs
-`decision` alone, and must not inherit a chat transport from its provider. A
+`decision` alone, and must not inherit a chat transport from its provider. An
 explicit native contract takes precedence over derived structured support.
 
 `effort` and `temperature` are optional chat options. Omit both for
