@@ -110,19 +110,25 @@ fn assess(
 | `policy` | Closed, compile-time constant `EvaluationPolicy` record naming a catalog route that declares `decision`. |
 
 The policy requires a `backend` of `"structured_llm"` or `"native_decision"`, string fields `provider`
-and `model`, and floating-point fields `threshold`,
-`evaluation_cost_limit`, and `run_cost_limit`. Checking validates this shape and
-the route's declared `decision` operation. A text-generation capability alone
-does not grant decision support. The checker makes no provider request and does
+and `model`, and a floating-point `threshold`. Optional finite nonnegative
+`evaluation_cost_limit` and `run_cost_limit` tighten inherited authority. Omitting
+them does not create budget authority: native calls require an existing
+conservative ledger ceiling and retain a finite per-call price bound. A native
+classifier configured on an agent loop installs its explicit run ceiling before
+the first chat turn; earlier unreserved calls cannot be retroactively covered.
+Checking validates this shape and the resolved `decision` operation. A route
+with native structured-output support and text generation derives structured
+decision support at the catalog owner. An explicit unsupported schema override
+prevents that derivation. The checker makes no provider request and does
 not establish credential availability or a resource reservation. Unknown routes
-and policies supplied only at runtime refuse admission.
+and policies supplied only at runtime refuse literal-site admission; use
+`evaluate_request` for typed runtime policy and vocabulary admission.
 Which operations a route needs follows from the `decision_protocol` its
 capability rule names. `structured_llm` dials the ordinary chat endpoint, so a
 route using it needs `text_generation` as well. A route on a native protocol
 (`typesafe_system_one`, `vercel_evaluate`, `openrouter_decisions`) needs
 `decision` alone, and must not inherit a chat transport from its provider. A
-route declaring `decision` whose capability rule names no protocol is refused
-by name: there is no endpoint to dial.
+explicit native contract takes precedence over derived structured support.
 
 `effort` and `temperature` are optional chat options. Omit both for
 `native_decision`; supplying either refuses with `unsupported_options` before
@@ -201,7 +207,9 @@ Structured answers retain the model's named verdict, choice, or score level
 even at low confidence. Their probability fields are synthesized compatibility
 projections, never evidence for changing the named answer; their receipt's raw
 probabilities are empty because the model measured no distribution. Native
-distributions continue to select their highest-probability label.
+distributions continue to select their highest-probability label. A native
+response that also names a contradictory label refuses instead of silently
+changing that answer.
 
 ```harn
 import "std/predicate"
