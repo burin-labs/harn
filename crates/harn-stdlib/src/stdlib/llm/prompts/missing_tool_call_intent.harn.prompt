@@ -1,0 +1,3 @@
+The parser found no valid tool calls in this assistant turn. Does the assistant text nevertheless say it is about to, trying to, or intending to invoke one of the candidate tools?
+
+Use the assistant text and candidate descriptions in the shared state. Apply the same rule across languages and minor typos. Final answers, status summaries, questions, and ordinary explanations do not imply a pending tool call. Do not infer intent from the original user task alone. Ambiguous intent should have low confidence.
