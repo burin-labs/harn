@@ -871,6 +871,46 @@ mod compaction_projection_tests {
     }
 
     #[test]
+    fn classified_decisions_survive_transcript_run_record_and_acp_projection() {
+        let receipt: crate::orchestration::CompactionReceipt =
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 2, "receipt_id": "classified-shared-id",
+                "engine_strategy": "classify", "classification": {
+                    "status": "applied", "confidence_floor": 0.8, "rounds": 1,
+                    "budget_bytes": 100, "result_bytes": 125, "budget_met": false,
+                    "summary_applied": false, "fallback_reason": null,
+                    "decisions": [{"index": 3, "question_id": "message_3",
+                        "choice": "drop", "confidence": 0.2,
+                        "confidence_kind": "model_rationale", "evaluation_receipt": "eval-id",
+                        "round": 1, "source": "evaluation", "applied": "reword",
+                        "application_reason": "confidence_floor"}]
+                }
+            }))
+            .unwrap();
+        let transcript = serde_json::json!({"id": "session-classified", "events": [{
+            "kind": "compaction", "id": receipt.receipt_id,
+            "metadata": {"receipt": receipt.to_json()}
+        }]});
+        let events =
+            compaction_events_from_transcript(&transcript, None, None, "run.transcript", None);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].classification, receipt.classification);
+        let projected = &receipt.to_acp_meta()["classification"];
+        assert_eq!(
+            projected["decisions"][0]["confidence"],
+            serde_json::json!(0.2)
+        );
+        assert_eq!(projected["decisions"][0]["applied"], "reword");
+        assert_eq!(projected["budget_met"], false);
+        let live = crate::agent_events::AgentEvent::TranscriptCompacted {
+            session_id: "session-classified".into(),
+            receipt: receipt.clone(),
+        };
+        let wire = serde_json::to_value(live).unwrap();
+        assert_eq!(wire["receipt"]["classification"], *projected);
+    }
+
+    #[test]
     fn marks_unavailable_snapshot_from_receipt() {
         // Manual compaction whose receipt names a snapshot asset that is not
         // present on the transcript: the record still projects, snapshot
