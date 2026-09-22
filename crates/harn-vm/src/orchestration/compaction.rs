@@ -3,11 +3,17 @@
 use crate::llm::{vm_call_llm_full, vm_value_to_json};
 use crate::value::{VmError, VmValue};
 
+mod classification;
 mod config;
 mod policy;
 mod prompt;
 mod tool_output;
 use crate::vm::AsyncBuiltinCtx;
+pub use classification::{
+    ClassificationApplicationReason, ClassificationChoice, ClassificationConfig,
+    ClassificationDecision, ClassificationDecisionReceipt, ClassificationReceipt,
+    ClassificationSource, ClassificationStatus,
+};
 pub use config::{
     compact_strategy_name, parse_compact_strategy, AutoCompactConfig, CompactStrategy,
     CompactionRequestProvenance, CompactionThresholdSource, DEFAULT_RECAP_BUDGET_BYTES,
