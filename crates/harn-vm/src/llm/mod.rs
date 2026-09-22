@@ -70,7 +70,7 @@ pub(crate) mod cost_route;
 #[cfg(test)]
 mod cost_route_pricing_tests;
 pub(crate) mod daemon;
-pub(crate) mod decision;
+pub mod decision;
 pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod first_token;

@@ -50,6 +50,18 @@ fn redact_execution_evidence_with_policy(
     artifact_paths: ArtifactPathVisibility,
 ) -> ExecutionEvidenceRecord {
     let execution_id = evidence.execution_id.clone();
+    if let Some(receipts) = evidence.evaluation_receipts.take() {
+        let mut value = serde_json::to_value(receipts).unwrap_or(Value::Null);
+        policy.redact_json_in_place(&mut value);
+        match serde_json::from_value(value) {
+            Ok(receipts) => evidence.evaluation_receipts = Some(receipts),
+            Err(_) => evidence.gaps.push(RunEvidenceGapRecord {
+                component: "evaluation_receipts".into(),
+                code: "projection_invalid".into(),
+                message: "Evaluation receipts could not be safely projected.".into(),
+            }),
+        }
+    }
     for span in &mut evidence.trace_spans {
         span.metadata.remove(crate::tracing::meta::EXECUTION_ID);
         if let Some(execution_id) = execution_id.as_ref() {

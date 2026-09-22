@@ -192,6 +192,9 @@
               "applies_to": {
                 "items": {
                   "enum": [
+                    "typesafe_system_one",
+                    "vercel_evaluate",
+                    "openrouter_decisions",
                     "anthropic_sse",
                     "open_ai_sse",
                     "ollama_ndjson",

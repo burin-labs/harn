@@ -95,7 +95,7 @@ pub fn schema_value() -> Value {
                                 "effect": {"enum": ["retention", "training"]},
                                 "applies_to": {
                                     "type": "array",
-                                    "items": {"enum": ["anthropic_sse", "open_ai_sse", "ollama_ndjson", "gemini_json", "gemini_interactions_sse"]}
+                                    "items": {"enum": llm_config::DataControlDialect::ALL}
                                 },
                                 "caveat": {"type": "string"}
                             },

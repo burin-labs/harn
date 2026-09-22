@@ -119,11 +119,27 @@ pub struct ModelDataControlsDef {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum DataControlDialect {
+    TypesafeSystemOne,
+    VercelEvaluate,
+    OpenrouterDecisions,
     AnthropicSse,
     OpenAiSse,
     OllamaNdjson,
     GeminiJson,
     GeminiInteractionsSse,
+}
+
+impl DataControlDialect {
+    pub const ALL: [Self; 8] = [
+        Self::TypesafeSystemOne,
+        Self::VercelEvaluate,
+        Self::OpenrouterDecisions,
+        Self::AnthropicSse,
+        Self::OpenAiSse,
+        Self::OllamaNdjson,
+        Self::GeminiJson,
+        Self::GeminiInteractionsSse,
+    ];
 }
 
 /// One documented per-request control.

@@ -6,6 +6,28 @@ request, under one receipt. `harness.llm.evaluate_predicate(id, question,
 input, policy)` is its single-boolean projection: the same evaluator, one
 question named by the site.
 
+`harn llm evaluate --model openrouter/typesafe/jev-1.13 --state-file state.txt
+--questions questions.json --json` runs the same evaluator and prints its full
+`{outcome, receipt}` result. The questions file maps IDs to `std/predicate`
+records such as `{"safe":{"kind":"boolean","instructions":"Is this read only?"}}`.
+The default native policy uses threshold 0.5 and $0.01 per-evaluation and run
+ceilings; `--policy policy.json` supplies a complete explicit policy.
+
+For corpus runners, `--request request.json --json` accepts exactly
+`{site_id, state, questions, policy}`. Labels are not part of that request.
+Typed refusals are successful command executions with a refusal outcome;
+malformed input exits with status 2. A receipt distinguishes outer transport
+requests from optional gateway-reported downstream attempts. It preserves the
+provider's served model verbatim; a moving alias does not prove a revision.
+If a gateway reports multiple downstream attempts, evaluation refuses, retains
+the reserved cost as uncertain, and closes shared budget admission. The final
+response's usage cannot establish the total cost of those hidden attempts.
+
+Script evaluations persist full receipts in the run record's
+`evidence.evaluation_receipts`, including zero-dispatch refusals. The journal
+shares execution ownership across child VMs, retains at most 1024 receipts,
+and reports overflow in `evidence.gaps`.
+
 Execution makes at most one physical provider request per evaluation and
 returns a closed outcome naming a receipt. A refusal the route's declared
 limits imply is decided before dispatch and makes no request at all. Cache and
@@ -87,8 +109,8 @@ fn assess(
 | `input`, `state` | Closed serializable type: primitives, closed records, typed lists, tuples, string-keyed maps, or unions of those types. |
 | `policy` | Closed, compile-time constant `EvaluationPolicy` record naming a catalog route that declares `decision`. |
 
-The policy requires a `backend` of `"structured_llm"` or `"native_decision"`, string fields `provider`,
-`model`, and `effort`, and floating-point fields `temperature`, `threshold`,
+The policy requires a `backend` of `"structured_llm"` or `"native_decision"`, string fields `provider`
+and `model`, and floating-point fields `threshold`,
 `evaluation_cost_limit`, and `run_cost_limit`. Checking validates this shape and
 the route's declared `decision` operation. A text-generation capability alone
 does not grant decision support. The checker makes no provider request and does
@@ -101,6 +123,21 @@ route using it needs `text_generation` as well. A route on a native protocol
 `decision` alone, and must not inherit a chat transport from its provider. A
 route declaring `decision` whose capability rule names no protocol is refused
 by name: there is no endpoint to dial.
+
+`effort` and `temperature` are optional chat options. Omit both for
+`native_decision`; supplying either refuses with `unsupported_options` before
+dispatch. Native routes use the catalog's TypeSafe, Vercel, or OpenRouter
+decision protocol, never a chat endpoint. The HTTP client disables retries and
+redirects. Provider rate limits and overload responses remain typed outcomes.
+Vercel requests apply the catalog's documented zero-retention and no-training
+routing restrictions. OpenRouter's native privacy controls remain unverified;
+direct TypeSafe retention is account-scoped. The receipt separates applied
+controls from gateway-reported routing facts.
+
+Native evaluations reserve their complete request bound in the execution's
+shared monetary ledger before dispatch. Concurrent evaluations share the same
+allowance. A missing usage report or cancellation retains that reservation as
+uncertain spending; only known usage releases unused allowance.
 
 An unvalidated `any`, `unknown`, bare `dict` or `list`, open record, recursive
 type, function, or capability handle cannot be an input. Validate external
@@ -198,6 +235,11 @@ measure fine where they are built and are refused where they are sent, which
 is the failure the ceiling already reports and the helper exists to prevent.
 An item that cannot fit the budget on its own throws, because there is no
 window that would hold it.
+
+For native Jev routes, reserve room for the questions too: the published
+32,000-token ceiling covers state plus the longest question, and 64,000 covers
+state plus all questions. Admission measures both before dispatch. Receipts
+keep the state, longest-question and total-request estimates separately.
 
 A native decision route has no equivalent escape. Its admission bounds encoded
 input and question count as a condition of being usable, so an evaluation site

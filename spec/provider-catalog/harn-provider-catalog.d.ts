@@ -121,7 +121,7 @@ export interface HarnProviderDataControl {
   value_kind: "bool" | "string"
   value: string
   effect: "retention" | "training"
-  applies_to?: ("anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse")[]
+  applies_to?: ("typesafe_system_one" | "vercel_evaluate" | "openrouter_decisions" | "anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse")[]
   caveat?: string
 }
 

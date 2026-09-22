@@ -67,7 +67,7 @@ pub type HarnProviderCatalogDataControls = {
   control_scope: "per_request" | "account" | "none",
   note?: string,
   request_controls?: list<{
-    applies_to?: list<"anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse">,
+    applies_to?: list<"typesafe_system_one" | "vercel_evaluate" | "openrouter_decisions" | "anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse">,
     caveat?: string,
     effect: "retention" | "training",
     location: "body" | "header",

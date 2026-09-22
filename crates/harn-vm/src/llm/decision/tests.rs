@@ -31,6 +31,7 @@ fn contract(window: usize, max_questions: Option<usize>) -> DecisionContract {
             score_levels_min: 2,
             score_levels_max: 10,
             state_window_tokens: window,
+            request_window_tokens: None,
         },
         input_price_per_mtok: Some(0.042),
         output_price_per_mtok: Some(0.0),
@@ -69,6 +70,24 @@ fn score(id: &str, levels: &[&str]) -> Question {
 
 fn set(questions: Vec<Question>) -> QuestionSet {
     QuestionSet { questions }
+}
+
+#[test]
+fn question_identity_includes_rubric_descriptions() {
+    let original = set(vec![choice("action", &["read", "write"])]);
+    let mut changed = original.clone();
+    let QuestionBody::Choice(criteria) = &mut changed.questions[0].body else {
+        unreachable!()
+    };
+    criteria[0].1 = "a different criterion with the same label".into();
+    assert_ne!(
+        question_set_digest(&original),
+        question_set_digest(&changed)
+    );
+    assert_eq!(
+        question_set_digest(&original),
+        question_set_digest(&original.clone())
+    );
 }
 
 fn distribution(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
@@ -377,6 +396,7 @@ fn the_policy_digest_covers_the_threshold() {
         model: "fixture".into(),
         effort: "low".into(),
         temperature: 0.0,
+        native_options_supplied: false,
         threshold,
         evaluation_cost_limit: 1.0,
         run_cost_limit: 1.0,
@@ -420,6 +440,7 @@ fn questions_value() -> VmValue {
 
 fn answering(probability: f64) -> RawDecisionResponse {
     RawDecisionResponse {
+        native_transport: None,
         answers: BTreeMap::from([(
             "safe".to_string(),
             RawAnswer::Boolean {
@@ -457,8 +478,8 @@ fn run(
     let outcome = runtime.block_on(async {
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
-        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
-        super::evaluate(
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm());
+        let result = super::evaluate(
             &ctx,
             &[
                 VmValue::String("triage.v1".into()),
@@ -468,7 +489,18 @@ fn run(
             ],
         )
         .await
-        .expect("evaluation returns an outcome, not an error")
+        .expect("evaluation returns an outcome, not an error");
+        let receipts = vm
+            .execution_evidence(None, Vec::new())
+            .evaluation_receipts
+            .expect("VM reports its evaluation journal");
+        assert_eq!(
+            receipts.len(),
+            1,
+            "child evaluation belongs to the parent execution"
+        );
+        assert_eq!(receipts[0].outcome_kind, result.0.kind);
+        result
     });
     let receipt = super::last_receipt().expect("every evaluation records a receipt");
     (outcome.0.kind.to_string(), receipt, backend.request_count())
