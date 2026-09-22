@@ -59,11 +59,7 @@ pub async fn one_structured_call(
         });
     }
     let usage = LlmUsage::aggregate(&outcome.usages);
-    let served_model = outcome
-        .vm_result
-        .as_dict()
-        .and_then(|fields| fields.get("model"))
-        .map(|model| model.as_str_cow().into_owned());
+    let served_model = reported_model(&outcome.vm_result);
     if !outcome.errors.is_empty() {
         return Err(DecisionTransportError::Refused {
             reason: RefusalReason::SchemaInvalid,
@@ -165,13 +161,27 @@ fn read_response(
     Ok(StructuredResponse {
         usage: settlement,
         data,
-        served_model: fields
-            .get("model")
-            .map(|model| model.as_str_cow().into_owned()),
+        served_model: reported_model(response),
         input_tokens: tokens("input_tokens"),
         output_tokens: tokens("output_tokens"),
         physical_attempts: 1,
     })
+}
+
+/// The top-level model is the requested logical route. Only provider telemetry
+/// can identify what was actually served; missing telemetry remains unknown.
+fn reported_model(response: &VmValue) -> Option<String> {
+    let VmValue::String(model) = response
+        .as_dict()?
+        .get("usage")?
+        .as_dict()?
+        .get("provider_telemetry")?
+        .as_dict()?
+        .get("response_model")?
+    else {
+        return None;
+    };
+    (!model.trim().is_empty()).then(|| model.to_string())
 }
 
 fn unsupported_or_failed(error: &VmError) -> DecisionTransportError {
@@ -244,5 +254,34 @@ fn classify(error: &VmError) -> DecisionTransportError {
         _ => DecisionTransportError::TransportFailed {
             diagnostic: message,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_reported_model_never_falls_back_to_requested_route() {
+        let response = crate::schema::json_to_vm_value(&serde_json::json!({
+            "model": "requested-alias",
+            "data": {"answers": {}},
+            "usage": {"provider_telemetry": {"response_model": "served-snapshot"}}
+        }));
+        assert_eq!(
+            reported_model(&response).as_deref(),
+            Some("served-snapshot")
+        );
+        let read = read_response(&response, LlmUsage::known_zero_attempt()).unwrap();
+        assert_eq!(read.served_model.as_deref(), Some("served-snapshot"));
+        for telemetry in [
+            serde_json::json!({}),
+            serde_json::json!({"response_model": ""}),
+        ] {
+            let absent = crate::schema::json_to_vm_value(&serde_json::json!({
+                "model": "requested-alias", "usage": {"provider_telemetry": telemetry}
+            }));
+            assert_eq!(reported_model(&absent), None);
+        }
     }
 }
