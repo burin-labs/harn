@@ -33,6 +33,27 @@ returns a closed outcome naming a receipt. A refusal the route's declared
 limits imply is decided before dispatch and makes no request at all. Cache and
 replay reuse are separate implementation steps.
 
+## Saved receipt verification
+
+`harn llm evaluate --request request.json --verify-receipt receipt.json --json`
+checks a saved request against the receipt emitted by the evaluator. The receipt
+file contains the original `receipt` object from the evaluation result. This
+operation requires no credentials, spends no budget, and makes no provider call.
+
+The JSON result has schema `harn.evaluation_verification.v1`, a `verified` boolean,
+typed `refusals`, the normalized `request_identity`, and its `stable_request_id`.
+Exit code 0 means the binding verified; 1 means it was refused; 2 means the input
+could not be read or parsed. Unknown identity versions and changed evaluator
+contracts return `unsupported_contract`. Older receipts remain readable evidence,
+but cannot be upgraded by applying a newer identity contract.
+
+Verification checks canonical input, normalized questions and rubric text,
+requested policy, site, route, evaluator contract, and stable request identity.
+JSON whitespace and object-key order do not change the binding. Stable identity
+does not distinguish repeated invocations. Cache or tape provenance is separate.
+This check does not authenticate a provider, validate answer quality, or certify
+accounting; consumers must evaluate those facts from the original receipt.
+
 Import the public types from `std/predicate`. This illustrative helper requires
 a catalog route named `fixture` on provider `mock` with
 `operations = ["text_generation", "decision"]`:
