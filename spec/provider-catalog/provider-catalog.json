@@ -1595,7 +1595,7 @@
         "path": "/models"
       },
       "protocols": [
-        "openai_chat_completions"
+        "typesafe_system_one"
       ],
       "features": [],
       "caveats": []

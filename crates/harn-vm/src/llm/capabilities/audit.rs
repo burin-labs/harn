@@ -11,10 +11,11 @@ use serde::Serialize;
 use super::lookup::builtin;
 use super::model::CapabilitiesFile;
 use super::overrides::current_user_overrides;
+use super::projection::rule_preferred_tool_format;
 use super::rule::{
-    first_matching_rule, rule_preferred_tool_format, rule_structured_output,
-    rule_structured_output_mode, rule_thinking_block_style, rule_thinking_modes,
-    rule_tool_mode_parity, rule_vision, MatchedCapabilityRule, ProviderRule,
+    first_matching_rule, rule_structured_output, rule_structured_output_mode,
+    rule_thinking_block_style, rule_thinking_modes, rule_tool_mode_parity, rule_vision,
+    MatchedCapabilityRule, ProviderRule,
 };
 use super::BUILTIN_PROVIDERS_TOML;
 

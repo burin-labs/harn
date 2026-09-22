@@ -68,7 +68,6 @@ unverified = [
   "qianfan",
   "siliconflow",
   "tgi",
-  "typesafe",
   "vercel_ai_gateway",
   "vllm",
   "volcengine_ark",
