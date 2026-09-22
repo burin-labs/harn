@@ -52,6 +52,7 @@ pub struct RunAuxOptions {
 
 #[derive(Clone, Debug, Default)]
 pub struct RunControlOptions {
+    pub evaluation: super::EvaluationReplayOptions,
     pub timeout: Option<Duration>,
     pub project_runtime: super::ProjectRuntimeMode,
     pub flight_recorder: FlightRecorderOptions,
@@ -159,6 +160,10 @@ pub(crate) fn run_aux_options_from_args(args: &crate::cli::RunArgs) -> RunAuxOpt
 
 pub(crate) fn run_control_options_from_args(args: &crate::cli::RunArgs) -> RunControlOptions {
     RunControlOptions {
+        evaluation: super::EvaluationReplayOptions {
+            tape: args.evaluation_tape.clone(),
+            cache: args.evaluation_cache,
+        },
         timeout: args.timeout,
         flight_recorder: FlightRecorderOptions {
             enabled: args.flight_recorder,

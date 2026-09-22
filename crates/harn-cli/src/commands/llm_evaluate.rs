@@ -56,13 +56,31 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
         return verify(&request, path, args.json);
     }
     let mut vm = harn_vm::Vm::new();
-    let result = harn_vm::orchestration::scope_fresh_run_runtime(vm.evaluate_decision(
+    let tape_session = match (super::evaluation_tape::EvaluationReplayOptions {
+        tape: args.tape.clone(),
+        cache: false,
+    })
+    .install(&mut vm)
+    {
+        Ok(session) => session,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 2;
+        }
+    };
+    let evaluation = harn_vm::orchestration::scope_fresh_run_runtime(vm.evaluate_decision(
         &request.site_id,
         request.state,
         request.questions,
         request.policy,
-    ))
-    .await;
+    ));
+    let result = evaluation.await;
+    if let Some(session) = tape_session {
+        if let Err(error) = session.finish(result.is_ok()) {
+            eprintln!("error: {error}");
+            return 2;
+        }
+    }
     match result {
         Ok(result) => {
             if args.json {

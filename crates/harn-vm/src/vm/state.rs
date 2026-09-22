@@ -333,6 +333,7 @@ pub struct Vm {
     pub(crate) flight_recorder: Option<Arc<crate::flight_recorder::FlightRecorder>>,
     pub(crate) evaluation_journal:
         Arc<parking_lot::Mutex<crate::llm::decision::receipt::EvaluationJournal>>,
+    pub(crate) evaluation_replay: Option<crate::llm::decision::replay::EvaluationReplayScope>,
     /// Root-only configuration used to create a fresh recorder per execution.
     pub(crate) flight_recorder_max_events: Option<usize>,
     /// Host-side agent-loop state owned by this VM tree.
@@ -633,6 +634,7 @@ impl VmBaseline {
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
             flight_recorder: None,
             evaluation_journal: Arc::default(),
+            evaluation_replay: None,
             flight_recorder_max_events: None,
             bridge: None,
             denied_builtins: Arc::clone(&self.denied_builtins),
@@ -910,6 +912,7 @@ impl Vm {
             coverage: crate::coverage::for_primary(None),
             flight_recorder: None,
             evaluation_journal: Arc::default(),
+            evaluation_replay: None,
             flight_recorder_max_events: None,
             bridge: None,
             denied_builtins: Arc::new(HashSet::new()),
@@ -1197,6 +1200,7 @@ impl Vm {
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
             flight_recorder: self.flight_recorder.clone(),
             evaluation_journal: self.evaluation_journal.clone(),
+            evaluation_replay: self.evaluation_replay.clone(),
             flight_recorder_max_events: None,
             bridge: self.bridge.clone(),
             denied_builtins: Arc::clone(&self.denied_builtins),

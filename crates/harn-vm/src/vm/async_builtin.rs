@@ -42,6 +42,21 @@ impl AsyncBuiltinCtx {
         self.child.lock().evaluation_journal.lock().record(receipt);
     }
 
+    pub(crate) fn evaluation_invocation_id(&self) -> String {
+        let vm = self.child.lock();
+        let id = vm
+            .evaluation_journal
+            .lock()
+            .invocation_id(&vm.execution_id().to_string());
+        id
+    }
+
+    pub(crate) fn evaluation_replay(
+        &self,
+    ) -> Option<crate::llm::decision::replay::EvaluationReplayScope> {
+        self.child.lock().evaluation_replay.clone()
+    }
+
     /// Construct a context for host work that the current VM awaits inline.
     ///
     /// The parent is parked until the host future completes, so the context

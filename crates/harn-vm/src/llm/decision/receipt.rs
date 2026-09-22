@@ -17,9 +17,18 @@ pub const EVALUATION_RECEIPT_SCHEMA: &str = "harn.evaluation.receipt.v1";
 pub(crate) struct EvaluationJournal {
     receipts: Vec<EvaluationReceipt>,
     dropped: usize,
+    next_invocation: u64,
 }
 
 impl EvaluationJournal {
+    pub(crate) fn invocation_id(&mut self, execution_id: &str) -> String {
+        let sequence = self.next_invocation;
+        self.next_invocation = sequence
+            .checked_add(1)
+            .expect("evaluation sequence exhausted");
+        format!("{execution_id}/evaluation/{sequence}")
+    }
+
     pub(crate) fn record(&mut self, receipt: EvaluationReceipt) {
         if self.receipts.len() < 1024 {
             self.receipts.push(receipt);
@@ -108,6 +117,13 @@ pub struct EvaluationQuestionReceipt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EvaluationReceipt {
+    /// Execution occurrence, distinct from the stable request evaluation_id.
+    /// Historical receipts did not record an occurrence identifier.
+    #[serde(default)]
+    pub invocation_id: Option<String>,
+    /// Original provider accounting retained as provenance on reuse only.
+    #[serde(default)]
+    pub reused_from: Option<Box<EvaluationReceipt>>,
     /// Present for completed calls. Adaptive estimates can be exceeded by the
     /// actual bill; conservative admission reserves a supported upper bound.
     #[serde(default)]
@@ -170,6 +186,8 @@ impl EvaluationReceipt {
         elapsed_ms: u64,
     ) -> Self {
         Self {
+            invocation_id: None,
+            reused_from: None,
             cost_admission: None,
             usage: None,
             native_transport: None,
@@ -232,6 +250,9 @@ impl EvaluationReceipt {
     /// The opaque handle a caller receives. The journal owns the contents; a
     /// caller can correlate but cannot read the evaluation out of the string.
     pub fn reference(&self) -> String {
-        self.evaluation_id.clone()
+        self.invocation_id
+            .as_ref()
+            .unwrap_or(&self.evaluation_id)
+            .clone()
     }
 }

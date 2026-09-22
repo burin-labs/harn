@@ -25,6 +25,7 @@ mod interrupts;
 pub mod json_events;
 mod lifecycle;
 mod llm_mock;
+pub use crate::commands::evaluation_tape::EvaluationReplayOptions;
 mod manifest_runtime;
 mod mcp_serve;
 mod outcome;
@@ -201,6 +202,7 @@ impl ProjectRuntimeMode {
 }
 
 struct ExecuteRunInputs<'a> {
+    evaluation: EvaluationReplayOptions,
     path: &'a str,
     trace: bool,
     denied_builtins: HashSet<String>,
@@ -297,6 +299,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         JsonRunSession::new(options, Box::new(io::stdout()) as Box<dyn io::Write + Send>)
     });
     let outcome = execute_run_inner(ExecuteRunInputs {
+        evaluation: control.evaluation,
         path,
         trace,
         denied_builtins,
@@ -600,6 +603,7 @@ pub async fn execute_run_with_harnpack_options(
 /// non-default project runtime without forking CLI behavior.
 #[derive(Clone, Debug, Default)]
 pub struct RunExecutionOptions {
+    pub evaluation: EvaluationReplayOptions,
     pub sandbox: RunSandboxOptions,
     pub harnpack: HarnpackRunOptions,
     pub project_runtime: ProjectRuntimeMode,
@@ -620,12 +624,14 @@ pub async fn execute_run_with_options(
 ) -> RunOutcome {
     crate::ensure_builtin_signatures_installed();
     let RunExecutionOptions {
+        evaluation,
         sandbox,
         harnpack,
         project_runtime,
         flight_recorder,
     } = options;
     execute_run_inner(ExecuteRunInputs {
+        evaluation,
         path,
         trace,
         denied_builtins,
@@ -696,12 +702,14 @@ pub async fn execute_run_json_with_options(
     execution_options: RunExecutionOptions,
 ) -> RunOutcome {
     let RunExecutionOptions {
+        evaluation,
         sandbox,
         harnpack,
         project_runtime,
         flight_recorder,
     } = execution_options;
     execute_run_inner(ExecuteRunInputs {
+        evaluation,
         path,
         trace,
         denied_builtins,
@@ -733,6 +741,7 @@ pub(crate) async fn execute_run_with_timing(
     project_runtime: ProjectRuntimeMode,
 ) -> RunOutcome {
     execute_run_inner(ExecuteRunInputs {
+        evaluation: EvaluationReplayOptions::default(),
         path,
         trace: false,
         denied_builtins: HashSet::new(),
@@ -795,6 +804,7 @@ async fn execute_run_inner_scoped(
     json_session: Option<JsonRunSession>,
 ) -> RunOutcome {
     let ExecuteRunInputs {
+        evaluation,
         path,
         trace,
         denied_builtins,
@@ -995,6 +1005,27 @@ async fn execute_run_inner_scoped(
     }
 
     let mut vm = harn_vm::Vm::new();
+    let evaluation_session = match evaluation.install(&mut vm) {
+        Ok(session) => session,
+        Err(error) => {
+            return finalize_run_error(
+                stdout,
+                stderr,
+                json_session,
+                summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
+                run_started,
+                None,
+                timing.as_deref(),
+                0,
+                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                crate::exit::RunFailure::Setup,
+                "evaluation_tape_install",
+                error,
+            );
+        }
+    };
     vm.set_graph_link_table(link_table);
     if let Some(runtime) = &linked_runtime {
         vm.set_linked_program_runtime(runtime);
@@ -1228,7 +1259,7 @@ async fn execute_run_inner_scoped(
     // `render("@alias/...")` resolving against the dependency's `harn.toml`.
     vm.set_source_dir(&entry_source_dir(path));
     let execution_started_at = harn_vm::clock::system_now_rfc3339();
-    let execution = local
+    let mut execution = local
         .run_until(async {
             match vm.execute(&chunk).await {
                 Ok(value) => RunExecution::Terminal(TerminalRun::Returned(value)),
@@ -1240,6 +1271,13 @@ async fn execute_run_inner_scoped(
         })
         .await;
     let execution_finished_at = harn_vm::clock::system_now_rfc3339();
+    if let Some(session) = evaluation_session {
+        let succeeded =
+            matches!(&execution, RunExecution::Terminal(terminal) if terminal.exit_code() == 0);
+        if let Err(error) = session.finish(succeeded) {
+            execution = RunExecution::Failed(error);
+        }
+    }
     let evidence_status = match &execution {
         RunExecution::Terminal(terminal) if terminal.exit_code() == 0 => {
             harn_vm::orchestration::ExecutionRecordStatus::Completed

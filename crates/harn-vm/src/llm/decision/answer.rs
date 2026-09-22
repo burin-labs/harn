@@ -15,7 +15,7 @@ use super::question::{Question, QuestionBody};
 
 /// The provenance of a confidence number. These are different quantities and
 /// one threshold does not equalize their error rates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConfidenceKind {
     /// Derived by the evaluator from a single yes-probability.
     BinaryProbability,
@@ -35,7 +35,7 @@ impl ConfidenceKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EvidenceKind {
     /// Mechanically produced from the supplied state.
     InputReference,
@@ -57,7 +57,7 @@ impl EvidenceKind {
 pub(super) const MAX_EVIDENCE_BYTES: usize = 2048;
 
 /// One typed answer, ready to project into the VM and onto the receipt.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Answer {
     pub question_id: String,
     pub confidence: f64,
@@ -70,7 +70,7 @@ pub struct Answer {
     pub raw_probabilities: BTreeMap<String, f64>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AnswerBody {
     Boolean {
         verdict: bool,
