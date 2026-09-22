@@ -170,7 +170,7 @@ require_declared_operations_served = {fail_closed}
             "jsonrpc":"2.0",
             "id":2,
             "method":"session/new",
-            "params":{"cwd":temp.path()}
+            "params":{"cwd":temp.path(), "environmentPolicy": {"kind": "isolated", "grants": []}}
         }),
     );
     let session_id = created["result"]["sessionId"].as_str().unwrap();
