@@ -398,6 +398,10 @@ async fn evaluate_internal(
     let route = resolve_route(&policy.provider, &policy.model);
     let canonical_state = crate::canonical_json::to_vec(&state);
     let identity = EvaluationIdentity {
+        structured_output_strategy: route
+            .as_ref()
+            .and_then(|route| route.structured_output_strategy)
+            .map(|strategy| strategy.as_str().to_string()),
         input_digest: digest_parts(std::iter::once(
             std::str::from_utf8(&canonical_state).unwrap_or(""),
         )),
@@ -419,15 +423,8 @@ async fn evaluate_internal(
             .map(|route| route.protocol.as_str().to_string())
             .unwrap_or_else(|| "unresolved".into()),
     };
-    let evaluation_id = digest_parts(
-        [
-            id.as_str(),
-            identity.input_digest.as_str(),
-            identity.question_set_digest.as_str(),
-            identity.policy_digest.as_str(),
-        ]
-        .into_iter(),
-    );
+    let identity_json = serde_json::to_string(&identity).expect("evaluation identity serializes");
+    let evaluation_id = digest_parts([id.as_str(), identity_json.as_str()].into_iter());
 
     let mut receipt = EvaluationReceipt::not_dispatched(
         evaluation_id,
@@ -492,6 +489,8 @@ async fn evaluate_internal(
             contract: &route,
             effort: &policy.effort,
             temperature: policy.temperature,
+            evaluation_cost_limit: policy.evaluation_cost_limit,
+            run_cost_limit: policy.run_cost_limit,
         };
         match native::request_body(&request) {
             Ok(body) => {
@@ -682,6 +681,8 @@ async fn dispatch(
         contract: route,
         effort: &evaluation.policy.effort,
         temperature: evaluation.policy.temperature,
+        evaluation_cost_limit: evaluation.policy.evaluation_cost_limit,
+        run_cost_limit: evaluation.policy.run_cost_limit,
     };
     if evaluation.policy.backend == BackendKind::NativeDecision {
         receipt.native_transport = Some(receipt::NativeTransportReceipt {
@@ -720,14 +721,18 @@ async fn dispatch(
             Vec::new(),
         );
     }
-    match (response.input_tokens, response.output_tokens) {
-        // Unknown usage keeps its reservation and says so. It is never
-        // recorded as a free attempt.
-        (Some(input), Some(output)) => {
-            receipt.accounting_status = AccountingStatus::Settled;
-            receipt.cost_usd = settled_cost(route, input, output);
+    if let Some(usage) = response.usage {
+        apply_structured_usage(receipt, usage);
+    } else {
+        match (response.input_tokens, response.output_tokens) {
+            // Unknown usage keeps its reservation and says so. It is never
+            // recorded as a free attempt.
+            (Some(input), Some(output)) => {
+                receipt.accounting_status = AccountingStatus::Settled;
+                receipt.cost_usd = settled_cost(route, input, output);
+            }
+            _ => receipt.accounting_status = AccountingStatus::UsageUnknown,
         }
-        _ => receipt.accounting_status = AccountingStatus::UsageUnknown,
     }
 
     if receipt.native_transport.as_ref().is_some_and(|transport| {
@@ -809,7 +814,12 @@ async fn dispatch(
 /// have billed.
 fn physical_attempts_for(error: &DecisionTransportError) -> u32 {
     match error {
+        DecisionTransportError::Accounted { usage, .. } => usage
+            .provider_call_count
+            .and_then(|count| u32::try_from(count).ok())
+            .unwrap_or(1),
         DecisionTransportError::UnsupportedOptions { .. }
+        | DecisionTransportError::LocalAdmissionDenied { .. }
         | DecisionTransportError::AuthorityDenied => 0,
         _ => 1,
     }
@@ -821,7 +831,20 @@ fn transport_outcome(
     reference: &str,
 ) -> Outcome {
     match error {
+        DecisionTransportError::Accounted {
+            error,
+            usage,
+            served_model,
+        } => {
+            receipt.served_model = served_model;
+            apply_structured_usage(receipt, usage);
+            transport_outcome(*error, receipt, reference)
+        }
         DecisionTransportError::AuthorityDenied => {
+            outcome::unavailable(reference, "authority_denied")
+        }
+        DecisionTransportError::LocalAdmissionDenied { diagnostic } => {
+            receipt.provider_reason = Some(diagnostic);
             outcome::unavailable(reference, "authority_denied")
         }
         DecisionTransportError::Refused { reason, diagnostic } => {
@@ -863,6 +886,23 @@ fn transport_outcome(
             )
         }
     }
+}
+
+fn apply_structured_usage(
+    receipt: &mut EvaluationReceipt,
+    usage: Box<crate::llm::usage::LlmUsage>,
+) {
+    receipt.cost_usd = usage.cost_usd;
+    receipt.accounting_status = if usage.cost_usd.is_some() && usage.usage_unknown_calls == 0 {
+        AccountingStatus::Settled
+    } else {
+        AccountingStatus::UsageUnknown
+    };
+    if usage.usage_unknown_calls == 0 {
+        receipt.input_tokens = u64::try_from(usage.input_tokens).ok();
+        receipt.output_tokens = u64::try_from(usage.output_tokens).ok();
+    }
+    receipt.usage = Some(usage);
 }
 
 /// The upper bound this evaluation may cost under the route's declared price.

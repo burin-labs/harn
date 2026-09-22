@@ -57,7 +57,7 @@ pipeline test(harness: Harness) {
             ""
           },
         )
-        assert_eq(result.decision.kind, "answered")
+        assert_eq(result.decision?.kind, "answered")
         assert_eq(len(harness.llm.mock_calls()), 1)
       },
     )
@@ -69,7 +69,7 @@ pipeline test(harness: Harness) {
       const result = classify(request)
       assert(result != nil, "malformed response remains observable")
       assert_eq(result.action, "ambiguous")
-      assert_eq(result.decision.kind, "refused")
+      assert_eq(result.decision?.kind, "refused")
       assert_eq(len(harness.llm.mock_calls()), 1)
     },
   )

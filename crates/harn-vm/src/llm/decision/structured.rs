@@ -24,7 +24,7 @@ use super::question::QuestionBody;
 
 /// Bumped whenever the instruction or answer interpretation changes, because both
 /// change what the model was asked and therefore the cache identity.
-pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v2";
+pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v3";
 pub const OUTPUT_SCHEMA_VERSION: &str = "harn.evaluation.answers.v1";
 
 const INSTRUCTION: &str = "\
@@ -133,17 +133,13 @@ impl DecisionBackend for StructuredLlmBackend {
             "State:\n{}\n\nAnswer every question in the schema.",
             serde_json::to_string(request.state).unwrap_or_else(|_| "{}".into())
         );
-        let response = super::transport::one_structured_call(
-            request.provider,
-            request.model,
-            request.effort,
-            &prompt,
-            INSTRUCTION,
-            &schema,
-        )
-        .await?;
-        let answers = read_answers(request.questions, &response.data)?;
+        let response =
+            super::transport::one_structured_call(&request, &prompt, INSTRUCTION, &schema).await?;
+        let answers = read_answers(request.questions, &response.data).map_err(|error| {
+            error.with_usage(response.usage.clone(), response.served_model.clone())
+        })?;
         Ok(RawDecisionResponse {
+            usage: Some(Box::new(response.usage)),
             native_transport: None,
             answers,
             provenance: ConfidenceProvenance::ModelReported,

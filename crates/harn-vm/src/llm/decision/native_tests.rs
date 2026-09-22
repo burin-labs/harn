@@ -57,6 +57,8 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
             contract: &contract,
             effort: "none",
             temperature: 0.0,
+            evaluation_cost_limit: None,
+            run_cost_limit: None,
         };
         let base = crate::llm_config::provider_config(provider)
             .unwrap()
