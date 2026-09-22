@@ -16,6 +16,8 @@ fn wire_output_schema_is_counted_but_prompt_validation_is_not_counted_twice() {
     use crate::llm::api::OutputFormat;
     let mut opts = crate::llm::api::options::base_opts("openai");
     opts.model = "gpt-5.4-nano".into();
+    opts.output_format = OutputFormat::Text;
+    opts.output_schema = None;
     let schema = serde_json::json!({
         "type": "object", "properties": {"safe": {
             "type": "boolean", "description": "rubric ".repeat(2000)
