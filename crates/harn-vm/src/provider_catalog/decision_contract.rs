@@ -1,14 +1,14 @@
 //! The decision request contract for one catalog route.
 //!
 //! This owner joins catalog operations and prices with resolved capabilities.
-//! Explicit native protocols take precedence. Text generation with native
-//! structured output mechanically supports the structured decision adapter.
+//! Explicit native protocols take precedence. Text generation uses the catalog's
+//! structured transport strategy, including Harn-owned prompt validation.
 //! Catalog projections and evaluator admission read the same resolved contract.
 //!
 //! No provider request is made here.
 
 use crate::llm::capabilities::{
-    Capabilities, DecisionLimits, DecisionProtocol, DecisionQuestionKind,
+    Capabilities, DecisionLimits, DecisionProtocol, DecisionQuestionKind, StructuredOutputStrategy,
 };
 use crate::llm_config::{self, ModelOperation};
 
@@ -18,6 +18,7 @@ use crate::llm_config::{self, ModelOperation};
 pub struct DecisionContract {
     /// How the decision operation is dialled on this route.
     pub protocol: DecisionProtocol,
+    pub structured_output_strategy: Option<StructuredOutputStrategy>,
     /// Question kinds the route accepts, in catalog order.
     pub question_kinds: Vec<DecisionQuestionKind>,
     /// Published request ceilings, when the protocol publishes any. `None` for
@@ -36,7 +37,7 @@ pub struct DecisionContract {
 /// route does not serve the decision operation.
 ///
 /// Returns `None` when neither a complete native contract nor a supported
-/// strict-schema text route is available. A raw operation label alone never
+/// structured text route is available. A raw operation label alone never
 /// grants evaluator admission.
 pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<DecisionContract> {
     let catalog_id = llm_config::model_catalog_id_for_route(provider, model)?;
@@ -45,9 +46,9 @@ pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<Decisi
     resolved_decision_contract(&catalog_id, &entry, &caps)
 }
 
-/// Resolve declared native decisions or the strict-schema projection of a
-/// text route. An explicit unsupported schema capability wins over an older
-/// JSON-schema fallback. No text-only capability grants decision support.
+/// Resolve declared native decisions or the validated structured projection of a
+/// text route. Explicit unsupported and unknown strategies refuse admission;
+/// absent declarations retain the existing prompt-validation compatibility.
 pub(super) fn resolved_decision_contract(
     catalog_id: &str,
     entry: &llm_config::ModelDef,
@@ -68,12 +69,8 @@ pub(super) fn resolved_decision_contract(
             )
         }
         _ => {
-            let schema_mode = caps
-                .structured_output
-                .as_deref()
-                .or(caps.json_schema.as_deref());
             if !entry.supports_operation(ModelOperation::TextGeneration)
-                || schema_mode != Some("native")
+                || caps.structured_output_strategy == StructuredOutputStrategy::Unsupported
             {
                 return None;
             }
@@ -91,6 +88,8 @@ pub(super) fn resolved_decision_contract(
     let pricing = entry.pricing.as_ref();
     Some(DecisionContract {
         protocol,
+        structured_output_strategy: (!protocol.is_native())
+            .then_some(caps.structured_output_strategy),
         question_kinds,
         limits,
         input_price_per_mtok: pricing.map(|pricing| pricing.input_per_mtok),

@@ -20,6 +20,7 @@ use super::*;
 fn contract(window: usize, max_questions: Option<usize>) -> DecisionContract {
     DecisionContract {
         protocol: DecisionProtocol::StructuredLlm,
+        structured_output_strategy: Some(StructuredOutputStrategy::NativeSchema),
         question_kinds: vec![
             DecisionQuestionKind::Boolean,
             DecisionQuestionKind::Choice,
@@ -499,6 +500,7 @@ fn questions_value() -> VmValue {
 
 fn answering(probability: f64) -> RawDecisionResponse {
     RawDecisionResponse {
+        usage: None,
         native_transport: None,
         answers: BTreeMap::from([(
             "safe".to_string(),
@@ -591,6 +593,50 @@ fn an_answered_batch_records_one_request_and_a_settled_receipt() {
         receipt.questions[0].raw_probabilities.get("true"),
         Some(&0.95)
     );
+}
+
+#[test]
+fn structured_paid_answers_and_refusals_retain_authoritative_cache_settlement() {
+    let mut usage = crate::llm::usage::LlmUsage::known_zero_attempt();
+    usage.input_tokens = 1000;
+    usage.output_tokens = 20;
+    usage.cost_usd = Some(0.00017);
+    usage.known_cost_usd = 0.00017;
+    usage.cache_supported = true;
+    usage.cache_accounting_declared = Some(true);
+    usage.cache_read_tokens = 900;
+    usage.cache_hit_ratio = Some(0.9);
+    let mut answer = answering(0.95);
+    answer.usage = Some(Box::new(usage.clone()));
+    for (expected, response) in [
+        ("answered", Ok(answer)),
+        (
+            "refused",
+            Err(DecisionTransportError::Refused {
+                reason: RefusalReason::SchemaInvalid,
+                diagnostic: "paid malformed response".into(),
+            }
+            .with_usage(usage.clone(), Some("served-fixture".into()))),
+        ),
+    ] {
+        let (kind, receipt, requests) = run(
+            VmValue::string("short"),
+            questions_value(),
+            policy_value(0.5, 1.0),
+            vec![response],
+        );
+        assert_eq!(kind, expected);
+        assert_eq!(requests, 1);
+        assert_eq!(receipt.physical_attempts, 1);
+        assert_eq!(receipt.input_tokens, Some(1000));
+        assert_eq!(
+            receipt.cost_usd,
+            Some(0.00017),
+            "never reprice cached tokens at the base rate"
+        );
+        assert_eq!(receipt.accounting_status, AccountingStatus::Settled);
+        assert_eq!(receipt.usage.as_deref(), Some(&usage));
+    }
 }
 
 #[test]

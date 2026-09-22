@@ -516,17 +516,34 @@ pub(crate) async fn execute_llm_call(
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
     delta_sink: Option<api::DeltaSender>,
 ) -> Result<VmValue, VmError> {
+    let outcome = execute_llm_call_outcome(ctx, opts, options, bridge, delta_sink).await?;
+    finish_llm_call(outcome)
+}
+
+/// The same dispatch owner with its paid usage retained on schema failure.
+/// Evaluation receipts consume this outcome instead of discarding settlement
+/// when strict validation rejects a completed provider response.
+pub(crate) async fn execute_llm_call_outcome(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    opts: api::LlmCallOptions,
+    options: Option<crate::value::DictMap>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<api::DeltaSender>,
+) -> Result<SchemaLoopOutcome, VmError> {
     // Publish the resolved provider/model facts for the introspection
     // tool surface (current_model() / current_provider() / ...). All
     // llm_call code paths funnel through this function — the bridged
     // `llm_call_with_bridge`, structured variants, and the plain
     // `llm_call_impl` — so recording here is the single DRY point.
     super::introspection::record_resolved_llm_call(&opts.provider, &opts.model);
-    let outcome = if let Some(policy) = opts.routing_policy.clone() {
-        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge, delta_sink).await?
+    if let Some(policy) = opts.routing_policy.clone() {
+        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge, delta_sink).await
     } else {
-        execute_schema_retry_loop(ctx, opts, options, bridge, delta_sink).await?
-    };
+        execute_schema_retry_loop(ctx, opts, options, bridge, delta_sink).await
+    }
+}
+
+fn finish_llm_call(outcome: SchemaLoopOutcome) -> Result<VmValue, VmError> {
     if outcome.errors.is_empty() {
         return Ok(outcome.vm_result);
     }
