@@ -77,7 +77,14 @@ fn __observation_key(obs: dict) {
   return obs.provider + ":" + obs.model_id
 }
 
-fn __merge_field(base: any, incoming: any, key: any, base_owner: string, incoming_owner: string) {
+fn __merge_field(
+  base: any,
+  incoming: any,
+  key: any,
+  base_owner: string,
+  incoming_owner: string,
+  rate: bool = false,
+) {
   const incoming_value = incoming[key]
   if incoming_value == nil {
     return {value: base[key], conflict: nil}
@@ -86,7 +93,8 @@ fn __merge_field(base: any, incoming: any, key: any, base_owner: string, incomin
   if base_value == nil {
     return {value: incoming_value, conflict: nil}
   }
-  if base_value == incoming_value {
+  if base_value == incoming_value
+    || (rate && __normalized_rate(base_value) == __normalized_rate(incoming_value)) {
     return {value: base_value, conflict: nil}
   }
   if base_owner == "provider" && incoming_owner != "provider" {
@@ -113,6 +121,7 @@ fn __merge_keyed(base_obs: dict, incoming_obs: dict, field: string, keys_list: l
       key,
       base_obs.source_owner,
       incoming_obs.source_owner,
+      field == "pricing",
     )
     if outcome.value != nil {
       merged = merged + {[key]: outcome.value}
@@ -244,6 +253,15 @@ fn __catalog_model_by_route(catalog: dict) {
   return by_id
 }
 
+/**
+ * Rates are USD per million tokens. Source adapters publish six fractional
+ * digits, so compare both sides at that same 0.000001 USD/MTok precision.
+ * Decimal conversion alone preserves floating-point conversion noise.
+ */
+fn __normalized_rate(value: any) -> float {
+  return round(to_float(value) * 1000000.0) / 1000000.0
+}
+
 fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dict> {
   let changes: list<dict> = []
   for key in PRICING_KEYS {
@@ -254,7 +272,7 @@ fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dic
     }
     if cat == nil {
       changes = changes + [{key: key, from: nil, to: obs}]
-    } else if obs != nil && decimal(to_string(cat)) != decimal(to_string(obs)) {
+    } else if obs != nil && __normalized_rate(cat) != __normalized_rate(obs) {
       changes = changes + [{key: key, from: cat, to: obs}]
     }
   }
