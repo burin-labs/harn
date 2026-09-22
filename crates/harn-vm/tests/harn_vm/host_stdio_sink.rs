@@ -64,9 +64,10 @@ struct ChildOutput {
 
 /// The mode this process was launched in, when it is a child.
 ///
-/// A child is this same test executable running this same test: re-entering
+/// A child is this same test executable running this same test. Re-entering
 /// one test under an environment variable keeps the measurement in the default
-/// suite, where an `#[ignore]`d helper would not run at all.
+/// suite; a separate helper test excluded from that suite by attribute would
+/// not run at all, which the repository's test-pattern policy refuses.
 fn child_mode() -> Option<String> {
     std::env::var(MODE_VARIABLE).ok()
 }
