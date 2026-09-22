@@ -85,3 +85,46 @@ revised structured evaluator, and revised native evaluator. Models, thresholds,
 replay procedure, and deterministic rotating order remain fixed. The total spend
 ceiling is $1. All pilots and failures are retained. This holdout will not be used
 for repeated rubric tuning or deployment certification.
+
+The completed holdout is retained in `holdout-analysis.json` and
+`holdout-calibration.json`. All 240 runs completed with zero transport failures,
+costing $0.04065119. The revised candidate was source
+`d6564e6e0926525225999191bf254301750f4f5e`, binary SHA-256
+`316a1582024cdd354c171f4f392a5b50d63e969e41a9d86b0c339b65c0ec7d83`.
+
+| Arm | Correct recovery and tool | False recoveries | Missed recoveries | Median classifier ms | Cost for 60 runs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy structured | 50/60 | 0 | 10 | 1,288.5 | $0.01015250 |
+| Original structured evaluator | 56/60 | 4 | 0 | 1,310.5 | $0.01392500 |
+| Revised structured evaluator | 45/60 | 0 | 15 | 1,388.5 | $0.01469650 |
+| Revised native evaluator | 60/60 | 0 | 0 | 203 | $0.00187719 |
+
+The revised rubric removed false recoveries but regressed structured recall.
+Its paired accuracy difference from the original structured evaluator was
+-18.3 percentage points (row-cluster 95% interval -50.0 to +11.7). It is not
+evidence of acceptable structured fallback equivalence. Both completed corpora
+are now development evidence. Combined spend, including retained instrument
+pilots, is $0.06733734 for 424 paid calls.
+
+## Structured instruction placement ablation
+
+The next candidate keeps the typed question rubric and answer schema fixed,
+projects their shared descriptions into the system instruction, and stamps
+`harn.evaluator.structured.v4`. State remains in the separate user message.
+Native instructions and answer semantics are unchanged. This tests instruction
+placement, not a new confidence threshold. The shared request admission must
+count the added system text as well as the schema representation.
+
+This is motivated by the model-dependent schema-versus-prompt findings in
+[Lin, 2026](https://arxiv.org/abs/2608.08254), not a claim that placement alone
+solves classification. A fresh corpus must be fixed before measuring this
+candidate; neither completed corpus can become its qualification set.
+
+`placement-final.jsonl` is fixed before any v4 call: twelve untouched texts,
+six positives and six negatives, four per language. Five repeats compare legacy
+GPT-5.4 nano, revised-rubric structured v3, the same rubric with structured v4,
+and native Jev 1.13. The primary placement comparison is v4 minus v3, with
+row-cluster paired intervals. Thresholds and tools remain unchanged. The 240-call
+study has a $1 total ceiling, fixed rotating arm order and deterministic row
+order. Instrument failures abort; behavioral mistakes remain observations. It
+measures curated fidelity and overhead only, never deployment qualification.
