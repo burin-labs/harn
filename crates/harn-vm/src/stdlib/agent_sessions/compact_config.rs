@@ -12,6 +12,7 @@ const COMPACT_OPT_KEYS: &[&str] = &[
     "custom_compactor",
     "mask_callback",
     "compress_callback",
+    "classify",
     "policy",
     "compaction_policy",
     "compaction_request",
@@ -66,6 +67,11 @@ pub(super) fn build_compact_config(
     config.custom_compactor = closure_option(opts, "custom_compactor", "agent_session_compact")?;
     config.mask_callback = closure_option(opts, "mask_callback", "agent_session_compact")?;
     config.compress_callback = closure_option(opts, "compress_callback", "agent_session_compact")?;
+    config.classification = opts
+        .get("classify")
+        .map(crate::orchestration::ClassificationConfig::from_value)
+        .transpose()?
+        .map(Box::new);
     config.request_provenance = crate::orchestration::CompactionRequestProvenance {
         requested_strategy: Some(
             crate::orchestration::compact_strategy_name(&config.compact_strategy).to_string(),

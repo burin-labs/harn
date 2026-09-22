@@ -442,11 +442,13 @@ fn compaction_event_record(
             instruction_source: receipt.instruction_source,
             compaction_policy: receipt.compaction_policy,
             recap: receipt.recap,
+            classification: receipt.classification,
         };
     }
 
     CompactionEventRecord {
         schema_version: 0,
+        classification: None,
         id: event_id,
         transcript_id,
         stage_id,

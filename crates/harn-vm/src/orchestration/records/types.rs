@@ -352,7 +352,7 @@ pub struct RunTranscriptArtifactDescriptor {
     pub tool_schema_hash: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CompactionEventRecord {
     /// Schema version of the receipt this record was projected from. `0` marks a
@@ -381,6 +381,7 @@ pub struct CompactionEventRecord {
     pub compaction_policy: Option<serde_json::Value>,
     /// Observation-mask recap metrics; `None` for non-masking strategies.
     pub recap: Option<super::super::RecapMetrics>,
+    pub classification: Option<Box<super::super::ClassificationReceipt>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

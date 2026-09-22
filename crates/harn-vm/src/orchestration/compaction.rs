@@ -647,6 +647,7 @@ fn default_mask_tool_result(role: &str, content: &str) -> String {
 /// the "recap of a recap = the same recap, updated" contract that stops recaps
 /// from compounding across compactions.
 pub(crate) const RECAP_HEADER_SENTINEL: &str = "via observation masking]";
+const CLASSIFIED_RECAP_HEADER_SENTINEL: &str = "via classified compaction]";
 
 /// Byte cap on a single carried-forward prior recap. Bounds the compound-growth
 /// term independently of the per-message budget so a chain of compactions
@@ -661,7 +662,7 @@ const ASSISTANT_PREVIEW_CHARS: usize = 240;
 
 /// Whether a message body is a previous observation-mask recap.
 fn is_prior_recap(content: &str) -> bool {
-    content.contains(RECAP_HEADER_SENTINEL)
+    content.contains(RECAP_HEADER_SENTINEL) || content.contains(CLASSIFIED_RECAP_HEADER_SENTINEL)
 }
 
 /// Render one archived assistant turn as a bounded preview. Short turns pass
@@ -1050,6 +1051,9 @@ async fn apply_compaction_strategy(
             );
             Ok((summary, Some(metrics)))
         }
+        CompactStrategy::Classify => Err(VmError::Runtime(
+            "classify is a primary compaction strategy, not a positional fallback".into(),
+        )),
     }
 }
 
@@ -1086,6 +1090,7 @@ pub(crate) struct AutoCompactResult {
     pub summary: String,
     pub strategy: CompactStrategy,
     pub recap_metrics: Option<RecapMetrics>,
+    pub classification: Option<Box<ClassificationReceipt>>,
     /// Typed source-window/summary measurement for this compaction. Always
     /// populated on this path, so a `None` field downstream means the
     /// measurement did not travel, never that it read zero.
@@ -1114,6 +1119,18 @@ pub(crate) async fn prepare_compaction_messages_with_ctx(
     config: &AutoCompactConfig,
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
 ) -> Result<Option<(AutoCompactResult, Vec<serde_json::Value>)>, VmError> {
+    if config.compact_strategy == CompactStrategy::Classify && config.classification.is_none() {
+        return Err(VmError::Runtime(
+            "classify requires a classification policy".into(),
+        ));
+    }
+    if config.hard_limit_strategy == CompactStrategy::Classify
+        || config.fallback_strategy == Some(CompactStrategy::Classify)
+    {
+        return Err(VmError::Runtime(
+            "classify cannot be a hard-limit or fallback strategy".into(),
+        ));
+    }
     if config.token_threshold > 0 && estimate_message_tokens(messages) <= config.token_threshold {
         return Ok(None);
     }
@@ -1197,26 +1214,61 @@ async fn compact_selected_window(
     // intact.
     clamp_tool_outputs(ctx, messages, config).await?;
 
-    let (mut summary, mut strategy, mut recap_metrics) = apply_compaction_strategy_with_fallback(
-        CompactionStrategyInputs {
-            ctx,
-            strategy: &config.compact_strategy,
-            old_messages: &old_messages,
-            retained_messages: messages.as_slice(),
-            archived_count,
-            llm_opts,
-            custom_compactor: config.custom_compactor.as_ref(),
-            custom_compactor_reminders: &config.custom_compactor_reminders,
-            mask_callback: config.mask_callback.as_ref(),
-            summarize_prompt: config.summarize_prompt.as_deref(),
-            policy: &config.policy,
-            recap_budget_bytes: config.recap_budget_bytes,
-        },
-        config.fallback_strategy.as_ref(),
-    )
-    .await?;
+    let mut classification = None;
+    let (mut summary, mut strategy, mut recap_metrics) =
+        if config.compact_strategy == CompactStrategy::Classify {
+            let classified = Box::pin(classification::classify_window(
+                classification::ClassificationInputs {
+                    ctx: ctx.ok_or_else(|| {
+                        VmError::Runtime("classify requires an async VM context".into())
+                    })?,
+                    config: config.classification.as_deref().ok_or_else(|| {
+                        VmError::Runtime("classify requires a classification policy".into())
+                    })?,
+                    archived: &old_messages,
+                    retained: messages,
+                    first_index: compact_start,
+                    budget_bytes: config.recap_budget_bytes,
+                    active: llm_opts,
+                    summarize_prompt: config.summarize_prompt.as_deref(),
+                    policy: &config.policy,
+                },
+            ))
+            .await?;
+            let strategy = if classified.receipt.status == ClassificationStatus::Fallback {
+                CompactStrategy::ObservationMask
+            } else {
+                CompactStrategy::Classify
+            };
+            classification = Some(classified.receipt);
+            (classified.summary, strategy, classified.fallback_recap)
+        } else {
+            apply_compaction_strategy_with_fallback(
+                CompactionStrategyInputs {
+                    ctx,
+                    strategy: &config.compact_strategy,
+                    old_messages: &old_messages,
+                    retained_messages: messages.as_slice(),
+                    archived_count,
+                    llm_opts,
+                    custom_compactor: config.custom_compactor.as_ref(),
+                    custom_compactor_reminders: &config.custom_compactor_reminders,
+                    mask_callback: config.mask_callback.as_ref(),
+                    summarize_prompt: config.summarize_prompt.as_deref(),
+                    policy: &config.policy,
+                    recap_budget_bytes: config.recap_budget_bytes,
+                },
+                config.fallback_strategy.as_ref(),
+            )
+            .await?
+        };
 
-    if let Some(hard_limit) = config.hard_limit_tokens {
+    // A positional hard-limit pass may not undo keep/reword decisions or the
+    // confidence floor. The classification receipt reports an unmet budget.
+    if let Some(hard_limit) = config
+        .hard_limit_tokens
+        .filter(|_| classification.is_none())
+    {
         let summary_msg = serde_json::json!({"role": "user", "content": &summary.text});
         let mut estimate_msgs = vec![summary_msg];
         estimate_msgs.extend_from_slice(messages.as_slice());
@@ -1295,6 +1347,7 @@ async fn compact_selected_window(
         summary,
         strategy,
         recap_metrics,
+        classification,
         measurement,
     })
 }

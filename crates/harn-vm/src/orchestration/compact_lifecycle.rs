@@ -430,6 +430,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         instruction_source: config.policy.instruction_source().map(str::to_string),
         compaction_policy: config.policy.metadata_json(),
         recap: recap_metrics,
+        classification: compact_result.classification,
         source_measurement: Some(source_measurement),
     };
 

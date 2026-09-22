@@ -19,13 +19,11 @@ pub type CompactionClassifyDecision = {
   evaluation_receipt: string,
 }
 
-pub type CompactionClassifyFixtureInput = {
-  items: list<CompactionClassifyItem>,
-  anchor: string,
-  round: int,
-}
+pub type CompactionFixtureInput = {items: list<CompactionClassifyItem>, anchor: string, round: int}
 
-pub type CompactionClassifyFixture = fn(CompactionClassifyFixtureInput) -> list<CompactionClassifyDecision>
+pub type CompactionClassifyDecisions = list<CompactionClassifyDecision>
+
+pub type CompactionClassifyFixture = fn(CompactionFixtureInput) -> CompactionClassifyDecisions
 
 pub type CompactionClassifyRequest = {
   items: list<CompactionClassifyItem>,
@@ -73,7 +71,9 @@ pub fn classify_compaction_round(
   if request?.fixture != nil {
     return {
       kind: "answered",
-      decisions: request.fixture({items: request.items, anchor: request.anchor, round: request.round}),
+      decisions: request.fixture(
+        {items: request.items, anchor: request.anchor, round: request.round},
+      ),
       reason: "",
     }
   }
