@@ -51,6 +51,40 @@ fn keep_with_latest_anchor(input: CompactionFixtureInput) -> list<CompactionClas
   return decisions
 }
 
+fn keep_then_drop(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  if input.round == 2 {
+    assert_eq(len(input.items), 1, "only raw keep is eligible for round two")
+    assert_eq(input.items[0]?.index, 0)
+  }
+  let decisions: list<CompactionClassifyDecision> = []
+  for item in input.items {
+    decisions = decisions
+      + [
+        {
+          index: item.index,
+          question_id: "message_" + to_string(item.index),
+          choice: if input.round == 1 && item.index == 0 {
+            "keep"
+          } else {
+            "drop"
+          },
+          confidence: if item.index == 1 {
+            0.2
+          } else {
+            0.9
+          },
+          confidence_kind: "model_rationale",
+          evaluation_receipt: "explicit typed round fixture",
+        },
+      ]
+  }
+  return decisions
+}
+
+fn missing_decision(_input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  return []
+}
+
 pipeline test(harness: Harness) {
   const policy = {
     backend: "structured_llm",
@@ -92,6 +126,36 @@ pipeline test(harness: Harness) {
   assert(result.summary.contains("retained 0"))
   assert(result.summary.contains("retained 1"))
   assert_eq(len(harness.llm.mock_calls()), 0, "explicit fixtures make no provider calls")
+  const repeated = harness.agent.transcript_auto_compact(
+    messages,
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_last: 1,
+      recap_budget_bytes: 1,
+      provider: "mock",
+      model: "mock",
+      classify: classify + {fixture: keep_then_drop},
+    },
+  )
+  assert_eq(repeated.receipt.classification.rounds, 2)
+  assert_eq(len(repeated.receipt.classification.decisions), 3)
+  assert(repeated.summary.contains("retained 1"), "downgraded drop cannot be reclassified")
+  assert(!repeated.summary.contains("Opaque evidence alpha"), "raw keep reached round-two drop")
+  const incomplete = try {
+    harness.agent.transcript_auto_compact(
+      messages,
+      {
+        compact_strategy: "classify",
+        token_threshold: 0,
+        keep_last: 1,
+        provider: "mock",
+        model: "mock",
+        classify: classify + {fixture: missing_decision},
+      },
+    )
+  }
+  assert(is_err(incomplete), "missing decisions cannot become a successful partial compaction")
   // Floor-off reaches removal at the application boundary (Rust control).
   // The real lifecycle must then refuse the empty replacement and retain the
   // source session; its nonempty-source guard is part of the product contract.
