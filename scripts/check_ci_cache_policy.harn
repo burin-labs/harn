@@ -39,6 +39,7 @@ pub import {
   ci_cache_policy_parse,
   ci_workflow_concurrency_errors,
   e2e_elastic_capacity_errors,
+  e2e_workflow_concurrency_errors,
   minimal_pr_capacity_errors,
   producer_runner_expression,
   producer_tier_expression,
