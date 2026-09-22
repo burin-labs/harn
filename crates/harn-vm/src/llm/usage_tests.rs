@@ -105,10 +105,11 @@ fn receipt_retains_request_instant_and_audio_counts_without_inventing_rates() {
     let _guard = crate::llm::env_guard();
     let wire = json!({
         "input_tokens": 1000, "output_tokens": 100,
-        "input_token_details": {"audio_tokens": 200, "cached_tokens": 0},
+        "input_token_details": {"audio_tokens": 200, "cached_tokens": 100},
         "output_token_details": {"audio_tokens": 50}
     });
     let mut receipt = ProviderUsageReceipt::from_openai_usage_tokens(&wire).unwrap();
+    assert_eq!(receipt.cache_read_tokens, 100);
     receipt.started_at_ms = Some(1_790_000_000_000);
     let roundtrip = ProviderUsageReceipt::from_vm_value(&receipt.to_vm_value()).unwrap();
     assert_eq!(roundtrip, receipt);
