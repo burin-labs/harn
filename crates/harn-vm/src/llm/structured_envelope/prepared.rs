@@ -68,3 +68,50 @@ fn prepare(
     }
     Ok(options)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepared_schema_reaches_shared_context_and_budget_projection() {
+        use crate::llm::cost::{check_llm_preflight_budget, LlmBudgetEnvelope};
+        use crate::llm::cost_context::project_llm_call_context_breakdown;
+
+        let active = crate::llm::api::LlmCallOptions {
+            provider: "openai".into(),
+            model: "gpt-4.1-mini".into(),
+            max_tokens: 100,
+            ..Default::default()
+        };
+        let schema = serde_json::json!({
+            "type": "object", "additionalProperties": false,
+            "required": ["text"], "properties": {
+                "text": {"type": "string", "description": "preserve source ".repeat(2000)}
+            }
+        });
+        let mut prepared = prepare(
+            &active,
+            "selected source".into(),
+            schema,
+            "compaction",
+            "rewrite",
+        )
+        .unwrap();
+        let context = project_llm_call_context_breakdown(&prepared);
+        let schema_tokens = context
+            .segments
+            .iter()
+            .find(|segment| segment.id == "output_schema")
+            .unwrap()
+            .tokens;
+        assert!(schema_tokens > 1000, "schema projection must actually fire");
+        prepared.budget = Some(LlmBudgetEnvelope {
+            max_input_tokens: Some(context.input_tokens - schema_tokens),
+            ..Default::default()
+        });
+        assert!(check_llm_preflight_budget(&prepared).is_err());
+        prepared.budget.as_mut().unwrap().max_input_tokens = Some(context.input_tokens);
+        assert!(check_llm_preflight_budget(&prepared).is_ok());
+    }
+}
