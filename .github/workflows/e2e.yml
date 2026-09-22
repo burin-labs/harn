@@ -32,12 +32,23 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Every main push gets its own key. `cancel-in-progress: false` keeps a
+  # RUNNING main push alive but does nothing for a WAITING one: GitHub holds at
+  # most one pending run per group and cancels the older pending run when a
+  # newer one arrives. Under one shared main key a push queued behind an
+  # executing run is evicted by the push after it, with zero jobs, so the
+  # `notify` job below never runs and nothing records that the commit has no
+  # slow-suite result. That is the same "reported nothing looks like reported
+  # green" gap the push trigger was added to close.
+  #
+  # Pull requests keep their per-PR key. `schedule` and `workflow_dispatch`
+  # keep the ref key; the push term is written on the event because main is
+  # this workflow's only push trigger.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}
   # A new commit invalidates the old E2E result for an opted-in PR. Cancel
-  # only on synchronize so adding the label cannot turn its own run red. Main
-  # pushes are never cancelled: a cancelled run leaves that head sha with no
-  # executed result, which is the gap this tier is here to close, so they
-  # queue behind each other instead.
+  # only on synchronize so adding the label cannot turn its own run red.
+  # Nothing supersedes a main push: with the per-commit key above, each one
+  # runs to an executed result.
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 env:

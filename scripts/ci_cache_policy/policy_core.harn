@@ -340,6 +340,32 @@ pub const CI_WORKFLOW_CONCURRENCY_GROUP = "$"
  */
 pub const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_request' }}"
 
+/**
+ * The slow E2E suite needs the same per-commit key, for the same reason.
+ *
+ * `cancel-in-progress: false` keeps a running main push alive, but it does not
+ * keep a waiting one: GitHub holds at most one pending run per group and
+ * cancels the older pending run when a newer one arrives. A main push queued
+ * behind an executing run is therefore evicted by the push after it, with zero
+ * jobs, so the `notify` job never runs and nothing records that the commit has
+ * no slow-suite result. This suite has no merge-group trigger and its only
+ * push trigger is main, so the push term is written on the event rather than
+ * on the ref, and `schedule` and `workflow_dispatch` keep the ref key.
+ */
+pub const E2E_WORKFLOW_CONCURRENCY_GROUP = "$"
+  + "{{ github.workflow }}-$"
+  + "{{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}"
+
+/**
+ * Only a newer commit on the same pull request supersedes an E2E run.
+ *
+ * Adding the opt-in label must not cancel the run that label just started, so
+ * this narrows to `synchronize` rather than cancelling every pull-request
+ * event.
+ */
+pub const E2E_WORKFLOW_CANCEL_POLICY = "$"
+  + "{{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}"
+
 pub const MAIN_ONLY_RUST_IF =
   "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
 
@@ -1610,22 +1636,55 @@ pub fn ci_cache_policy_errors(
   return errors + rust_cache_reader_errors(policy, workflows)
 }
 
-/** Keep one current pull-request proof and an executed result per main head. */
-pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
+/**
+ * One key per main commit, and nothing that supersedes a main push.
+ *
+ * Both halves are needed and neither implies the other. The key stops a later
+ * push from evicting a run that is still pending, and the cancel policy stops
+ * one from killing a run already executing. A workflow missing either leaves
+ * main commits whose run never executed, and a branch reporting nothing looks
+ * exactly like a branch reporting green.
+ */
+fn per_commit_concurrency_errors(
+  workflow: dict,
+  name: string,
+  group: string,
+  cancel: string,
+) -> list<string> {
   let errors: list<string> = []
-  if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
+  if trim(workflow?.concurrency?.group ?? "") != group {
     errors = errors
       + [
-        "ci.yml concurrency.group must give each main push its own key while preserving PR, merge-group, and ref keys",
+        "${name} concurrency.group must give each main push its own key while preserving the other event keys",
       ]
   }
-  if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != CI_WORKFLOW_CANCEL_POLICY {
+  if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != cancel {
     errors = errors
       + [
-        "ci.yml must cancel superseded pull-request runs only; nothing may supersede a main push, so every head sha keeps an executed result",
+        "${name} must cancel superseded pull-request runs only; nothing may supersede a main push, so every head sha keeps an executed result",
       ]
   }
   return errors
+}
+
+/** Keep one current pull-request proof and an executed result per main head. */
+pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
+  return per_commit_concurrency_errors(
+    workflow,
+    "ci.yml",
+    CI_WORKFLOW_CONCURRENCY_GROUP,
+    CI_WORKFLOW_CANCEL_POLICY,
+  )
+}
+
+/** Same contract for the slow E2E suite, whose main pushes are its only proof. */
+pub fn e2e_workflow_concurrency_errors(workflow: dict) -> list<string> {
+  return per_commit_concurrency_errors(
+    workflow,
+    "e2e.yml",
+    E2E_WORKFLOW_CONCURRENCY_GROUP,
+    E2E_WORKFLOW_CANCEL_POLICY,
+  )
 }
 
 pub fn owned_producer_condition() -> string {

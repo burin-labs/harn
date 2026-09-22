@@ -71,6 +71,19 @@ pub fn ci_concurrency() {
   }
 }
 
+pub fn e2e_concurrency() {
+  return {
+    group: gha_expression("github.workflow")
+      + "-"
+      + gha_expression(
+        "github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref",
+      ),
+    "cancel-in-progress": gha_expression(
+      "github.event_name == 'pull_request' && github.event.action == 'synchronize'",
+    ),
+  }
+}
+
 pub fn cache_refresh_generation_steps(miss_guard: string) {
   return {
     steps: [
