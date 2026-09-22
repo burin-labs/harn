@@ -35,6 +35,11 @@ fn __with_missing_call_admission(opts: dict) {
   }
   const declared = policy?.run_cost_limit
   const inherited = budget?.total_budget_usd
+  for limit in [declared, inherited] {
+    if limit != nil && (is_nan(limit) || is_infinite(limit) || limit < 0.0) {
+      throw "agent_loop: native missing-tool-call budget limits must be finite and nonnegative"
+    }
+  }
   const ceiling = if declared == nil {
     inherited
   } else if inherited == nil {
