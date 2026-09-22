@@ -147,7 +147,8 @@ fn __pricing_hhmm(minutes: int) -> string {
     "0" + hours
   } else {
     hours
-  } + ":"
+  }
+    + ":"
     + if len(remainder) == 1 {
       "0" + remainder
     } else {
