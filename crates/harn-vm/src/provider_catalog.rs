@@ -37,9 +37,13 @@ mod automatic_eligibility_tests;
 mod bindings;
 #[cfg(test)]
 mod cache_accounting_tests;
+mod decision_contract;
+#[cfg(test)]
+mod decision_contract_tests;
 #[cfg(test)]
 mod display_name_tests;
 mod from_artifact;
+pub use decision_contract::{decision_contract_for_route, DecisionContract};
 mod predicate_admission;
 pub use predicate_admission::{predicate_model_catalog_identity, validate_predicate_models};
 mod harn_binding;

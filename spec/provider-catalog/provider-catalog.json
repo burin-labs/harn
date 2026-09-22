@@ -1575,6 +1575,32 @@
       "latency_p50_ms": 1600
     },
     {
+      "id": "typesafe",
+      "display_name": "TypeSafe",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.typesafe.ai/v1",
+        "base_url_env": "TYPESAFE_BASE_URL",
+        "chat_endpoint": "/systemone"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "TYPESAFE_API_KEY"
+        ],
+        "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
+      "protocols": [
+        "typesafe_system_one"
+      ],
+      "features": [],
+      "caveats": []
+    },
+    {
       "id": "vercel_ai_gateway",
       "display_name": "Vercel AI Gateway",
       "classification": "hosted",
@@ -2532,7 +2558,8 @@
       "id": "claude-haiku-4-5-20251001",
       "name": "Claude Haiku 4.5",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "Claude Haiku 4.5",
       "provider": "anthropic",
@@ -2548,7 +2575,8 @@
           "pdf"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -8737,7 +8765,8 @@
       "id": "gemini-3.1-flash-lite",
       "name": "Gemini 3.1 Flash-Lite",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "Gemini 3.1 Flash-Lite",
       "provider": "gemini",
@@ -8751,7 +8780,8 @@
           "pdf"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -15387,7 +15417,8 @@
       "id": "gpt-5.4-mini",
       "name": "GPT-5.4 Mini",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-5.4 Mini",
       "provider": "openai",
@@ -15399,7 +15430,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -15499,7 +15531,8 @@
       "id": "gpt-5.4-nano",
       "name": "GPT-5.4 Nano",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-5.4 Nano",
       "provider": "openai",
@@ -15511,7 +15544,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -21213,6 +21247,78 @@
       ]
     },
     {
+      "id": "openrouter/typesafe/jev-1.13",
+      "name": "Jev 1.13 (OpenRouter)",
+      "operations": [
+        "decision"
+      ],
+      "display_name": "Jev 1.13",
+      "blurb": "Jev's decision answers through OpenRouter's alpha decisions endpoint.",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 32000,
+      "logical_model": "typesafe-jev-1.13",
+      "equivalence_group": "typesafe-jev-1.13",
+      "served_variant": "openrouter",
+      "wire_model": "typesafe/jev-1.13",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": false,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.042,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "unknown",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "typesafe-jev",
+      "lineage": "typesafe-jev-1",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap"
+      ],
+      "row_kind": "snapshot"
+    },
+    {
       "id": "qwen/qwen3-coder",
       "name": "Qwen3 Coder 480B A35B",
       "operations": [
@@ -25240,6 +25346,151 @@
       ]
     },
     {
+      "id": "typesafe/jev-1.13.0",
+      "name": "Jev 1.13.0 (TypeSafe)",
+      "operations": [
+        "decision"
+      ],
+      "display_name": "Jev 1.13.0",
+      "blurb": "Answers yes/no, multiple-choice, and rating questions about a shared state in well under a second, and cannot write prose.",
+      "provider": "typesafe",
+      "aliases": [],
+      "context_window": 32000,
+      "logical_model": "typesafe-jev-1.13",
+      "equivalence_group": "typesafe-jev-1.13",
+      "served_variant": "direct",
+      "wire_model": "jev-1.13.0",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": false,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.042,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "unknown",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "typesafe-jev",
+      "lineage": "typesafe-jev-1",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap"
+      ],
+      "row_kind": "snapshot"
+    },
+    {
+      "id": "typesafe/jev-latest",
+      "name": "Jev Latest (TypeSafe)",
+      "operations": [
+        "decision"
+      ],
+      "display_name": "Jev Latest",
+      "blurb": "Follows TypeSafe's current flagship decision model instead of pinning a version.",
+      "provider": "typesafe",
+      "aliases": [],
+      "context_window": 32000,
+      "logical_model": "typesafe-jev-1.13",
+      "equivalence_group": "typesafe-jev-1.13",
+      "served_variant": "direct",
+      "wire_model": "jev-latest",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": false,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.042,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "unknown",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "typesafe-jev",
+      "lineage": "typesafe-jev-1",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap"
+      ],
+      "row_kind": "selector",
+      "current_snapshot": "typesafe/jev-1.13.0"
+    },
+    {
       "id": "vercel/anthropic/claude-haiku-4.5",
       "name": "Claude Haiku 4.5 (Vercel AI Gateway)",
       "operations": [
@@ -25509,6 +25760,79 @@
         "tool_use",
         "reasoning"
       ]
+    },
+    {
+      "id": "vercel/typesafe-ai/jev",
+      "name": "Jev (Vercel AI Gateway)",
+      "operations": [
+        "decision"
+      ],
+      "display_name": "Jev",
+      "blurb": "Jev's decision answers over the gateway key Harn already holds, with no separate TypeSafe account.",
+      "provider": "vercel_ai_gateway",
+      "aliases": [],
+      "context_window": 32000,
+      "logical_model": "typesafe-jev-1.13",
+      "equivalence_group": "typesafe-jev-1.13",
+      "served_variant": "vercel-ai-gateway",
+      "wire_model": "typesafe-ai/jev",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": false,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.042,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "typesafe-jev",
+      "lineage": "typesafe-jev-1",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap"
+      ],
+      "row_kind": "selector",
+      "current_snapshot": "typesafe/jev-1.13.0"
     },
     {
       "id": "vertex/gemini-2.5-flash",
@@ -31717,6 +32041,19 @@
     },
     {
       "provider": "openrouter",
+      "model": "typesafe/jev-1.13",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Jev 1.13 (OpenRouter)",
+      "family": "typesafe-jev",
+      "capabilities": [
+        "streaming",
+        "structured_output_mode:none",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
       "model": "qwen/qwen3-coder",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -32603,6 +32940,32 @@
       ]
     },
     {
+      "provider": "typesafe",
+      "model": "jev-1.13.0",
+      "base_url": "https://api.typesafe.ai/v1",
+      "secret_env": "TYPESAFE_API_KEY",
+      "label": "Jev 1.13.0 (TypeSafe)",
+      "family": "typesafe-jev",
+      "capabilities": [
+        "streaming",
+        "structured_output_mode:none",
+        "tools"
+      ]
+    },
+    {
+      "provider": "typesafe",
+      "model": "jev-latest",
+      "base_url": "https://api.typesafe.ai/v1",
+      "secret_env": "TYPESAFE_API_KEY",
+      "label": "Jev Latest (TypeSafe)",
+      "family": "typesafe-jev",
+      "capabilities": [
+        "streaming",
+        "structured_output_mode:none",
+        "tools"
+      ]
+    },
+    {
       "provider": "vercel_ai_gateway",
       "model": "anthropic/claude-haiku-4.5",
       "base_url": "https://ai-gateway.vercel.sh/v1",
@@ -32667,6 +33030,19 @@
         "tool_search",
         "tools",
         "vision"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "typesafe-ai/jev",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "Jev (Vercel AI Gateway)",
+      "family": "typesafe-jev",
+      "capabilities": [
+        "streaming",
+        "structured_output_mode:none",
+        "tools"
       ]
     },
     {

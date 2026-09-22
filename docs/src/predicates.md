@@ -94,8 +94,13 @@ the route's declared `decision` operation. A text-generation capability alone
 does not grant decision support. The checker makes no provider request and does
 not establish credential availability or a resource reservation. Unknown routes
 and policies supplied only at runtime refuse admission.
-The current `structured_llm` backend also requires `text_generation`; a native
-decision-only route cannot inherit a chat transport from its provider.
+Which operations a route needs follows from the `decision_protocol` its
+capability rule names. `structured_llm` dials the ordinary chat endpoint, so a
+route using it needs `text_generation` as well. A route on a native protocol
+(`typesafe_system_one`, `vercel_evaluate`, `openrouter_decisions`) needs
+`decision` alone, and must not inherit a chat transport from its provider. A
+route declaring `decision` whose capability rule names no protocol is refused
+by name: there is no endpoint to dial.
 
 An unvalidated `any`, `unknown`, bare `dict` or `list`, open record, recursive
 type, function, or capability handle cannot be an input. Validate external

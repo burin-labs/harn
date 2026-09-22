@@ -183,6 +183,11 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // process proves clap parsing, embedded-script dispatch and rendering
   // agree on the status the caller scripts against.
   "crates/harn-cli/tests/harn_cli_e2e/eval_calibrate_cli.rs",
+  // The decision-route operation gate fires inside `harn run`, before credential
+  // resolution, against a script file on disk. Only a real process in a scratch
+  // working directory shows the refusal a script author would see; an in-process
+  // call would assert the gate function rather than the shipped path.
+  "crates/harn-cli/tests/harn_cli_e2e/decision_route_admission.rs",
   // Cancellation poisoning crosses the async hostlib/VM/CLI boundary. A real
   // CLI process proves a caught launch error leaves the parent execution live.
   "crates/harn-cli/tests/harn_cli_e2e/command_probe_parent_liveness.rs",

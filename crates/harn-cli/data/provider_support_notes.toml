@@ -260,3 +260,18 @@ caveats = [
 local_setup_notes = [
   "Run `harn models install mlx-qwen3.6` for the venv, download, launch, and verification commands.",
 ]
+
+[[entry]]
+id = "typesafe"
+catalog_provider = "typesafe"
+display_name = "TypeSafe"
+endpoint_style = "TypeSafe System One decisions"
+usage_confidence = "provider_default"
+notes = [
+  "Decision-only. Every TypeSafe route answers typed questions over a shared state and returns probabilities; none serves text generation, so this provider has no recommended chat route.",
+  "Run `harn models recommend --operation decision` to list the decision routes and their credential status.",
+]
+caveats = [
+  "Direct access was waitlisted on 2026-09-20 and Harn holds no TYPESAFE_API_KEY; the reachable route today is `vercel/typesafe-ai/jev` on the Vercel AI Gateway.",
+  "Retention and training posture is unresearched; TypeSafe is listed in the catalog's `data_controls_audit.unverified` queue rather than claimed as zero-retention.",
+]

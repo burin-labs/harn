@@ -32,6 +32,7 @@ pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml"
 
 mod admission;
 mod audit;
+mod decision;
 mod diagnostics;
 mod effort;
 mod lookup;
@@ -60,6 +61,7 @@ mod lookup_tests_system_placement;
 mod model;
 mod overrides;
 mod pattern;
+mod projection;
 mod route;
 mod rule;
 #[cfg(test)]
@@ -79,6 +81,7 @@ pub use audit::{
     audit_catalogued_chat_model_tool_capabilities, matrix_rows, matrix_rows_for_base,
     ProviderCapabilityMatrixRow, ToolCapabilityAuditGap, ToolCapabilityAuditReport,
 };
+pub use decision::{DecisionLimits, DecisionProtocol, DecisionQuestionKind};
 pub use lookup::{
     builtin_file, clear_user_overrides, lookup, lookup_for_mockable_route, lookup_with_base_file,
     lookup_with_source_config, lookup_with_user_overrides, parse_capabilities_toml,

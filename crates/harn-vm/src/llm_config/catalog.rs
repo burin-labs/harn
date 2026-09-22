@@ -768,6 +768,16 @@ pub fn equivalent_model_catalog_entries_for_requirements(
         .filter(|(id, model)| !(id == &resolved.id && model.provider == resolved.provider))
         .filter(|(_, model)| !model.deprecated)
         .filter(|(_, model)| model.availability != ModelAvailability::Dedicated)
+        // A substitute has to do the same job. Equivalence is about weights
+        // and family, and says nothing about operations: a decision route and
+        // a chat route can share a family and still be unable to answer each
+        // other's requests.
+        .filter(|(_, model)| {
+            source
+                .normalized_operations()
+                .iter()
+                .all(|operation| model.supports_operation(*operation))
+        })
         .filter(|(_, model)| {
             model.equivalence_group.as_deref() == Some(group.as_str())
                 || model.logical_model.as_deref() == Some(group.as_str())

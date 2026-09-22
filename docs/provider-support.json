@@ -361,6 +361,15 @@
       "auth_style": "bearer"
     },
     {
+      "id": "typesafe",
+      "display_name": "TypeSafe",
+      "featured": false,
+      "env": [
+        "TYPESAFE_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
       "id": "vercel_ai_gateway",
       "display_name": "Vercel AI Gateway",
       "featured": false,
@@ -2684,6 +2693,60 @@
       },
       "notes": [],
       "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "typesafe",
+      "display_name": "TypeSafe",
+      "catalog_provider": "typesafe",
+      "endpoint_style": "TypeSafe System One decisions",
+      "classification": "hosted",
+      "auth_env": [
+        "TYPESAFE_API_KEY"
+      ],
+      "recommended": {
+        "selector": "typesafe",
+        "provider": "typesafe",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": []
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
+        "serving_tiers": [],
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [
+        "Decision-only. Every TypeSafe route answers typed questions over a shared state and returns probabilities; none serves text generation, so this provider has no recommended chat route.",
+        "Run `harn models recommend --operation decision` to list the decision routes and their credential status."
+      ],
+      "caveats": [
+        "Direct access was waitlisted on 2026-09-20 and Harn holds no TYPESAFE_API_KEY; the reachable route today is `vercel/typesafe-ai/jev` on the Vercel AI Gateway.",
+        "Retention and training posture is unresearched; TypeSafe is listed in the catalog's `data_controls_audit.unverified` queue rather than claimed as zero-retention."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     },

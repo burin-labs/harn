@@ -11,10 +11,11 @@ use serde::Serialize;
 use super::lookup::builtin;
 use super::model::CapabilitiesFile;
 use super::overrides::current_user_overrides;
+use super::projection::rule_preferred_tool_format;
 use super::rule::{
-    first_matching_rule, rule_preferred_tool_format, rule_structured_output,
-    rule_structured_output_mode, rule_thinking_block_style, rule_thinking_modes,
-    rule_tool_mode_parity, rule_vision, MatchedCapabilityRule, ProviderRule,
+    first_matching_rule, rule_structured_output, rule_structured_output_mode,
+    rule_thinking_block_style, rule_thinking_modes, rule_tool_mode_parity, rule_vision,
+    MatchedCapabilityRule, ProviderRule,
 };
 use super::BUILTIN_PROVIDERS_TOML;
 
@@ -175,7 +176,13 @@ where
     let mut audited_models = 0;
 
     for (model_id, model) in models {
-        if model.pricing.is_none() || model.is_embedding_model() {
+        // Tool capabilities are a chat fact. A priced row that does not serve
+        // text generation has no tool surface to declare, so reading the
+        // operation contract covers embedding and decision routes alike
+        // instead of naming one non-chat operation and missing the next.
+        if model.pricing.is_none()
+            || !model.supports_operation(crate::llm_config::ModelOperation::TextGeneration)
+        {
             continue;
         }
         audited_models += 1;

@@ -918,10 +918,19 @@ Catalog validation requires embedding dimensions and the embedding operation
 to agree. Output modalities and tool support are projected from operations, so
 a decision-only row does not advertise text generation or text tools.
 
-Predicate evaluation requires a declared `decision` operation. Its currently
-registered `structured_llm` backend also requires `text_generation`; declaring
-an operation does not implement a native decision transport or establish model
-quality. See the [predicate contract](../predicates.md) for check-time admission.
+Predicate evaluation requires a declared `decision` operation. How that
+operation is dialled is a separate, typed capability, because decision
+endpoints are not interchangeable chat endpoints: a capability rule names a
+closed `decision_protocol` of `typesafe_system_one`, `vercel_evaluate`,
+`openrouter_decisions`, or `structured_llm`, alongside `decision_question_kinds`
+and, for the native protocols, published `decision_limits`. An unknown protocol
+fails the capability load rather than falling back to the chat backend.
+
+`structured_llm` is the one protocol that dials the ordinary chat endpoint, so a
+route using it needs `text_generation` as well. A native decision route needs
+`decision` alone and must not inherit a chat transport. Declaring an operation
+does not establish model quality. See the
+[predicate contract](../predicates.md) for check-time admission.
 
 ### Field-wise catalog patches with `[patch.models]`
 

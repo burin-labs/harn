@@ -813,6 +813,34 @@ features = ["responses_api", "native_tools", "reasoning", "prompt_caching", "wir
 method = "GET"
 path = "/models"
 
+# TypeSafe — System One decision models. NOT a chat provider: the published
+# API is `POST /v1/systemone`, which answers typed questions over one shared
+# state and returns probabilities, not prose.
+#
+# `chat_endpoint` names that same `/systemone` path rather than an invented
+# `/chat/completions`. The catalog contract requires a non-empty endpoint on
+# every provider, a requirement that predates decision-only providers, and the
+# choice is between the real path and a path that does not exist. The value is
+# inert either way: no `typesafe` model row declares `text_generation`, so
+# operation admission refuses a chat request before transport. How the decision
+# operation is actually dialled is named by the `decision_protocol` capability
+# rule, which is the authoritative owner.
+#
+# Direct access was waitlisted on 2026-09-20 and Harn holds no TYPESAFE_API_KEY;
+# the `vercel/typesafe-ai/jev` route is the one reachable today.
+# https://docs.typesafe.ai/api
+[providers.typesafe]
+display_name = "TypeSafe"
+base_url = "https://api.typesafe.ai/v1"
+base_url_env = "TYPESAFE_BASE_URL"
+auth_style = "bearer"
+auth_env = "TYPESAFE_API_KEY"
+chat_endpoint = "/systemone"
+
+[providers.typesafe.healthcheck]
+method = "GET"
+path = "/models"
+
 # Cloudflare Workers AI / AI Gateway — OpenAI-compatible path is scoped by
 # account id. Set CLOUDFLARE_AI_BASE_URL to the concrete account/gateway URL.
 [providers.cloudflare_ai_gateway]
