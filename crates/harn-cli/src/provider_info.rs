@@ -11,7 +11,8 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
     let context_window =
         harn_vm::llm::fetch_provider_max_context(&resolved.provider, &resolved.id, &api_key).await;
     let readiness = local_provider_readiness(&resolved.provider, &resolved.id, &api_key).await;
-    let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
+    let catalog =
+        harn_vm::llm_config::model_catalog_entry_for_route(&resolved.provider, &resolved.id);
     let runtime_context_window = catalog
         .as_ref()
         .and_then(|entry| entry.runtime_context_window);

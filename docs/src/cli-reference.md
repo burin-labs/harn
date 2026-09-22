@@ -2314,6 +2314,12 @@ Print resolved model metadata as JSON. For Ollama models, `--verify` probes
 `/api/tags` and checks the selected tag. `--warm` implies `--verify` and sends
 an empty `/api/generate` request to preload the matched tag.
 
+Hosted `context_window` and `catalog` metadata come from the selected provider's
+catalog entry, including aliases and wire model names. Local server discovery
+takes precedence over catalog limits; when discovery is unavailable, only an
+explicit catalog `runtime_context_window` is used for local routes. Unknown
+limits are reported as `null`.
+
 ```bash
 harn models info llama3.2:latest
 harn models info --verify llama3.2
