@@ -202,6 +202,10 @@ const QUESTION_INVALID: Ty = Ty::Shape(&[
         "reason",
         Ty::Union(&[
             Ty::LitString("too_many_options"),
+            Ty::LitString("empty_questions"),
+            Ty::LitString("empty_options"),
+            Ty::LitString("empty_identifier"),
+            Ty::LitString("duplicate_labels"),
             Ty::LitString("too_few_levels"),
             Ty::LitString("too_many_levels"),
             Ty::LitString("empty_instructions"),
@@ -306,6 +310,19 @@ pub const EVALUATE: BuiltinSignature = BuiltinSignature::simple(
         Param::new("id", STRING),
         // The checker infers and records the closed type at each call site.
         // `any` here is not permission to pass gradual or opaque inputs.
+        Param::new("state", Ty::Any),
+        Param::new("questions", DICT_STRING_QUESTION),
+        Param::new("policy", POLICY),
+    ],
+    EVALUATION_OUTCOME,
+);
+
+/// Runtime vocabulary and route; checking still requires a closed input and
+/// policy while execution owns question, route, authority and limit admission.
+pub const EVALUATE_REQUEST: BuiltinSignature = BuiltinSignature::simple(
+    "__cap_llm_evaluate_request",
+    &[
+        Param::new("id", STRING),
         Param::new("state", Ty::Any),
         Param::new("questions", DICT_STRING_QUESTION),
         Param::new("policy", POLICY),

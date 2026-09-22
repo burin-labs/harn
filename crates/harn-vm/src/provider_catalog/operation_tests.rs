@@ -47,7 +47,7 @@ fn decision_operation_survives_export_and_runtime_reload() {
 }
 
 #[test]
-fn legacy_routes_preserve_operations_without_granting_decision() {
+fn legacy_routes_derive_decision_only_from_resolved_schema_capability() {
     let config = llm_config::embedded_config(None);
     let catalog = artifact_embedded(None, None);
     assert!(
@@ -58,31 +58,25 @@ fn legacy_routes_preserve_operations_without_granting_decision() {
     let mut declared_count = 0;
     for model in &catalog.models {
         let legacy = &config.models[&model.id];
-        // A row that declares its own operation set is not a legacy row. This
-        // test is about what an UNDECLARED row inherits, so a declared row is
-        // counted and skipped rather than folded into the text expectation.
-        if let Some(declared) = &legacy.operations {
+        if legacy.operations.is_some() {
             declared_count += 1;
-            assert_eq!(
-                model.operations,
-                declared.iter().copied().collect::<Vec<_>>(),
-                "{}",
-                model.id
-            );
-            continue;
         }
-        let expected = if legacy.embedding_dim.is_some() {
+        if legacy.embedding_dim.is_some() {
             embedding_count += 1;
-            ModelOperation::Embedding
-        } else {
-            ModelOperation::TextGeneration
-        };
-        assert_eq!(model.operations, [expected], "{}", model.id);
-        assert!(
-            !model.operations.contains(&ModelOperation::Decision),
-            "{} inherited the decision operation without declaring it",
+        }
+        let caps = crate::llm::capabilities::lookup(&legacy.provider, &model.id);
+        assert_eq!(
+            model.operations,
+            super::decision_contract::resolved_operations(&model.id, legacy, &caps),
+            "{}",
             model.id
         );
+        if model.operations.contains(&ModelOperation::Decision)
+            && !legacy.supports_operation(ModelOperation::Decision)
+        {
+            assert!(model.operations.contains(&ModelOperation::TextGeneration));
+            assert_eq!(model.structured_output, "native", "{}", model.id);
+        }
     }
     assert!(embedding_count > 0, "known non-text route must be measured");
     assert!(

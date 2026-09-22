@@ -17,22 +17,14 @@ pub fn predicate_model_catalog_identity() -> Vec<u8> {
         .models
         .iter()
         .map(|(id, model)| {
+            let caps = crate::llm::capabilities::lookup(&model.provider, id);
+            let contract = super::decision_contract::resolved_decision_contract(id, model, &caps);
             (
                 id,
                 &model.provider,
                 &model.wire_model,
-                model.normalized_operations(),
-                // Only a decision row's protocol can change admission, and a
-                // capability lookup is not free. Resolving one per catalog row
-                // would put several hundred lookups on the check-cache key
-                // path for a fact that is `None` on almost all of them.
-                model
-                    .supports_operation(ModelOperation::Decision)
-                    .then(|| {
-                        decision_contract_for_route(&model.provider, id)
-                            .map(|contract| contract.protocol.as_str())
-                    })
-                    .flatten(),
+                super::decision_contract::resolved_operations(id, model, &caps),
+                contract.map(|contract| contract.protocol.as_str()),
             )
         })
         .collect();
@@ -54,6 +46,9 @@ enum AdmissionGap {
 }
 
 fn admission_gap(provider: &str, model: &str) -> Option<AdmissionGap> {
+    if decision_contract_for_route(provider, model).is_some() {
+        return None;
+    }
     let entry = llm_config::model_catalog_id_for_route(provider, model)
         .and_then(|id| llm_config::model_catalog_entry(&id));
     let Some(entry) = entry else {
@@ -62,31 +57,13 @@ fn admission_gap(provider: &str, model: &str) -> Option<AdmissionGap> {
     if !entry.supports_operation(ModelOperation::Decision) {
         return Some(AdmissionGap::Operation(ModelOperation::Decision));
     }
-    let serves_text = entry.supports_operation(ModelOperation::TextGeneration);
-    let Some(contract) = decision_contract_for_route(provider, model) else {
-        // No capability rule names a protocol. A row that also serves text
-        // generation is a chat route and there is exactly one way to ask it a
-        // decision: the ordinary chat endpoint under a strict schema. Admitting
-        // that is reading the row, not defaulting.
-        //
-        // A decision-ONLY row with no protocol is the dangerous case, and the
-        // one this refuses: it names no chat endpoint and no decision
-        // endpoint, so there is literally nothing to dial.
-        return (!serves_text).then_some(AdmissionGap::Protocol);
-    };
-    // A native decision endpoint needs the `decision` operation and nothing
-    // else. `structured_llm` dials the ordinary chat endpoint, so that one
-    // route shape additionally needs text generation, and a decision-only row
-    // must never inherit a generic chat transport to get there.
-    if !contract.protocol.is_native() && !serves_text {
-        return Some(AdmissionGap::Operation(ModelOperation::TextGeneration));
-    }
-    None
+    Some(AdmissionGap::Protocol)
 }
 
 pub fn validate_predicate_models(sites: &[PredicateSite]) -> Vec<TypeDiagnostic> {
     sites
         .iter()
+        .filter(|site| site.kind != harn_parser::PredicateSiteKind::RuntimeEvaluation)
         .filter_map(|site| {
             let (message, help) = if let Some(route) = &site.model_route {
                 match admission_gap(&route.provider, &route.model)? {
