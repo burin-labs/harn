@@ -38,15 +38,17 @@ pub(crate) async fn evaluate_round(
     let harness = ctx.child_vm().root_harness_value().ok_or_else(|| {
         VmError::Runtime("classified compaction requires root Harness authority".into())
     })?;
-    let fields = harness.as_dict().ok_or_else(|| {
-        VmError::Runtime("classified compaction received invalid Harness authority".into())
-    })?;
+    let VmValue::Harness(root) = harness else {
+        return Err(VmError::Runtime(
+            "classified compaction received invalid Harness authority".into(),
+        ));
+    };
     let mut authority = crate::value::DictMap::new();
     for name in ["fs", "llm"] {
-        let value = fields.get(name).ok_or_else(|| {
+        let value = root.sub_handle(name).ok_or_else(|| {
             VmError::Runtime(format!("classified compaction requires Harness.{name}"))
         })?;
-        authority.insert(crate::value::intern_key(name), value.clone());
+        authority.insert(crate::value::intern_key(name), VmValue::harness(value));
     }
     let payload = serde_json::json!({
         "items": items,
