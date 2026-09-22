@@ -516,7 +516,12 @@ pub(crate) async fn execute_llm_call(
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
     delta_sink: Option<api::DeltaSender>,
 ) -> Result<VmValue, VmError> {
-    let outcome = execute_llm_call_outcome(ctx, opts, options, bridge, delta_sink).await?;
+    // Keep the large dispatch future off the stack of this wrapper, which
+    // every ordinary chat caller awaits.
+    let outcome = Box::pin(execute_llm_call_outcome(
+        ctx, opts, options, bridge, delta_sink,
+    ))
+    .await?;
     finish_llm_call(outcome)
 }
 
