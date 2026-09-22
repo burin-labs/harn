@@ -9,16 +9,19 @@
 
 use serde_json::Value as JsonValue;
 
-use crate::llm::{execute_llm_call, extract_llm_options, llm_error_message};
+use crate::llm::usage::LlmUsage;
+use crate::llm::{extract_llm_options, llm_error_message};
 use crate::value::{VmError, VmValue};
 
-use super::backend::{DecisionTransportError, RefusalReason};
+use super::backend::{DecisionRequest, DecisionTransportError, RefusalReason};
+use super::contract::StructuredOutputStrategy;
 
 /// Output tokens an evaluation may spend. The answers are labels, confidences,
 /// and short citations; a cap this size is a real bound, not a formality.
 const MAX_EVALUATION_OUTPUT_TOKENS: i64 = 2048;
 
 pub struct StructuredResponse {
+    pub usage: LlmUsage,
     pub data: JsonValue,
     pub served_model: Option<String>,
     pub input_tokens: Option<u64>,
@@ -32,51 +35,99 @@ pub struct StructuredResponse {
 /// helper defaults it to 3, which would make one evaluation cost up to four
 /// billed requests and hide a malformed answer behind a re-prompt.
 pub async fn one_structured_call(
-    provider: &str,
-    model: &str,
-    effort: &str,
+    request: &DecisionRequest<'_>,
     prompt: &str,
     system: &str,
     schema: &JsonValue,
 ) -> Result<StructuredResponse, DecisionTransportError> {
-    let (extracted, options) = prepare(provider, model, effort, prompt, system, schema)?;
+    let (extracted, options) = prepare(request, prompt, system, schema)?;
     // Boxed so the awaited call's state does not live in this frame. The
     // structured request is large enough that inlining it crosses the stack
     // frame budget, and an evaluation runs on the same stack as its caller.
-    let response = Box::pin(execute_llm_call(None, extracted, Some(options), None, None))
-        .await
-        .map_err(|error| classify(&error))?;
-    read_response(&response)
+    let outcome = Box::pin(crate::llm::call::execute_llm_call_outcome(
+        None,
+        extracted,
+        Some(options),
+        None,
+        None,
+    ))
+    .await
+    .map_err(|error| classify(&error))?;
+    if outcome.usages.is_empty() {
+        return Err(DecisionTransportError::TransportFailed {
+            diagnostic: "completed structured call has no usage ledger".into(),
+        });
+    }
+    let usage = LlmUsage::aggregate(&outcome.usages);
+    let served_model = outcome
+        .vm_result
+        .as_dict()
+        .and_then(|fields| fields.get("model"))
+        .map(|model| model.as_str_cow().into_owned());
+    if !outcome.errors.is_empty() {
+        return Err(DecisionTransportError::Refused {
+            reason: RefusalReason::SchemaInvalid,
+            diagnostic: outcome.errors.join("; "),
+        }
+        .with_usage(usage, served_model));
+    }
+    read_response(&outcome.vm_result, usage.clone())
+        .map_err(|error| error.with_usage(usage, served_model))
 }
 
 /// Build the one request. Split from the dispatch so the request's own
 /// scratch space is released before the call is awaited.
 fn prepare(
-    provider: &str,
-    model: &str,
-    effort: &str,
+    request: &DecisionRequest<'_>,
     prompt: &str,
     system: &str,
     schema: &JsonValue,
 ) -> Result<(crate::llm::api::LlmCallOptions, crate::value::DictMap), DecisionTransportError> {
-    let options = crate::schema::json_to_vm_value(&serde_json::json!({
-        "provider": provider,
-        "model": model,
+    let mut options = serde_json::json!({
+        "provider": request.provider,
+        "model": request.model,
         "temperature": 0.0,
-        "effort": effort,
+        "effort": request.effort,
         "max_tokens": MAX_EVALUATION_OUTPUT_TOKENS,
         "output": {"schema": schema, "strict": true, "validation": "error"},
         // One physical request. No repair, no re-prompt, no failover.
         "schema_retries": 0,
-    }));
-    let extracted = extract_llm_options(&[
+    });
+    let mut budget = serde_json::Map::new();
+    if let Some(limit) = request.evaluation_cost_limit {
+        budget.insert("max_cost_usd".into(), serde_json::json!(limit));
+    }
+    if let Some(limit) = request.run_cost_limit {
+        budget.insert("admission".into(), serde_json::json!("conservative"));
+        budget.insert("total_budget_usd".into(), serde_json::json!(limit));
+    }
+    if !budget.is_empty() {
+        options["budget"] = JsonValue::Object(budget);
+    }
+    let mut args = [
         VmValue::string(prompt),
         VmValue::string(system),
-        options.clone(),
-    ])
-    .map_err(|error| unsupported_or_failed(&error))?;
+        crate::schema::json_to_vm_value(&options),
+    ];
+    let prompt_validation = request.contract.structured_output_strategy
+        == Some(StructuredOutputStrategy::PromptValidation);
+    let schema_value = crate::schema::json_to_vm_value(schema);
+    if prompt_validation {
+        crate::llm::structured_envelope::apply_prompt_mode_structured_transport(
+            &mut args,
+            &schema_value,
+        );
+    }
+    let mut extracted =
+        extract_llm_options(&args).map_err(|error| unsupported_or_failed(&error))?;
+    if prompt_validation {
+        extracted = crate::llm::structured_envelope::install_prompt_mode_validation(
+            extracted,
+            &schema_value,
+        );
+    }
     let options_dict =
-        options
+        args[2]
             .as_dict()
             .cloned()
             .ok_or_else(|| DecisionTransportError::TransportFailed {
@@ -87,7 +138,10 @@ fn prepare(
 
 /// Read the validated envelope. A response that carried no validated data is
 /// a schema refusal, not an empty answer.
-fn read_response(response: &VmValue) -> Result<StructuredResponse, DecisionTransportError> {
+fn read_response(
+    response: &VmValue,
+    settlement: LlmUsage,
+) -> Result<StructuredResponse, DecisionTransportError> {
     let fields = response
         .as_dict()
         .ok_or_else(|| DecisionTransportError::Refused {
@@ -109,6 +163,7 @@ fn read_response(response: &VmValue) -> Result<StructuredResponse, DecisionTrans
             .and_then(|count| u64::try_from(count).ok())
     };
     Ok(StructuredResponse {
+        usage: settlement,
         data,
         served_model: fields
             .get("model")
@@ -179,7 +234,7 @@ fn classify(error: &VmError) -> DecisionTransportError {
             reason: RefusalReason::OutputTruncated,
             diagnostic: message,
         },
-        (_, _, "budget_exceeded") => DecisionTransportError::TransportFailed {
+        (_, _, "budget_exceeded") => DecisionTransportError::LocalAdmissionDenied {
             diagnostic: message,
         },
         _ if message.contains("max_tokens_exceeded") => DecisionTransportError::StateTooLarge {

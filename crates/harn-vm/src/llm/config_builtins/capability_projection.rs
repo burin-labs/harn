@@ -251,6 +251,10 @@ pub(crate) fn capabilities_to_vm_value(
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
+        crate::value::intern_key("structured_output_strategy"),
+        VmValue::string(caps.structured_output_strategy.as_str()),
+    );
+    dict.insert(
         crate::value::intern_key("json_schema"),
         caps.json_schema
             .as_deref()

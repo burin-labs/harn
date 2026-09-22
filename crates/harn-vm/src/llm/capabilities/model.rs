@@ -673,6 +673,62 @@ impl CapabilityProbeStatus {
     }
 }
 
+/// The supported structured transport, distinct from presentation preferences.
+/// Prompt validation is a Harn capability, not a vendor schema guarantee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StructuredOutputStrategy {
+    NativeSchema,
+    ToolSchema,
+    FormatSchema,
+    #[default]
+    PromptValidation,
+    Unsupported,
+}
+
+impl StructuredOutputStrategy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeSchema => "native_schema",
+            Self::ToolSchema => "tool_schema",
+            Self::FormatSchema => "format_schema",
+            Self::PromptValidation => "prompt_validation",
+            Self::Unsupported => "unsupported",
+        }
+    }
+
+    pub(super) fn from_declaration(declaration: Option<&str>) -> Self {
+        match declaration {
+            Some("native") => Self::NativeSchema,
+            Some("tool_use") => Self::ToolSchema,
+            Some("format_kw") => Self::FormatSchema,
+            Some("delimited") | None => Self::PromptValidation,
+            Some(_) => Self::Unsupported,
+        }
+    }
+}
+
+#[cfg(test)]
+mod structured_strategy_tests {
+    use super::StructuredOutputStrategy as Strategy;
+
+    #[test]
+    fn absence_can_use_prompt_validation_but_explicit_denial_cannot() {
+        assert_eq!(Strategy::from_declaration(None), Strategy::PromptValidation);
+        assert_eq!(
+            Strategy::from_declaration(Some("delimited")),
+            Strategy::PromptValidation
+        );
+        assert_eq!(
+            Strategy::from_declaration(Some("none")),
+            Strategy::Unsupported
+        );
+        assert_eq!(
+            Strategy::from_declaration(Some("misspelled")),
+            Strategy::Unsupported
+        );
+    }
+}
+
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
@@ -719,6 +775,7 @@ pub struct Capabilities {
     pub files_api_supported: bool,
     pub file_upload_wire_format: Option<String>,
     pub structured_output: Option<String>,
+    pub structured_output_strategy: StructuredOutputStrategy,
     /// Legacy mirror for CLI display and older callers.
     pub json_schema: Option<String>,
     pub prefers_xml_scaffolding: bool,
@@ -898,6 +955,7 @@ impl Default for Capabilities {
             files_api_supported: false,
             file_upload_wire_format: None,
             structured_output: None,
+            structured_output_strategy: StructuredOutputStrategy::default(),
             json_schema: None,
             prefers_xml_scaffolding: false,
             reserved_tool_call_token: false,

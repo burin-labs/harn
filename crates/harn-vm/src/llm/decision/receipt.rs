@@ -69,6 +69,8 @@ pub enum AccountingStatus {
 /// consumer can see which facts a reuse decision rests on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvaluationIdentity {
+    #[serde(default)]
+    pub structured_output_strategy: Option<String>,
     pub input_digest: String,
     pub canonical_input_type: String,
     pub question_set_digest: String,
@@ -91,6 +93,10 @@ pub struct EvaluationQuestionReceipt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EvaluationReceipt {
+    /// Authoritative structured-call settlement. Absence is unavailable
+    /// telemetry, never a measured zero or a native cache claim.
+    #[serde(default)]
+    pub usage: Option<Box<crate::llm::usage::LlmUsage>>,
     pub native_transport: Option<NativeTransportReceipt>,
     pub schema: String,
     pub evaluation_id: String,
@@ -139,6 +145,7 @@ impl EvaluationReceipt {
         elapsed_ms: u64,
     ) -> Self {
         Self {
+            usage: None,
             native_transport: None,
             schema: EVALUATION_RECEIPT_SCHEMA.into(),
             evaluation_id,

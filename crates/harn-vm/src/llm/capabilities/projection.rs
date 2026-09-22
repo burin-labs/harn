@@ -5,7 +5,9 @@
 //! owns what that rule means.
 
 use super::effort::rule_thinking_modes;
-use super::model::{Capabilities, LiveEndpointFamily, ProviderDefaults, WireDialect};
+use super::model::{
+    Capabilities, LiveEndpointFamily, ProviderDefaults, StructuredOutputStrategy, WireDialect,
+};
 use super::pattern::ModelPatterns;
 use super::rule::{
     rule_structured_output, rule_structured_output_mode, rule_thinking_block_style,
@@ -262,6 +264,11 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
             .clone()
             .or_else(|| defaults.file_upload_wire_format.clone()),
         structured_output: rule_structured_output(rule),
+        structured_output_strategy: StructuredOutputStrategy::from_declaration(
+            rule.structured_output
+                .as_deref()
+                .or(rule.json_schema.as_deref()),
+        ),
         json_schema: rule_structured_output(rule),
         prefers_xml_scaffolding: rule.prefers_xml_scaffolding.unwrap_or(false),
         reserved_tool_call_token: rule.reserved_tool_call_token.unwrap_or(false),

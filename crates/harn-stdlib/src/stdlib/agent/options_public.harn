@@ -14,17 +14,20 @@ import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
-// Native post-turn decisions share the chat admission ledger. Install their
+// Post-turn decisions share the chat admission ledger. Install an explicit
 // finite ceiling before the first chat call; late activation cannot account
 // conservatively for earlier unreserved calls.
 fn __with_missing_call_admission(opts: dict) {
   const recovery = opts?.missing_tool_call_recovery
   if type_of(recovery) != "dict" || !(recovery?.enabled ?? true)
     || recovery?.classifier != nil
-    || recovery?.decision_policy?.backend != "native_decision" {
+    || recovery?.decision_policy == nil {
     return opts
   }
   const policy = recovery.decision_policy
+  if policy.backend != "native_decision" && policy?.run_cost_limit == nil {
+    return opts
+  }
   const raw = opts?.budget
   let budget = if type_of(raw) == "dict" {
     raw
@@ -37,7 +40,7 @@ fn __with_missing_call_admission(opts: dict) {
   const inherited = budget?.total_budget_usd
   for limit in [declared, inherited] {
     if limit != nil && (is_nan(limit) || is_infinite(limit) || limit < 0.0) {
-      throw "agent_loop: native missing-tool-call budget limits must be finite and nonnegative"
+      throw "agent_loop: missing-tool-call budget limits must be finite and nonnegative"
     }
   }
   const ceiling = if declared == nil {

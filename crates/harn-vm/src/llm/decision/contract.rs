@@ -6,7 +6,9 @@
 
 use crate::llm_config;
 
-pub use crate::llm::capabilities::{DecisionProtocol, DecisionQuestionKind};
+pub use crate::llm::capabilities::{
+    DecisionProtocol, DecisionQuestionKind, StructuredOutputStrategy,
+};
 
 /// Declared bounds. Every field is a number the route states; none is a
 /// default the evaluator invented. `max_questions` is absent when the route
@@ -25,6 +27,7 @@ pub struct DecisionLimits {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecisionContract {
     pub protocol: DecisionProtocol,
+    pub structured_output_strategy: Option<StructuredOutputStrategy>,
     pub question_kinds: Vec<DecisionQuestionKind>,
     pub limits: DecisionLimits,
     pub input_price_per_mtok: Option<f64>,
@@ -63,6 +66,7 @@ pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<Decisi
         let limits = declared.limits?;
         return Some(DecisionContract {
             protocol: declared.protocol,
+            structured_output_strategy: declared.structured_output_strategy,
             question_kinds: declared.question_kinds,
             limits: DecisionLimits {
                 max_questions: limits.max_questions.map(|n| n as usize),
@@ -84,6 +88,7 @@ pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<Decisi
     let window = entry.context_window as usize;
     Some(DecisionContract {
         protocol: DecisionProtocol::StructuredLlm,
+        structured_output_strategy: declared.structured_output_strategy,
         question_kinds: vec![
             DecisionQuestionKind::Boolean,
             DecisionQuestionKind::Choice,
