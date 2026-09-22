@@ -5,6 +5,8 @@ name: CLI end-to-end behavior
 #   - on every push to main
 #   - nightly (3 AM UTC)
 #   - when the `e2e` label is added to a pull request and after every later push
+#   - on a pull request whose diff touches the suite itself or the ACP adapter,
+#     with no label needed
 #   - manually via workflow_dispatch
 #
 # Running on every main push is the point, not an optimization. This tier is
@@ -20,7 +22,10 @@ on:
   schedule:
     - cron: "0 3 * * *"
   pull_request:
-    types: [labeled, synchronize]
+    # `opened` and `reopened` matter as much as the label. A pull request that
+    # touches the watched paths must run the suite on its first head, not wait
+    # for a later push that may never come.
+    types: [opened, reopened, labeled, synchronize]
   workflow_dispatch:
 
 permissions:
@@ -41,11 +46,61 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # Why a pull request runs this suite, said out loud.
+  #
+  # The `e2e` label is the opt-in for everything else, but two surfaces are
+  # their own reason to run: the suite's own tests, and the ACP adapter they
+  # exercise end to end. A change to the ACP `session/new` contract edited a
+  # test in this suite without the label, so its pull request never executed
+  # it and main stayed red for thirteen hours while every later pull request
+  # was green by construction.
+  #
+  # This job reports its decision rather than only emitting a boolean. A gate
+  # that quietly answers "no" is indistinguishable from a gate that answered
+  # "yes" and found nothing, which is the failure it exists to prevent.
+  changes:
+    name: Decide whether this pull request runs the E2E suite
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          list-files: shell
+          filters: |
+            e2e_surface:
+              - '.github/workflows/e2e.yml'
+              - 'crates/harn-cli/tests/harn_cli_e2e/**'
+              - 'crates/harn-serve/src/adapters/acp/**'
+      - name: Name the decision and why
+        id: decide
+        env:
+          TOUCHED: ${{ steps.filter.outputs.e2e_surface }}
+          TOUCHED_FILES: ${{ steps.filter.outputs.e2e_surface_files }}
+          LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'e2e') }}
+        run: bash scripts/ci/e2e_pull_request_reason.sh
+
   # Where the main-push runs are allowed to land. Read for its `capacity`
   # counts rather than its per-lane booleans: those booleans go false both when
   # the fleet is switched off and when it is merely busy, and a busy fleet is a
   # reason to queue, not a reason to send this suite somewhere else.
+  #
+  # Same-repository events only. A fork pull request cannot read the
+  # release-app credentials this probe needs, and it is not eligible for owned
+  # capacity anyway, so the probe is skipped rather than failed for it. Every
+  # pull request lands on a hosted runner regardless, which is what the
+  # routing expression below already falls through to.
   runner-availability:
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -58,12 +113,17 @@ jobs:
   # the tier, leaving nothing to attribute the downgrade to.
   e2e-capacity:
     name: Name the E2E runner capacity decision
-    needs: runner-availability
+    needs: [changes, runner-availability]
+    # `!cancelled()` rather than the default, because both `needs` are skipped
+    # on the events that do not have them: `changes` on a push, and
+    # `runner-availability` on a fork pull request. A skipped dependency would
+    # otherwise skip this job and, through it, the suite.
     if: >
+      !cancelled() && (
       github.event_name == 'push' ||
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
+      (github.event_name == 'pull_request' && needs.changes.outputs.should_run != 'false'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -83,7 +143,7 @@ jobs:
 
   e2e:
     name: Slow E2E suite
-    needs: [runner-availability, e2e-capacity]
+    needs: [changes, runner-availability, e2e-capacity]
     # The fleet-evacuation switch takes every event to elastic paid capacity.
     # When it is off, main pushes prefer the big self-hosted rung: 24 cores at
     # no cost, and this suite compiles the CLI integration tests before running
@@ -108,11 +168,17 @@ jobs:
         && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || 'ubuntu-latest' }}
+    # Read `!= 'false'` rather than `== 'true'`. A detector that failed, or
+    # was skipped, leaves this empty, and treating an unread decision as "do
+    # not run" is exactly the silence this workflow is being fixed for. The
+    # cost of being wrong that way is one slow suite nobody needed; the cost
+    # of the other way is thirteen hours of red main.
     if: >
+      !cancelled() && (
       github.event_name == 'push' ||
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
+      (github.event_name == 'pull_request' && needs.changes.outputs.should_run != 'false'))
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
