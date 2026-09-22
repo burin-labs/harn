@@ -148,7 +148,7 @@ impl DecisionBackend for NativeDecisionBackend {
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
             .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(60));
+            .timeout(std::time::Duration::from_mins(1));
         let client =
             crate::egress::install_ssrf_guard_with_private_host_allowlist(builder, &allow_hosts)
                 .build()
