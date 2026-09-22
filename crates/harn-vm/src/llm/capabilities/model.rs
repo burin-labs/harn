@@ -700,28 +700,6 @@ impl StructuredOutputStrategy {
     }
 }
 
-#[cfg(test)]
-mod structured_strategy_tests {
-    use super::StructuredOutputStrategy as Strategy;
-
-    #[test]
-    fn absence_can_use_prompt_validation_but_explicit_denial_cannot() {
-        assert_eq!(Strategy::from_declaration(None), Strategy::PromptValidation);
-        assert_eq!(
-            Strategy::from_declaration(Some("delimited")),
-            Strategy::PromptValidation
-        );
-        assert_eq!(
-            Strategy::from_declaration(Some("none")),
-            Strategy::Unsupported
-        );
-        assert_eq!(
-            Strategy::from_declaration(Some("misspelled")),
-            Strategy::Unsupported
-        );
-    }
-}
-
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
@@ -1012,5 +990,27 @@ impl Default for Capabilities {
             system_message_placement: None,
             runtime_probe: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod structured_strategy_tests {
+    use super::StructuredOutputStrategy as Strategy;
+
+    #[test]
+    fn absence_can_use_prompt_validation_but_explicit_denial_cannot() {
+        assert_eq!(Strategy::from_declaration(None), Strategy::PromptValidation);
+        assert_eq!(
+            Strategy::from_declaration(Some("delimited")),
+            Strategy::PromptValidation
+        );
+        assert_eq!(
+            Strategy::from_declaration(Some("none")),
+            Strategy::Unsupported
+        );
+        assert_eq!(
+            Strategy::from_declaration(Some("misspelled")),
+            Strategy::Unsupported
+        );
     }
 }
