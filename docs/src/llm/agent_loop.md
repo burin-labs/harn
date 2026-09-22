@@ -642,8 +642,13 @@ Available strategies:
 The `classify` strategy requires `compaction.classify.policy`, using the existing
 `EvaluationPolicy` contract from `std/predicate`. Its `threshold` is the confidence
 floor: below it, drop becomes reword and reword becomes keep. A failed rewrite
-keeps the original message. Pinned messages and the latest prior recap bypass
-classification; the latest user message anchors every evaluation window.
+keeps the original message. Messages selected by the existing pinning policy
+(the latest three markers) and the latest prior recap bypass classification;
+the latest user message anchors every evaluation window.
+
+Native classification requires conservative run budget authority admitted from
+the start. It refuses late activation after unreserved chat spend, preserving
+source instead of treating earlier unknown charges as zero.
 
 | Classification option | Default | Meaning |
 |---|---|---|
