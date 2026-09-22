@@ -1,6 +1,15 @@
 use super::Vm;
 
 impl Vm {
+    /// Install an explicit decision recording/replay scope. Child VMs inherit
+    /// it, including work scheduled on other threads; misses cannot go live.
+    pub fn set_evaluation_replay(
+        &mut self,
+        scope: crate::llm::decision::replay::EvaluationReplayScope,
+    ) {
+        self.evaluation_replay = Some(scope);
+    }
+
     /// Enable exact, value-free source-path recording for this VM execution
     /// tree. Child VMs inherit the same bounded recorder.
     pub fn enable_flight_recorder(&mut self, max_events: usize) {

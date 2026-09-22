@@ -37,6 +37,7 @@ pub(crate) mod eval_prompt_context;
 pub(crate) mod eval_scope_triage;
 pub mod eval_skill_gate;
 pub(crate) mod eval_tool_calls;
+pub(crate) mod evaluation_tape;
 pub(crate) mod explain;
 pub(crate) mod fix;
 pub mod flow;

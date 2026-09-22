@@ -173,6 +173,12 @@ pub(crate) struct RunArgs {
         conflicts_with = "llm_mock"
     )]
     pub llm_mock_record: Option<String>,
+    /// Record evaluations to a new tape, or strictly replay an existing tape offline.
+    #[arg(long, conflicts_with = "evaluation_cache")]
+    pub evaluation_tape: Option<PathBuf>,
+    /// Reuse complete identical evaluations within this execution (1024-entry bound).
+    #[arg(long)]
+    pub evaluation_cache: bool,
     /// Accept first-run provider setup prompts.
     #[arg(long)]
     pub yes: bool,

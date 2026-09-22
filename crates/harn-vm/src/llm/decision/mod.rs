@@ -21,6 +21,7 @@ pub(crate) mod native;
 pub(crate) mod outcome;
 pub(crate) mod question;
 pub mod receipt;
+pub mod replay;
 pub(crate) mod structured;
 pub(crate) mod transport;
 
@@ -401,14 +402,36 @@ async fn evaluate_internal(
     ctx: &crate::vm::AsyncBuiltinCtx,
     args: &[VmValue],
 ) -> Result<(Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt), VmError> {
-    let (
-        id,
-        Evaluation {
-            policy,
-            questions,
-            state,
-        },
-    ) = Evaluation::from_arguments(args)?;
+    // Normalize before recording or looking up anything. The raw request is
+    // retained, while matching uses the same canonical identity as live calls.
+    let (site_id, evaluation) = Evaluation::from_arguments(args)?;
+    if ctx.evaluation_replay().is_none() {
+        return evaluate_live(ctx, site_id, evaluation).await;
+    }
+    let request = identity::EvaluationRequest {
+        site_id: site_id.clone(),
+        state: crate::llm::helpers::vm_value_to_json(&args[1]),
+        questions: crate::llm::helpers::vm_value_to_json(&args[2]),
+        policy: crate::llm::helpers::vm_value_to_json(&args[3]),
+    };
+    if let Some(reused) = replay::lookup(ctx, &request)? {
+        return Ok(reused);
+    }
+    let result = evaluate_live(ctx, site_id, evaluation).await?;
+    replay::record(ctx, request, &result.0, &result.1, &result.3)?;
+    Ok(result)
+}
+
+async fn evaluate_live(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    id: String,
+    evaluation: Evaluation,
+) -> Result<(Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt), VmError> {
+    let Evaluation {
+        policy,
+        questions,
+        state,
+    } = evaluation;
     let started = decision_started();
     let publish = |receipt: &EvaluationReceipt| {
         ctx.record_evaluation_receipt(receipt.clone());
@@ -429,6 +452,7 @@ async fn evaluate_internal(
         "unavailable",
         0,
     );
+    receipt.invocation_id = Some(ctx.evaluation_invocation_id());
     let reference = receipt.reference();
 
     // --- Local refusals. Every one of these makes zero provider requests. ---

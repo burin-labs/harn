@@ -40,6 +40,67 @@ fn verify(root: &Path) -> (i32, Value) {
 }
 
 #[test]
+fn canonical_tape_replay_has_new_occurrence_and_refuses_missing_changed_extra_records() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let request = json!({"site_id":"tape.control","state":"unchanged",
+        "questions":{"safe":{"kind":"boolean","instructions":"Is this safe?"}},
+        "policy":{"backend":"native_decision","provider":"openrouter",
+        "model":"openrouter/typesafe/jev-1.13","threshold":0.5,
+        "evaluation_cost_limit":0.0,"run_cost_limit":0.01}});
+    write(root, "request.json", &request);
+    let args = [
+        "llm",
+        "evaluate",
+        "--request",
+        "request.json",
+        "--tape",
+        "probe.tape",
+        "--json",
+    ];
+    let (status, original) = run(root, &args);
+    assert_eq!(status, 0);
+    assert_eq!(original["outcome"]["kind"], "budget_cut");
+    let saved = std::fs::read_to_string(root.join("probe.tape")).unwrap();
+    let (status, reused) = run(root, &args);
+    assert_eq!(status, 0);
+    assert_eq!(reused["receipt"]["source"], "tape");
+    assert_eq!(reused["receipt"]["reused_from"], original["receipt"]);
+    assert_eq!(reused["receipt"]["physical_attempts"], 0);
+    assert_eq!(reused["receipt"]["cost_usd"], 0.0);
+    assert_ne!(
+        reused["receipt"]["invocation_id"],
+        original["receipt"]["invocation_id"]
+    );
+    assert_eq!(
+        reused["receipt"]["evaluation_id"],
+        original["receipt"]["evaluation_id"]
+    );
+    let refuses = || {
+        let output = crate::test_util::process::harn_e2e_command()
+            .env_clear()
+            .env("HOME", root)
+            .env("HARN_LLM_CALLS_DISABLED", "1")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("replay mismatch"));
+    };
+    let mut changed = request.clone();
+    changed["state"] = json!("changed");
+    write(root, "request.json", &changed);
+    refuses();
+    write(root, "request.json", &request);
+    let lines: Vec<_> = saved.lines().collect();
+    std::fs::write(root.join("probe.tape"), format!("{}\n", lines[0])).unwrap();
+    refuses();
+    std::fs::write(root.join("probe.tape"), format!("{saved}{}\n", lines[1])).unwrap();
+    refuses();
+}
+
+#[test]
 fn emitted_receipt_binds_request_offline_and_refuses_tampering() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

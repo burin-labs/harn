@@ -20,6 +20,7 @@
 - [Why Harn?](./why-harn.md)
 - [How Harn compares](./how-harn-compares.md)
 - [Predicate evaluation contract](./predicates.md)
+- [Record and replay decision evaluations](./decision-replay.md)
 - [What a confidence score means](./concepts/confidence.md)
 - [Probabilistic branching proposal](./design/probabilistic-branching.md)
 

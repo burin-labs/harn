@@ -5,6 +5,9 @@
 //! the same counter reads one when a dispatch does happen, so every
 //! zero-request test is paired with a dispatch that proves the counter moves.
 
+#[path = "replay_tests.rs"]
+mod replay_tests;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
