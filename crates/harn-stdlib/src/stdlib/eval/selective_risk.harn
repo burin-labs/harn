@@ -1,4 +1,4 @@
-import { calibration_report } from "./calibration.harn"
+import { calibration_report } from "std/eval/calibration"
 
 /**
  * Conditional error certification over a fixed threshold family.
