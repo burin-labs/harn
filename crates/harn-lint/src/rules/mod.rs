@@ -22,5 +22,6 @@ pub(crate) mod template_variant_explosion;
 pub(crate) mod tool_handler_host_call;
 pub(crate) mod tool_handler_result;
 pub(crate) mod trailing_comma;
+pub(crate) mod unbounded_decision_state;
 pub(crate) mod unnecessary_parentheses;
 pub(crate) mod unnormalized_options;

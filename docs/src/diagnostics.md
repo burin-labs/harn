@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 77 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 78 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -336,6 +336,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-076`](#harn-lnt-076) | tool handler reaches the privileged host wire | — | — |
 | [`HARN-LNT-077`](#harn-lnt-077) | record literal copies fields one by one from a value that `pick` can select | `records/pick-fields` | `behavior-preserving` |
 | [`HARN-LNT-078`](#harn-lnt-078) | tool descriptor spells its per-parameter map as a JSON Schema document | — | — |
+| [`HARN-LNT-079`](#harn-lnt-079) | evaluation site hands a native decision route an input whose declared type has no finite size bound | — | — |
 
 ## FMT — Formatter
 
@@ -4383,6 +4384,66 @@ tools = tool_define(tools, "read_file", "Read one file", {
 This reports as an error. The runtime refuses the same shape when a registry is
 built, so a descriptor this rule accepts and a registry the runtime accepts
 agree by construction.
+
+### `HARN-LNT-079`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+evaluation site hands a native decision route an input whose declared type has no finite size bound
+
+An evaluation site hands a route the state it will encode. A structured-LLM
+route has an escape when that state is too big: the ceiling measures it against
+the route's window and returns `state_too_large` before dispatching anything,
+so an oversized input costs nothing and the caller can react.
+
+A native decision route does not have that escape. Its admission bounds encoded
+input and question count as a condition of being usable at all, so a route
+whose input carries no bound cannot establish one.
+
+The declared type is where the bound either exists or does not. `int`, `bool`,
+`float` and string-literal enums encode to a bounded number of tokens no matter
+what value arrives. `string`, `list<T>`, `dict<K, V>`, `any` and an open record
+admit arbitrarily many, so no window is large enough by construction, and
+whether the site works depends on data its author never sees.
+
+This rule reports an evaluation site whose policy names the `native_decision`
+backend and whose input has a declared type containing one of those unbounded
+constructs.
+
+#### How to fix
+
+Narrow the declared type so its encoded size is bounded:
+
+```harn
+type Triage = {severity: "low" | "high", reopened: bool, age_days: int}
+
+const verdict = harness.llm.evaluate(
+  "triage.v1", triage, questions, policy,
+)
+```
+
+Or keep the wide input and split it into windows that each fit, using the
+evaluator's own estimator rather than a character approximation:
+
+```harn
+import { evaluation_windows } from "std/predicate"
+
+const windowing = evaluation_windows(harness.llm, items, {
+  anchor: latest_user_message,
+  budget_tokens: 28000,
+  overlap_items: 2,
+})
+```
+
+Each window measures under the ceiling with the same call the ceiling makes, so
+the fit is by construction rather than by retrying after a refusal.
+
+#### Severity
+
+This reports as a warning. A bound the rule cannot see may still exist: it reads
+declared types in one file, so a type that arrives through an import, or a
+binding with no annotation, is not reported. Silence here means the rule found
+no unbounded construct it could read, not that the input is proven bounded.
 
 ### `HARN-FMT-001`
 
