@@ -65,6 +65,14 @@ pub enum AccountingStatus {
     NotDispatched,
 }
 
+/// Monetary admission is distinct from the provider's eventual settled bill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostAdmission {
+    AdaptiveProjection,
+    ConservativeUpperBound,
+}
+
 /// The complete cache key, named field by field rather than pre-hashed, so a
 /// consumer can see which facts a reuse decision rests on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +101,10 @@ pub struct EvaluationQuestionReceipt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EvaluationReceipt {
+    /// Present for completed calls. Adaptive estimates can be exceeded by the
+    /// actual bill; conservative admission reserves a supported upper bound.
+    #[serde(default)]
+    pub cost_admission: Option<CostAdmission>,
     /// Authoritative structured-call settlement. Absence is unavailable
     /// telemetry, never a measured zero or a native cache claim.
     #[serde(default)]
@@ -145,6 +157,7 @@ impl EvaluationReceipt {
         elapsed_ms: u64,
     ) -> Self {
         Self {
+            cost_admission: None,
             usage: None,
             native_transport: None,
             schema: EVALUATION_RECEIPT_SCHEMA.into(),
