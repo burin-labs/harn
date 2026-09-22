@@ -7,6 +7,7 @@ import {
 // Effect: typed low-confidence drops are recorded and applied as rewrites.
 // Negative: the same loop below the threshold emits no compaction event.
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
 fn low_drop(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
@@ -31,6 +32,7 @@ fn rewrite(items: list<CompactionClassifyItem>) -> list<{index: int, text: strin
   return items.map(
     fn(item) { return {index: item.index, text: "retained source " + to_string(item.index)} },
   )
+    .to_list()
 }
 
 pipeline default(harness: Harness) {
@@ -50,23 +52,24 @@ pipeline default(harness: Harness) {
     evaluation_cost_limit: 1.0,
   }
   for threshold in [1, 1000000] {
+    const options: AgentSpec = {
+      provider: "mock",
+      model: "gpt-4",
+      tools: tools,
+      tool_format: "native",
+      max_iterations: 3,
+      compact_threshold: threshold,
+      compaction: {
+        strategy: "classify",
+        keep_last_n: 1,
+        classify: {policy: policy, fixture: low_drop, rewrite_fixture: rewrite},
+      },
+    }
     const result = agent_loop(
       harness,
       "Observe evidence until the iteration budget ends.",
       "You are a compacting test agent.",
-      {
-        provider: "mock",
-        model: "gpt-4",
-        tools: tools,
-        tool_format: "native",
-        max_iterations: 3,
-        compact_threshold: threshold,
-        compaction: {
-          strategy: "classify",
-          keep_last_n: 1,
-          classify: {policy: policy, fixture: low_drop, rewrite_fixture: rewrite},
-        },
-      },
+      options,
     )
     const events = transcript_events_by_kind(result.transcript, "compaction")
     if threshold == 1 {
