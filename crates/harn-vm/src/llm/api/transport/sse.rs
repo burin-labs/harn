@@ -1458,6 +1458,6 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         served_fast,
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }

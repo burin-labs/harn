@@ -641,7 +641,7 @@ pub(crate) fn parse_response(
         stop_reason,
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 

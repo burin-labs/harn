@@ -54,8 +54,9 @@ pipeline test_pricing_structures_survive_comparison_and_candidate_roundtrip(
   const changed = obs + {pricing: pricing + {schedules: [window + {input_multiplier: 0.6}]}}
   const drift = build_drift([changed], catalog)
   assert_eq(drift.changed[0].pricing_changes[0].key, "schedules")
-  const candidate = toml_parse(
-    render_candidate_toml(drift, {generated_at: "fixture", run_mode: "fixtures"}),
+  const candidate = schema_expect(
+    toml_parse(render_candidate_toml(drift, {generated_at: "fixture", run_mode: "fixtures"})),
+    {type: "object", required: ["models"], properties: {models: {type: "object"}}},
   )
   assert_eq(candidate.models.example.pricing, changed.pricing)
 }

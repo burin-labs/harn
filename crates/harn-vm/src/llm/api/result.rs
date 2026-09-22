@@ -133,8 +133,10 @@ pub(crate) struct LlmResult {
     pub logprobs: Vec<serde_json::Value>,
     /// Server-side timings and runtime accounting captured from this
     /// response. Empty for mocks and providers that report nothing usable.
+    /// Keep the extensible receipt off the result's inline layout: this value
+    /// crosses nested async calls, multiplying inline growth across frames.
     #[serde(default, skip_serializing_if = "ProviderTelemetry::is_empty")]
-    pub telemetry: ProviderTelemetry,
+    pub telemetry: Box<ProviderTelemetry>,
     /// How many provider requests this one logical call actually took, and why
     /// the extra ones happened. Stamped by the observed-call boundary, which is
     /// the only place that runs the retry loop.
@@ -819,7 +821,7 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
             "visibility": "public",
         })],
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
     }
 }
 
@@ -833,7 +835,7 @@ pub(crate) fn test_public_usage_keys() -> std::collections::BTreeSet<String> {
     result.model = "gpt-5.6-luna".into();
     result.input_tokens = 10;
     result.output_tokens = 10;
-    result.telemetry = ProviderTelemetry::new("usage_parity_test");
+    *result.telemetry = ProviderTelemetry::new("usage_parity_test");
     result.telemetry.billing = Some(Box::new(crate::llm::usage::BillingUsage {
         hosted_tool_calls: std::collections::BTreeMap::from([("web_search".into(), 1)]),
         audio_input_tokens: Some(1),

@@ -213,7 +213,7 @@ async fn vm_call_completion_openai_style(
             "visibility": "public",
         })],
         logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 
@@ -336,7 +336,7 @@ async fn vm_call_completion_ollama(
             "visibility": "public",
         })],
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 

@@ -893,7 +893,7 @@ mod tests {
             served_fast: false,
             blocks: Vec::new(),
             logprobs: Vec::new(),
-            telemetry: crate::llm::api::ProviderTelemetry::default(),
+            telemetry: Box::default(),
         };
         let usage = result.usage();
         SchemaLoopOutcome {

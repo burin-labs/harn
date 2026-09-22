@@ -29,10 +29,10 @@ fn accounted_result() -> LlmResult {
         served_fast: false,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry {
+        telemetry: Box::new(ProviderTelemetry {
             cache_accounting_declared: Some(true),
             ..ProviderTelemetry::default()
-        },
+        }),
         attempts: ProviderAttempts {
             total: 3,
             rate_limited: 1,
@@ -54,7 +54,7 @@ fn reported_hosted_search_is_billed_or_explicitly_unpriced() {
     let mut response = accounted_result();
     response.model = "claude-sonnet-4-5-20250929".into();
     let plain = LlmUsage::from_result(&response).cost_usd.unwrap();
-    response.telemetry = ProviderTelemetry::from_anthropic_usage(
+    *response.telemetry = ProviderTelemetry::from_anthropic_usage(
         &json!({
             "input_tokens": 1000, "output_tokens": 100,
             "server_tool_use": {"web_search_requests": 1}
@@ -148,10 +148,10 @@ fn self_hosted_result_without_usage() -> LlmResult {
         cache_supported: false,
         model: "some-locally-served-model".to_string(),
         provider: "llamacpp".to_string(),
-        telemetry: ProviderTelemetry {
+        telemetry: Box::new(ProviderTelemetry {
             cache_accounting_declared: Some(false),
             ..ProviderTelemetry::default()
-        },
+        }),
         attempts: ProviderAttempts::default(),
         ..accounted_result()
     }
@@ -179,7 +179,7 @@ fn live_tool_probe_preserves_missing_usage_as_unknown() {
         model: "Qwen/Qwen3.6-Plus".to_string(),
         input_tokens: 0,
         output_tokens: 0,
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
         attempts: ProviderAttempts::default(),
         ..accounted_result()
     };
@@ -199,11 +199,11 @@ fn live_tool_probe_preserves_missing_usage_as_unknown() {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
-        telemetry: ProviderTelemetry {
+        telemetry: Box::new(ProviderTelemetry {
             server_prompt_tokens: Some(0),
             server_output_tokens: Some(0),
             ..ProviderTelemetry::default()
-        },
+        }),
         ..accounted_result()
     });
     assert_eq!(
@@ -593,7 +593,7 @@ fn missing_stream_usage_stays_unknown_instead_of_becoming_free() {
     result.model = "accounts/fireworks/models/minimax-m3".to_string();
     result.input_tokens = 0;
     result.output_tokens = 0;
-    result.telemetry = ProviderTelemetry::from_openai_response(
+    *result.telemetry = ProviderTelemetry::from_openai_response(
         &serde_json::json!({"usage": {}}),
         Some("chatcmpl-without-usage"),
     );

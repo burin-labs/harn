@@ -919,7 +919,7 @@ pub(crate) fn parse_response(
         stop_reason: interaction_stop_reason(json["status"].as_str()),
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 

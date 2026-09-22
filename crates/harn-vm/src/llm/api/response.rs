@@ -227,7 +227,7 @@ pub(crate) fn parse_llm_response(
             served_fast: crate::llm::serving_tiers::served_fast(model, json),
             blocks,
             logprobs: Vec::new(),
-            telemetry,
+            telemetry: Box::new(telemetry),
         })
     } else {
         openai::parse_chat_completions_response(json, provider, model, tools_offered)

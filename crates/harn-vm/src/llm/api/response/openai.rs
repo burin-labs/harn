@@ -485,7 +485,7 @@ pub(crate) fn parse_openai_responses_response(
         served_fast,
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 
@@ -754,6 +754,6 @@ pub(super) fn parse_chat_completions_response(
         served_fast,
         blocks,
         logprobs: extract_openai_choice_logprobs(choice),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }

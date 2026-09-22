@@ -570,7 +570,7 @@ fn parse_bedrock_converse_response(
         })
         .transpose()?
         .unwrap_or(0);
-    result.telemetry =
+    *result.telemetry =
         crate::llm::api::ProviderTelemetry::new(crate::llm::api::telemetry_source::BEDROCK_USAGE);
     result.telemetry.server_prompt_tokens = reported_input_tokens;
     result.telemetry.server_output_tokens = json["usage"]["outputTokens"].as_i64();

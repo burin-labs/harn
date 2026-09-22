@@ -20,7 +20,7 @@ fn result_with(attempts: ProviderAttempts) -> LlmResult {
         served_fast: false,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
     }
 }
 

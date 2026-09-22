@@ -699,10 +699,10 @@ fn cached_call_result() -> crate::llm::api::LlmResult {
         served_fast: false,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: crate::llm::api::ProviderTelemetry {
+        telemetry: Box::new(crate::llm::api::ProviderTelemetry {
             server_prompt_tokens: Some(91),
             ..Default::default()
-        },
+        }),
     }
 }
 

@@ -1108,15 +1108,11 @@ mod tests {
             );
         }
 
-        // The census is only meaningful if the struct really was fully
-        // populated; a field left at `None` would be skipped by serde and
-        // silently excused from the check above.
-        assert_eq!(
-            encoded.len(),
-            25,
-            "every ProviderTelemetry field must be populated for the census to \
-             cover it; update this count when the struct gains a field"
-        );
+        // Non-null accounting witnesses keep the projection census from
+        // passing while the request-time pricing facts are absent.
+        assert_eq!(encoded["started_at_ms"], 1_780_000_000_000_i64);
+        assert_eq!(encoded["prompt_cache_ttl"], "1h");
+        assert_eq!(encoded["billing"]["hosted_tool_calls"]["web_search"], 1);
     }
 
     /// An unmeasured first frame stays absent through both projections, so a

@@ -12,7 +12,7 @@ where
     BillingUsage::deserialize(deserializer).map(BillingUsage::present)
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BillingUsage {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invalid_modality_counts: bool,
