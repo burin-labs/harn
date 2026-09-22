@@ -254,6 +254,7 @@ pub(super) fn read_response(
                     return Err(malformed("choice label is absent from distribution"));
                 }
                 RawAnswer::Choice {
+                    selected: Some(selected.to_string()),
                     probabilities: distribution,
                     reported_confidence: Some(number("confidence")?),
                     evidence: None,

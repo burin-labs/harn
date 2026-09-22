@@ -151,6 +151,17 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
                 crate::llm::decision::answer::EvidenceKind::InputReference
             );
         }
+        let mut contradictory = tape.clone();
+        contradictory["answers"]["action"]["choice"] = json!("write");
+        contradictory["answers"]["action"]["probabilities"] = json!({"read": 0.9, "write": 0.1});
+        let contradiction = read_response(&request, &contradictory).unwrap();
+        let refusal = Answer::project(
+            &questions.questions[1],
+            &contradiction.answers["action"],
+            contradiction.provenance,
+        )
+        .expect_err("a vendor label must not silently invert through projection");
+        assert!(refusal.diagnostic.contains("contradicts"));
         tape["answers"].as_object_mut().unwrap().remove("risk");
         assert!(matches!(
             read_response(&request, &tape),

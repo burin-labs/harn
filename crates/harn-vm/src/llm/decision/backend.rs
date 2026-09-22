@@ -68,6 +68,8 @@ pub enum RawAnswer {
         evidence: Option<String>,
     },
     Choice {
+        /// If the vendor also names a label, it must agree with projection.
+        selected: Option<String>,
         probabilities: BTreeMap<String, f64>,
         reported_confidence: Option<f64>,
         evidence: Option<String>,

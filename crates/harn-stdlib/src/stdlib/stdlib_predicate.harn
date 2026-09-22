@@ -82,8 +82,8 @@ pub type EvaluationPolicy = {
   effort?: string,
   temperature?: float,
   threshold: float,
-  evaluation_cost_limit: float,
-  run_cost_limit: float,
+  evaluation_cost_limit?: float,
+  run_cost_limit?: float,
 }
 
 pub type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: string} \

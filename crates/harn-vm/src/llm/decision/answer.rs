@@ -283,6 +283,7 @@ impl Answer {
             (
                 QuestionBody::Choice(_),
                 RawAnswer::Choice {
+                    selected,
                     probabilities,
                     reported_confidence,
                     evidence,
@@ -291,6 +292,14 @@ impl Answer {
                 admit_distribution(question, &labels, probabilities)?;
                 let (choice, _) = argmax(&labels, probabilities)
                     .ok_or_else(|| reject("distribution is empty"))?;
+                if selected
+                    .as_deref()
+                    .is_some_and(|selected| selected != choice)
+                {
+                    return Err(reject(
+                        "named choice contradicts the distribution's selected label",
+                    ));
+                }
                 let (confidence, confidence_kind) = distribution_confidence(
                     provenance,
                     reported_confidence,
