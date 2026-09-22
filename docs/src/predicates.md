@@ -197,6 +197,12 @@ distribution (`distribution_shape`); a structured LLM reports its own number
 equalize their error rates. None of them is calibrated until a calibration
 report says otherwise.
 
+Structured answers retain the model's named verdict, choice, or score level
+even at low confidence. Their probability fields are synthesized compatibility
+projections, never evidence for changing the named answer; their receipt's raw
+probabilities are empty because the model measured no distribution. Native
+distributions continue to select their highest-probability label.
+
 ```harn
 import "std/predicate"
 
