@@ -65,7 +65,7 @@ fn native_downstream_retry_retains_cost_and_closes_shared_admission() {
 #[test]
 fn native_optional_caps_inherit_existing_authority_without_inventing_one() {
     let scope = AdmissionScope::default();
-    let previous = swap_scope(scope.clone());
+    let previous = swap_scope(scope);
     assert!(reserve_decision(0.1, None, None).is_err());
     assert_eq!(
         remaining_allowance(),
