@@ -16,6 +16,10 @@ are stored there. Tapes contain the supplied state and model responses; choose
 a storage location suitable for that data.
 
 For a script, use `harn run script.harn --evaluation-tape probe.tape`.
+The repository's `examples/decision-probes/probe.harn` exercises six probe
+families in 53 lines. Run it with `--evaluation-tape
+examples/decision-probes/probe.tape` for a credential-free, explicitly synthetic
+protocol example.
 The scope covers evaluations in child VMs as well as the entry script.
 Every record must be consumed exactly once, in recorded order. A different
 state, question rubric, policy, site, or evaluator contract fails verification.
