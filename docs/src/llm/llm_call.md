@@ -911,7 +911,7 @@ harness.stdio.log("Estimated cost: $${cost}")
 
 // Check cumulative session costs
 const session = harness.llm.session_cost()
-harness.stdio.log("Measured total (nil if unknown): ${session.total_cost}")
+harness.stdio.log("Measured cost (nil if unknown): ${session.total_cost}")
 harness.stdio.log("Budget charged: $${session.budget_charged_usd}")
 harness.stdio.log("Calls: ${session.call_count}")
 harness.stdio.log("Input tokens: ${session.input_tokens}")
