@@ -802,8 +802,11 @@ struct CapturedRun {
     duration_ms: i64,
 }
 
+#[path = "process_credential_presence.rs"]
+mod credential_presence;
 #[path = "process_program_resolution.rs"]
 mod program_resolution;
+pub(crate) use credential_presence::{session_env_presence, SessionEnvPresenceError};
 pub(crate) use program_resolution::{resolve_program_path, resolve_program_path_for_spawn};
 
 /// Shared synchronous spawn-and-capture core used by `harness.process.run` and
@@ -1359,6 +1362,13 @@ fn session_env_with(
 /// call site means a caller cannot accidentally keep reading the raw
 /// environment when a profile *is* active.
 pub(crate) fn session_env_var(name: &str) -> Result<Option<String>, VmError> {
+    session_env_var_with(name, &resolve_grant_secret)
+}
+
+fn session_env_var_with(
+    name: &str,
+    resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+) -> Result<Option<String>, VmError> {
     let Some(environment) = current_session_environment() else {
         return Ok(std::env::var(name).ok());
     };
@@ -1376,7 +1386,7 @@ pub(crate) fn session_env_var(name: &str) -> Result<Option<String>, VmError> {
         &environment,
         name,
         &session_env_lookup(&workspace_defaults),
-        &resolve_grant_secret,
+        resolve_secret,
     )
     .map_err(grant_env_error)?;
     Ok(resolved)

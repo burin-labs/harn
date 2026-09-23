@@ -1956,7 +1956,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to a `harness.llm.call` option dict, preserving caller-supplied `thinking` or `effort` |
 | `harness.llm.rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool/dict | Set (`{rpm: N, tpm: N, input_tpm: N, output_tpm: N, concurrency: N}`), query legacy RPM, query rich details with `{details: true}`, or clear (`{rpm: 0}`) per-provider rate limits |
 | `harness.llm.providers()` | — | list | List all configured provider names |
-| `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"` |
+| `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"`, `"needs_user_approval"` (a stored credential that only a system dialog this process does not show could release) |
 | `harness.llm.available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
 | `harness.llm.known_models()` | — | list | List configured model alias names |
 | `harness.llm.qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
