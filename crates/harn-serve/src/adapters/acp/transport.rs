@@ -228,10 +228,10 @@ async fn acp_websocket_session(config: AcpServerConfig, session: WsSession) {
 ///
 /// It exposes three signals:
 ///
-/// * [`shutdown`](Self::shutdown) — request a graceful stop. The server stops
-///   accepting new requests and drains, then the driving future resolves. This
-///   is in addition to the existing teardown path of dropping the request
-///   sender (closing `request_rx`), which also stops the loop.
+/// * [`shutdown`](Self::shutdown) — stop accepting requests and interrupt
+///   any active dispatch before the driving future resolves. This is in
+///   addition to the existing teardown path of dropping the request sender
+///   (closing `request_rx`), which also stops the loop.
 /// * [`wait_ready`](Self::wait_ready) — resolves once the server has installed
 ///   its [`AcpServer`] and entered its message loop, so an embedder can defer
 ///   the first `session/new` until the runtime is live.
@@ -261,10 +261,10 @@ impl AcpChannelHandle {
         }
     }
 
-    /// Request a graceful shutdown of the channel server. Idempotent and safe
-    /// to call from any thread. Wakes the server loop, which stops accepting
-    /// further requests and resolves its driving future. Calling this when the
-    /// server has already terminated is a no-op.
+    /// Shut down the channel server. Idempotent and safe to call from any
+    /// thread. Stops accepting requests and interrupts an active dispatch,
+    /// releasing any external resources owned by its future. Calling this
+    /// after the server has terminated is a no-op.
     pub fn shutdown(&self) {
         self.shutdown_requested.store(true, Ordering::SeqCst);
         self.shutdown_notify.notify_waiters();
@@ -513,7 +513,21 @@ async fn run_acp_channel_server_inner(
                         }
                     }
                     msg = routed_rx.recv() => match msg {
-                        Some(msg) => dispatch_incoming(&mut server, msg).await,
+                        Some(msg) => {
+                            // A prompt can be awaiting an unresponsive host or
+                            // MCP handshake indefinitely. Shutdown must also
+                            // drop that in-flight dispatch, which owns the
+                            // pending connection and its child process.
+                            tokio::select! {
+                                biased;
+                                () = shutdown_notify.as_mut() => {
+                                    if handle.shutdown_requested.load(Ordering::SeqCst) {
+                                        break;
+                                    }
+                                }
+                                () = dispatch_incoming(&mut server, msg) => {}
+                            }
+                        }
                         None => break,
                     },
                 }
