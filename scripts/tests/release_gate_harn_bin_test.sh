@@ -501,6 +501,13 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]];
     printf 'lane\tgrammar-audit\trun_grammar_audit\n'
     printf 'lane\tsecurity-audit\trun_security_audit\n'
     printf 'lane\tsmoke-audit\trun_smoke_audit\n'
+  elif [[ " $* " == *" --residual-only "* ]]; then
+    printf 'meta\tfalse\tresidual_only\n'
+    printf 'lane\tgenerated-audit\trun_generated_audit\n'
+    printf 'lane\tdocs-audit\trun_docs_audit\n'
+    printf 'lane\tgrammar-audit\trun_grammar_audit\n'
+    printf 'lane\tsecurity-audit\trun_security_audit\n'
+    printf 'lane\tsmoke-audit\trun_smoke_audit\n'
   elif [[ " $* " == *" --source-only "* ]]; then
     printf 'meta\tfalse\tsource_only\n'
     printf 'lane\trust-audit\trun_rust_audit\n'
@@ -660,6 +667,41 @@ do
   if grep -Fq "$unexpected" "$audit_record"; then
     echo "receipt-authorized residual audit repeated proved work: $unexpected" >&2
     cat "$audit_record" >&2
+    exit 1
+  fi
+done
+
+# A residual-only rehearsal runs the lanes a receipt would authorize, on the
+# explicit HARN_BIN a live release hands them, without needing a receipt.
+run_audit residual-only --residual-only
+if ! grep -Fq "audit plan: residual_only" "$tmp_root/audit-residual-only.txt" ||
+  ! grep -Fq "warm-prebuild (reuse exact receipt-warmed HARN_BIN)" "$tmp_root/audit-residual-only.txt"; then
+  echo "residual-only audit did not plan residual lanes on the explicit HARN_BIN" >&2
+  cat "$tmp_root/audit-residual-only.txt" >&2
+  exit 1
+fi
+for lane in generated-audit docs-audit grammar-audit security-audit smoke-audit; do
+  if ! grep -Eq "ok: +$lane " "$tmp_root/audit-residual-only.txt"; then
+    echo "residual-only audit did not run $lane" >&2
+    cat "$tmp_root/audit-residual-only.txt" >&2
+    exit 1
+  fi
+done
+if grep -Eq 'cargo clippy|make (fmt-check|test|conformance)|package-audit HARN_BIN=' "$audit_record"; then
+  echo "residual-only audit ran merge-group-proved work" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+for conflicting in --source-only --receipt; do
+  conflict_args=(--residual-only "$conflicting")
+  if [[ "$conflicting" == "--receipt" ]]; then
+    conflict_args+=("$receipt")
+  fi
+  if HARN_RELEASE_ROOT="$audit_root" HARN_BIN="$fake_audit_harn" \
+    "$release_gate" audit "${conflict_args[@]}" > "$tmp_root/audit-conflict.txt" 2>&1 ||
+    ! grep -Fq "are mutually exclusive" "$tmp_root/audit-conflict.txt"; then
+    echo "residual-only audit accepted a conflicting scope: $conflicting" >&2
+    cat "$tmp_root/audit-conflict.txt" >&2
     exit 1
   fi
 done
