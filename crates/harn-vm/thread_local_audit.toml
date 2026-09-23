@@ -306,6 +306,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/llm/helpers/options/tool_choice.rs"
+statics = ["FORCED_TOOL_CHOICE_WARN_ONCE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/llm/provider.rs"
 statics = ["PROVIDER_NAMES", "DEFAULTS_REGISTERED"]
 category = "logical_task"
