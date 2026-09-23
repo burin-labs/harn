@@ -322,6 +322,7 @@ mod stream;
 pub(crate) mod tool_delimiter;
 pub(crate) mod tools;
 mod trace;
+pub(crate) use trace::LlmTraceRuntime;
 pub(crate) mod trigger_predicate;
 
 /// Process-environment mutation for the test suites, with one owner.

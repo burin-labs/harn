@@ -344,6 +344,18 @@ pub(crate) fn remaining_allowance() -> Option<f64> {
     })
 }
 
+/// Amount reserved or settled against the execution's conservative ceiling.
+/// Unlike the legacy thread-local accumulator, this includes native workers
+/// and uncertain in-flight provider attempts in the same admission scope.
+pub(crate) fn charged_upper_usd() -> Option<f64> {
+    SCOPE.with(|slot| {
+        let scope = slot.borrow();
+        let ledger = scope.ledger.lock().ok()?;
+        ledger.ceiling?;
+        (ledger.settled_upper + ledger.in_flight + ledger.uncertain).to_f64()
+    })
+}
+
 /// Upper accounting is deliberately named apart from the actual-usage ledger.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct AdmissionReceipt {

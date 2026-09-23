@@ -952,7 +952,8 @@ fn llm_cost_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-ledger"], sig = "__llm_session_cost() -> dict", category = "llm.economics")]
 fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let summary = super::trace::peek_trace_usage_summary();
-    let budget_charged_usd = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
+    let budget_charged_usd = super::admission::charged_upper_usd()
+        .unwrap_or_else(|| LLM_ACCUMULATED_COST.with(|acc| *acc.borrow()));
     let measured_cost = summary
         .cost
         .cost_usd()
