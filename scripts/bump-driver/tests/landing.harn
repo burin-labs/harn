@@ -1,13 +1,11 @@
 import { assert_eq } from "std/testing"
-import { github_bump_remote, landing_decision } from "../github_remote"
+import { github_bump_remote } from "../github_remote"
 
 const API = "https://api.github.com"
 
 const PULL_URL = API + "/repos/octo-org/octo-repo/pulls/42"
 
 const HEAD = "1111111111111111111111111111111111111111"
-
-const MOVED = "2222222222222222222222222222222222222222"
 
 fn remote(harness: Harness) {
   return github_bump_remote(
@@ -23,361 +21,151 @@ fn remote(harness: Harness) {
 }
 
 /** GitHub's REST pull document as the connector reads it. */
-fn pull(head: string, armed: bool, mergeable_state: string) {
-  return json_stringify(
-    {
-      number: 42,
-      node_id: "PR_node_42",
-      title: "Bump Harn runtime",
-      state: "open",
-      html_url: "https://github.com/octo-org/octo-repo/pull/42",
-      mergeable: mergeable_state == "clean",
-      mergeable_state: mergeable_state,
-      base: {
-        ref: "main",
-        sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        repo: {name: "octo-repo", full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
+fn pull(armed: bool, mergeable_state: string) {
+  return {
+    status: 200,
+    body: json_stringify(
+      {
+        number: 42,
+        node_id: "PR_node_42",
+        title: "Bump Harn runtime",
+        state: "open",
+        html_url: "https://github.com/octo-org/octo-repo/pull/42",
+        mergeable: mergeable_state == "clean",
+        mergeable_state: mergeable_state,
+        base: {ref: "main", sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        head: {ref: "automation/bump-harn-runtime", sha: HEAD},
+        auto_merge: if armed {
+          {merge_method: "squash"}
+        } else {
+          nil
+        },
       },
-      head: {
-        ref: "automation/bump-harn-runtime",
-        sha: head,
-        repo: {name: "octo-repo", full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
-      },
-      auto_merge: if armed {
-        {merge_method: "squash"}
-      } else {
-        nil
-      },
-    },
-  )
+    ),
+  }
 }
 
-fn ok(body: string) {
-  return {status: 200, body: body}
+fn graphql(value: dict) {
+  return {status: 200, body: json_stringify(value)}
 }
 
 fn armed_response() {
-  return ok(
-    json_stringify(
-      {
-        data: {
-          enablePullRequestAutoMerge: {
-            pullRequest: {
-              number: 42,
-              url: "https://github.com/octo-org/octo-repo/pull/42",
-              autoMergeRequest: {mergeMethod: "SQUASH"},
-            },
+  return graphql(
+    {
+      data: {
+        enablePullRequestAutoMerge: {
+          pullRequest: {
+            number: 42,
+            url: "https://github.com/octo-org/octo-repo/pull/42",
+            autoMergeRequest: {mergeMethod: "SQUASH"},
           },
         },
       },
-    ),
+    },
   )
 }
 
+/** GitHub's refusal to arm a pull request that is already mergeable. */
 fn clean_refusal() {
-  return ok(
-    json_stringify(
-      {
-        data: {enablePullRequestAutoMerge: nil},
-        errors: [
-          {
-            type: "UNPROCESSABLE",
-            path: ["enablePullRequestAutoMerge"],
-            message: "Pull request Pull request is in clean status",
-          },
-        ],
-      },
-    ),
+  return graphql(
+    {
+      data: {enablePullRequestAutoMerge: nil},
+      errors: [
+        {
+          type: "UNPROCESSABLE",
+          path: ["enablePullRequestAutoMerge"],
+          message: "Pull request Pull request is in clean status",
+        },
+      ],
+    },
   )
 }
 
-fn queue_response(configured: bool, queued_numbers: list<int>) {
-  if !configured {
-    return ok(json_stringify({data: {repository: {mergeQueue: nil}}}))
-  }
-  const nodes = queued_numbers.map(
-    { number ->
-      {
-        id: "MQE_" + to_string(number),
-        position: 1,
-        state: "QUEUED",
-        headCommit: {oid: HEAD},
-        pullRequest: {number: number, url: "", headRefOid: HEAD, baseRefName: "main"},
-      }
-    },
-  )
-    .to_list()
-  return ok(
-    json_stringify(
-      {
-        data: {
-          repository: {
-            mergeQueue: {
-              url: "https://github.com/octo-org/octo-repo/queue/main",
-              entries: {nodes: nodes},
+fn membership(armed: bool, queued: bool) {
+  return graphql(
+    {
+      data: {
+        repository: {
+          pullRequest: {
+            number: 42,
+            autoMergeRequest: if armed {
+              {mergeMethod: "SQUASH"}
+            } else {
+              nil
+            },
+            mergeQueueEntry: if queued {
+              {
+                id: "MQE_42",
+                position: 2,
+                state: "QUEUED",
+                headCommit: {oid: HEAD},
+                pullRequest: {number: 42, url: "", headRefOid: HEAD, baseRefName: "main"},
+              }
+            } else {
+              nil
             },
           },
         },
       },
+    },
+  )
+}
+
+fn mock(testing: HarnessTesting, pulls: list, posts: list) {
+  testing.http_mock_clear()
+  testing.http_mock("GET", PULL_URL, {responses: pulls})
+  testing.http_mock("POST", API + "/graphql", {responses: posts})
+}
+
+pipeline test_armed_while_checks_pending_passes_and_records_the_read(harness: Harness) {
+  mock(
+    harness.testing,
+    [pull(false, "blocked"), pull(true, "blocked")],
+    [armed_response(), membership(true, false)],
+  )
+  const landing = remote(harness).enable_auto_merge(42, HEAD)
+  assert_eq(landing.enabled, true, "armed pull request passes")
+  assert_eq(landing.state, "armed", "receipt says armed")
+  assert(
+    landing.detail.contains(
+      "octo-org/octo-repo#42 mergeable_state=blocked armed=true queued=false",
     ),
+    "receipt records what was observed",
   )
-}
-
-fn enqueued_response() {
-  return ok(
-    json_stringify(
-      {
-        data: {
-          enqueuePullRequest: {
-            mergeQueueEntry: {
-              id: "MQE_42",
-              position: 3,
-              state: "QUEUED",
-              headCommit: {oid: HEAD},
-              pullRequest: {number: 42, url: "", headRefOid: HEAD, baseRefName: "main"},
-            },
-          },
-        },
-      },
-    ),
-  )
-}
-
-fn mutations(testing: HarnessTesting) {
-  return testing.http_mock_calls().filter({ call -> call.method == "PUT" || call.method == "POST" })
-}
-
-fn graphql_bodies(testing: HarnessTesting) -> list<string> {
-  return testing.http_mock_calls().filter({ call -> call.method == "POST" }).map(
-    { call -> call.body },
-  )
-    .to_list()
-}
-
-pipeline test_decision_table_covers_every_landing_state() {
-  const base = {
-    expected_head_oid: HEAD,
-    observed_head_oid: HEAD,
-    armed: true,
-    mergeable_state: "blocked",
-    queue: false,
-    queued: false,
-  }
-  assert_eq(landing_decision(base), "armed", "pending checks keep the arm")
-  assert_eq(
-    landing_decision(base + {armed: false}),
-    "arm",
-    "a refused arm that is no longer clean re-arms",
-  )
-  assert_eq(
-    landing_decision(base + {mergeable_state: "clean"}),
-    "merge",
-    "clean without a queue merges",
-  )
-  assert_eq(landing_decision(base + {mergeable_state: "has_hooks"}), "merge", "has_hooks is clean")
-  assert_eq(
-    landing_decision(base + {mergeable_state: "clean", queue: true}),
-    "enqueue",
-    "clean with a queue enqueues",
-  )
-  assert_eq(
-    landing_decision(base + {mergeable_state: "clean", queue: true, queued: true}),
-    "queued",
-    "an already queued pull request is left alone",
-  )
-  assert_eq(
-    landing_decision(base + {mergeable_state: "unknown"}),
-    "unresolved",
-    "unknown is not pending",
-  )
-  assert_eq(
-    landing_decision(base + {observed_head_oid: MOVED, mergeable_state: "clean"}),
-    "stale_head",
-    "a moved head is refused before any landing",
-  )
-}
-
-pipeline test_armed_while_checks_pending_stays_armed(harness: Harness) {
-  harness.testing.http_mock_clear()
-  harness.testing.http_mock(
-    "GET",
-    PULL_URL,
-    {responses: [ok(pull(HEAD, false, "blocked")), ok(pull(HEAD, true, "blocked"))]},
-  )
-  harness.testing.http_mock(
-    "POST",
-    API + "/graphql",
-    {responses: [armed_response(), queue_response(false, [])]},
-  )
-  const landing = remote(harness).enable_auto_merge(42, HEAD)
-  assert_eq(landing.state, "armed", "pending checks still owe GitHub the merge event")
-  assert_eq(landing.enabled, true, "armed counts as on the way to landing")
-  assert(landing.detail.contains("mergeable_state=blocked"), "receipt records what was observed")
-  assert_eq(len(mutations(harness.testing)), 2, "only the arm mutation and the queue read")
-  harness.testing.http_mock_clear()
-}
-
-pipeline test_armed_on_an_already_clean_pull_without_a_queue_is_merged(harness: Harness) {
-  harness.testing.http_mock_clear()
-  harness.testing.http_mock(
-    "GET",
-    PULL_URL,
-    {
-      responses: [
-        ok(pull(HEAD, false, "clean")),
-        ok(pull(HEAD, true, "clean")),
-        ok(pull(HEAD, true, "clean")),
-      ],
-    },
-  )
-  harness.testing.http_mock(
-    "POST",
-    API + "/graphql",
-    {responses: [armed_response(), queue_response(false, [])]},
-  )
-  harness.testing.http_mock(
-    "GET",
-    API + "/repos/octo-org/octo-repo/branches/main/protection",
-    {status: 404, body: json_stringify({message: "Branch not protected"})},
-  )
-  harness.testing.http_mock("PUT", PULL_URL + "/merge", ok(json_stringify({merged: true})))
-  const landing = remote(harness).enable_auto_merge(42, HEAD)
-  assert_eq(landing.state, "merged", "a clean pull request produces no event, so it is merged")
-  assert_eq(landing.enabled, true, "merged is landed")
-  const puts = harness.testing.http_mock_calls().filter({ call -> call.method == "PUT" })
-  assert_eq(len(puts), 1, "exactly one merge")
-  const body: {sha: string, merge_method: string} = json_parse(puts[0].body)
-  assert_eq(body.sha, HEAD, "merge is pinned to the verified head")
-  assert_eq(body.merge_method, "squash", "merge uses the arm's method")
-  harness.testing.http_mock_clear()
-}
-
-pipeline test_clean_refusal_without_a_queue_is_merged_not_failed(harness: Harness) {
-  harness.testing.http_mock_clear()
-  harness.testing.http_mock(
-    "GET",
-    PULL_URL,
-    {
-      responses: [
-        ok(pull(HEAD, false, "clean")),
-        ok(pull(HEAD, false, "clean")),
-        ok(pull(HEAD, false, "clean")),
-      ],
-    },
-  )
-  harness.testing.http_mock(
-    "POST",
-    API + "/graphql",
-    {responses: [clean_refusal(), queue_response(false, [])]},
-  )
-  harness.testing.http_mock(
-    "GET",
-    API + "/repos/octo-org/octo-repo/branches/main/protection",
-    {status: 404, body: json_stringify({message: "Branch not protected"})},
-  )
-  harness.testing.http_mock("PUT", PULL_URL + "/merge", ok(json_stringify({merged: true})))
-  const landing = remote(harness).enable_auto_merge(42, HEAD)
-  assert_eq(
-    landing.state,
-    "merged",
-    "GitHub's refusal to arm a clean pull request lands it instead",
-  )
-  harness.testing.http_mock_clear()
-}
-
-pipeline test_already_clean_pull_on_a_queue_branch_is_enqueued_under_its_head(harness: Harness) {
-  harness.testing.http_mock_clear()
-  harness.testing.http_mock(
-    "GET",
-    PULL_URL,
-    {
-      responses: [
-        ok(pull(HEAD, false, "clean")),
-        ok(pull(HEAD, true, "clean")),
-        ok(pull(HEAD, true, "clean")),
-      ],
-    },
-  )
-  harness.testing.http_mock(
-    "POST",
-    API + "/graphql",
-    {responses: [armed_response(), queue_response(true, [7]), enqueued_response()]},
-  )
-  const landing = remote(harness).enable_auto_merge(42, HEAD)
-  assert_eq(landing.state, "enqueued", "clean on a queue branch is enqueued explicitly")
-  assert_eq(landing.enabled, true, "enqueued is on the way to landing")
-  assert(landing.detail.contains("position=3"), "receipt records the queue position")
-  const bodies = graphql_bodies(harness.testing)
-  assert_eq(len(bodies), 3, "arm, queue read, enqueue")
-  const enqueue: {query: string, variables: {input: {expectedHeadOid: string}}} = json_parse(
-    bodies[2],
-  )
-  assert(enqueue.query.contains("enqueuePullRequest"), "third mutation is the enqueue")
-  assert_eq(enqueue.variables.input.expectedHeadOid, HEAD, "enqueue is pinned to the verified head")
-  assert_eq(
-    len(harness.testing.http_mock_calls().filter({ call -> call.method == "PUT" })),
-    0,
-    "a queue branch is never merged directly",
-  )
-  harness.testing.http_mock_clear()
-}
-
-pipeline test_pull_already_in_the_queue_is_left_alone(harness: Harness) {
-  harness.testing.http_mock_clear()
-  harness.testing.http_mock(
-    "GET",
-    PULL_URL,
-    {responses: [ok(pull(HEAD, false, "clean")), ok(pull(HEAD, true, "clean"))]},
-  )
-  harness.testing.http_mock(
-    "POST",
-    API + "/graphql",
-    {responses: [armed_response(), queue_response(true, [42])]},
-  )
-  const landing = remote(harness).enable_auto_merge(42, HEAD)
-  assert_eq(landing.state, "queued", "GitHub already queued it")
-  assert_eq(len(graphql_bodies(harness.testing)), 2, "no second enqueue")
-  harness.testing.http_mock_clear()
-}
-
-pipeline test_stale_head_after_arming_is_refused_and_recorded(harness: Harness) {
-  harness.testing.http_mock_clear()
-  harness.testing.http_mock(
-    "GET",
-    PULL_URL,
-    {responses: [ok(pull(HEAD, false, "blocked")), ok(pull(MOVED, true, "clean"))]},
-  )
-  harness.testing.http_mock(
-    "POST",
-    API + "/graphql",
-    {responses: [armed_response(), queue_response(true, [])]},
-  )
-  const landing = remote(harness).enable_auto_merge(42, HEAD)
-  assert_eq(landing.state, "stale_head", "a moved head is not landed")
-  assert_eq(landing.enabled, false, "the refusal fails the run")
-  assert(landing.detail.contains("head=" + MOVED), "receipt names the observed head")
-  assert_eq(len(graphql_bodies(harness.testing)), 2, "no enqueue on a moved head")
-  // The connector's own lease would also refuse the enqueue one read later;
-  // the driver refuses first, so no landing call is attempted at all.
   assert_eq(
     len(harness.testing.http_mock_calls().filter({ call -> call.method == "GET" })),
     2,
-    "only the arm read and the observation read",
-  )
-  assert_eq(
-    len(harness.testing.http_mock_calls().filter({ call -> call.method == "PUT" })),
-    0,
-    "no merge on a moved head",
+    "the arm read and one read-back shared by both checks",
   )
   harness.testing.http_mock_clear()
 }
 
-pipeline test_stale_head_at_arming_is_refused_without_a_landing(harness: Harness) {
+pipeline test_neither_armed_nor_queued_fails_naming_the_pull_and_its_state(harness: Harness) {
+  mock(
+    harness.testing,
+    [pull(false, "clean"), pull(false, "clean")],
+    [clean_refusal(), membership(false, false)],
+  )
+  const outcome = try {
+    remote(harness).enable_auto_merge(42, HEAD)
+  }
+  assert(is_err(outcome), "a pull request nothing will land fails the run")
+  const message = to_string(unwrap_err(outcome))
+  assert(message.contains("octo-org/octo-repo#42"), "error names the pull request")
+  assert(message.contains("mergeable_state=clean"), "error names its merge state")
+  assert(message.contains("clean status"), "error carries GitHub's arm refusal")
   harness.testing.http_mock_clear()
-  harness.testing.http_mock("GET", PULL_URL, ok(pull(MOVED, false, "clean")))
+}
+
+pipeline test_queued_pull_passes(harness: Harness) {
+  mock(
+    harness.testing,
+    [pull(false, "clean"), pull(false, "clean")],
+    [clean_refusal(), membership(false, true)],
+  )
   const landing = remote(harness).enable_auto_merge(42, HEAD)
-  assert_eq(landing.state, "stale_head", "the connector's lease refusal is recorded")
-  assert_eq(landing.enabled, false, "not landed")
-  assert_eq(len(mutations(harness.testing)), 0, "nothing was mutated")
+  assert_eq(landing.enabled, true, "queued pull request passes")
+  assert_eq(landing.state, "queued", "receipt says queued")
+  assert(landing.detail.contains("queued=true"), "receipt records queue membership")
   harness.testing.http_mock_clear()
 }

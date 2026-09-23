@@ -2,7 +2,7 @@
 name = "harn-bump-driver"
 version = "0.1.0"
 description = "Package-backed GitHub driver for Harn's provider-neutral runtime bump state machine."
-harn = ">=0.10.135,<0.11"
+harn = ">=0.10.121,<0.11"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn"
 docs_url = "https://github.com/burin-labs/harn/blob/main/scripts/bump-driver/README.md"
@@ -15,4 +15,4 @@ default = "github_remote.harn"
 [dependencies]
 # Immutable release tag plus the content-addressed lockfile keep CI and local
 # bump runs on the same reviewed connector implementation.
-harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", rev = "8cd5f3c9a12d76abf0e9fcce5d8a42a74cddef2a" }
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.8.7" }

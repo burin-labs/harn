@@ -6,20 +6,19 @@ import {
   GithubBranchHeadRequest,
   GithubBranchTreeCompareRequest,
   GithubClientOptions,
+  GithubMergeQueueMembership,
   GithubPullRequestUpsertRequest,
+  call_typed,
   github_branch_head,
   github_close_pr,
   github_compare_branch_trees,
   github_find_open_pr,
   github_latest_release,
-  github_merge_queue_enqueue,
-  github_merge_queue_entries,
   github_release,
   github_resolve_mergeable,
   github_upsert_pull_request,
   pulls_disable_auto_merge,
   pulls_enable_auto_merge,
-  pulls_merge_safe,
 } from "harn-github-connector/default"
 import {
   GithubConnectorError,
@@ -334,227 +333,75 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       }
       return true
     },
-    enable_auto_merge: fn(number, expected_head_oid) { return __land(
-      harness,
-      {repo: repo, options: options, base: config.base},
-      number,
-      expected_head_oid,
-    ) },
-  }
-}
-
-/**
- * What the driver reads back after arming. `mergeable_state` is GitHub's
- * resolved REST value; `queue` is whether the base branch has a merge queue.
- */
-pub type LandingObservation = {
-  expected_head_oid: string,
-  observed_head_oid: string,
-  armed: bool,
-  mergeable_state: string,
-  queue: bool,
-  queued: bool,
-}
-
-/** The one next step that leaves the pull request merged, queued, or waiting on an event. */
-pub type LandingDecision = "stale_head" \
-  | "unresolved" \
-  | "queued" \
-  | "enqueue" \
-  | "merge" \
-  | "armed" \
-  | "arm"
-
-/**
- * Decide how an armed or refused repin pull request lands.
- *
- * GitHub fires auto-merge on the next state change. A pull request that is
- * already clean produces none, and GitHub refuses to arm one at all, so an
- * off/on toggle cannot recover it. A clean pull request is therefore landed
- * explicitly: enqueued when the base branch requires a merge queue, merged
- * otherwise. Anything not yet clean stays armed; its checks still owe GitHub
- * the event that fires the merge.
- */
-pub fn landing_decision(seen: LandingObservation) -> LandingDecision {
-  if seen.observed_head_oid != seen.expected_head_oid {
-    return "stale_head"
-  }
-  if seen.mergeable_state == "unknown" {
-    return "unresolved"
-  }
-  if seen.mergeable_state == "clean" || seen.mergeable_state == "has_hooks" {
-    if !seen.queue {
-      return "merge"
-    }
-    return if seen.queued {
-      "queued"
-    } else {
-      "enqueue"
-    }
-  }
-  return if seen.armed {
-    "armed"
-  } else {
-    "arm"
-  }
-}
-
-type LandingTarget = {repo: GithubRepo, options: GithubClientOptions, base: string}
-
-/** The fields of GitHub's pull document the landing decision reads. */
-type PullLandingEvidence = {head: {sha: string}, auto_merge: dict?}
-
-fn __landing(state: string, enabled: bool, seen: LandingObservation?, detail: string = "") {
-  const observed = if seen == nil {
-    ""
-  } else {
-    "mergeable_state=${seen.mergeable_state} queue=${seen.queue} head=${seen.observed_head_oid}"
-  }
-  const receipt: BumpAutoMerge = {
-    enabled: enabled,
-    state: state,
-    detail: trim(observed + " " + detail),
-  }
-  return receipt
-}
-
-/** Arm under the head lease. `nil` means GitHub reported nothing left to wait on. */
-fn __arm(harness: Harness, target: LandingTarget, number: int, head: string) -> bool? {
-  const armed = pulls_enable_auto_merge(
-    harness,
-    {
-      owner: target.repo.owner,
-      repo: target.repo.name,
-      pull_number: number,
-      expected_head_oid: head,
-      method: "squash",
-      options: target.options,
+    enable_auto_merge: fn(number, expected_head_oid) {
+      const armed = pulls_enable_auto_merge(
+        harness,
+        {
+          owner: repo.owner,
+          repo: repo.name,
+          pull_number: number,
+          expected_head_oid: expected_head_oid,
+          method: "squash",
+          options: options,
+        },
+      )
+      // A refused arm is not final on its own: the read-back below decides,
+      // and names the pull request and its merge state when it fails.
+      const arm_detail = if is_err(armed) {
+        "arm refused: " + json_stringify(unwrap_err(armed))
+      } else {
+        "arm " + unwrap(armed).state
+      }
+      return __require_armed_or_queued(harness, repo, options, number, arm_detail)
     },
-  )
-  if is_ok(armed) {
-    return true
   }
-  const failure: GithubConnectorError = unwrap_err(armed)
-  if failure.code == "pull_request_clean" {
-    return nil
-  }
-  if failure.code == "stale_head" {
-    return false
-  }
-  throw "bump-driver: leased auto-merge enable failed: " + json_stringify(failure)
 }
 
-fn __observe(
+/**
+ * Fail unless the pull request is armed or already in the merge queue.
+ *
+ * Absence must not read as success: a published pull request that is neither
+ * armed nor queued has nothing that will ever land it.
+ */
+fn __require_armed_or_queued(
   harness: Harness,
-  target: LandingTarget,
+  repo: GithubRepo,
+  options: GithubClientOptions,
   number: int,
-  head: string,
-) -> LandingObservation {
+  arm_detail: string,
+) -> BumpAutoMerge {
   const mergeability = __must(
     github_resolve_mergeable(
       harness,
-      {
-        owner: target.repo.owner,
-        repo: target.repo.name,
-        pull_number: number,
-        options: target.options,
-      },
+      {owner: repo.owner, repo: repo.name, pull_number: number, options: options},
     ),
     "pull request mergeability read",
   )
-  const raw = mergeability.raw
-  if !schema_is(raw, schema_of(PullLandingEvidence)) {
-    throw "bump-driver: mergeability read omitted the pull request head"
-  }
-  const queue = __must(
-    github_merge_queue_entries(
+  // Reuse the same pull document so both reads describe one GitHub snapshot.
+  const membership: GithubMergeQueueMembership = __must(
+    call_typed(
       harness,
-      {
-        owner: target.repo.owner,
-        repo: target.repo.name,
-        branch: target.base,
-        options: target.options,
-      },
+      "github.merge_queue.membership",
+      {owner: repo.owner, repo: repo.name, pull_number: number, pull: mergeability.raw}
+        + options,
+      GithubMergeQueueMembership,
     ),
-    "merge queue read",
+    "merge queue membership read",
   )
-  return {
-    expected_head_oid: head,
-    observed_head_oid: raw.head.sha,
-    armed: raw.auto_merge != nil,
-    mergeable_state: if mergeability.resolved {
-      mergeability.mergeable_state
+  const pull = "${repo.owner}/${repo.name}#${number}"
+  const observed =
+    "mergeable_state=${mergeability.mergeable_state} armed=${membership.auto_merge_armed} queued=${membership.queued}"
+  if !membership.auto_merge_armed && !membership.queued {
+    throw "bump-driver: ${pull} is neither armed nor queued (${observed}; ${arm_detail})"
+  }
+  const receipt: BumpAutoMerge = {
+    enabled: true,
+    state: if membership.queued {
+      "queued"
     } else {
-      "unknown"
+      "armed"
     },
-    queue: queue.configured,
-    queued: queue.entries.any({ entry -> entry.pull_number == number }),
+    detail: "${pull} ${observed}",
   }
-}
-
-/**
- * Arm, read the pull request back, and carry out `landing_decision`. Every
- * outcome is returned as the receipt's `auto_merge`; `enabled` is true only
- * when the pull request is merged, queued, or armed with checks still pending.
- */
-fn __land(harness: Harness, target: LandingTarget, number: int, head: string) -> BumpAutoMerge {
-  const first = __arm(harness, target, number, head)
-  if first == false {
-    return __landing("stale_head", false, nil, "arming refused: head moved off ${head}")
-  }
-  let rearmed = false
-  while true {
-    const seen = __observe(harness, target, number, head)
-    const decision = landing_decision(seen)
-    if decision == "armed" || decision == "queued" {
-      return __landing(decision, true, seen)
-    }
-    if decision == "stale_head" || decision == "unresolved" {
-      return __landing(decision, false, seen)
-    }
-    if decision == "enqueue" {
-      const enqueued = github_merge_queue_enqueue(
-        harness,
-        {
-          owner: target.repo.owner,
-          repo: target.repo.name,
-          pull_number: number,
-          expected_head_oid: head,
-          options: target.options,
-        },
-      )
-      if is_err(enqueued) && unwrap_err(enqueued).code == "stale_head" {
-        return __landing("stale_head", false, seen, "enqueue refused")
-      }
-      const entry = __must(enqueued, "leased merge queue enqueue").entry
-      return __landing("enqueued", true, seen, "position=${entry.position}")
-    }
-    if decision == "merge" {
-      const merged = pulls_merge_safe(
-        harness,
-        {
-          owner: target.repo.owner,
-          repo: target.repo.name,
-          pull_number: number,
-          expected_head_oid: head,
-          method: "squash",
-          options: target.options,
-        },
-      )
-      if is_err(merged) && unwrap_err(merged).code == "stale_head" {
-        return __landing("stale_head", false, seen, "merge refused")
-      }
-      __must(merged, "leased pull request merge")
-      return __landing("merged", true, seen)
-    }
-    // "arm": GitHub refused to arm a clean pull request that is no longer
-    // clean. Arm it once more; a second refusal is reported, not looped on.
-    if rearmed {
-      return __landing("unresolved", false, seen, "arming refused twice")
-    }
-    rearmed = true
-    if __arm(harness, target, number, head) == false {
-      return __landing("stale_head", false, seen, "re-arming refused")
-    }
-  }
+  return receipt
 }

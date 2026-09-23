@@ -106,28 +106,15 @@ pipeline main(harness: Harness) {
     gha_write_output(harness, "pr_number", gha_int_output(receipt.pr_number))
     gha_write_output(harness, "pr_url", receipt.pr_url ?? "")
   }
-  // `landing` is merged, enqueued, queued, armed, stale_head, or unresolved.
-  const landing = receipt.auto_merge
-  if landing != nil {
-    gha_write_output(harness, "landing", landing.state)
-  }
   gha_append_summary(
     harness.env,
     harness.fs,
     "### bump-harn: ${receipt.outcome}\n\n"
       + "- target: `${receipt.target_tag}` (was `${receipt.previous_version}`)\n"
       + "- ready: ${receipt.ready}\n"
-      + if landing != nil {
-        "- landing: `${landing.state}` ${landing.detail}\n"
-      } else {
-        ""
-      }
       + join(receipt.notes.map({ note -> "- ${note}" }), "\n"),
   )
-  // A repin that was asked to land and did not is a failed run, even though
-  // the pull request was published.
-  const landed = landing == nil || landing.enabled
-  return if receipt.ok && landed {
+  return if receipt.ok {
     0
   } else {
     1
