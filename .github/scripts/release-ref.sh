@@ -9,9 +9,7 @@
 #
 # Every consumer must accept BOTH. A matcher pinned to the older shape silently
 # stops matching at the cutover and its gate goes quiet without failing — which
-# is exactly what happened to four call sites in this repo. `release-smoke.yml`
-# and `scripts/check_release_smoke.harn` already accepted both; they were the
-# outliers that were right.
+# is exactly what happened to four call sites in this repo.
 #
 # Sourced by `.github/workflows/ci.yml` (the `changes` job checks out the repo
 # before use) and by `scripts/native_platform_ci_plan.sh`.

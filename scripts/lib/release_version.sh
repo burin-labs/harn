@@ -170,6 +170,25 @@ release_development_bump_plan() {
   RELEASE_DEVELOPMENT_BUMP_REASON="published_stable_needs_development_identity"
 }
 
+# Print the root workspace version from a Cargo.toml read on stdin: the first
+# top-level `version = "..."` line, which is `[workspace.package]` in this
+# repository. Prints nothing when there is none.
+release_workspace_version() {
+  sed -n 's/^version = "\([^"]*\)"$/\1/p' | head -n 1
+}
+
+# A push to main is a release candidate exactly when it changes the workspace
+# version to a canonical stable X.Y.Z. The version decides, never the commit
+# subject: a development bump, a prerelease, or an unchanged version is not a
+# release, and a missing previous version (a root commit) is still a change.
+release_push_is_stable_version_change() {
+  local previous="${1:-}"
+  local current="${2:-}"
+  release_version_is_canonical "$current" \
+    && ! release_version_is_prerelease "$current" \
+    && [[ "$current" != "$previous" ]]
+}
+
 release_tag_is_canonical() {
   [[ "${1:-}" == v* ]] && release_version_is_canonical "${1#v}"
 }
@@ -193,8 +212,8 @@ release_branch_is_canonical() {
   [[ "${1:-}" == release/v* ]] && release_version_is_canonical "${1#release/v}"
 }
 
-# Project a canonical release version into the public channel policy consumed by
-# build-release-binaries.yml. Results are returned in RELEASE_* globals so the
+# Project a canonical release version into the public channel policy (GitHub
+# latest flag and container tags) that publication applies. Results are returned in RELEASE_* globals so the
 # workflow and its fixture test share one policy owner.
 # shellcheck disable=SC2034 # public result globals are consumed by sourcing callers
 release_publication_plan() {

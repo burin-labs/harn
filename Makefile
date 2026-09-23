@@ -677,12 +677,8 @@ test-pr-gate-scripts:
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_tag_main_ancestry_test.sh
-	./scripts/tests/verify_release_archive_provenance_test.sh
-	./scripts/tests/candidate_archive_promotion_test.sh
-	./scripts/tests/candidate_archive_certification_binding_test.sh
-	./scripts/tests/download_candidate_archive_promotion_test.sh
-	./scripts/tests/publish_certified_release_assets_test.sh
-	./scripts/tests/certified_publication_inputs_test.sh
+	./scripts/tests/candidate_manifest_test.sh
+	./scripts/tests/release_candidate_trigger_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
@@ -769,7 +765,6 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	HARN_BIN_RESOLVER_TEST_ALLOW_CARGO=1 ./scripts/tests/harn_bin_resolver_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/agent_shell_guard_adapter_test.sh
-	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_release_smoke_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_prepare_env_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_withdrawal_lineage_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh

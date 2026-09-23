@@ -73,7 +73,7 @@ pub const RELEASE_PATH_FILTER_OUTPUT = "$"
 pub const RELEASE_PATH_FILTER_BRANCH = "[[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]"
 
 pub const RELEASE_WORKFLOW_CONCURRENCY_GROUP = "build-release-binaries-$"
-  + "{{ (github.event_name == 'workflow_dispatch' && inputs.candidate_source_sha != '' && format('candidate-{0}', inputs.candidate_source_sha)) || (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && github.ref_type == 'branch' && format('branch-{0}', github.run_id)) || inputs.tag || github.ref_name }}"
+  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
 
 pub const RELEASE_WORKFLOW_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}"
@@ -83,11 +83,6 @@ pub const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
 
 pub const RELEASE_BUILD_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' }}"
-
-pub const RELEASE_ACTIVE_TAG_SELECTOR =
-  "(.event == \"push\" and ((.headBranch // \"\") | test(\"^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+(-[0-9A-Za-z.-]+)?$\")))"
-
-pub const RELEASE_ACTIVE_DISPATCH_SELECTOR = "(.event == \"workflow_dispatch\")"
 
 pub const RELEASE_BUILD_IF = "needs.setup.outputs.should_build_binaries == 'true'"
 
@@ -415,7 +410,7 @@ pub const RELEASE_CACHE_SHARED_KEY = "release-$" + "{{ matrix.target }}"
 pub const RELEASE_CACHE_SOURCE_KEY = "$" + "{{ matrix.rust_cache_broad_restore_prefix }}"
 
 pub const RELEASE_CACHE_SAVE_ENV = "$"
-  + "{{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false' }}"
+  + "{{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}"
 
 pub const RELEASE_CACHE_SAVE_REQUEST = "$"
   + "{{ env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true' }}"
@@ -857,19 +852,6 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
     errors = errors
       + [
         "${RELEASE_BINARY_WORKFLOW}:build must let only real main-branch warms supersede a target warm",
-      ]
-  }
-  const resolve_run = (workflow?.jobs?.setup?.steps ?? []).filter({ step -> step?.id == "resolve" })
-    .to_list()[0]?.run
-    ?? ""
-  if !contains(resolve_run, RELEASE_ACTIVE_TAG_SELECTOR) {
-    errors = errors
-      + ["${RELEASE_BINARY_WORKFLOW}:setup must recognize active tag-release runs"]
-  }
-  if contains(resolve_run, RELEASE_ACTIVE_DISPATCH_SELECTOR) {
-    errors = errors
-      + [
-        "${RELEASE_BINARY_WORKFLOW}:setup must not misclassify benchmark or warm dispatches as releases",
       ]
   }
   return errors

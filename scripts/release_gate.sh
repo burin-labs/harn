@@ -1281,10 +1281,8 @@ cmd_prepare() {
     echo "  1. Review docs/release notes diff"
     echo "  2. Commit on a release/v$next branch: git commit -am 'Release v$next'"
     echo "  3. Open the Release v$next PR and enable auto-merge"
-    echo "  4. After merge, let the watcher tag the exact main squash commit"
-    echo "  5. Let the tag-triggered publish and binary workflows finish"
-    echo "  6. Require Release smoke against the published artifacts:"
-    echo "       ./scripts/check_release_smoke.sh v$next"
+    echo "  4. After merge, the push to main builds and checks the v$next release candidate"
+    echo "     (Build release binaries); promotion publishes exactly those files"
   )
 }
 
@@ -1315,11 +1313,9 @@ cmd_publish() {
   fi
   echo "Publish phase complete for v$version"
   echo "Follow-up / verification checklist:"
-  echo "  Ensure tag v$version has been pushed from the merge-queue-approved main commit"
+  echo "  Ensure tag v$version was created by promotion at the version commit"
   echo "  Review changelog-backed GitHub release notes"
-  echo "  Wait for Build release binaries to finalize the GitHub release (7 assets)"
-  echo "  Require Release smoke to pass against the published artifacts:"
-  echo "    ./scripts/check_release_smoke.sh v$version"
+  echo "  Confirm the release holds the files the candidate run checked (candidate-manifest.json)"
 }
 
 cmd_notes() {

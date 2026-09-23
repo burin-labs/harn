@@ -2,43 +2,34 @@ name: Build release binaries
 
 # Triggers, in order of importance:
 #
-#   1. push tags v* — canonical release path. Proves the tag selects the
-#      matching Release squash commit on main, then builds, signs, notarizes,
-#      packages, and attests that exact merged source before finalizing the
-#      GitHub release and container.
+#   1. push main that changes the workspace version to a stable X.Y.Z —
+#      candidate mode. Builds, signs, notarizes, packages, and attests the
+#      full five-target matrix at exactly github.sha, builds the
+#      target-independent release files (SHA256SUMS, release-assets.json,
+#      release notes) from those archives, writes the candidate manifest
+#      (burin-labs.candidate_manifest.v1), and runs the late release checks
+#      (the residual audit lanes and release smoke) on those same files. The
+#      run is green only when the files it built passed every check. A
+#      separate promotion workflow publishes exactly these files; nothing here
+#      creates a tag, a GitHub release, or a container.
 #
-#   2. workflow_dispatch candidate_only — build/sign/notarize/package/attest
-#      the full five-target matrix against an exact source SHA under current
-#      main policy. Uploads fail-closed run-scoped candidate archives and a
-#      candidate-archive-manifest-<sha> receipt. Never mutates a GitHub
-#      release or publishes a container. Because the workflow itself runs on
-#      main, each successful candidate also refreshes the bounded per-target
-#      Rust cache. This prevents continuous releases from starving the warm
-#      lane while later candidates still verify their exact source revision.
-#
-#   3. push main — warm-cache-only mode. Runs the same build matrix to
-#      populate the per-target Swatinem rust-cache on main so the next
-#      candidate/release cycle can restore warm via restore-keys prefix
-#      matching. Skips sign/notarize/package/upload/release/container.
-#      Release PR merge commits are skipped here.
-#
-#      The setup job below short-circuits this mode unless the push changed a
-#      compile or build-topology input declared in
+#   2. push main, any other commit — warm-cache-only mode. Runs the same build
+#      matrix to populate the per-target Swatinem rust-cache on main so the
+#      next candidate restores warm via restore-keys prefix matching. Skips
+#      sign/notarize/package/upload. The setup job short-circuits this mode
+#      unless the push changed a compile or build-topology input declared in
 #      .github/release-warm-cache-paths.yml.
 #
-#   4. schedule, daily — safety-net warm-up against GitHub's 7-day eviction.
+#   3. schedule, daily — safety-net warm-up against GitHub's 7-day eviction.
 #
-#   5. workflow_dispatch recovery — force_rebuild or missing-asset recovery
-#      for an existing tag; warm_cache_only; or benchmark_only size gates.
+#   4. workflow_dispatch — warm_cache_only, or benchmark_only size gates.
 #
-# Cache architecture note. GitHub Actions caches are scoped per-ref: tag
-# release runs restore only. Main warm events and main-dispatched candidate
-# builds own saves. Candidate saves matter when continuous releases suppress
-# every overlapping warm run. Each target prunes old generations first.
+# Cache architecture note. GitHub Actions caches are scoped per-ref. Main warm
+# events and main candidate builds own saves; each target prunes old
+# generations first.
 on:
   push:
     branches: [main]
-    tags: ['v*']
   schedule:
     # Daily warm at 05:17 UTC. Staggered from release-smoke's 09:17 cron
     # so the two release-mode workflows don't contend for runners or for
@@ -46,54 +37,18 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:
-      promote_only:
-        description: 'Publish exact certified candidate archives without rebuilding.'
-        type: boolean
-        default: false
-      candidate_archive_run_id:
-        description: 'Completed certified candidate archive producer run.'
-        type: string
-      candidate_manifest_artifact_id:
-        description: 'Exact candidate manifest artifact ID.'
-        type: string
-      expected_manifest_digest:
-        description: 'Exact sha256: digest of the manifest artifact ZIP.'
-        type: string
-      expected_source_sha:
-        description: 'Certified source commit and signed tag target.'
-        type: string
-      expected_archive_policy_sha:
-        description: 'Original archive producer policy commit.'
-        type: string
-      expected_policy_sha:
-        description: 'Exact current-main workflow execution commit.'
-        type: string
-      tag:
-        description: 'Tag to (re-)release, e.g. v0.7.31. Leave empty when warm_cache_only is true.'
-        required: false
-        type: string
       warm_cache_only:
         description: 'Build the release matrix on main only to refresh default-branch Rust caches.'
         required: false
         type: boolean
         default: false
-      force_rebuild:
-        description: 'Rebuild/re-publish even when release assets and the versioned container image already exist.'
-        required: false
-        type: boolean
-        default: false
       targets:
-        description: 'Optional comma/space-separated Rust target triples to rebuild/re-publish for tag recovery. Leave empty for missing-asset detection.'
-        required: false
-        type: string
-        default: ''
-      legacy_provenance_override:
-        description: 'Audited JSON binding exact SHA-256 values for unattested archives from an older release. Empty fails closed.'
+        description: 'Comma/space-separated Rust target triples for benchmark_only.'
         required: false
         type: string
         default: ''
       benchmark_only:
-        description: 'Build only the requested targets from the dispatched ref; never sign, package, upload, finalize a release, publish a container, or save caches.'
+        description: 'Build only the requested targets from the dispatched ref; never sign, package, upload, or save caches.'
         required: false
         type: boolean
         default: false
@@ -112,23 +67,8 @@ on:
         required: false
         type: boolean
         default: false
-      candidate_only:
-        description: 'Build signed/notarized candidate archives for an exact source SHA; never mutate a GitHub release or publish a container.'
-        required: false
-        type: boolean
-        default: false
-      candidate_source_ref:
-        description: 'Immutable source ref for candidate_only (for example release-certify/<sha>).'
-        required: false
-        type: string
-        default: ''
-      candidate_source_sha:
-        description: 'Required exact 40-hex commit for candidate_only.'
-        required: false
-        type: string
-        default: ''
       runner_profile:
-        description: 'Runner override for recovery/benchmark: policy, standard, or fast. Primary releases, candidate builds, and warm builds always use policy.'
+        description: 'Runner override for benchmark: policy, standard, or fast. Candidate and warm builds always use policy.'
         required: false
         type: choice
         options:
@@ -143,16 +83,14 @@ permissions:
   packages: read
 
 concurrency:
-  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.candidate_source_sha != '' && format('candidate-{0}', inputs.candidate_source_sha)) || (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && github.ref_type == 'branch' && format('branch-{0}', github.run_id)) || inputs.tag || github.ref_name }}
-  # Tag-push runs must never be cancelled mid-build (the release waits on
-  # their artifacts), and neither should manual workflow_dispatch recovery
-  # runs. An immutable-source benchmark has a source-qualified lane so a new
-  # main push cannot cancel a queued or active release gate. Branch pushes get
-  # run-qualified workflow lanes because setup may resolve to a no-op; the build
-  # job below gives only real per-target warms a shared, preemptible lane. This
-  # preserves the latest-warm-wins optimization without letting a docs-only push
-  # destroy useful cache work. Scheduled and explicit manual full warms share
-  # `warm-main` and safely supersede an older full warm.
+  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
+  # Candidate runs are push runs, so they get a run-qualified lane and a later
+  # main push can never cancel a release candidate. An immutable-source
+  # benchmark has a source-qualified lane. Setup may resolve a push to a no-op;
+  # the build job below gives only real per-target warms a shared, preemptible
+  # lane, so a docs-only push cannot destroy useful cache work. Scheduled and
+  # explicit manual full warms share `warm-main` and safely supersede an older
+  # full warm.
   cancel-in-progress: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}
 
 env:
@@ -167,16 +105,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ref: ${{ steps.resolve.outputs.ref }}
-      is_release: ${{ steps.resolve.outputs.is_release }}
-      is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
       version: ${{ steps.resolve.outputs.version }}
-      major_minor: ${{ steps.resolve.outputs.major_minor }}
       should_build_binaries: ${{ steps.resolve.outputs.should_build_binaries }}
       should_package_archives: ${{ steps.resolve.outputs.should_package_archives }}
-      should_finalize_release: ${{ steps.resolve.outputs.should_finalize_release }}
-      should_publish_container: ${{ steps.resolve.outputs.should_publish_container }}
       candidate_source_sha: ${{ steps.resolve.outputs.candidate_source_sha }}
-      make_latest: ${{ steps.resolve.outputs.make_latest }}
       build_matrix: ${{ steps.resolve.outputs.build_matrix }}
       build_mode: ${{ steps.resolve.outputs.build_mode }}
       runner_profile: ${{ steps.resolve.outputs.runner_profile }}
@@ -186,9 +118,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Resolve policy from the workflow revision, not the source tag. This
-          # keeps current recovery logic available for old releases. Build jobs
-          # independently check out the resolved source ref.
+          # Resolve policy from the workflow revision, not a benchmark source
+          # ref. Build jobs independently check out the resolved source ref.
           ref: ${{ github.sha }}
           # Must stay 0. `ref:` above pins a detached sha, so `main` is absent
           # and the paths-filter step below fetches it itself:
@@ -235,111 +166,31 @@ jobs:
       - name: Resolve release context
         id: resolve
         env:
-          INPUT_TAG: ${{ inputs.tag }}
-          INPUT_PROMOTE_ONLY: ${{ inputs.promote_only && 'true' || 'false' }}
-          PROMOTION_RUN: ${{ inputs.candidate_archive_run_id }}
-          PROMOTION_MANIFEST_ID: ${{ inputs.candidate_manifest_artifact_id }}
-          PROMOTION_MANIFEST_DIGEST: ${{ inputs.expected_manifest_digest }}
-          PROMOTION_SOURCE: ${{ inputs.expected_source_sha }}
-          PROMOTION_ARCHIVE_POLICY: ${{ inputs.expected_archive_policy_sha }}
-          PROMOTION_POLICY: ${{ inputs.expected_policy_sha }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
-          INPUT_LEGACY_PROVENANCE_OVERRIDE: ${{ inputs.legacy_provenance_override }}
           INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
           INPUT_BENCHMARK_SOURCE_REF: ${{ inputs.benchmark_source_ref }}
           INPUT_BENCHMARK_SOURCE_SHA: ${{ inputs.benchmark_source_sha }}
           INPUT_BENCHMARK_CARGO_BLOAT: ${{ inputs.benchmark_cargo_bloat && 'true' || 'false' }}
-          INPUT_CANDIDATE_ONLY: ${{ inputs.candidate_only && 'true' || 'false' }}
-          INPUT_CANDIDATE_SOURCE_REF: ${{ inputs.candidate_source_ref }}
-          INPUT_CANDIDATE_SOURCE_SHA: ${{ inputs.candidate_source_sha }}
           INPUT_RUNNER_PROFILE: ${{ inputs.runner_profile || 'policy' }}
-          FORCE_REBUILD: ${{ inputs.force_rebuild && 'true' || 'false' }}
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           RELEASE_BUILD_INPUTS_CHANGED: ${{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}
-          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
           source scripts/lib/release_version.sh
-          REF="${INPUT_TAG:-$REF_NAME}"
-          IS_RELEASE=false
-          IS_PRERELEASE=false
+          REF="$REF_NAME"
           SHOULD_BUILD_BINARIES=false
           SHOULD_PACKAGE_ARCHIVES=false
-          SHOULD_FINALIZE_RELEASE=false
-          SHOULD_PUBLISH_CONTAINER=false
           CANDIDATE_SOURCE_SHA=""
-          MAKE_LATEST=false
           BUILD_MODE=""
           RUNNER_PROFILE="${INPUT_RUNNER_PROFILE:-policy}"
-          FULL_BUILD_MATRIX='[]'
+          BUILD_MATRIX="[]"
           CLI_AOT_PRIMARY_RUNNER="$(jq -er '.jobs.cli_aot.primary | select(type == "string" and length > 0)' .github/release-runner-policy.json)"
           CLI_AOT_STANDARD_RUNNER="$(jq -er '.jobs.cli_aot.standard | select(type == "string" and length > 0)' .github/release-runner-policy.json)"
-
-          active_tag_release_runs() {
-            local status
-            for status in queued in_progress; do
-              # A generic workflow_dispatch may be a benchmark or another
-              # warm. Treating every dispatch as a release starves the cache:
-              # a replacement warm cancels the useful old warm at concurrency
-              # admission, then observes the benchmark and skips its own
-              # matrix. Tag pushes are the authoritative shipping path and are
-              # unambiguous from run-list metadata. Manual recovery is
-              # restore-only, so overlapping its rare targeted build with a
-              # default-branch cache save is safe.
-              gh run list \
-                --repo "$GITHUB_REPOSITORY" \
-                --workflow build-release-binaries.yml \
-                --status "$status" \
-                --limit 50 \
-                --json databaseId,event,headBranch,url \
-                --jq '.[] |
-                  select((.databaseId | tostring) != env.GITHUB_RUN_ID) |
-                  select(
-                    (.event == "push" and ((.headBranch // "") | test("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$")))
-                  ) |
-                  "\(.databaseId)\t\(.event)\t\(.headBranch // "<unknown>")\t\(.url)"'
-            done
-          }
-
-          requested_targets_json() {
-            local raw="$1"
-            if [[ -z "$raw" ]]; then
-              echo '[]'
-              return 0
-            fi
-            printf '%s\n' "$raw" \
-              | tr ',[:space:]' '\n' \
-              | sed '/^$/d' \
-              | LC_ALL=C sort -u \
-              | jq -R . \
-              | jq -sc 'unique'
-          }
-
-          matrix_for_targets() {
-            local targets_json="$1"
-            jq -c --argjson targets "$targets_json" \
-              '[.[] | select(.target as $target | $targets | index($target))]' \
-              <<<"$FULL_BUILD_MATRIX"
-          }
-
-          validate_requested_targets() {
-            local targets_json="$1"
-            local known_json unknown
-            known_json="$(jq -c '[.targets[].target]' .github/release-runner-policy.json)"
-            unknown="$(jq -nr --argjson requested "$targets_json" --argjson known "$known_json" '$requested - $known | .[]')"
-            if [[ -n "$unknown" ]]; then
-              echo "::error::Unknown release target(s) in targets input:"
-              while IFS= read -r target; do
-                [[ -n "$target" ]] || continue
-                echo "::error::  $target"
-              done <<<"$unknown"
-              echo "::error::Known targets: $(jq -r '.targets[].target' .github/release-runner-policy.json | paste -sd ' ' -)"
-              exit 1
-            fi
-          }
+          VERSION="$(release_workspace_version < Cargo.toml)"
 
           resolve_runner_matrix() {
             local mode="$1"
@@ -351,137 +202,25 @@ jobs:
               --targets "$targets"
           }
 
-          release_container_tags_missing() {
-            local version="$1"
-            local make_latest="$2"
-            local anonymous_docker_config
-            anonymous_docker_config="${RUNNER_TEMP}/anonymous-docker-config"
-            rm -rf "$anonymous_docker_config"
-            mkdir -p "$anonymous_docker_config"
-            MISSING_PUBLIC_CONTAINER_TAGS=()
-            release_publication_plan "$version" "$make_latest"
-            CONTAINER_TAGS=("${RELEASE_CONTAINER_TAGS[@]}")
-            for TAG in "${CONTAINER_TAGS[@]}"; do
-              IMAGE="ghcr.io/burin-labs/harn:${TAG}"
-              if docker --config "$anonymous_docker_config" manifest inspect "$IMAGE" >/dev/null 2>&1; then
-                echo "::notice::Container image $IMAGE is already publicly pullable."
-              else
-                MISSING_PUBLIC_CONTAINER_TAGS+=("$TAG")
-              fi
-            done
-            (( ${#MISSING_PUBLIC_CONTAINER_TAGS[@]} > 0 ))
-          }
-
-          skip_warm_cache_if_tag_release_active() {
-            local active_runs
-            active_runs="$(active_tag_release_runs || true)"
-            if [[ -z "$active_runs" ]]; then
-              return 1
-            fi
-
-            echo "::notice::Skipping warm-cache binary matrix because tag-release binary run(s) are already queued/in progress."
-            {
-              echo "### Warm-cache overlap guard"
-              echo
-              echo "Skipped this warm-cache binary matrix because tag-release build-release-binaries run(s) are already active."
-              echo
-              echo "| Run | Event | Ref | URL |"
-              echo "| --- | --- | --- | --- |"
-            } >> "$GITHUB_STEP_SUMMARY"
-            while IFS=$'\t' read -r run_id event head url; do
-              [[ -n "$run_id" ]] || continue
-              echo "::notice::  active tag-release binary run $run_id ($event $head): $url"
-              echo "| $run_id | $event | $head | $url |" >> "$GITHUB_STEP_SUMMARY"
-            done <<<"$active_runs"
-            echo "::notice::A later push/scheduled warm can refresh the default-branch cache after the release lane clears."
-            return 0
-          }
-
-          BUILD_MATRIX="[]"
-          scripts/validate_release_promotion_inputs.sh
-          REQUESTED_TARGETS_JSON="$(requested_targets_json "$INPUT_TARGETS")"
-          REQUESTED_TARGET_COUNT="$(jq 'length' <<<"$REQUESTED_TARGETS_JSON")"
-          if (( REQUESTED_TARGET_COUNT > 0 )); then
-            validate_requested_targets "$REQUESTED_TARGETS_JSON"
-          fi
-          if [[ -n "$INPUT_LEGACY_PROVENANCE_OVERRIDE" ]] &&
-             [[ "$EVENT_NAME" != "workflow_dispatch" || -z "$INPUT_TAG" ||
-                "$INPUT_WARM_CACHE_ONLY" == "true" || "$INPUT_BENCHMARK_ONLY" == "true" ||
-                "$INPUT_CANDIDATE_ONLY" == "true" ]]; then
-            echo "::error::legacy_provenance_override is only valid for an explicit workflow_dispatch release-tag recovery"
-            exit 1
-          fi
           if [[ "$INPUT_BENCHMARK_CARGO_BLOAT" == "true" && "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
             echo "::error::benchmark_cargo_bloat requires benchmark_only=true"
             exit 1
           fi
-          if [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" ]] &&
+          if [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" || -n "$INPUT_TARGETS" ]] &&
              [[ "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
-            echo "::error::benchmark_source_ref and benchmark_source_sha require benchmark_only=true"
+            echo "::error::targets, benchmark_source_ref, and benchmark_source_sha require benchmark_only=true"
             exit 1
           fi
-          if [[ -n "$INPUT_CANDIDATE_SOURCE_REF" || -n "$INPUT_CANDIDATE_SOURCE_SHA" ]] &&
-             [[ "$INPUT_CANDIDATE_ONLY" != "true" ]]; then
-            echo "::error::candidate_source_ref and candidate_source_sha require candidate_only=true"
-            exit 1
-          fi
-          if [[ "$INPUT_PROMOTE_ONLY" == "true" ]]; then
-            scripts/verify_release_tag_main_ancestry.sh --tag "$REF"
-            [[ "$(git rev-parse "refs/tags/$REF^{commit}")" == "$PROMOTION_SOURCE" ]] || { echo '::error::Signed tag target differs from certified source'; exit 1; }
-            IS_RELEASE=true
-            BUILD_MODE=promote
-            VERSION="${REF#v}"
-            SHOULD_FINALIZE_RELEASE=true
-            SHOULD_PUBLISH_CONTAINER=true
-          elif [[ "$INPUT_CANDIDATE_ONLY" == "true" ]]; then
-            if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
-              echo "::error::candidate_only is only valid for workflow_dispatch"
-              exit 1
-            fi
-            if [[ "$INPUT_WARM_CACHE_ONLY" == "true" || "$INPUT_BENCHMARK_ONLY" == "true" ||
-                 -n "$INPUT_TAG" || "$FORCE_REBUILD" == "true" ]]; then
-              echo "::error::candidate_only cannot be combined with warm_cache_only, benchmark_only, tag, or force_rebuild"
-              exit 1
-            fi
-            if [[ -z "$INPUT_CANDIDATE_SOURCE_REF" || -z "$INPUT_CANDIDATE_SOURCE_SHA" ]]; then
-              echo "::error::candidate_only requires candidate_source_ref and candidate_source_sha together"
-              exit 1
-            fi
-            if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
-              echo "::error::candidate_only must be dispatched from main so current policy is authoritative (got ${REF_TYPE}/${REF_NAME})"
-              exit 1
-            fi
-            if [[ ! "$INPUT_CANDIDATE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::candidate_source_sha must be an exact lowercase 40-hex commit"
-              exit 1
-            fi
-            if (( REQUESTED_TARGET_COUNT > 0 )); then
-              echo "::error::candidate_only always builds the full five-target release matrix; leave targets empty"
-              exit 1
-            fi
-            if [[ "$RUNNER_PROFILE" != "policy" ]]; then
-              echo "::error::candidate_only always uses policy runners; runner_profile must be policy"
-              exit 1
-            fi
-            REF="$INPUT_CANDIDATE_SOURCE_REF"
-            CANDIDATE_SOURCE_SHA="$INPUT_CANDIDATE_SOURCE_SHA"
-            BUILD_MODE=candidate
-            RUNNER_PROFILE=policy
-            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-            BUILD_MATRIX="$(resolve_runner_matrix candidate "$RUNNER_PROFILE")"
-            SHOULD_BUILD_BINARIES=true
-            SHOULD_PACKAGE_ARCHIVES=true
-            echo "::notice::Candidate archive matrix for immutable source ${REF} at ${CANDIDATE_SOURCE_SHA}. Sign/notarize/package/attest and upload fail-closed run artifacts. No GitHub release mutation, finalize, container, or cache save."
-          elif [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
+          if [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::benchmark_only is only valid for workflow_dispatch"
               exit 1
             fi
-            if [[ "$INPUT_WARM_CACHE_ONLY" == "true" || -n "$INPUT_TAG" || "$FORCE_REBUILD" == "true" ]]; then
-              echo "::error::benchmark_only cannot be combined with warm_cache_only, tag, or force_rebuild"
+            if [[ "$INPUT_WARM_CACHE_ONLY" == "true" ]]; then
+              echo "::error::benchmark_only cannot be combined with warm_cache_only"
               exit 1
             fi
-            if (( REQUESTED_TARGET_COUNT == 0 )); then
+            if [[ -z "$INPUT_TARGETS" ]]; then
               echo "::error::benchmark_only requires an explicit targets subset"
               exit 1
             fi
@@ -502,21 +241,12 @@ jobs:
               echo "::notice::Current policy will benchmark immutable source ${REF} at ${INPUT_BENCHMARK_SOURCE_SHA}."
             fi
             BUILD_MODE=benchmark
-            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE" "$INPUT_TARGETS")"
             SHOULD_BUILD_BINARIES=true
-            echo "::notice::Non-publishing benchmark from $REF using runner profile $RUNNER_PROFILE. No sign/notarize/package/upload/release/container/cache save. cargo-bloat opt-in: $INPUT_BENCHMARK_CARGO_BLOAT."
+            echo "::notice::Non-publishing benchmark from $REF using runner profile $RUNNER_PROFILE. No sign/notarize/package/upload/cache save. cargo-bloat opt-in: $INPUT_BENCHMARK_CARGO_BLOAT."
           elif [[ "$INPUT_WARM_CACHE_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::warm_cache_only is only valid for workflow_dispatch"
-              exit 1
-            fi
-            if [[ -n "$INPUT_TAG" ]]; then
-              echo "::error::warm_cache_only cannot be combined with a release tag"
-              exit 1
-            fi
-            if (( REQUESTED_TARGET_COUNT > 0 )); then
-              echo "::error::targets is only valid for release tag recovery, not warm_cache_only"
               exit 1
             fi
             if [[ "$RUNNER_PROFILE" != "policy" ]]; then
@@ -524,238 +254,61 @@ jobs:
               exit 1
             fi
             if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
-              echo "::error::warm_cache_only must be dispatched on the main branch so tag releases can restore the saved default-branch cache (got ${REF_TYPE}/${REF_NAME})"
+              echo "::error::warm_cache_only must be dispatched on the main branch so candidates can restore the saved default-branch cache (got ${REF_TYPE}/${REF_NAME})"
               exit 1
             fi
             BUILD_MODE=warm
-            RUNNER_PROFILE=policy
-            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
-            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-            if skip_warm_cache_if_tag_release_active; then
-              echo "::notice::Warm-cache-only workflow_dispatch suppressed while release binaries are already building."
-            else
-              SHOULD_BUILD_BINARIES=true
-              BUILD_MATRIX="$FULL_BUILD_MATRIX"
-              echo "::notice::Warm-cache-only workflow_dispatch on main. Building release binaries to refresh default-branch Swatinem rust-cache entries. No sign/notarize/package/upload/release/container."
-            fi
-          elif [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
-            IS_RELEASE=true
-            if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-              if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
-                echo "::error::Release recovery must be dispatched from the main branch so current policy is authoritative (got ${REF_TYPE}/${REF_NAME})"
-                exit 1
-              fi
-              BUILD_MODE=recovery
-            else
-              BUILD_MODE=primary
-              RUNNER_PROFILE=policy
-            fi
-            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
-            if ! release_tag_is_canonical "$REF"; then
-              echo "::error::expected canonical release tag, got '$REF'"
-              exit 1
-            fi
-            scripts/verify_release_tag_main_ancestry.sh --tag "$REF"
-            if [[ "$EVENT_NAME" != "workflow_dispatch" ]] && (( REQUESTED_TARGET_COUNT > 0 )); then
-              echo "::error::targets is only valid on workflow_dispatch tag recovery"
-              exit 1
-            fi
-            if [[ "$FORCE_REBUILD" == "true" ]] && (( REQUESTED_TARGET_COUNT > 0 )); then
-              echo "::error::force_rebuild=true cannot be combined with targets; either rebuild every target or request an explicit target subset"
-              exit 1
-            fi
-            VERSION="${REF#v}"
-            release_publication_plan "$VERSION" false
-            IS_PRERELEASE="$RELEASE_IS_PRERELEASE"
+            BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" policy)"
+            SHOULD_BUILD_BINARIES=true
+            echo "::notice::Warm-cache-only workflow_dispatch on main. Building release binaries to refresh default-branch Swatinem rust-cache entries. No sign/notarize/package/upload."
           elif [[ "$EVENT_NAME" == "schedule" ]]; then
-            # Cron-driven warm-cache run. Normally proceed — the whole point
-            # is to refresh the cache against GitHub's 7-day eviction — but
-            # do not contend with an active release binary build.
+            # Cron-driven warm-cache run: refresh the cache against GitHub's
+            # 7-day eviction.
             BUILD_MODE=warm
             RUNNER_PROFILE=policy
-            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
-            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-            if skip_warm_cache_if_tag_release_active; then
-              echo "::notice::Warm-cache-only run (schedule) suppressed while release binaries are already building."
-            else
-              SHOULD_BUILD_BINARIES=true
-              BUILD_MATRIX="$FULL_BUILD_MATRIX"
-              echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
-            fi
+            BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" policy)"
+            SHOULD_BUILD_BINARIES=true
+            echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload."
           elif [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "main" ]]; then
-            BUILD_MODE=warm
             RUNNER_PROFILE=policy
-            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
-            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-            COMMIT_SUBJECT="$(git log -1 --pretty=%s)"
-            if [[ "$COMMIT_SUBJECT" =~ ^Release[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-              echo "::notice::Push to main is a release merge commit ('$COMMIT_SUBJECT'). The tag release builds the same source state, and an overlapping warm-cache run cannot help that active release. Skipping build matrix; the daily schedule will refresh the main cache."
-            elif skip_warm_cache_if_tag_release_active; then
-              echo "::notice::Push-to-main warm-cache run suppressed while release binaries are already building."
+            # The version commit is the release: a push whose workspace version
+            # changes to a stable X.Y.Z builds the candidate at exactly this
+            # commit. The decision reads the version, never the commit subject.
+            PREVIOUS_VERSION="$(git show HEAD^:Cargo.toml | release_workspace_version)"
+            if release_push_is_stable_version_change "$PREVIOUS_VERSION" "$VERSION"; then
+              BUILD_MODE=candidate
+              REF="$GITHUB_SHA"
+              CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
+              BUILD_MATRIX="$(resolve_runner_matrix candidate policy)"
+              SHOULD_BUILD_BINARIES=true
+              SHOULD_PACKAGE_ARCHIVES=true
+              echo "::notice::Workspace version changed from $PREVIOUS_VERSION to $VERSION. Building release candidate v$VERSION at $GITHUB_SHA: sign, notarize, package, attest, then run the release checks on those files."
             else
               # The parsed path policy owns which changes rotate a build cache
               # or alter release-build topology. For all other pushes the
               # previous warm cache still keys cleanly and a rebuild adds no
               # signal.
+              BUILD_MODE=warm
+              BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" policy)"
               if [[ "$RELEASE_BUILD_INPUTS_CHANGED" == "true" ]]; then
                 SHOULD_BUILD_BINARIES=true
-                BUILD_MATRIX="$FULL_BUILD_MATRIX"
-                echo "::notice::Warm-cache-only run (push main). A release build input changed according to .github/release-warm-cache-paths.yml."
-                echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
+                echo "::notice::Warm-cache-only run (push main). A release build input changed according to .github/release-warm-cache-paths.yml. No sign/notarize/package/upload."
               else
-                echo "::notice::Push to main did not change a release build input declared in .github/release-warm-cache-paths.yml — existing warm cache still keys cleanly. Skipping build matrix."
+                BUILD_MATRIX="[]"
+                echo "::notice::Push to main did not change a release build input declared in .github/release-warm-cache-paths.yml, and is not a stable version change. Skipping build matrix."
               fi
             fi
           elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "::error::workflow_dispatch requires tag=vX.Y.Z, candidate_only=true, warm_cache_only=true, or benchmark_only=true"
+            echo "::error::workflow_dispatch requires warm_cache_only=true or benchmark_only=true"
             exit 1
-          else
-            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-          fi
-          MAJOR_MINOR="$(echo "$VERSION" | awk -F. '{print $1"."$2}')"
-
-          if [[ "$IS_RELEASE" == "true" && "$IS_PRERELEASE" == "false" ]]; then
-            LATEST_REPO_TAG="$(
-              git ls-remote --tags origin 'refs/tags/v*' \
-                | awk '{print $2}' \
-                | sed -E 's#^refs/tags/##; s/\^\{\}$//' \
-                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-                | sort -Vu \
-                | tail -n1 || true
-            )"
-            if [[ -z "$LATEST_REPO_TAG" ]]; then
-              echo "::error::Could not resolve the repository's latest vX.Y.Z tag"
-              exit 1
-            fi
-            if [[ "$REF" == "$LATEST_REPO_TAG" ]]; then
-              MAKE_LATEST=true
-            else
-              echo "::notice::Recovering historical $REF; preserving GitHub /releases/latest and moving container tags at $LATEST_REPO_TAG."
-            fi
-          elif [[ "$IS_RELEASE" == "true" ]]; then
-            echo "::notice::Prerelease $REF publishes an exact-version container only and preserves GitHub /releases/latest plus rolling container tags."
-          fi
-          release_publication_plan "$VERSION" "$MAKE_LATEST"
-          IS_PRERELEASE="$RELEASE_IS_PRERELEASE"
-          MAKE_LATEST="$RELEASE_MAKE_LATEST"
-          if [[ "$IS_RELEASE" == "true" && "$BUILD_MODE" != "promote" ]]; then
-            EXPECTED_ARCHIVES=(
-              "harn-aarch64-apple-darwin.tar.gz"
-              "harn-aarch64-unknown-linux-gnu.tar.gz"
-              "harn-x86_64-apple-darwin.tar.gz"
-              "harn-x86_64-pc-windows-msvc.zip"
-              "harn-x86_64-unknown-linux-gnu.tar.gz"
-            )
-            EXPECTED_METADATA=(
-              "SHA256SUMS"
-              "release-assets.json"
-            )
-            EXPECTED_ASSETS=("${EXPECTED_ARCHIVES[@]}" "${EXPECTED_METADATA[@]}")
-            target_for_archive() {
-              case "$1" in
-                harn-aarch64-apple-darwin.tar.gz) echo "aarch64-apple-darwin" ;;
-                harn-aarch64-unknown-linux-gnu.tar.gz) echo "aarch64-unknown-linux-gnu" ;;
-                harn-x86_64-apple-darwin.tar.gz) echo "x86_64-apple-darwin" ;;
-                harn-x86_64-pc-windows-msvc.zip) echo "x86_64-pc-windows-msvc" ;;
-                harn-x86_64-unknown-linux-gnu.tar.gz) echo "x86_64-unknown-linux-gnu" ;;
-                *) return 1 ;;
-              esac
-            }
-
-            if (( REQUESTED_TARGET_COUNT > 0 )); then
-              SHOULD_BUILD_BINARIES=true
-              SHOULD_PACKAGE_ARCHIVES=true
-              SHOULD_FINALIZE_RELEASE=true
-              BUILD_MATRIX="$(matrix_for_targets "$REQUESTED_TARGETS_JSON")"
-              echo "::notice::Explicit release-recovery target subset requested for $REF: $(jq -r '.[]' <<<"$REQUESTED_TARGETS_JSON" | paste -sd ' ' -)"
-              echo "::notice::Selected build matrix: $BUILD_MATRIX"
-              if jq -e 'index("x86_64-unknown-linux-gnu") or index("aarch64-unknown-linux-gnu")' <<<"$REQUESTED_TARGETS_JSON" >/dev/null; then
-                if release_container_tags_missing "$VERSION" "$MAKE_LATEST"; then
-                  SHOULD_PUBLISH_CONTAINER=true
-                  echo "::notice::Linux release target is being rebuilt and container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Publishing container tags after release finalization."
-                else
-                  echo "::notice::Linux release target is being rebuilt, but all release container tags are already publicly pullable; skipping container publish."
-                fi
-              fi
-            elif [[ "$FORCE_REBUILD" == "true" ]]; then
-              SHOULD_BUILD_BINARIES=true
-              SHOULD_PACKAGE_ARCHIVES=true
-              SHOULD_FINALIZE_RELEASE=true
-              SHOULD_PUBLISH_CONTAINER=true
-              BUILD_MATRIX="$FULL_BUILD_MATRIX"
-              echo "::notice::force_rebuild=true; rebuilding release binaries and re-publishing container tags for $REF."
-            else
-              MISSING_ASSETS=()
-              MISSING_ARCHIVE_TARGETS=()
-              RELEASE_PRERELEASE=false
-              if RELEASE_INFO="$(gh release view "$REF" --json assets,isPrerelease 2>/dev/null)"; then
-                RELEASE_ASSETS="$(jq -r '.assets[].name' <<<"$RELEASE_INFO")"
-                RELEASE_PRERELEASE="$(jq -r '.isPrerelease' <<<"$RELEASE_INFO")"
-                for ASSET in "${EXPECTED_ASSETS[@]}"; do
-                  if ! grep -Fxq "$ASSET" <<<"$RELEASE_ASSETS"; then
-                    MISSING_ASSETS+=("$ASSET")
-                  fi
-                done
-                for ARCHIVE in "${EXPECTED_ARCHIVES[@]}"; do
-                  if ! grep -Fxq "$ARCHIVE" <<<"$RELEASE_ASSETS"; then
-                    MISSING_ARCHIVE_TARGETS+=("$(target_for_archive "$ARCHIVE")")
-                  fi
-                done
-              else
-                MISSING_ASSETS=("${EXPECTED_ASSETS[@]}")
-                for ARCHIVE in "${EXPECTED_ARCHIVES[@]}"; do
-                  MISSING_ARCHIVE_TARGETS+=("$(target_for_archive "$ARCHIVE")")
-                done
-                RELEASE_PRERELEASE=true
-              fi
-
-              if (( ${#MISSING_ASSETS[@]} == 0 )); then
-                echo "::notice::All expected GitHub release assets already exist for $REF; skipping binary build matrix."
-                if [[ "$RELEASE_PRERELEASE" != "$IS_PRERELEASE" ]]; then
-                  SHOULD_FINALIZE_RELEASE=true
-                  echo "::notice::Release $REF has all assets but its prerelease flag is $RELEASE_PRERELEASE (expected $IS_PRERELEASE); correcting without rebuilding."
-                fi
-                if release_container_tags_missing "$VERSION" "$MAKE_LATEST"; then
-                  SHOULD_PUBLISH_CONTAINER=true
-                  SHOULD_FINALIZE_RELEASE=true
-                  echo "::notice::Release container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Re-verifying release archives before publishing container tags."
-                else
-                  echo "::notice::All release container tags are publicly pullable; skipping container publish."
-                fi
-              elif (( ${#MISSING_ARCHIVE_TARGETS[@]} == 0 )); then
-                SHOULD_FINALIZE_RELEASE=true
-                echo "::notice::Only release metadata is missing for $REF; regenerating release metadata from existing archives without compiling."
-                if release_container_tags_missing "$VERSION" "$MAKE_LATEST"; then
-                  SHOULD_PUBLISH_CONTAINER=true
-                  echo "::notice::Release container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}."
-                fi
-              else
-                # Build publication artifacts from the immutable merged-main
-                # tag itself. Candidate archives certify the pre-merge tree but
-                # cannot substitute for the commit that actually landed.
-                missing_targets_json="$(printf '%s\n' "${MISSING_ARCHIVE_TARGETS[@]}" | jq -R . | jq -sc 'unique')"
-                SHOULD_BUILD_BINARIES=true
-                SHOULD_PACKAGE_ARCHIVES=true
-                SHOULD_FINALIZE_RELEASE=true
-                SHOULD_PUBLISH_CONTAINER=true
-                BUILD_MATRIX="$(matrix_for_targets "$missing_targets_json")"
-                echo "::notice::Building missing release archives from merged-main tag $REF: ${MISSING_ARCHIVE_TARGETS[*]}."
-              fi
-            fi
           fi
 
           {
             echo "ref=$REF"
-            echo "is_release=$IS_RELEASE"
-            echo "is_prerelease=$IS_PRERELEASE"
             echo "version=$VERSION"
-            echo "major_minor=$MAJOR_MINOR"
             echo "should_build_binaries=$SHOULD_BUILD_BINARIES"
             echo "should_package_archives=$SHOULD_PACKAGE_ARCHIVES"
-            echo "should_finalize_release=$SHOULD_FINALIZE_RELEASE"
-            echo "should_publish_container=$SHOULD_PUBLISH_CONTAINER"
             echo "candidate_source_sha=$CANDIDATE_SOURCE_SHA"
-            echo "make_latest=$MAKE_LATEST"
             echo "build_mode=$BUILD_MODE"
             echo "runner_profile=$RUNNER_PROFILE"
             echo "cli_aot_primary_runner=$CLI_AOT_PRIMARY_RUNNER"
@@ -772,67 +325,19 @@ jobs:
             echo "| Event | $EVENT_NAME |"
             echo "| Ref | $REF |"
             echo "| Version | $VERSION |"
-            echo "| Release mode | $IS_RELEASE |"
-            echo "| Prerelease | $IS_PRERELEASE |"
             echo "| Build mode | $BUILD_MODE |"
             echo "| Runner profile | $RUNNER_PROFILE |"
             echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
             echo "| Package archives | $SHOULD_PACKAGE_ARCHIVES |"
             echo "| Candidate SHA | $CANDIDATE_SOURCE_SHA |"
-            echo "| Finalize release | $SHOULD_FINALIZE_RELEASE |"
-            echo "| Publish container | $SHOULD_PUBLISH_CONTAINER |"
-            echo "| Move latest tags | $MAKE_LATEST |"
-            echo "| Requested targets | \`$REQUESTED_TARGETS_JSON\` |"
             echo "| Build matrix | \`$BUILD_MATRIX\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Create the GitHub release up front as a PRERELEASE placeholder so each
-  # build leg can upload its own tarball the moment it finishes, instead of
-  # everything waiting on the slowest leg + a final aggregate job. A
-  # prerelease is publicly downloadable by tag but is NOT returned by
-  # /releases/latest, so install.sh / `harn upgrade` consumers that resolve
-  # "latest" keep seeing the previous version until the `release` job flips
-  # this to the canonical latest release (with checksums) once all legs land.
-  # Doing this in one job (not racing N build legs) keeps release creation
-  # single-writer.
-  prepare_release:
-    name: Ensure prerelease placeholder
-    needs: setup
-    # Release build paths need a placeholder. Warm/benchmark/candidate builds
-    # still enter this job so `needs` stays aligned with `build` (candidate
-    # skips the create step because is_release is false).
-    if: needs.setup.outputs.should_build_binaries == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - name: Create prerelease if absent
-        # Only real releases author a GitHub release; warm-cache events still
-        # run this job (to keep the `if` aligned with `build`) but no-op here.
-        if: needs.setup.outputs.is_release == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REF: ${{ needs.setup.outputs.ref }}
-          VERSION: ${{ needs.setup.outputs.version }}
-        run: |
-          set -euo pipefail
-          if gh release view "$REF" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::notice::Release $REF already exists; leaving it in place for incremental uploads."
-          else
-            gh release create "$REF" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "$VERSION" \
-              --prerelease \
-              --notes "Release $VERSION is building. Per-architecture archives are attached as each build finishes; SHA256SUMS, the asset manifest, and the canonical \"latest\" flag are set once every build completes."
-            echo "::notice::Created prerelease placeholder $REF for incremental per-arch uploads."
-          fi
-
   # Generate the target-independent CLI AOT payload exactly once before the
-  # release or benchmark matrix. The generator needs the complete Rust
+  # candidate or benchmark matrix. The generator needs the complete Rust
   # workspace; each target build needs only the resulting package-local
   # manifest and bytecode. Benchmark builds must match shipped release contents
-  # so their pre-tag size proof cannot undercount the payload. Warm-cache builds
+  # so their size proof cannot undercount the payload. Warm-cache builds
   # intentionally stay source-fallback-only.
   prepare_cli_aot:
     name: Prepare CLI AOT payload
@@ -845,11 +350,11 @@ jobs:
     # has real work; warm-cache runs retain the standard public runner. The
     # repository opt-in enables paid capacity without changing release source
     # or credentials; the public repository otherwise uses free hosted capacity.
-    runs-on: ${{ vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && (needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner }}
+    runs-on: ${{ vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && (needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
+        if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
         with:
           ref: ${{ needs.setup.outputs.ref }}
 
@@ -881,14 +386,14 @@ jobs:
           fi
 
       - uses: ./.github/actions/rust-toolchain
-        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
+        if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
 
       - name: Generate and verify target-independent CLI AOT payload
-        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
+        if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
         run: make gen-cli-aot && make check-cli-aot
 
       - name: Upload CLI AOT payload for release and benchmark targets
-        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
+        if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: harn-cli-aot-payload
@@ -903,29 +408,29 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    # prepare_release is skipped on warm-cache-only events (is_release=false);
-    # `needs` on a skipped job is satisfied, so warm-cache runs still build.
-    needs: [setup, prepare_release, prepare_cli_aot]
+    # prepare_cli_aot skips its work on warm-cache-only events; `needs` on a
+    # job whose steps were skipped is satisfied, so warm-cache runs still build.
+    needs: [setup, prepare_cli_aot]
     if: needs.setup.outputs.should_build_binaries == 'true'
     # Setup-only branch pushes never instantiate this matrix and therefore
     # cannot enter or cancel these lanes. A newer real main-branch warm replaces
-    # only the same target from an older real warm. Releases, recoveries,
-    # benchmarks, schedules, and manual warms use run-qualified lanes; their
-    # workflow-level concurrency owns any allowed cancellation.
+    # only the same target from an older real warm. Candidates, benchmarks,
+    # schedules, and manual warms use run-qualified lanes; their workflow-level
+    # concurrency owns any allowed cancellation.
     concurrency:
       group: build-release-binaries-build-${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target) }}
       cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' }}
-    # contents: write so each leg can upload its own archive to the release
-    # as soon as it finishes (incremental per-arch publish).
+    # actions: write prunes superseded cache generations; attestations,
+    # artifact-metadata, and id-token sign each candidate archive's provenance.
     permissions:
       actions: write
       artifact-metadata: write
       attestations: write
-      contents: write
+      contents: read
       id-token: write
     # Runner labels are resolved from release-runner-policy.json in setup.
-    # Warm, primary, recovery, and explicit benchmark capacity are separate
-    # policy dimensions; build jobs consume the selected label directly.
+    # Warm, candidate, and explicit benchmark capacity are separate policy
+    # dimensions; build jobs consume the selected label directly.
     runs-on: ${{ matrix.runner }}
     # Avoid GitHub's multi-hour default timeout for release artifacts. Native
     # macOS is the slowest surface; if it cannot finish inside this budget,
@@ -942,20 +447,18 @@ jobs:
       # Compilation, size measurement, and cargo-bloat attribution must share
       # one build identity. Step-scoping this value made the growth signal
       # misclassify required-AOT release binaries as non-comparable.
-      HARN_REQUIRE_CLI_AOT: ${{ (needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && '1' || '0' }}
-      HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
+      HARN_REQUIRE_CLI_AOT: ${{ (needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && '1' || '0' }}
+      HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
     strategy:
-      # Release artifacts are uploaded incrementally per target. If one leg
-      # fails (for example a size-budget ratchet or platform-specific signer
-      # outage), keep the other legs running so the release is not left with
-      # avoidably missing archives.
+      # If one leg fails (for example a size-budget ratchet or a
+      # platform-specific signer outage), keep the other legs running so the
+      # failure report names every broken target at once.
       fail-fast: false
       matrix:
         # release_codegen_units is target policy. Keep 16 where parallel
         # codegen and lower peak linker memory prevent aarch64 OOMs; x86_64
         # Linux uses 8 to recover binary-size headroom without serializing the
-        # link at cgu=1. Release-recovery dispatches a subset of this matrix
-        # when only one target archive is missing.
+        # link at cgu=1. A benchmark dispatch builds a subset of this matrix.
         include: ${{ fromJSON(needs.setup.outputs.build_matrix) }}
 
     steps:
@@ -995,7 +498,7 @@ jobs:
           fi
 
       - name: Restore target-independent CLI AOT payload
-        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
+        if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
         uses: ./.github/actions/download-artifact-with-retry
         with:
           name: harn-cli-aot-payload
@@ -1050,9 +553,9 @@ jobs:
             echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
           fi
 
-      # See the cache architecture note at the top of this workflow. Tag-push
-      # runs cannot restore another tag's cache, so they stay restore-only.
-      # Main warm runs and exact candidate builds can feed the next candidate.
+      # See the cache architecture note at the top of this workflow. Main warm
+      # runs and candidate builds can feed the next candidate; benchmarks
+      # restore only.
       - uses: ./.github/actions/rust-cache
         id: rust-cache
         # Cache restore/save is a release latency optimization, not a release
@@ -1156,7 +659,6 @@ jobs:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
           HARN_RELEASE_REF: ${{ needs.setup.outputs.ref }}
           HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
-          HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
         run: |
@@ -1182,7 +684,6 @@ jobs:
             echo "| Runner label | $HARN_RELEASE_RUNNER_LABEL |"
             echo "| Ref | $HARN_RELEASE_REF |"
             echo "| Version | $HARN_RELEASE_VERSION |"
-            echo "| Release mode | $HARN_RELEASE_IS_RELEASE |"
             echo "| Duration | ${duration}s |"
             echo "| Rust wrapper | ${RUSTC_WRAPPER:-<none>} |"
             echo "| Swatinem cache hit | $HARN_RELEASE_RUST_CACHE_HIT |"
@@ -1209,7 +710,6 @@ jobs:
         env:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
           HARN_RELEASE_SCCACHE_BACKEND: ${{ matrix.sccache_backend }}
-          HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
         run: |
           set -euo pipefail
           sccache_bin="${SCCACHE_PATH:-sccache}"
@@ -1573,11 +1073,11 @@ jobs:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          # Recovery of an existing tag splits the two refs on purpose: the
-          # policy comes from the dispatch ref via setup, the source from the
-          # tag. The fuse above honors that split because setup hands it the
+          # A benchmark of an older immutable source splits the two refs on
+          # purpose: the policy comes from the dispatch ref via setup, the
+          # source from the benchmark ref. The fuse above honors that split because setup hands it the
           # bytes. This step cannot: it runs the *source* checkout's
-          # check_binary_size.harn, so recovering a tag cut before the policy
+          # check_binary_size.harn, so measuring a source cut before the policy
           # contract existed runs a script that never heard of
           # BINARY_SIZE_FUSE_BYTES and falls back to its own hardcoded default
           # (#6257). v0.10.51's script would fail on 218.00 MiB while the fuse
@@ -1588,7 +1088,7 @@ jobs:
           # contract did not exist, so skip it and say so. Deliberately not a
           # legacy BINARY_SIZE_BUDGET_MB alias: that is a shim with no
           # retirement condition, while this guard can never fire once every
-          # recoverable tag postdates the contract. The fuse already ran from
+          # measured source postdates the contract. The fuse already ran from
           # the dispatch ref and stays authoritative either way.
           if [[ ! -f .github/release-binary-size-policy.json ]]; then
             echo "::notice::binary-size growth signal not evaluated: the checked-out source ($BINARY_SIZE_SOURCE_REF) predates .github/release-binary-size-policy.json; the distribution fuse from the dispatch ref still applied"
@@ -1689,7 +1189,7 @@ jobs:
           # measured?". harn-bump-fleet's pre-tag gate asks exactly that before
           # spending ~40 minutes re-measuring a commit a previous release
           # attempt already built, and its answer is the existence of this
-          # artifact. Same idiom as candidate-archive-manifest-<sha>.
+          # artifact. Same idiom as candidate-manifest-<sha>.
           name: harn-binary-size-${{ matrix.target }}-${{ env.HARN_BUILD_REVISION }}
           path: dist/binary-size-${{ matrix.target }}
           if-no-files-found: ignore
@@ -1705,7 +1205,7 @@ jobs:
         env:
           BUILD_POLICY_REF: ${{ github.workflow_ref }}
           BUILD_POLICY_REVISION: ${{ github.workflow_sha }}
-          RELEASE_REF: ${{ needs.setup.outputs.ref }}
+          CANDIDATE_SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
           RELEASE_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
@@ -1723,21 +1223,13 @@ jobs:
             echo "::error::Checked-out source moved from $HARN_BUILD_REVISION to $source_commit before attestation."
             exit 1
           fi
-          phase="release"
-          tag_value="$RELEASE_REF"
-          if [[ "${{ needs.setup.outputs.build_mode }}" == "candidate" ]]; then
-            phase="candidate"
-            tag_value=""
-            if [[ "$source_commit" != "${{ needs.setup.outputs.candidate_source_sha }}" ]]; then
-              echo "::error::Candidate source $source_commit != ${{ needs.setup.outputs.candidate_source_sha }}"
-              exit 1
-            fi
+          if [[ "$source_commit" != "$CANDIDATE_SOURCE_SHA" ]]; then
+            echo "::error::Candidate source $source_commit != $CANDIDATE_SOURCE_SHA"
+            exit 1
           fi
           jq -n \
             --arg schema "harn.release_archive_provenance.v1" \
             --arg repository "$GITHUB_REPOSITORY" \
-            --arg phase "$phase" \
-            --arg tag "$tag_value" \
             --arg sourceCommit "$source_commit" \
             --arg target "$RELEASE_TARGET" \
             --arg archive "$archive_name" \
@@ -1751,9 +1243,8 @@ jobs:
             --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             '{
               schemaVersion: $schema,
-              phase: $phase,
+              phase: "candidate",
               repository: $repository,
-              tag: $tag,
               sourceCommit: $sourceCommit,
               target: $target,
               archive: $archive,
@@ -1775,11 +1266,10 @@ jobs:
             echo "predicate=$RUNNER_TEMP/release-archive-provenance.json"
           } >> "$GITHUB_OUTPUT"
 
+      # Promotion verifies this attestation (predicate type, signer repository,
+      # and source digest) for every file before it publishes anything.
       - name: Attest release archive provenance
         if: needs.setup.outputs.should_package_archives == 'true'
-        # Recovery runs load current policy from main but build an older tag.
-        # A custom predicate records that checked-out source; the verifier also
-        # pins the signer workflow and certificate-backed policy revision.
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ steps.release-provenance.outputs.archive }}
@@ -1814,8 +1304,22 @@ jobs:
               ;;
           esac
           mkdir -p dist/candidate-receipts
-          scripts/write_candidate_archive_receipt.sh             --output "dist/candidate-receipts/${RELEASE_TARGET}.json"             --source-commit "$SOURCE_COMMIT"             --target "$RELEASE_TARGET"             --archive "$archive_name"             --sha256 "$archive_sha256"             --policy-revision "$POLICY_REVISION"             --signing-status "$signing_status"             --notarization-status "$notarization_status"             --attestation-identity "https://harnlang.com/attestations/release-archive/v1"             --run-id "$GITHUB_RUN_ID"             --run-attempt "$GITHUB_RUN_ATTEMPT"             --workflow-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          scripts/write_candidate_archive_receipt.sh \
+            --output "dist/candidate-receipts/${RELEASE_TARGET}.json" \
+            --source-commit "$SOURCE_COMMIT" \
+            --target "$RELEASE_TARGET" \
+            --archive "$archive_name" \
+            --sha256 "$archive_sha256" \
+            --policy-revision "$POLICY_REVISION" \
+            --signing-status "$signing_status" \
+            --notarization-status "$notarization_status" \
+            --attestation-identity "https://harnlang.com/attestations/release-archive/v1" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --workflow-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
+      # The archive sits at the artifact root, which is where promotion looks
+      # for the manifest's `file`; the receipt rides beside it.
       - name: Upload candidate archive (unix)
         if: needs.setup.outputs.build_mode == 'candidate' && runner.os != 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1826,8 +1330,8 @@ jobs:
             dist/candidate-receipts/${{ matrix.target }}.json
           if-no-files-found: error
           compression-level: 0
-          # Retain pre-merge certification evidence through the release attempt.
-          retention-days: 7
+          # Promotion reads these after the run concludes.
+          retention-days: 30
 
       - name: Upload candidate archive (windows)
         if: needs.setup.outputs.build_mode == 'candidate' && runner.os == 'Windows'
@@ -1839,74 +1343,170 @@ jobs:
             dist/candidate-receipts/${{ matrix.target }}.json
           if-no-files-found: error
           compression-level: 0
-          retention-days: 7
+          retention-days: 30
 
-      - name: Upload artifact (unix)
-        if: needs.setup.outputs.is_release == 'true' && runner.os != 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        # The GitHub Release upload below is the authoritative shipping path for
-        # force_rebuild recovery. Keep this secondary run artifact best-effort.
-        continue-on-error: true
-        with:
-          name: harn-${{ matrix.target }}
-          path: dist/harn-${{ matrix.target }}.tar.gz
-          compression-level: 0
-          retention-days: 1
-
-      - name: Upload artifact (windows)
-        if: needs.setup.outputs.is_release == 'true' && runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        continue-on-error: true
-        with:
-          name: harn-${{ matrix.target }}
-          path: dist/harn-${{ matrix.target }}.zip
-          compression-level: 0
-          retention-days: 1
-
-      # Publish THIS target's archive to the prerelease the moment it is built,
-      # so consumers that only need one architecture can fetch it without
-      # waiting for the slowest leg or the final aggregate job. --clobber makes
-      # it idempotent across release-recovery re-runs. SHA256SUMS / the asset
-      # manifest / the canonical "latest" flag are still added by the `release`
-      # job once every leg has landed.
-      - name: Publish archive to release (incremental)
-        if: needs.setup.outputs.is_release == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REF: ${{ needs.setup.outputs.ref }}
-        run: |
-          set -euo pipefail
-          start=$SECONDS
-          shopt -s nullglob
-          archives=(dist/harn-*.tar.gz dist/harn-*.zip)
-          if [ ${#archives[@]} -eq 0 ]; then
-            echo "::error::No archive found in dist/ to upload for ${{ matrix.target }}."
-            exit 1
-          fi
-          archive="${archives[0]}"
-          echo "Uploading $archive to release $REF"
-          gh release upload "$REF" "$archive" --repo "$GITHUB_REPOSITORY" --clobber
-          archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
-          duration=$((SECONDS - start))
-          {
-            echo "### Release archive upload"
-            echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Target | ${{ matrix.target }} |"
-            echo "| Archive | $archive |"
-            echo "| Archive bytes | $archive_bytes |"
-            echo "| Duration | ${duration}s |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-
+  # Assemble the release from the candidate archives: SHA256SUMS,
+  # release-assets.json, and the release notes, built here from the same bytes
+  # rather than at publication time, then the candidate manifest that records
+  # every file's digest. Promotion publishes exactly the files this job lists.
   collect_candidate_manifest:
-    name: Assemble candidate archive manifest
+    name: Assemble candidate manifest
     needs: [setup, build]
     if: needs.setup.outputs.build_mode == 'candidate' && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download candidate archives
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          # Also matches other harn-* run artifacts; the step below takes the
+          # five target archives by name.
+          pattern: harn-*
+          path: ${{ runner.temp }}/candidate-artifacts
+          merge-multiple: false
+
+      - name: Build release files and the candidate manifest
+        id: manifest
+        env:
+          SOURCE_COMMIT: ${{ needs.setup.outputs.candidate_source_sha }}
+          POLICY_REVISION: ${{ github.workflow_sha }}
+          VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          set -euo pipefail
+          downloads="$RUNNER_TEMP/candidate-artifacts"
+          receipts="$RUNNER_TEMP/candidate-receipts"
+          tools="$RUNNER_TEMP/candidate-harn"
+          # Inside the workspace: the Harn scripts below read the archives and
+          # write their outputs under the project root.
+          archives="$GITHUB_WORKSPACE/candidate-release/archives"
+          release_files="$GITHUB_WORKSPACE/candidate-release/files"
+          manifest_dir="$GITHUB_WORKSPACE/candidate-release/manifest"
+          mkdir -p "$receipts" "$archives" "$release_files" "$manifest_dir" "$tools"
+          for target in aarch64-apple-darwin aarch64-unknown-linux-gnu x86_64-apple-darwin x86_64-pc-windows-msvc x86_64-unknown-linux-gnu; do
+            receipt="$downloads/harn-${target}/candidate-receipts/${target}.json"
+            if [[ ! -f "$receipt" ]]; then
+              echo "::error::missing candidate receipt for $target"
+              find "$downloads" -type f | sort
+              exit 1
+            fi
+            cp "$receipt" "$receipts/${target}.json"
+            archive="$(jq -er '.archive' "$receipt")"
+            cp "$downloads/harn-${target}/${archive}" "$archives/${archive}"
+          done
+
+          # install.sh and `harn upgrade` verify downloads against this file:
+          # coreutils `<sha256>  <filename>`, one line per archive, by name.
+          (cd "$archives" && sha256sum harn-* | LC_ALL=C sort -k 2) > "$release_files/SHA256SUMS"
+          cat "$release_files/SHA256SUMS"
+
+          # The candidate's own Linux CLI renders the target-independent files.
+          tar -xzf "$archives/harn-x86_64-unknown-linux-gnu.tar.gz" -C "$tools" harn
+          "$tools/harn" run scripts/build_release_assets_manifest.harn -- \
+            --artifacts-dir "$archives" \
+            --tag "v$VERSION" \
+            --output "$release_files/release-assets.json"
+          "$tools/harn" run scripts/render_release_notes.harn -- \
+            --version "$VERSION" \
+            --output "$release_files/release-notes.md"
+
+          scripts/assemble_candidate_manifest.sh \
+            --output "$manifest_dir/candidate-manifest.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "$SOURCE_COMMIT" \
+            --policy-revision "$POLICY_REVISION" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --receipts-dir "$receipts" \
+            --archives-dir "$archives" \
+            --release-files-dir "$release_files"
+          cat "$manifest_dir/candidate-manifest.json"
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sourceCommit "$SOURCE_COMMIT" \
+            --arg version "$VERSION" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            '{
+              schemaVersion: "harn.release_files_provenance.v1",
+              phase: "candidate",
+              repository: $repository,
+              sourceCommit: $sourceCommit,
+              version: $version,
+              workflow: {runId: $runId, runAttempt: $runAttempt}
+            }' > "$RUNNER_TEMP/release-files-provenance.json"
+          {
+            echo "release_files=$release_files"
+            echo "manifest=$manifest_dir/candidate-manifest.json"
+            echo "predicate=$RUNNER_TEMP/release-files-provenance.json"
+          } >> "$GITHUB_OUTPUT"
+
+      # Promotion verifies an attestation for every file the manifest lists,
+      # including the ones built here.
+      - name: Attest release files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ steps.manifest.outputs.release_files }}/SHA256SUMS
+            ${{ steps.manifest.outputs.release_files }}/release-assets.json
+            ${{ steps.manifest.outputs.release_files }}/release-notes.md
+          predicate-type: https://harnlang.com/attestations/release-archive/v1
+          predicate-path: ${{ steps.manifest.outputs.predicate }}
+
+      # The schema's owner validates the manifest here, so a bad manifest fails
+      # the run that wrote it rather than the promotion that reads it.
+      # TODO(release-promotion): pin the commit on burin-labs/.github main that
+      # adds validate-candidate-manifest; it is not merged yet.
+      - name: Validate the candidate manifest
+        uses: burin-labs/.github/.github/actions/validate-candidate-manifest@c030a79edf7176678504112480f54a559d4302d2 # TODO: pin once the action lands on main
+        with:
+          manifest: ${{ steps.manifest.outputs.manifest }}
+          repository: ${{ github.repository }}
+          source-commit: ${{ needs.setup.outputs.candidate_source_sha }}
+          run-id: ${{ github.run_id }}
+          harn-version-file: .harn-bootstrap-version
+
+      - name: Upload release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-release-files
+          path: |
+            ${{ steps.manifest.outputs.release_files }}/SHA256SUMS
+            ${{ steps.manifest.outputs.release_files }}/release-assets.json
+            ${{ steps.manifest.outputs.release_files }}/release-notes.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload candidate manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-manifest-${{ needs.setup.outputs.candidate_source_sha }}
+          path: ${{ steps.manifest.outputs.manifest }}
+          if-no-files-found: error
+          retention-days: 30
+
+  # The residual release audit lanes (generated files, docs, grammar, security,
+  # smoke; owned by scripts/release_audit_contract.json) on the candidate's own
+  # shipped Linux CLI. restore-candidate proves the executable came from the
+  # archive the manifest records at this commit, and exports the identity the
+  # source gate requires, so the lanes audit the binary a release publishes.
+  release-residual-audit:
+    name: Release residual audit
+    needs: [setup, prepare_cli_aot, collect_candidate_manifest]
+    if: needs.setup.outputs.build_mode == 'candidate' && needs.collect_candidate_manifest.result == 'success'
+    runs-on: ubuntu-latest
+    # Hang backstop, not a performance budget.
+    timeout-minutes: 45
     permissions:
       actions: read
       contents: read
@@ -1914,48 +1514,57 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-
-      - name: Download candidate target artifacts
+          persist-credentials: false
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: tree-sitter-harn/package-lock.json
+      - name: Install ripgrep
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: ripgrep
+          check-command: rg
+      - uses: ./.github/actions/rust-toolchain
+      # The generated-files lane checks the payload the archives embed.
+      - name: Restore the candidate's CLI AOT payload
         uses: ./.github/actions/download-artifact-with-retry
         with:
-          pattern: harn-*
-          path: candidate-artifacts
-          merge-multiple: false
-
-      - name: Assemble and upload candidate-archive-manifest
-        env:
-          SOURCE_COMMIT: ${{ needs.setup.outputs.candidate_source_sha }}
-          POLICY_REVISION: ${{ github.workflow_sha }}
-        run: |
-          set -euo pipefail
-          mkdir -p receipts
-          for target in aarch64-apple-darwin aarch64-unknown-linux-gnu x86_64-apple-darwin x86_64-pc-windows-msvc x86_64-unknown-linux-gnu; do
-            receipt="$(find candidate-artifacts -type f \( -path "*/candidate-receipts/${target}.json" -o -name "${target}.json" \) | head -n1 || true)"
-            if [[ -z "$receipt" ]]; then
-              echo "::error::missing candidate receipt for $target"
-              find candidate-artifacts -type f | sort
-              exit 1
-            fi
-            cp "$receipt" "receipts/${target}.json"
-          done
-          scripts/assemble_candidate_archive_manifest.sh \
-            --output "candidate-archive-manifest-${SOURCE_COMMIT}.json" \
-            --source-commit "$SOURCE_COMMIT" \
-            --policy-revision "$POLICY_REVISION" \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --receipts-dir receipts \
-            --workflow-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          cat "candidate-archive-manifest-${SOURCE_COMMIT}.json"
-
-      - name: Upload candidate-archive-manifest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          name: harn-cli-aot-payload
+          path: crates/harn-cli/generated
+      - name: Download the candidate Linux archive
+        uses: ./.github/actions/download-artifact-with-retry
         with:
-          name: candidate-archive-manifest-${{ needs.setup.outputs.candidate_source_sha }}
-          path: candidate-archive-manifest-${{ needs.setup.outputs.candidate_source_sha }}.json
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
+          name: harn-x86_64-unknown-linux-gnu
+          path: ${{ runner.temp }}/candidate-archive
+      - name: Download the candidate manifest
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: candidate-manifest-${{ needs.setup.outputs.candidate_source_sha }}
+          path: ${{ runner.temp }}/candidate-manifest
+      - name: Verify the candidate Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-candidate
+          "$RUNNER_TEMP/candidate-archive/harn-x86_64-unknown-linux-gnu.tar.gz"
+          "$RUNNER_TEMP/candidate-manifest/candidate-manifest.json"
+          x86_64-unknown-linux-gnu
+          "$RUNNER_TEMP/candidate-harn"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - name: Run the release residual audit
+        run: ./scripts/release_gate.sh audit --residual-only
+
+  # Release smoke on the candidate archives, verified against the manifest.
+  release-smoke:
+    name: Release smoke
+    needs: [setup, collect_candidate_manifest]
+    if: needs.setup.outputs.build_mode == 'candidate' && needs.collect_candidate_manifest.result == 'success'
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/release-smoke.yml
+    with:
+      candidate-commit: ${{ needs.setup.outputs.candidate_source_sha }}
 
   cache_budget:
     name: Report cache budget
@@ -1978,459 +1587,3 @@ jobs:
           HARN_PRUNE_SUPERSEDED_RELEASE_CACHES: "1"
           HARN_ENFORCE_CACHE_BUDGET: "1"
         run: ./scripts/report_ci_cache_budget.sh
-
-  container:
-    name: Publish container
-    needs: [setup, release]
-    if: >-
-      always() &&
-      needs.setup.outputs.should_publish_container == 'true' &&
-      (needs.release.result == 'success' ||
-        (needs.release.result == 'skipped' && needs.setup.outputs.should_build_binaries == 'false'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.setup.outputs.ref }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-
-      - name: Download Linux release archives
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REF: ${{ needs.setup.outputs.ref }}
-        run: |
-          set -euo pipefail
-
-          assets_dir="${RUNNER_TEMP}/harn-release-assets"
-          rm -rf "$assets_dir" release-container
-          mkdir -p "$assets_dir" release-container/amd64 release-container/arm64
-
-          gh release download "$REF" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern harn-x86_64-unknown-linux-gnu.tar.gz \
-            --pattern harn-aarch64-unknown-linux-gnu.tar.gz \
-            --dir "$assets_dir"
-
-          cp "$assets_dir/harn-x86_64-unknown-linux-gnu.tar.gz" release-container/amd64/harn.tar.gz
-          cp "$assets_dir/harn-aarch64-unknown-linux-gnu.tar.gz" release-container/arm64/harn.tar.gz
-
-          for arch in amd64 arm64; do
-            archive="release-container/${arch}/harn.tar.gz"
-            archive_list="${assets_dir}/${arch}.lst"
-            tar tzf "$archive" > "$archive_list"
-            for binary in harn harn-container-probe; do
-              if ! grep -Fxq "$binary" "$archive_list"; then
-                echo "::error::${archive} is missing ${binary}; container image must be assembled from release artifacts, not a Docker source rebuild."
-                exit 1
-              fi
-            done
-          done
-
-      - name: Log in to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Compute image metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ghcr.io/burin-labs/harn
-          # Use raw tags computed from the resolved version so the
-          # workflow can publish for an explicit input.tag (recovery
-          # path) just as well as for an auto-fired tag push. The
-          # semver type=match,pattern=... approach only works when the
-          # workflow itself was triggered by a tag push, which the
-          # recovery / re-release path isn't.
-          tags: |
-            type=raw,value=${{ needs.setup.outputs.version }}
-            type=raw,value=${{ needs.setup.outputs.major_minor }},enable=${{ needs.setup.outputs.make_latest == 'true' }}
-            type=raw,value=latest,enable=${{ needs.setup.outputs.make_latest == 'true' }}
-
-      - name: Build and push container image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: ./Dockerfile.release
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
-
-      - name: Verify public container tags
-        env:
-          MAKE_LATEST: ${{ needs.setup.outputs.make_latest }}
-          VERSION: ${{ needs.setup.outputs.version }}
-          MAJOR_MINOR: ${{ needs.setup.outputs.major_minor }}
-        run: |
-          set -euo pipefail
-
-          anonymous_config="${RUNNER_TEMP}/anonymous-docker-config"
-          rm -rf "$anonymous_config"
-          mkdir -p "$anonymous_config"
-
-          tags=("$VERSION")
-          if [[ "$MAKE_LATEST" == "true" ]]; then
-            tags+=("$MAJOR_MINOR" latest)
-          fi
-          for tag in "${tags[@]}"; do
-            image="ghcr.io/burin-labs/harn:${tag}"
-            if ! docker --config "$anonymous_config" manifest inspect "$image" >/dev/null; then
-              {
-                printf '::error title=Container image is not publicly pullable::'
-                printf 'Anonymous manifest lookup failed for %s. ' "$image"
-                printf 'GHCR packages default to private on first publish; '
-                printf 'set the burin-labs/harn package visibility to public, '
-                printf 'then rerun this workflow.\n'
-              }
-              exit 1
-            fi
-            echo "Verified anonymous pull metadata for ${image}"
-          done
-
-  release:
-    name: Create GitHub release
-    needs: [setup, prepare_release, prepare_cli_aot, build]
-    # is_release gates out warm-cache-only events (push to main, schedule):
-    # they run the build matrix to populate the cache but must not author a
-    # GitHub release. should_finalize_release lets metadata-only recovery
-    # regenerate checksums/manifests from existing release archives without
-    # paying for a no-op binary matrix. Every missing archive is built from the
-    # tag-derived merged-main source before this job finalizes.
-    if: >-
-      always() &&
-      needs.setup.outputs.is_release == 'true' &&
-      needs.setup.outputs.should_finalize_release == 'true' &&
-      (needs.prepare_release.result == 'success' || needs.prepare_release.result == 'skipped') &&
-      (needs.prepare_cli_aot.result == 'success' || needs.prepare_cli_aot.result == 'skipped') &&
-      (needs.build.result == 'success' || needs.build.result == 'skipped')
-    runs-on: ubuntu-latest
-    permissions:
-      attestations: read
-      actions: read
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-
-      - name: Preserve current release provenance policy
-        id: stage-release-tools
-        run: scripts/stage_release_tools.sh "$RUNNER_TEMP/release-provenance-policy"
-
-      - name: Preserve release signer policy
-        run: |
-          set -euo pipefail
-          policy_dir="$RUNNER_TEMP/release-provenance-policy"
-          cp .github/release-bot-allowed-signers "$policy_dir/release-bot-allowed-signers"
-
-      - name: Download and verify certified candidate archive bytes
-        if: needs.setup.outputs.build_mode == 'promote'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARCHIVE_RUN: ${{ inputs.candidate_archive_run_id }}
-          MANIFEST_ID: ${{ inputs.candidate_manifest_artifact_id }}
-          MANIFEST_DIGEST: ${{ inputs.expected_manifest_digest }}
-          SOURCE_SHA: ${{ inputs.expected_source_sha }}
-          ARCHIVE_POLICY: ${{ inputs.expected_archive_policy_sha }}
-          TRUST_POLICY: ${{ inputs.expected_policy_sha }}
-          REF: ${{ needs.setup.outputs.ref }}
-        run: |
-          "$RUNNER_TEMP/release-provenance-policy/verify_candidate_archive_certification.sh" "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$ARCHIVE_RUN" "$ARCHIVE_POLICY" "$TRUST_POLICY" "$GITHUB_WORKSPACE"
-          scripts/download_candidate_archive_promotion.sh "$GITHUB_REPOSITORY" "$ARCHIVE_RUN" "$MANIFEST_ID" "$MANIFEST_DIGEST" "$SOURCE_SHA" "$ARCHIVE_POLICY" "$RUNNER_TEMP/certified-archives"
-          scripts/verify_candidate_archive_promotion.sh --manifest "$RUNNER_TEMP/certified-archives/candidate-archive-manifest.json" --tag "$REF" --repo "$GITHUB_REPOSITORY" --artifacts-dir "$RUNNER_TEMP/certified-archives" --expected-source-commit "$SOURCE_SHA" --expected-policy-revision "$ARCHIVE_POLICY" --expected-run-id "$ARCHIVE_RUN"
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.setup.outputs.ref }}
-
-      - name: Download release archives
-        if: needs.setup.outputs.build_mode != 'promote'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REF: ${{ needs.setup.outputs.ref }}
-        run: |
-          set -euo pipefail
-          start=$SECONDS
-          expected=(
-            harn-aarch64-apple-darwin.tar.gz
-            harn-aarch64-unknown-linux-gnu.tar.gz
-            harn-x86_64-apple-darwin.tar.gz
-            harn-x86_64-pc-windows-msvc.zip
-            harn-x86_64-unknown-linux-gnu.tar.gz
-          )
-          mkdir -p artifacts
-          for attempt in $(seq 1 12); do
-            rm -f artifacts/*
-            gh release download "$REF" \
-              --repo "$GITHUB_REPOSITORY" \
-              --pattern 'harn-*.tar.gz' \
-              --pattern 'harn-*.zip' \
-              --dir artifacts || true
-            missing=()
-            for file in "${expected[@]}"; do
-              if [ ! -f "artifacts/$file" ]; then
-                missing+=("$file")
-              fi
-            done
-            if (( ${#missing[@]} == 0 )); then
-              break
-            fi
-            if (( attempt == 12 )); then
-              printf '::error::Missing release archives after %s attempts: %s\n' "$attempt" "${missing[*]}"
-              find artifacts -maxdepth 1 -type f -print | sort
-              exit 1
-            fi
-            printf '::notice::Release archive(s) not visible yet for %s: %s; retrying download (%s/12).\n' "$REF" "${missing[*]}" "$attempt"
-            sleep 10
-          done
-          duration=$((SECONDS - start))
-          {
-            echo "### Release archive download"
-            echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Ref | $REF |"
-            echo "| Archive count | ${#expected[@]} |"
-            echo "| Duration | ${duration}s |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Verify release archive provenance
-        env:
-          GH_TOKEN: ${{ github.token }}
-          LEGACY_PROVENANCE_OVERRIDE: ${{ inputs.legacy_provenance_override }}
-          REF: ${{ needs.setup.outputs.ref }}
-          BUILD_MODE: ${{ needs.setup.outputs.build_mode }}
-        run: |
-          set -euo pipefail
-          args=(
-            --artifacts-dir artifacts
-            --tag "$REF"
-            --repo "$GITHUB_REPOSITORY"
-            --allowed-signers "$RUNNER_TEMP/release-provenance-policy/release-bot-allowed-signers"
-          )
-          if [[ "$BUILD_MODE" == "promote" ]]; then
-            mkdir -p artifacts
-            cp "$RUNNER_TEMP/certified-archives"/harn-* artifacts/
-            args+=(--candidate-manifest "$RUNNER_TEMP/certified-archives/candidate-archive-manifest.json")
-          fi
-          if [[ -n "$LEGACY_PROVENANCE_OVERRIDE" ]]; then
-            args+=(--legacy-override "$LEGACY_PROVENANCE_OVERRIDE")
-          fi
-          bash "$RUNNER_TEMP/release-provenance-policy/verify_release_archive_provenance.sh" "${args[@]}"
-
-      - name: Render release notes from changelog
-        # This job has no Rust toolchain (it only assembles artifacts), so
-        # run the Harn renderer with the just-built linux-x64 release binary
-        # rather than compiling from source. The tarball packs `harn` at its
-        # root; ubuntu-latest is x86_64.
-        run: |
-          set -euo pipefail
-          start=$SECONDS
-          tar xzf artifacts/harn-x86_64-unknown-linux-gnu.tar.gz harn
-          ./harn run scripts/render_release_notes.harn -- \
-            --version "${{ needs.setup.outputs.version }}" \
-            --output release-notes.md
-          rm -f harn
-          duration=$((SECONDS - start))
-          {
-            echo "### Release notes render"
-            echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Version | ${{ needs.setup.outputs.version }} |"
-            echo "| Duration | ${duration}s |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Generate SHA256SUMS
-        # install.sh and `harn upgrade` fetch this manifest to verify the
-        # tarball/zip before extracting. The body is the standard
-        # coreutils format (`<sha256>  <filename>`), one entry per
-        # release asset.
-        working-directory: artifacts
-        run: |
-          set -euo pipefail
-          start=$SECONDS
-          expected=(
-            harn-aarch64-apple-darwin.tar.gz
-            harn-aarch64-unknown-linux-gnu.tar.gz
-            harn-x86_64-apple-darwin.tar.gz
-            harn-x86_64-pc-windows-msvc.zip
-            harn-x86_64-unknown-linux-gnu.tar.gz
-          )
-          missing=()
-          for file in "${expected[@]}"; do
-            if [ ! -f "$file" ]; then
-              missing+=("$file")
-            fi
-          done
-          if (( ${#missing[@]} > 0 )); then
-            printf '::error::Missing release artifacts: %s\n' "${missing[*]}"
-            find . -maxdepth 1 -type f -print | sort
-            exit 1
-          fi
-          files=("${expected[@]}")
-          sha256sum "${files[@]}" | LC_ALL=C sort -k 2 > SHA256SUMS
-          cat SHA256SUMS
-          duration=$((SECONDS - start))
-          {
-            echo "### Release checksum generation"
-            echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Archive count | ${#files[@]} |"
-            echo "| Duration | ${duration}s |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Generate release-assets.json
-        # Per-target download manifest consumed by downstream packagers
-        # (host fetch scripts, the CLI npm postinstall, Scoop). See
-        # docs/src/dev/release-assets-manifest.md for the schema and
-        # consumer contract.
-        run: |
-          set -euo pipefail
-          start=$SECONDS
-          tar xzf artifacts/harn-x86_64-unknown-linux-gnu.tar.gz harn
-          ./harn run scripts/build_release_assets_manifest.harn -- \
-            --artifacts-dir artifacts \
-            --tag "${{ needs.setup.outputs.ref }}" \
-            --output artifacts/release-assets.json
-          rm -f harn
-          cat artifacts/release-assets.json
-          duration=$((SECONDS - start))
-          {
-            echo "### Release asset manifest"
-            echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Ref | ${{ needs.setup.outputs.ref }} |"
-            echo "| Duration | ${duration}s |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Finalize GitHub release
-        if: needs.setup.outputs.build_mode != 'promote'
-        # Every leg has landed. Attach SHA256SUMS + the asset manifest, write
-        # the real notes, and set the intentional channel selected by the tag.
-        # Stable builds clear the temporary placeholder; prerelease builds keep
-        # the release marked prerelease. Only the highest stable tag may move
-        # /releases/latest (and thus install.sh / `harn upgrade`); historical
-        # recovery preserves that pointer. The per-arch archives were already
-        # uploaded incrementally by each build leg; re-listing them here is a
-        # harmless idempotent overwrite that also covers any retried upload.
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          tag_name: ${{ needs.setup.outputs.ref }}
-          body_path: release-notes.md
-          prerelease: ${{ needs.setup.outputs.is_prerelease }}
-          make_latest: ${{ needs.setup.outputs.make_latest }}
-          files: |
-            artifacts/*.tar.gz
-            artifacts/*.zip
-            artifacts/SHA256SUMS
-            artifacts/release-assets.json
-
-      - name: Publish certified assets without replacement
-        if: needs.setup.outputs.build_mode == 'promote'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REF: ${{ needs.setup.outputs.ref }}
-          SOURCE_SHA: ${{ inputs.expected_source_sha }}
-          PRERELEASE: ${{ needs.setup.outputs.is_prerelease }}
-          MAKE_LATEST: ${{ needs.setup.outputs.make_latest }}
-        run: |
-          "$RUNNER_TEMP/release-provenance-policy/publish_certified_release_assets.sh" "$GITHUB_REPOSITORY" "$REF" "$SOURCE_SHA" artifacts release-notes.md "$PRERELEASE" "$MAKE_LATEST"
-
-  open-development-bump:
-    name: Open post-publication development bump
-    needs: [setup, release]
-    # The release job is the publication owner: success means the complete
-    # seven-asset GitHub Release exists with its final stable channel metadata.
-    # A tag or an incremental prerelease placeholder cannot reach this job.
-    if: >-
-      needs.release.result == 'success' &&
-      needs.setup.outputs.is_release == 'true' &&
-      needs.setup.outputs.is_prerelease == 'false'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: main
-
-      - name: Plan development identity after published release
-        id: development
-        env:
-          PUBLISHED_TAG: ${{ needs.setup.outputs.ref }}
-        run: |
-          set -euo pipefail
-          source scripts/lib/release_version.sh
-          version="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-          release_development_bump_plan "$version" "$PUBLISHED_TAG" true
-          {
-            echo "required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED"
-            echo "version=$RELEASE_DEVELOPMENT_BUMP_VERSION"
-            echo "reason=$RELEASE_DEVELOPMENT_BUMP_REASON"
-          } >> "$GITHUB_OUTPUT"
-          echo "::notice::Post-publication development bump: required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED reason=$RELEASE_DEVELOPMENT_BUMP_REASON version=${RELEASE_DEVELOPMENT_BUMP_VERSION:-<none>}"
-
-      - name: Mint GitHub App installation token
-        if: steps.development.outputs.required == 'true'
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.development.outputs.required == 'true'
-        with:
-          fetch-depth: 0
-          ref: main
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Configure isolated Harn build
-        if: steps.development.outputs.required == 'true'
-        run: make setup-rust
-
-      - name: Prepare and open development bump
-        if: steps.development.outputs.required == 'true'
-        id: development-bump
-        env:
-          EXPECTED_DEVELOPMENT_VERSION: ${{ steps.development.outputs.version }}
-          # The tag this run just published, so the next development identity is
-          # derived from what shipped rather than from whatever main happens to
-          # carry. A hand-cut tag leaves main on the old development version.
-          RELEASE_PUBLISHED_VERSION: ${{ needs.setup.outputs.ref }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
-          HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh
-
-      # A skipped open is a correct no-op: another publication completion may
-      # have already advanced main while this run was queued.
-      - name: Validate grammar receipt and arm development bump
-        if: >-
-          steps.development.outputs.required == 'true' &&
-          steps.development-bump.outputs.skipped != 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          DEVELOPMENT_BUMP_PR_URL: ${{ steps.development-bump.outputs.pr_url }}
-        run: |
-          set -euo pipefail
-          ./scripts/validate_development_bump.sh

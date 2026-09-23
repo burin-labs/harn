@@ -42,30 +42,11 @@ if release_publication_plan 1.3.0-rc.02 false; then
   fail "noncanonical prerelease reached publication policy"
 fi
 
-workflow="$root/.github/workflows/build-release-binaries.yml"
-# GitHub expressions and shell variables below are intentionally matched as
-# literal workflow source.
-grep -Fq 'release_publication_plan "$VERSION" "$MAKE_LATEST"' "$workflow" \
-  || fail "workflow bypasses the fixture-backed publication policy"
-grep -Fq 'prerelease: ${{ needs.setup.outputs.is_prerelease }}' "$workflow" \
-  || fail "final GitHub release does not preserve intentional prerelease state"
-grep -Fq 'make_latest: ${{ needs.setup.outputs.make_latest }}' "$workflow" \
-  || fail "final GitHub release does not consume the stable-only latest policy"
-grep -Fq 'type=raw,value=${{ needs.setup.outputs.version }}' "$workflow" \
-  || fail "exact container tag is not projected"
-grep -Fq -- "--prerelease \\" "$workflow" \
-  || fail "stable release placeholder is no longer created as prerelease"
-grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$REF"' "$workflow" \
-  || fail "binary publication does not prove the tag selects merged main"
-grep -Fq 'scripts/validate_release_promotion_inputs.sh' "$workflow" \
-  || fail "candidate promotion bypasses the closed publication intent"
-
 vscode_workflow="$root/.github/workflows/publish-vscode.yml"
 grep -Fq "if: github.ref_type != 'tag' || !contains(github.ref_name, '-')" "$vscode_workflow" \
   || fail "prerelease tag would reach the stable-only VS Code version projection"
 
 publish_workflow="$root/.github/workflows/publish-release.yml"
-binary_workflow="$root/.github/workflows/build-release-binaries.yml"
 grep -Fq "grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$'" "$publish_workflow" \
   || fail "stable drift comparison can select a prerelease tag"
 grep -Fq 'release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VERSION"' \
@@ -83,16 +64,6 @@ fi
 if grep -Eq 'bump-fleet\.yml|permission-actions: write' "$publish_workflow"; then
   fail "crate publication can bypass the hosted release owner's convergence decision"
 fi
-grep -Fq "needs.release.result == 'success'" "$binary_workflow" \
-  || fail "development bump can run before release publication succeeds"
-grep -Fq "needs.setup.outputs.is_prerelease == 'false'" "$binary_workflow" \
-  || fail "prerelease publication can open a stable development bump"
-grep -Fq 'release_development_bump_plan "$version" "$PUBLISHED_TAG" true' "$binary_workflow" \
-  || fail "post-publication bump bypasses the fixture-backed release-state plan"
-grep -Fq 'reason=$RELEASE_DEVELOPMENT_BUMP_REASON' "$binary_workflow" \
-  || fail "post-release bump skip does not report its typed reason"
-grep -Fq 'HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh' "$binary_workflow" \
-  || fail "post-release workflow bypasses the tested development preparation seam"
 development_opener="$root/scripts/open_development_bump.sh"
 grep -Fq 'echo "harn_bin=$harn_bin"' "$development_opener" \
   || fail "post-release workflow does not retain its pre-mutation Harn binary proof"

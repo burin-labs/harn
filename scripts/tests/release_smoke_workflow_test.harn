@@ -1,105 +1,56 @@
 import { read_yaml } from "std/fs"
 
+fn step_named(job: dict, name: string) -> dict? {
+  return (job?.steps ?? []).find({ step -> step?.name == name })
+}
+
+/**
+ * Release smoke runs inside the release candidate's own run, on archives it
+ * verifies against the candidate manifest, and on a schedule from source.
+ * Nothing smokes a release after publication, because publication no longer
+ * builds or changes bytes.
+ */
 @complexity(allow)
-fn release_smoke_workflow_errors(workflow: dict, text: string) -> list<string> {
+fn release_smoke_workflow_errors(workflow: dict, caller: dict) -> list<string> {
   let errors: list<string> = []
   const triggers = workflow?.on ?? {}
-  const push = triggers?.push
-  if push != nil && push?.tags != nil {
-    errors = errors + ["release-smoke must not run directly on tag pushes"]
+  if triggers?.push != nil {
+    errors = errors + ["release-smoke must not run on pushes"]
   }
-  const workflow_run = triggers?.workflow_run
-  if workflow_run == nil {
-    errors = errors + ["release-smoke must be triggered by build-release-binaries completion"]
-  } else {
-    if workflow_run?.workflows != ["Build release binaries"] {
-      errors = errors + ["workflow_run must listen only to Build release binaries"]
-    }
-    if workflow_run?.types != ["completed"] {
-      errors = errors + ["workflow_run must trigger only on completed runs"]
-    }
-  }
-  if !to_string(workflow.get("run-name") ?? "").contains("github.event.workflow_run.head_branch") {
-    errors = errors + ["run-name must surface the triggering release ref for the Actions run list"]
-  }
-  for forbidden in [
-    "HARN_RELEASE_ASSET_WAIT_SECONDS",
-    "sleep 30",
-    "while true",
-    "Timed out waiting for release assets",
-  ] {
-    if text.contains(forbidden) {
-      errors = errors
-        + ["release-smoke must not hold a runner with polling loop token: " + forbidden]
-    }
-  }
-  const resolve = workflow?.jobs?.resolve ?? {}
-  const resolve_if = to_string(resolve?.if ?? "")
-  for required in [
-    "github.event.workflow_run.conclusion == 'success'",
-    "startsWith(github.event.workflow_run.head_branch, 'v')",
-    "startsWith(github.event.workflow_run.head_branch, 'release/v')",
-    "startsWith(github.event.workflow_run.head_branch, 'release-attempt/v')",
-  ] {
-    if !resolve_if.contains(required) {
-      errors = errors + ["resolve job must gate workflow_run releases with: " + required]
-    }
-  }
-  if resolve_if.contains("github.event.workflow_run.event == 'push'") {
+  if triggers?.workflow_run != nil {
     errors = errors
-      + [
-        "resolve job must not require workflow_run.event == 'push' (recovery / release-attempt dispatches that finalize must also smoke)",
-      ]
+      + ["release-smoke must not trigger after publication; the candidate run calls it"]
   }
-  const timeout = resolve?.get("timeout-minutes")
-  if type_of(timeout) != "int" || timeout > 10 {
-    errors = errors
-      + ["resolve job must stay short because it validates assets once instead of waiting"]
+  if triggers?.schedule == nil {
+    errors = errors + ["release-smoke must keep its scheduled source-health mode"]
   }
-  const resolve_step = (resolve?.steps ?? []).find({ step -> step?.id == "resolve" })
-  if resolve_step == nil {
-    errors = errors + ["resolve job must keep an id=resolve step"]
-  } else {
-    const run = to_string(resolve_step?.run ?? "")
-    if !run.contains("Create GitHub release") {
-      errors = errors
-        + ["resolve step must require the triggering run's Create GitHub release job to succeed"]
-    }
-    if !run.contains("extract_release_tag") {
-      errors = errors
-        + ["resolve step must extract vX.Y.Z from tag and release-branch head_branch shapes"]
-    }
-    if regex_captures("gh release view", run).count != 1 {
-      errors = errors + ["resolve step must inspect release assets exactly once"]
-    }
-    if !run.contains("Missing release assets") {
-      errors = errors + ["resolve step must fail fast when finalized assets are absent"]
-    }
-    for asset in ["SHA256SUMS", "release-assets.json"] {
-      if !run.contains(asset) {
-        errors = errors + ["resolve step must require finalized release asset " + asset]
-      }
-    }
+  const call_input = triggers?.workflow_call?.inputs?.get("candidate-commit")
+  if call_input?.required != true || call_input?.type != "string" {
+    errors = errors + ["release-smoke must be callable with a required candidate-commit input"]
   }
   const smoke = workflow?.jobs?.smoke ?? {}
-  const smoke_if = to_string(smoke?.if ?? "")
-  if !smoke_if.contains("needs.resolve.outputs.mode == 'artifact'") {
-    errors = errors + ["smoke matrix must run only for artifact or source modes (not noop)"]
-  }
-  if !smoke_if.contains("needs.resolve.outputs.mode == 'source'") {
-    errors = errors + ["smoke matrix must still allow scheduled/manual source-health mode"]
-  }
   const checkout = (smoke?.steps ?? []).find(
     { step -> to_string(step?.uses ?? "").starts_with("actions/checkout@") },
   )
-  if checkout == nil {
-    errors = errors + ["smoke matrix must check out repository scripts"]
-  } else if to_string(checkout?.with?.ref ?? "")
-    != "$" + "{{ needs.resolve.outputs.tag || github.sha }}" {
+  if to_string(checkout?.with?.ref ?? "") != "$" + "{{ inputs.candidate-commit || github.sha }}" {
     errors = errors
-      + ["artifact smoke must check out the release tag, while source smoke keeps github.sha"]
+      + ["candidate smoke must check out the candidate commit, while source smoke keeps github.sha"]
   }
-  const run_smoke = (smoke?.steps ?? []).find({ step -> step?.name == "Run release smoke" })
+  const verify = step_named(smoke, "Verify and extract candidate archive")
+  const verify_run = to_string(verify?.run ?? "")
+  if verify == nil || !verify_run.contains("./scripts/ci/rust_artifact.sh restore-candidate")
+    || !verify_run.contains("candidate-manifest.json") {
+    errors = errors
+      + [
+        "candidate smoke must verify each archive against the candidate manifest before running it",
+      ]
+  }
+  const manifest_download = step_named(smoke, "Download candidate manifest")
+  if to_string(manifest_download?.with?.name ?? "")
+    != "candidate-manifest-" + "$" + "{{ inputs.candidate-commit }}" {
+    errors = errors + ["candidate smoke must read the manifest the calling run wrote"]
+  }
+  const run_smoke = step_named(smoke, "Run release smoke")
   if run_smoke == nil {
     errors = errors + ["smoke matrix must keep an attributable Run release smoke step"]
   } else {
@@ -121,13 +72,46 @@ fn release_smoke_workflow_errors(workflow: dict, text: string) -> list<string> {
       }
     }
   }
+  const call = caller?.jobs?.get("release-smoke") ?? {}
+  if call?.uses != "./.github/workflows/release-smoke.yml"
+    || to_string(call?.with?.get("candidate-commit") ?? "")
+      != "$" + "{{ needs.setup.outputs.candidate_source_sha }}" {
+    errors = errors
+      + ["build-release-binaries must call release-smoke on its own candidate commit"]
+  }
+  if !(call?.needs ?? []).contains("collect_candidate_manifest") {
+    errors = errors + ["the candidate smoke must wait for the candidate manifest"]
+  }
   return errors
 }
 
+fn load(fs: HarnessFs, name: string) -> dict {
+  return read_yaml(fs, path_join(fs.source_dir(), "../../.github/workflows/" + name))
+}
+
 @test
-pipeline test_release_smoke_waits_for_finalized_build_output(harness: Harness, task: unknown) {
-  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/release-smoke.yml")
-  const text = harness.fs.read_text(path)
-  const workflow = read_yaml(harness.fs, path)
-  assert_eq(release_smoke_workflow_errors(workflow, text), [])
+pipeline test_release_smoke_runs_on_the_candidate_archives(harness: Harness, task: unknown) {
+  const workflow = load(harness.fs, "release-smoke.yml")
+  const caller = load(harness.fs, "build-release-binaries.yml")
+  assert_eq(release_smoke_workflow_errors(workflow, caller), [])
+  let post_publication = json_parse(json_stringify(workflow))
+  post_publication.on.workflow_run = {workflows: ["Build release binaries"], types: ["completed"]}
+  assert(len(release_smoke_workflow_errors(post_publication, caller)) == 1)
+  let unverified = json_parse(json_stringify(workflow))
+  unverified.jobs.smoke.steps = unverified.jobs.smoke.steps.filter(
+    { step -> step?.name != "Verify and extract candidate archive" },
+  )
+    .to_list()
+  assert(
+    join(release_smoke_workflow_errors(unverified, caller), "\n").contains(
+      "verify each archive against the candidate manifest",
+    ),
+  )
+  let uncalled = json_parse(json_stringify(caller))
+  uncalled.jobs["release-smoke"] = {}
+  assert(
+    join(release_smoke_workflow_errors(workflow, uncalled), "\n").contains(
+      "call release-smoke on its own candidate commit",
+    ),
+  )
 }

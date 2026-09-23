@@ -5,7 +5,6 @@ pub type ReleaseStagingConsumer = {workflow: string, job: string, directory: str
 type WorkflowFilters = dict<string, list<string>>
 
 pub const RELEASE_STAGING_CONSUMERS = [
-  {workflow: "build-release-binaries.yml", job: "release", directory: "release-provenance-policy"},
   {workflow: "publish-release.yml", job: "publish", directory: "release-tools"},
 ]
 
