@@ -141,8 +141,8 @@ pub(crate) fn prepare_guardian(
     let mut payload_spec = spec.clone();
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
-    let (mut payload, _) =
-        super::real::prepare_command(&payload_spec, Some(cleanup_token.clone()))?;
+    let prepared = super::real::prepare_command(&payload_spec, Some(cleanup_token.clone()))?;
+    let mut payload = prepared.command;
     payload.env(
         harn_vm::op_interrupt::PROCESS_OWNER_TOKEN_ENV,
         &cleanup_token,
@@ -150,9 +150,14 @@ pub(crate) fn prepare_guardian(
     // Built from the SAME ambient policy the payload command was prepared
     // under, one step earlier in this function, so the two cannot disagree.
     let confinement = build_confinement(&payload_spec.program)?;
+    // Whether the payload's environment was CLEARED, not which mode was asked
+    // for. An inheriting mode under a session policy is cleared and rebuilt
+    // from the session's resolved set; sending the mode instead dropped that
+    // clear in transfer, and the guardian's own environment reached the child
+    // behind the explicit entries.
     let request = PreparedCommand::from_command(
         &payload,
-        spec.env_mode == super::EnvMode::Replace,
+        prepared.env_cleared,
         cleanup_token.clone(),
         confinement.as_ref().map(TransferredConfinement::request),
     );
