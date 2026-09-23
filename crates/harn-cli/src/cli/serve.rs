@@ -199,6 +199,9 @@ pub(crate) struct A2aServeArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct ApiServeArgs {
+    /// Mode assigned to new API sessions that omit mode_id. The default is read-only.
+    #[arg(long = "default-session-mode", default_value = "ask", value_parser = ["ask", "architect", "code", "shadow"])]
+    pub default_session_mode: String,
     /// Socket address to bind the local Agents API server to.
     #[arg(
         long,

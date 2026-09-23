@@ -223,7 +223,7 @@ pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
     let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
     guard_serve_bind_auth("api", args.bind, &auth_policy, &tls)?;
 
-    let config = api_server_config(args, auth_policy);
+    let config = api_server_config(args, auth_policy)?;
     let server = Arc::new(ApiServer::new(config));
     server
         .run_http(ApiHttpServeOptions {
@@ -234,16 +234,21 @@ pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
         .await
 }
 
-fn api_server_config(args: &ApiServeArgs, auth_policy: AuthPolicy) -> ApiServerConfig {
+fn api_server_config(
+    args: &ApiServeArgs,
+    auth_policy: AuthPolicy,
+) -> Result<ApiServerConfig, String> {
     let profile = AcpProfileConfig {
         text: args.trace || args.profile.text,
         json_path: args.profile.json_path.clone(),
     };
     let acp = crate::acp::server_config(Some(args.file.clone()), AuthPolicy::allow_all())
         .with_profile(profile);
-    let mut config = ApiServerConfig::for_pipeline(args.file.clone()).with_auth_policy(auth_policy);
+    let mut config = ApiServerConfig::for_pipeline(args.file.clone())
+        .with_auth_policy(auth_policy)
+        .with_default_session_mode(&args.default_session_mode)?;
     config.acp = acp;
-    config
+    Ok(config)
 }
 
 pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> {
@@ -750,7 +755,7 @@ pub fn on_tick(_event) -> nil {
         ]) else {
             panic!("expected serve api");
         };
-        let config = api_server_config(&args, AuthPolicy::allow_all());
+        let config = api_server_config(&args, AuthPolicy::allow_all())?;
         let mut vm = harn_vm::Vm::new();
         harn_vm::register_vm_stdlib(&mut vm);
         let result = async {

@@ -83,6 +83,7 @@ Run it with:
 harn serve api agent.harn
 harn serve api --bind 127.0.0.1:8787 agent.harn
 harn serve api --api-key "$HARN_KEY" agent.harn
+harn serve api --default-session-mode code agent.harn
 ```
 
 Behavior today:
@@ -96,6 +97,15 @@ Behavior today:
   workspace, and UTF-8 file helpers for generated SDKs
 - supports the same API-key, HMAC, and TLS listener settings as the other HTTP
   adapters
+
+New sessions use ACP `ask` mode unless the server was started with
+`--default-session-mode` or the create request supplies `mode_id`. The accepted
+values are `ask`, `architect`, `code`, and `shadow`; an invalid value is rejected
+before a session is created. The session response reports the effective
+`mode_id`. `code` allows the pipeline's internal state writes and coding
+effects, so use it only for a server whose callers are authorized to run those
+effects. Selecting a mode does not supply an embedder for product-specific
+`host/call` operations; those pipelines still need their host adapter.
 
 Session create and update requests accept an optional typed `model_policy`:
 

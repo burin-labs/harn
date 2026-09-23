@@ -55,6 +55,7 @@ pub struct ApiServerConfig {
     pub acp: AcpServerConfig,
     pub auth_policy: AuthPolicy,
     pub workspace_root: PathBuf,
+    default_session_mode: String,
 }
 
 impl ApiServerConfig {
@@ -65,12 +66,21 @@ impl ApiServerConfig {
             acp: AcpServerConfig::for_pipeline(path),
             auth_policy: AuthPolicy::allow_all(),
             workspace_root: root,
+            default_session_mode: "ask".to_string(),
         }
     }
 
     pub fn with_auth_policy(mut self, auth_policy: AuthPolicy) -> Self {
         self.auth_policy = auth_policy;
         self
+    }
+
+    pub fn with_default_session_mode(mut self, mode_id: &str) -> Result<Self, String> {
+        if !crate::adapters::acp::is_supported_session_mode(mode_id) {
+            return Err(format!("unknown session mode: {mode_id}"));
+        }
+        self.default_session_mode = mode_id.to_string();
+        Ok(self)
     }
 
     pub fn with_profile(mut self, profile: crate::adapters::acp::AcpProfileConfig) -> Self {
@@ -106,6 +116,7 @@ impl ApiServer {
             auth_policy: config.auth_policy,
             permissions: Arc::new(InMemoryPermissionStore::default()),
             provider_catalog,
+            default_session_mode: config.default_session_mode,
             event_log,
             event_log_error,
             canonical_sessions,
@@ -145,6 +156,7 @@ struct ApiState {
     /// eventual `harness.permissions.*` host calls.
     permissions: Arc<InMemoryPermissionStore>,
     provider_catalog: ProviderCatalogRuntime,
+    default_session_mode: String,
     event_log: Option<Arc<AnyEventLog>>,
     event_log_error: Option<String>,
     canonical_sessions: Option<crate::sessions::SharedSessionStore>,
