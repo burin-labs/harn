@@ -290,6 +290,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     }
   }
   const schema = approval_review_verdict_schema(effective_policy)
+  const route = __approval_review_route(policy, effective_policy, request)
   const started = harness.clock.monotonic_ms()
   const checkpoint = agent_typed_output_checkpoint(
     harness.agent,
@@ -298,7 +299,8 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     approval_review_user_prompt(request),
     schema,
     {
-      model: effective_policy?.reviewer?.model,
+      provider: route.provider,
+      model: route.model,
       system: approval_review_system_prompt(effective_policy),
       timeout_ms: effective_policy?.reviewer?.timeout_ms,
       reasoning_effort: effective_policy?.reviewer?.effort,
@@ -334,7 +336,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     detail: "",
     site: request?.site,
     category: category,
-    reviewer_model: effective_policy?.reviewer?.model,
+    reviewer_model: route.model,
     duration_ms: duration_ms,
     // NIL when the checkpoint reported no usage, never 0.0. A zero cost across a
     // whole calibration run would read as "the reviewer is free" when it means
@@ -348,6 +350,31 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     accounting_status: __approval_review_usage(checkpoint)?.accounting_status,
     unpriced_calls: to_int(__approval_review_usage(checkpoint)?.unpriced_calls),
   }
+}
+
+/**
+ * The provider and model the reviewer calls.
+ *
+ * A caller whose policy names a reviewer model decides. Otherwise, inside a
+ * loop, the reviewer runs on the loop's own route, which `agent_loop` passes as
+ * `request.route` (a route with no provider or model is the process default the
+ * loop itself is running on). Only a reviewer called outside any loop falls
+ * back to the bundled policy's model.
+ *
+ * The order is the fix. The bundled model used to win whenever the caller named
+ * none, so a loop granted only its own route's credential got a reviewer that
+ * failed authentication on every call, and every guarded tool call was refused.
+ */
+fn __approval_review_route(caller_policy: dict?, effective_policy: dict, request: dict) -> dict {
+  const explicit = caller_policy?.reviewer
+  if explicit?.model != nil {
+    return {provider: explicit?.provider, model: explicit.model}
+  }
+  const route = request?.route
+  if route != nil {
+    return {provider: route?.provider, model: route?.model}
+  }
+  return {provider: effective_policy?.reviewer?.provider, model: effective_policy?.reviewer?.model}
 }
 
 /**
@@ -422,9 +449,29 @@ pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> an
         refused_paths: request?.refused_paths ?? [],
         observability: request?.observability ?? "inferred",
         untrusted_context: request?.untrusted_context,
+        route: request?.route,
       },
     )
   }
+}
+
+/**
+ * Hand a reviewer the route of the loop that installed it.
+ *
+ * The VM builds the review request from the refused call alone, so without
+ * this a reviewer whose policy names no model has no route to inherit.
+ * Anything that is not a closure passes through untouched, so the dispatch
+ * host still refuses a malformed reviewer by name.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn approval_reviewer_on_route(reviewer: any, route: dict) -> any {
+  const kind = type_of(reviewer)
+  if kind != "closure" && kind != "function" && kind != "fn" {
+    return reviewer
+  }
+  return { request -> reviewer(request + {route: route}) }
 }
 
 /** The refusal's category, never blank -- the floor is matched by category. */

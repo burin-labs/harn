@@ -104,6 +104,10 @@
         "reader": "agent_loop_provider_failure"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "reader": "__dispatch_tool_calls"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
         "reader": "__agent_loop_run"
       },
@@ -266,6 +270,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_provider_failure.harn",
         "reader": "agent_loop_provider_failure"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "reader": "__dispatch_tool_calls"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
