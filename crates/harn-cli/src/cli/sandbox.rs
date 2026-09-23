@@ -24,8 +24,8 @@ pub(crate) struct SandboxArgs {
     #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
     pub no_sandbox: bool,
     /// Permit policy-managed child network while retaining the worktree
-    /// sandbox. Child traffic remains denied until HARN_EGRESS_* or
-    /// harness.net.egress_policy configures an allow decision.
+    /// sandbox. Children reach public hosts; private and loopback addresses
+    /// stay denied, and HARN_EGRESS_* or harness.net.egress_policy narrows it.
     #[arg(
         long = "allow-process-network",
         action = clap::ArgAction::SetTrue,
