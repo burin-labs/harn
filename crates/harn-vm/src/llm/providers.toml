@@ -3106,14 +3106,14 @@ provider = "anthropic"
 context_window = 1000000
 released = "2026-09-21"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00 }
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00, cache_write_1h_per_mtok = 8.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic", "vision"]
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
 serving_tiers = [
-  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00, cache_write_1h_per_mtok = 16.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
 ]
 
 # OpenRouter serves Opus 5.5 under a dotted slug at Anthropic's list price.
@@ -3285,7 +3285,7 @@ logical_model = "gpt-6-sol"
 equivalence_group = "gpt-6-sol"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "mid"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3307,7 +3307,7 @@ logical_model = "gpt-6-luna"
 equivalence_group = "gpt-6-luna"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]

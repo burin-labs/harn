@@ -173,6 +173,30 @@ fn a_one_hour_cache_write_settles_above_the_five_minute_write() {
 }
 
 #[test]
+fn current_direct_models_keep_the_pricing_dimensions_they_can_bill() {
+    // These routes landed after the original pricing patch. A catalog rebase
+    // must carry the same settlement dimensions onto the newly added rows.
+    let _guard = super::env_guard();
+    let now = at("2026-09-23T12:00:00Z");
+    let opus = pricing_detail_for_tier("anthropic", "claude-opus-5-5", false, 1_000, now)
+        .expect("current Claude route is priced");
+    assert!((opus.cache_write_per_1k.expect("5m cache write") - 0.005).abs() < 1e-9);
+    assert!((opus.cache_write_1h_per_1k.expect("1h cache write") - 0.008).abs() < 1e-9);
+    assert!(opus.hosted_tool_fees.contains_key("web_search"));
+
+    let fast = pricing_detail_for_tier("anthropic", "claude-opus-5-5", true, 1_000, now)
+        .expect("current Claude fast route is priced");
+    assert!((fast.cache_write_1h_per_1k.expect("fast 1h cache write") - 0.016).abs() < 1e-9);
+
+    for model in ["gpt-6-sol", "gpt-6-luna"] {
+        let card = pricing_detail_for_tier("openai", model, false, 1_000, now)
+            .expect("current OpenAI route is priced");
+        assert!(card.hosted_tool_fees.contains_key("web_search"), "{model}");
+        assert!(card.hosted_tool_fees.contains_key("file_search"), "{model}");
+    }
+}
+
+#[test]
 fn a_route_with_no_one_hour_tier_settles_short_and_says_so() {
     // A route the catalog prices with one cache-write rate cannot price a
     // one-hour write. It settles at the short rate — the provider may well

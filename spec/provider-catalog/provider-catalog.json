@@ -3778,7 +3778,14 @@
         "input_per_mtok": 4.0,
         "output_per_mtok": 20.0,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": 5.0
+        "cache_write_per_mtok": 5.0,
+        "cache_write_1h_per_mtok": 8.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -3835,7 +3842,8 @@
             "input_per_mtok": 8.0,
             "output_per_mtok": 40.0,
             "cache_read_per_mtok": 0.4,
-            "cache_write_per_mtok": 10.0
+            "cache_write_per_mtok": 10.0,
+            "cache_write_1h_per_mtok": 16.0
           },
           "latency": "higher output-token throughput than standard Claude serving",
           "reliability": "research preview, account-manager gated",
@@ -17396,7 +17404,17 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
@@ -17621,7 +17639,17 @@
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
-        ]
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
       },
       "deprecation": {
         "status": "active"
