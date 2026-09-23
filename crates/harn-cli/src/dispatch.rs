@@ -185,7 +185,13 @@ pub async fn run_embedded_script(
     argv: Vec<String>,
     json_mode: bool,
 ) -> RunOutcome {
-    run_embedded_script_inner(script_name, argv, json_mode, None).await
+    Box::pin(run_embedded_script_inner(
+        script_name,
+        argv,
+        json_mode,
+        None,
+    ))
+    .await
 }
 
 /// Capture-mode variant that runs the script with the given sandbox
@@ -198,7 +204,13 @@ pub async fn run_embedded_script_with_sandbox(
     json_mode: bool,
     sandbox: RunSandboxOptions,
 ) -> RunOutcome {
-    run_embedded_script_inner(script_name, argv, json_mode, Some(sandbox)).await
+    Box::pin(run_embedded_script_inner(
+        script_name,
+        argv,
+        json_mode,
+        Some(sandbox),
+    ))
+    .await
 }
 
 async fn run_embedded_script_inner(
