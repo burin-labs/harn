@@ -3862,6 +3862,11 @@ through `session/request_permission`. Use `--api-key <key>` /
 `authenticate` before protected session methods. WebSocket clients can also
 pre-authenticate the upgrade with `Authorization: Bearer <key>` or
 `X-API-Key`.
+Pass `--read-only-root <path>` once per host-owned asset directory that a
+session must read outside its project workspace. Harn canonicalizes each path
+and adds it to the per-turn file-read policy for stdio and WebSocket ACP.
+This is additive to the existing policy; it does not enable confinement or
+change child-process permissions. Unconfined `code` mode remains unconfined.
 Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
 executed `session/prompt`; use `--profile-json <path>` /
 `HARN_PROFILE_JSON=<path>` to append per-turn NDJSON records with
