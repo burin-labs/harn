@@ -20,20 +20,24 @@ id = "claude-sonnet-4-6"
 provider = "anthropic"
 
 [aliases.opus]
-id = "claude-opus-5"
+id = "claude-opus-5-5"
 provider = "anthropic"
 
+[aliases.opus55]
+id = "claude-opus-5-5"
+provider = "anthropic"
+
+# Previous Opus generations, kept addressable for pinned workflows.
 [aliases.opus5]
 id = "claude-opus-5"
 provider = "anthropic"
 
-# Previous Opus generation, kept addressable for pinned workflows.
 [aliases.opus48]
 id = "claude-opus-4-8"
 provider = "anthropic"
 
 # Fable is the Mythos-class tier above Opus, not an Opus successor — the
-# `opus` alias tracks the current Opus generation (claude-opus-5), not Fable.
+# `opus` alias tracks the current Opus generation (claude-opus-5-5), not Fable.
 [aliases.fable]
 id = "claude-fable-5-1"
 provider = "anthropic"
@@ -74,33 +78,42 @@ provider = "openrouter"
 id = "accounts/fireworks/models/gpt-oss-120b"
 provider = "fireworks"
 
+# GPT-6 tiers: Astra is the frontier, Sol the balanced tier (GPT-6 has no
+# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier.
 [aliases."openai/mid"]
-id = "gpt-5.6-terra"
+id = "gpt-6-sol"
 provider = "openai"
 
 [aliases."openai/frontier"]
-id = "gpt-5.6-sol"
+id = "gpt-6-astra"
 provider = "openai"
 
 [aliases."openai/small"]
-id = "gpt-5.6-luna"
+id = "gpt-6-luna"
 provider = "openai"
 
-# Preserve OpenAI's public family alias while resolving to the explicit tier
-# for stable catalog metadata, receipts, and cost projections.
+# Preserve OpenAI's public GPT-5.6 family alias while resolving to the
+# explicit tier for stable catalog metadata, receipts, and cost projections.
 [aliases."gpt-5.6"]
 id = "gpt-5.6-sol"
 provider = "openai"
 
-# GPT-6 ships a single model, so the family alias and the marketing name both
-# resolve to the one id. Kept as aliases rather than extra catalog rows so
-# receipts and cost projections stay on the canonical `gpt-6-astra`.
+# OpenAI publishes no bare `gpt-6` id; the family alias names the flagship.
+# Tier names resolve to the GPT-6 generation.
 [aliases."gpt-6"]
 id = "gpt-6-astra"
 provider = "openai"
 
 [aliases.astra]
 id = "gpt-6-astra"
+provider = "openai"
+
+[aliases.sol]
+id = "gpt-6-sol"
+provider = "openai"
+
+[aliases.luna]
+id = "gpt-6-luna"
 provider = "openai"
 
 # The small tier default stays on an open-weight host by policy (see

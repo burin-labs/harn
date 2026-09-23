@@ -6,8 +6,6 @@ pipeline default(harness: Harness) {
 {{ end }}{{ end }}{{ endsection }}
 {{ section "output_format" schema=output_schema }}{{ endsection }}
 {{ section "tools" tools=tool_list }}{{ endsection }}
-{{ section "thinking_scaffold" }}{{ endsection }}
-{{ section "chain_of_thought" }}{{ endsection }}
 """
   const bindings = {
     urgent: true,

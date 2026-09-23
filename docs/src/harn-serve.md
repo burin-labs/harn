@@ -103,7 +103,7 @@ Session create and update requests accept an optional typed `model_policy`:
 {
   "model_policy": {
     "provider": "openai",
-    "model": "gpt-5.6",
+    "model": "gpt-6-sol",
     "reasoning_effort": "high"
   }
 }

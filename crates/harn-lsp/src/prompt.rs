@@ -595,12 +595,10 @@ mod tests {
         assert_eq!(
             labels("{{ section \"‸"),
             vec![
-                "chain_of_thought",
                 "examples",
                 "output_format",
                 "system_framing",
                 "task",
-                "thinking_scaffold",
                 "tools",
             ]
         );

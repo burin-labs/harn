@@ -1653,20 +1653,24 @@ id = "claude-sonnet-4-6"
 provider = "anthropic"
 
 [aliases.opus]
-id = "claude-opus-5"
+id = "claude-opus-5-5"
 provider = "anthropic"
 
+[aliases.opus55]
+id = "claude-opus-5-5"
+provider = "anthropic"
+
+# Previous Opus generations, kept addressable for pinned workflows.
 [aliases.opus5]
 id = "claude-opus-5"
 provider = "anthropic"
 
-# Previous Opus generation, kept addressable for pinned workflows.
 [aliases.opus48]
 id = "claude-opus-4-8"
 provider = "anthropic"
 
 # Fable is the Mythos-class tier above Opus, not an Opus successor — the
-# `opus` alias tracks the current Opus generation (claude-opus-5), not Fable.
+# `opus` alias tracks the current Opus generation (claude-opus-5-5), not Fable.
 [aliases.fable]
 id = "claude-fable-5-1"
 provider = "anthropic"
@@ -1707,33 +1711,42 @@ provider = "openrouter"
 id = "accounts/fireworks/models/gpt-oss-120b"
 provider = "fireworks"
 
+# GPT-6 tiers: Astra is the frontier, Sol the balanced tier (GPT-6 has no
+# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier.
 [aliases."openai/mid"]
-id = "gpt-5.6-terra"
+id = "gpt-6-sol"
 provider = "openai"
 
 [aliases."openai/frontier"]
-id = "gpt-5.6-sol"
+id = "gpt-6-astra"
 provider = "openai"
 
 [aliases."openai/small"]
-id = "gpt-5.6-luna"
+id = "gpt-6-luna"
 provider = "openai"
 
-# Preserve OpenAI's public family alias while resolving to the explicit tier
-# for stable catalog metadata, receipts, and cost projections.
+# Preserve OpenAI's public GPT-5.6 family alias while resolving to the
+# explicit tier for stable catalog metadata, receipts, and cost projections.
 [aliases."gpt-5.6"]
 id = "gpt-5.6-sol"
 provider = "openai"
 
-# GPT-6 ships a single model, so the family alias and the marketing name both
-# resolve to the one id. Kept as aliases rather than extra catalog rows so
-# receipts and cost projections stay on the canonical `gpt-6-astra`.
+# OpenAI publishes no bare `gpt-6` id; the family alias names the flagship.
+# Tier names resolve to the GPT-6 generation.
 [aliases."gpt-6"]
 id = "gpt-6-astra"
 provider = "openai"
 
 [aliases.astra]
 id = "gpt-6-astra"
+provider = "openai"
+
+[aliases.sol]
+id = "gpt-6-sol"
+provider = "openai"
+
+[aliases.luna]
+id = "gpt-6-luna"
 provider = "openai"
 
 # The small tier default stays on an open-weight host by policy (see
@@ -2575,7 +2588,7 @@ reasoning_effort = "high"
 
 [qc_defaults]
 anthropic = "claude-haiku-4-5-20251001"
-openai = "gpt-5.6-luna"
+openai = "gpt-6-luna"
 openrouter = "google/gemini-2.5-flash"
 ollama = "llama3.2"
 # `local` previously pointed at gpt-4o — a hosted (and now sunset)
@@ -2667,52 +2680,53 @@ label = "Long context"
 description = "Largest context-window route in this catalog."
 selector = { kind = "largest_context" }
 
-[presentation.families.openai-gpt-5-6]
-label = "GPT-5.6"
+[presentation.families.openai-gpt-6]
+label = "GPT-6"
 plain_description = "Choose a model size and how much time it spends reasoning."
 
-[[presentation.families.openai-gpt-5-6.dimensions]]
+[[presentation.families.openai-gpt-6.dimensions]]
 key = "variant"
 label = "Model size"
 plain_description = "Larger variants trade speed and cost for more capability."
 kind = "model"
 ordered_values = [
-  { value = "luna", label = "Luna", plain_description = "Fastest and lowest cost for routine work.", relative_cost_hint = 1, relative_speed_hint = 5, model_id = "gpt-5.6-luna" },
-  { value = "terra", label = "Terra", plain_description = "Balanced capability, speed, and cost.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "gpt-5.6-terra" },
-  { value = "sol", label = "Sol", plain_description = "Most capable and most expensive for difficult work.", relative_cost_hint = 5, relative_speed_hint = 1, model_id = "gpt-5.6-sol" },
+  { value = "luna", label = "Luna", plain_description = "Fastest and lowest cost for routine work.", relative_cost_hint = 1, relative_speed_hint = 5, model_id = "gpt-6-luna" },
+  { value = "sol", label = "Sol", plain_description = "Strong reasoning for everyday coding and analysis.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "gpt-6-sol" },
+  { value = "astra", label = "Astra", plain_description = "Most capable and most expensive for the hardest work.", relative_cost_hint = 5, relative_speed_hint = 1, model_id = "gpt-6-astra" },
 ]
 
-[[presentation.families.openai-gpt-5-6.dimensions]]
+# Only the levels every GPT-6 model accepts. Sol and Luna also take `none`,
+# but Astra rejects it, and all three reject `max` despite the model pages
+# listing it (live probe 2026-09-22).
+[[presentation.families.openai-gpt-6.dimensions]]
 key = "effort"
 label = "Thinking time"
 plain_description = "More thinking time can improve difficult answers but takes longer and costs more."
 kind = "reasoning_effort"
 ordered_values = [
-  { value = "none", label = "None", plain_description = "Respond directly without extra reasoning.", relative_cost_hint = 1, relative_speed_hint = 5 },
   { value = "low", label = "Low", plain_description = "Brief reasoning for straightforward work.", relative_cost_hint = 1, relative_speed_hint = 5 },
   { value = "medium", label = "Medium", plain_description = "Balanced reasoning for everyday work.", relative_cost_hint = 2, relative_speed_hint = 4 },
   { value = "high", label = "High", plain_description = "More reasoning for difficult tasks.", relative_cost_hint = 3, relative_speed_hint = 3 },
-  { value = "xhigh", label = "Extra high", plain_description = "Deep reasoning for complex tasks.", relative_cost_hint = 4, relative_speed_hint = 2 },
-  { value = "max", label = "Maximum", plain_description = "Most reasoning for the hardest tasks.", relative_cost_hint = 5, relative_speed_hint = 1 },
+  { value = "xhigh", label = "Extra high", plain_description = "Deepest reasoning for the hardest tasks.", relative_cost_hint = 5, relative_speed_hint = 1 },
 ]
 
-[[presentation.families.openai-gpt-5-6.presets]]
+[[presentation.families.openai-gpt-6.presets]]
 id = "fast"
 label = "Fast"
 plain_blurb = "Quick, low-cost responses for routine edits and questions."
 coordinates = { variant = "luna", effort = "low" }
 
-[[presentation.families.openai-gpt-5-6.presets]]
+[[presentation.families.openai-gpt-6.presets]]
 id = "balanced"
 label = "Balanced"
 plain_blurb = "A practical default for everyday coding and analysis."
-coordinates = { variant = "terra", effort = "medium" }
+coordinates = { variant = "sol", effort = "medium" }
 
-[[presentation.families.openai-gpt-5-6.presets]]
+[[presentation.families.openai-gpt-6.presets]]
 id = "deep"
 label = "Deep"
 plain_blurb = "Maximum capability and reasoning for the hardest work."
-coordinates = { variant = "sol", effort = "max" }
+coordinates = { variant = "astra", effort = "xhigh" }
 
 # --- source: 60-models/00-anthropic.toml ---
 # ── Models ───────────────────────────────────────────────────────────────────
@@ -2922,8 +2936,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5."
-superseded_by = "claude-opus-5"
+deprecation_note = "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5-5."
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "long_context"]
@@ -2934,8 +2948,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5."
-superseded_by = "claude-opus-5"
+deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5-5."
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2947,8 +2961,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5."
-superseded_by = "claude-opus-5"
+deprecation_note = "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5-5."
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2959,7 +2973,7 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2969,7 +2983,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2980,7 +2994,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2992,7 +3006,7 @@ serving_tiers = [
 
 # Claude Opus 4.8 (released 2026-05-28) — Anthropic's most capable model
 # for complex reasoning, long-horizon agentic coding, and high-autonomy
-# work; the current `opus` alias target. Adaptive thinking only (extended
+# work. Adaptive thinking only (extended
 # thinking budgets return 400); the `effort` parameter controls reasoning
 # depth and defaults to `high` on every surface. Sampling params
 # (temperature/top_p/top_k) are rejected — steer via prompting instead.
@@ -3006,7 +3020,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -3017,8 +3031,8 @@ serving_tiers = [
   { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." },
 ]
 
-# Claude Opus 5 (released 2026-07-24) — the current Opus generation and the
-# `opus` alias target: a drop-in upgrade from Opus 4.8 at identical $5 / $25
+# Claude Opus 5 (released 2026-07-24) — superseded by Opus 5.5 and pinned by
+# the `opus5` alias: a drop-in upgrade from Opus 4.8 at identical $5 / $25
 # per MTok pricing (cache read 0.1x, 5-min cache write 1.25x). Inherits the
 # Opus 4.7+ request surface (adaptive thinking only, sampling params rejected,
 # no assistant prefill) with two changes verified against the live API on
@@ -3039,6 +3053,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -3054,9 +3069,53 @@ provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+superseded_by = "anthropic/claude-opus-5.5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
+
+# Claude Opus 5.5 (released 2026-09-21) — the current Opus generation and the
+# `opus` alias target. Cheaper than Opus 5 ($4 / $20 per MTok, cache read
+# $0.20 = 0.05x, 5-min cache write 1.25x) with the same 1M context, 128K
+# output, and tokenizer. Verified against the live API on 2026-09-22:
+#   1. Thinking cannot be disabled. `{"type":"disabled"}` and
+#      `{"type":"enabled","budget_tokens":N}` are both 400s at every effort;
+#      effort is the only control and its API default is `medium` (Opus 5
+#      defaulted to `high`).
+#   2. Forced `tool_choice` (`any` / `tool`) is a 400; `auto` and `none` pass.
+#   3. Minimum cacheable prefix stays at 512 tokens (a 608-token prefix cached
+#      on Opus 5.5 and silently did not on Opus 4.8).
+#   4. Fast mode (`speed: "fast"`) is accepted at 2x standard pricing.
+# Thinking blocks are bound to the model and conversation ("preserved
+# thinking"), so history must stay append-only; only Fable 5.1 / Mythos 5.1
+# read an Opus 5.5 block, other models drop it silently.
+[models."claude-opus-5-5"]
+name = "Claude Opus 5.5"
+provider = "anthropic"
+context_window = 1000000
+released = "2026-09-21"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic", "vision"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+# Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
+]
+
+# OpenRouter serves Opus 5.5 under a dotted slug at Anthropic's list price.
+[models."anthropic/claude-opus-5.5"]
+name = "Claude Opus 5.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+released = "2026-09-22"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic", "vision"]
 
 [models."anthropic/claude-opus-4.8"]
 name = "Claude Opus 4.8 (via OpenRouter)"
@@ -3131,6 +3190,19 @@ open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 
+# OpenRouter serves Fable 5.1 under a dotted slug at Anthropic's list price,
+# including Fable 5.1's $0.25 cache-read rate.
+[models."anthropic/claude-fable-5.1"]
+name = "Claude Fable 5.1 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+released = "2026-09-01"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+
 # --- source: 60-models/10-openai-gemini-mistral.toml ---
 # OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
 
@@ -3181,7 +3253,66 @@ serving_tiers = [
   { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
 ]
 
-# GPT-5.6 — current OpenAI family. The bare gpt-5.6 API alias routes to Sol;
+# GPT-6 Sol and Luna (announced 2026-09-22) — the GPT-6 successors to
+# GPT-5.6 Sol and Luna at about half their promotional price. There is no
+# GPT-6 Terra: Sol now covers the balanced tier and is cheaper than GPT-5.6
+# Terra. Unlike Astra, both accept effort `none`. Live probe 2026-09-22 on
+# both models:
+#   reasoning_effort none/low/medium/high/xhigh -> 200; minimal and max -> 400
+#     (the model pages list `max`; the API does not accept it)
+#   temperature=0.2 at effort none -> 200; at the default effort -> 400
+#   function tools on /v1/chat/completions -> 400 unless effort is none
+#   service_tier=fast -> 200, echoes "fast"; reasoning.mode=pro -> 200
+# Long-context band: prompts over 272K input tokens bill input and cache at 2x
+# and output at 1.5x. Default effort is `medium`.
+[models."gpt-6-sol"]
+name = "GPT-6 Sol"
+blurb = "Strong GPT-6 reasoning for everyday coding, planning, and review at a moderate cost."
+provider = "openai"
+context_window = 1050000
+logical_model = "gpt-6-sol"
+equivalence_group = "gpt-6-sol"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+tier = "mid"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.4, cache_write_per_mtok = 5.00 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "GPT-6 responses echo service_tier=fast when the premium tier was served (live probe 2026-09-22)." },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.1, cache_write_per_mtok = 1.25 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-22). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6. OpenRouter's `-pro` slugs sell this knob, not a separate model." },
+]
+
+[models."gpt-6-luna"]
+name = "GPT-6 Luna"
+blurb = "Fastest and lowest-cost GPT-6 option for routine edits, summaries, and extraction."
+provider = "openai"
+context_window = 1050000
+logical_model = "gpt-6-luna"
+equivalence_group = "gpt-6-luna"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 0.2, output_per_mtok = 1.00, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "GPT-6 responses echo service_tier=fast when the premium tier was served (live probe 2026-09-22)." },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 0.05, output_per_mtok = 0.25, cache_read_per_mtok = 0.005, cache_write_per_mtok = 0.0625 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-22). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6. OpenRouter's `-pro` slugs sell this knob, not a separate model." },
+]
+
+# GPT-5.6 — previous OpenAI family, superseded by GPT-6 Sol and Luna. OpenAI
+# has not announced a sunset, so the rows stay routable (not `deprecated`);
+# GPT-5.6 Terra has no GPT-6 counterpart and points at GPT-6 Sol, which is
+# cheaper and stronger. The bare gpt-5.6 API alias routes to Sol;
 # Harn resolves it through the alias catalog so receipts keep the explicit
 # tier. All three models accept none/low/medium/high/xhigh/max effort, support
 # image input, and expose the Responses-first hosted tool surface. Cache writes
@@ -3196,6 +3327,7 @@ logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }] }
+superseded_by = "gpt-6-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3223,6 +3355,7 @@ logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+superseded_by = "gpt-6-sol"
 tier = "mid"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3244,6 +3377,7 @@ logical_model = "gpt-5.6-luna"
 equivalence_group = "gpt-5.6-luna"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+superseded_by = "gpt-6-luna"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -6375,6 +6509,33 @@ strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_conte
 # read rate is higher ($0.50 versus $0.30 per MTok). Reasoning effort accepts
 # low, medium, high and xhigh and defaults to high, unchanged from 4.5, so the
 # xai capability rules need no edit.
+# Grok 4.7 (xAI index created 2026-09-01; OpenRouter listed 2026-09-21).
+# xAI's /v1/language-models prices it identically to Grok 4.6 ($2 / $6, cached
+# $0.50); OpenRouter lists it at $1.60 / $4.80, cached $0.40. Same 500K
+# context and image input as Grok 4.6. The `grok-*` capability rules cover it.
+[models."grok-4.7"]
+name = "Grok 4.7"
+provider = "xai"
+context_window = 500000
+released = "2026-09-01"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
+rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-09-22" }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."x-ai/grok-4.7"]
+name = "Grok 4.7 (via OpenRouter)"
+provider = "openrouter"
+context_window = 500000
+released = "2026-09-21"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.60, output_per_mtok = 4.80, cache_read_per_mtok = 0.40 }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+
 [models."grok-4.6"]
 name = "Grok 4.6"
 provider = "xai"
@@ -6382,6 +6543,7 @@ context_window = 500000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-09-20" }
+superseded_by = "grok-4.7"
 tier = "frontier"
 open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
@@ -6392,6 +6554,7 @@ provider = "openrouter"
 context_window = 500000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
+superseded_by = "x-ai/grok-4.7"
 tier = "frontier"
 open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
@@ -6410,6 +6573,93 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_conte
 # slugs for each tier; Pro is a serving behavior, not an independent model
 # lineage, so both routes share the same equivalence group. Base rates remain
 # durable while the API's current discount is represented as a promotion.
+# GPT-6 on OpenRouter (listed 2026-09-04 for Astra, 2026-09-22 for Sol and
+# Luna) at OpenAI's list prices. The `-pro` slugs are OpenRouter's packaging
+# of the pro reasoning mode on the same model, so they share the logical model.
+[models."openai/gpt-6-astra"]
+name = "GPT-6 Astra (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-astra"
+equivalence_group = "gpt-6-astra"
+served_variant = "openrouter"
+released = "2026-09-04"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-astra-pro"]
+name = "GPT-6 Astra Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-astra"
+equivalence_group = "gpt-6-astra"
+served_variant = "openrouter_pro"
+released = "2026-09-04"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-sol"]
+name = "GPT-6 Sol (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-sol"
+equivalence_group = "gpt-6-sol"
+served_variant = "openrouter"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-sol-pro"]
+name = "GPT-6 Sol Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-sol"
+equivalence_group = "gpt-6-sol"
+served_variant = "openrouter_pro"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-luna"]
+name = "GPT-6 Luna (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-luna"
+equivalence_group = "gpt-6-luna"
+served_variant = "openrouter"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125 }
+tier = "small"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-luna-pro"]
+name = "GPT-6 Luna Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-luna"
+equivalence_group = "gpt-6-luna"
+served_variant = "openrouter_pro"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125 }
+tier = "small"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
 [models."openai/gpt-5.6-sol"]
 name = "GPT-5.6 Sol (via OpenRouter)"
 provider = "openrouter"
@@ -6419,6 +6669,7 @@ equivalence_group = "gpt-5.6-sol"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }] }
+superseded_by = "openai/gpt-6-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6432,6 +6683,7 @@ equivalence_group = "gpt-5.6-sol"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-pro-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }] }
+superseded_by = "openai/gpt-6-sol-pro"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6445,6 +6697,7 @@ equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+superseded_by = "openai/gpt-6-sol"
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6458,6 +6711,7 @@ equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+superseded_by = "openai/gpt-6-sol-pro"
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6471,6 +6725,7 @@ equivalence_group = "gpt-5.6-luna"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25 }
+superseded_by = "openai/gpt-6-luna"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6484,6 +6739,7 @@ equivalence_group = "gpt-5.6-luna"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25 }
+superseded_by = "openai/gpt-6-luna-pro"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7019,7 +7275,7 @@ steps = [
 [model_ladders.agent_frontier]
 label = "agent frontier route with transport fallback"
 steps = [
-  { model = "claude-opus-5", provider = "anthropic", label = "frontier" },
+  { model = "claude-opus-5-5", provider = "anthropic", label = "frontier" },
   { model = "claude-sonnet-5", provider = "anthropic", label = "fallback" },
 ]
 

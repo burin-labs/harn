@@ -205,8 +205,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5."
-superseded_by = "claude-opus-5"
+deprecation_note = "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5-5."
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "long_context"]
@@ -217,8 +217,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5."
-superseded_by = "claude-opus-5"
+deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5-5."
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -230,8 +230,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5."
-superseded_by = "claude-opus-5"
+deprecation_note = "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5-5."
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -242,7 +242,7 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -252,7 +252,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -263,7 +263,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -275,7 +275,7 @@ serving_tiers = [
 
 # Claude Opus 4.8 (released 2026-05-28) — Anthropic's most capable model
 # for complex reasoning, long-horizon agentic coding, and high-autonomy
-# work; the current `opus` alias target. Adaptive thinking only (extended
+# work. Adaptive thinking only (extended
 # thinking budgets return 400); the `effort` parameter controls reasoning
 # depth and defaults to `high` on every surface. Sampling params
 # (temperature/top_p/top_k) are rejected — steer via prompting instead.
@@ -289,7 +289,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -300,8 +300,8 @@ serving_tiers = [
   { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." },
 ]
 
-# Claude Opus 5 (released 2026-07-24) — the current Opus generation and the
-# `opus` alias target: a drop-in upgrade from Opus 4.8 at identical $5 / $25
+# Claude Opus 5 (released 2026-07-24) — superseded by Opus 5.5 and pinned by
+# the `opus5` alias: a drop-in upgrade from Opus 4.8 at identical $5 / $25
 # per MTok pricing (cache read 0.1x, 5-min cache write 1.25x). Inherits the
 # Opus 4.7+ request surface (adaptive thinking only, sampling params rejected,
 # no assistant prefill) with two changes verified against the live API on
@@ -322,6 +322,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -337,9 +338,53 @@ provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+superseded_by = "anthropic/claude-opus-5.5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
+
+# Claude Opus 5.5 (released 2026-09-21) — the current Opus generation and the
+# `opus` alias target. Cheaper than Opus 5 ($4 / $20 per MTok, cache read
+# $0.20 = 0.05x, 5-min cache write 1.25x) with the same 1M context, 128K
+# output, and tokenizer. Verified against the live API on 2026-09-22:
+#   1. Thinking cannot be disabled. `{"type":"disabled"}` and
+#      `{"type":"enabled","budget_tokens":N}` are both 400s at every effort;
+#      effort is the only control and its API default is `medium` (Opus 5
+#      defaulted to `high`).
+#   2. Forced `tool_choice` (`any` / `tool`) is a 400; `auto` and `none` pass.
+#   3. Minimum cacheable prefix stays at 512 tokens (a 608-token prefix cached
+#      on Opus 5.5 and silently did not on Opus 4.8).
+#   4. Fast mode (`speed: "fast"`) is accepted at 2x standard pricing.
+# Thinking blocks are bound to the model and conversation ("preserved
+# thinking"), so history must stay append-only; only Fable 5.1 / Mythos 5.1
+# read an Opus 5.5 block, other models drop it silently.
+[models."claude-opus-5-5"]
+name = "Claude Opus 5.5"
+provider = "anthropic"
+context_window = 1000000
+released = "2026-09-21"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic", "vision"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+# Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
+]
+
+# OpenRouter serves Opus 5.5 under a dotted slug at Anthropic's list price.
+[models."anthropic/claude-opus-5.5"]
+name = "Claude Opus 5.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+released = "2026-09-22"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic", "vision"]
 
 [models."anthropic/claude-opus-4.8"]
 name = "Claude Opus 4.8 (via OpenRouter)"
@@ -413,3 +458,16 @@ tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+
+# OpenRouter serves Fable 5.1 under a dotted slug at Anthropic's list price,
+# including Fable 5.1's $0.25 cache-read rate.
+[models."anthropic/claude-fable-5.1"]
+name = "Claude Fable 5.1 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+released = "2026-09-01"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]

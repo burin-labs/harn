@@ -4,7 +4,7 @@
 
 [qc_defaults]
 anthropic = "claude-haiku-4-5-20251001"
-openai = "gpt-5.6-luna"
+openai = "gpt-6-luna"
 openrouter = "google/gemini-2.5-flash"
 ollama = "llama3.2"
 # `local` previously pointed at gpt-4o — a hosted (and now sunset)

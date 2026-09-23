@@ -52,7 +52,7 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(to_string(receipt.assets[0]?.size_bytes ?? 0))
   const calls = harness.testing.http_mock_calls()
   harness.stdio.log(to_string(len(calls)))
-  harness.stdio.log(to_string(contains(calls[0]?.body ?? "", "gpt-5.6-sol")))
+  harness.stdio.log(to_string(contains(calls[0]?.body ?? "", "gpt-6-sol")))
   harness.stdio.log(to_string(contains(calls[0]?.body ?? "", "image_generation")))
   const malformed = model_job_run_result(harness, backend, request + {id: "request-2"}, options)
   harness.stdio.log(to_string(is_err(malformed)))
