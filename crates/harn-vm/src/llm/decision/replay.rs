@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::testbench::tape::{EventTape, TapeHeader, TapeRecordKind, TapeRecorder};
 use crate::VmError;
@@ -26,7 +27,41 @@ struct Recording {
 enum Mode {
     Record(TapeRecorder),
     Replay(VecDeque<Recording>),
+    Fixtures(VecDeque<Recording>),
     Cache(BTreeMap<String, Recording>),
+}
+
+/// A test-owned answer is explicit about the selected arm and its claimed
+/// confidence. It is projected through the same question validator as a model
+/// report rather than being trusted as a finished outcome.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FixtureAnswer {
+    Boolean {
+        verdict: bool,
+        confidence: f64,
+        evidence: String,
+    },
+    Choice {
+        choice: String,
+        confidence: f64,
+        evidence: String,
+    },
+    Score {
+        level: String,
+        confidence: f64,
+        evidence: String,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvaluationFixture {
+    pub site_id: String,
+    pub state: Value,
+    pub questions: Value,
+    pub policy: Value,
+    pub answers: BTreeMap<String, FixtureAnswer>,
 }
 
 /// An explicit scope. Replay never falls back to live transport; cache reuse
@@ -35,6 +70,17 @@ enum Mode {
 pub struct EvaluationReplayScope(Arc<Mutex<Mode>>, Arc<Mutex<Option<String>>>);
 
 impl EvaluationReplayScope {
+    pub fn fixtures(fixtures: Vec<EvaluationFixture>) -> Result<Self, VmError> {
+        let records = fixtures
+            .into_iter()
+            .map(fixture_recording)
+            .collect::<Result<VecDeque<_>, _>>()?;
+        Ok(Self(
+            Arc::new(Mutex::new(Mode::Fixtures(records))),
+            Arc::default(),
+        ))
+    }
+
     pub fn record() -> Self {
         Self(
             Arc::new(Mutex::new(Mode::Record(TapeRecorder::new()))),
@@ -68,6 +114,9 @@ impl EvaluationReplayScope {
             if &recorded.receipt.evaluation_id != request_digest {
                 return Err(error("record request digest mismatch"));
             }
+            if recorded.receipt.source != EvaluationSource::Live {
+                return Err(error("tape record must retain an original live evaluation"));
+            }
             validate(&recorded)?;
             records.push_back(recorded);
         }
@@ -88,11 +137,13 @@ impl EvaluationReplayScope {
                 None,
                 vec![],
             )))),
-            Mode::Replay(records) if !records.is_empty() => Err(error(format!(
-                "{} unconsumed record(s); next site `{}`",
-                records.len(),
-                records[0].request.site_id,
-            ))),
+            Mode::Replay(records) | Mode::Fixtures(records) if !records.is_empty() => {
+                Err(error(format!(
+                    "{} unconsumed record(s); next site `{}`",
+                    records.len(),
+                    records[0].request.site_id,
+                )))
+            }
             _ => Ok(None),
         }
     }
@@ -112,6 +163,127 @@ fn key(request: &EvaluationRequest) -> Result<String, VmError> {
         route.as_ref(),
     );
     Ok(super::identity::request_id(&site, &identity))
+}
+
+fn fixture_recording(fixture: EvaluationFixture) -> Result<Recording, VmError> {
+    let request = EvaluationRequest {
+        site_id: fixture.site_id,
+        state: fixture.state,
+        questions: fixture.questions,
+        policy: fixture.policy,
+    };
+    let (site, evaluation) = Evaluation::from_arguments(&request.arguments())?;
+    let route = super::resolve_route(&evaluation.policy.provider, &evaluation.policy.model)
+        .ok_or_else(|| {
+            error(format!(
+                "fixture site `{site}` has no decision-capable route"
+            ))
+        })?;
+    evaluation.questions.admit(&route).map_err(|refusal| {
+        error(format!(
+            "fixture site `{site}` question `{}` is invalid: {}",
+            refusal.question,
+            refusal.reason.as_str()
+        ))
+    })?;
+    if fixture.answers.len() != evaluation.questions.questions.len() {
+        return Err(error(format!(
+            "fixture site `{site}` declares {} answers for {} questions",
+            fixture.answers.len(),
+            evaluation.questions.questions.len()
+        )));
+    }
+    let mut answers = Vec::with_capacity(fixture.answers.len());
+    for question in &evaluation.questions.questions {
+        let declared = fixture.answers.get(&question.id).ok_or_else(|| {
+            error(format!(
+                "fixture site `{site}` has no answer for question `{}`",
+                question.id
+            ))
+        })?;
+        let (selection, confidence, evidence) = match declared {
+            FixtureAnswer::Boolean {
+                verdict,
+                confidence,
+                evidence,
+            } => (ReportedSelection::Boolean(*verdict), *confidence, evidence),
+            FixtureAnswer::Choice {
+                choice,
+                confidence,
+                evidence,
+            } => (
+                ReportedSelection::Choice(choice.clone()),
+                *confidence,
+                evidence,
+            ),
+            FixtureAnswer::Score {
+                level,
+                confidence,
+                evidence,
+            } => (
+                ReportedSelection::Score(level.clone()),
+                *confidence,
+                evidence,
+            ),
+        };
+        let answer = Answer::project(
+            question,
+            &RawAnswer::ModelReported {
+                selection,
+                confidence,
+                evidence: Some(evidence.clone()),
+            },
+            ConfidenceProvenance::ModelReported,
+        )
+        .map_err(|rejection| {
+            error(format!(
+                "fixture site `{site}` question `{}`: {}",
+                rejection.question_id, rejection.diagnostic
+            ))
+        })?;
+        answers.push(answer);
+    }
+    let identity = super::identity::request_identity(
+        &evaluation.state,
+        &evaluation.questions,
+        &evaluation.policy,
+        Some(&route),
+    );
+    let evaluation_id = super::identity::request_id(&site, &identity);
+    let mut receipt = EvaluationReceipt::not_dispatched(
+        evaluation_id,
+        site,
+        identity,
+        evaluation.policy.provider.clone(),
+        evaluation.policy.model.clone(),
+        &evaluation.questions,
+        "answered",
+        0,
+    );
+    receipt.source = EvaluationSource::Fixture;
+    receipt.input_tokens = Some(0);
+    receipt.output_tokens = Some(0);
+    receipt.cost_usd = Some(0.0);
+    receipt.budget_charge_usd = Some(0.0);
+    receipt.record_answers(&answers);
+    let reference = receipt.reference();
+    let outcome = if answers
+        .iter()
+        .all(|answer| answer.meets(evaluation.policy.threshold))
+    {
+        super::outcome::answered(&reference, &answers)
+    } else {
+        super::outcome::low_confidence(&reference, &answers, evaluation.policy.threshold)
+    };
+    receipt.outcome_kind = outcome.kind.into();
+    let recording = Recording {
+        request,
+        outcome: crate::llm::helpers::vm_value_to_json(&outcome.into_value()),
+        answers,
+        receipt,
+    };
+    validate(&recording)?;
+    Ok(recording)
 }
 
 type ReusedEvaluation = (Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt);
@@ -151,6 +323,12 @@ fn lookup_inner(
                 })?;
                 (recorded, EvaluationSource::Tape)
             }
+            Mode::Fixtures(records) => {
+                let recorded = records.pop_front().ok_or_else(|| {
+                    error(format!("missing fixture for site `{}`", request.site_id))
+                })?;
+                (recorded, EvaluationSource::Fixture)
+            }
         }
     };
     let verified = verify_receipt(request, &recorded.receipt)?;
@@ -163,7 +341,7 @@ fn lookup_inner(
     let (_, evaluation) = Evaluation::from_arguments(&request.arguments())?;
     let mut receipt = recorded.receipt.clone();
     receipt.invocation_id = Some(ctx.evaluation_invocation_id());
-    receipt.reused_from = Some(Box::new(recorded.receipt));
+    receipt.reused_from = (source != EvaluationSource::Fixture).then(|| Box::new(recorded.receipt));
     receipt.source = source;
     receipt.physical_attempts = 0;
     receipt.input_tokens = Some(0);
@@ -238,8 +416,8 @@ pub(super) fn record(
 }
 
 fn validate(record: &Recording) -> Result<(), VmError> {
-    if record.receipt.source != EvaluationSource::Live || record.receipt.reused_from.is_some() {
-        return Err(error("record must retain an original live evaluation"));
+    if record.receipt.reused_from.is_some() {
+        return Err(error("record cannot reuse another receipt"));
     }
     if !verify_receipt(&record.request, &record.receipt)?.verified {
         return Err(error("recorded request does not match receipt"));

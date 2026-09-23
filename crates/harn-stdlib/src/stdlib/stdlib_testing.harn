@@ -34,6 +34,7 @@
  * say.
  */
 import { unified_diff } from "std/diff"
+import { EvaluationPolicy, EvaluationQuestion } from "std/predicate"
 
 pub type NullaryBody<out T> = fn() -> T
 
@@ -364,6 +365,41 @@ pub fn with_capability_fixtures<T>(
     testing.pop_scope()
     throw e
   }
+}
+
+pub type EvaluationFixtureAnswer = {
+  kind: "boolean",
+  verdict: bool,
+  confidence: float,
+  evidence: string,
+} \
+  | {kind: "choice", choice: string, confidence: float, evidence: string} \
+  | {kind: "score", level: string, confidence: float, evidence: string}
+
+pub type EvaluationFixture = {
+  site_id: string,
+  state: unknown,
+  questions: dict<string, EvaluationQuestion>,
+  policy: EvaluationPolicy,
+  answers: dict<string, EvaluationFixtureAnswer>,
+}
+
+/**
+ * Run a body with exact, typed decision answers and no provider fallback.
+ * Each fixture binds site, state, questions, route, policy, and answer labels.
+ * Missing, changed, or unconsumed occurrences fail even when the body catches
+ * the mismatch. The answers pass through the evaluator's ordinary projection
+ * and threshold checks; receipts name `fixture` as their source and zero spend.
+ *
+ * @effects: []
+ * @errors: [validation, replay_mismatch]
+ */
+pub fn with_evaluation_fixtures<T>(
+  harness: Harness,
+  fixtures: list<EvaluationFixture>,
+  body: ScopedBody<T>,
+) -> T {
+  return __testing_with_evaluation_fixtures(harness, fixtures, body)
 }
 
 /**
