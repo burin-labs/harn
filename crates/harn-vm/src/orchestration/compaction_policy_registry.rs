@@ -419,13 +419,15 @@ pub fn parse_policy_dict(
     builtin: &str,
     dict: &crate::value::DictMap,
 ) -> Result<CompactionPolicyDeclaration, String> {
-    let mut policy = CompactionPolicyDeclaration::default();
-    policy.classification = dict
-        .get("classify")
-        .map(super::ClassificationConfig::from_value)
-        .transpose()
-        .map_err(|error| format!("{builtin}: {}", display_vm_error(&error)))?
-        .map(Box::new);
+    let mut policy = CompactionPolicyDeclaration {
+        classification: dict
+            .get("classify")
+            .map(super::ClassificationConfig::from_value)
+            .transpose()
+            .map_err(|error| format!("{builtin}: {}", display_vm_error(&error)))?
+            .map(Box::new),
+        ..Default::default()
+    };
     if let Some(value) = dict.get("strategy") {
         match value {
             VmValue::String(text) => {
