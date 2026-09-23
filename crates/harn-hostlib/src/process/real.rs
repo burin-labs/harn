@@ -171,6 +171,9 @@ impl ProcessSpawner for RealSpawner {
 pub(crate) struct PreparedSpawn {
     pub(crate) command: Command,
     pub(crate) cleanup_token: String,
+    /// Read only by the Unix process-owner guardian; Windows contains a
+    /// process tree with a Job Object and never re-creates the command.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) env_cleared: bool,
 }
 
