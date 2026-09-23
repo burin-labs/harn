@@ -178,6 +178,26 @@ pub fn resolve_secret_ref_to_string(raw: &str) -> Result<Option<String>, SecretE
     Ok(Some(rendered))
 }
 
+/// Whether the secret a reference names exists, without reading its value.
+///
+/// `Ok(None)` when `raw` is not a secret reference at all. Status and
+/// availability questions use this rather than
+/// [`resolve_secret_ref_to_string`]: on macOS reading a value can raise a
+/// Keychain dialog, and asking whether a credential exists should never do
+/// that.
+pub fn secret_ref_is_present(raw: &str) -> Result<Option<bool>, SecretError> {
+    let Some(id) = parse_secret_ref(raw)? else {
+        return Ok(None);
+    };
+    let present = if let Ok(provider) = ACTIVE_SECRET_PROVIDER.try_with(Arc::clone) {
+        futures::executor::block_on(provider.contains(&id))?
+    } else {
+        let chain = configured_secret_chain()?;
+        futures::executor::block_on(chain.contains(&id))?
+    };
+    Ok(Some(present))
+}
+
 /// Resolve secret references through `provider` for one async operation.
 ///
 /// Hosts scope the complete session execution so model discovery, routing,
@@ -385,6 +405,13 @@ pub enum SecretError {
     NoProviders {
         namespace: String,
     },
+    /// Reading the secret needs a person to approve an operating-system
+    /// dialog (a macOS Keychain access prompt), and this process does not
+    /// show one. Distinct from absence: the credential may well be there.
+    NeedsUserApproval {
+        provider: String,
+        id: SecretId,
+    },
     All(Vec<SecretError>),
 }
 
@@ -400,6 +427,17 @@ impl SecretError {
         match self {
             Self::NotFound { .. } => true,
             Self::All(errors) => !errors.is_empty() && errors.iter().all(Self::is_not_found),
+            _ => false,
+        }
+    }
+
+    /// Whether answering needs a person at an operating-system dialog that
+    /// this process will not show. A chain reports it when any provider did,
+    /// because that provider is the one that may hold the credential.
+    pub fn needs_user_approval(&self) -> bool {
+        match self {
+            Self::NeedsUserApproval { .. } => true,
+            Self::All(errors) => errors.iter().any(Self::needs_user_approval),
             _ => false,
         }
     }
@@ -429,6 +467,12 @@ impl fmt::Display for SecretError {
                     "no secret providers configured for namespace '{namespace}'"
                 )
             }
+            Self::NeedsUserApproval { provider, id } => write!(
+                f,
+                "{provider}: reading secret '{id}' needs approval in a system dialog, which \
+                 this non-interactive process does not show; provide the credential through \
+                 the environment or set {SECRET_PROVIDER_CHAIN_ENV}=env"
+            ),
             Self::All(errors) => {
                 let rendered = errors
                     .iter()

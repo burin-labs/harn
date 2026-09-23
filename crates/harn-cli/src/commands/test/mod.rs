@@ -46,6 +46,13 @@ pub(crate) async fn run_command(mut args: TestArgs) {
     // apart, and it cannot once the two have been merged.
     let plan_conflict_was_typed = plan_conflicting_option_was_typed(&args);
     resolve_environment_defaults(&mut args);
+    // A test run never reaches the person's login keychain unless it asks to.
+    // Every rebuilt binary is a new Keychain code identity, so a test that fell
+    // through to the default `env,keyring` chain raised an access dialog on
+    // every build. Set before any test or supervised child starts, and held
+    // for the whole command.
+    let _secret_chain_guard =
+        ScopedEnvVar::set_if_unset(harn_vm::secrets::SECRET_PROVIDER_CHAIN_ENV, "env");
 
     #[cfg(feature = "hostlib")]
     if supervisor::requires_supervision(&args) && !supervisor::is_payload() {
