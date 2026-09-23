@@ -131,11 +131,18 @@ fn contract_schema() {
   )
 }
 
+/**
+ * The warm record names the one build that can back a residual audit.
+ *
+ * The residual lanes receive the warmed binary as an explicit HARN_BIN, and
+ * the freshness gates refuse one without a build receipt. Only the owning
+ * locked warm writes that receipt; a raw `cargo build` does not.
+ */
 fn warm_schema() {
   return schema_closed_object(
     {
       head_sha: sha_schema(),
-      command: schema_literal("cargo build -p harn-cli --bin harn --locked"),
+      command: schema_literal("HARN_BIN= HARN_BIN_NO_BUILD=0 ./scripts/ci_warm_harn_bin.sh"),
       binary_sha256: schema_string() + {pattern: "^[0-9a-f]{64}$"},
       status: schema_literal("success"),
     },

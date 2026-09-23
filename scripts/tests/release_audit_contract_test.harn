@@ -99,7 +99,7 @@ fn receipt() {
     join: {started_at_ms: 100, completed_at_ms: 1000, duration_ms: 900, critical_path: "windows"},
     warm: {
       head_sha: SHA,
-      command: "cargo build -p harn-cli --bin harn --locked",
+      command: "HARN_BIN= HARN_BIN_NO_BUILD=0 ./scripts/ci_warm_harn_bin.sh",
       binary_sha256: BINARY_SHA,
       status: "success",
     },
@@ -194,6 +194,20 @@ pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task: 
   )
   assert_eq(
     release_audit_receipt_plan(cfg, {...receipt(), extra: true}, SHA, BINARY_SHA).reason,
+    "invalid_receipt",
+  )
+  // A raw Cargo warm leaves no freshness receipt, so its binary cannot back
+  // the residual lanes and the receipt falls back to the full audit.
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {
+        ...receipt(),
+        warm: {...receipt().warm, command: "cargo build -p harn-cli --bin harn --locked"},
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
     "invalid_receipt",
   )
   // The certifier records how it obtained each run. A reused run is only as
