@@ -10,4 +10,4 @@ if [[ $# -ne 2 ]]; then
   exit 2
 fi
 
-harn_snapshot_binary "$1" "$2"
+harn_snapshot_binary "$1" "$2" harn certify

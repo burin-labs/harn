@@ -718,6 +718,7 @@ test-pr-gate-scripts:
 	./scripts/tests/windows_storage_budget_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
+	./scripts/tests/harn_bin_snapshot_provenance_test.sh
 	./scripts/tests/harn_bin_recovery_batch_test.sh
 	./scripts/tests/package_verify_bootstrap_test.sh
 	./scripts/tests/verify_crate_dependency_resolution_test.sh

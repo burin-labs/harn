@@ -33,7 +33,7 @@ harn_source_gate_binary_identity() {
 
   harn_require_executable_bin "$bin" || return $?
   receipt="$(harn_binary_freshness_receipt_path "$bin")" || return $?
-  if [[ -r "$receipt" ]]; then
+  if [[ -r "$receipt" ]] || [[ -r "$(harn_binary_snapshot_provenance_path "$bin")" ]]; then
     harn_verified_build_freshness_id "$bin"
     return
   fi

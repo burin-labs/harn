@@ -775,7 +775,7 @@ cmd_audit() {
   fi
   local stable_bin_dir stable_harn_bin
   stable_bin_dir="$tmp/harn-bin"
-  stable_harn_bin="$(harn_snapshot_binary "$cargo_harn_bin" "$stable_bin_dir")"
+  stable_harn_bin="$(harn_snapshot_binary "$cargo_harn_bin" "$stable_bin_dir" harn certify)"
   HARN_BIN="$stable_harn_bin"
   HARN_CONFORMANCE_HARN_BIN="$stable_harn_bin"
   export HARN_BIN HARN_CONFORMANCE_HARN_BIN
