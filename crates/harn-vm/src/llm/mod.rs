@@ -66,6 +66,8 @@ mod cost_budget_tests;
 pub(crate) mod cost_context;
 #[cfg(test)]
 mod cost_context_tests;
+#[cfg(test)]
+mod cost_rate_card_tests;
 pub(crate) mod cost_route;
 #[cfg(test)]
 mod cost_route_pricing_tests;

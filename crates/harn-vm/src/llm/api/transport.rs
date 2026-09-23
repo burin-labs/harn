@@ -335,6 +335,11 @@ pub(crate) async fn vm_call_llm_api_with_body(
     dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
     let started = Instant::now();
+    // Absolute counterpart of `started`. `Instant` is monotonic and carries no
+    // date, and settlement needs a date to pick a promotion or a time-of-day
+    // window, so the wall reading is taken here at the same origin rather than
+    // re-read after the response lands.
+    let started_at_ms = crate::stdlib::clock::now_wall_ms_unrecorded();
     // Same origin as `started`, in `tokio` form so the first-frame stamp is
     // subtractable from `client_wall_ms` and so virtual-time tests can advance
     // it. Both therefore span the whole call including any retried attempts.
@@ -375,6 +380,20 @@ pub(crate) async fn vm_call_llm_api_with_body(
     // different fact from "we never asked".
     if let Ok(result) = result.as_mut() {
         result.telemetry.data_controls = Some(Box::new(data_controls_receipt));
+    }
+    if let Err(VmError::Thrown(VmValue::Dict(fields))) = &mut result {
+        if let Some(VmValue::Dict(receipt)) = fields.get("provider_usage") {
+            let mut receipt = (**receipt).clone();
+            receipt.insert("started_at_ms".into(), VmValue::Int(started_at_ms));
+            receipt.insert(
+                "prompt_cache_ttl".into(),
+                opts.prompt_cache_ttl
+                    .map_or(VmValue::Nil, |ttl| VmValue::String(ttl.as_str().into())),
+            );
+            let mut updated = (**fields).clone();
+            updated.insert("provider_usage".into(), VmValue::dict(receipt));
+            *fields = updated.into();
+        }
     }
     let mut result = result?;
     crate::llm::managed_supply::apply_terminal_receipt(&mut result, &opts.provider, &opts.model)?;
@@ -419,6 +438,13 @@ pub(crate) async fn vm_call_llm_api_with_body(
     // dashboards can decompose total latency end-to-end.
     if result.telemetry.client_wall_ms.is_none() {
         result.telemetry.client_wall_ms = Some(elapsed_ms(started));
+    }
+    if result.telemetry.started_at_ms.is_none() {
+        result.telemetry.started_at_ms = Some(started_at_ms);
+    }
+    if result.telemetry.prompt_cache_ttl.is_none() {
+        result.telemetry.prompt_cache_ttl =
+            opts.prompt_cache_ttl.map(|ttl| ttl.as_str().to_string());
     }
     if result.telemetry.source.is_empty() {
         result.telemetry.source = telemetry_source::UNKNOWN.to_string();

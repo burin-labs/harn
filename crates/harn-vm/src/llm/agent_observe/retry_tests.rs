@@ -429,7 +429,7 @@ fn failed_snapshot_write_is_retried_before_the_next_reference() {
 // next-turn payload is unchanged.
 #[test]
 fn response_record_exposes_text_parsed_calls_without_touching_history() {
-    use super::super::api::{vm_build_llm_result, LlmResult, ProviderTelemetry};
+    use super::super::api::{vm_build_llm_result, LlmResult};
     use crate::event_log::{
         install_active_event_log, reset_active_event_log, AnyEventLog, EventLog, SqliteEventLog,
         Topic,
@@ -493,7 +493,7 @@ summary: Listed the workspace\n\
         stop_reason: Some("stop".to_string()),
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
     };
     let tools = run_tool_registry();
     futures::executor::block_on(crate::llm::api::ensure_llm_text_projection(

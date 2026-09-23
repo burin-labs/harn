@@ -424,7 +424,7 @@ fn parse_raw_generate_json(
             .and_then(|value| value.as_str())
             .map(str::to_string),
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 
@@ -523,7 +523,7 @@ async fn parse_raw_generate_stream(
         thinking_summary: None,
         stop_reason,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 

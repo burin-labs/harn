@@ -1,4 +1,4 @@
-use crate::llm::api::{DeltaSender, LlmResult, ProviderTelemetry};
+use crate::llm::api::{DeltaSender, LlmResult};
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
@@ -95,7 +95,7 @@ pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
         stop_reason: None,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
     }
 }
 

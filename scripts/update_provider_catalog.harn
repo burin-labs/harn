@@ -166,7 +166,7 @@ fn __openrouter_mapper(payload: dict) {
     const pricing_value = if len(pricing_dict) == 0 {
       nil
     } else {
-      pricing_dict
+      openrouter_scheduled_pricing(pricing ?? {}, pricing_dict)
     }
     const entry = {
       provider: record?.provider ?? "openrouter",

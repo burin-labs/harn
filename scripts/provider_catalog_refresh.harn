@@ -18,6 +18,12 @@ const PRICING_KEYS = [
   "output_per_mtok",
   "cache_read_per_mtok",
   "cache_write_per_mtok",
+  "cache_write_1h_per_mtok",
+  "input_token_bands",
+  "promotions",
+  "schedules",
+  "hosted_tool_fees",
+  "modality_rates",
 ]
 
 const CAPABILITY_KEYS = [
@@ -94,7 +100,7 @@ fn __merge_field(
     return {value: incoming_value, conflict: nil}
   }
   if base_value == incoming_value
-    || (rate && __normalized_rate(base_value) == __normalized_rate(incoming_value)) {
+    || (rate && __pricing_values_equal(base_value, incoming_value)) {
     return {value: base_value, conflict: nil}
   }
   if base_owner == "provider" && incoming_owner != "provider" {
@@ -262,6 +268,40 @@ fn __normalized_rate(value: any) -> float {
   return round(to_float(value) * 1000000.0) / 1000000.0
 }
 
+fn __pricing_values_equal(left: any, right: any) -> bool {
+  const lt = type_of(left)
+  const rt = type_of(right)
+  if contains(["int", "float", "decimal"], lt) && contains(["int", "float", "decimal"], rt) {
+    return __normalized_rate(left) == __normalized_rate(right)
+  }
+  if lt != rt {
+    return false
+  }
+  if lt == "dict" {
+    if keys(left).sorted() != keys(right).sorted() {
+      return false
+    }
+    for key in keys(left) {
+      if !__pricing_values_equal(left[key], right[key]) {
+        return false
+      }
+    }
+    return true
+  }
+  if lt == "list" {
+    if len(left) != len(right) {
+      return false
+    }
+    for i in range(len(left)) {
+      if !__pricing_values_equal(left[i], right[i]) {
+        return false
+      }
+    }
+    return true
+  }
+  return left == right
+}
+
 fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dict> {
   let changes: list<dict> = []
   for key in PRICING_KEYS {
@@ -272,7 +312,7 @@ fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dic
     }
     if cat == nil {
       changes = changes + [{key: key, from: nil, to: obs}]
-    } else if obs != nil && __normalized_rate(cat) != __normalized_rate(obs) {
+    } else if obs != nil && !__pricing_values_equal(cat, obs) {
       changes = changes + [{key: key, from: cat, to: obs}]
     }
   }
@@ -306,17 +346,6 @@ fn __effective_catalog_pricing(pricing: dict?, observed_at: string?) -> dict? {
   return effective
 }
 
-fn __dict_to_pairs(value: any) -> list<dict> {
-  if type_of(value) != "dict" {
-    return []
-  }
-  let pairs: list<dict> = []
-  for k in keys(value) {
-    pairs = pairs + [{key: k, value: value[k]}]
-  }
-  return pairs.sorted_by({ pair -> pair.key })
-}
-
 fn __values_equal(left: any, right: any) {
   const lt = type_of(left)
   const rt = type_of(right)
@@ -337,7 +366,15 @@ fn __values_equal(left: any, right: any) {
     return true
   }
   if lt == "dict" {
-    return __values_equal(__dict_to_pairs(left), __dict_to_pairs(right))
+    if keys(left).sorted() != keys(right).sorted() {
+      return false
+    }
+    for key in keys(left) {
+      if !__values_equal(left[key], right[key]) {
+        return false
+      }
+    }
+    return true
   }
   return left == right
 }
@@ -455,6 +492,11 @@ fn __format_currency(value: float?) -> string {
 }
 
 fn __format_change_line(change: dict) -> string {
+  if type_of(change.from) == "dict" || type_of(change.from) == "list"
+    || type_of(change.to) == "dict"
+    || type_of(change.to) == "list" {
+    return __format_capability_change(change)
+  }
   return "  - " + change.key + ": " + __format_currency(change.from) + " → "
     + __format_currency(change.to)
 }
@@ -641,6 +683,25 @@ fn __toml_string(value: any) -> string {
   return "\"" + __toml_escape(to_string(value)) + "\""
 }
 
+fn __toml_pricing_value(value: any) -> string {
+  if type_of(value) == "string" {
+    return __toml_string(value)
+  }
+  if type_of(value) == "list" {
+    return "[" + join(value.map({ item -> __toml_pricing_value(item) }), ", ") + "]"
+  }
+  if type_of(value) == "dict" {
+    let fields = []
+    for key in keys(value).sorted() {
+      if value[key] != nil {
+        fields = fields + [__toml_string(key) + " = " + __toml_pricing_value(value[key])]
+      }
+    }
+    return "{ " + join(fields, ", ") + " }"
+  }
+  return to_string(value)
+}
+
 fn __toml_list_of_strings(items: string | bytes | list | dict | set | range | nil) -> string {
   if len(items) == 0 {
     return "[]"
@@ -672,7 +733,7 @@ fn __format_model_section(obs: dict) -> list<string> {
     for key in PRICING_KEYS {
       const value = obs.pricing?.[key]
       if value != nil {
-        lines = lines + [key + " = " + to_string(value)]
+        lines = lines + [key + " = " + __toml_pricing_value(value)]
       }
     }
   }

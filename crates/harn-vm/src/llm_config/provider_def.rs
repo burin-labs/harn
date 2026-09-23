@@ -98,6 +98,7 @@ pub struct ProviderDef {
     pub cost_per_1k_in: Option<f64>,
     /// Provider/catalog pricing in USD per 1k output tokens.
     pub cost_per_1k_out: Option<f64>,
+    pub platform_fee_percent: Option<f64>,
     /// Observed or configured p50 latency in milliseconds.
     pub latency_p50_ms: Option<u64>,
     /// Optional provider-level serving performance observations.
@@ -190,6 +191,8 @@ struct ProviderDefWire {
     #[serde(default)]
     cost_per_1k_out: Option<f64>,
     #[serde(default)]
+    platform_fee_percent: Option<f64>,
+    #[serde(default)]
     latency_p50_ms: Option<u64>,
     #[serde(default)]
     performance: Option<ServingPerformanceDef>,
@@ -239,6 +242,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             rate_limits: wire.rate_limits,
             cost_per_1k_in: wire.cost_per_1k_in,
             cost_per_1k_out: wire.cost_per_1k_out,
+            platform_fee_percent: wire.platform_fee_percent,
             latency_p50_ms: wire.latency_p50_ms,
             performance: wire.performance,
             auth_style_explicit,
@@ -283,6 +287,7 @@ impl Default for ProviderDef {
             rate_limits: None,
             cost_per_1k_in: None,
             cost_per_1k_out: None,
+            platform_fee_percent: None,
             latency_p50_ms: None,
             performance: None,
             auth_style_explicit: false,
@@ -344,6 +349,10 @@ impl ProviderDef {
         merge_option(&mut self.rate_limits, &overlay.rate_limits);
         merge_option(&mut self.cost_per_1k_in, &overlay.cost_per_1k_in);
         merge_option(&mut self.cost_per_1k_out, &overlay.cost_per_1k_out);
+        merge_option(
+            &mut self.platform_fee_percent,
+            &overlay.platform_fee_percent,
+        );
         merge_option(&mut self.latency_p50_ms, &overlay.latency_p50_ms);
         merge_option(&mut self.performance, &overlay.performance);
     }

@@ -1,6 +1,123 @@
 import "../provider_catalog_notice/workflow.harn"
+import {
+  build_drift,
+  normalize_observations,
+  observation,
+  render_candidate_toml,
+} from "../provider_catalog_refresh.harn"
+import { openrouter_scheduled_pricing } from "../provider_catalog_sources.harn"
 
 const FIXTURE_DIR = "../provider_catalog_notice_fixtures"
+
+@test
+pipeline test_pricing_structures_survive_comparison_and_candidate_roundtrip(
+  harness: Harness,
+  task: unknown,
+) {
+  const window = {
+    id: "offpeak",
+    days: ["mon"],
+    start: "04:00",
+    end: "06:00",
+    utc_offset: "+00:00",
+    input_multiplier: 0.5,
+    output_multiplier: 0.5,
+    source_url: "https://example.test/pricing",
+  }
+  const pricing = {
+    input_per_mtok: 2.0,
+    output_per_mtok: 6.0,
+    schedules: [window],
+    hosted_tool_fees: {web_search: {per_1k_calls: 10.0, source_url: "https://example.test/search"}},
+    modality_rates: {audio_input_per_mtok: 32.0},
+  }
+  const obs = observation(
+    "anthropic",
+    "example",
+    {pricing: pricing},
+    {
+      source_url: "https://example.test/pricing",
+      source_owner: "provider",
+      observed_at: "2026-09-22T00:00:00Z",
+    },
+  )
+  const normalized = normalize_observations(
+    [
+      obs,
+      obs + {pricing: pricing + {schedules: [window + {input_multiplier: 0.5000000000000001}]}},
+    ],
+  )
+  assert_eq(len(normalized.conflicts), 0)
+  assert_eq(normalized.observations[0].pricing, pricing)
+  const catalog = {models: [{provider: "anthropic", id: "example", pricing: pricing}]}
+  assert_eq(len(build_drift(normalized.observations, catalog).changed), 0)
+  const changed = obs + {pricing: pricing + {schedules: [window + {input_multiplier: 0.6}]}}
+  const drift = build_drift([changed], catalog)
+  assert_eq(drift.changed[0].pricing_changes[0].key, "schedules")
+  const candidate = schema_expect(
+    toml_parse(render_candidate_toml(drift, {generated_at: "fixture", run_mode: "fixtures"})),
+    {type: "object", required: ["models"], properties: {models: {type: "object"}}},
+  )
+  assert_eq(candidate.models.example.pricing, changed.pricing)
+}
+
+@test
+pipeline test_scheduled_pricing_normalizes_peak_and_weekend(harness: Harness, task: unknown) {
+  const pricing = openrouter_scheduled_pricing(
+    {
+      overrides: [
+        {
+          utc_days: ["monday"],
+          utc_start: 100,
+          utc_end: 400,
+          prompt: "0.000002",
+          completion: "0.000006",
+        },
+        {utc_days: ["saturday", "sunday"], prompt: "0.000001", completion: "0.000003"},
+      ],
+    },
+    {input_per_mtok: 1.0, output_per_mtok: 3.0},
+  )
+  assert_eq(pricing.input_per_mtok, 2.0)
+  assert_eq(pricing.output_per_mtok, 6.0)
+  assert_eq(len(pricing.schedules), 8)
+  const saturday = pricing.schedules.filter({ row -> row.days == ["sat"] })
+  assert_eq(len(saturday), 1)
+  assert_eq(saturday[0].start, "00:00")
+  assert_eq(saturday[0].end, "24:00")
+  assert_eq(saturday[0].input_multiplier, 0.5)
+}
+
+@test
+pipeline test_scheduled_pricing_rejects_overlapping_wire_windows(harness: Harness, task: unknown) {
+  let rejected = false
+  try {
+    openrouter_scheduled_pricing(
+      {
+        overrides: [
+          {
+            utc_days: ["monday"],
+            utc_start: 100,
+            utc_end: 400,
+            prompt: "0.000002",
+            completion: "0.000006",
+          },
+          {
+            utc_days: ["monday"],
+            utc_start: 300,
+            utc_end: 500,
+            prompt: "0.000001",
+            completion: "0.000003",
+          },
+        ],
+      },
+      {input_per_mtok: 1.0, output_per_mtok: 3.0},
+    )
+  } catch (error) {
+    rejected = contains(to_string(error), "Overlapping")
+  }
+  assert(rejected)
+}
 
 const BASE_CATALOG = {
   providers: [

@@ -255,6 +255,9 @@ path = "/models"
 
 [providers.openrouter]
 display_name = "OpenRouter"
+# Credit-purchase fee allocated to usage, excluding the $0.80 minimum.
+# https://openrouter.ai/docs/faq#how-much-does-openrouter-cost
+platform_fee_percent = 5.5
 features = ["model_proxy"]
 cache_usage_accounting = true
 stream_usage_accounting = true
@@ -2736,6 +2739,14 @@ coordinates = { variant = "astra", effort = "xhigh" }
 # beside each section; edit the literal here and the change shows up in
 # `git blame`.
 
+# Cache writes have two rates: `cache_write_per_mtok` is the five-minute write
+# at 1.25x input, and `cache_write_1h_per_mtok` is the one-hour write at 2x
+# input (https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching,
+# read 2026-09-20). Harn sends `cache_control.ttl = "1h"` when a request asks
+# for it, so both rates must be here or the longer write settles at the
+# shorter rate. Claude routes served through other providers carry only the
+# five-minute rate until each passthrough card is read at its own source.
+
 # Anthropic ─ pricing pages: https://www.anthropic.com/pricing &
 # https://platform.claude.com/docs/en/about-claude/model-deprecations.
 # Verified 2026-07-02 against the provider /v1/models API and the
@@ -2750,7 +2761,7 @@ name = "Claude Haiku 3.5"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.08, cache_write_per_mtok = 1.00 }
+pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.08, cache_write_per_mtok = 1.00, cache_write_1h_per_mtok = 1.60 }
 deprecated = true
 deprecation_note = "Retired 2026-02-19 per Anthropic deprecations page. Use claude-haiku-4-5-20251001."
 superseded_by = "claude-haiku-4-5-20251001"
@@ -2766,7 +2777,7 @@ provider = "anthropic"
 operations = ["text_generation", "decision"]
 context_window = 200000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25, cache_write_1h_per_mtok = 2.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
@@ -2776,7 +2787,7 @@ name = "Claude Sonnet 3.5 (2024-06-20)"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00 }
 deprecated = true
 deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6."
 superseded_by = "claude-sonnet-4-6"
@@ -2791,7 +2802,7 @@ name = "Claude Sonnet 3.5 (2024-10-22)"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00 }
 deprecated = true
 deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6."
 superseded_by = "claude-sonnet-4-6"
@@ -2806,7 +2817,7 @@ name = "Claude Sonnet 4"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 deprecated = true
 deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
 tier = "frontier"
@@ -2818,7 +2829,7 @@ name = "Claude Sonnet 4.5"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 deprecated = true
 deprecation_note = "Undated compatibility selector. Anthropic's active API id is claude-sonnet-4-5-20250929; prefer that dated id or claude-sonnet-4-6."
 superseded_by = "claude-sonnet-4-5-20250929"
@@ -2834,7 +2845,7 @@ name = "Claude Sonnet 4.5"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2848,7 +2859,7 @@ provider = "anthropic"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2871,7 +2882,7 @@ provider = "anthropic"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2892,7 +2903,7 @@ provider = "openrouter"
 wire_model = "anthropic/claude-haiku-4.5"
 context_window = 200000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25, cache_write_1h_per_mtok = 2.00 }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
@@ -2901,7 +2912,7 @@ name = "Claude Fable 5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00 }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2913,7 +2924,7 @@ wire_model = "anthropic/claude-sonnet-4.6"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2924,7 +2935,7 @@ provider = "openrouter"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2934,7 +2945,7 @@ name = "Claude Opus 3"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75, cache_write_1h_per_mtok = 30.00 }
 deprecated = true
 deprecation_note = "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5-5."
 superseded_by = "claude-opus-5-5"
@@ -2946,7 +2957,7 @@ name = "Claude Opus 4"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75, cache_write_1h_per_mtok = 30.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 deprecated = true
 deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5-5."
 superseded_by = "claude-opus-5-5"
@@ -2959,7 +2970,7 @@ name = "Claude Opus 4.1"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75, cache_write_1h_per_mtok = 30.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 deprecated = true
 deprecation_note = "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5-5."
 superseded_by = "claude-opus-5-5"
@@ -2972,7 +2983,7 @@ name = "Claude Opus 4.5"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
@@ -2982,7 +2993,7 @@ name = "Claude Opus 4.6"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
@@ -2993,7 +3004,7 @@ name = "Claude Opus 4.7"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
@@ -3001,7 +3012,7 @@ strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 87.6, swe_bench_pro = 64.3 }
 # Fast mode (research preview): 6x standard pricing, ~2.5x output tok/s.
 serving_tiers = [
-  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 6.0, status = "research_preview", pricing = { input_per_mtok = 30.00, output_per_mtok = 150.00, cache_read_per_mtok = 3.00, cache_write_per_mtok = 37.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate." },
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 6.0, status = "research_preview", pricing = { input_per_mtok = 30.00, output_per_mtok = 150.00, cache_read_per_mtok = 3.00, cache_write_per_mtok = 37.50, cache_write_1h_per_mtok = 60.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate." },
 ]
 
 # Claude Opus 4.8 (released 2026-05-28) — Anthropic's most capable model
@@ -3019,7 +3030,7 @@ name = "Claude Opus 4.8"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
@@ -3028,7 +3039,7 @@ benchmarks = { swe_bench_verified = 88.6, swe_bench_pro = 69.2 }
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
 serving_tiers = [
-  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." },
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." },
 ]
 
 # Claude Opus 5 (released 2026-07-24) — superseded by Opus 5.5 and pinned by
@@ -3052,7 +3063,7 @@ name = "Claude Opus 5"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
@@ -3060,7 +3071,7 @@ strengths = ["reasoning", "coding", "long_context", "agentic"]
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
 serving_tiers = [
-  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
 ]
 
 [models."anthropic/claude-opus-5"]
@@ -3068,7 +3079,7 @@ name = "Claude Opus 5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00 }
 superseded_by = "anthropic/claude-opus-5.5"
 tier = "frontier"
 open_weight = false
@@ -3095,14 +3106,14 @@ provider = "anthropic"
 context_window = 1000000
 released = "2026-09-21"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00 }
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00, cache_write_1h_per_mtok = 8.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic", "vision"]
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
 serving_tiers = [
-  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00, cache_write_1h_per_mtok = 16.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
 ]
 
 # OpenRouter serves Opus 5.5 under a dotted slug at Anthropic's list price.
@@ -3122,7 +3133,7 @@ name = "Claude Opus 4.8 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00 }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -3148,7 +3159,7 @@ name = "Claude Fable 5"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -3184,7 +3195,7 @@ name = "Claude Fable 5.1"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 12.50 }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -3244,7 +3255,7 @@ logical_model = "gpt-6-astra"
 equivalence_group = "gpt-6-astra"
 released = "2026-09-03"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3274,7 +3285,7 @@ logical_model = "gpt-6-sol"
 equivalence_group = "gpt-6-sol"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "mid"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3296,7 +3307,7 @@ logical_model = "gpt-6-luna"
 equivalence_group = "gpt-6-luna"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3326,7 +3337,7 @@ context_window = 1050000
 logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }] }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 superseded_by = "gpt-6-sol"
 tier = "frontier"
 open_weight = false
@@ -3354,7 +3365,7 @@ context_window = 1050000
 logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 superseded_by = "gpt-6-sol"
 tier = "mid"
 open_weight = false
@@ -3376,7 +3387,7 @@ context_window = 1050000
 logical_model = "gpt-5.6-luna"
 equivalence_group = "gpt-5.6-luna"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 superseded_by = "gpt-6-luna"
 tier = "small"
 open_weight = false
@@ -3405,7 +3416,7 @@ name = "GPT-5.5"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -3420,7 +3431,7 @@ name = "GPT-5.5 Pro"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -3435,7 +3446,7 @@ name = "GPT-5.4"
 provider = "openai"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -3445,7 +3456,7 @@ name = "GPT-5.4 Pro"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3458,7 +3469,7 @@ provider = "openai"
 operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
+pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
@@ -3471,7 +3482,7 @@ provider = "openai"
 operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
@@ -3484,7 +3495,7 @@ name = "GPT-5.3-Codex"
 provider = "openai"
 context_window = 400000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.75, output_per_mtok = 14.00, cache_read_per_mtok = 0.175 }
+pricing = { input_per_mtok = 1.75, output_per_mtok = 14.00, cache_read_per_mtok = 0.175, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "tool_use", "agentic"]
@@ -3682,7 +3693,7 @@ name = "Gemini 3.8 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.8-intro", starts_on = "2026-09-02", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.8-intro", starts_on = "2026-09-02", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
@@ -3700,7 +3711,7 @@ name = "Gemini 3.7 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
@@ -3719,7 +3730,7 @@ name = "Gemini 3.6 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
@@ -3736,7 +3747,7 @@ name = "Gemini 3.5 Flash-Lite"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "vision", "tool_use", "agentic"]
@@ -3753,7 +3764,7 @@ name = "Gemini 3.5 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15 }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
@@ -3772,7 +3783,7 @@ name = "Gemini 3.1 Pro (Preview)"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "vision", "agentic"]
@@ -3790,7 +3801,7 @@ provider = "gemini"
 operations = ["text_generation", "decision"]
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025 }
+pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "tool_use"]
@@ -4980,22 +4991,30 @@ strengths = ["reasoning", "coding", "tool_use", "long_context"]
 # ships; these pin a fixed build, which is what eval baselines need so a
 # silent upstream swap cannot move a measured number. Both verified serving on
 # 2026-08-15 and both returned a single clean native `message.tool_calls`.
-# On OpenRouter these snapshots price at the direct DeepSeek rate card, so
-# `deepseek-v4-pro-0813` is currently ~2.7x CHEAPER than the undated
-# `deepseek/deepseek-v4-pro` alias for identical weights.
+# On OpenRouter these snapshots price on DeepSeek's own peak/off-peak clock
+# rather than the undated alias's flat card, so which of the two is cheaper for
+# identical weights depends on the hour the call starts.
 [models."deepseek/deepseek-v4-pro-0813"]
 name = "DeepSeek V4 Pro 0813 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming", "prompt_caching"]
-# OpenRouter bills this route on a UTC clock: $0.66 / $1.98 / $0.022 per MTok
-# off peak, and exactly double during the weekday peak windows 01:00-04:00 and
-# 06:00-10:00 UTC (the `overrides` array on the model record, read 2026-09-20).
-# The rate card has no hour-of-day band — `input_token_bands` keys off prompt
-# size and `promotions` off calendar dates — so the row records the peak rate.
-# Over-recording by 2x off peak is the safe direction; the alternative
-# understates the peak, which is the error this file's header warns about.
-pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.044 }
+# OpenRouter bills this route on a UTC clock. The base card below is the
+# weekday PEAK rate (01:00-04:00 and 06:00-10:00 UTC); every other hour, and
+# all weekend, is exactly half of it. The `overrides` array on the OpenRouter
+# model record is the source, read 2026-09-20. The off-peak hours are declared
+# as `schedules` rather than folded into the base rate, so a call settles at
+# the rate the provider charged for the hour it started in.
+#
+# DeepSeek excludes Chinese public holidays from its peak hours. That calendar
+# is not modeled: a holiday that falls on a weekday still settles at the peak
+# rate, which over-records rather than under-records.
+pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.044, schedules = [
+  { id = "deepseek-offpeak-weekday-0000", days = ["mon", "tue", "wed", "thu", "fri"], start = "00:00", end = "01:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://openrouter.ai/api/v1/models", review_after = "2026-12-20", note = "Chinese public holidays are excluded from DeepSeek's peak hours and are not modeled; a holiday weekday settles at the peak rate." },
+  { id = "deepseek-offpeak-weekday-0400", days = ["mon", "tue", "wed", "thu", "fri"], start = "04:00", end = "06:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://openrouter.ai/api/v1/models", review_after = "2026-12-20", note = "Chinese public holidays are excluded from DeepSeek's peak hours and are not modeled; a holiday weekday settles at the peak rate." },
+  { id = "deepseek-offpeak-weekday-1000", days = ["mon", "tue", "wed", "thu", "fri"], start = "10:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://openrouter.ai/api/v1/models", review_after = "2026-12-20", note = "Chinese public holidays are excluded from DeepSeek's peak hours and are not modeled; a holiday weekday settles at the peak rate." },
+  { id = "deepseek-offpeak-weekend", days = ["sat", "sun"], start = "00:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://openrouter.ai/api/v1/models", review_after = "2026-12-20" },
+] }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]

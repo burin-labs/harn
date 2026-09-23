@@ -1349,6 +1349,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         served_fast,
     )
     .with_reported_total(telemetry.server_total_tokens)
+    .with_billing(telemetry.billing.clone())
     .with_cache(
         cache_read_tokens,
         cache_write_tokens,
@@ -1457,6 +1458,6 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         served_fast,
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
