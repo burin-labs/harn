@@ -16,7 +16,8 @@ mod memory;
 pub use env::EnvSecretProvider;
 pub use file::{FileSecretProvider, SECRET_FILE_PATH_ENV};
 pub use keyring::{
-    KeyringSecretProvider, NativeKeyring, NativeKeyringError, NativeKeyringUnavailable,
+    keychain_interaction_allowed, KeyringSecretProvider, NativeKeyring, NativeKeyringError,
+    NativeKeyringUnavailable, SECRET_INTERACTIVE_ENV,
 };
 pub use memory::MemorySecretProvider;
 

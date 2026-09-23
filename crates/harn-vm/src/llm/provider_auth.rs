@@ -857,7 +857,7 @@ mod tests {
         ) -> Result<Vec<crate::secrets::SecretMeta>, crate::secrets::SecretError> {
             Ok(Vec::new())
         }
-        fn namespace(&self) -> &str {
+        fn namespace(&self) -> &'static str {
             "read-counting"
         }
         fn supports_versions(&self) -> bool {
