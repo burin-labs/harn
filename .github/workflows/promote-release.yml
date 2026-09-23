@@ -15,7 +15,8 @@ name: Promote release
 #      attestation against the candidate manifest, then creates the tag and the
 #      GitHub release from those same files. The tag push starts
 #      publish-release.yml, which publishes the crates from the tag.
-#   4. `container` packages the published Linux archives into the image, and
+#   4. `repin` asks every registered consumer to repin onto the release,
+#      `container` packages the published Linux archives into the image, and
 #      `open-development-bump` moves main to the next development version.
 on:
   # Privileged `workflow_run` is intentional here: `plan` checks out only the
@@ -106,6 +107,21 @@ jobs:
       sha: ${{ github.event.workflow_run.head_sha }}
       run-id: ${{ github.event.workflow_run.id }}
       tag: ${{ needs.plan.outputs.tag }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+  # Each registered consumer's own repin workflow opens its pull request, and
+  # that repository's CI and review rules decide whether it merges.
+  repin:
+    name: Repin consumers
+    needs: [plan, promote]
+    permissions:
+      contents: read
+    uses: burin-labs/.github/.github/workflows/repin.yml@d33db398eec4f00e2fee4164afeb7157005bd4ba # repin
+    with:
+      released-repository: ${{ github.repository }}
+      tag: ${{ needs.promote.outputs.tag }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
