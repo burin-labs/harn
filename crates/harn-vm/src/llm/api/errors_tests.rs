@@ -64,7 +64,9 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
 fn network_failure_classifies_into_the_exported_vocabulary() {
     let classified = classify_llm_error(
         ErrorCategory::TransientNetwork,
-        "error sending request: connection reset by peer",
+        // The shape `reqwest_send_error` produces for a dropped connection:
+        // reqwest's text names no cause, so the category must carry it.
+        "openai Responses error (send): error sending request for url (https://api.openai.com/v1/responses)",
     );
     assert_eq!(classified.reason.as_str(), "network_error");
     assert_eq!(classified.kind.as_str(), "transient");

@@ -702,6 +702,8 @@ use sse::{
     vm_call_llm_api_sse_from_response,
 };
 
+pub(crate) use sse::reqwest_send_error;
+
 #[cfg(test)]
 mod dialect_golden_stream_tests;
 #[cfg(test)]
