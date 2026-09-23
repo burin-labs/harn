@@ -185,6 +185,9 @@ pub type CompletionEvidenceSnapshot = {
   successful_tools_used: string,
   iteration: int,
   knowledge_state: string,
+  // Stable across prose-only retries; changes whenever task obligations or a
+  // tool lifecycle fact changes. Completion policy uses it for repeat detection.
+  substantive_evidence_state: string,
   // Deferred effects survive turns. Completion policy alone decides whether
   // later evidence supersedes them, so expose their count instead of hiding a veto.
   pending_tool_batch_effect_count: int,
