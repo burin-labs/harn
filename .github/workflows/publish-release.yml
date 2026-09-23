@@ -2,14 +2,12 @@ name: Publish release
 
 # Fires on two triggers:
 #
-#   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path. The
-#      bump-fleet watcher creates the tag only after the exact Release PR
-#      squash-merges, at that merged commit on main. This trigger ships
-#      crates.io from the immutable tag while the binary workflow creates
-#      the GitHub release from the same merged source.
-#      Release binaries are not built here or on the tag: promotion
-#      creates the tag and GitHub release from the files the version
-#      commit's build-release-binaries.yml run built and checked.
+#   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path.
+#      promote-release.yml creates the tag, at the version commit on main,
+#      when it publishes the GitHub release from the files that commit's
+#      build-release-binaries.yml run built and checked. This trigger ships
+#      crates.io from that immutable tag. Release binaries are not built
+#      here or on the tag.
 #
 #   2. workflow_dispatch — manual recovery for the partial-failure case
 #      (tag pushed but crates.io publish was incomplete). With no
