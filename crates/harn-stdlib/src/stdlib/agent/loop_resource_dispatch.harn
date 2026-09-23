@@ -1,3 +1,4 @@
+import { approval_reviewer_on_route } from "std/agent/approval_review"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
@@ -1243,22 +1244,6 @@ pub fn __intra_turn_resource_blocked_result(
   }
 }
 
-/**
- * Hand the reviewer the route this loop runs on.
- *
- * The VM builds the review request from the refused call alone, so without
- * this a reviewer whose policy names no model has no route but the process
- * default. Anything that is not a closure passes through untouched, so the
- * dispatch host still refuses a malformed reviewer by name.
- */
-fn __approval_reviewer_on_loop_route(reviewer: any, route: dict) -> any {
-  const kind = type_of(reviewer)
-  if kind != "closure" && kind != "function" && kind != "fn" {
-    return reviewer
-  }
-  return { request -> reviewer(request + {route: route}) }
-}
-
 pub fn __dispatch_tool_calls(harness: Harness, session_id: any, tool_calls: any, turn_opts: any) {
   if len(tool_calls) == 0 {
     return {dispatch: nil, turn_opts: turn_opts, audit_flushes: []}
@@ -1276,12 +1261,10 @@ pub fn __dispatch_tool_calls(harness: Harness, session_id: any, tool_calls: any,
     tool_format: turn_opts.tool_format,
     policy: turn_opts?.policy,
     approval_policy: turn_opts?.approval_policy,
-    // The AutoReview answerer. This list is an explicit allowlist, so an option
-    // the loop accepts but does not name here is silently dropped before it
-    // ever reaches dispatch -- the seam works when called directly and does
-    // nothing through the product path. That is exactly what happened before
-    // this line existed, and the loop-level control test is what caught it.
-    approval_reviewer: __approval_reviewer_on_loop_route(
+    // The AutoReview answerer, on this loop's route. This list is an allowlist:
+    // an option not named here never reaches dispatch, which is how the seam
+    // once worked when called directly and did nothing through the loop.
+    approval_reviewer: approval_reviewer_on_route(
       turn_opts?.approval_reviewer,
       {provider: turn_opts?.provider, model: turn_opts?.model},
     ),

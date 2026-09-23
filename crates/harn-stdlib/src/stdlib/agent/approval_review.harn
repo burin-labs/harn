@@ -455,6 +455,25 @@ pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> an
   }
 }
 
+/**
+ * Hand a reviewer the route of the loop that installed it.
+ *
+ * The VM builds the review request from the refused call alone, so without
+ * this a reviewer whose policy names no model has no route to inherit.
+ * Anything that is not a closure passes through untouched, so the dispatch
+ * host still refuses a malformed reviewer by name.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn approval_reviewer_on_route(reviewer: any, route: dict) -> any {
+  const kind = type_of(reviewer)
+  if kind != "closure" && kind != "function" && kind != "fn" {
+    return reviewer
+  }
+  return { request -> reviewer(request + {route: route}) }
+}
+
 /** The refusal's category, never blank -- the floor is matched by category. */
 fn __reviewer_category(request: any) -> string {
   const declared = trim(to_string(request?.category ?? ""))
