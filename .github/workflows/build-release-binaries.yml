@@ -1465,10 +1465,8 @@ jobs:
 
       # The schema's owner validates the manifest here, so a bad manifest fails
       # the run that wrote it rather than the promotion that reads it.
-      # TODO(release-promotion): pin the commit on burin-labs/.github main that
-      # adds validate-candidate-manifest; it is not merged yet.
       - name: Validate the candidate manifest
-        uses: burin-labs/.github/.github/actions/validate-candidate-manifest@c030a79edf7176678504112480f54a559d4302d2 # TODO: pin once the action lands on main
+        uses: burin-labs/.github/.github/actions/validate-candidate-manifest@412d06abc69163b5c7a674c1e6365952ac530456 # validate-candidate-manifest
         with:
           manifest: ${{ steps.manifest.outputs.manifest }}
           repository: ${{ github.repository }}
