@@ -1,0 +1,151 @@
+import { boolean, choice } from "std/predicate"
+import { with_evaluation_fixtures } from "std/testing"
+
+fn policy() {
+  return {
+    backend: "structured_llm",
+    provider: "openai",
+    model: "gpt-5.4-nano",
+    effort: "none",
+    temperature: 0.0,
+    threshold: 0.8,
+  }
+}
+
+fn questions() {
+  return {
+    safe: boolean("Is the command safe?"),
+    route: choice("Which route?", {review: "Review it", run: "Run it"}),
+  }
+}
+
+fn fixture() {
+  return {
+    site_id: "fixture.decision.v1",
+    state: {command: "echo ready"},
+    questions: questions(),
+    policy: policy(),
+    answers: {
+      safe: {kind: "boolean", verdict: true, confidence: 0.95, evidence: "read-only command"},
+      route: {kind: "choice", choice: "run", confidence: 0.91, evidence: "no mutation"},
+    },
+  }
+}
+
+fn evaluate(llm: HarnessLlm, state: {command: string} = {command: "echo ready"}) {
+  return llm.evaluate(
+    "fixture.decision.v1",
+    state,
+    {
+      safe: boolean("Is the command safe?"),
+      route: choice("Which route?", {review: "Review it", run: "Run it"}),
+    },
+    {
+      backend: "structured_llm",
+      provider: "openai",
+      model: "gpt-5.4-nano",
+      effort: "none",
+      temperature: 0.0,
+      threshold: 0.8,
+    },
+  )
+}
+
+@test
+pipeline test_typed_fixture_answers_without_provider(harness: Harness, task: unknown) {
+  const kind = with_evaluation_fixtures(
+    harness,
+    [fixture()],
+    { ->
+      const outcome = evaluate(harness.llm)
+      match outcome.kind {
+        "answered" -> {
+          assert_eq(outcome.value.safe.verdict, true)
+          assert_eq(outcome.value.route.choice, "run")
+          assert_eq(outcome.value.safe.confidence, 0.95)
+          "answered"
+        }
+        _ -> {
+          throw "expected answered fixture"
+        }
+      }
+    },
+  )
+  assert_eq(kind, "answered")
+  assert_eq(len(harness.llm.mock_calls()), 0)
+}
+
+@test
+pipeline test_changed_request_fails_after_body_catches_it(harness: Harness, task: unknown) {
+  const attempted = try {
+    with_evaluation_fixtures(
+      harness,
+      [fixture()],
+      { ->
+        const caught = try {
+          const outcome = evaluate(harness.llm, {command: "echo changed"})
+          match outcome.kind {
+            "answered" -> { nil }
+            _ -> { nil }
+          }
+        }
+        assert_eq(is_err(caught), true)
+        nil
+      },
+    )
+  }
+  assert_eq(is_err(attempted), true)
+  assert_eq(len(harness.llm.mock_calls()), 0)
+}
+
+@test
+pipeline test_missing_and_unused_fixtures_fail(harness: Harness, task: unknown) {
+  const missing = try {
+    with_evaluation_fixtures(
+      harness,
+      [],
+      { ->
+        const outcome = evaluate(harness.llm)
+        match outcome.kind {
+          "answered" -> { nil }
+          _ -> { nil }
+        }
+      },
+    )
+  }
+  assert_eq(is_err(missing), true)
+  const unused = try {
+    with_evaluation_fixtures(harness, [fixture()], { -> nil })
+  }
+  assert_eq(is_err(unused), true)
+  assert_eq(len(harness.llm.mock_calls()), 0)
+}
+
+@test
+pipeline test_declared_answer_shape_and_threshold_are_checked(harness: Harness, task: unknown) {
+  let invalid = fixture()
+  invalid.answers.route.choice = "undeclared"
+  const rejected = try {
+    with_evaluation_fixtures(harness, [invalid], { -> nil })
+  }
+  assert_eq(is_err(rejected), true)
+  let uncertain = fixture()
+  uncertain.answers.safe.confidence = 0.4
+  const kind = with_evaluation_fixtures(
+    harness,
+    [uncertain],
+    { ->
+      const outcome = evaluate(harness.llm)
+      match outcome.kind {
+        "low_confidence" -> {
+          assert_eq(outcome.question_ids, ["safe"])
+          "low_confidence"
+        }
+        _ -> {
+          throw "expected low_confidence fixture"
+        }
+      }
+    },
+  )
+  assert_eq(kind, "low_confidence")
+}

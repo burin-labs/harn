@@ -40,3 +40,11 @@ pass the resulting question map to `harness.llm.evaluate`. See the
 and outcome arms. A model's reported confidence is not a measured error rate;
 read [what a confidence score means](./concepts/confidence.md) before making it
 a gate.
+
+In a test, use `with_evaluation_fixtures(harness, fixtures, body)` from
+`std/testing`. Each fixture declares the exact site ID, state, questions,
+policy, and typed answers. The helper never falls through to a provider. A
+changed or missing request, an unused fixture, or an invalid answer fails the
+test, including when its body catches the mismatch. The
+[fixture test](../../scripts/tests/check_evaluation_fixtures_test.harn) shows
+answered, uncertain, and mismatch cases with live calls disabled.

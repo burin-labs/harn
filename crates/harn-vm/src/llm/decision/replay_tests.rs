@@ -1,5 +1,5 @@
 use super::*;
-use crate::llm::decision::replay::EvaluationReplayScope;
+use crate::llm::decision::replay::{EvaluationFixture, EvaluationReplayScope, FixtureAnswer};
 
 fn args(state: &str) -> Vec<VmValue> {
     vec![
@@ -122,5 +122,52 @@ fn missing_changed_extra_and_caught_mismatches_cannot_succeed_or_dispatch() {
                 1,
                 "only the positive recording dispatched"
             );
+        });
+}
+
+#[test]
+fn typed_fixture_receipt_reports_no_dispatch_or_invented_live_source() {
+    let backend = Arc::new(MockDecisionBackend::scripted(vec![]));
+    let _backend = install_backend(backend.clone());
+    let _route = install_route("mock", "fixture", contract(4096, None));
+    let arguments = args("state");
+    let fixture = EvaluationFixture {
+        site_id: "replay.site".into(),
+        state: crate::llm::helpers::vm_value_to_json(&arguments[1]),
+        questions: crate::llm::helpers::vm_value_to_json(&arguments[2]),
+        policy: crate::llm::helpers::vm_value_to_json(&arguments[3]),
+        answers: BTreeMap::from([(
+            "safe".into(),
+            FixtureAnswer::Boolean {
+                verdict: true,
+                confidence: 0.95,
+                evidence: "declared by the test".into(),
+            },
+        )]),
+    };
+    let scope = EvaluationReplayScope::fixtures(vec![fixture]).unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let mut vm = crate::Vm::new();
+            vm.set_evaluation_replay(scope.clone());
+            let result = evaluate_internal(
+                &crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm()),
+                &arguments,
+            )
+            .await
+            .unwrap();
+            scope.finish().unwrap();
+            assert_eq!(result.0.kind, "answered");
+            assert_eq!(result.3.source, EvaluationSource::Fixture);
+            assert!(result.3.reused_from.is_none());
+            assert_eq!(result.3.physical_attempts, 0);
+            assert_eq!(result.3.cost_usd, Some(0.0));
+            assert_eq!(result.3.budget_charge_usd, Some(0.0));
+            let evidence = vm.execution_evidence(None, Vec::new());
+            assert_eq!(evidence.evaluation_receipts.unwrap().len(), 1);
+            assert_eq!(backend.request_count(), 0);
         });
 }
