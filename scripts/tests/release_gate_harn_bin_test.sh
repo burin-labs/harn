@@ -501,6 +501,13 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]];
     printf 'lane\tgrammar-audit\trun_grammar_audit\n'
     printf 'lane\tsecurity-audit\trun_security_audit\n'
     printf 'lane\tsmoke-audit\trun_smoke_audit\n'
+  elif [[ " $* " == *" --residual-only "* ]]; then
+    printf 'meta\tfalse\tresidual_only\n'
+    printf 'lane\tgenerated-audit\trun_generated_audit\n'
+    printf 'lane\tdocs-audit\trun_docs_audit\n'
+    printf 'lane\tgrammar-audit\trun_grammar_audit\n'
+    printf 'lane\tsecurity-audit\trun_security_audit\n'
+    printf 'lane\tsmoke-audit\trun_smoke_audit\n'
   elif [[ " $* " == *" --source-only "* ]]; then
     printf 'meta\tfalse\tsource_only\n'
     printf 'lane\trust-audit\trun_rust_audit\n'
@@ -526,6 +533,22 @@ exit 0
 SH
 chmod +x "$fake_audit_harn"
 
+# The residual lanes require proof that HARN_BIN was built from the audited
+# commit. CI supplies it after verifying a downloaded artifact; this wrapper
+# supplies the same proof for the fake harness, recomputed per call because
+# some cases below commit to the audit root.
+release_gate_with_proof="$tmp_root/release-gate-with-proof"
+cat > "$release_gate_with_proof" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+export GITHUB_ACTIONS=true
+export SOURCE_GATE_CI_BINARY_COMMIT="\$(git -C "\$HARN_RELEASE_ROOT" rev-parse HEAD)"
+export SOURCE_GATE_CI_BINARY_SHA256="\$( (sha256sum "\$HARN_BIN" 2>/dev/null || shasum -a 256 "\$HARN_BIN") | cut -d ' ' -f 1)"
+export SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID="$(printf 'a%.0s' {1..40})"
+exec "$release_gate" "\$@"
+SH
+chmod +x "$release_gate_with_proof"
+
 audit_record="$tmp_root/audit-record.txt"
 run_audit() {
   local label="$1"
@@ -538,7 +561,7 @@ run_audit() {
     XDG_CACHE_HOME="$cache_home" \
     FAKE_AUDIT_RECORD="$audit_record" \
     env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR -u HARN_DEV_SETUP_STORAGE_ROOT \
-      "$release_gate" audit "$@" > "$tmp_root/audit-$label.txt" 2>&1 || {
+      "$release_gate_with_proof" audit "$@" > "$tmp_root/audit-$label.txt" 2>&1 || {
     cat "$tmp_root/audit-$label.txt" >&2
     exit 1
   }
@@ -664,6 +687,72 @@ do
   fi
 done
 
+# A residual-only rehearsal runs the lanes a receipt would authorize, on the
+# explicit HARN_BIN a live release hands them, without needing a receipt.
+run_audit residual-only --residual-only
+if ! grep -Fq "audit plan: residual_only" "$tmp_root/audit-residual-only.txt" ||
+  ! grep -Fq "warm-prebuild (reuse exact receipt-warmed HARN_BIN)" "$tmp_root/audit-residual-only.txt"; then
+  echo "residual-only audit did not plan residual lanes on the explicit HARN_BIN" >&2
+  cat "$tmp_root/audit-residual-only.txt" >&2
+  exit 1
+fi
+for lane in generated-audit docs-audit grammar-audit security-audit smoke-audit; do
+  if ! grep -Eq "ok: +$lane " "$tmp_root/audit-residual-only.txt"; then
+    echo "residual-only audit did not run $lane" >&2
+    cat "$tmp_root/audit-residual-only.txt" >&2
+    exit 1
+  fi
+done
+if grep -Eq 'cargo clippy|make (fmt-check|test|conformance)|package-audit HARN_BIN=' "$audit_record"; then
+  echo "residual-only audit ran merge-group-proved work" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+# Without proof, and with proof for different bytes, the residual lanes never
+# start: the refusal names the audited commit.
+: > "$audit_record"
+if PATH="$fake_tools:$PATH" HARN_RELEASE_ROOT="$audit_root" HARN_BIN="$fake_audit_harn" \
+  TMPDIR="$tmp_root" FAKE_AUDIT_RECORD="$audit_record" \
+  env -u GITHUB_ACTIONS -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+    "$release_gate" audit --residual-only > "$tmp_root/audit-unproven.txt" 2>&1 ||
+  ! grep -Fq "the residual audit's HARN_BIN is not proven to be built from" "$tmp_root/audit-unproven.txt"; then
+  echo "residual-only audit accepted a HARN_BIN with no build proof" >&2
+  cat "$tmp_root/audit-unproven.txt" >&2
+  exit 1
+fi
+if PATH="$fake_tools:$PATH" HARN_RELEASE_ROOT="$audit_root" HARN_BIN="$fake_audit_harn" \
+  TMPDIR="$tmp_root" FAKE_AUDIT_RECORD="$audit_record" \
+  GITHUB_ACTIONS=true \
+  SOURCE_GATE_CI_BINARY_COMMIT="$(git -C "$audit_root" rev-parse HEAD)" \
+  SOURCE_GATE_CI_BINARY_SHA256="$(printf '0%.0s' {1..64})" \
+  SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID="$(printf 'a%.0s' {1..40})" \
+  env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+    "$release_gate" audit --residual-only > "$tmp_root/audit-substituted.txt" 2>&1 ||
+  ! grep -Fq "hosted Harn binary changed after Rust artifact verification" "$tmp_root/audit-substituted.txt"; then
+  echo "residual-only audit accepted a HARN_BIN whose bytes differ from the verified artifact" >&2
+  cat "$tmp_root/audit-substituted.txt" >&2
+  exit 1
+fi
+if grep -Eq 'make (check|smoke)|verify_tree_sitter_parse|markdownlint' "$audit_record"; then
+  echo "an unproven HARN_BIN still launched residual lanes" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+
+for conflicting in --source-only --receipt; do
+  conflict_args=(--residual-only "$conflicting")
+  if [[ "$conflicting" == "--receipt" ]]; then
+    conflict_args+=("$receipt")
+  fi
+  if HARN_RELEASE_ROOT="$audit_root" HARN_BIN="$fake_audit_harn" \
+    "$release_gate_with_proof" audit "${conflict_args[@]}" > "$tmp_root/audit-conflict.txt" 2>&1 ||
+    ! grep -Fq "are mutually exclusive" "$tmp_root/audit-conflict.txt"; then
+    echo "residual-only audit accepted a conflicting scope: $conflicting" >&2
+    cat "$tmp_root/audit-conflict.txt" >&2
+    exit 1
+  fi
+done
+
 assert_residual_prerequisite_fails() {
   local label="$1"
   local expected="$2"
@@ -675,7 +764,7 @@ assert_residual_prerequisite_fails() {
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
     env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
-      "$release_gate" audit --receipt "$receipt" \
+      "$release_gate_with_proof" audit --receipt "$receipt" \
       > "$tmp_root/audit-$label.txt" 2>&1; then
     echo "residual audit passed without required prerequisite: $label" >&2
     exit 1
@@ -738,7 +827,7 @@ assert_residual_lane_failure() {
     HARN_BIN="$fake_audit_harn" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    "$release_gate" audit --receipt "$receipt" \
+    "$release_gate_with_proof" audit --receipt "$receipt" \
       > "$tmp_root/audit-$label.txt" 2>&1; then
     echo "injected residual lane failure unexpectedly passed: $label" >&2
     exit 1
@@ -789,11 +878,11 @@ assert_arg_fails_before_work() {
 assert_arg_fails_before_work \
   removed-profile \
   "error: unknown audit arg: --profile" \
-  "$release_gate" audit --profile residual
+  "$release_gate_with_proof" audit --profile residual
 assert_arg_fails_before_work \
   missing \
   "error: audit --receipt requires a path" \
-  "$release_gate" audit --receipt
+  "$release_gate_with_proof" audit --receipt
 
 invalid_receipt="$tmp_root/receipt-invalid.json"
 printf '{}\n' > "$invalid_receipt"
@@ -804,7 +893,7 @@ if PATH="$fake_tools:$PATH" \
   TMPDIR="$tmp_root" \
   FAKE_AUDIT_RECORD="$audit_record" \
   env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
-    "$release_gate" audit --receipt "$invalid_receipt" \
+    "$release_gate_with_proof" audit --receipt "$invalid_receipt" \
     > "$tmp_root/audit-invalid-receipt.txt" 2>&1; then
   echo "rejected receipt unexpectedly fell back to an unauthenticated audit" >&2
   exit 1
@@ -855,7 +944,7 @@ if PATH="$fake_tools:$PATH" \
   FAKE_AUDIT_RECORD="$audit_record" \
   FAIL_FAKE_MAKE_TARGET=check-test-case-performance \
   env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
-    "$release_gate" audit \
+    "$release_gate_with_proof" audit \
       > "$tmp_root/audit-full-performance-failure.txt" 2>&1; then
   echo "injected isolated performance failure unexpectedly passed" >&2
   exit 1
