@@ -317,6 +317,22 @@ thinking_block_style = "inline"
 # not inherit direct-Anthropic `thinking` controls here: OpenRouter's
 # Anthropic pass-through rejects those wire options even when the direct
 # Anthropic route supports them.
+# OpenRouter passes `tool_choice` through to Anthropic verbatim, so the
+# models that reject forced tool choice (Fable 5.1, Opus 5.5 and later) need
+# the same `auto` / `none` restriction on this route as on the direct one.
+[[provider.openrouter]]
+model_match = ["anthropic/claude-fable-5.1*", "anthropic/claude-fable-5-1*"]
+extends = true
+native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
+[[provider.openrouter]]
+model_match = "anthropic/claude-opus-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.openrouter]]
 model_match = "anthropic/claude-fable-*"
 native_tools = true

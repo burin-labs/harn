@@ -84,6 +84,84 @@ fn opus_5_disabled_thinking_is_explicit_not_omitted() {
         .is_none());
 }
 
+/// Opus 5.5 and the Fable/Mythos tier always think: `{type:"disabled"}` is a
+/// 400 (live API, 2026-09-22). A thinking-off request must therefore omit the
+/// field and ask for the lowest effort, or the model thinks at the API
+/// default (`medium` on Opus 5.5) — the opposite of what was asked.
+#[test]
+fn always_on_models_lower_thinking_off_to_the_lowest_effort() {
+    for model in ["claude-opus-5-5", "claude-fable-5-1"] {
+        let mut payload = base_payload();
+        payload.model = model.to_string();
+        payload.thinking = ThinkingConfig::Disabled;
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert!(body.get("thinking").is_none(), "{model}: {body}");
+        assert_eq!(body["output_config"]["effort"], "low", "{model}: {body}");
+
+        // `ReasoningEffort::None` is the same request spelled as an effort.
+        let mut none = base_payload();
+        none.model = model.to_string();
+        none.thinking = ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::None,
+        };
+        let body = AnthropicProvider::build_request_body(&none);
+        assert!(body.get("thinking").is_none(), "{model}: {body}");
+        assert_eq!(body["output_config"]["effort"], "low", "{model}: {body}");
+    }
+
+    // Control: Opus 5 accepts the explicit off switch, so it keeps it and
+    // gains no effort the caller did not ask for.
+    let mut opus5 = base_payload();
+    opus5.model = "claude-opus-5".to_string();
+    opus5.thinking = ThinkingConfig::Disabled;
+    let body = AnthropicProvider::build_request_body(&opus5);
+    assert_eq!(body["thinking"], serde_json::json!({ "type": "disabled" }));
+    assert!(body.pointer("/output_config/effort").is_none(), "{body}");
+}
+
+/// A caller override can put `thinking:{disabled}` back after the builder ran.
+/// The egress seam re-lowers it for always-on models and keeps an effort the
+/// caller chose.
+#[test]
+fn always_on_models_relower_a_disabled_thinking_override_at_egress() {
+    let reconciled = |model: &str, body: serde_json::Value| {
+        let mut body = body;
+        reconcile_request_body(
+            &mut body,
+            "anthropic",
+            model,
+            &ThinkingConfig::Disabled,
+            None,
+        );
+        body
+    };
+
+    let body = reconciled(
+        "claude-opus-5-5",
+        serde_json::json!({"model": "claude-opus-5-5", "thinking": {"type": "disabled"}}),
+    );
+    assert!(body.get("thinking").is_none(), "{body}");
+    assert_eq!(body["output_config"]["effort"], "low", "{body}");
+
+    let body = reconciled(
+        "claude-opus-5-5",
+        serde_json::json!({
+            "model": "claude-opus-5-5",
+            "thinking": {"type": "disabled"},
+            "output_config": {"effort": "high"},
+        }),
+    );
+    assert!(body.get("thinking").is_none(), "{body}");
+    assert_eq!(body["output_config"]["effort"], "high", "{body}");
+
+    // Control: Opus 5 keeps the override it accepts.
+    let body = reconciled(
+        "claude-opus-5",
+        serde_json::json!({"model": "claude-opus-5", "thinking": {"type": "disabled"}}),
+    );
+    assert_eq!(body["thinking"], serde_json::json!({ "type": "disabled" }));
+}
+
 #[test]
 fn opus_5_clamps_effort_when_thinking_is_disabled() {
     // `thinking:{disabled}` above effort `high` is a 400 on generation-5

@@ -16,9 +16,10 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(type_of(r.thinking), "dict")
   assert_eq(r.thinking.mode, "enabled")
   assert_eq(r.thinking.budget_tokens, 4096)
-  // The agent task overlay owns its generic sampling defaults.
-  assert_eq(r.temperature, 0.5)
-  assert_eq(r.top_p, 0.95)
+  // Task overlays own output shape only; sampling stays with the catalog,
+  // which sets none for this model.
+  assert_eq(r?.temperature, nil)
+  assert_eq(r?.top_p, nil)
   assert_eq(r.schema_retries, 0)
   assert_eq(r.output, "text")
   // Canonical policy fields survive for introspection.

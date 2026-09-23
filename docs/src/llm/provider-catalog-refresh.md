@@ -166,10 +166,10 @@ provider adapter, request builder, stream parser, and response normalizer as
 
 ```bash
 # Inspect the request without calling the provider.
-harn provider tool-probe openai --model gpt-5.6-sol --dry-run-request
+harn provider tool-probe openai --model gpt-6-sol --dry-run-request
 
 # Check non-streaming and streaming native tool calls.
-harn provider tool-probe openai --model gpt-5.6-sol --mode both
+harn provider tool-probe openai --model gpt-6-sol --mode both
 ```
 
 The probe reads the provider's normal API-key environment variable. Pass
