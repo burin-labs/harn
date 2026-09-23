@@ -290,7 +290,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     }
   }
   const schema = approval_review_verdict_schema(effective_policy)
-  const route = __approval_review_route(policy, effective_policy, request)
+  const route = __approval_review_route(harness.llm, policy, effective_policy, request)
   const started = harness.clock.monotonic_ms()
   const checkpoint = agent_typed_output_checkpoint(
     harness.agent,
@@ -303,10 +303,10 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
       model: route.model,
       system: approval_review_system_prompt(effective_policy),
       timeout_ms: effective_policy?.reviewer?.timeout_ms,
-      reasoning_effort: effective_policy?.reviewer?.effort,
       output: {schema: schema, strict: true, validation: "error"},
       _call_stage: "verify",
-    },
+    }
+      + route.reasoning,
   )
   const duration_ms = harness.clock.monotonic_ms() - started
   if !(checkpoint?.ok ?? false) {
@@ -337,6 +337,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     site: request?.site,
     category: category,
     reviewer_model: route.model,
+    reviewer_route_source: route.source,
     duration_ms: duration_ms,
     // NIL when the checkpoint reported no usage, never 0.0. A zero cost across a
     // whole calibration run would read as "the reviewer is free" when it means
@@ -353,28 +354,100 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
 }
 
 /**
- * The provider and model the reviewer calls.
+ * The catalog role that names the reviewer's cheap model per provider family.
  *
- * A caller whose policy names a reviewer model decides. Otherwise, inside a
- * loop, the reviewer runs on the loop's own route, which `agent_loop` passes as
- * `request.route` (a route with no provider or model is the process default the
- * loop itself is running on). Only a reviewer called outside any loop falls
- * back to the bundled policy's model.
- *
- * The order is the fix. The bundled model used to win whenever the caller named
- * none, so a loop granted only its own route's credential got a reviewer that
- * failed authentication on every call, and every guarded tool call was refused.
+ * Owned by the runtime model catalog; policy code carries only the role name.
  */
-fn __approval_review_route(caller_policy: dict?, effective_policy: dict, request: dict) -> dict {
+const __APPROVAL_REVIEW_ROLE_LADDER = "approval_reviewer"
+
+/**
+ * The provider, model, and reasoning setting the reviewer calls with, and the
+ * source of that decision.
+ *
+ * A caller whose policy names a reviewer model decides (`caller`). Otherwise,
+ * inside a loop, the reviewer keeps the loop's PROVIDER, whose credential the
+ * run already holds, and runs on that provider's row of the catalog's
+ * `approval_reviewer` role (`catalog_role`). The bundled effort, `off`, is
+ * the least reasoning each route accepts. A decision is one short structured verdict; on the loop's
+ * own model a frontier run paid frontier prices for every one of them.
+ *
+ * A loop route whose provider has no row, or whose provider cannot be named
+ * (the process default with no model), keeps the loop's own route
+ * (`loop_route`): moving to another provider would fail authentication on a
+ * run granted only its own credential, and every guarded call would be
+ * refused. Only a reviewer called outside any loop falls back to the bundled
+ * policy's model (`bundled`).
+ */
+fn __approval_review_route(
+  llm: HarnessLlm,
+  caller_policy: dict?,
+  effective_policy: dict,
+  request: dict,
+) -> dict {
   const explicit = caller_policy?.reviewer
+  // The policy's effort is a reasoning-policy LEVEL, not a wire `effort`: a
+  // level snaps to what the route accepts, whereas a wire value refuses any
+  // model that takes no effort ladder, and a refused call is a denial.
+  const configured_effort = effective_policy?.reviewer?.effort
+  const reasoning = configured_effort == nil ? {} : {reasoning_policy: configured_effort}
   if explicit?.model != nil {
-    return {provider: explicit?.provider, model: explicit.model}
+    return {
+      provider: explicit?.provider,
+      model: explicit.model,
+      reasoning: reasoning,
+      source: "caller",
+    }
   }
   const route = request?.route
-  if route != nil {
-    return {provider: route?.provider, model: route?.model}
+  if route == nil {
+    return {
+      provider: effective_policy?.reviewer?.provider,
+      model: effective_policy?.reviewer?.model,
+      reasoning: reasoning,
+      source: "bundled",
+    }
   }
-  return {provider: effective_policy?.reviewer?.provider, model: effective_policy?.reviewer?.model}
+  const provider = __approval_review_route_provider(llm, route)
+  const role_model = __approval_review_role_model(llm, provider)
+  if role_model == nil {
+    return {
+      provider: route?.provider,
+      model: route?.model,
+      reasoning: reasoning,
+      source: "loop_route",
+    }
+  }
+  return {provider: provider, model: role_model, reasoning: reasoning, source: "catalog_role"}
+}
+
+/** The loop route's provider: declared, else inferred from its model, else nil. */
+fn __approval_review_route_provider(llm: HarnessLlm, route: dict) -> string? {
+  const declared = trim(to_string(route?.provider ?? ""))
+  if declared != "" {
+    return declared
+  }
+  const model = trim(to_string(route?.model ?? ""))
+  if model == "" {
+    return nil
+  }
+  const inferred = trim(to_string(llm.model_info(model)?.provider ?? ""))
+  return inferred == "" ? nil : inferred
+}
+
+/** The catalog's reviewer model for one provider family, or nil. */
+fn __approval_review_role_model(llm: HarnessLlm, provider: string?) -> string? {
+  if provider == nil {
+    return nil
+  }
+  for step in llm.model_ladder(__APPROVAL_REVIEW_ROLE_LADDER)?.steps ?? [] {
+    if to_string(step?.provider ?? "") == provider {
+      const model = trim(to_string(step?.model ?? ""))
+      if model != "" {
+        return model
+      }
+    }
+  }
+  return nil
 }
 
 /**

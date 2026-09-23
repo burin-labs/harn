@@ -34,7 +34,7 @@ Nothing here needs a code change.
 ```toml
 [reviewer]
 model = "claude-haiku-4-5-20251001"
-effort = "low"
+effort = "off"
 timeout_ms = 30000
 on_error = "deny"
 
@@ -44,10 +44,20 @@ max_denials_per_turn = 10
 ```
 
 Inside `agent_loop`, a reviewer whose caller policy names no `reviewer.model`
-runs on the loop's own provider and model, not on this bundled model. A loop
-that holds only its own route's credential therefore gets a reviewer that can
-use it. The bundled model applies to a reviewer called outside any loop, and a
-caller policy with `reviewer = {model = ...}` always wins.
+keeps the loop's provider, whose credential the run already holds, and runs on
+that provider's row of the catalog's `approval_reviewer` ladder
+(`[model_ladders.approval_reviewer]`). A decision is one short structured
+verdict, so a frontier loop does not pay frontier prices for it. A provider
+with no row keeps the loop's own model. The bundled model applies to a reviewer
+called outside any loop, and a caller policy with `reviewer = {model = ...}`
+always wins. Each decision records the choice in `reviewer_route_source`:
+`caller`, `catalog_role`, `loop_route`, or `bundled`.
+
+`effort` is a reasoning-policy level (`off`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, `max`), not a provider wire value. It snaps to what the
+reviewer's route accepts, so `off` is the least reasoning each route takes: no
+reasoning where the route can switch it off, and its lowest declared rung where
+it cannot.
 
 To use a stronger reviewer for an eval, change `[reviewer].model`. The reviewer
 runs on a would-be denial rather than on every tool call, so cost tracks

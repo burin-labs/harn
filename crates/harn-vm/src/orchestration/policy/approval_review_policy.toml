@@ -19,7 +19,10 @@ version = 1
 # call, but a busy run can still produce dozens of verdicts. Evals override this
 # with a stronger model; see `docs/how-to/approval-review.md`.
 model = "claude-haiku-4-5-20251001"
-effort = "low"
+# A reasoning-policy level (`off`, `minimal`, `low`, ... `max`), snapped to what
+# the reviewer's route accepts. `off` is the least reasoning each route takes: a
+# verdict is one short structured answer.
+effort = "off"
 # Fail closed. A reviewer that times out has not approved anything, and treating
 # silence as assent would make the timeout the widest grant in the system.
 timeout_ms = 30000
