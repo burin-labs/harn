@@ -2,7 +2,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-workflow="$repo_root/.github/workflows/build-release-binaries.yml"
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/workspace"
@@ -192,12 +191,6 @@ PATH="$bin_dir:$PATH" \
   "$repo_root/scripts/validate_development_bump.sh"
 grep -Fq $'gh\tpr merge https://example.invalid/pull/42 --auto --squash' "$record"
 
-open_line="$(grep -nF './scripts/open_development_bump.sh' "$workflow" | cut -d: -f1)"
-validate_line="$(grep -nF './scripts/validate_development_bump.sh' "$workflow" | cut -d: -f1)"
-[[ -n "$open_line" && -n "$validate_line" && "$open_line" -lt "$validate_line" ]] || {
-  echo "publish workflow does not open the development bump before validation" >&2
-  exit 1
-}
 if grep -Fq 'resolved_grammars_pass_the_versioned_fitness_corpus' \
   "$repo_root/scripts/open_development_bump.sh"; then
   echo "development bump opener is still gated on the grammar corpus" >&2

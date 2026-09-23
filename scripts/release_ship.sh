@@ -93,10 +93,11 @@ DEFAULT FLOW (one human PR, then bot finalizes)
        git commit -m "Release vX.Y.Z"
        gh pr create
 
-  5. After the PR squash-merges, the release watcher signs and pushes
-     vX.Y.Z at that exact main commit. publish-release.yml and
-     build-release-binaries.yml prove the tag's main ancestry and publish
-     crates, binaries, and the GitHub release from the tagged source.
+  5. After the PR squash-merges, its push to main builds and checks the
+     release candidate (build-release-binaries.yml). Promotion tags that
+     commit and publishes those exact files; the tag push runs
+     publish-release.yml, which proves the tag's main ancestry and
+     publishes crates.
 
 ==============================================================================
 PREPARE MODE

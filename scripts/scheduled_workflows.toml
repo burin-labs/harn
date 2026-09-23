@@ -16,7 +16,7 @@ name = "Build release binaries"
 claim = "The main branch can still produce every supported release artifact and warm cache"
 crons = ["17 5 * * *"]
 cadence_reason = "Daily keeps release-platform compiler caches usable between infrequent releases."
-job_ids = ["setup", "prepare_release", "prepare_cli_aot", "build", "collect_candidate_manifest", "cache_budget", "container", "release"]
+job_ids = ["setup", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke", "cache_budget"]
 
 [[workflow]]
 path = ".github/workflows/cli-cold-start-budget.yml"
@@ -85,10 +85,10 @@ job_ids = ["dispatch"]
 [[workflow]]
 path = ".github/workflows/release-smoke.yml"
 name = "Release smoke"
-claim = "Published artifacts and source-health release builds remain installable across platforms"
+claim = "Release candidate archives and source-health release builds remain installable across platforms"
 crons = ["17 9 * * *"]
-cadence_reason = "Daily tests source health; publication events separately trigger exact artifact smoke."
-job_ids = ["resolve", "smoke"]
+cadence_reason = "Daily tests source health; each release candidate run separately smokes its exact archives."
+job_ids = ["smoke"]
 
 [[workflow]]
 path = ".github/workflows/repository-state-reconciliation.yml"
