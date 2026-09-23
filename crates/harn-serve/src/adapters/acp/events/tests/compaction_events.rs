@@ -33,5 +33,6 @@ pub(super) fn fixture_compaction_receipt(
         // never an invented measured zero.
         source_measurement: None,
         recap: None,
+        classification: None,
     }
 }
