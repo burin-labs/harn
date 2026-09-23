@@ -426,7 +426,11 @@ async fn run_reloadable_stdio(path: &str, card_source: Option<&str>, loaded: Loa
                 std::process::exit(1);
             }
         };
-    let watch_root = Path::new(path).parent().unwrap_or(Path::new("."));
+    // A bare filename has an empty parent, which notify cannot watch.
+    let watch_root = Path::new(path)
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     if let Err(error) = watcher.watch(watch_root, RecursiveMode::Recursive) {
         eprintln!(
             "error: failed to watch MCP source root {}: {error}",

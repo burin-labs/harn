@@ -34,6 +34,24 @@ fn protected_push_fixture() -> GitFixture {
     fs::create_dir(&repo).expect("create repo");
     git(root.path(), &["init", "--bare", remote.to_str().unwrap()]);
     git(&repo, &["init", "-b", "main"]);
+    // Use only fixture-owned hooks even when the developer has core.hooksPath
+    // configured globally. The sandboxed Harn process cannot run those hooks.
+    git(
+        &remote,
+        &[
+            "config",
+            "core.hooksPath",
+            remote.join("hooks").to_str().unwrap(),
+        ],
+    );
+    git(
+        &repo,
+        &[
+            "config",
+            "core.hooksPath",
+            repo.join(".git/hooks").to_str().unwrap(),
+        ],
+    );
     git(&repo, &["config", "user.email", "harn@example.test"]);
     git(&repo, &["config", "user.name", "Harn Test"]);
     fs::write(repo.join("value.txt"), "initial\n").expect("write initial");

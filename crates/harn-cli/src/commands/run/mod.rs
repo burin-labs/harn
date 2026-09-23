@@ -960,16 +960,19 @@ async fn execute_run_inner_scoped(
     // lives for the rest of this function, so recording ends with the run on
     // every exit path below.
     let _builtin_profile_guard = profile.is_enabled().then(harn_vm::builtin_profile::enable);
-    let mut vm = harn_vm::Vm::new();
+    // The VM snapshots CLI mock mode during construction. Install it first so
+    // offline replay and existing mock-backed runs share the same boundary.
     let setup_result = install_cli_llm_mock_mode(&llm_mock_mode)
         .map_err(|error| ("llm_mock_install", error))
         .and_then(|()| {
+            let mut vm = harn_vm::Vm::new();
             evaluation
                 .install(&mut vm)
+                .map(|session| (vm, session))
                 .map_err(|error| ("evaluation_tape_install", error))
         });
-    let evaluation_session = match setup_result {
-        Ok(session) => session,
+    let (mut vm, evaluation_session) = match setup_result {
+        Ok(result) => result,
         Err((code, error)) => {
             stderr.push_str(&format!("error: {error}\n"));
             time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
