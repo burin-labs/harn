@@ -904,7 +904,7 @@ mod compaction_projection_tests {
         assert_eq!(projected["budget_met"], false);
         let live = crate::agent_events::AgentEvent::TranscriptCompacted {
             session_id: "session-classified".into(),
-            receipt: receipt.clone(),
+            receipt,
         };
         let wire = serde_json::to_value(live).unwrap();
         assert_eq!(wire["receipt"]["classification"], *projected);
