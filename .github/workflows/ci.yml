@@ -450,7 +450,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The action's default glob is `*.{md,markdown}`, the repository root
+      # only. The release docs lane lints `**/*.md`, so a violation anywhere
+      # else passed here and was found for the first time by a release.
       - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        with:
+          globs: "**/*.md"
 
   # Release semantics have two enforcers: this repository's release scripts and
   # workflows, and the release orchestrator that drives cuts. When they
