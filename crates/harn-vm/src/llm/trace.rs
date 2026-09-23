@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 
+use parking_lot::RwLock;
+
 use super::usage::UsageCostCertainty;
 
 /// A single LLM call trace entry.
@@ -18,7 +20,7 @@ pub struct LlmTraceEntry {
     pub duration_ms: u64,
 }
 
-/// Canonical aggregate of the current thread's completed LLM calls.
+/// Canonical aggregate of the current execution's completed LLM calls.
 ///
 /// Always collected in constant space, independently of detailed trace capture,
 /// so session accounting cannot change when diagnostics are enabled or drained.
@@ -33,25 +35,74 @@ pub struct LlmTraceUsageSummary {
     pub cost: UsageCostCertainty,
 }
 
-thread_local! {
-    static LLM_TRACE: RefCell<Vec<LlmTraceEntry>> = const { RefCell::new(Vec::new()) };
-    static LLM_TRACING_ENABLED: RefCell<bool> = const { RefCell::new(false) };
-    static LLM_USAGE_SUMMARY: RefCell<LlmTraceUsageSummary> = RefCell::new(LlmTraceUsageSummary::default());
+#[derive(Default)]
+struct LlmTraceState {
+    entries: Vec<LlmTraceEntry>,
+    enabled: bool,
+    summary: LlmTraceUsageSummary,
 }
 
-/// Enable LLM tracing for the current thread.
+/// The VM's execution-owned trace and usage ledger. Native workers inherit
+/// the same runtime even when their futures are polled on different threads.
+#[derive(Default)]
+pub(crate) struct LlmTraceRuntime {
+    state: RwLock<LlmTraceState>,
+}
+
+impl LlmTraceRuntime {
+    fn enable(&self) {
+        self.state.write().enabled = true;
+    }
+
+    fn take(&self) -> Vec<LlmTraceEntry> {
+        std::mem::take(&mut self.state.write().entries)
+    }
+
+    fn peek(&self) -> Vec<LlmTraceEntry> {
+        self.state.read().entries.clone()
+    }
+
+    fn summary(&self) -> LlmTraceUsageSummary {
+        self.state.read().summary
+    }
+
+    fn reset(&self) {
+        *self.state.write() = LlmTraceState::default();
+    }
+
+    fn record(&self, entry: LlmTraceEntry) {
+        let mut state = self.state.write();
+        let summary = &mut state.summary;
+        summary.call_count = summary.call_count.saturating_add(1);
+        summary.input_tokens = summary
+            .input_tokens
+            .saturating_add(entry.usage.input_tokens);
+        summary.output_tokens = summary
+            .output_tokens
+            .saturating_add(entry.usage.output_tokens);
+        summary.duration_ms = summary
+            .duration_ms
+            .saturating_add(i64::try_from(entry.duration_ms).unwrap_or(i64::MAX));
+        summary.cost.record(&entry.usage);
+        if state.enabled {
+            state.entries.push(entry);
+        }
+    }
+}
+
+/// Enable detailed LLM tracing for the current execution.
 pub fn enable_tracing() {
-    LLM_TRACING_ENABLED.with(|v| *v.borrow_mut() = true);
+    crate::tracing::active_tracing_runtime().llm.enable();
 }
 
 /// Get and clear the detailed trace log. Session accounting remains intact.
 pub fn take_trace() -> Vec<LlmTraceEntry> {
-    LLM_TRACE.with(|v| std::mem::take(&mut *v.borrow_mut()))
+    crate::tracing::active_tracing_runtime().llm.take()
 }
 
 /// Clone the current trace log without consuming it.
 pub fn peek_trace() -> Vec<LlmTraceEntry> {
-    LLM_TRACE.with(|v| v.borrow().clone())
+    crate::tracing::active_tracing_runtime().llm.peek()
 }
 
 /// Read session usage without consuming detailed trace entries.
@@ -67,36 +118,16 @@ pub fn peek_trace_summary() -> (i64, i64, i64, i64) {
 
 /// Read session usage and certainty, including calls made with tracing disabled.
 pub fn peek_trace_usage_summary() -> LlmTraceUsageSummary {
-    LLM_USAGE_SUMMARY.with(|summary| *summary.borrow())
+    crate::tracing::active_tracing_runtime().llm.summary()
 }
 
-/// Reset thread-local trace state. Call between test runs.
+/// Reset the current execution's trace state. Call between test runs.
 pub(crate) fn reset_trace_state() {
-    LLM_TRACE.with(|v| v.borrow_mut().clear());
-    LLM_TRACING_ENABLED.with(|v| *v.borrow_mut() = false);
-    LLM_USAGE_SUMMARY.with(|summary| *summary.borrow_mut() = LlmTraceUsageSummary::default());
+    crate::tracing::active_tracing_runtime().llm.reset();
 }
 
 pub(crate) fn trace_llm_call(entry: LlmTraceEntry) {
-    LLM_USAGE_SUMMARY.with(|summary| {
-        let mut summary = summary.borrow_mut();
-        summary.call_count = summary.call_count.saturating_add(1);
-        summary.input_tokens = summary
-            .input_tokens
-            .saturating_add(entry.usage.input_tokens);
-        summary.output_tokens = summary
-            .output_tokens
-            .saturating_add(entry.usage.output_tokens);
-        summary.duration_ms = summary
-            .duration_ms
-            .saturating_add(i64::try_from(entry.duration_ms).unwrap_or(i64::MAX));
-        summary.cost.record(&entry.usage);
-    });
-    LLM_TRACING_ENABLED.with(|enabled| {
-        if *enabled.borrow() {
-            LLM_TRACE.with(|v| v.borrow_mut().push(entry));
-        }
-    });
+    crate::tracing::active_tracing_runtime().llm.record(entry);
 }
 
 /// The loop and tool facts an agent session already records durably.
