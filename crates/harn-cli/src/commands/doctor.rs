@@ -609,15 +609,12 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
             harn_vm::llm::ProviderCredentialStatus::NotRequired => {
                 (DoctorStatus::Skip, "no key required".to_string(), None)
             }
-            harn_vm::llm::ProviderCredentialStatus::NeedsUserApproval => (
-                DoctorStatus::Warn,
-                "stored credential needs a Keychain approval this non-interactive process does \
-                 not show"
-                    .to_string(),
-                envs.first().map(|env| format!("export {env}=…")),
-            ),
-            harn_vm::llm::ProviderCredentialStatus::Missing => {
-                let detail = if envs.is_empty() {
+            status @ (harn_vm::llm::ProviderCredentialStatus::Missing
+            | harn_vm::llm::ProviderCredentialStatus::NeedsUserApproval) => {
+                let detail = if status == harn_vm::llm::ProviderCredentialStatus::NeedsUserApproval
+                {
+                    "stored; needs a Keychain approval this process cannot show".to_string()
+                } else if envs.is_empty() {
                     "credential unavailable".to_string()
                 } else {
                     format!("missing: {}", envs.join(", "))
