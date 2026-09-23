@@ -43,6 +43,12 @@ max_consecutive_denials = 3
 max_denials_per_turn = 10
 ```
 
+Inside `agent_loop`, a reviewer whose caller policy names no `reviewer.model`
+runs on the loop's own provider and model, not on this bundled model. A loop
+that holds only its own route's credential therefore gets a reviewer that can
+use it. The bundled model applies to a reviewer called outside any loop, and a
+caller policy with `reviewer = {model = ...}` always wins.
+
 To use a stronger reviewer for an eval, change `[reviewer].model`. The reviewer
 runs on a would-be denial rather than on every tool call, so cost tracks
 refusals, not turns — but a run that fights its permission policy can still
@@ -100,7 +106,10 @@ than the prompt, which is not.
 ### It fails closed
 
 No reviewer, no VM context, a closure that raises, an unparseable verdict, or
-re-entrancy all leave the call denied exactly as it would have been. A bare
+re-entrancy all leave the call denied exactly as it would have been. The
+receipt's `auto_review` entry names which one in `unavailable_reason`, and
+carries the reviewer's own redacted explanation, such as the model call's
+error, in `unavailable_detail`. A bare
 `true` is explicitly not an approval: the contract is a decision record, and
 accepting a stray truthy value is how a seam like this stops meaning anything.
 
