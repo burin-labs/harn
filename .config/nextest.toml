@@ -345,6 +345,55 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::windows_sandboxed_run_child_can_read_the_host_node_toolchain/)'
 slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
 
+# Two more burin-mini playground cases sit near the ci profile's 120s hard kill
+# on Windows only. Both copy the experiment and run a full playground task; on
+# Linux and macOS they finish well inside the generic ceiling.
+#
+# Measured from the `Workspace nextest (windows-latest)` job of the eleven green
+# `Windows workspace tests` runs on 2026-09-22, 35745740385 through
+# 35790468545:
+#
+#   burin_mini_explain_repo_fixture_run_passes:
+#     68.5 70.5 71.4 75.3 75.7 76.2 77.0 83.7 84.1 86.8 89.1s, median 76.2s
+#   windows_sandbox_fix_keeps_writes_confined_to_the_workspace:
+#     64.1 70.1 70.9 71.2 71.8 74.3 74.7 78.4 81.4 83.7 84.6s, median 74.3s
+#
+# That is 64% to 74% of the 120s cap on an ordinary run. A hosted release
+# certification (run 35749349845) landed on a VM whose whole suite took 1092s
+# against 775s for the same lineage half an hour earlier, and both cases were
+# killed at 120s.
+#
+# 60s x 5 is a 300s ceiling: 3.4x the slowest green pass and 3.9x the median.
+# The period stays at 60s so the SLOW lines keep reporting progress, and a real
+# hang is still killed. The override is scoped to Windows so the other
+# platforms keep the generic ceiling: the explain case takes about 10s on the
+# Linux and macOS workspace lanes, and the sandbox case exists only on Windows.
+[[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "windows")' }
+filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::(burin_mini_explain_repo_fixture_run_passes|windows_sandbox_fix_keeps_writes_confined_to_the_workspace)$/)'
+slow-timeout = { period = "60s", terminate-after = 5, grace-period = "10s" }
+
+# The host-lease FIFO case replays the same admission sequence 32 times, each
+# against a fresh SQLite store, and every store operation opens its own
+# connection. Its wall time is file I/O, and on Windows that I/O is what a slow
+# VM starves hardest.
+#
+# Same eleven green Windows runs: 20.2 20.5 20.5 22.2 25.8 25.9 26.6 27.8 30.3
+# 32.9 33.5s, median 25.9s. In run 35749349845 it passed 120s and was killed.
+# That run's suite was 1.4x slower overall, but its host-lease module was 4x to
+# 6x slower: `acquire_blocks_second_owner_until_release` went from 0.55s to
+# 3.5s and `supervised_waiters_handoff_fifo_on_the_public_restart_path` from
+# 6.3s to 34.8s. So a margin sized to the suite-wide slowdown would have killed
+# it again; 3x the slowest green pass is 100s, below where it died.
+#
+# 60s x 4 is a 240s ceiling: 7.2x the slowest green pass, and 2x the point the
+# slow VM had reached when it was killed. Scoped to Windows: the Linux and
+# macOS workspace lanes finish it in about 1s.
+[[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "windows")' }
+filter = 'package(harn-hostlib) and test(=host_lease::tests::same_class_waiters_are_fifo_across_reversed_wake_order_and_restart)'
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
+
 # The two heavy burin-mini playground cases are not wall-clock budget tests,
 # but they have the same relationship to their neighbours: their cost is
 # dominated by whoever else is running, and they were failing because of it.
