@@ -94,21 +94,32 @@ pipeline test_release_smoke_runs_on_the_candidate_archives(harness: Harness, tas
   const workflow = load(harness.fs, "release-smoke.yml")
   const caller = load(harness.fs, "build-release-binaries.yml")
   assert_eq(release_smoke_workflow_errors(workflow, caller), [])
-  let post_publication = json_parse(json_stringify(workflow))
-  post_publication.on.workflow_run = {workflows: ["Build release binaries"], types: ["completed"]}
+  const post_publication = workflow
+    + {
+      on: workflow.on
+        + {workflow_run: {workflows: ["Build release binaries"], types: ["completed"]}},
+    }
   assert(len(release_smoke_workflow_errors(post_publication, caller)) == 1)
-  let unverified = json_parse(json_stringify(workflow))
-  unverified.jobs.smoke.steps = unverified.jobs.smoke.steps.filter(
-    { step -> step?.name != "Verify and extract candidate archive" },
-  )
-    .to_list()
+  const smoke = workflow.jobs.smoke
+  const unverified = workflow
+    + {
+      jobs: workflow.jobs
+        + {
+          smoke: smoke
+            + {
+              steps: smoke.steps.filter(
+                { step -> step?.name != "Verify and extract candidate archive" },
+              )
+                .to_list(),
+            },
+        },
+    }
   assert(
     join(release_smoke_workflow_errors(unverified, caller), "\n").contains(
       "verify each archive against the candidate manifest",
     ),
   )
-  let uncalled = json_parse(json_stringify(caller))
-  uncalled.jobs["release-smoke"] = {}
+  const uncalled = caller + {jobs: caller.jobs + {"release-smoke": {}}}
   assert(
     join(release_smoke_workflow_errors(workflow, uncalled), "\n").contains(
       "call release-smoke on its own candidate commit",
