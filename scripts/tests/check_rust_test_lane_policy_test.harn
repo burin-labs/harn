@@ -13,7 +13,10 @@ const RAW = "cargo nextest run --workspace --test-threads=8"
 // the last `slow-timeout` override. One added below it would be shadowed on
 // Windows by the catch-all and never apply there.
 @test
-pipeline test_windows_platform_budget_is_the_last_slow_timeout_override(harness: Harness, task: unknown) {
+pipeline test_windows_platform_budget_is_the_last_slow_timeout_override(
+  harness: Harness,
+  task: unknown,
+) {
   const nextest = read_toml(harness.fs, "../../.config/nextest.toml", nil)
   const overrides = nextest?.profile?.default?.overrides ?? []
   let last: dict? = nil
