@@ -223,10 +223,7 @@ impl OllamaProvider {
         let req = crate::llm::api::apply_auth_headers(req, &request.api_key, pdef.as_ref());
         let started = Instant::now();
         let response = req.send().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "ollama raw generate API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))))
+            crate::llm::api::reqwest_send_error("ollama", "raw generate", error)
         })?;
         if !response.status().is_success() {
             let status = response.status();

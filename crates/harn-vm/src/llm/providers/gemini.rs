@@ -280,12 +280,10 @@ impl GeminiProvider {
             attempt,
             &body,
         );
-        let response = req.send().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "gemini API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))))
-        })?;
+        let response = req
+            .send()
+            .await
+            .map_err(|error| crate::llm::api::reqwest_send_error("gemini", "API", error))?;
         if !response.status().is_success() {
             let status = response.status();
             let headers = response.headers().clone();

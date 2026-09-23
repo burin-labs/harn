@@ -184,12 +184,10 @@ impl BedrockProvider {
         for (name, value) in signed.headers {
             req = req.header(name, value);
         }
-        let response = req.send().await.map_err(|error| {
-            vm_err(format!(
-                "bedrock API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))
-        })?;
+        let response = req
+            .send()
+            .await
+            .map_err(|error| crate::llm::api::reqwest_send_error("bedrock", "API", error))?;
         if !response.status().is_success() {
             return Err(crate::llm::api::err_for_non_success("bedrock", response).await);
         }
