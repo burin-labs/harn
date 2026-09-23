@@ -88,12 +88,24 @@ pub(super) fn oauth_request_with_legacy_registration(
     if request.redirect_uri == DEFAULT_OAUTH_REDIRECT_URI {
         request.redirect_uri = registration
             .redirect_uri
+            .filter(|uri| !uri.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_OAUTH_REDIRECT_URI.to_string());
     }
     if request.resource.trim().is_empty() {
         request.resource = registration.resource.unwrap_or_default();
     }
     request
+}
+
+pub(super) fn legacy_registration_missing_redirect(
+    request: &OAuthConnectRequest,
+    registration: &LegacyOAuthRegistration,
+) -> bool {
+    request.redirect_uri == DEFAULT_OAUTH_REDIRECT_URI
+        && registration
+            .redirect_uri
+            .as_deref()
+            .is_none_or(|uri| uri.trim().is_empty())
 }
 
 pub(super) fn migrated_oauth_client_secret_required(request: &OAuthConnectRequest) -> bool {
