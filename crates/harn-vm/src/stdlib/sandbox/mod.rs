@@ -1177,6 +1177,10 @@ pub fn push_process_sandbox_scope(
 /// spawn seam in the VM and `harn-hostlib` reaches a child through the three
 /// funnel fns below. Callers still layer `env`/`env_remove` on top afterward;
 /// sandbox confinement sets no env vars, so clearing cannot weaken it.
+///
+/// Evaluates to whether it closed the environment, because a command's cleared
+/// state is not readable back off it: a seam that re-creates the command
+/// elsewhere (the process-owner guardian) has to be told.
 macro_rules! close_env_for_session {
     ($command:expr, $program:expr) => {
         if let Some(env) =
@@ -1186,11 +1190,28 @@ macro_rules! close_env_for_session {
             for (key, value) in env {
                 $command.env(key, value);
             }
+            true
+        } else {
+            false
         }
     };
 }
 
 pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
+    std_command_for_with_env_state(program, args).map(|(command, _)| command)
+}
+
+/// [`std_command_for`], also reporting whether the session policy CLEARED the
+/// command's environment and rebuilt it from the session's resolved set.
+///
+/// When it did, `get_envs()` holds that whole set and nothing else may be
+/// inherited. A seam that serializes the command to spawn it in another
+/// process must carry this flag with it, or the receiving side inherits its
+/// own environment behind the explicit entries.
+pub fn std_command_for_with_env_state(
+    program: &str,
+    args: &[String],
+) -> Result<(Command, bool), VmError> {
     let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
     let active = active_sandbox_policy();
     let mut command = match active.as_ref() {
@@ -1203,11 +1224,11 @@ pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmErro
             command
         }
     };
-    close_env_for_session!(command, program);
+    let env_closed = close_env_for_session!(command, program);
     if let Some(proxy) = active.and_then(|(policy, _)| policy.process_network_proxy) {
         process_output::apply_managed_proxy_env(&mut command, proxy);
     }
-    Ok(command)
+    Ok((command, env_closed))
 }
 
 pub fn tokio_command_for(

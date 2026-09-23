@@ -108,7 +108,11 @@ impl ProcessSpawner for RealSpawner {
             ));
         }
 
-        let (mut command, cleanup_token) = prepare_command(&spec, None)?;
+        let PreparedSpawn {
+            mut command,
+            cleanup_token,
+            ..
+        } = prepare_command(&spec, None)?;
         #[cfg(target_os = "windows")]
         let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment
             || spec.configure_process_group
@@ -161,18 +165,29 @@ impl ProcessSpawner for RealSpawner {
     }
 }
 
+/// A command ready to spawn, with the one fact about it that `Command` cannot
+/// report back: whether its environment was cleared, so that `get_envs()` is
+/// the child's WHOLE environment rather than a patch over an inherited one.
+pub(crate) struct PreparedSpawn {
+    pub(crate) command: Command,
+    pub(crate) cleanup_token: String,
+    pub(crate) env_cleared: bool,
+}
+
 pub(crate) fn prepare_command(
     spec: &SpawnSpec,
     cleanup_token: Option<String>,
-) -> Result<(Command, String), ProcessError> {
+) -> Result<PreparedSpawn, ProcessError> {
     if spec.program.is_empty() {
         return Err(ProcessError::InvalidArgv(
             "first element of argv must be a non-empty program name".to_string(),
         ));
     }
 
-    let mut command = process_sandbox::std_command_for(&spec.program, &spec.args)
-        .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+    let (mut command, session_closed) =
+        process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
+            .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+    let env_cleared = session_closed || spec.env_mode == EnvMode::Replace;
 
     let mut env: Vec<_> = spec
         .env
@@ -329,7 +344,11 @@ pub(crate) fn prepare_command(
         (_, false) => Stdio::null(),
     });
 
-    Ok((command, cleanup_token))
+    Ok(PreparedSpawn {
+        command,
+        cleanup_token,
+        env_cleared,
+    })
 }
 
 /// Record only the non-secret facts needed to diagnose command-resolution
@@ -447,7 +466,7 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
     let inherited_cleanup_token = std::env::var(harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV)
         .ok()
         .filter(|token| !token.is_empty());
-    let (mut command, _cleanup_token) = prepare_command(&spec, inherited_cleanup_token)?;
+    let mut command = prepare_command(&spec, inherited_cleanup_token)?.command;
     // `exec` replaces this process on success, so the only value it can return
     // is an error. It loses the same race for the same reason, so it crosses
     // the window the same way.
