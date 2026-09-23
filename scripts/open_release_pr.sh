@@ -11,7 +11,9 @@
 # Otherwise the opener branches release/vX.Y.Z, runs
 # `release_ship.sh --prepare --materialize-candidate` (which folds the
 # fragments, bumps the version to X.Y.Z, and regenerates derived files),
-# publishes that tree as one GitHub-signed commit, and opens the pull request.
+# publishes that tree as one GitHub-signed commit, opens the pull request, and
+# arms auto-merge on it at once (scripts/lib/release_auto_merge.sh). The pull
+# request still merges only through its required checks and review.
 #
 # Usage: open_release_pr.sh [--plan]
 #   --plan  decide only. Writes action=open|existing|none to $GITHUB_OUTPUT.
@@ -28,6 +30,7 @@ release_ship="${HARN_RELEASE_SHIP_SCRIPT:-$script_root/scripts/release_ship.sh}"
 cd "$root"
 source "$script_root/scripts/lib/release_version.sh"
 source "$script_root/scripts/lib/release_tree_guard.sh"
+source "$script_root/scripts/lib/release_auto_merge.sh"
 
 mode=open
 case "${1:-}" in
@@ -62,19 +65,24 @@ fi
 title="Release v$version"
 branch="release/v$version"
 
-# A failed lookup must not read as "no pull request": opening a second release
+# Stop, naming it, when a release pull request for this version is open. A
+# failed lookup must not read as "no pull request": opening a second release
 # pull request for one version is the failure this check exists to prevent.
-if ! existing="$(gh pr list --state open --base main --limit 1000 \
-  --json url,title,headRefName \
-  --jq "[.[] | select(.title == \"$title\" or .headRefName == \"$branch\")] | .[0].url // empty")"; then
-  echo "error: could not list open pull requests; refusing to open $title on unproved state" >&2
-  exit 1
-fi
-if [[ -n "$existing" ]]; then
-  echo "::notice title=Release pull request already open::$title is open: $existing"
-  emit action=existing "version=$version" "pr_url=$existing"
-  exit 0
-fi
+stop_if_release_pr_open() {
+  local existing
+  if ! existing="$(gh pr list --state open --base main --limit 1000 \
+    --json url,title,headRefName \
+    --jq "[.[] | select(.title == \"$title\" or .headRefName == \"$branch\")] | .[0].url // empty")"; then
+    echo "error: could not list open pull requests; refusing to open $title on unproved state" >&2
+    exit 1
+  fi
+  if [[ -n "$existing" ]]; then
+    echo "::notice title=Release pull request already open::$title is open: $existing"
+    emit action=existing "version=$version" "pr_url=$existing"
+    exit 0
+  fi
+}
+stop_if_release_pr_open
 
 fragments=()
 while IFS= read -r fragment; do
@@ -117,6 +125,24 @@ if [[ "$actual" != "$version" ]]; then
   exit 1
 fi
 
+# Decide again against main itself, just before publishing. The checkout is as
+# old as this job, and preparing takes minutes: if this version's release pull
+# request merged meanwhile, the checkout still reads $current and the open-list
+# above no longer shows the merged pull request, so without this re-read the
+# run would open a second one for a version already on main. An unreadable main
+# refuses rather than proceeding on unproved state.
+if ! git fetch --quiet origin main; then
+  echo "error: could not fetch origin/main to re-check $title; refusing to open it on unproved state" >&2
+  exit 1
+fi
+main_version="$(git show FETCH_HEAD:Cargo.toml | release_workspace_version)"
+if [[ "$main_version" != "$current" ]]; then
+  echo "::notice title=Nothing to release::main moved from $current to ${main_version:-no workspace version} while this run prepared $title, so it is no longer due."
+  emit action=none "version=$version" pr_url=
+  exit 0
+fi
+stop_if_release_pr_open
+
 HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
   HARN_BRANCH_COMMIT_BRANCH="$branch" \
   HARN_BRANCH_COMMIT_BASE_OID="$base_oid" \
@@ -132,4 +158,8 @@ When this merges, the push to main builds and checks the release candidate at th
 EOF
 pr_url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$body_file")"
 echo "Opened $title: $pr_url"
-emit action=opened "version=$version" "pr_url=$pr_url"
+# Arm now, before the checks settle. The URL is emitted first so a failed arm
+# still names the pull request it left unarmed.
+emit "version=$version" "pr_url=$pr_url"
+release_arm_auto_merge "$pr_url"
+emit action=opened

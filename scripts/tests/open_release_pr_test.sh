@@ -37,6 +37,14 @@ case "$1 $2" in
       echo "HTTP 502: Bad Gateway" >&2
       exit 1
     fi
+    # FAKE_GH_PRS_LATER answers every lookup after the first, for a pull
+    # request that opens while the run is preparing.
+    lists=$(( $(cat "$OPENER_STATE/list-count" 2>/dev/null || echo 0) + 1 ))
+    printf '%s\n' "$lists" > "$OPENER_STATE/list-count"
+    prs="${FAKE_GH_PRS:-[]}"
+    if (( lists > 1 )) && [[ -n "${FAKE_GH_PRS_LATER:-}" ]]; then
+      prs="$FAKE_GH_PRS_LATER"
+    fi
     jq_program=""
     while [[ $# -gt 0 ]]; do
       if [[ "$1" == "--jq" ]]; then
@@ -46,7 +54,13 @@ case "$1 $2" in
         shift
       fi
     done
-    jq -r "$jq_program" <<< "${FAKE_GH_PRS:-[]}"
+    jq -r "$jq_program" <<< "$prs"
+    ;;
+  "pr merge")
+    if [[ "${FAKE_GH_MERGE_FAIL:-0}" == 1 ]]; then
+      echo "GraphQL: Auto merge is not allowed for this repository" >&2
+      exit 1
+    fi
     ;;
   "pr create")
     cp "$HARN_RELEASE_ROOT/CHANGELOG.md" "$OPENER_STATE/changelog-at-create.md"
@@ -139,6 +153,11 @@ new_fixture() {
   git -C "$fixture" config commit.gpgsign false
   git -C "$fixture" add -A
   git -C "$fixture" commit --quiet -m initial
+  # The opener re-reads origin/main before publishing, so each fixture has a
+  # real remote.
+  git init --quiet --bare "$fixture.origin.git"
+  git -C "$fixture" remote add origin "$fixture.origin.git"
+  git -C "$fixture" push --quiet origin HEAD:refs/heads/main
   printf '%s\n' "$fixture"
 }
 
@@ -148,6 +167,23 @@ add_fragments() {
   printf -- '- **Retry budget is spent on retries (#8012).**\n' > "$fixture/changelog.d/8012.fixed.md"
   git -C "$fixture" add -A
   git -C "$fixture" commit --quiet -m "add fragments"
+  git -C "$fixture" push --quiet origin HEAD:refs/heads/main
+}
+
+# Land this version's release commit on origin/main from another clone, the way
+# a release pull request merging during the run would. The fixture's own
+# checkout keeps reading the development version.
+merge_release_on_origin() {
+  local fixture="$1"
+  local other="$fixture.other"
+  git clone --quiet "$fixture.origin.git" "$other"
+  git -C "$other" config user.name "Release PR Opener Test"
+  git -C "$other" config user.email "release-pr-opener-test@example.invalid"
+  git -C "$other" config commit.gpgsign false
+  sed 's/^version = "1.2.4-dev"$/version = "1.2.4"/' "$other/Cargo.toml" > "$other/Cargo.toml.next"
+  mv "$other/Cargo.toml.next" "$other/Cargo.toml"
+  git -C "$other" commit --quiet -am "Release v1.2.4"
+  git -C "$other" push --quiet origin HEAD:refs/heads/main
 }
 
 # Run the opener in a fixture. Sets case_output, case_record, case_outputs,
@@ -188,7 +224,7 @@ run_opener() {
 assert_no_side_effects() {
   local label="$1"
   local fixture="$2"
-  if grep -Eq '^(make|gate|publish) |^gh pr create' "$case_record"; then
+  if grep -Eq '^(make|gate|publish) |^gh pr (create|merge)' "$case_record"; then
     cat "$case_record" >&2
     fail "$label: prepared, published, or opened a pull request"
   fi
@@ -230,6 +266,55 @@ grep -Fxq "M  CHANGELOG.md" "$case_state/status-at-publish.txt" \
   || fail "published tree does not carry the folded CHANGELOG.md"
 [[ -e "$opens/changelog.d/README.md" ]] || fail "fold deleted a non-fragment file"
 grep -Fq "folds 2 changelog fragment(s)" "$case_state/body.md" || fail "pull request body does not count the folded fragments"
+# Auto-merge is armed by the same run that opens the pull request, right after
+# it opens and before its checks can settle, and it is the run's last GitHub
+# call.
+create_line=$(grep -n -m1 '^gh pr create ' "$case_record" | cut -d: -f1)
+merge_line=$(grep -n -Fx 'gh pr merge https://github.com/example/harn/pull/9001 --auto --squash' "$case_record" | cut -d: -f1 || true)
+[[ -n "$merge_line" ]] || { cat "$case_record" >&2; fail "opened pull request was not armed for auto-merge"; }
+[[ "$merge_line" -gt "$create_line" ]] || fail "auto-merge was armed before the pull request existed"
+[[ "$(grep '^gh ' "$case_record" | tail -n 1)" == "gh pr merge https://github.com/example/harn/pull/9001 --auto --squash" ]] \
+  || { cat "$case_record" >&2; fail "arming is not the opening run's last GitHub call"; }
+
+# --- A failed arm fails the run loudly and names the unarmed pull request ----
+unarmed=$(new_fixture unarmed 1.2.4-dev)
+add_fragments "$unarmed"
+FAKE_GH_MERGE_FAIL=1 run_opener "$unarmed"
+[[ "$case_status" -ne 0 ]] || fail "opener succeeded although arming auto-merge failed"
+grep -Fq "could not arm auto-merge on https://github.com/example/harn/pull/9001" "$case_output" \
+  || { cat "$case_output" >&2; fail "arming failure did not name the unarmed pull request"; }
+grep -Fq 'gh pr merge https://github.com/example/harn/pull/9001 --auto --squash' "$case_record" \
+  || fail "arming failure case never attempted to arm"
+grep -Fxq "pr_url=https://github.com/example/harn/pull/9001" "$case_outputs" \
+  || fail "arming failure did not report the opened pull request"
+if grep -Fxq "action=opened" "$case_outputs"; then
+  fail "arming failure still reported action=opened"
+fi
+
+# --- This version's release merges while the run prepares: no second PR -----
+moved=$(new_fixture moved 1.2.4-dev)
+add_fragments "$moved"
+merge_release_on_origin "$moved"
+run_opener "$moved"
+[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "main-moved case failed"; }
+grep -Fxq "action=none" "$case_outputs" || fail "main-moved case did not report action=none"
+grep -Fq "main moved from 1.2.4-dev to 1.2.4 while this run prepared Release v1.2.4" "$case_output" \
+  || { cat "$case_output" >&2; fail "main-moved case did not name the reason"; }
+if grep -Eq '^publish |^gh pr (create|merge)' "$case_record"; then
+  fail "opener published a release pull request for a version already on main"
+fi
+
+# --- A release PR opens while the run prepares: name it, publish nothing -----
+raced=$(new_fixture raced 1.2.4-dev)
+add_fragments "$raced"
+FAKE_GH_PRS_LATER='[{"url":"https://github.com/example/harn/pull/80","title":"Release v1.2.4","headRefName":"release/v1.2.4"}]' \
+  run_opener "$raced"
+[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "raced case failed"; }
+grep -Fxq "pr_url=https://github.com/example/harn/pull/80" "$case_outputs" \
+  || fail "a release pull request opened during prepare was not named"
+if grep -Eq '^publish |^gh pr (create|merge)' "$case_record"; then
+  fail "opener published over a release pull request that opened during prepare"
+fi
 
 # --- A failure after the fold restores the notes and publishes nothing --------
 rollback=$(new_fixture rollback 1.2.4-dev)
@@ -291,12 +376,17 @@ grep -Fq "refusing to open Release v1.2.4 on unproved state" "$case_output" \
   || { cat "$case_output" >&2; fail "list failure did not explain the refusal"; }
 assert_no_side_effects "list failure" "$unproved"
 
-# --- main already at a stable version: the development bump has not landed ---
+# --- main at a stable version with fragments pending: no-op, reason named ----
+# This is main between a release commit and its post-publication development
+# bump: promotion in flight, or a failed candidate build. Fragments that landed
+# meanwhile wait for the next development version.
 stable=$(new_fixture stable 1.2.4)
 add_fragments "$stable"
 run_opener "$stable"
 [[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "stable-version case failed"; }
 grep -Fxq "action=none" "$case_outputs" || fail "stable-version case did not report action=none"
+grep -Fq "::notice title=Nothing to release::main declares 1.2.4, not an X.Y.Z-dev development version. The next release starts once the development bump lands." "$case_output" \
+  || { cat "$case_output" >&2; fail "stable-version case did not name the reason"; }
 assert_no_side_effects "stable version" "$stable"
 if grep -q '^gh ' "$case_record"; then
   fail "stable-version case queried GitHub before deciding there is nothing to release"

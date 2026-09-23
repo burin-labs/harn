@@ -2,8 +2,9 @@ name: Open release PR
 
 # Opens the `Release vX.Y.Z` pull request (scripts/open_release_pr.sh). It
 # moves main from X.Y.Z-dev to X.Y.Z, folds changelog.d fragments into
-# CHANGELOG.md and deletes them, and merges on green through normal CI like
-# any other pull request. When its commit reaches main,
+# CHANGELOG.md and deletes them. The run arms auto-merge as soon as the pull
+# request opens, so it lands through the normal required checks and review
+# like any other pull request. When its commit reaches main,
 # build-release-binaries.yml builds and checks the release candidate at that
 # commit, and promotion publishes exactly those files.
 #

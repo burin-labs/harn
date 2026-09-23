@@ -142,8 +142,9 @@ Terminal proof requires all of these to be successful:
   pushes only warm caches. Promotion publishes a green candidate run's files.
 - `.github/workflows/bump-release.yml` ("Open release PR") runs
   `scripts/open_release_pr.sh` daily and on dispatch. It opens the
-  `Release vX.Y.Z` pull request when main has unreleased fragments, names an
-  already-open one, and is otherwise a no-op.
+  `Release vX.Y.Z` pull request and arms auto-merge when main is on a
+  development version with unreleased fragments, names an already-open one,
+  and is otherwise a no-op.
 - `.github/workflows/release-pr-drift-check.yml` can ask you to rerun
   `release_harn.harn` when a release PR's pin diverges from `origin/main`.
 
