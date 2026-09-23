@@ -48,7 +48,7 @@ impl AsyncBuiltinCtx {
             .evaluation
             .journal
             .lock()
-            .invocation_id(&vm.execution_id().to_string());
+            .invocation_id(vm.execution_id().as_ref());
         id
     }
 

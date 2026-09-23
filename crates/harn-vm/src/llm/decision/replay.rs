@@ -114,10 +114,12 @@ fn key(request: &EvaluationRequest) -> Result<String, VmError> {
     Ok(super::identity::request_id(&site, &identity))
 }
 
+type ReusedEvaluation = (Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt);
+
 pub(super) fn lookup(
     ctx: &crate::vm::AsyncBuiltinCtx,
     request: &EvaluationRequest,
-) -> Result<Option<(Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt)>, VmError> {
+) -> Result<Option<ReusedEvaluation>, VmError> {
     let Some(scope) = ctx.evaluation_replay() else {
         return Ok(None);
     };
@@ -132,7 +134,7 @@ fn lookup_inner(
     ctx: &crate::vm::AsyncBuiltinCtx,
     request: &EvaluationRequest,
     scope: &EvaluationReplayScope,
-) -> Result<Option<(Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt)>, VmError> {
+) -> Result<Option<ReusedEvaluation>, VmError> {
     let (recorded, source) = {
         let mut mode = scope.0.lock().expect("evaluation replay lock");
         match &mut *mode {

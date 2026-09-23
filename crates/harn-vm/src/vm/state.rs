@@ -331,7 +331,7 @@ pub struct Vm {
     pub(crate) owns_execution: bool,
     /// Exact source path recorder shared by this VM tree when explicitly enabled.
     pub(crate) flight_recorder: Option<Arc<crate::flight_recorder::FlightRecorder>>,
-    pub(crate) evaluation: crate::llm::decision::receipt::EvaluationExecutionState,
+    pub(crate) evaluation: Box<crate::llm::decision::receipt::EvaluationExecutionState>,
     /// Root-only configuration used to create a fresh recorder per execution.
     pub(crate) flight_recorder_max_events: Option<usize>,
     /// Host-side agent-loop state owned by this VM tree.
