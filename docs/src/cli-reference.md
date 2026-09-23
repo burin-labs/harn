@@ -2841,7 +2841,10 @@ default port, no query string, no fragment, and no trailing slash.
 `harn connect <provider>` reads authentication metadata for providers in the
 nearest `harn.toml` `[[providers]]` table. OAuth metadata starts the browser
 flow; flags such as `--client-id`, `--scope`, `--auth-url`, and `--token-url`
-override that metadata for one run.
+override that metadata for one run. An old OAuth credential that did not record
+its registered callback prompts for the exact URI. A missing authorization URL
+can be supplied at the next prompt or discovered from the resource. Unattended
+setup supplies the callback with `--redirect-uri <uri>`.
 
 For `auth_type = "api-key"` with one outbound `required_secrets` entry, the
 same command prompts without echoing the key. Inbound verification secrets do
