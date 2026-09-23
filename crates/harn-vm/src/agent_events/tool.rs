@@ -265,6 +265,8 @@ pub enum DenialGate {
     /// decided ahead of the configured rules, and also not an approval
     /// decision.
     SensitivePath,
+    /// The network policy refused the declared destination before endpoint health.
+    NetworkPolicy,
     /// A static approval policy decided `deny`.
     ApprovalPolicy,
     /// Approval was required (`ask`) but could not be requested because no
@@ -284,7 +286,7 @@ pub enum DenialGate {
 }
 
 impl DenialGate {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::ToolCeiling,
         Self::MalformedToolWrapper,
         Self::CapabilityCeiling,
@@ -293,6 +295,7 @@ impl DenialGate {
         Self::DynamicPermission,
         Self::WorkspaceBoundary,
         Self::SensitivePath,
+        Self::NetworkPolicy,
         Self::ApprovalPolicy,
         Self::ApprovalUnavailable,
         Self::HostRejected,
@@ -311,6 +314,7 @@ impl DenialGate {
             Self::DynamicPermission => "dynamic_permission",
             Self::WorkspaceBoundary => "workspace_boundary",
             Self::SensitivePath => "sensitive_path",
+            Self::NetworkPolicy => "network_policy",
             Self::ApprovalPolicy => "approval_policy",
             Self::ApprovalUnavailable => "approval_unavailable",
             Self::HostRejected => "host_rejected",
@@ -333,6 +337,7 @@ impl DenialGate {
             Self::DynamicPermission => "Dynamic permission denial",
             Self::WorkspaceBoundary => "Workspace boundary denial",
             Self::SensitivePath => "Sensitive path denial",
+            Self::NetworkPolicy => "Network policy denial",
             Self::ApprovalPolicy => "Approval policy denial",
             Self::ApprovalUnavailable => "Approval unavailable denial",
             Self::HostRejected => "Host rejection denial",
@@ -428,6 +433,8 @@ pub struct ToolDenial {
     /// Workspace paths the denied call declared, when the tool annotates
     /// path arguments. Empty for tools that declare no paths.
     pub denied_paths: Vec<String>,
+    /// Network destinations refused by policy, as declared URLs.
+    pub denied_network_targets: Vec<String>,
     /// Command lines the denied call declared, when it declared any. Empty for
     /// the many tools that run no command.
     ///
@@ -484,6 +491,7 @@ impl ToolDenial {
             gate,
             capability,
             denied_paths: Vec::new(),
+            denied_network_targets: Vec::new(),
             denied_commands: Vec::new(),
             retryable: false,
             reason: gate.render_reason(particulars),
@@ -511,6 +519,7 @@ impl ToolDenial {
             gate,
             capability,
             denied_paths: Vec::new(),
+            denied_network_targets: Vec::new(),
             denied_commands: Vec::new(),
             retryable: true,
             reason: gate.render_reason(particulars),
@@ -600,6 +609,7 @@ impl Serialize for ToolDenial {
         let mut field_count = 3;
         field_count += usize::from(self.capability.is_some());
         field_count += usize::from(!self.denied_paths.is_empty());
+        field_count += usize::from(!self.denied_network_targets.is_empty());
         field_count += usize::from(!self.denied_commands.is_empty());
         field_count += usize::from(self.denial_class.is_some());
         field_count += usize::from(self.class_repeat_count.is_some());
@@ -613,6 +623,9 @@ impl Serialize for ToolDenial {
         }
         if !self.denied_paths.is_empty() {
             record.serialize_field("denied_paths", &self.denied_paths)?;
+        }
+        if !self.denied_network_targets.is_empty() {
+            record.serialize_field("denied_network_targets", &self.denied_network_targets)?;
         }
         if !self.denied_commands.is_empty() {
             record.serialize_field("denied_commands", &self.denied_commands)?;
@@ -645,6 +658,8 @@ struct ToolDenialRecord {
     capability: Option<String>,
     #[serde(default)]
     denied_paths: Vec<String>,
+    #[serde(default)]
+    denied_network_targets: Vec<String>,
     #[serde(default)]
     denied_commands: Vec<String>,
     retryable: bool,
@@ -690,6 +705,7 @@ impl<'de> Deserialize<'de> for ToolDenial {
             gate: record.gate,
             capability: record.capability,
             denied_paths: record.denied_paths,
+            denied_network_targets: record.denied_network_targets,
             denied_commands: record.denied_commands,
             retryable: record.retryable,
             reason,

@@ -20,6 +20,8 @@ pub(super) fn policy_evidence(
             .as_ref()
             .and_then(|rule| rule.id.clone()),
         risk_labels: evaluation.risk_labels.clone(),
+        denial_gate: evaluation.is_deny().then(|| evaluation.denial_gate()),
+        denied_network_targets: evaluation.denied_network_targets.clone(),
         policy_decision: evaluation.receipt.clone(),
     }
 }

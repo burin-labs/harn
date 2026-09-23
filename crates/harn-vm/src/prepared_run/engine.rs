@@ -6,7 +6,10 @@ use async_trait::async_trait;
 use serde_json::json;
 
 use crate::harness_net::NetPolicyDecision;
-use crate::orchestration::{PolicyEvaluation, ProcessSandboxPreset, ToolApprovalRequest};
+use crate::orchestration::{
+    PolicyEvaluation, PolicyMatchedRule, ProcessSandboxPreset, ToolApprovalRequest,
+    SOURCE_NET_POLICY,
+};
 
 use super::evidence::{
     approval_batch, diagnostic, fingerprint, persist_terminally, policy_evidence,
@@ -1251,21 +1254,30 @@ pub(super) fn evaluate_requirement(
         {
             NetPolicyDecision::Allow { .. } => {}
             NetPolicyDecision::Deny { audit, .. } => {
+                let matched_rule = PolicyMatchedRule {
+                    source: SOURCE_NET_POLICY.to_string(),
+                    action: "deny".to_string(),
+                    id: audit.matched_rule.clone(),
+                    index: None,
+                };
                 return Ok(PolicyEvaluation {
                     action: "deny".to_string(),
                     reason: format!(
                         "network policy denied before endpoint health: {}",
                         audit.reason
                     ),
-                    matched_rule: None,
+                    matched_rule: Some(matched_rule.clone()),
                     required_approval: None,
                     risk_labels: vec!["network_policy".to_string()],
                     denied_paths: Vec::new(),
+                    denied_network_targets: vec![audit.url.clone()],
                     receipt: json!({
                         "type": "harn.permission_policy_decision.v1",
                         "action": "deny",
                         "reason": audit.reason,
-                        "policy_source": "harn.net_policy",
+                        "policy_source": SOURCE_NET_POLICY,
+                        "matched_rule": matched_rule,
+                        "denied_network_targets": [audit.url],
                     }),
                 });
             }
