@@ -1,9 +1,10 @@
 # `changelog.d/` — changelog fragments
 
-Each non-trivial PR drops a single markdown file in this directory. At release
-time `release_harn.harn` (in `~/projects/harn-bump-fleet`) reads every fragment,
-groups them by category, folds them into the top `## Unreleased` block in
-`../CHANGELOG.md`, then deletes the fragments in the same release commit.
+Each non-trivial PR drops a single markdown file in this directory. The
+`Release vX.Y.Z` pull request folds them: `scripts/release_changelog_fold.harn`
+reads every fragment, groups them by category, merges them into the
+`## Unreleased` block of `../CHANGELOG.md`, renames that block `## vX.Y.Z`, and
+deletes the fragments in the same release commit.
 
 The pattern is a small adaptation of [towncrier](https://towncrier.readthedocs.io).
 It exists to remove `## Unreleased` as a merge-conflict hot spot. Two PRs that

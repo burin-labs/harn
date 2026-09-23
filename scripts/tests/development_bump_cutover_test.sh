@@ -56,7 +56,7 @@ case "$*" in
   *"/sync_protocol_fixture_runtime_versions.harn "*) ;;
   *"/sync_grammar_fitness_receipt.harn") ;;
   "dump-protocol-artifacts") ;;
-  "run --no-sandbox "*"/publish_development_bump.harn") ;;
+  "run --no-sandbox "*"/publish_branch_commit.harn") ;;
   *) echo "unexpected fake Harn invocation: $*" >&2; exit 2 ;;
 esac
 EOF

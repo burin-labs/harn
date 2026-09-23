@@ -345,8 +345,8 @@ jobs:
         # `pull_request`: honour the paths filter — a docs/website/markdown-only
         #   PR skips the heavy Linux Rust lanes for fast, cheap feedback. A
         #   release/vX.Y.Z PR whose diff is only release metadata also skips
-        #   those PR-head lanes because `release_harn` already ran the release
-        #   audit locally; merge_group below remains the full backstop.
+        #   those PR-head lanes: its content is a version bump and folded notes,
+        #   and merge_group below runs the full backstop before it can land.
         # `merge_group`: default to `rust=true` so the speculative merge commit
         #   catches cross-PR interaction regressions. The only skip is a
         #   stacked docs-only tail whose incremental diff from the previous
