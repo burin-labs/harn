@@ -1072,6 +1072,11 @@ mod tests {
             .expect("send session/prompt");
 
         block_on(async {
+            // The PID file and process state are external OS events. Polling
+            // them is bounded by named timeouts; the interval is only a probe
+            // cadence, never a delay used to order Harn tasks.
+            let mut probe = tokio::time::interval(Duration::from_millis(20));
+            probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             tokio::time::timeout(Duration::from_secs(30), async {
                 while !pid_file.exists() {
                     tokio::select! {
@@ -1088,7 +1093,7 @@ mod tests {
                             }
                             assert_ne!(message["id"], 3, "prompt finished before MCP child: {message}");
                         }
-                        () = tokio::time::sleep(Duration::from_millis(20)) => {}
+                        _ = probe.tick() => {}
                     }
                 }
             })
@@ -1117,6 +1122,8 @@ mod tests {
                 .expect("shutdown must interrupt MCP initialization");
         });
         block_on(async {
+            let mut probe = tokio::time::interval(Duration::from_millis(20));
+            probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             tokio::time::timeout(Duration::from_secs(2), async {
                 loop {
                     let state = process_state();
@@ -1127,7 +1134,7 @@ mod tests {
                     {
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    probe.tick().await;
                 }
             })
             .await
