@@ -8,6 +8,25 @@ const WRAPPED = "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace"
 
 const RAW = "cargo nextest run --workspace --test-threads=8"
 
+// nextest applies the first matching override per setting, so the Windows
+// platform budget only fills the gap left by every per-test budget while it is
+// the last `slow-timeout` override. One added below it would be shadowed on
+// Windows by the catch-all and never apply there.
+@test
+pipeline test_windows_platform_budget_is_the_last_slow_timeout_override(harness: Harness, task: unknown) {
+  const nextest = read_toml(harness.fs, "../../.config/nextest.toml", nil)
+  const overrides = nextest?.profile?.default?.overrides ?? []
+  let last: dict? = nil
+  for entry in overrides {
+    if entry?.["slow-timeout"] != nil {
+      last = entry
+    }
+  }
+  assert(last != nil, "no slow-timeout override was measured")
+  assert_eq(last?.filter, "all()")
+  assert_eq(last?.platform?.host, "cfg(target_os = \"windows\")")
+}
+
 @test
 pipeline test_e2e_compile_budget_is_independent_of_test_workers(harness: Harness, task: unknown) {
   const nextest = read_toml(harness.fs, "../../.config/nextest.toml", nil)
