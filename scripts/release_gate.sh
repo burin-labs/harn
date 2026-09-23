@@ -9,6 +9,8 @@ PUBLISH_SCRIPT="${HARN_PUBLISH_SCRIPT:-./scripts/publish.sh}"
 source "$SCRIPT_DIR/lib/cargo_env.sh"
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$SCRIPT_DIR/lib/harn_bin.sh"
+# shellcheck source=scripts/lib/source_gate_receipt.sh
+source "$SCRIPT_DIR/lib/source_gate_receipt.sh"
 
 release_gate_target_name() {
   printf '%s' "$(basename "$ROOT_DIR")" | tr -c 'A-Za-z0-9._-' '-'
@@ -786,6 +788,18 @@ cmd_audit() {
   if [[ ! -x "$cargo_harn_bin" ]]; then
     echo "error: warm prebuild completed but HARN_BIN is not executable: $cargo_harn_bin"
     exit 1
+  fi
+  # The residual lanes run on a binary this gate may not have built. Bind it to
+  # the audited commit once, before any lane starts, through the proof the docs
+  # lane already requires: a freshness receipt, a certified snapshot, or the
+  # identity CI exported when it verified a downloaded artifact. Otherwise only
+  # that one lane notices a substituted binary, and the others audit it anyway.
+  if [[ "$AUDIT_RECEIPT_REUSED" == "true" || "$plan_scope" == "residual" ]]; then
+    if ! harn_source_gate_binary_identity "$cargo_harn_bin" "$certified_source_sha" >/dev/null; then
+      echo "error: the residual audit's HARN_BIN is not proven to be built from $certified_source_sha" >&2
+      exit 1
+    fi
+    printf 'ok: %-15s (%s)\n' "harn-bin-proof" "$certified_source_sha"
   fi
 
   local tmp

@@ -112,6 +112,7 @@ jobs:
       prompt_prose: ${{ steps.surface_filter.outputs.prompt_prose }}
       setup_action: ${{ steps.surface_filter.outputs.setup_action }}
       release_contract: ${{ steps.surface_filter.outputs.release_contract }}
+      release_residual: ${{ steps.surface_filter.outputs.release_residual }}
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -203,6 +204,17 @@ jobs:
               - 'scripts/*development*'
               - 'scripts/tests/*release*'
               - 'scripts/tests/*development*'
+            # Everything the release residual audit lanes execute or read as
+            # their contract: the gate and its lanes, the Make targets they
+            # call, and the docs, spec, and grammar checks among them.
+            release_residual:
+              - '.github/workflows/ci.yml'
+              - '.markdownlint-cli2.jsonc'
+              - 'Makefile'
+              - 'scripts/**'
+              - 'spec/**'
+              - 'tree-sitter-harn/**'
+              - 'website/**'
             package_audit:
               - '.github/workflows/ci.yml'
               - 'Cargo.lock'
@@ -450,7 +462,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The action's default glob is `*.{md,markdown}`, the repository root
+      # only. The release docs lane lints `**/*.md`, so a violation anywhere
+      # else passed here and was found for the first time by a release.
       - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        with:
+          globs: "**/*.md"
 
   # Release semantics have two enforcers: this repository's release scripts and
   # workflows, and the release orchestrator that drives cuts. When they
@@ -529,6 +546,64 @@ jobs:
 
       - name: Rehearse release staging and development cutover offline
         run: bash scripts/release_rehearsal.sh
+
+  # The release residual audit lanes on this change's exact-commit CLI.
+  #
+  # A release runs these lanes (generated files, docs, grammar, security,
+  # smoke) on the candidate's shipped CLI before it promotes anything. A change
+  # to what they execute runs them here first, through the same
+  # `release_gate.sh` entry point and the same downloaded-binary proof, so a
+  # change that breaks a late check is refused before it merges instead of at
+  # the next release.
+  release-residual-audit:
+    name: Release residual audit
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true'
+    runs-on: ubuntu-latest
+    # Hang backstop, not a performance budget.
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: tree-sitter-harn/package-lock.json
+      - name: Install ripgrep
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: ripgrep
+          check-command: rg
+      - uses: ./.github/actions/rust-toolchain
+      # A release generates this ignored payload before its audit, and the
+      # candidate build uploads it beside the archives. Generate it the same
+      # way so the generated-files lane checks real bytes.
+      - name: Generate the CLI AOT payload
+        run: make gen-cli-aot && make check-cli-aot
+      - name: Wait for shared Harn binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - name: Run the release residual audit
+        run: ./scripts/release_gate.sh audit --residual-only
 
   # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
   # already below the SLO; the full test graph is owned by rust-check-inputs so the
@@ -2629,6 +2704,7 @@ jobs:
         package-audit,
         lint-md,
         release-contract,
+        release-residual-audit,
         rust-checks,
         rust-producer-capacity,
         rust-check-inputs,
@@ -2729,6 +2805,15 @@ jobs:
           echo "Release contract: $release_contract_result (expected=$release_contract_expected)"
           require_result "$release_contract_result" \
             "Release contract failed, or did not report a verdict while release-relevant paths were touched." [ "$release_contract_expected" != "true" ]
+
+          # The release residual audit runs when this change can alter what a
+          # release's late checks execute. It needs the exact-commit CLI, so it
+          # is expected exactly when the Rust lanes ran and its paths changed.
+          release_residual_result="${{ needs['release-residual-audit'].result }}"
+          release_residual_expected="${{ needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true' }}"
+          echo "Release residual audit: $release_residual_result (expected=$release_residual_expected)"
+          require_result "$release_residual_result" \
+            "Release residual audit failed, or did not report a verdict while its paths were touched." [ "$release_residual_expected" != "true" ]
 
           # Rust checks remain pre-merge product proof. Repository policies are
           # handled separately below as a main-only integration ratchet.
