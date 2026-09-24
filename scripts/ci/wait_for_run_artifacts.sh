@@ -16,13 +16,15 @@ repository="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must name owner/repo}"
 run_id="${GITHUB_RUN_ID:?GITHUB_RUN_ID must identify the current workflow run}"
 producer_job="${HARN_EXT_ARTIFACT_PRODUCER_JOB:?HARN_EXT_ARTIFACT_PRODUCER_JOB must name the producing job}"
 run_attempt="${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT must identify the current attempt}"
-max_attempts="${HARN_ARTIFACT_WAIT_MAX_ATTEMPTS:-66}"
+# Retained for callers using the existing setting: this bounds consecutive
+# unreadable producer-state observations, not time spent in a measured queue.
+max_unmeasured_attempts="${HARN_ARTIFACT_WAIT_MAX_ATTEMPTS:-66}"
 interval_seconds="${HARN_ARTIFACT_WAIT_INTERVAL_SECONDS:-10}"
 
 case "$run_attempt" in
   ''|*[!0-9]*|0) echo "GITHUB_RUN_ATTEMPT must be a positive integer" >&2; exit 2 ;;
 esac
-case "$max_attempts" in
+case "$max_unmeasured_attempts" in
   ''|*[!0-9]*|0) echo "HARN_ARTIFACT_WAIT_MAX_ATTEMPTS must be a positive integer" >&2; exit 2 ;;
 esac
 case "$interval_seconds" in
@@ -65,7 +67,7 @@ read_artifacts() {
   [ "${#missing[@]}" -eq 0 ]
 }
 
-producer_conclusion() {
+producer_state() {
   local pages
   pages=$(gh api "$jobs_path" --paginate --slurp 2>/dev/null) || return 1
   jq -er --arg name "$producer_job" '
@@ -76,35 +78,49 @@ producer_conclusion() {
              or (.status | type) != "string" then error("invalid job") else . end)
     | map(select(.name == $name))
     | if length != 1 then error("producer not uniquely measured") else .[0] end
-    | if .status != "completed" then empty else .conclusion end
-    | select(. == "success" or . == "failure" or . == "cancelled" or . == "skipped"
-             or . == "timed_out" or . == "action_required" or . == "neutral"
-             or . == "stale" or . == "startup_failure")
+    | if .status == "completed" then
+        if (.conclusion == "success" or .conclusion == "failure" or .conclusion == "cancelled"
+            or .conclusion == "skipped" or .conclusion == "timed_out"
+            or .conclusion == "action_required" or .conclusion == "neutral"
+            or .conclusion == "stale" or .conclusion == "startup_failure")
+        then "completed:" + .conclusion else error("unknown producer conclusion") end
+      elif (.status == "queued" or .status == "in_progress" or .status == "waiting"
+            or .status == "pending" or .status == "requested") and .conclusion == null
+      then .status
+      else error("unknown producer status") end
   ' <<< "$pages" 2>/dev/null
 }
 
-for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+attempt=0
+unmeasured_attempts=0
+while :; do
+  attempt=$((attempt + 1))
   if read_artifacts; then
     echo "run artifacts ready: ${artifacts[*]}"
     exit 0
   fi
-  if conclusion=$(producer_conclusion); then
-    # Upload may have completed between the first inventory and the job read.
-    # Re-read after observing terminal state before declaring an artifact lost.
-    if read_artifacts; then
-      echo "run artifacts ready: ${artifacts[*]}"
-      exit 0
+  if state=$(producer_state); then
+    unmeasured_attempts=0
+    if [[ $state == completed:* ]]; then
+      # Upload may have completed between the first inventory and the job read.
+      # Re-read after observing terminal state before declaring an artifact lost.
+      if read_artifacts; then
+        echo "run artifacts ready: ${artifacts[*]}"
+        exit 0
+      fi
+      echo "producer '${producer_job}' completed (${state#completed:}) without readable required artifacts: ${missing[*]}" >&2
+      exit 1
     fi
-    echo "producer '${producer_job}' completed (${conclusion}) without readable required artifacts: ${missing[*]}" >&2
-    exit 1
-  fi
-
-  if [ "$attempt" -eq "$max_attempts" ]; then
-    echo "timed out waiting for run artifacts after ${max_attempts} attempts: ${missing[*]}" >&2
-    exit 1
+  else
+    state=unmeasured
+    unmeasured_attempts=$((unmeasured_attempts + 1))
+    if [ "$unmeasured_attempts" -ge "$max_unmeasured_attempts" ]; then
+      echo "producer '${producer_job}' state unmeasured after ${max_unmeasured_attempts} polls; missing artifacts: ${missing[*]}" >&2
+      exit 1
+    fi
   fi
   if [ "$attempt" -eq 1 ] || [ $((attempt % 6)) -eq 0 ]; then
-    echo "waiting for run artifacts (attempt ${attempt}/${max_attempts}): ${missing[*]}"
+    echo "waiting for run artifacts (poll ${attempt}, producer ${state}): ${missing[*]}"
   fi
   sleep "$interval_seconds"
 done
