@@ -156,7 +156,7 @@ Moves the workspace from $current to $version and folds ${#fragments[@]} changel
 
 When this merges, the push to main builds and checks the release candidate at that commit, and promotion publishes exactly those files. Opened by \`scripts/open_release_pr.sh\` from main at $base_oid.
 EOF
-pr_url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$body_file")"
+pr_url="$(gh pr create --base main --head "$branch" --title "Release v$version" --body-file "$body_file")"
 echo "Opened $title: $pr_url"
 # Arm now, before the checks settle. The URL is emitted first so a failed arm
 # still names the pull request it left unarmed.

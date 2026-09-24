@@ -637,8 +637,12 @@ git -C "$release_root" reset --hard --quiet HEAD
 mkdir -p "$release_root/changelog.d"
 printf '*.md text eol=lf\n' > "$release_root/.gitattributes"
 printf 'rollback masker regression\n' > "$release_root/changelog.d/rollback-masker.fixed.md"
-git -C "$release_root" add .gitattributes changelog.d/rollback-masker.fixed.md
-git -C "$release_root" commit --quiet -m "add tracked changelog fragment"
+# The fold refuses to succeed on zero fragments, so one stays for it to fold;
+# the audit then fails after generation, which is the failure under test.
+printf 'rollback fold input\n' > "$release_root/changelog.d/rollback-kept.fixed.md"
+git -C "$release_root" add .gitattributes changelog.d/rollback-masker.fixed.md \
+  changelog.d/rollback-kept.fixed.md
+git -C "$release_root" commit --quiet -m "add tracked changelog fragments"
 rm "$release_root/changelog.d/rollback-masker.fixed.md"
 printf '\n- authored before failed prepare\n' >> "$release_root/CHANGELOG.md"
 git -C "$release_root" add CHANGELOG.md
