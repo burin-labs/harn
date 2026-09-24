@@ -726,6 +726,14 @@ statics = ["WARNED_KEYS"]
 category = "thread_private"
 plan = "thread_private_cache"
 
+# A re-entrancy guard set and cleared around the wrapper probe's own
+# synchronous `cargo` spawn on the same thread; nothing else reads it.
+[[thread_local]]
+path = "src/stdlib/sandbox/rustc_wrapper.rs"
+statics = ["PROBING"]
+category = "thread_private"
+plan = "thread_private_cache"
+
 [[thread_local]]
 path = "src/stdlib/supervisor.rs"
 statics = ["SUPERVISORS", "SUPERVISOR_COUNTER"]
