@@ -75,7 +75,7 @@ fi
 
 tmp_repo="$(mktemp -d)"
 trap 'rm -rf "$tmp_repo"' EXIT
-git -C "$tmp_repo" init --quiet
+git -C "$tmp_repo" init -b main --quiet
 git -C "$tmp_repo" config user.name "Release Version Test"
 git -C "$tmp_repo" config user.email "release-version-test@example.com"
 git -C "$tmp_repo" config commit.gpgsign false

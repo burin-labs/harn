@@ -74,7 +74,7 @@ touch \
   "$release_root/docs/src/SUMMARY.md" \
   "$release_root/docs/theme/harn-keywords.js"
 
-git -C "$release_root" init --quiet
+git -C "$release_root" init -b main --quiet
 git -C "$release_root" config user.name "Release Test"
 git -C "$release_root" config user.email "release-test@example.com"
 git -C "$release_root" config commit.gpgsign false
@@ -344,7 +344,7 @@ cat > "$real_release_root/docs/src/embedding-rust.md" <<'EOF'
 tag = "v1.2.3"
 EOF
 PATH="$real_path" cargo generate-lockfile --manifest-path "$real_release_root/Cargo.toml" --offline
-git -C "$real_release_root" init --quiet
+git -C "$real_release_root" init -b main --quiet
 git -C "$real_release_root" config user.name "Release Test"
 git -C "$real_release_root" config user.email "release-test@example.com"
 git -C "$real_release_root" config commit.gpgsign false

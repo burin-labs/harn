@@ -42,7 +42,7 @@ trap 'rm -rf "$fixture_root"' EXIT
 mkdir -p "$fixture_root/docs" "$fixture_root/scripts"
 cp "$script" "$fixture_root/scripts/check_public_product_names.sh"
 cp "$scanner" "$fixture_root/scripts/scan_hashed_denylist.mjs"
-git -C "$fixture_root" init -q
+git -C "$fixture_root" init -b main -q
 
 # The fixture's own denylist covers a benign token throughout, so proving the
 # mechanism never requires a real private hostname in this tracked test file.

@@ -657,6 +657,7 @@ test-agent-scripts:
 
 test-pr-gate-scripts:
 	./scripts/tests/pr_title_convention_test.sh
+	./scripts/tests/fixture_git_init_branch_test.sh
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
