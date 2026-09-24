@@ -1365,3 +1365,70 @@ fn a_workspace_socket_bind_succeeds_under_the_grant_and_fails_outside_it() {
     let stderr = String::from_utf8_lossy(&outside.stderr);
     assert!(stderr.contains("bind: Operation not permitted"), "{stderr}");
 }
+
+/// A socket root outside every writable root takes a socket file and nothing
+/// else.
+///
+/// Binding creates the socket file, a file write the bind rule does not
+/// carry, so a root that was only a socket root refused every bind with a bare
+/// EPERM. The regular-file leg keeps the fix from turning the root into a
+/// writable directory.
+#[test]
+fn a_socket_root_outside_every_writable_root_takes_a_socket_and_no_regular_file() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    // Under the home directory: the default presets grant the shared temp
+    // tree, and a root there would bind through that grant instead.
+    let home = std::env::var_os("HOME").expect("HOME");
+    let root = tempfile::Builder::new()
+        .prefix(".harn-socket-root-")
+        .tempdir_in(home)
+        .expect("socket root");
+    let sockets = root.path().canonicalize().expect("canonical socket root");
+    let workspace = tempfile::tempdir().expect("workspace");
+    let workspace_path = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
+
+    let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text"]);
+    policy.workspace_roots = vec![workspace_path.display().to_string()];
+    policy.process_sandbox.unix_socket_roots = vec![sockets.display().to_string()];
+    let profile_file = workspace_path.join("profile.sb");
+    std::fs::write(&profile_file, render_profile(&policy)).expect("write profile");
+    let run = |program: &str, args: &[&str]| -> std::process::Output {
+        std::process::Command::new(SANDBOX_EXEC_PATH)
+            .arg("-f")
+            .arg(&profile_file)
+            .arg(program)
+            .args(args)
+            .current_dir(&workspace_path)
+            .output()
+            .expect("spawn sandbox-exec")
+    };
+
+    let socket = sockets.join("build.sock");
+    let bound = run(
+        "/usr/bin/perl",
+        &[
+            "-MSocket",
+            "-e",
+            "socket(S, PF_UNIX, SOCK_STREAM, 0) or die \"socket: $!\"; \
+             bind(S, sockaddr_un($ARGV[0])) or die \"bind: $!\";",
+            &socket.display().to_string(),
+        ],
+    );
+    assert!(
+        bound.status.success() && socket.exists(),
+        "a socket under a socket root outside every writable root must bind: stderr={}",
+        String::from_utf8_lossy(&bound.stderr)
+    );
+
+    let regular = sockets.join("regular.txt");
+    let touched = run("/usr/bin/touch", &[&regular.display().to_string()]);
+    assert!(
+        !touched.status.success() && !regular.exists(),
+        "a socket root must not admit a regular file"
+    );
+}

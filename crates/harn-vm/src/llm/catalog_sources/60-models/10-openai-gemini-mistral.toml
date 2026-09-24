@@ -38,7 +38,7 @@ logical_model = "gpt-6-astra"
 equivalence_group = "gpt-6-astra"
 released = "2026-09-03"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -47,7 +47,66 @@ serving_tiers = [
   { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
 ]
 
-# GPT-5.6 — current OpenAI family. The bare gpt-5.6 API alias routes to Sol;
+# GPT-6 Sol and Luna (announced 2026-09-22) — the GPT-6 successors to
+# GPT-5.6 Sol and Luna at about half their promotional price. There is no
+# GPT-6 Terra: Sol now covers the balanced tier and is cheaper than GPT-5.6
+# Terra. Unlike Astra, both accept effort `none`. Live probe 2026-09-22 on
+# both models:
+#   reasoning_effort none/low/medium/high/xhigh -> 200; minimal and max -> 400
+#     (the model pages list `max`; the API does not accept it)
+#   temperature=0.2 at effort none -> 200; at the default effort -> 400
+#   function tools on /v1/chat/completions -> 400 unless effort is none
+#   service_tier=fast -> 200, echoes "fast"; reasoning.mode=pro -> 200
+# Long-context band: prompts over 272K input tokens bill input and cache at 2x
+# and output at 1.5x. Default effort is `medium`.
+[models."gpt-6-sol"]
+name = "GPT-6 Sol"
+blurb = "Strong GPT-6 reasoning for everyday coding, planning, and review at a moderate cost."
+provider = "openai"
+context_window = 1050000
+logical_model = "gpt-6-sol"
+equivalence_group = "gpt-6-sol"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+tier = "mid"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.4, cache_write_per_mtok = 5.00 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "GPT-6 responses echo service_tier=fast when the premium tier was served (live probe 2026-09-22)." },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.1, cache_write_per_mtok = 1.25 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-22). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6. OpenRouter's `-pro` slugs sell this knob, not a separate model." },
+]
+
+[models."gpt-6-luna"]
+name = "GPT-6 Luna"
+blurb = "Fastest and lowest-cost GPT-6 option for routine edits, summaries, and extraction."
+provider = "openai"
+context_window = 1050000
+logical_model = "gpt-6-luna"
+equivalence_group = "gpt-6-luna"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 0.2, output_per_mtok = 1.00, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "GPT-6 responses echo service_tier=fast when the premium tier was served (live probe 2026-09-22)." },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 0.05, output_per_mtok = 0.25, cache_read_per_mtok = 0.005, cache_write_per_mtok = 0.0625 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-22). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6. OpenRouter's `-pro` slugs sell this knob, not a separate model." },
+]
+
+# GPT-5.6 — previous OpenAI family, superseded by GPT-6 Sol and Luna. OpenAI
+# has not announced a sunset, so the rows stay routable (not `deprecated`);
+# GPT-5.6 Terra has no GPT-6 counterpart and points at GPT-6 Sol, which is
+# cheaper and stronger. The bare gpt-5.6 API alias routes to Sol;
 # Harn resolves it through the alias catalog so receipts keep the explicit
 # tier. All three models accept none/low/medium/high/xhigh/max effort, support
 # image input, and expose the Responses-first hosted tool surface. Cache writes
@@ -61,7 +120,8 @@ context_window = 1050000
 logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }] }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+superseded_by = "gpt-6-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -88,7 +148,8 @@ context_window = 1050000
 logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+superseded_by = "gpt-6-sol"
 tier = "mid"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -109,7 +170,8 @@ context_window = 1050000
 logical_model = "gpt-5.6-luna"
 equivalence_group = "gpt-5.6-luna"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+superseded_by = "gpt-6-luna"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -137,7 +199,7 @@ name = "GPT-5.5"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -152,7 +214,7 @@ name = "GPT-5.5 Pro"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -167,7 +229,7 @@ name = "GPT-5.4"
 provider = "openai"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -177,7 +239,7 @@ name = "GPT-5.4 Pro"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -190,7 +252,7 @@ provider = "openai"
 operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
+pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
@@ -203,7 +265,7 @@ provider = "openai"
 operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
@@ -216,7 +278,7 @@ name = "GPT-5.3-Codex"
 provider = "openai"
 context_window = 400000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.75, output_per_mtok = 14.00, cache_read_per_mtok = 0.175 }
+pricing = { input_per_mtok = 1.75, output_per_mtok = 14.00, cache_read_per_mtok = 0.175, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "tool_use", "agentic"]
@@ -414,7 +476,7 @@ name = "Gemini 3.8 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.8-intro", starts_on = "2026-09-02", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.8-intro", starts_on = "2026-09-02", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
@@ -432,7 +494,7 @@ name = "Gemini 3.7 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
@@ -451,7 +513,7 @@ name = "Gemini 3.6 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
@@ -468,7 +530,7 @@ name = "Gemini 3.5 Flash-Lite"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "vision", "tool_use", "agentic"]
@@ -485,7 +547,7 @@ name = "Gemini 3.5 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15 }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
@@ -504,7 +566,7 @@ name = "Gemini 3.1 Pro (Preview)"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "vision", "agentic"]
@@ -522,7 +584,7 @@ provider = "gemini"
 operations = ["text_generation", "decision"]
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025 }
+pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "tool_use"]

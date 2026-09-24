@@ -184,12 +184,10 @@ impl BedrockProvider {
         for (name, value) in signed.headers {
             req = req.header(name, value);
         }
-        let response = req.send().await.map_err(|error| {
-            vm_err(format!(
-                "bedrock API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))
-        })?;
+        let response = req
+            .send()
+            .await
+            .map_err(|error| crate::llm::api::reqwest_send_error("bedrock", "API", error))?;
         if !response.status().is_success() {
             return Err(crate::llm::api::err_for_non_success("bedrock", response).await);
         }
@@ -572,7 +570,7 @@ fn parse_bedrock_converse_response(
         })
         .transpose()?
         .unwrap_or(0);
-    result.telemetry =
+    *result.telemetry =
         crate::llm::api::ProviderTelemetry::new(crate::llm::api::telemetry_source::BEDROCK_USAGE);
     result.telemetry.server_prompt_tokens = reported_input_tokens;
     result.telemetry.server_output_tokens = json["usage"]["outputTokens"].as_i64();

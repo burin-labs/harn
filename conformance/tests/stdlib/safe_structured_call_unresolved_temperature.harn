@@ -1,0 +1,25 @@
+// A late-bound route may reject temperature. The stdlib must not add it while
+// the route is unresolved, including on the repair request.
+import { safe_structured_call } from "std/llm/safe"
+
+pipeline test(harness: Harness, task: unknown) {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["verdict"],
+    properties: {verdict: {type: "string"}},
+  }
+  const envelope = safe_structured_call(
+    harness.llm,
+    "Grade this output.",
+    schema,
+    {max_tokens: 512, schema_retries: 0, repair: {enabled: true}},
+  )
+  assert(envelope.ok)
+  assert(envelope.repaired)
+  assert(envelope.value.verdict == "YES")
+  const calls = harness.llm.mock_calls()
+  assert(len(calls) == 2)
+  harness.stdio.println("main_temperature_omitted=" + to_string(calls[0].temperature == nil))
+  harness.stdio.println("repair_temperature_omitted=" + to_string(calls[1].temperature == nil))
+}

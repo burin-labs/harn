@@ -80,6 +80,7 @@ pub mod harness_net;
 pub mod harness_system;
 pub mod harness_tenant;
 pub mod host_attachments;
+pub mod host_stdio;
 
 /// Placement policy for child-interpreter subtasks.
 ///

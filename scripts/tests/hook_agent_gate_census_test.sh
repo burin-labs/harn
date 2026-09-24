@@ -13,8 +13,10 @@ trap 'rm -rf "$tmp_root"' EXIT
 fake_bin="$tmp_root/bin"
 work="$tmp_root/work"
 make_record="$tmp_root/make-commands.txt"
-mkdir -p "$fake_bin" "$work/.githooks" "$work/spec/agent-gates" \
-  "$work/crates/harn-stdlib/src/stdlib/workflow" "$work/crates/harn-parser/src"
+build_record="$tmp_root/builds.txt"
+mkdir -p "$fake_bin" "$work/.githooks" "$work/spec/agent-gates" "$work/scripts" \
+  "$work/target/debug" "$work/crates/harn-stdlib/src/stdlib/workflow" "$work/crates/harn-parser/src"
+worktree_harn="$work/target/debug/harn"
 
 # The reader the census records. `changed_reader` moves it; `changed_bystander`
 # is a source file with no recorded read, which must cost nothing.
@@ -40,7 +42,7 @@ JSON
 cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'make %s\n' "$*" >> "$MAKE_COMMAND_RECORD"
+printf 'make %s HARN_BIN=%s\n' "$*" "${HARN_BIN:-}" >> "$MAKE_COMMAND_RECORD"
 case "$*" in
   "-s check-agent-gates")
     if [[ "${CENSUS_RESULT:-pass}" == "pass" ]]; then
@@ -59,13 +61,38 @@ exit 0
 SH
 chmod +x "$fake_bin/make"
 
-# hook_find_existing_harn_bin returns $HARN_BIN when it is executable, so the
-# census never has to resolve or build a real binary here.
+# Stands in for a release on PATH or an inherited HARN_BIN: a binary that is
+# not this worktree's build and embeds a different stdlib.
 cat > "$fake_bin/harn" <<'SH'
 #!/usr/bin/env bash
 exit 0
 SH
 chmod +x "$fake_bin/harn"
+
+# The worktree's own build. Its freshness proof passes unless WORKTREE_STALE is
+# set; the resolver's build path records that it ran and makes it fresh.
+cat > "$worktree_harn" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+cat > "$work/target/debug/harn-freshness-check" <<'SH'
+#!/usr/bin/env bash
+[[ -z "${WORKTREE_STALE:-}" || -e "$BUILD_RECORD" && -s "$BUILD_RECORD" ]]
+SH
+cat > "$work/scripts/harn_bin.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+case " $* " in
+  *" --no-build "*)
+    [[ -z "${WORKTREE_STALE:-}" ]] || exit 1
+    ;;
+  *)
+    printf 'build\n' >> "$BUILD_RECORD"
+    ;;
+esac
+printf '%s\n' "$(pwd)/target/debug/harn"
+SH
+chmod +x "$worktree_harn" "$work/target/debug/harn-freshness-check" "$work/scripts/harn_bin.sh"
 
 cat > "$fake_bin/npx" <<'SH'
 #!/usr/bin/env bash
@@ -122,6 +149,7 @@ run_prepush() {
   census_result=$2
   output=$3
   : > "$make_record"
+  : > "$build_record"
   set +e
   (
     cd "$work"
@@ -129,7 +157,10 @@ run_prepush() {
       CHANGED_PATHS="$changed_paths" \
       CENSUS_RESULT="$census_result" \
       MAKE_COMMAND_RECORD="$make_record" \
-      HARN_BIN="$fake_bin/harn" \
+      BUILD_RECORD="$build_record" \
+      HARN_BIN="${INHERITED_HARN_BIN-$fake_bin/harn}" \
+      CARGO_TARGET_DIR="$work/target" \
+      CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
       PATH="$fake_bin:$PATH" \
       ./.githooks/pre-push > "$output" 2>&1
   )
@@ -166,6 +197,21 @@ run_prepush "$changed_reader" pass "$clean_out" ||
   fail "a clean census refused the push" "$clean_out"
 grep -Fq "Agent gate census OK." "$clean_out" ||
   fail "a clean census did not report a pass" "$clean_out"
+# The moved reader is compiled into the binary, so an inherited HARN_BIN is not
+# this tree's build: the census runs on the worktree's own proven binary.
+grep -Fq "make -s check-agent-gates HARN_BIN=$worktree_harn" "$make_record" ||
+  fail "the census ran on a binary other than the worktree's own" "$make_record"
+
+# Falsifier for a stale worktree build with a release on PATH. The census must
+# build the worktree binary before running, never fall back to the stale build
+# or the PATH release, which fail on their own stdlib rather than the census.
+stale_build_out="$tmp_root/stale-build.out"
+INHERITED_HARN_BIN='' WORKTREE_STALE=1 run_prepush "$changed_reader" pass "$stale_build_out" ||
+  fail "a stale worktree build refused the push" "$stale_build_out"
+grep -Fxq "build" "$build_record" ||
+  fail "a stale worktree build ran the census without rebuilding" "$stale_build_out" "$make_record"
+grep -Fq "make -s check-agent-gates HARN_BIN=$worktree_harn" "$make_record" ||
+  fail "a stale worktree build ran the census on another binary" "$make_record"
 
 # A push touching no recorded reader must not pay for the census at all.
 bystander_out="$tmp_root/bystander.out"

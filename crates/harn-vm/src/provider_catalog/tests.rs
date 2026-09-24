@@ -1118,25 +1118,25 @@ fn catalog_roundtrips_presentation_metadata_into_runtime_config() {
     let expected_family = catalog
         .families
         .iter()
-        .find(|family| family.id == "openai-gpt-5-6")
+        .find(|family| family.id == "openai-gpt-6")
         .expect("family exists");
     let config = config_from_artifact(&catalog);
     let family = config
         .presentation
         .families
-        .get("openai-gpt-5-6")
+        .get("openai-gpt-6")
         .expect("family roundtrips");
     assert_eq!(family.dimensions, expected_family.dimensions);
     assert_eq!(family.presets, expected_family.presets);
     assert_eq!(
         config
             .models
-            .get("gpt-5.6-sol")
+            .get("gpt-6-sol")
             .and_then(|model| model.blurb.as_deref()),
         catalog
             .models
             .iter()
-            .find(|model| model.id == "gpt-5.6-sol")
+            .find(|model| model.id == "gpt-6-sol")
             .and_then(|model| model.blurb.as_deref())
     );
     assert!(matches!(
@@ -1155,7 +1155,7 @@ fn validation_rejects_malformed_model_family_presentation() {
     let family = catalog
         .families
         .iter_mut()
-        .find(|family| family.id == "openai-gpt-5-6")
+        .find(|family| family.id == "openai-gpt-6")
         .expect("family exists");
     family.dimensions[0].ordered_values[0].relative_cost_hint = 0;
     family.presets[0].coordinates.remove("effort");
@@ -1340,7 +1340,7 @@ fn overlay_suppress_hides_families_that_reference_the_route() {
     let _guard = install_overlay(
         r#"
 [suppress]
-routes = ["openai:gpt-5.6-luna"]
+routes = ["openai:gpt-6-luna"]
 "#,
     );
     let catalog = artifact();
@@ -1348,7 +1348,7 @@ routes = ["openai:gpt-5.6-luna"]
         !catalog
             .families
             .iter()
-            .any(|family| family.id == "openai-gpt-5-6"),
+            .any(|family| family.id == "openai-gpt-6"),
         "a family must not export a grid containing a suppressed model"
     );
 }

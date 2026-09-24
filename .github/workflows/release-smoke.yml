@@ -1,47 +1,40 @@
 name: Release smoke
 
-# Cross-platform release smoke matrix. Artifact smokes run after
-# build-release-binaries finalizes a GitHub release (SHA256SUMS +
-# release-assets.json + make_latest), then validate the official artifacts
-# exactly as users download them. Manual runs can pass a tag to smoke
-# already-published artifacts; scheduled/manual source-health runs without a
-# tag build a native release `harn` binary first.
+# Cross-platform release smoke matrix, in two modes:
 #
-# Trigger note: softprops/finalize uses GITHUB_TOKEN, so a `release:` event
-# would not chain. `workflow_run` is the supported post-finalize hook. The
-# resolve job further requires the triggering run's "Create GitHub release"
-# job to have succeeded, so warm-cache / partial recovery builds never enter
-# artifact mode.
+#   candidate — called by build-release-binaries.yml in the same run that
+#   built a release candidate. Each platform downloads its archive from that
+#   run, verifies it against the candidate manifest (commit and sha256), and
+#   smokes it exactly as a user would install it. Promotion later publishes
+#   those same bytes, so this is the release's artifact smoke.
 #
-# The post-merge `windows` job in `ci.yml` and the tag-push release binary
-# build cover Windows-specific compile breaks. This job is the explicit
+#   source — scheduled or manual. Builds a native release `harn` binary from
+#   main and smokes it, to catch capability breaks between releases.
+#
+# The post-merge `windows` job in `ci.yml` and the release candidate build
+# cover Windows-specific compile breaks. This job is the explicit
 # *capability* gate — failures point at a specific (platform, capability)
 # pair via `::error::` annotations from the smoke driver. See
 # docs/src/dev/platform-compatibility.md for the support matrix.
 on:
   schedule:
     - cron: '17 9 * * *'
-  workflow_run: # zizmor: ignore[dangerous-triggers] bounded post-finalize artifact smoke trigger
-    workflows: ["Build release binaries"]
-    types: [completed]
   workflow_dispatch:
+  workflow_call:
     inputs:
-      tag:
-        description: 'Optional release tag to artifact-smoke, e.g. v0.8.57. Empty keeps source-health mode.'
-        required: false
+      candidate-commit:
+        description: Commit whose candidate archives and manifest the calling run built.
+        required: true
         type: string
-
-# Surface the candidate tag (or source-health) in the Actions run list so
-# operators can tell a real publication smoke from a skipped warm trigger.
-run-name: >-
-  Release smoke (${{ inputs.tag || github.event.workflow_run.head_branch || 'source-health' }})
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-smoke-${{ inputs.tag || github.event.workflow_run.head_branch || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A called workflow shares its caller's run; qualify by run so the caller's
+  # own concurrency owns cancellation.
+  group: release-smoke-${{ inputs.candidate-commit != '' && format('candidate-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -50,136 +43,11 @@ env:
   HARN_LLM_CALLS_DISABLED: "1"
 
 jobs:
-  resolve:
-    name: Resolve release smoke input
-    # Do not require workflow_run.event == 'push': recovery publishes and
-    # release-attempt dispatches that finalize a release must also smoke.
-    # Restrict to release-shaped refs so main/schedule warm completions stay
-    # skipped at the job level (no idle runner, no green no-op clutter).
-    if: >-
-      github.event_name != 'workflow_run' ||
-      (
-        github.event.workflow_run.conclusion == 'success' &&
-        (
-          startsWith(github.event.workflow_run.head_branch, 'v') ||
-          startsWith(github.event.workflow_run.head_branch, 'release/v') ||
-          startsWith(github.event.workflow_run.head_branch, 'release-attempt/v')
-        )
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      mode: ${{ steps.resolve.outputs.mode }}
-      tag: ${{ steps.resolve.outputs.tag }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          sparse-checkout: scripts/lib/release_version.sh
-      - name: Resolve smoke mode
-        id: resolve
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          INPUT_TAG: ${{ inputs.tag }}
-          EVENT_NAME: ${{ github.event_name }}
-          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
-          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-        run: |
-          set -euo pipefail
-          # shellcheck source=scripts/lib/release_version.sh
-          source scripts/lib/release_version.sh
-
-          extract_release_tag() {
-            local ref="$1"
-            local candidate=""
-            if [[ "$ref" == v* ]]; then
-              candidate="$ref"
-            elif [[ "$ref" == release/v* ]]; then
-              candidate="${ref#release/}"
-            elif [[ "$ref" == release-attempt/v*/* ]]; then
-              candidate="${ref#release-attempt/}"
-              candidate="${candidate%%/*}"
-            fi
-            if release_tag_is_canonical "$candidate"; then
-              printf '%s\n' "$candidate"
-            fi
-          }
-
-          if [[ -n "${INPUT_TAG:-}" ]]; then
-            tag="$INPUT_TAG"
-          elif [[ "${EVENT_NAME}" == "workflow_run" ]]; then
-            # Only artifact-smoke runs that actually finalized the GitHub
-            # release. Partial recovery builds (and any future warm path that
-            # lands on a release-shaped ref) leave "Create GitHub release"
-            # skipped — those must not enter artifact mode or fail the gate.
-            finalize_conclusion="$(
-              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/jobs" \
-                --jq '.jobs[] | select(.name == "Create GitHub release") | .conclusion' \
-                | head -n1
-            )"
-            if [[ "$finalize_conclusion" != "success" ]]; then
-              echo "mode=noop" >> "$GITHUB_OUTPUT"
-              echo "tag=" >> "$GITHUB_OUTPUT"
-              echo "::notice::Triggering build-release-binaries run did not finalize a GitHub release (Create GitHub release conclusion='${finalize_conclusion:-missing}'); skipping artifact smoke."
-              exit 0
-            fi
-
-            tag="$(extract_release_tag "$WORKFLOW_RUN_HEAD_BRANCH")"
-            if [[ -z "$tag" ]]; then
-              echo "::error::Could not extract a canonical release tag from workflow_run head_branch '$WORKFLOW_RUN_HEAD_BRANCH'"
-              exit 1
-            fi
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            tag="${GITHUB_REF_NAME}"
-          else
-            echo "mode=source" >> "$GITHUB_OUTPUT"
-            echo "tag=" >> "$GITHUB_OUTPUT"
-            echo "::notice::Non-tag run; release smoke will build from source."
-            exit 0
-          fi
-
-          if ! release_tag_is_canonical "$tag"; then
-            echo "::error::Expected canonical release tag, got '$tag'"
-            exit 1
-          fi
-
-          expected_assets=(
-            harn-aarch64-apple-darwin.tar.gz
-            harn-aarch64-unknown-linux-gnu.tar.gz
-            harn-x86_64-apple-darwin.tar.gz
-            harn-x86_64-pc-windows-msvc.zip
-            harn-x86_64-unknown-linux-gnu.tar.gz
-            SHA256SUMS
-            release-assets.json
-          )
-
-          assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)"
-          missing=()
-          for asset in "${expected_assets[@]}"; do
-            if ! grep -Fxq "$asset" <<<"$assets"; then
-              missing+=("$asset")
-            fi
-          done
-
-          if (( ${#missing[@]} > 0 )); then
-            printf '::error::Missing release assets for %s after release finalization: %s\n' "$tag" "${missing[*]}"
-            exit 1
-          fi
-
-          echo "mode=artifact" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "::notice::All release assets for $tag are available; smoke jobs will download official artifacts."
-
   smoke:
     name: Release smoke (${{ matrix.platform }})
-    needs: resolve
-    if: >-
-      needs.resolve.result == 'success' &&
-      (
-        needs.resolve.outputs.mode == 'artifact' ||
-        needs.resolve.outputs.mode == 'source'
-      )
+    permissions:
+      actions: read
+      contents: read
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -205,107 +73,85 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.resolve.outputs.tag || github.sha }}
+          ref: ${{ inputs.candidate-commit || github.sha }}
+          persist-credentials: false
 
       - name: Resolve harn binary
         id: runtime
         shell: bash
         env:
-          MODE: ${{ needs.resolve.outputs.mode }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate-commit }}
           SOURCE_HARN_BINARY: ${{ matrix.harn_binary }}
         run: |
           set -euo pipefail
 
-          if [[ "$MODE" == "source" ]]; then
-            echo "harn_binary=$SOURCE_HARN_BINARY" >> "$GITHUB_OUTPUT"
-            echo "asset=" >> "$GITHUB_OUTPUT"
+          if [[ -z "$CANDIDATE_COMMIT" ]]; then
+            {
+              echo "mode=source"
+              echo "harn_binary=$SOURCE_HARN_BINARY"
+            } >> "$GITHUB_OUTPUT"
             echo "::notice::Source smoke will use $SOURCE_HARN_BINARY."
             exit 0
           fi
 
-          if [[ "$MODE" != "artifact" ]]; then
-            echo "::error::Unexpected release smoke mode '$MODE'"
-            exit 1
-          fi
-
           case "${RUNNER_OS}-${RUNNER_ARCH}" in
-            Linux-X64)
-              asset="harn-x86_64-unknown-linux-gnu.tar.gz"
-              binary="harn"
-              ;;
-            Linux-ARM64)
-              asset="harn-aarch64-unknown-linux-gnu.tar.gz"
-              binary="harn"
-              ;;
-            macOS-X64)
-              asset="harn-x86_64-apple-darwin.tar.gz"
-              binary="harn"
-              ;;
-            macOS-ARM64)
-              asset="harn-aarch64-apple-darwin.tar.gz"
-              binary="harn"
-              ;;
-            Windows-X64)
-              asset="harn-x86_64-pc-windows-msvc.zip"
-              binary="harn.exe"
-              ;;
+            Linux-X64) target="x86_64-unknown-linux-gnu"; asset="harn-${target}.tar.gz"; binary="harn" ;;
+            Linux-ARM64) target="aarch64-unknown-linux-gnu"; asset="harn-${target}.tar.gz"; binary="harn" ;;
+            macOS-X64) target="x86_64-apple-darwin"; asset="harn-${target}.tar.gz"; binary="harn" ;;
+            macOS-ARM64) target="aarch64-apple-darwin"; asset="harn-${target}.tar.gz"; binary="harn" ;;
+            Windows-X64) target="x86_64-pc-windows-msvc"; asset="harn-${target}.zip"; binary="harn.exe" ;;
             *)
-              echo "::error::Unsupported runner for artifact smoke: ${RUNNER_OS}-${RUNNER_ARCH}"
+              echo "::error::Unsupported runner for candidate smoke: ${RUNNER_OS}-${RUNNER_ARCH}"
               exit 1
               ;;
           esac
 
-          echo "asset=$asset" >> "$GITHUB_OUTPUT"
-          echo "harn_binary=${RUNNER_TEMP}/harn-release/${binary}" >> "$GITHUB_OUTPUT"
-          echo "::notice::Artifact smoke will use $asset for ${RUNNER_OS}-${RUNNER_ARCH}."
+          {
+            echo "mode=candidate"
+            echo "target=$target"
+            echo "asset=$asset"
+            echo "harn_binary=${RUNNER_TEMP}/harn-candidate/${binary}"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Candidate smoke will use $asset for ${RUNNER_OS}-${RUNNER_ARCH}."
 
-      - name: Download release artifact
-        if: needs.resolve.outputs.mode == 'artifact'
+      - name: Download candidate archive
+        if: steps.runtime.outputs.mode == 'candidate'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-${{ steps.runtime.outputs.target }}
+          path: ${{ runner.temp }}/candidate-archive
+
+      - name: Download candidate manifest
+        if: steps.runtime.outputs.mode == 'candidate'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: candidate-manifest-${{ inputs.candidate-commit }}
+          path: ${{ runner.temp }}/candidate-manifest
+
+      - name: Verify and extract candidate archive
+        if: steps.runtime.outputs.mode == 'candidate'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.resolve.outputs.tag }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate-commit }}
+          TARGET: ${{ steps.runtime.outputs.target }}
           ASSET: ${{ steps.runtime.outputs.asset }}
           HARN_BINARY: ${{ steps.runtime.outputs.harn_binary }}
         run: |
           set -euo pipefail
-
-          out_dir="${RUNNER_TEMP}/harn-release"
-          rm -rf "$out_dir"
-          mkdir -p "$out_dir"
-
-          gh release download "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "$ASSET" \
-            --dir "$out_dir"
-
-          case "$ASSET" in
-            *.zip)
-              if command -v unzip >/dev/null 2>&1; then
-                unzip -q "$out_dir/$ASSET" -d "$out_dir"
-              elif command -v 7z >/dev/null 2>&1; then
-                7z x -y "$out_dir/$ASSET" "-o$out_dir"
-              else
-                echo "::error::Neither unzip nor 7z is available to extract $ASSET"
-                exit 1
-              fi
-              ;;
-            *.tar.gz) tar -xzf "$out_dir/$ASSET" -C "$out_dir" ;;
-            *)
-              echo "::error::Unsupported release asset extension: $ASSET"
-              exit 1
-              ;;
-          esac
-
-          chmod +x "$out_dir"/harn*
+          ./scripts/ci/rust_artifact.sh restore-candidate \
+            "$RUNNER_TEMP/candidate-archive/$ASSET" \
+            "$RUNNER_TEMP/candidate-manifest/candidate-manifest.json" \
+            "$TARGET" \
+            "$RUNNER_TEMP/harn-candidate" \
+            "$CANDIDATE_COMMIT"
           "$HARN_BINARY" --version
 
       - uses: ./.github/actions/rust-toolchain
-        if: needs.resolve.outputs.mode == 'source'
+        if: steps.runtime.outputs.mode == 'source'
       # Match build-release-binaries.yml: persist a bounded local SCCACHE_DIR
       # without the per-object GHA backend that failed mid-compile on Windows.
       - uses: ./.github/actions/sccache
-        if: needs.resolve.outputs.mode == 'source'
+        if: steps.runtime.outputs.mode == 'source'
         continue-on-error: true
         with:
           cache-key: release-smoke-${{ matrix.platform }}
@@ -318,7 +164,7 @@ jobs:
       # in their key, so a reader cannot match one, and the compiler cache
       # restored above is the store that actually warms this lane.
       - name: Verify macOS Rust toolchain
-        if: needs.resolve.outputs.mode == 'source' && runner.os == 'macOS'
+        if: steps.runtime.outputs.mode == 'source' && runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
@@ -330,7 +176,7 @@ jobs:
           cargo --version
           rustc --version
       - name: Build release harn binary
-        if: needs.resolve.outputs.mode == 'source'
+        if: steps.runtime.outputs.mode == 'source'
         shell: bash
         env:
           # Match build-release-binaries.yml. Fat LTO makes this smoke gate

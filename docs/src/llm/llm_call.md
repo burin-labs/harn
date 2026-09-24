@@ -968,7 +968,7 @@ const bounded: LlmBudget = {
 }
 const answer = try {
   harness.llm.call("Return one word", nil, {
-    provider: "openai", model: "gpt-5.6-luna",
+    provider: "openai", model: "gpt-6-luna",
     max_tokens: 64, budget: bounded,
   })
 }

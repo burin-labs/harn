@@ -53,6 +53,11 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         return;
     }
 
+    if cli.argument_schema {
+        commands::argument_schema::run();
+        return;
+    }
+
     let Some(subcommand) = cli.command else {
         // `arg_required_else_help` already shows help when no args are
         // supplied. We only land here if a top-level flag (e.g. a

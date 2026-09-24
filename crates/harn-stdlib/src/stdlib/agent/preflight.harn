@@ -466,7 +466,7 @@ pub fn __agent_active_skill_prompt(agent: HarnessAgent, session_id: any, active:
   if len(active ?? []) == 0 {
     return ""
   }
-  let out = "## Active skills\n"
+  let out = "## Active skills\n\nThe user's instructions take precedence over a skill's guidance.\n"
   for active_skill in active {
     const name = active_skill?.id ?? active_skill?.name
     if name == nil || name == "" {

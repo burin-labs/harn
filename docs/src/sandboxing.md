@@ -87,8 +87,9 @@ Pass `--allow-process-network` to allow network access for the Harn run and its
 child processes under the run's egress policy. Filesystem and process
 confinement remain active. Supported local sandboxes route child HTTP, HTTPS,
 and SOCKS5 traffic through Harn's managed forwarding proxy and restrict the
-child itself to that proxy. Child traffic stays denied until `HARN_EGRESS_*` or
-`harness.net.egress_policy(...)` configures an allow decision.
+child itself to that proxy. Children reach public hosts by default; private and
+loopback addresses stay denied. `HARN_EGRESS_*` or
+`harness.net.egress_policy(...)` narrows that default.
 
 `harness.net.egress_policy(...)` does not grant network access. It restricts
 the destinations available to a run that already has network access, so a
@@ -145,7 +146,8 @@ restrict calls made by Harn, including HTTP, provider, and connector calls.
 The same live policy state also configures a host-side HTTP/SOCKS5 proxy for
 child traffic, whether it came from `HARN_EGRESS_*` at startup or
 `harness.net.egress_policy(...)` during the run. Until either source configures
-a policy, the proxy denies every destination. The OS sandbox grants the child
+a policy, the grant itself is the child's policy: every public host is allowed
+and private, link-local, and loopback addresses are denied. The OS sandbox grants the child
 only the proxy's ephemeral loopback ports, so clearing `HTTP_PROXY` or opening a
 raw socket cannot bypass the host decision. DNS is resolved by the proxy and
 each connection is pinned to the addresses checked by the existing CIDR, deny,

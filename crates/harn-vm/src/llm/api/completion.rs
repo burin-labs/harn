@@ -170,13 +170,10 @@ async fn vm_call_completion_openai_style(
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
-    let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{} completion API error: {}",
-            opts.provider,
-            crate::egress::redact_reqwest_error(&e)
-        ))))
-    })?;
+    let response = req
+        .send()
+        .await
+        .map_err(|e| crate::llm::api::reqwest_send_error(&opts.provider, "completion", e))?;
 
     let json = completion_json_response(&opts.provider, response).await?;
 
@@ -216,7 +213,7 @@ async fn vm_call_completion_openai_style(
             "visibility": "public",
         })],
         logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 
@@ -301,13 +298,10 @@ async fn vm_call_completion_ollama(
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
-    let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{} completion API error: {}",
-            opts.provider,
-            crate::egress::redact_reqwest_error(&e)
-        ))))
-    })?;
+    let response = req
+        .send()
+        .await
+        .map_err(|e| crate::llm::api::reqwest_send_error(&opts.provider, "completion", e))?;
     let json = completion_json_response(&opts.provider, response).await?;
     if let Some(err) = json["error"].as_str() {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -342,7 +336,7 @@ async fn vm_call_completion_ollama(
             "visibility": "public",
         })],
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 

@@ -14,13 +14,15 @@ define HARN_REQUIRE_NEXTEST
 		echo "cargo-nextest is required; run 'make setup' or 'cargo install cargo-nextest --locked'" >&2; \
 		exit 1; \
 	fi
-	@$(HARN_CARGO_CMD) nextest --version >/dev/null
+	@cargo-nextest nextest --version >/dev/null
 endef
 # Rust tests start from a known security-policy environment. Focused tests may
 # still seed these variables explicitly after process startup. Harn script
 # tests use harn_test_env.sh so they also get a fresh durable session store.
 HARN_EGRESS_TEST_ENV = env -u HARN_EGRESS_ALLOW -u HARN_EGRESS_DENY -u HARN_EGRESS_DEFAULT -u HARN_EGRESS_BLOCK_PRIVATE -u HARN_EGRESS_ALLOW_LOOPBACK
-HARN_RUST_TEST_ENV = $(HARN_EGRESS_TEST_ENV) HARN_LLM_CALLS_DISABLED=1 RUST_MIN_STACK="$${RUST_MIN_STACK:-16777216}"
+# HARN_SECRET_PROVIDERS=env keeps every test off the login keychain unless the
+# caller set a chain on purpose.
+HARN_RUST_TEST_ENV = $(HARN_EGRESS_TEST_ENV) HARN_LLM_CALLS_DISABLED=1 HARN_SECRET_PROVIDERS="$${HARN_SECRET_PROVIDERS:-env}" RUST_MIN_STACK="$${RUST_MIN_STACK:-16777216}"
 HARN_SCRIPT_TEST_ENV = bash ./scripts/harn_test_env.sh
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
@@ -655,6 +657,7 @@ test-agent-scripts:
 
 test-pr-gate-scripts:
 	./scripts/tests/pr_title_convention_test.sh
+	./scripts/tests/fixture_git_init_branch_test.sh
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
@@ -675,12 +678,9 @@ test-pr-gate-scripts:
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_tag_main_ancestry_test.sh
-	./scripts/tests/verify_release_archive_provenance_test.sh
-	./scripts/tests/candidate_archive_promotion_test.sh
-	./scripts/tests/candidate_archive_certification_binding_test.sh
-	./scripts/tests/download_candidate_archive_promotion_test.sh
-	./scripts/tests/publish_certified_release_assets_test.sh
-	./scripts/tests/certified_publication_inputs_test.sh
+	./scripts/tests/candidate_manifest_test.sh
+	./scripts/tests/release_candidate_trigger_test.sh
+	./scripts/tests/release_promotion_plan_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
@@ -691,6 +691,7 @@ test-pr-gate-scripts:
 	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_commit_msg_session_trailer_test.sh
 	./scripts/tests/stack_frame_measurement_floor_test.sh
+	./scripts/tests/stack_frame_admission_test.sh
 	./scripts/tests/hook_fast_default_mode_test.sh
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/hook_timing_instrument_test.sh
@@ -716,6 +717,7 @@ test-pr-gate-scripts:
 	./scripts/tests/windows_storage_budget_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
+	./scripts/tests/harn_bin_snapshot_provenance_test.sh
 	./scripts/tests/harn_bin_recovery_batch_test.sh
 	./scripts/tests/package_verify_bootstrap_test.sh
 	./scripts/tests/verify_crate_dependency_resolution_test.sh
@@ -740,6 +742,7 @@ test-pr-gate-scripts:
 	./scripts/tests/check_stdlib_strict_types_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh
+	./scripts/tests/test_nextest_readiness_test.sh
 
 # Rust/Harn-backed shell integration tests run only after CI restores the Rust
 # toolchain/caches and exports the one warmed binary. Pure Harn semantics remain
@@ -764,8 +767,8 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	HARN_BIN_RESOLVER_TEST_ALLOW_CARGO=1 ./scripts/tests/harn_bin_resolver_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/agent_shell_guard_adapter_test.sh
-	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_release_smoke_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_prepare_env_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/open_release_pr_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_withdrawal_lineage_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/embedded_asset_rebuild_test.sh
@@ -1101,12 +1104,13 @@ check-docs-cookbook-entrypoints:
 # code or its repair template.
 sync-diagnostics-catalog:
 	@set -e; \
-	tmp_dir=$$(mktemp -d "$(CURDIR)/.diagnostics-catalog.XXXXXX"); \
+	tmp_dir=$$(mktemp -d); \
 	tmp_md="$$tmp_dir/diagnostics.md"; \
 	tmp_json="$$tmp_dir/diagnostics-catalog.json"; \
 	trap 'rm -f "$$tmp_md" "$$tmp_json"; rmdir "$$tmp_dir" 2>/dev/null || true' EXIT; \
 	$(HARN_BIN_ASSIGN); \
 	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	HARN_BIN="$$harn_bin" $(HARN_BIN_CMD) --print-build-freshness >/dev/null; \
 	"$$harn_bin" explain --catalog --format markdown > "$$tmp_md"; \
 	"$$harn_bin" explain --catalog --format json > "$$tmp_json"; \
 	mv "$$tmp_md" docs/src/diagnostics.md; \
@@ -1122,6 +1126,7 @@ check-diagnostics-catalog:
 	trap 'rm -f "$$tmp_md" "$$tmp_json"' EXIT; \
 	$(HARN_BIN_ASSIGN); \
 	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	HARN_BIN="$$harn_bin" $(HARN_BIN_CMD) --print-build-freshness >/dev/null; \
 	"$$harn_bin" explain --catalog --format markdown > "$$tmp_md"; \
 	"$$harn_bin" explain --catalog --format json > "$$tmp_json"; \
 	if ! diff -u docs/src/diagnostics.md "$$tmp_md" >/dev/null; then \

@@ -144,6 +144,13 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Prefixed Fable 5.1 ids carry the direct row's forced-tool-choice removal.
+[[provider.anthropic]]
+model_match = ["anthropic/claude-fable-5-1*", "anthropic/claude-fable-5.1*"]
+extends = true
+native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.anthropic]]
 model_match = "anthropic/claude-fable-*"
 prompt_cache_min_prefix_tokens = 512
@@ -239,6 +246,23 @@ top_k_supported = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Opus 5.5 (2026-09-21) narrows the Opus 5 surface in two wire-visible ways,
+# both verified against the live API on 2026-09-22:
+#   * thinking cannot be disabled — `{"type":"disabled"}` and
+#     `{"type":"enabled"}` are 400s at every effort, so a thinking-off request
+#     must become "omit the field, lowest effort";
+#   * forced tool choice is gone — `tool_choice` `any` / `tool` are 400s, so
+#     only `auto` and `none` may reach the wire.
+# Everything else (512-token cache floor, native mid-conversation system
+# messages, the 4.7+ sampling and prefill rules) layers on from the rows below.
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+reasoning_disable_supported = false
+allowed_tool_choice_modes = ["auto", "none"]
 
 # Opus 5 halves the minimum cacheable prefix to 512 tokens. Verified against
 # the live API on 2026-07-24: a 691-token prefix produced
@@ -541,6 +565,24 @@ top_k_supported = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Prefixed Opus ids mirror the direct Opus 5 / 5.5 layering above. Without the
+# 5.0 row an `anthropic/claude-opus-5*` id kept Opus 4.7's 2048-token cache
+# floor; without the 5.5 row it would send a disabled-thinking config or a
+# forced tool choice the model rejects.
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+reasoning_disable_supported = false
+allowed_tool_choice_modes = ["auto", "none"]
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [5, 0]
+extends = true
+prompt_cache_min_prefix_tokens = 512
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"

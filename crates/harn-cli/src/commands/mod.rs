@@ -1,6 +1,7 @@
 pub(crate) mod agents_conformance;
 pub(crate) mod app;
 mod app_host_assets;
+pub(crate) mod argument_schema;
 pub(crate) mod bench;
 pub(crate) mod canon;
 pub(crate) mod chat;

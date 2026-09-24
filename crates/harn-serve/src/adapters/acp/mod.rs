@@ -443,6 +443,30 @@ fn bridge_mode_for_session_inject(params: &serde_json::Value) -> Result<&'static
     }
 }
 
+/// The retarget a `session/inject` steer carries, validated once here.
+///
+/// A `queue` note is refused a goal: it lands after the last model call, so a
+/// retarget riding on it would retire acceptance items for an objective the
+/// model was never shown.
+fn session_inject_goal(
+    params: &serde_json::Value,
+    bridge_mode: &str,
+) -> Result<Option<harn_session_store::ControlGoal>, String> {
+    let Some(raw) = params.get("goal").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    if bridge_mode == "audit_only" {
+        return Err(
+            "session/inject: `goal` retargets the run and needs mode `steer` or \
+             `interrupt_immediate`; a `queue` note never reaches the model"
+                .to_string(),
+        );
+    }
+    harn_session_store::ControlGoal::parse(raw)
+        .map(Some)
+        .map_err(|message| format!("session/inject: {message}"))
+}
+
 fn normalize_session_inject_content(
     method: &str,
     params: &serde_json::Value,

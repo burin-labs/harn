@@ -12,7 +12,7 @@ use serde_json::{json, Value as JsonValue};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::VmError;
 
@@ -319,7 +319,7 @@ where
             vec![super::common::output_text_block(&collector.text)]
         },
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
     })
 }
 

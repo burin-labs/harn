@@ -11,8 +11,8 @@ fake_bin="$tmp_root/bin"
 record="$tmp_root/cargo-record.txt"
 real_git=$(command -v git)
 
-git init --bare --quiet "$origin"
-git init --quiet "$work"
+git init -b main --bare --quiet "$origin"
+git init -b main --quiet "$work"
 mkdir -p \
   "$fake_bin" \
   "$work/.githooks" \

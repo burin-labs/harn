@@ -71,6 +71,8 @@ use paths::{
 mod backend;
 mod build_command;
 pub(crate) use build_command::{build_std_command, build_tokio_command};
+mod command_for;
+pub use command_for::{std_command_for, std_command_for_with_env_state, tokio_command_for};
 #[cfg(all(test, target_os = "linux"))]
 mod enforcement_report;
 mod handler_env;
@@ -1170,67 +1172,6 @@ pub fn push_process_sandbox_scope(
         .collect();
     crate::orchestration::push_execution_policy(policy);
     Ok(ProcessSandboxScopeGuard { pushed: true })
-}
-
-/// Close a freshly built command's environment under an active session policy:
-/// the choke point that makes the environment contract structural, since every
-/// spawn seam in the VM and `harn-hostlib` reaches a child through the three
-/// funnel fns below. Callers still layer `env`/`env_remove` on top afterward;
-/// sandbox confinement sets no env vars, so clearing cannot weaken it.
-macro_rules! close_env_for_session {
-    ($command:expr, $program:expr) => {
-        if let Some(env) =
-            crate::stdlib::process::session_closed_env_for_command($program, std::iter::empty())?
-        {
-            $command.env_clear();
-            for (key, value) in env {
-                $command.env(key, value);
-            }
-        }
-    };
-}
-
-pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
-    let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
-    let active = active_sandbox_policy();
-    let mut command = match active.as_ref() {
-        Some((policy, profile)) => {
-            build_std_command::<ActiveBackend>(&resolved_program, args, policy, *profile)?
-        }
-        None => {
-            let mut command = Command::new(&resolved_program);
-            command.args(args);
-            command
-        }
-    };
-    close_env_for_session!(command, program);
-    if let Some(proxy) = active.and_then(|(policy, _)| policy.process_network_proxy) {
-        process_output::apply_managed_proxy_env(&mut command, proxy);
-    }
-    Ok(command)
-}
-
-pub fn tokio_command_for(
-    program: &str,
-    args: &[String],
-) -> Result<tokio::process::Command, VmError> {
-    let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
-    let active = active_sandbox_policy();
-    let mut command = match active.as_ref() {
-        Some((policy, profile)) => {
-            build_tokio_command::<ActiveBackend>(&resolved_program, args, policy, *profile)?
-        }
-        None => {
-            let mut command = tokio::process::Command::new(&resolved_program);
-            command.args(args);
-            command
-        }
-    };
-    close_env_for_session!(command, program);
-    if let Some(proxy) = active.and_then(|(policy, _)| policy.process_network_proxy) {
-        process_output::apply_managed_proxy_env_tokio(&mut command, proxy);
-    }
-    Ok(command)
 }
 
 pub fn command_output(

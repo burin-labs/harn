@@ -3,8 +3,8 @@
 # install channel (`cargo install harn-cli` or `install.sh`) against the
 # cross-platform release smoke harness.
 #
-# The per-tag `release-smoke.yml` gate validates the binary at release
-# time. This helper backs `install-smoke.yml`, which catches drift
+# The `release-smoke.yml` gate validates the candidate archives in the
+# release candidate's build run. This helper backs `install-smoke.yml`, which catches drift
 # *between* releases — a transitive dependency that stops building on
 # crates.io, `install.sh` OS/arch detection regressing, a yanked crate —
 # that the release-time gate cannot observe because it never re-installs.

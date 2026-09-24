@@ -743,7 +743,10 @@ pub(crate) fn extract_llm_options(
         .as_ref()
         .and_then(|o| o.get("tool_choice"))
         .filter(|value| !matches!(value, VmValue::Nil))
-        .map(vm_value_to_json);
+        .map(vm_value_to_json)
+        .map(|choice| {
+            super::tool_choice::relax_rejected_forced_tool_choice(choice, &caps, &capability_model)
+        });
     // tool_choice is accepted for any route that can call tools at all —
     // native or text-format. Text-format routes don't have a protocol-level
     // tool_choice field, but the value is still meaningful (e.g. `"none"`

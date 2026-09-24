@@ -666,6 +666,8 @@ mod trace_summary_pricing_tests {
                 unpriced_calls: i64::from(cost_usd.is_none()),
                 usage_unknown_calls: 0,
                 unpriced: None,
+                pricing: None,
+                billing: None,
             },
             duration_ms: 5,
         }

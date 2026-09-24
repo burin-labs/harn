@@ -631,7 +631,7 @@ fn empty_result() -> crate::llm::api::LlmResult {
         served_fast: false,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: crate::llm::api::ProviderTelemetry::default(),
+        telemetry: Box::default(),
     }
 }
 

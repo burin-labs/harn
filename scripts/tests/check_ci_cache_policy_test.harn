@@ -495,38 +495,6 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
   )
 }
 
-pipeline test_release_warm_cache_concurrency_rejects_dispatch_as_release(
-  harness: Harness,
-  task: unknown,
-) {
-  const workflow = release_binary_workflow()
-  const resolve = setup_step_by_id(workflow, "resolve")
-  const invalid = {
-    ...workflow,
-    jobs: {
-      ...workflow.jobs,
-      setup: {
-        ...workflow.jobs.setup,
-        steps: workflow.jobs.setup.steps.map(
-          { step ->
-            if step?.id == "resolve" {
-              {...resolve, run: resolve.run + "\nselect((.event == \"workflow_dispatch\"))"}
-            } else {
-              step
-            }
-          },
-        ),
-      },
-    },
-  }
-  assert_eq(
-    release_warm_cache_concurrency_errors(invalid),
-    [
-      "build-release-binaries.yml:setup must not misclassify benchmark or warm dispatches as releases",
-    ],
-  )
-}
-
 pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harness, task: unknown) {
   const workflow = release_binary_workflow()
   const invalid = {

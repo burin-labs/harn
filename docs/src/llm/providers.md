@@ -1233,7 +1233,7 @@ Ask for a posture in provider-neutral terms:
 
 ```harn
 harness.llm.call({
-  model: "gpt-5.6",
+  model: "gpt-6-sol",
   messages: messages,
   data_controls: "strictest_available",
 })
@@ -1330,7 +1330,7 @@ is specified in the script.
 ### Model resolution guarantees
 
 Harn resolves a model selector and its provider as one decision before a
-provider call. A qualified selector such as `openai:gpt-5.6-sol` is a hard
+provider call. A qualified selector such as `openai:gpt-6-sol` is a hard
 provider constraint. Harn rejects it if the catalog assigns the model to a
 different provider, if a separate `provider` option disagrees, or if a later
 routing step changes the provider. It does not fall through to the default or
@@ -1341,7 +1341,7 @@ provider registry declares the `model_proxy` feature. A custom adapter, the
 generic local OpenAI-compatible adapter, or a catalogued router may deliberately
 serve an upstream model identity, while its selected adapter remains a hard
 transport constraint. This keeps gateways and test adapters composable without
-allowing `ollama:gpt-5.6-sol` or another contradictory namespace-owned selector
+allowing `ollama:gpt-6-sol` or another contradictory namespace-owned selector
 to escape to the wrong provider.
 
 An explicit provider can name a private or newly released model that is not in
