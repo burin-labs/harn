@@ -646,7 +646,7 @@ harn test tests/ --parallel --timing   # show progress and slowest tests/files
 harn test tests/ --parallel -j 4       # pin worker count (also via HARN_TEST_JOBS)
 harn test tests/ --affected-from origin/main --parallel # run changed modules' importer tests
 harn test tests/ --affected-from origin/main --plan # print the selection or full-suite fallback as JSON
-harn test tests/fast.harn --test-path tests/contracts.harn --parallel # one curated suite
+harn test tests/fast.harn tests/contracts.harn --parallel # one curated suite
 harn test tests/ --watch               # re-run on file changes
 harn test conformance --verbose        # show per-test timing
 harn test conformance --timing         # show timing summary without verbose failures
@@ -662,7 +662,7 @@ harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 Watch mode keeps immutable prepared module artifacts warm between reruns. Each
 test still receives a fresh VM, module state, and persistence root.
 
-| Flag | Description |
+| Argument or flag | Description |
 |---|---|
 | `--filter <pattern>` | Only run tests matching pattern |
 | `--target <url>` | Harness base URL for `harn test agents-conformance` |
@@ -673,7 +673,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
 | `--parallel` | Run a bounded worker pool. User tests run in-process; conformance tests run in isolated processes because each worker owns process-wide runtime state. |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). The default follows available CPU and memory, capped at 8. |
-| `--test-path <PATH>` | Add a user-test file or directory to the same compile-once suite. Repeatable; overlapping paths are deduplicated. |
+| `[PATH]...` | User-test files or directories in one compile-once suite. Overlapping paths are deduplicated. Special suite names such as `conformance` and `protocols` select their own optional fixture grammar. |
 | `--affected-from <GIT_REF>` | Run only user-test files affected since a Git ref. Uses Harn's resolved module graph and falls back to the complete suite for any unmodelled change. One-shot user suites only. |
 | `--plan` | With `--affected-from`, print a versioned JSON plan and exit without running tests. The plan reports `selected` or `full`, the reason, and the exact test files, so CI can size its execution matrix without weakening Harn's fallback policy. |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |

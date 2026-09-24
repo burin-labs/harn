@@ -344,7 +344,6 @@ fn multiple_test_targets_share_one_relative_report_namespace() {
         .args([
             "test",
             "suite_a",
-            "--test-path",
             "suite_b/nested",
             "--json-out",
             json_out.to_str().expect("JSON report path is UTF-8"),
@@ -377,6 +376,38 @@ fn multiple_test_targets_share_one_relative_report_namespace() {
         .collect::<Vec<_>>();
     files.sort();
     assert_eq!(files, ["suite_a/test_a.harn", "suite_b/nested/test_b.harn"]);
+}
+
+#[test]
+fn special_test_modes_and_watch_refuse_extra_paths() {
+    let cases: &[(&[&str], &str)] = &[
+        (
+            &["conformance", "suite", "extra"],
+            "`harn test conformance` does not accept extra positional paths",
+        ),
+        (
+            &["protocols", "suite", "extra"],
+            "`harn test protocols` does not accept extra positional paths",
+        ),
+        (
+            &["agents-conformance", "suite", "extra"],
+            "`harn test agents-conformance` does not accept extra positional paths",
+        ),
+        (
+            &["suite_a", "suite_b", "--watch"],
+            "`harn test --watch` accepts at most one positional path",
+        ),
+    ];
+    for (arguments, expected) in cases {
+        let output = Command::new(binary_path())
+            .arg("test")
+            .args(*arguments)
+            .output()
+            .expect("spawn test mode refusal");
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(expected), "{arguments:?}: {stderr}");
+    }
 }
 
 #[test]
@@ -589,7 +620,6 @@ fn empty_user_suite_fails_closed_unless_explicitly_allowed() {
     let rejected = Command::new(binary_path())
         .args([
             "test",
-            "--test-path",
             empty.to_str().expect("empty target path is UTF-8"),
             "--json-out",
             json_out.to_str().expect("JSON report path is UTF-8"),
@@ -631,7 +661,6 @@ fn empty_user_suite_fails_closed_unless_explicitly_allowed() {
     let allowed = Command::new(binary_path())
         .args([
             "test",
-            "--test-path",
             empty.to_str().expect("empty target path is UTF-8"),
             "--json-out",
             json_out.to_str().expect("JSON report path is UTF-8"),
@@ -670,7 +699,6 @@ fn empty_user_suite_fails_closed_unless_explicitly_allowed() {
     let positive = Command::new(binary_path())
         .args([
             "test",
-            "--test-path",
             passing.to_str().expect("passing target path is UTF-8"),
         ])
         .output()
