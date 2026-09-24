@@ -1,0 +1,88 @@
+// Trigger: a mock agent requests a tool matched by a mode default and a
+// remembered user choice. Effect: the user choice decides and its source is
+// recorded. Negative: without that choice the mode asks, and a path guard
+// still refuses a sensitive path even with a remembered allow.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract.harn"
+
+fn run_case(harness: Harness, marker: string, path: string, approval_policy: dict) {
+  harness.fs.write_text(marker, "")
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "probe",
+    "Read a workspace path.",
+    {
+      handler: { args ->
+        harness.fs.write_text(marker, args.path)
+        return "read"
+      },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read", side_effect_level: "none"},
+    },
+  )
+  return with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "probe-1", name: "probe", arguments: {path: path}}]}],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        tools: tools,
+        tool_format: "native",
+        max_iterations: 1,
+        policy: {
+          tools: ["probe"],
+          tool_annotations: {
+            probe: {kind: "read", side_effect_level: "none", arg_schema: {path_params: ["path"]}},
+          },
+        },
+        approval_policy: approval_policy,
+      }
+      agent_loop(harness, "Read the requested path.", "Use tools.", options)
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const marker = harness.fs.workspace_temp_dir() + "/remembered-approval-priority"
+  const mode_ask = {source: "mode", ask: {side_effect: "none"}}
+  const user_allow = {source: "user", allow: {tool: "probe"}}
+  const remembered = run_case(harness, marker, "src/readme.txt", {rules: [mode_ask, user_allow]})
+  const grants = json_stringify(transcript_events_by_kind(remembered.transcript, "PermissionGrant"))
+  contract_effect(
+    harness.stdio,
+    "remembered_allow_executes",
+    harness.fs.read_text(marker) == "src/readme.txt"
+      && len(remembered.tools.rejected) == 0,
+  )
+  contract_effect(
+    harness.stdio,
+    "receipt_names_user_source",
+    grants.contains("\"source\":\"user\""),
+  )
+  const mode_only = run_case(harness, marker, "src/readme.txt", {rules: [mode_ask]})
+  const mode_denials = json_stringify(
+    transcript_events_by_kind(mode_only.transcript, "PermissionDeny"),
+  )
+  contract_negative(
+    harness.stdio,
+    "mode_ask_without_memory_does_not_execute",
+    harness.fs.read_text(marker) != ""
+      || len(mode_only.tools.rejected) == 0
+      || !mode_denials.contains("\"source\":\"mode\""),
+  )
+  const guarded = run_case(harness, marker, "config/.env", {rules: [mode_ask, user_allow]})
+  const guard_denials = json_stringify(
+    transcript_events_by_kind(guarded.transcript, "PermissionDeny"),
+  )
+  contract_negative(
+    harness.stdio,
+    "remembered_allow_does_not_bypass_sensitive_path",
+    harness.fs.read_text(marker) != ""
+      || len(guarded.tools.rejected) == 0
+      || !guard_denials.contains("default_sensitive_path"),
+  )
+}
