@@ -16,12 +16,13 @@ pub use provider_setup::{
     connector_service_issues, ConnectorConditionalProfileRequirement,
     ConnectorConfigurationEnvironmentManifest, ConnectorCredentialEnvironmentManifest,
     ConnectorEnvironment, ConnectorEvidenceRequirement, ConnectorExternalSpend,
-    ConnectorHealthCheckManifest, ConnectorOperationEffect, ConnectorOperationManifest,
-    ConnectorParameterManifest, ConnectorParameterType, ConnectorProtectedProfileManifest,
-    ConnectorReconciliation, ConnectorRecoveryCopy, ConnectorRedactionTarget,
-    ConnectorRequiredSecretManifest, ConnectorSecretDirection, ConnectorServiceManifest,
-    ConnectorSetupConfigurationField, ConnectorTestProfile, ProtectedProfileFieldClass,
-    ProviderManifestEntry, ProviderSetupManifest, ResolvedProviderConnectorConfig,
+    ConnectorHealthCheckManifest, ConnectorOperationEffect, ConnectorOperationKind,
+    ConnectorOperationManifest, ConnectorParameterManifest, ConnectorParameterType,
+    ConnectorProtectedProfileManifest, ConnectorReconciliation, ConnectorRecoveryCopy,
+    ConnectorRedactionTarget, ConnectorRequiredSecretManifest, ConnectorSecretDirection,
+    ConnectorServiceManifest, ConnectorSetupConfigurationField, ConnectorTestProfile,
+    ProtectedProfileFieldClass, ProviderManifestEntry, ProviderSetupManifest,
+    ResolvedProviderConnectorConfig,
 };
 
 #[derive(Debug, Clone, Deserialize)]
