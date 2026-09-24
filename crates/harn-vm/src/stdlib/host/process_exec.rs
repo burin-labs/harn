@@ -453,6 +453,7 @@ pub(crate) fn build_sandboxed_command(
     crate::process_sandbox::apply_active_rustc_wrapper_policy(
         &mut launch.env,
         &mut launch.env_remove,
+        launch.cwd.as_deref(),
     );
     let mut cmd = crate::process_sandbox::tokio_command_for(&launch.program, &launch.args)
         .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;

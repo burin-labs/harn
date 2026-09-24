@@ -1,11 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-const RUSTC_WRAPPER_ENV_KEYS: [&str; 4] = [
-    "RUSTC_WRAPPER",
-    "CARGO_BUILD_RUSTC_WRAPPER",
-    "RUSTC_WORKSPACE_WRAPPER",
-    "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
-];
+use crate::orchestration::CapabilityPolicy;
+
+/// Whether a Cargo `rustc` wrapper runs inside the sandbox, and the receipt.
+#[path = "rustc_wrapper.rs"]
+pub mod rustc_wrapper;
+use rustc_wrapper::RUSTC_WRAPPER_ENV_KEYS;
 
 /// Exact bytes supplied to a child process.
 ///
@@ -33,17 +33,56 @@ pub struct ProcessCommandConfig {
     pub closed_env: bool,
 }
 
-/// Disable Cargo `rustc` and workspace wrappers for a spawn governed by an active sandbox.
+/// Apply the recorded wrapper decision to a spawn governed by an active sandbox.
 ///
-/// A wrapper such as `sccache` is a shared per-user daemon. If a sandboxed
-/// Cargo invocation starts it, the daemon inherits that confinement and can
-/// poison later builds outside the workspace. Empty wrapper values override
-/// Cargo configuration while leaving unsandboxed builds and caches unchanged.
+/// A wrapper that runs under the active profile is left in place; one that
+/// cannot, or that would leave a confined long-lived process behind, is
+/// switched off by setting every wrapper key empty, which overrides Cargo
+/// configuration files too. Unsandboxed spawns are left unchanged. The
+/// decision is measured once per (policy, working directory) and recorded in
+/// [`rustc_wrapper::rustc_wrapper_decisions`].
 pub fn apply_active_rustc_wrapper_policy(
     env: &mut Vec<(String, String)>,
     env_remove: &mut Vec<String>,
+    cwd: Option<&Path>,
 ) {
-    if super::active_sandbox_policy().is_some() {
+    if let Some((policy, _)) = super::active_sandbox_policy() {
+        decide_and_apply(&policy, cwd, env, env_remove);
+    }
+}
+
+/// [`apply_active_rustc_wrapper_policy`] for a config already known to run
+/// under `policy`.
+pub(super) fn apply_rustc_wrapper_decision(
+    policy: &CapabilityPolicy,
+    config: &mut ProcessCommandConfig,
+) {
+    let cwd = config.cwd.clone();
+    decide_and_apply(
+        policy,
+        cwd.as_deref(),
+        &mut config.env,
+        &mut config.env_remove,
+    );
+}
+
+fn decide_and_apply(
+    policy: &CapabilityPolicy,
+    cwd: Option<&Path>,
+    env: &mut Vec<(String, String)>,
+    env_remove: &mut Vec<String>,
+) {
+    if rustc_wrapper::probing() {
+        return;
+    }
+    let cwd = match cwd {
+        Some(cwd) => cwd.to_path_buf(),
+        None => match super::policy_process_cwd(policy, None) {
+            Ok(cwd) => cwd,
+            Err(_) => return neutralize_rustc_wrapper(env, env_remove),
+        },
+    };
+    if rustc_wrapper::rustc_wrapper_decision(policy, &cwd, env).disables() {
         neutralize_rustc_wrapper(env, env_remove);
     }
 }

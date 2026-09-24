@@ -95,8 +95,8 @@ pub use backend::{
     active_backend_filesystem_mechanism, active_backend_name, conformance,
 };
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
-pub use process_config::apply_active_rustc_wrapper_policy;
-use process_config::neutralize_rustc_wrapper;
+use process_config::apply_rustc_wrapper_decision;
+pub use process_config::{apply_active_rustc_wrapper_policy, rustc_wrapper};
 pub use process_config::{ProcessCommandConfig, ProcessStdin};
 use process_output::apply_process_config;
 #[cfg(target_os = "windows")]
@@ -1257,7 +1257,7 @@ fn sandboxed_process_config(
     } else {
         resolved.cwd = Some(policy_process_cwd(policy, None)?);
     }
-    neutralize_rustc_wrapper(&mut resolved.env, &mut resolved.env_remove);
+    apply_rustc_wrapper_decision(policy, &mut resolved);
     inject_workspace_process_env(&mut resolved.env, policy);
     resolved.env.retain(|(key, _)| {
         !resolved

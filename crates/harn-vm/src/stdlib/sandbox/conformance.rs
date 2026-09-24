@@ -57,6 +57,19 @@ pub enum ConformanceCase {
     /// writable root. The negative control for the two binds above: without
     /// it, a blanket grant would pass them.
     UnixSocketBindOutsideRootRefused,
+    /// A Cargo `rustc` wrapper that runs under the profile (it needs nothing
+    /// the profile denies) stays in place: a build through it reaches the
+    /// wrapper, and the recorded decision says `kept`.
+    RustcWrapperThatRunsIsKept,
+    /// A Cargo `rustc` wrapper that cannot run under the profile is switched
+    /// off rather than killing the build: the build completes without it, and
+    /// the recorded decision says `disabled`.
+    RustcWrapperThatCannotRunIsSwitchedOff,
+    /// A Cargo `rustc` wrapper that leaves a detached process running is
+    /// switched off, and the confined process it left is gone: a long-lived
+    /// helper started inside the sandbox would keep the sandbox for its whole
+    /// life and serve later builds with it.
+    RustcWrapperThatDaemonizesIsSwitchedOff,
 }
 
 impl ConformanceCase {
@@ -71,6 +84,9 @@ impl ConformanceCase {
         Self::UnixSocketBindUnderRoot,
         Self::UnixSocketBindUnderRootWithNetwork,
         Self::UnixSocketBindOutsideRootRefused,
+        Self::RustcWrapperThatRunsIsKept,
+        Self::RustcWrapperThatCannotRunIsSwitchedOff,
+        Self::RustcWrapperThatDaemonizesIsSwitchedOff,
     ];
 
     pub fn id(self) -> &'static str {
@@ -86,6 +102,13 @@ impl ConformanceCase {
             Self::UnixSocketBindUnderRoot => "unix_socket.bind_under_root",
             Self::UnixSocketBindUnderRootWithNetwork => "unix_socket.bind_under_root_with_network",
             Self::UnixSocketBindOutsideRootRefused => "unix_socket.bind_outside_root_refused",
+            Self::RustcWrapperThatRunsIsKept => "rustc_wrapper.runs_is_kept",
+            Self::RustcWrapperThatCannotRunIsSwitchedOff => {
+                "rustc_wrapper.cannot_run_is_switched_off"
+            }
+            Self::RustcWrapperThatDaemonizesIsSwitchedOff => {
+                "rustc_wrapper.daemonizing_is_switched_off"
+            }
         }
     }
 
@@ -122,8 +145,26 @@ impl ConformanceCase {
                  with a Job Object and the command is never re-created",
             );
         }
+        let is_wrapper_case = matches!(
+            self,
+            Self::RustcWrapperThatRunsIsKept
+                | Self::RustcWrapperThatCannotRunIsSwitchedOff
+                | Self::RustcWrapperThatDaemonizesIsSwitchedOff
+        );
+        if is_wrapper_case && !cfg!(unix) {
+            return Expectation::NotApplicable(
+                "the wrapper probe is a POSIX shell script; no Windows wrapper probe exists yet",
+            );
+        }
         match self {
-            Self::WorkspaceWriteAdmitted => Expectation::Observe(Observation::Admitted),
+            // "Admitted" is the build completing: through the wrapper for the
+            // first, without it for the second.
+            Self::WorkspaceWriteAdmitted
+            | Self::RustcWrapperThatRunsIsKept
+            | Self::RustcWrapperThatCannotRunIsSwitchedOff
+            | Self::RustcWrapperThatDaemonizesIsSwitchedOff => {
+                Expectation::Observe(Observation::Admitted)
+            }
             Self::OutsideWriteRefused
             | Self::OutsideReadRefused
             | Self::GuardianOutsideWriteRefused
