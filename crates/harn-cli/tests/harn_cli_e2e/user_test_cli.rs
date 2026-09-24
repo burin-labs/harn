@@ -748,7 +748,7 @@ fn empty_user_suite_fails_closed_unless_explicitly_allowed() {
     );
     let positive_stdout = String::from_utf8_lossy(&positive.stdout);
     assert!(
-        positive_stdout.contains("1 passed, 1 total"),
+        positive_stdout.contains("1 passed, 0 skipped, 1 total"),
         "{positive_stdout}"
     );
 }
