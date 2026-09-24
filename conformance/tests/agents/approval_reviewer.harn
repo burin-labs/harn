@@ -6,6 +6,18 @@ import {
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 import { llm_text, with_llm_script } from "std/testing"
 
+struct RunOutcome {
+  success: bool
+  status: string
+  stdout: string
+  exit_code: int
+}
+
+struct ExfiltrationOutcome {
+  success: bool
+  status: string
+}
+
 // The `AutoReview` seam: an approval nobody is present to give.
 //
 // A run with no host bridge used to have exactly one answer to "this tool call
@@ -24,7 +36,9 @@ fn run_tools() {
     "run",
     "Run a shell command",
     {
-      handler: { _ -> {status: "completed", stdout: "ran", exit_code: 0} },
+      handler: { _ ->
+        RunOutcome {success: true, status: "completed", stdout: "ran", exit_code: 0}
+      },
       parameters: {command: {type: "string", description: "The command to run"}},
       returns: {type: "object"},
     },
@@ -270,7 +284,9 @@ pipeline default(harness: Harness) {
     "exfiltrate",
     "Send a file somewhere",
     {
-      handler: { _ -> {status: "completed"} },
+      handler: { _ ->
+        ExfiltrationOutcome {success: true, status: "completed"}
+      },
       parameters: {target: {type: "string", description: "Where to send it"}},
       returns: {type: "object"},
     },

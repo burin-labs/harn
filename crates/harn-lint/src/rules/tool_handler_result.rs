@@ -8,13 +8,15 @@
 //! of key names separates the two. It has already cost one silent defect, where
 //! a dict-shaped refusal was reported a success (harn#7884).
 //!
-//! Warning severity while in-tree handlers migrate (harn#7901). It becomes an
-//! error once no untyped handler result remains.
+//! Error severity for the result shapes this rule can prove. Returns from
+//! helpers and mutable locals still need type analysis. Other `handler` keys,
+//! such as tool-search strategies, do not declare tool outcomes.
 
 use harn_lexer::Span;
 use harn_parser::visit;
-use harn_parser::{DiagnosticCode as Code, DictEntry, Node, SNode};
+use harn_parser::{BindingPattern, DiagnosticCode as Code, DictEntry, Node, SNode};
 use harn_vm::llm::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
+use std::collections::BTreeSet;
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
@@ -29,6 +31,27 @@ pub(crate) fn check_untyped_tool_handler_result(
     program: &[SNode],
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
+    let mut strategy_handlers = BTreeSet::new();
+    visit::walk_program(program, &mut |node| {
+        let Node::DictLiteral(entries) = &node.node else {
+            return;
+        };
+        let Some(search) = entry_for_key(entries, "tool_search") else {
+            return;
+        };
+        let Node::DictLiteral(search_entries) = &search.value.node else {
+            return;
+        };
+        let Some(strategy) = entry_for_key(search_entries, "strategy") else {
+            return;
+        };
+        let Node::DictLiteral(strategy_entries) = &strategy.value.node else {
+            return;
+        };
+        if let Some(handler) = entry_for_key(strategy_entries, "handler") {
+            strategy_handlers.insert((handler.value.span.start, handler.value.span.end));
+        }
+    });
     visit::walk_program(program, &mut |node| {
         let Node::DictLiteral(entries) = &node.node else {
             return;
@@ -36,6 +59,9 @@ pub(crate) fn check_untyped_tool_handler_result(
         let Some(handler) = entry_for_key(entries, "handler") else {
             return;
         };
+        if strategy_handlers.contains(&(handler.value.span.start, handler.value.span.end)) {
+            return;
+        }
         let Node::Closure { body, .. } = &handler.value.node else {
             return;
         };
@@ -48,10 +74,9 @@ pub(crate) fn check_untyped_tool_handler_result(
 /// Every dict literal this closure body can hand back: an explicit `return`,
 /// or a trailing expression in tail position.
 ///
-/// Deliberately shallow. A dict built up in a local and returned by name is not
-/// reported, because the rule would then need type inference to say anything
-/// true, and a warning that stays quiet on a value it cannot see is better than
-/// one that guesses.
+/// An immutable local initialized directly from a dict literal is also known
+/// without type inference. Helpers and mutable locals still need type analysis;
+/// the rule does not guess about their results.
 ///
 /// The typed result envelope is a dict literal too, and it is the shape this
 /// rule's own suggestion recommends for a text result, so reporting it would
@@ -60,7 +85,27 @@ pub(crate) fn check_untyped_tool_handler_result(
 /// value is an envelope, so the lint and the runtime agree by construction.
 fn returned_dict_literals(body: &[SNode]) -> Vec<Span> {
     let mut spans = Vec::new();
+    let mut untyped_consts = BTreeSet::new();
     for statement in body {
+        if let Node::ConstBinding {
+            pattern: BindingPattern::Identifier(name),
+            value,
+            ..
+        } = &statement.node
+        {
+            if let Node::DictLiteral(entries) = &value.node {
+                if !is_handler_result_envelope(entries) {
+                    untyped_consts.insert(name.as_str());
+                }
+            }
+        }
+        if let Node::ReturnStmt { value: Some(value) } = &statement.node {
+            if let Node::Identifier(name) = &value.node {
+                if untyped_consts.contains(name.as_str()) {
+                    spans.push(value.span);
+                }
+            }
+        }
         visit::walk_node(statement, &mut |node| {
             if let Node::ReturnStmt { value: Some(value) } = &node.node {
                 if let Node::DictLiteral(entries) = &value.node {
@@ -74,6 +119,10 @@ fn returned_dict_literals(body: &[SNode]) -> Vec<Span> {
     if let Some(last) = body.last() {
         if let Node::DictLiteral(entries) = &last.node {
             if !is_handler_result_envelope(entries) {
+                spans.push(last.span);
+            }
+        } else if let Node::Identifier(name) = &last.node {
+            if untyped_consts.contains(name.as_str()) {
                 spans.push(last.span);
             }
         }
@@ -124,7 +173,7 @@ fn make_diagnostic(span: Span) -> LintDiagnostic {
             CONVENTIONAL_OUTCOME_KEYS.join("`, `")
         ),
         span,
-        severity: LintSeverity::Warning,
+        severity: LintSeverity::Error,
         suggestion: Some(
             "return a typed struct whose type declares the outcome, or the \
              `harn.agent_tool_handler_result.v1` envelope for a text result."
