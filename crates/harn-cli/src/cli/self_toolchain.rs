@@ -16,7 +16,7 @@ pub(crate) enum SelfCommand {
     Run {
         #[arg(long, value_name = "TAG")]
         version: String,
-        #[arg(last = true, required = true, value_name = "HARN_ARGS")]
+        #[arg(last = true, required = true, value_name = "ARGS")]
         args: Vec<OsString>,
     },
     /// List locally cached release binaries.
