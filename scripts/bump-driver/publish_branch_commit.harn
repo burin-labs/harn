@@ -1,0 +1,33 @@
+#!/usr/bin/env harn
+/**
+ * Publish a prepared worktree as one GitHub-signed commit on a branch.
+ *
+ * The release pull request opener and the post-release development bump both
+ * publish through this script, so every automated branch commit is signed by
+ * GitHub under the automation identity rather than created by a local
+ * `git commit`.
+ */
+import { github_bump_remote } from "./github_remote"
+
+fn required_env(env: HarnessEnv, name: string) -> string {
+  const value = trim(env.get_or(name, ""))
+  if value == "" {
+    throw "publish_branch_commit: " + name + " is required"
+  }
+  return value
+}
+
+fn main(harness: Harness) {
+  const repo = required_env(harness.env, "GITHUB_REPOSITORY")
+  const token = required_env(harness.env, "HARN_BRANCH_COMMIT_TOKEN")
+  const branch = required_env(harness.env, "HARN_BRANCH_COMMIT_BRANCH")
+  const base_oid = required_env(harness.env, "HARN_BRANCH_COMMIT_BASE_OID")
+  const headline = required_env(harness.env, "HARN_BRANCH_COMMIT_HEADLINE")
+  const remote = github_bump_remote(
+    harness,
+    {repo: repo, release_repo: repo, token: token, branch: branch, base: "main", repo_dir: "."},
+  )
+  const receipt = remote.publish_commit({branch: branch, headline: headline, base_sha: base_oid})
+  harness.stdio.println(json_stringify_pretty(receipt))
+  return 0
+}

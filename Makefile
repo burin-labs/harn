@@ -679,6 +679,7 @@ test-pr-gate-scripts:
 	./scripts/tests/release_tag_main_ancestry_test.sh
 	./scripts/tests/candidate_manifest_test.sh
 	./scripts/tests/release_candidate_trigger_test.sh
+	./scripts/tests/release_promotion_plan_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
@@ -766,6 +767,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN_RESOLVER_TEST_ALLOW_CARGO=1 ./scripts/tests/harn_bin_resolver_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/agent_shell_guard_adapter_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_prepare_env_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/open_release_pr_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_withdrawal_lineage_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/embedded_asset_rebuild_test.sh
