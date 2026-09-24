@@ -328,7 +328,15 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
 fn write_argv(target: &Path) -> Vec<String> {
     let path = target.display().to_string();
     if cfg!(windows) {
-        vec!["cmd".into(), "/c".into(), format!("echo probe> \"{path}\"")]
+        // Separate arguments: one argument holding its own quotes is escaped
+        // by the launcher's quoting and reaches `cmd` as a malformed path.
+        vec![
+            "cmd".into(),
+            "/c".into(),
+            "echo".into(),
+            "probe>".into(),
+            path,
+        ]
     } else {
         vec!["touch".into(), path]
     }
