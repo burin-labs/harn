@@ -119,15 +119,38 @@ impl DialectContract {
     /// provider receives instead of a second copy of the dialect table.
     pub(crate) fn build_request_body(self, request: &LlmRequestPayload) -> serde_json::Value {
         let body = self.lower_request_body(request);
+        self.record_request_body(request, &body);
+        body
+    }
+
+    /// Build a registered OpenAI-compatible request from the capability
+    /// snapshot its response stream will use. Other dialects retain their
+    /// ordinary builder when a registered provider selects one.
+    pub(crate) fn build_openai_request_body_with_caps(
+        self,
+        request: &LlmRequestPayload,
+        caps: &crate::llm::capabilities::Capabilities,
+    ) -> serde_json::Value {
+        let body = if self.stream_protocol() == StreamProtocol::OpenAiSse {
+            crate::llm::providers::OpenAiCompatibleProvider::build_request_body_with_caps(
+                request, caps,
+            )
+        } else {
+            self.lower_request_body(request)
+        };
+        self.record_request_body(request, &body);
+        body
+    }
+
+    fn record_request_body(self, request: &LlmRequestPayload, body: &serde_json::Value) {
         crate::llm::reasoning_receipt::record(
             &request.provider,
             &request.model,
             self.dialect_label(),
             &request.thinking,
             self.reasoning_fields(),
-            &body,
+            body,
         );
-        body
     }
 
     fn lower_request_body(self, request: &LlmRequestPayload) -> serde_json::Value {

@@ -164,6 +164,9 @@
 #   image_url_input_supported:
 #                     whether image content blocks may reference remote URLs.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
+#   honors_preserve_thinking_kwarg:
+#                     whether this route honors the preserve_thinking request
+#                     knob; model support alone does not imply wire support.
 #   server_parser   : server-side response parser that transforms model output.
 #   honors_chat_template_kwargs:
 #                     whether provider-specific chat-template options are honored.
@@ -293,6 +296,10 @@
 #                     `tool_calls[]` entries; strict OpenAI-compatible servers
 #                     can reject replayed history with more than one tool call
 #                     even when Harn originally parsed text-tool calls.
+#   requires_parallel_tool_calls_false:
+#                     whether the request must explicitly carry
+#                     `parallel_tool_calls: false`; history support alone does
+#                     not decide whether the provider accepts this wire field.
 #   tools_exclude_response_format:
 #                     whether the route rejects `response_format` when native
 #                     `tools` are present. Harn drops response_format for these
