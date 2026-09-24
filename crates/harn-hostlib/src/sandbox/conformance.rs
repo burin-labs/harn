@@ -216,6 +216,9 @@ struct Layout {
     workspace: PathBuf,
     outside: PathBuf,
     socket_root: PathBuf,
+    /// A directory in the host's shared temp dir, holding a file another
+    /// process left there. It is the one part of the layout outside `HOME`.
+    shared_temp: tempfile::TempDir,
 }
 
 impl Layout {
@@ -241,11 +244,16 @@ impl Layout {
             std::fs::create_dir_all(dir)?;
         }
         std::fs::write(outside.join("secret.txt"), OUTSIDE_CONTENT)?;
+        let shared_temp = tempfile::Builder::new()
+            .prefix("harn-sandbox-conformance-sibling-")
+            .tempdir()?;
+        std::fs::write(shared_temp.path().join("secret.txt"), OUTSIDE_CONTENT)?;
         Ok(Self {
             _root: root,
             workspace,
             outside,
             socket_root,
+            shared_temp,
         })
     }
 }
@@ -294,15 +302,46 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
             let target = layout.outside.join("probe.txt");
             (write_argv(&target), target.display().to_string())
         }
-        ConformanceCase::OutsideReadRefused => {
-            let target = layout.outside.join("secret.txt");
-            let path = target.display().to_string();
+        ConformanceCase::OutsideReadRefused => read_probe(&layout.outside.join("secret.txt")),
+        ConformanceCase::SiblingTempReadRefused => {
+            read_probe(&layout.shared_temp.path().join("secret.txt"))
+        }
+        ConformanceCase::AtomicReplaceAdmitted => {
+            // JavaScript for Automation reaches Foundation on every Mac; the
+            // atomic option (1) is the call SwiftPM's build-file writes make.
+            let target = layout.workspace.join("atomic.txt");
+            let script = format!(
+                "ObjC.import('Foundation'); \
+                 $.NSString.alloc.initWithUTF8String('probe').dataUsingEncoding(4)\
+                 .writeToURLOptionsError($.NSURL.fileURLWithPath({:?}), 1, null)",
+                target.display().to_string()
+            );
+            (
+                owned(&["osascript", "-l", "JavaScript", "-e", &script]),
+                target.display().to_string(),
+            )
+        }
+        ConformanceCase::SessionTempWriteAdmitted => {
+            // The child names the file through its own TMPDIR; the target is
+            // where the session temp dir must put it.
+            let target =
+                harn_vm::process_sandbox::workspace_local_tmpdir(&case_policy(case, layout))
+                    .map(|dir| dir.join(SESSION_TEMP_PROBE))
+                    .unwrap_or_default();
             let argv = if cfg!(windows) {
-                owned(&["cmd", "/c", "type", &path])
+                owned(&[
+                    "cmd",
+                    "/c",
+                    &format!("echo probe> \"%TEMP%\\{SESSION_TEMP_PROBE}\""),
+                ])
             } else {
-                owned(&["cat", &path])
+                owned(&[
+                    "sh",
+                    "-c",
+                    &format!("touch \"$TMPDIR/{SESSION_TEMP_PROBE}\""),
+                ])
             };
-            (argv, path)
+            (argv, target.display().to_string())
         }
         ConformanceCase::UndeclaredEnvironmentNameWithheld
         | ConformanceCase::GuardianUndeclaredEnvironmentNameWithheld => {
@@ -323,6 +362,18 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
             (bind_argv(&target), target.display().to_string())
         }
     }
+}
+
+const SESSION_TEMP_PROBE: &str = "harn-conformance-session-temp";
+
+fn read_probe(target: &Path) -> (Vec<String>, String) {
+    let path = target.display().to_string();
+    let argv = if cfg!(windows) {
+        vec!["cmd".into(), "/c".into(), "type".into(), path.clone()]
+    } else {
+        vec!["cat".into(), path.clone()]
+    };
+    (argv, path)
 }
 
 fn write_argv(target: &Path) -> Vec<String> {
@@ -466,7 +517,7 @@ fn observe(case: ConformanceCase, child: &Child, target: &str) -> Result<Observe
         })
     };
     match case {
-        ConformanceCase::OutsideReadRefused => {
+        ConformanceCase::OutsideReadRefused | ConformanceCase::SiblingTempReadRefused => {
             Ok(took_effect(child.stdout.contains(OUTSIDE_CONTENT)))
         }
         ConformanceCase::UndeclaredEnvironmentNameWithheld

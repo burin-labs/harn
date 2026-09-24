@@ -165,10 +165,8 @@ pub(crate) use replace::{
     atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
     read_for_replace_scoped_at_open,
 };
-pub use workspace_env::active_workspace_process_env;
-pub(crate) use workspace_env::{
-    inject_workspace_process_env, workspace_local_tmpdir, WORKSPACE_TMPDIR_NAME,
-};
+pub use workspace_env::{active_workspace_process_env, workspace_local_tmpdir};
+pub(crate) use workspace_env::{inject_workspace_process_env, WORKSPACE_TMPDIR_NAME};
 #[cfg(test)]
 pub(crate) use workspace_env::{inject_workspace_tmpdir, TMPDIR_ENV_KEYS};
 
