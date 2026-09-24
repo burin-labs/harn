@@ -216,7 +216,6 @@ fn read_to_end_async(mut file: std::fs::File) -> std::thread::JoinHandle<io::Res
 }
 
 struct AppContainerProfile {
-    name: Vec<u16>,
     label: String,
     sid: PSID,
 }
@@ -250,11 +249,7 @@ impl AppContainerProfile {
                 return Err(io::Error::from_raw_os_error(derived));
             }
         }
-        Ok(Self {
-            name: wide_name,
-            label: name,
-            sid,
-        })
+        Ok(Self { label: name, sid })
     }
 
     fn label(&self) -> &str {
