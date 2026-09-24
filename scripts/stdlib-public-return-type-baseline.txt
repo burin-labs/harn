@@ -153,7 +153,7 @@
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_web.harn
 # count    5  crates/harn-stdlib/src/stdlib/stdlib_worktree.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_xml.harn
-# count   21  crates/harn-stdlib/src/stdlib/verification_core.harn
+# count   19  crates/harn-stdlib/src/stdlib/verification_core.harn
 # count    6  crates/harn-stdlib/src/stdlib/verification_ladder.harn
 # count   13  crates/harn-stdlib/src/stdlib/verification_targets.harn
 # count    1  crates/harn-stdlib/src/stdlib/workflow/checkpoints.harn
@@ -1215,11 +1215,9 @@ crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_status
 crates/harn-stdlib/src/stdlib/stdlib_xml.harn::from_xml
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_capture_snapshot
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_delta_direct_count
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_duration_ms
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_exit
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_failure_signature
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_gate_embedded_classification
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_opts
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_snapshot_map
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_toolchain_probe
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_toolchain_probe_options

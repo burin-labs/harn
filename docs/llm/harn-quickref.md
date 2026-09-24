@@ -671,6 +671,10 @@ imported alongside the functions that use it —
 annotations or as a `harness.llm.call_structured` schema type; non-`pub`
 type aliases stay module-private and error on import.
 
+Use `@sibling` before a non-public `fn` to share a helper among source files
+in the same resolved directory. It takes no arguments. Sibling helpers stay
+out of the public export surface and cannot be promoted with `pub import`.
+
 Top-level `const` / `let` and `fn` declarations are visible inside
 functions defined in the same file:
 

@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use harn_modules::{public_declarations, DefKind};
+use harn_modules::{public_declarations, sibling_declarations, DefKind};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -180,6 +180,9 @@ pub struct ModuleArtifact {
     /// initialized value, schema, or type-only projection without maintaining
     /// a second AST export table.
     pub public_exports: BTreeMap<String, DefKind>,
+    /// Functions available only to modules in this source's directory.
+    #[serde(default)]
+    pub sibling_exports: BTreeMap<String, DefKind>,
     /// Public declarations whose runtime value is produced by replaying
     /// [`init_chunk`](Self::init_chunk), rather than the precompiled function
     /// table. This includes bindings, enums, tools, skills, and eval packs.
@@ -245,6 +248,7 @@ pub fn specialize_module_artifact(
                 .cloned(),
         );
     }
+    pending.extend(artifact.sibling_exports.keys().cloned());
     // Every initializer is preserved, so every callable it can reach is a root.
     for node in program {
         let inner = match &node.node {
@@ -516,6 +520,11 @@ fn compile_module_artifact_with_options(
         .flat_map(public_declarations)
         .map(|export| (export.name, export.kind))
         .collect();
+    let sibling_exports: BTreeMap<String, DefKind> = program
+        .iter()
+        .flat_map(sibling_declarations)
+        .map(|export| (export.name, export.kind))
+        .collect();
     let public_value_names = public_exports
         .iter()
         .filter(|(_, kind)| {
@@ -606,6 +615,7 @@ fn compile_module_artifact_with_options(
         init_chunk,
         functions,
         public_exports,
+        sibling_exports,
         public_value_names,
         public_type_names,
     })
@@ -618,6 +628,14 @@ fn validate_privileged_wire_surface(
     if imports.iter().any(|import| import.is_pub) {
         return Err(VmError::Runtime(
             "Privileged wire modules cannot re-export imports".to_string(),
+        ));
+    }
+    if program
+        .iter()
+        .any(|node| !sibling_declarations(node).is_empty())
+    {
+        return Err(VmError::Runtime(
+            "Privileged wire modules cannot declare sibling exports".to_string(),
         ));
     }
     for export in program.iter().flat_map(public_declarations) {
@@ -1159,6 +1177,19 @@ pub fn call() { return lib.greet() }
             error
                 .to_string()
                 .contains("only explicit capability-value bindings"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn privileged_wire_functions_cannot_use_sibling_visibility() {
+        let error = compile_privileged_wire_module_artifact_from_source(
+            Path::new("<trusted>/wire.harn"),
+            "@sibling\nfn probe() { host_call(\"project.scan\", {}) }",
+        )
+        .expect_err("wire closures must not cross through sibling imports");
+        assert!(
+            error.to_string().contains("cannot declare sibling exports"),
             "{error}"
         );
     }

@@ -1,0 +1,6 @@
+import * as helpers from "./sibling_export_lib"
+import { hidden } from "./sibling_export_lib"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println("sibling:" + hidden() + ":" + helpers.hidden())
+}
