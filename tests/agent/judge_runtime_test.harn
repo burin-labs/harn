@@ -684,11 +684,11 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
               loop_until_done: true,
               done_sentinel: "##DONE##",
               max_iterations: 2,
-              deadline_ms: 1,
+              deadline_ms: 5000,
               verify_completion_judge: {
                 provider: "mock",
                 max_invocations: 1,
-                operation_timeout_ms: 100,
+                operation_timeout_ms: 10000,
                 deadline_reserve_ms: 0,
               },
               turn_end_condition: {provider: "mock", max_invocations: 1},
