@@ -67,22 +67,32 @@ fi
 development_opener="$root/scripts/open_development_bump.sh"
 grep -Fq 'echo "harn_bin=$harn_bin"' "$development_opener" \
   || fail "post-release workflow does not retain its pre-mutation Harn binary proof"
-grep -Fq 'scripts/bump-driver/publish_development_bump.harn' "$development_opener" \
-  || fail "post-release development bump bypasses signed GitHub publication"
-grep -Fq 'HARN_DEVELOPMENT_BUMP_TOKEN="$GH_TOKEN"' "$development_opener" \
-  || fail "signed development-bump publication does not receive the automation identity"
-if grep -Fq 'git commit -m "Start $DEVELOPMENT_VERSION development"' "$development_opener" \
-  || grep -Fq 'git push -u origin "$branch"' "$development_opener"; then
-  fail "post-release development bump can still create an unsigned local commit"
-fi
-development_publisher="$root/scripts/bump-driver/publish_development_bump.harn"
-grep -Fq 'import { github_bump_remote } from "./github_remote"' "$development_publisher" \
-  || fail "development bump does not use the signed GitHub connector seam"
-grep -Fq 'remote.publish_commit(' "$development_publisher" \
-  || fail "development bump does not publish through the signed commit operation"
-grep -Fq 'gh pr merge "$pr_url" --auto --squash' \
-  "$root/scripts/validate_development_bump.sh" \
-  || fail "post-release development bump does not enter the merge queue"
+# Both automated branch openers publish through the one signed-commit script.
+release_opener="$root/scripts/open_release_pr.sh"
+for opener in "$development_opener" "$release_opener"; do
+  grep -Fq 'scripts/bump-driver/publish_branch_commit.harn' "$opener" \
+    || fail "$(basename "$opener") bypasses signed GitHub publication"
+  grep -Fq 'HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN"' "$opener" \
+    || fail "$(basename "$opener") does not give signed publication the automation identity"
+  if grep -Eq 'git (commit|push)' "$opener"; then
+    fail "$(basename "$opener") can still create or push an unsigned local commit"
+  fi
+done
+branch_publisher="$root/scripts/bump-driver/publish_branch_commit.harn"
+grep -Fq 'import { github_bump_remote } from "./github_remote"' "$branch_publisher" \
+  || fail "branch publication does not use the signed GitHub connector seam"
+grep -Fq 'remote.publish_commit(' "$branch_publisher" \
+  || fail "branch publication does not publish through the signed commit operation"
+# One arming path for both automated release-lane pull requests.
+grep -Fq 'gh pr merge "$pr_url" --auto --squash' "$root/scripts/lib/release_auto_merge.sh" \
+  || fail "the shared release auto-merge helper does not arm a squash merge"
+for armer in "$root/scripts/validate_development_bump.sh" "$release_opener"; do
+  grep -Fq 'release_arm_auto_merge "$pr_url"' "$armer" \
+    || fail "$(basename "$armer") does not arm through the shared release auto-merge helper"
+  if grep -Fq 'gh pr merge' "$armer"; then
+    fail "$(basename "$armer") arms auto-merge outside the shared helper"
+  fi
+done
 
 ci_workflow="$root/.github/workflows/ci.yml"
 grep -Fq 'release_published_version_for_workspace "$workspace_version"' "$ci_workflow" \

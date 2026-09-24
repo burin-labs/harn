@@ -19,6 +19,14 @@ cadence_reason = "Daily keeps release-platform compiler caches usable between in
 job_ids = ["setup", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke", "cache_budget"]
 
 [[workflow]]
+path = ".github/workflows/bump-release.yml"
+name = "Open release PR"
+claim = "Unreleased changelog fragments on main have an open Release vX.Y.Z pull request"
+crons = ["29 15 * * *"]
+cadence_reason = "Daily bounds how long merged changes wait for a release; a run with nothing to release ends before any build."
+job_ids = ["open-release-pr"]
+
+[[workflow]]
 path = ".github/workflows/cli-cold-start-budget.yml"
 name = "CLI cold-start budget"
 claim = "Optimized CLI startup remains within its published latency budgets"
