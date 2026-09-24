@@ -362,7 +362,6 @@ fn channel_send_wait(vm: &Vm, target: ChannelTarget) -> Result<Option<WaitGuard>
     }
     vm.wait_for_graph
         .wait_for_channel_send(&vm.runtime_context.task_id, target)
-        .map(Some)
 }
 
 fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuard>, VmError> {
@@ -381,7 +380,6 @@ fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuar
     }
     vm.wait_for_graph
         .wait_for_channel_receive(&vm.runtime_context.task_id, targets)
-        .map(Some)
 }
 
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
@@ -1364,30 +1362,38 @@ async fn send_builtin(
         if ch.is_closed() || *closed_rx.borrow() {
             return Err(channel_closed_error("send", ch.name.as_ref()));
         }
-        let val = args[1].clone();
-        let val = match ch.sender.try_send(val) {
-            Ok(()) => {
-                vm.wait_for_graph.notify_channel_send(&target);
-                return Ok(VmValue::Bool(true));
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Full(val)) => val,
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                return Err(channel_closed_error("send", ch.name.as_ref()));
-            }
-        };
-        let _wait = channel_send_wait(&vm, target.clone())?;
-        tokio::select! {
-            biased;
-            _ = closed_rx.changed() => Err(channel_closed_error("send", ch.name.as_ref())),
-            result = ch.sender.send(val) => {
-                match result {
-                    Ok(()) => {
-                        vm.wait_for_graph.notify_channel_send(&target);
-                        Ok(VmValue::Bool(true))
-                    }
-                    Err(_) => Err(channel_closed_error("send", ch.name.as_ref())),
+        let mut val = args[1].clone();
+        loop {
+            val = match ch.sender.try_send(val) {
+                Ok(()) => {
+                    vm.wait_for_graph.notify_channel_send(&target);
+                    return Ok(VmValue::Bool(true));
                 }
-            }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(val)) => val,
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    return Err(channel_closed_error("send", ch.name.as_ref()));
+                }
+            };
+            // Another receiver may free capacity between try_send and wait
+            // registration. Retry the send instead of blocking without a wait
+            // record if the graph observes that ready state.
+            let Some(_wait) = channel_send_wait(&vm, target.clone())? else {
+                tokio::task::yield_now().await;
+                continue;
+            };
+            return tokio::select! {
+                biased;
+                _ = closed_rx.changed() => Err(channel_closed_error("send", ch.name.as_ref())),
+                result = ch.sender.send(val) => {
+                    match result {
+                        Ok(()) => {
+                            vm.wait_for_graph.notify_channel_send(&target);
+                            Ok(VmValue::Bool(true))
+                        }
+                        Err(_) => Err(channel_closed_error("send", ch.name.as_ref())),
+                    }
+                }
+            };
         }
     } else {
         Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
