@@ -9,6 +9,134 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.142
+
+### Breaking
+
+- The `thinking_scaffold` and `chain_of_thought` prompt-template sections are removed; a template
+  that names them now fails with an unknown-section error. They asked models to write their reasoning
+  into the response, which current models do natively and which Claude Opus 5.5 can decline as
+  reasoning extraction.
+
+### Added
+
+- Resolve call prices at request start, including recurring UTC windows,
+  one-hour cache writes, hosted search fees, and reported audio tokens. Receipts
+  identify the applied card, band, tier, unpriced units, and unapplied free
+  allowances. OpenRouter funding overhead is a separately named estimate;
+  provider-reported totals remain authoritative. Catalog schema 12 adds these
+  fields to generated consumer bindings. (#8557)
+- **An embedding host can own the runtime's diagnostic writes (#8622).** A host installs one stdio sink at session
+  start and receives the runtime's stdout and stderr text as data, with the stream named, instead of having it land on
+  the process's file descriptors and overwrite whatever the host had drawn there. A host that installs nothing keeps
+  the descriptors, so a command-line embedding is unchanged.
+- Claude Opus 5.5, GPT-6 Sol, GPT-6 Luna, and Grok 4.7 join the provider catalog on their direct and
+  OpenRouter routes, along with the missing OpenRouter routes for Claude Fable 5.1 and GPT-6 Astra.
+  The `opus` alias now names Claude Opus 5.5 (`opus5` pins Opus 5), `sol` and `luna` name the GPT-6
+  models, and the OpenAI tier aliases move to GPT-6 (Astra, Sol, Luna). GPT-5.6 models point at their
+  GPT-6 successors; GPT-5.6 Terra points at GPT-6 Sol because GPT-6 has no Terra.
+- Add `./scripts/release_gate.sh audit --residual-only`, which runs the residual release audit lanes on an
+  explicit HARN_BIN without a certification receipt, so a release harness can rehearse them before a cut.
+- Export a versioned native CLI argument tree with `harn --argument-schema` so hosts can project the parser's
+  nested commands and flags without copying its definitions.
+
+### Changed
+
+- A thinking-off request to a Claude model that always thinks (Opus 5.5, Fable, Mythos) now sends the
+  lowest effort instead of letting the model think at its default, and a forced tool choice sent to a
+  model that rejects it (Opus 5.5, Fable 5.1) becomes `auto` with a warning instead of a provider
+  error. `pack_for` task profiles no longer invent `temperature` and `top_p` values, and the agent
+  completion contract follows current model guidance: act on a reasonable reading of the request,
+  verify in proportion to risk, and delegate parallel work.
+- An approval reviewer whose policy names no model now keeps its loop's provider but runs on that provider's row of the
+  new `approval_reviewer` catalog ladder, instead of the loop's own model. Decisions record the choice in
+  `reviewer_route_source`. The reviewer's `effort` is now applied as a reasoning-policy level and defaults to `off`.
+  Before, it was dropped, and a reviewer on a route that refuses disabled thinking failed every call.
+- Releases are built and checked on the version commit's push to main. The run builds, signs,
+  notarizes, and attests the five archives at that commit, builds `SHA256SUMS`, `release-assets.json`,
+  and the release notes from them, writes a `burin-labs.candidate_manifest.v1` candidate manifest, and
+  runs the residual release audit and release smoke on those same files. Promotion publishes exactly
+  those files. A `v*` tag push no longer rebuilds binaries, and the manual tag recovery, promotion,
+  and candidate dispatch modes are gone.
+- Releases publish themselves once the version commit's candidate run succeeds. A new `promote-release.yml`
+  promotes that run's files into the tag and GitHub release through the organization's promotion workflow,
+  asks every registered consumer to repin, publishes the container image from the promoted Linux archives,
+  and opens the next development version. Nothing is rebuilt after the candidate run tested it.
+- The `Release vX.Y.Z` pull request is opened from main by the "Open release PR" workflow, daily and
+  on dispatch, when main has unreleased changelog fragments (#8712). It moves the workspace from
+  `X.Y.Z-dev` to `X.Y.Z` and folds the fragments into `CHANGELOG.md` with
+  `scripts/release_changelog_fold.harn`, now the fold's only implementation. The workflow arms
+  auto-merge when the pull request opens, and names an already-open release pull request instead of
+  duplicating it. `release_ship.sh --prepare` no longer requires an external release harness, and
+  the legacy `release_ship.sh --bump` mode is removed.
+
+### Fixed
+
+- A steer can now change what a run is for. `session/inject` in `steer` or
+  `interrupt_immediate` mode (and `agent_session_push_user_message`) accepts
+  `goal: {objective}`: the completion judge, the completion gate, and
+  `goal_reloop` then hold the run to the new objective, and every acceptance
+  item frozen under the old one is retired instead of demanded. The retarget is
+  kept on the typed control row, reaches the model as a standing `contract`
+  directive, and each completion decision that retired rows emits a
+  `harn.completion_requirements_retired.v1` checkpoint naming them. A plain steer
+  still amends the run and retires nothing. In-VM
+  `agent_session_push_user_message` now records the same typed control row
+  `session/inject` does.
+- Temporary package-verification pins for broken registry releases now expire
+  automatically. The verifier reports the selected version and expiry so a
+  transitive publish cannot silently become a permanent dependency policy.
+- Recovering an older OAuth connector asks for its registered redirect URI when
+  the old credential did not store it and offers an authorization URL prompt
+  when needed. Unattended setup reports the required `--redirect-uri` flag.
+- A Unix-socket root outside every writable root now takes a socket file. On Linux the grant was dropped when
+  the policy also permitted networking, and on macOS binding under such a root was always refused because the
+  socket file's creation was not granted. Regular files stay refused under a socket root on macOS.
+- Diagnostic catalog checks and regeneration now refuse an explicitly selected stale Harn binary
+  unless its exact input manifest proves it matches the worktree.
+- Provider catalog drift compares rates at the adapters' six-decimal USD-per-million-token precision,
+  eliminating conversion-noise changes while retaining real price and context-window changes.
+- A dropped or refused connection on a non-streaming provider call (OpenAI
+  Responses, completions, Azure OpenAI, Bedrock, Gemini, Ollama raw generate,
+  Vertex) is now a typed transient network error, so `agent_loop` retries it
+  instead of ending the run with a generic provider error.
+- Test commands no longer queue a nextest version probe behind Rust compilation, and exact tests use one build admission
+  while still rejecting missing or ignored tests.
+- On macOS, provider status (`harness.llm.providers()`, `harn doctor`, model
+  recommendations, routing) now checks whether a stored credential exists
+  without reading it, so it no longer raises a Keychain access dialog. A
+  process with no terminal, or one running under `CI`, never raises one: a
+  read that would need approval fails with a typed error naming the
+  credential, and provider status reports `needs_user_approval`.
+  `HARN_SECRET_INTERACTIVE=1` re-enables dialogs for a host that has a person
+  present. `harn test`, `make test`, and the script-test wrapper default to
+  `HARN_SECRET_PROVIDERS=env`.
+- Structured LLM calls defer their temperature default until a late-bound model route
+  establishes support, so temperature-rejecting models can answer judges and
+  repair attempts.
+- Inside `agent_loop`, an approval reviewer whose policy names no reviewer
+  model now runs on the loop's own provider and model instead of the bundled
+  reviewer model, so a loop that holds only its own route's credential no
+  longer gets a reviewer that fails authentication on every call. A refusal
+  receipt's `auto_review` entry now carries the reviewer's redacted error in
+  `unavailable_detail` beside `unavailable_reason`.
+- `harn run --allow-process-network` now lets child processes reach public hosts through the managed egress proxy
+  without any `HARN_EGRESS_*` setting. Private, link-local, and loopback addresses stay denied, and a configured egress
+  policy still narrows the default.
+- **Verified agent completions stop repeated judge objections before the cap (#8689).** When a declared
+  verifier has passed and the judge repeats the same attributed requirement without new task or tool evidence,
+  the loop records a verified stop instead of exhausting its review budget.
+- The release gate and `make all` no longer fail at `check-docs` on the snapshot copy of their Harn binary. A certified
+  snapshot keeps its source's freshness proof and is accepted only while its bytes and the checkout are unchanged.
+- A background or auto-backgrounded command spawned through the process-owner guardian now receives exactly the session's
+  resolved environment. It used to inherit the launcher's environment behind the explicit entries, so a name the session
+  never declared reached the child.
+- The runtime bump driver now reads a repin pull request back after arming
+  auto-merge and fails the run unless it is armed or already in the merge
+  queue. The error names the pull request and its `mergeable_state`, so a
+  pull request that nothing will land no longer passes as a successful bump.
+  The observed state is recorded in the receipt's `auto_merge`.
+
 ## v0.10.141
 
 ### Breaking
