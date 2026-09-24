@@ -575,6 +575,66 @@ fn main(harness: Harness) {
     }
 
     #[test]
+    fn batched_evaluation_question_and_choice_errors_reach_the_lsp() {
+        let state = DocumentState::new(
+            r#"
+fn choice(instructions: string, criteria: dict<string, string>) -> {kind: "choice", instructions: string, criteria: dict<string, string>} {
+  return {kind: "choice", instructions: instructions, criteria: criteria}
+}
+fn score(instructions: string, levels: list<string>) -> {kind: "score", instructions: string, levels: list<string>} {
+  return {kind: "score", instructions: instructions, levels: levels}
+}
+fn main(harness: Harness) {
+  const policy = {
+    backend: "structured_llm", provider: "openai", model: "gpt-5.4-mini",
+    effort: "low", temperature: 0.0, threshold: 0.8,
+    evaluation_cost_limit: 0.01, run_cost_limit: 0.08,
+  }
+  const answers = harness.llm.evaluate("triage.v1", {text: "window"}, {
+    disposition: choice("Keep or drop?", {
+      keep: "still needed", drop: "superseded",
+    }),
+    risk: score("How risky?", ["low", "high"]),
+  }, policy)
+  match answers.kind {
+    "answered" -> {
+      match answers.value.disposition.choice {
+        "keep" -> { harness.stdio.println("keep") }
+        "delete" -> { harness.stdio.println("delete") }
+      }
+    }
+    _ -> { harness.stdio.println(answers.receipt) }
+  }
+  const invalid = harness.llm.evaluate("bad.v1", {text: "window"}, {
+    disposition: choice("Which?", {}),
+  }, policy)
+  harness.stdio.println(invalid.kind)
+}
+"#
+            .into(),
+        );
+        for code in ["HARN-MAT-001", "HARN-TYP-036"] {
+            let diagnostic = state.diagnostics.iter().find(|diagnostic| {
+                matches!(diagnostic.code.as_ref(), Some(NumberOrString::String(value)) if value == code)
+            }).unwrap_or_else(|| panic!("missing {code}: {:?}", state.diagnostics));
+            assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
+            assert_eq!(diagnostic.source.as_deref(), Some("harn-typecheck"));
+            assert!(diagnostic.range.start.line > 0);
+        }
+        let mut errors: Vec<_> = state
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Some(DiagnosticSeverity::ERROR))
+            .filter_map(|diagnostic| match diagnostic.code.as_ref() {
+                Some(NumberOrString::String(code)) => Some(code.as_str()),
+                _ => None,
+            })
+            .collect();
+        errors.sort_unstable();
+        assert_eq!(errors, ["HARN-MAT-001", "HARN-TYP-036"]);
+    }
+
+    #[test]
     fn imported_predicate_outcome_cannot_select_an_lsp_boolean_branch() {
         use harn_parser::builtin_signatures::TyExt;
         let temp = tempfile::tempdir().unwrap();

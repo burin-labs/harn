@@ -283,3 +283,88 @@ fn degenerate(labels: &[String], chosen: &str, confidence: f64) -> BTreeMap<Stri
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::decision::question::{Question, QuestionSet};
+
+    #[test]
+    fn structured_fixture_requires_every_typed_question_in_one_response() {
+        let questions = QuestionSet {
+            questions: vec![
+                Question {
+                    id: "safe".into(),
+                    instructions: "Safe?".into(),
+                    body: QuestionBody::Boolean,
+                },
+                Question {
+                    id: "disposition".into(),
+                    instructions: "Keep or drop?".into(),
+                    body: QuestionBody::Choice(vec![
+                        ("keep".into(), "needed".into()),
+                        ("drop".into(), "superseded".into()),
+                    ]),
+                },
+                Question {
+                    id: "risk".into(),
+                    instructions: "How risky?".into(),
+                    body: QuestionBody::Score(vec!["low".into(), "high".into()]),
+                },
+            ],
+        };
+        let schema = answers_schema(&questions);
+        assert_eq!(
+            schema["properties"]["answers"]["required"],
+            json!(["safe", "disposition", "risk"])
+        );
+        assert_eq!(
+            schema["properties"]["answers"]["properties"]["disposition"]["properties"]["choice"]
+                ["enum"],
+            json!(["keep", "drop"])
+        );
+        let fixture = json!({"answers": {
+            "safe": {"verdict": false, "confidence": 0.95, "evidence": "boundary"},
+            "disposition": {"choice": "keep", "confidence": 0.8, "evidence": "still needed"},
+            "risk": {"level": "high", "confidence": 0.7, "evidence": "shared state"},
+        }});
+        let answers = read_answers(&questions, &fixture).expect("one complete typed response");
+        assert_eq!(answers.len(), 3);
+        assert!(
+            matches!(answers.get("safe"), Some(RawAnswer::Boolean { probability, .. }) if (*probability - 0.05).abs() < 1e-9)
+        );
+        assert!(matches!(
+            answers.get("disposition"),
+            Some(RawAnswer::Choice {
+                reported_confidence: Some(0.8),
+                ..
+            })
+        ));
+        assert!(matches!(
+            answers.get("risk"),
+            Some(RawAnswer::Score {
+                score: Some(1.0),
+                ..
+            })
+        ));
+
+        let mut partial = fixture.clone();
+        partial["answers"].as_object_mut().unwrap().remove("risk");
+        assert!(matches!(
+            read_answers(&questions, &partial),
+            Err(DecisionTransportError::Refused {
+                reason: RefusalReason::SchemaInvalid,
+                ..
+            })
+        ));
+        let mut invalid = fixture;
+        invalid["answers"]["disposition"]["choice"] = json!("delete");
+        assert!(matches!(
+            read_answers(&questions, &invalid),
+            Err(DecisionTransportError::Refused {
+                reason: RefusalReason::SchemaInvalid,
+                ..
+            })
+        ));
+    }
+}
