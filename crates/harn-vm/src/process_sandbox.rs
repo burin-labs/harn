@@ -23,7 +23,7 @@ pub use crate::stdlib::sandbox::{
     apply_active_rustc_wrapper_policy, check_fs_path_scope, command_output, conformance,
     deterministic_message_locale_env, enforce_process_cwd, infer_process_sandbox_mechanism,
     is_process_sandbox_signal, process_spawn_error, process_violation_error,
-    push_process_sandbox_scope, render_policy_root, std_command_for,
+    push_process_sandbox_scope, render_policy_root, rustc_wrapper, std_command_for,
     std_command_for_with_env_state, tokio_command_for, workspace_local_tmpdir, FsAccess,
     ProcessCommandConfig, ProcessSandboxAssessment, ProcessSandboxDenialReporting,
     ProcessSandboxGrants, ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
