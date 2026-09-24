@@ -801,6 +801,11 @@ pub struct AcpSessionInjectParams {
     pub session_id: String,
     pub mode: AcpSessionInjectMode,
     pub content: AcpSessionInjectContent,
+    /// Retarget the run: the steer replaces the objective, and every
+    /// acceptance item declared under the previous one is retired. Only a
+    /// `steer` or `interrupt_immediate` may carry it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<harn_session_store::ControlGoal>,
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<AcpMeta>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
@@ -838,9 +843,18 @@ impl AcpSessionInjectParams {
             session_id: session_id.into(),
             mode,
             content: content.into(),
+            goal: None,
             meta: None,
             extra: BTreeMap::new(),
         }
+    }
+
+    /// Replace the run's objective with `objective` as this steer lands.
+    pub fn with_goal(mut self, objective: impl Into<String>) -> Self {
+        self.goal = Some(harn_session_store::ControlGoal {
+            objective: objective.into(),
+        });
+        self
     }
 }
 

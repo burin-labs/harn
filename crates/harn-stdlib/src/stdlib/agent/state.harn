@@ -106,6 +106,7 @@ pub type AgentSessionControlEvent = {
   delivery_mode?: string,
   message_id?: string,
   text?: string,
+  goal?: {objective: string},
   actor?: unknown,
   provenance: "recorded" | "heuristic",
 }
