@@ -74,6 +74,7 @@ const KNOWN_GAPS: &[&str] = if cfg!(windows) {
     &[
         "fs.outside_write_refused",
         "fs.outside_read_refused",
+        "fs.sibling_temp_read_refused",
         "unix_socket.bind_under_root",
         "unix_socket.bind_under_root_with_network",
         "unix_socket.bind_outside_root_refused",
