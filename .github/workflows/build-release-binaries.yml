@@ -1217,7 +1217,9 @@ jobs:
           fi
           archive="${archives[0]}"
           archive_name="$(basename "$archive")"
-          archive_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+          # shellcheck source=scripts/lib/sha256.sh
+          source scripts/lib/sha256.sh
+          archive_sha256="$(sha256_file_hex "$archive")"
           source_commit="$(git rev-parse HEAD)"
           if [[ "$source_commit" != "$HARN_BUILD_REVISION" ]]; then
             echo "::error::Checked-out source moved from $HARN_BUILD_REVISION to $source_commit before attestation."
@@ -1294,7 +1296,9 @@ jobs:
           fi
           archive="${archives[0]}"
           archive_name="$(basename "$archive")"
-          archive_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+          # shellcheck source=scripts/lib/sha256.sh
+          source scripts/lib/sha256.sh
+          archive_sha256="$(sha256_file_hex "$archive")"
           signing_status="not_applicable"
           notarization_status="not_applicable"
           case "$RELEASE_TARGET" in

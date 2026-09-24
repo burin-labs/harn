@@ -629,12 +629,11 @@ harn_binary_snapshot_provenance_path() {
   printf '%s.snapshot-provenance\n' "$1"
 }
 
+# shellcheck source=scripts/lib/sha256.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/sha256.sh"
+
 harn_file_sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | cut -d ' ' -f 1
-  else
-    shasum -a 256 "$1" | cut -d ' ' -f 1
-  fi
+  sha256_file_hex "$1"
 }
 
 # Certify a byte-identical copy of a proven executable.
