@@ -401,5 +401,22 @@
     ],
     "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
     "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unset; the test parent supplies its private SQLite path",
+    "evidence": "Structural environment access/declaration in the separate-process spend quota test; production model calls do not read this test input.",
+    "expiry": "2026-10-24",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_MACHINE_SPEND_TEST_CHILD_PATH",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/admission/durable.rs",
+        "reader": "std::env::var_os"
+      }
+    ],
+    "reason": "Test-only child-process handoff for the cross-process reservation falsifier; it does not configure production model routing.",
+    "verdict": "KEEP-with-expiry"
   }
 ]
