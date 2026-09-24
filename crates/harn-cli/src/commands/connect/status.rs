@@ -6,6 +6,7 @@ use serde_json::Value as JsonValue;
 
 use crate::cli::{ConnectSetupPlanArgs, ConnectStatusArgs};
 use crate::json_envelope::{self, JsonEnvelope};
+use crate::package::ConnectorSecretDirection;
 use crate::package::{self, ConnectorRecoveryCopy};
 use harn_vm::secrets::SecretProvider;
 
@@ -15,7 +16,7 @@ use super::store::{
 };
 use super::{
     ConnectIndex, ConnectSetupPlan, ConnectSetupStep, ConnectStatusReport, ConnectorHealthStatus,
-    ConnectorStatus,
+    ConnectorInboundReadiness, ConnectorStatus,
 };
 
 pub(crate) const CONNECT_STATUS_SCHEMA_VERSION: u32 = 1;
@@ -160,6 +161,12 @@ pub(super) async fn connector_status(
         .outbound_credentials()
         .map(|requirement| requirement.id.clone())
         .collect::<Vec<_>>();
+    let inbound_secrets = setup
+        .required_secrets
+        .iter()
+        .filter(|requirement| requirement.direction == ConnectorSecretDirection::Inbound)
+        .map(|requirement| requirement.id.clone())
+        .collect::<Vec<_>>();
     let credential_environment = setup.credential_environment.clone();
     let configuration_environment = setup.configuration_environment.clone();
     let entry = index
@@ -263,75 +270,50 @@ pub(super) async fn connector_status(
 
     if status == "healthy" {
         for secret in &outbound_credentials {
-            if let Some(environment_name) = package::available_process_credential_environment_name(
-                &credential_environment,
-                secret,
-            ) {
-                health_checks.push(ConnectorHealthStatus {
-                    id: format!("secret:{secret}"),
-                    kind: "secret".to_string(),
-                    status: "pass".to_string(),
-                    detail: format!("available from environment:{environment_name}"),
-                });
-                continue;
-            }
-            match parse_secret_id(secret) {
-                // Presence, not value. `usable` only needs to know the
-                // credential exists, and reading each one to find out is what
-                // made a single status command raise a Keychain access dialog
-                // per stored secret (#7749).
-                Some(id) => match provider.contains(&id).await {
-                    Ok(true) => health_checks.push(ConnectorHealthStatus {
-                        id: format!("secret:{secret}"),
-                        kind: "secret".to_string(),
-                        status: "pass".to_string(),
-                        detail: String::new(),
-                    }),
-                    Ok(false) => {
-                        missing_secrets.push(secret.clone());
-                        health_checks.push(ConnectorHealthStatus {
-                            id: format!("secret:{secret}"),
-                            kind: "secret".to_string(),
-                            status: "fail".to_string(),
-                            detail: "missing secret".to_string(),
-                        });
-                    }
-                    Err(error) if secret_error_is_not_found(&error) => {
-                        missing_secrets.push(secret.clone());
-                        health_checks.push(ConnectorHealthStatus {
-                            id: format!("secret:{secret}"),
-                            kind: "secret".to_string(),
-                            status: "fail".to_string(),
-                            detail: "missing secret".to_string(),
-                        });
-                    }
-                    Err(error) => {
-                        status = "transient_provider_outage".to_string();
-                        reason = format!("credential backend was unavailable: {error}");
-                        health_checks.push(ConnectorHealthStatus {
-                            id: format!("secret:{secret}"),
-                            kind: "secret".to_string(),
-                            status: "fail".to_string(),
-                            detail: error.to_string(),
-                        });
-                    }
-                },
-                None => {
-                    missing_secrets.push(secret.clone());
-                    health_checks.push(ConnectorHealthStatus {
-                        id: format!("secret:{secret}"),
-                        kind: "secret".to_string(),
-                        status: "fail".to_string(),
-                        detail: "invalid secret id".to_string(),
-                    });
+            let check = probe_secret_presence(secret, &credential_environment, provider).await;
+            match check.status.as_str() {
+                "fail" => missing_secrets.push(secret.clone()),
+                "transient_provider_outage" => {
+                    status = "transient_provider_outage".to_string();
+                    reason = format!("credential backend was unavailable: {}", check.detail);
                 }
+                _ => {}
             }
+            health_checks.push(check);
         }
         if !missing_secrets.is_empty() && status == "healthy" {
             status = "missing_auth".to_string();
             reason = format!("missing required secrets: {}", missing_secrets.join(", "));
         }
     }
+
+    // Inbound verification is a separate readiness fact. It must be measured
+    // even when outbound authentication has already failed.
+    let mut missing_inbound_secrets = Vec::new();
+    let mut inbound_unavailable = false;
+    for secret in &inbound_secrets {
+        let check = probe_secret_presence(secret, &credential_environment, provider).await;
+        if check.status == "fail" {
+            missing_inbound_secrets.push(secret.clone());
+        } else if check.status == "transient_provider_outage" {
+            inbound_unavailable = true;
+        }
+        health_checks.push(check);
+    }
+    let inbound = ConnectorInboundReadiness {
+        status: if inbound_secrets.is_empty() {
+            "not_required"
+        } else if inbound_unavailable {
+            "transient_provider_outage"
+        } else if !missing_inbound_secrets.is_empty() {
+            "missing_auth"
+        } else {
+            "ready"
+        }
+        .to_string(),
+        required_secrets: inbound_secrets,
+        missing_secrets: missing_inbound_secrets,
+    };
 
     let missing_scopes = missing_required_scopes(
         &required_scopes,
@@ -345,14 +327,36 @@ pub(super) async fn connector_status(
         );
     }
 
-    if run_health_checks && status == "healthy" {
+    if run_health_checks {
         for check in &setup.health_checks {
-            let check_status = run_manifest_health_check(check);
+            let check_status = if check.kind == "secret" {
+                match check.secret.as_deref() {
+                    Some(secret) => {
+                        let mut result =
+                            probe_secret_presence(secret, &credential_environment, provider).await;
+                        result.id = check.id.clone();
+                        result
+                    }
+                    None => ConnectorHealthStatus {
+                        id: check.id.clone(),
+                        kind: check.kind.clone(),
+                        status: "invalid_manifest".to_string(),
+                        detail: "secret health check has no secret id".to_string(),
+                    },
+                }
+            } else if status == "healthy" {
+                run_manifest_health_check(check)
+            } else {
+                continue;
+            };
             if check_status.status == "inaccessible_resource"
                 || check_status.status == "transient_provider_outage"
+                || check_status.status == "invalid_manifest"
             {
-                status = check_status.status.clone();
-                reason = check_status.detail.clone();
+                if check.kind != "secret" || check_status.status == "invalid_manifest" {
+                    status = check_status.status.clone();
+                    reason = check_status.detail.clone();
+                }
             }
             health_checks.push(check_status);
         }
@@ -365,6 +369,7 @@ pub(super) async fn connector_status(
         usable: status == "healthy",
         status,
         reason,
+        inbound,
         auth_type,
         flow,
         required_scopes,
@@ -389,6 +394,11 @@ pub(super) fn missing_install_status(connector_id: &str) -> ConnectorStatus {
         usable: false,
         status: "missing_install".to_string(),
         reason: format!("connector '{connector_id}' is not declared in the nearest harn.toml"),
+        inbound: ConnectorInboundReadiness {
+            status: "not_required".to_string(),
+            required_secrets: Vec::new(),
+            missing_secrets: Vec::new(),
+        },
         auth_type: None,
         flow: None,
         required_scopes: Vec::new(),
@@ -549,17 +559,43 @@ pub(super) fn missing_required_scopes(required: &[String], actual: Option<&str>)
         .collect()
 }
 
+async fn probe_secret_presence(
+    secret: &str,
+    credential_environment: &[package::ConnectorCredentialEnvironmentManifest],
+    provider: &dyn SecretProvider,
+) -> ConnectorHealthStatus {
+    // A presence check must not read stored credential bytes or prompt for
+    // access to them while an operator inspects connector readiness.
+    let (status, detail) = if let Some(environment_name) =
+        package::available_process_credential_environment_name(credential_environment, secret)
+    {
+        (
+            "pass",
+            format!("available from environment:{environment_name}"),
+        )
+    } else if let Some(id) = parse_secret_id(secret) {
+        match provider.contains(&id).await {
+            Ok(true) => ("pass", String::new()),
+            Ok(false) => ("fail", "missing secret".to_string()),
+            Err(error) if secret_error_is_not_found(&error) => {
+                ("fail", "missing secret".to_string())
+            }
+            Err(error) => ("transient_provider_outage", error.to_string()),
+        }
+    } else {
+        ("fail", "invalid secret id".to_string())
+    };
+    ConnectorHealthStatus {
+        id: format!("secret:{secret}"),
+        kind: "secret".to_string(),
+        status: status.to_string(),
+        detail,
+    }
+}
+
 pub(super) fn run_manifest_health_check(
     check: &package::ConnectorHealthCheckManifest,
 ) -> ConnectorHealthStatus {
-    if check.kind == "secret" {
-        return ConnectorHealthStatus {
-            id: check.id.clone(),
-            kind: check.kind.clone(),
-            status: "skipped".to_string(),
-            detail: "secret checks are evaluated before command health checks".to_string(),
-        };
-    }
     if check.kind != "command" {
         return ConnectorHealthStatus {
             id: check.id.clone(),
