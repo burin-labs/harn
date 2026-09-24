@@ -349,14 +349,13 @@ pub(super) async fn connector_status(
             } else {
                 continue;
             };
-            if check_status.status == "inaccessible_resource"
+            if (check_status.status == "inaccessible_resource"
                 || check_status.status == "transient_provider_outage"
-                || check_status.status == "invalid_manifest"
+                || check_status.status == "invalid_manifest")
+                && (check.kind != "secret" || check_status.status == "invalid_manifest")
             {
-                if check.kind != "secret" || check_status.status == "invalid_manifest" {
-                    status = check_status.status.clone();
-                    reason = check_status.detail.clone();
-                }
+                status = check_status.status.clone();
+                reason = check_status.detail.clone();
             }
             health_checks.push(check_status);
         }
