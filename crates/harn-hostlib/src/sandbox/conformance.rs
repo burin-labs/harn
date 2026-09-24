@@ -227,7 +227,13 @@ impl Layout {
         let root = tempfile::Builder::new()
             .prefix(".harn-sandbox-conformance-")
             .tempdir_in(home)?;
-        let base = root.path().canonicalize()?;
+        // Windows canonicalizes to a `\\?\` path, which `cmd` redirection
+        // refuses as invalid; the profile directory has no alias to resolve.
+        let base = if cfg!(windows) {
+            root.path().to_path_buf()
+        } else {
+            root.path().canonicalize()?
+        };
         let workspace = base.join("workspace");
         let outside = base.join("outside");
         let socket_root = base.join("sockets");

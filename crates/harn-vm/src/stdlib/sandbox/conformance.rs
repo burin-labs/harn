@@ -369,7 +369,7 @@ mod tests {
             REFUSE,
             false,
             Observation::Admitted,
-            "HARN_PROBE",
+            "UNDECLARED_PROBE",
         );
         assert!(matches!(verdict, Verdict::Escaped { .. }), "{verdict:?}");
     }
