@@ -801,7 +801,7 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(
     verified_runtime(),
     verified_catalog(),
   )
-  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v10")
+  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v11")
   assert_eq(report.runtime, verified_runtime())
   assert_eq(report.catalog, verified_catalog())
   assert_eq(report.summary.planned, 3)
@@ -921,7 +921,7 @@ pipeline test_provider_tool_probe_campaign_live_spend_fails_closed_without_case_
   assert_eq(report.spend.estimated_usd_known, false)
   assert_eq(report.spend.actual_usd, 0.0)
   assert_eq(report.spend.unaccounted_probe_count, 1)
-  assert_eq(report.spend.budget_status, "stopped_unpriced")
+  assert_eq(report.spend.budget_status, "accounting_incomplete")
 }
 
 @test
@@ -987,7 +987,7 @@ pipeline test_provider_tool_probe_campaign_counts_retired_routes_apart_from_fail
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_stops_after_unreceipted_child_attempt(
+pipeline test_provider_tool_probe_campaign_counts_an_unreceipted_child_as_unpriced(
   harness: Harness,
   task: unknown,
 ) {
@@ -1486,4 +1486,71 @@ pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(
   assert_contains(markdown, "- Target runtime: `" + json_stringify(verified_runtime()) + "`")
   assert_contains(markdown, "- Target catalog: `" + json_stringify(verified_catalog()) + "`")
   assert_contains(markdown, "left \\| right")
+}
+
+@test
+pipeline test_campaign_keeps_going_after_a_live_case_the_runtime_did_not_price(
+  harness: Harness,
+  task: unknown,
+) {
+  // The defect. One live case without a runtime price used to end every
+  // remaining execution, whatever the cap said: a weekly campaign with a 5 USD
+  // cap and a fraction of a cent spent stopped after two probes and excluded
+  // 586. The cap is now the only thing that can say no.
+  const one_unpriced = {actual_usd: 0.0, unpriced_case_count: 1}
+  assert_true(provider_tool_probe_campaign_may_execute(one_unpriced, 5.0))
+  assert_eq(provider_tool_probe_campaign_charged_usd(one_unpriced), 0.05)
+  // The charge is real, so an unpriced run still bounds itself. It takes a
+  // hundred unpriced cases to reach a 5 USD cap, not one.
+  const many_unpriced = {actual_usd: 0.0, unpriced_case_count: 99}
+  assert_true(provider_tool_probe_campaign_may_execute(many_unpriced, 5.0))
+  assert_false(
+    provider_tool_probe_campaign_may_execute({actual_usd: 0.0, unpriced_case_count: 100}, 5.0),
+  )
+  // The control. A priced case that reaches the cap still stops, so this did
+  // not simply remove the brake.
+  assert_false(
+    provider_tool_probe_campaign_may_execute({actual_usd: 5.0, unpriced_case_count: 0}, 5.0),
+  )
+  assert_true(
+    provider_tool_probe_campaign_may_execute({actual_usd: 4.99, unpriced_case_count: 0}, 5.0),
+  )
+  // And the two sources combine against one cap.
+  assert_false(
+    provider_tool_probe_campaign_may_execute({actual_usd: 4.96, unpriced_case_count: 1}, 5.0),
+  )
+}
+
+@test
+pipeline test_campaign_reports_the_charged_figure_apart_from_the_priced_one(
+  harness: Harness,
+  task: unknown,
+) {
+  // An estimate must never read back as a measurement. The receipt carries the
+  // declared figure, what it added, and keeps `actual_usd_known` false.
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
+  const planned = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
+  const cells = [
+    unwrap(planned[0]) + {status: "pass"},
+    unwrap(planned[1]) + {status: "skip"},
+    unwrap(planned[2]) + {status: "planned"},
+  ]
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    true,
+    false,
+    ".out",
+    2,
+    {env: {}, env_source: {checked: true}},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  assert_eq(report.spend.actual_usd_known, false)
+  assert_eq(report.spend.unpriced_case_fallback_usd, 0.05)
+  assert_contains(report.spend.accounting, "the campaign continued")
+  // The status no longer claims a stop that did not happen.
+  assert_eq(report.spend.budget_status, "accounting_incomplete")
 }

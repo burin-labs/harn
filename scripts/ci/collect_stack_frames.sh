@@ -35,7 +35,10 @@ cd "$repo_root"
 # that CI, which builds cold, then refuses. The census gets its own target
 # directory so its lowered-threshold analysis is never shared with a normal
 # build in either direction.
-census_target_dir="${CARGO_TARGET_DIR:-$repo_root/target}/stack-frame-census"
+# Resolve configured worktree targets through the same Cargo metadata owner
+# as ordinary builds, then keep the measurement's artifacts separate.
+source "$repo_root/scripts/lib/cargo_env.sh"
+census_target_dir="${CARGO_TARGET_DIR:-$(harn_cargo_metadata_target_dir)}/stack-frame-census"
 mkdir -p "$census_target_dir"
 
 conf_dir="$(mktemp -d)"
@@ -52,7 +55,8 @@ printf 'stack-size-threshold = %s\n' "$threshold" >> "$conf_dir/clippy.toml"
 # lint lane and keeps its own ceiling. The only pass condition here is the
 # non-null control below.
 set +e
-CLIPPY_CONF_DIR="$conf_dir" CARGO_TARGET_DIR="$census_target_dir" RUSTFLAGS="" cargo clippy --workspace --all-targets \
+env -u CARGO_BUILD_BUILD_DIR CLIPPY_CONF_DIR="$conf_dir" CARGO_TARGET_DIR="$census_target_dir" RUSTFLAGS="" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" clippy --workspace --all-targets \
   --message-format=json > "$raw_out"
 cargo_status=$?
 set -e

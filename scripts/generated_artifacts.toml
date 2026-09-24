@@ -58,6 +58,7 @@ exempt_checks = [
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
   "check-scheduled-workflows",       # validates the scheduled-workflow claim and cadence registry
+  "check-e2e-trigger-contract",      # validates the E2E suite's own pull-request trigger contract and its reporter, not a generated mirror
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs",                     # semantic documentation-check aggregator
   "check-docs-portable",            # the half of check-docs a published release can judge
@@ -663,6 +664,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-gate-path-visibility" = "source"
 "check-python-boundary" = "source"
 "check-harn-syntax-sensitive-scans" = "source"
+"check-e2e-trigger-contract" = "source"
 "check-agent-guidance" = "source"
 "check-loud-boundaries" = "source"
 "check-turn-end-boundary" = "source"

@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
-        "line": 16,
         "reader": "judge-override-key-domain"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
-        "line": 16,
         "reader": "judge-override-key-domain"
       }
     ],
@@ -46,7 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
-        "line": 16,
         "reader": "judge-override-key-domain"
       }
     ],
@@ -64,7 +61,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
-        "line": 16,
         "reader": "judge-override-key-domain"
       }
     ],
@@ -82,7 +78,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
-        "line": 16,
         "reader": "judge-override-key-domain"
       }
     ],

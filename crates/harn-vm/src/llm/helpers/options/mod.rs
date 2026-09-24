@@ -22,6 +22,7 @@ mod reminders;
 mod routing;
 mod system_prompt;
 mod thinking;
+mod tool_choice;
 mod tool_search;
 mod validate;
 
@@ -60,6 +61,8 @@ mod routing_test_support;
 mod routing_tests;
 #[cfg(test)]
 mod thinking_effort_tests;
+#[cfg(test)]
+mod tool_choice_tests;
 
 // Shared imports re-exported across the whole `options` subtree so each
 // submodule only needs `use super::*;`.

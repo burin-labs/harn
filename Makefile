@@ -1,8 +1,8 @@
-.PHONY: repository-policies repository-policies-source run-policy-list setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-downstream-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths check-stack-frames check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-generated-registry gen-release-contract check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
+.PHONY: repository-policies repository-policies-source run-policy-list setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-downstream-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-cancellation-owner lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths check-stack-frames check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-generated-registry gen-release-contract check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache gh-check-state
 .PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
 .PHONY: check-typescript-protocol-binding check-swift-protocol-binding
-.PHONY: check-scheduled-workflows
+.PHONY: check-scheduled-workflows check-e2e-trigger-contract
 .PHONY: sync-docs-diagnostics
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
 
@@ -14,13 +14,15 @@ define HARN_REQUIRE_NEXTEST
 		echo "cargo-nextest is required; run 'make setup' or 'cargo install cargo-nextest --locked'" >&2; \
 		exit 1; \
 	fi
-	@$(HARN_CARGO_CMD) nextest --version >/dev/null
+	@cargo-nextest nextest --version >/dev/null
 endef
 # Rust tests start from a known security-policy environment. Focused tests may
 # still seed these variables explicitly after process startup. Harn script
 # tests use harn_test_env.sh so they also get a fresh durable session store.
 HARN_EGRESS_TEST_ENV = env -u HARN_EGRESS_ALLOW -u HARN_EGRESS_DENY -u HARN_EGRESS_DEFAULT -u HARN_EGRESS_BLOCK_PRIVATE -u HARN_EGRESS_ALLOW_LOOPBACK
-HARN_RUST_TEST_ENV = $(HARN_EGRESS_TEST_ENV) HARN_LLM_CALLS_DISABLED=1 RUST_MIN_STACK="$${RUST_MIN_STACK:-16777216}"
+# HARN_SECRET_PROVIDERS=env keeps every test off the login keychain unless the
+# caller set a chain on purpose.
+HARN_RUST_TEST_ENV = $(HARN_EGRESS_TEST_ENV) HARN_LLM_CALLS_DISABLED=1 HARN_SECRET_PROVIDERS="$${HARN_SECRET_PROVIDERS:-env}" RUST_MIN_STACK="$${RUST_MIN_STACK:-16777216}"
 HARN_SCRIPT_TEST_ENV = bash ./scripts/harn_test_env.sh
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
@@ -252,7 +254,7 @@ check-app-host:
 	npm run app-host:check
 
 # Run clippy lints (deny warnings in CI)
-lint: lint-no-rust-prompt-prose lint-no-xfail-regression
+lint: lint-no-rust-prompt-prose lint-cancellation-owner lint-no-xfail-regression
 	$(HARN_CARGO_CMD) clippy --workspace --all-targets -- -D warnings
 	$(HARN_CARGO_CMD) clippy -p harn-cli --bin harn-freshness-check \
 		--features internal-freshness-checker -- -D warnings
@@ -655,6 +657,7 @@ test-agent-scripts:
 
 test-pr-gate-scripts:
 	./scripts/tests/pr_title_convention_test.sh
+	./scripts/tests/fixture_git_init_branch_test.sh
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
@@ -669,19 +672,15 @@ test-pr-gate-scripts:
 	./scripts/tests/native_platform_ci_plan_test.sh
 	./scripts/tests/release_ref_matcher_test.sh
 	./scripts/tests/ci_merge_group_proof_test.sh
-	./scripts/tests/e2e_workflow_trigger_test.sh
 	./scripts/tests/check_sdk_release_artifacts_test.sh
 	./scripts/tests/generate_sdk_clients_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_tag_main_ancestry_test.sh
-	./scripts/tests/verify_release_archive_provenance_test.sh
-	./scripts/tests/candidate_archive_promotion_test.sh
-	./scripts/tests/candidate_archive_certification_binding_test.sh
-	./scripts/tests/download_candidate_archive_promotion_test.sh
-	./scripts/tests/publish_certified_release_assets_test.sh
-	./scripts/tests/certified_publication_inputs_test.sh
+	./scripts/tests/candidate_manifest_test.sh
+	./scripts/tests/release_candidate_trigger_test.sh
+	./scripts/tests/release_promotion_plan_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
@@ -692,6 +691,7 @@ test-pr-gate-scripts:
 	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_commit_msg_session_trailer_test.sh
 	./scripts/tests/stack_frame_measurement_floor_test.sh
+	./scripts/tests/stack_frame_admission_test.sh
 	./scripts/tests/hook_fast_default_mode_test.sh
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/hook_timing_instrument_test.sh
@@ -717,6 +717,7 @@ test-pr-gate-scripts:
 	./scripts/tests/windows_storage_budget_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
+	./scripts/tests/harn_bin_snapshot_provenance_test.sh
 	./scripts/tests/harn_bin_recovery_batch_test.sh
 	./scripts/tests/package_verify_bootstrap_test.sh
 	./scripts/tests/verify_crate_dependency_resolution_test.sh
@@ -741,6 +742,7 @@ test-pr-gate-scripts:
 	./scripts/tests/check_stdlib_strict_types_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh
+	./scripts/tests/test_nextest_readiness_test.sh
 
 # Rust/Harn-backed shell integration tests run only after CI restores the Rust
 # toolchain/caches and exports the one warmed binary. Pure Harn semantics remain
@@ -765,8 +767,8 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	HARN_BIN_RESOLVER_TEST_ALLOW_CARGO=1 ./scripts/tests/harn_bin_resolver_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/agent_shell_guard_adapter_test.sh
-	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_release_smoke_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_prepare_env_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/open_release_pr_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_withdrawal_lineage_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/embedded_asset_rebuild_test.sh
@@ -1102,12 +1104,13 @@ check-docs-cookbook-entrypoints:
 # code or its repair template.
 sync-diagnostics-catalog:
 	@set -e; \
-	tmp_dir=$$(mktemp -d "$(CURDIR)/.diagnostics-catalog.XXXXXX"); \
+	tmp_dir=$$(mktemp -d); \
 	tmp_md="$$tmp_dir/diagnostics.md"; \
 	tmp_json="$$tmp_dir/diagnostics-catalog.json"; \
 	trap 'rm -f "$$tmp_md" "$$tmp_json"; rmdir "$$tmp_dir" 2>/dev/null || true' EXIT; \
 	$(HARN_BIN_ASSIGN); \
 	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	HARN_BIN="$$harn_bin" $(HARN_BIN_CMD) --print-build-freshness >/dev/null; \
 	"$$harn_bin" explain --catalog --format markdown > "$$tmp_md"; \
 	"$$harn_bin" explain --catalog --format json > "$$tmp_json"; \
 	mv "$$tmp_md" docs/src/diagnostics.md; \
@@ -1123,6 +1126,7 @@ check-diagnostics-catalog:
 	trap 'rm -f "$$tmp_md" "$$tmp_json"' EXIT; \
 	$(HARN_BIN_ASSIGN); \
 	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	HARN_BIN="$$harn_bin" $(HARN_BIN_CMD) --print-build-freshness >/dev/null; \
 	"$$harn_bin" explain --catalog --format markdown > "$$tmp_md"; \
 	"$$harn_bin" explain --catalog --format json > "$$tmp_json"; \
 	if ! diff -u docs/src/diagnostics.md "$$tmp_md" >/dev/null; then \
@@ -1248,6 +1252,11 @@ check-receipt-structs:
 
 lint-no-rust-prompt-prose:
 	@./scripts/check_no_rust_prompt_prose.sh
+
+# Keep the host-cancellation payload to its one constructor, so a new site
+# cannot throw a cancellation without stating what happened to the handlers.
+lint-cancellation-owner:
+	@./scripts/check_cancellation_owner.sh
 
 lint-agent-path-normalization:
 	@./scripts/check_agent_path_normalization.sh --self-test
@@ -1390,6 +1399,7 @@ verify-tree-sitter-parse:
 # and the one below as the single owner of what `repository-policies` runs, so
 # the two sides cannot drift.
 SOURCE_REPOSITORY_POLICIES := \
+  check-e2e-trigger-contract \
   lint-agent-path-normalization \
   check-stdlib-host-neutral \
   check-public-product-names \
@@ -1429,6 +1439,15 @@ WARM_REPOSITORY_POLICIES := \
 # need nothing but the tree. Before this existed, a stdlib type error could
 # only be reported by the push-only lane, which meant main went red and every
 # branch downstream inherited a failure it did not cause.
+# The slow E2E suite decides for itself whether a pull request runs it. Both
+# halves of that decision are checked here, from the tree alone: the workflow
+# contract, and the reporter that has to say what it decided. This lived only
+# in `test-pr-gate-scripts`, which no CI job calls, so the guard on a
+# suite-that-does-not-run did not run either.
+check-e2e-trigger-contract:
+	./scripts/tests/e2e_workflow_trigger_test.sh
+	./scripts/tests/e2e_pull_request_reason_test.sh
+
 repository-policies-source:
 	@$(MAKE) --no-print-directory run-policy-list POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES)"
 

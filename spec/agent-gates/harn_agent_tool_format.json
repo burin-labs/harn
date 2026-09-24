@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/orchestration/stage_options.rs",
-        "line": 44,
         "reader": "non_empty_env"
       }
     ],

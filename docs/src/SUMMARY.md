@@ -20,6 +20,7 @@
 - [Why Harn?](./why-harn.md)
 - [How Harn compares](./how-harn-compares.md)
 - [Predicate evaluation contract](./predicates.md)
+- [What a confidence score means](./concepts/confidence.md)
 - [Probabilistic branching proposal](./design/probabilistic-branching.md)
 
 # Tutorials
@@ -321,6 +322,7 @@
 - [`std/cli/envelope`](./cli-envelope-reference.md)
 - [`std/cli/render`](./cli-render-reference.md)
 - [`std/cli/paths`](./cli-paths-reference.md)
+- [`std/eval/calibration`](./eval-calibration-reference.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
 - [SQLite](./sqlite.md)

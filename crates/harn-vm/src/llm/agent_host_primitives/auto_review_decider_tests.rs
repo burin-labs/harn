@@ -49,7 +49,7 @@ fn granting_reviewer() -> Arc<VmClosure> {
     )
 }
 
-fn asking_policy() -> crate::orchestration::ToolApprovalPolicy {
+pub(super) fn asking_policy() -> crate::orchestration::ToolApprovalPolicy {
     serde_json::from_value(serde_json::json!({
         "rules": [{
             "ask": {"tool": "exec", "command_identity": "pip"},
@@ -102,7 +102,7 @@ fn collect_activities(value: &serde_json::Value, out: &mut Vec<serde_json::Value
     }
 }
 
-async fn dispatch_pip_install(
+pub(super) async fn dispatch_pip_install(
     session_id: &str,
     reviewer: Option<Arc<VmClosure>>,
 ) -> serde_json::Value {
@@ -206,7 +206,23 @@ async fn no_reviewer_still_records_the_host_as_unavailable() {
 /// The count is the load-bearing half. A reviewer that answers first means the
 /// host is never asked at all, and "the call was allowed" alone cannot tell
 /// that apart from a host that happened to say yes.
-fn rejecting_bridge(seen: Arc<std::sync::Mutex<usize>>) -> Arc<crate::bridge::HostBridge> {
+pub(super) fn rejecting_bridge(
+    seen: Arc<std::sync::Mutex<usize>>,
+) -> Arc<crate::bridge::HostBridge> {
+    rejecting_bridge_with_reason(seen, Some("no human here".to_string()))
+}
+
+/// A host bridge that refuses every permission question, optionally without
+/// saying why.
+///
+/// The reason is a parameter because a host that gives none is the case the
+/// runtime has to fill in from its own knowledge: the wire parser falls back to
+/// a fixed sentence, and that sentence is all a reader gets unless the record
+/// names the call elsewhere.
+pub(super) fn rejecting_bridge_with_reason(
+    seen: Arc<std::sync::Mutex<usize>>,
+    reason: Option<String>,
+) -> Arc<crate::bridge::HostBridge> {
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
     use tokio::sync::Mutex as TokioMutex;
@@ -227,7 +243,7 @@ fn rejecting_bridge(seen: Arc<std::sync::Mutex<usize>>) -> Arc<crate::bridge::Ho
             == Some(crate::llm::acp_permission::METHOD_REQUEST_PERMISSION);
         let result = if is_permission {
             *seen.lock().map_err(|_| "seen mutex poisoned".to_string())? += 1;
-            crate::llm::acp_permission::reject_response(Some("no human here".to_string()))
+            crate::llm::acp_permission::reject_response(reason.clone())
         } else {
             serde_json::json!({"ok": true})
         };

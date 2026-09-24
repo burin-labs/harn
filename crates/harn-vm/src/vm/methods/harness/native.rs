@@ -155,9 +155,9 @@ impl crate::vm::Vm {
                                     // program kept executing past the throw.
                                     self.dispatch_handlers_for_observed_cancel()
                                         .await?;
-                                    return Err(
-                                        crate::stdlib::cancelled_vm_error(),
-                                    );
+                                    return Err(crate::cancellation::cancelled_error(
+                                        crate::cancellation::HandlerDispatch::Dispatched,
+                                    ));
                                 }
                             }
                         }

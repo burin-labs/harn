@@ -34,7 +34,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 411,
         "reader": "__agent_text_tool_contract_prompt"
       }
     ],

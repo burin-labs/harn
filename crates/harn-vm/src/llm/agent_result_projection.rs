@@ -115,11 +115,69 @@ fn text_in_block(block: &VmValue) -> Option<&str> {
         .filter(|text| !text.trim().is_empty())
 }
 
-/// The most recent assistant message with visible (non-reasoning) text.
+/// The key the loop sets on an assistant turn it wrote for its own
+/// bookkeeping rather than one the model produced.
+///
+/// The agent loop retires a vetoed closing draft by replacing it with a fixed
+/// placeholder, so the turn count stays stable and the adjudicator's pending
+/// directive still lands on the next round. That placeholder has to remain in
+/// the transcript and reach the provider, which is exactly why it cannot be
+/// distinguished by its content: it is an ordinary text block, and every
+/// alternative encoding would drop it from the provider request. Writers set
+/// this key; the answer projection below is the only reader.
+pub(crate) const BOOKKEEPING_TURN_KEY: &str = "harn_bookkeeping_turn";
+
+/// True when the loop wrote this turn for its own bookkeeping.
+fn is_bookkeeping_turn(message: &VmValue) -> bool {
+    matches!(
+        dict_get(message, BOOKKEEPING_TURN_KEY),
+        Some(VmValue::Bool(true))
+    )
+}
+
+/// The most recent assistant message the MODEL produced with visible
+/// (non-reasoning) text.
+///
+/// Bookkeeping turns are skipped rather than returned. A run whose closing
+/// draft was vetoed therefore answers with the last draft that was actually
+/// accepted, and a run where nothing was accepted answers with nothing at all
+/// rather than handing a reader the placeholder as if the model had written
+/// it.
+/// True when this run has no answer to report BECAUSE the loop ended on the
+/// round that withdrew one.
+///
+/// Two conditions, and both are load-bearing. There must be no answer, and the
+/// LAST assistant turn must be the bookkeeping one. Asking only whether the
+/// run holds a withdrawn turn somewhere is too wide: a run that was vetoed,
+/// carried on, and later ended on a turn that happened to carry no prose would
+/// be reported as withdrawn when it was nothing of the kind. Requiring the
+/// withdrawal to be the trailing turn is what says the loop stopped on it.
+pub(crate) fn answer_was_withdrawn(snapshot: &VmValue) -> bool {
+    if last_assistant_text(snapshot).is_some() {
+        return false;
+    }
+    let Some(messages_value) = dict_get(snapshot, "messages") else {
+        return false;
+    };
+    list_items(messages_value)
+        .iter()
+        .rev()
+        .find(|message| {
+            dict_get(message, "role")
+                .map(VmValue::display)
+                .unwrap_or_default()
+                == "assistant"
+        })
+        .is_some_and(is_bookkeeping_turn)
+}
+
 pub(crate) fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
     let messages_value = dict_get(snapshot, "messages")?;
     let messages = list_items(messages_value);
     for msg in messages.iter().rev() {
+        if is_bookkeeping_turn(msg) {
+            continue;
+        }
         if let Some(visible) = visible_assistant_text(msg) {
             return Some(visible);
         }

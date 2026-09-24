@@ -438,7 +438,16 @@ impl ObservedAttemptToken {
         }
     }
 
+    /// Record one physical provider dispatch.
+    ///
+    /// The call-scoped ledger is the measurement; the agent session's own
+    /// counter is a projection of it kept for the session's terminal
+    /// accounting. Recording only against the session left every call outside
+    /// one measuring nothing, which is what made a pre-dispatch refusal
+    /// indistinguishable from an unmeasured attempt
+    /// (burin-labs/harn#8529).
     pub(super) fn record_provider_dispatch(&self) {
+        super::provider_dispatch::record_dispatch();
         if let Some(session_id) = self.session_id.as_deref() {
             super::agent_session_host::record_provider_dispatch(session_id);
         }

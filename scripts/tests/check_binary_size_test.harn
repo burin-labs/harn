@@ -45,7 +45,7 @@ type ReleaseWorkflow = {
       },
       steps: list<ReleaseWorkflowStep>,
     },
-    release: {needs: list<string>, if: string},
+    collect_candidate_manifest: {needs: list<string>, if: string},
   },
 }
 
@@ -116,7 +116,7 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
                   },
                 ),
               ),
-              release: schema_field(
+              collect_candidate_manifest: schema_field(
                 schema_object(
                   {
                     needs: schema_field(schema_list(schema_string())),
@@ -806,7 +806,7 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
   )
   const build = release_workflow_step(workflow.jobs.build.steps, "Build")
   const aot_condition =
-    "needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'"
+    "needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'"
   assert_eq(workflow.jobs.prepare_cli_aot.needs, "setup")
   assert_eq(workflow.jobs.prepare_cli_aot.if, "needs.setup.outputs.should_build_binaries == 'true'")
   assert_eq(checkout.if, aot_condition)
@@ -823,8 +823,12 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
     nil,
   )
   assert_eq(workflow.jobs.build.needs.contains("prepare_cli_aot"), true)
-  assert_eq(workflow.jobs.release.needs.contains("prepare_cli_aot"), true)
-  assert_eq(workflow.jobs.release.if.contains("needs.prepare_cli_aot.result"), true)
+  // The manifest records archives only after every target built with the payload.
+  assert_eq(workflow.jobs.collect_candidate_manifest.needs.contains("build"), true)
+  assert_eq(
+    workflow.jobs.collect_candidate_manifest.if.contains("needs.build.result == 'success'"),
+    true,
+  )
 }
 
 @test
@@ -849,8 +853,8 @@ pipeline test_artifact_download_retry_is_bounded_and_fail_closed(harness: Harnes
   assert(!action.contains("continue-on-error: false"))
   assert(!release_workflow_text.contains(official_download))
   assert(!ci_workflow_text.contains(official_download))
-  assert_eq(release_workflow_text.split(bounded_download).count, 3)
-  assert_eq(ci_workflow_text.split(bounded_download).count, 10)
+  assert_eq(release_workflow_text.split(bounded_download).count, 6)
+  assert_eq(ci_workflow_text.split(bounded_download).count, 11)
 }
 
 // --- format_mib -------------------------------------------------------------

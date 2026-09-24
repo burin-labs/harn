@@ -10,27 +10,22 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 112,
         "reader": "agent_purpose_label_turn_nudge"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 127,
         "reader": "agent_purpose_label_prefill"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 243,
         "reader": "agent_purpose_label_extract"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 98,
         "reader": "agent_purpose_label_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 150,
         "reader": "agent_purpose_label_prompt_fragment"
       }
     ],
@@ -48,22 +43,18 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 112,
         "reader": "agent_purpose_label_turn_nudge"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 127,
         "reader": "agent_purpose_label_prefill"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 150,
         "reader": "agent_purpose_label_prompt_fragment"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 236,
         "reader": "agent_purpose_label_extract"
       }
     ],
@@ -81,17 +72,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 262,
         "reader": "agent_purpose_label_extract"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 97,
         "reader": "agent_purpose_label_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
-        "line": 174,
         "reader": "__purpose_label_instruction"
       }
     ],

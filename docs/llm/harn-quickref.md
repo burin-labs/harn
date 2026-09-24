@@ -24,6 +24,9 @@ logs and progress always go to stderr.
 
 - Discover supported commands and their current schema versions:
   `harn --json-schemas` (filter with `--command <name>`).
+- Discover native CLI flags, nested actions, positional arity, and enum values:
+  `harn --argument-schema` (versioned JSON envelope). Harn still validates
+  custom value parsers and cross-argument rules.
 - Per-command shape reference: `docs/src/cli-json-contract.md`.
 - Decode `harn lint --json` through `std/cli/envelope` (`decode_lint_json`);
   `harn --json-schemas --command lint` publishes the complete `schemaJson`.
@@ -1474,7 +1477,7 @@ background mode, or provider-side truncation/compaction:
 ```harn
 const r = harness.llm.call(prompt, sys, {
   provider: "openai",
-  model: "gpt-5.4",
+  model: "gpt-6-sol",
   api_mode: "responses",
   output: {schema: schema, strict: true, validation: "error"},
   provider_tools: [
@@ -1570,12 +1573,12 @@ convo = add_user(convo, "What is my name?")
 // Same script on every route:
 const base = {messages: transcript_messages(convo)}
 harness.llm.call(
-  "", nil, base + {provider: "anthropic", model: "claude-opus-4-8"},
+  "", nil, base + {provider: "anthropic", model: "claude-opus-5-5"},
 )
 harness.llm.call(
   "", nil, base + {provider: "anthropic", model: "claude-haiku-4-5"},
 )
-harness.llm.call("", nil, base + {provider: "openai", model: "gpt-5.4"})
+harness.llm.call("", nil, base + {provider: "openai", model: "gpt-6-sol"})
 ```
 
 Per-route behavior (capability-driven, not hardcoded):
@@ -1694,7 +1697,7 @@ registry = tool_define(registry, "deploy", "Deploy to production", {
 
 const r = harness.llm.call(prompt, sys, {
   provider: "anthropic",
-  model: "claude-opus-4-7",
+  model: "claude-opus-5-5",
   tools: registry,
   tool_search: "bm25",                 // or "regex" / "hybrid"
 })
@@ -1787,10 +1790,10 @@ Query the effective matrix at runtime:
 
 ```harn
 const caps = harness.llm.provider_capabilities(
-  "anthropic", "claude-opus-4-7",
+  "anthropic", "claude-opus-5-5",
 )
 // {
-//   provider: "anthropic", model: "claude-opus-4-7",
+//   provider: "anthropic", model: "claude-opus-5-5",
 //   native_tools: true, text_tool_wire_format_supported: true,
 //   preferred_tool_format: "native", tool_mode_parity: "unknown",
 //   tools: true, defer_loading: true,
@@ -1916,7 +1919,7 @@ pub skill deploy {
   invocation "explicit"           // "auto" | "explicit" | "both"
   paths ["infra/**", "Dockerfile"]
   allowed_tools ["bash", "git"]
-  model "claude-opus-4-7"
+  model "claude-opus-5-5"
   effort "high"
   prompt "Follow the deployment runbook."
 
@@ -4698,8 +4701,8 @@ compositions with a single typed primitive.
 fn main(harness: Harness) {
   const policy = harness.llm.routing_policy({
     chain: [
-      {provider: "anthropic", model: "claude-opus-4-20250514"},
-      {provider: "openai",    model: "gpt-5.4-mini"},
+      {provider: "anthropic", model: "claude-opus-5-5"},
+      {provider: "openai",    model: "gpt-6-luna"},
       {provider: "ollama",    model: "llama4:70b"},      // local fallback
     ],
     failover: {

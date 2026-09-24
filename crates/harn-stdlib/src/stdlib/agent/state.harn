@@ -106,6 +106,7 @@ pub type AgentSessionControlEvent = {
   delivery_mode?: string,
   message_id?: string,
   text?: string,
+  goal?: {objective: string},
   actor?: unknown,
   provenance: "recorded" | "heuristic",
 }
@@ -545,12 +546,22 @@ pub fn agent_session_inject_reminder(agent: HarnessAgent, session_id: any, optio
  * trailing message is not an assistant turn — signals a call-site
  * discipline bug, not a runtime condition.
  *
+ * A non-empty `replacement` leaves that text in the popped turn's place,
+ * flagged as a bookkeeping turn so the run's answer never reports it as
+ * something the model said. The runtime writes the flag; no caller assembles
+ * the message, because a caller that got the flag wrong would fail silently.
+ *
  * @effects: [host]
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_session_pop_last_assistant(agent: HarnessAgent, session_id: any) {
-  return agent.session_pop_last_assistant(session_id)
+pub fn agent_session_pop_last_assistant(
+  agent: HarnessAgent,
+  session_id: any,
+  replacement: string = "",
+  reason: string = "",
+) {
+  return agent.session_pop_last_assistant(session_id, replacement, reason)
 }
 
 /**

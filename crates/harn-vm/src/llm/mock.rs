@@ -764,7 +764,7 @@ fn build_mock_result(
         stop_reason: mock.stop_reason.clone(),
         blocks,
         logprobs: mock.logprobs.clone(),
-        telemetry: ProviderTelemetry::mock_replay(mock.simulated_cost_usd),
+        telemetry: Box::new(ProviderTelemetry::mock_replay(mock.simulated_cost_usd)),
     }
 }
 
@@ -1431,7 +1431,7 @@ pub(crate) fn mock_llm_response(
                     "visibility": "internal",
                 })],
                 logprobs: Vec::new(),
-                telemetry: ProviderTelemetry::default(),
+                telemetry: Box::default(),
             };
             if request.cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
@@ -1477,7 +1477,7 @@ pub(crate) fn mock_llm_response(
             "visibility": "public",
         })],
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
     };
     if request.cache {
         apply_mock_prompt_cache(&mut result, &cache_key);

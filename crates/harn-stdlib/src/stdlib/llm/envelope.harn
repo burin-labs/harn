@@ -64,6 +64,20 @@ pub type LlmProviderAttempts = {
   other: int,
 }
 
+/** Catalog settlement evidence for one provider request. */
+pub type LlmPricingReceipt = {
+  rate_card: string,
+  settled_at_ms: int,
+  input_band_minimum?: int,
+  serving_tier?: string,
+  cache_ttl_unpriced: bool,
+  platform_fee_estimate_usd: float,
+  platform_fee_basis?: string,
+  hosted_tool_unpriced: list<string>,
+  modality_unpriced: list<string>,
+  monthly_allowance_unapplied: list<string>,
+}
+
 pub type LlmUsage = {
   input_tokens: int,
   output_tokens: int,
@@ -110,6 +124,12 @@ pub type LlmUsage = {
    */
   accounting_status?: "reported" | "partial" | "unknown",
   provider_telemetry?: dict,
+  pricing?: LlmPricingReceipt,
+  hosted_tool_calls?: dict,
+  audio_input_tokens?: int,
+  audio_output_tokens?: int,
+  cached_audio_input_tokens?: int,
+  invalid_modality_counts?: bool,
 }
 
 /**

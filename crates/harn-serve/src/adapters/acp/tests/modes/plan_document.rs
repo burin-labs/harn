@@ -50,7 +50,7 @@ async fn acp_plan_mutations_conflict_receipt_reopen_and_replay() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -299,7 +299,7 @@ async fn acp_session_load_replays_persisted_agent_events() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;

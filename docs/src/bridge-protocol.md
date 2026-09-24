@@ -685,8 +685,10 @@ Payload:
 ```
 
 On the ACP adapter surface, hosts can wake the daemon by sending a pending
-user-message inject. `session/inject` accepts `{sessionId, mode, content}`
-where `content` is a string or ACP content-block array, then responds
+user-message inject. `session/inject` accepts `{sessionId, mode, content,
+goal?}` where `content` is a string or ACP content-block array and the
+optional `goal` (`{objective}`, steer or interrupt only) retargets the run, then
+responds
 immediately with `status: "accepted"` and an agent-owned `messageId`. Harn
 later delivers the same id as `session/update` with `sessionUpdate:
 "user_message"`. `mode: "interrupt_immediate"` drains at the next eligible

@@ -6,7 +6,7 @@ verifier="$root/scripts/verify_release_tag_main_ancestry.sh"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-release-main-tag-test.XXXXXX")"
 trap 'rm -rf "$tmp_root"' EXIT
 
-git init --bare -q "$tmp_root/origin.git"
+git init -b main --bare -q "$tmp_root/origin.git"
 git init -q -b main "$tmp_root/work"
 git -C "$tmp_root/work" config user.name Test
 git -C "$tmp_root/work" config user.email test@example.com

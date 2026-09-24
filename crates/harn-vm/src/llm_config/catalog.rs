@@ -6,6 +6,18 @@ use std::collections::BTreeMap;
 use super::*;
 
 use harn_glob::match_name as glob_match;
+use time::OffsetDateTime;
+
+/// The instant a caller with no request of its own settles at.
+///
+/// This reads the active (mock-aware) VM clock rather than the system clock,
+/// so a test that pins time gets the card it pinned. `effective_today` builds
+/// a fresh real clock and cannot.
+pub fn pricing_clock_now() -> OffsetDateTime {
+    let value_ms = crate::stdlib::clock::now_wall_ms_unrecorded();
+    OffsetDateTime::from_unix_timestamp_nanos(i128::from(value_ms) * 1_000_000)
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+}
 
 const LOGICAL_MODEL_DEFAULT_PREFIX: &str = "logical:";
 const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
@@ -768,6 +780,16 @@ pub fn equivalent_model_catalog_entries_for_requirements(
         .filter(|(id, model)| !(id == &resolved.id && model.provider == resolved.provider))
         .filter(|(_, model)| !model.deprecated)
         .filter(|(_, model)| model.availability != ModelAvailability::Dedicated)
+        // A substitute has to do the same job. Equivalence is about weights
+        // and family, and says nothing about operations: a decision route and
+        // a chat route can share a family and still be unable to answer each
+        // other's requests.
+        .filter(|(_, model)| {
+            source
+                .normalized_operations()
+                .iter()
+                .all(|operation| model.supports_operation(*operation))
+        })
         .filter(|(_, model)| {
             model.equivalence_group.as_deref() == Some(group.as_str())
                 || model.logical_model.as_deref() == Some(group.as_str())
@@ -893,67 +915,103 @@ pub fn qc_defaults() -> BTreeMap<String, String> {
     effective_config().qc_defaults.clone()
 }
 
-pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
+/// Resolve a model's rate card as it stood at `at`, naming the card applied.
+///
+/// Settlement passes the instant the request left the client, so a promotion
+/// that expired mid-session and a recurring time-of-day window both price the
+/// call the way the provider billed it. Presentation is the one caller that
+/// legitimately wants "now": it uses `ModelPricing::effective_today`.
+pub fn model_pricing_per_mtok(model_id: &str, at: OffsetDateTime) -> Option<ResolvedPricing> {
     effective_config()
         .models
         .get(model_id)
         .and_then(|model| model.pricing.as_ref())
-        .map(ModelPricing::effective_today)
+        .map(|pricing| pricing.resolve_at(at))
 }
 
-pub fn model_pricing_per_mtok_for_route(provider: &str, model_id: &str) -> Option<ModelPricing> {
+pub fn model_pricing_per_mtok_for_route(
+    provider: &str,
+    model_id: &str,
+    at: OffsetDateTime,
+) -> Option<ResolvedPricing> {
     let catalog_id = model_catalog_id_for_route(provider, model_id)?;
-    model_pricing_per_mtok(&catalog_id)
+    model_pricing_per_mtok(&catalog_id, at)
 }
 
 /// Per-MTok whole-request pricing selected for the provider-reported input
 /// usage. Models without input-token bands retain their base rates.
-pub fn model_pricing_for_input_tokens(model_id: &str, input_tokens: i64) -> Option<ModelPricing> {
-    model_pricing_per_mtok(model_id).map(|pricing| pricing.for_input_tokens(input_tokens))
+pub fn model_pricing_for_input_tokens(
+    model_id: &str,
+    input_tokens: i64,
+    at: OffsetDateTime,
+) -> Option<ModelPricing> {
+    model_pricing_per_mtok(model_id, at)
+        .map(|resolved| resolved.pricing.for_input_tokens(input_tokens))
 }
 
 pub fn model_pricing_for_route_input_tokens(
     provider: &str,
     model_id: &str,
     input_tokens: i64,
+    at: OffsetDateTime,
 ) -> Option<ModelPricing> {
-    model_pricing_per_mtok_for_route(provider, model_id)
-        .map(|pricing| pricing.for_input_tokens(input_tokens))
+    model_pricing_per_mtok_for_route(provider, model_id, at)
+        .map(|resolved| resolved.pricing.for_input_tokens(input_tokens))
 }
 
 /// Per-MTok pricing for a named serving tier. Explicit rates win; otherwise
 /// the tier's multiplier or discount is applied to the effective standard
 /// rate so dated promotions cannot drift from alternate serving modes.
-pub fn model_serving_tier_pricing_per_mtok(model_id: &str, tier_id: &str) -> Option<ModelPricing> {
+pub fn model_serving_tier_pricing_per_mtok(
+    model_id: &str,
+    tier_id: &str,
+    at: OffsetDateTime,
+) -> Option<ResolvedPricing> {
     let config = effective_config();
     let model = config.models.get(model_id)?;
     let tier = model.serving_tiers.iter().find(|tier| tier.id == tier_id)?;
     if let Some(pricing) = &tier.pricing {
-        return Some(pricing.effective_today());
+        let mut resolved = pricing.resolve_at(at);
+        if let Some(standard) = &model.pricing {
+            // Explicit tier token rates do not erase independently billed
+            // hosted tools. A tier may override an individual tool's fee.
+            for (tool, fee) in &standard.hosted_tool_fees {
+                resolved
+                    .pricing
+                    .hosted_tool_fees
+                    .entry(tool.clone())
+                    .or_insert_with(|| fee.clone());
+            }
+        }
+        return Some(resolved);
     }
-    let standard = model.pricing.as_ref()?.effective_today();
+    let standard = model.pricing.as_ref()?.resolve_at(at);
     let multiplier = tier.cost_multiplier.or_else(|| {
         tier.discount_percent
             .map(|percent| 1.0 - f64::from(percent) / 100.0)
     })?;
-    Some(standard.scaled(multiplier))
+    Some(ResolvedPricing {
+        pricing: standard.pricing.scaled(multiplier),
+        rate_card: standard.rate_card,
+    })
 }
 
 pub fn model_serving_tier_pricing_per_mtok_for_route(
     provider: &str,
     model_id: &str,
     tier_id: &str,
-) -> Option<ModelPricing> {
+    at: OffsetDateTime,
+) -> Option<ResolvedPricing> {
     let catalog_id = model_catalog_id_for_route(provider, model_id)?;
-    model_serving_tier_pricing_per_mtok(&catalog_id, tier_id)
+    model_serving_tier_pricing_per_mtok(&catalog_id, tier_id, at)
 }
 
 pub fn pricing_per_1k_for(provider: &str, model_id: &str) -> Option<(f64, f64)> {
-    model_pricing_per_mtok_for_route(provider, model_id)
-        .map(|pricing| {
+    model_pricing_per_mtok_for_route(provider, model_id, pricing_clock_now())
+        .map(|resolved| {
             (
-                pricing.input_per_mtok / 1000.0,
-                pricing.output_per_mtok / 1000.0,
+                resolved.pricing.input_per_mtok / 1000.0,
+                resolved.pricing.output_per_mtok / 1000.0,
             )
         })
         .or_else(|| {

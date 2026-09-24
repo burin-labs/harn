@@ -30,7 +30,7 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": dir.path().to_string_lossy()},
+            "params": {"cwd": dir.path().to_string_lossy(), "environmentPolicy": {"kind": "isolated", "grants": []}},
         }),
     )
     .await;

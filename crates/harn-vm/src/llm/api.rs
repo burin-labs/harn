@@ -20,6 +20,7 @@ mod schema_stream;
 mod telemetry;
 mod thinking;
 mod transport;
+pub(crate) use transport::reqwest_send_error;
 
 use crate::value::{ErrorCategory, VmError, VmValue};
 

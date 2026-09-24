@@ -38,6 +38,7 @@ mod connector_testkit_public_api;
 mod external_agent_errors;
 mod flow_backend;
 mod github_stdlib_connectors;
+mod host_stdio_sink;
 mod host_tool_batch_overlap;
 mod injection_classifier_loader;
 mod mcp_call_budget;

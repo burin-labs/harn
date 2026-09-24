@@ -662,10 +662,12 @@ mod trace_summary_pricing_tests {
                 served_fast: false,
                 accounting_status: harn_vm::llm::usage::UsageAccountingStatus::Reported,
                 known_cost_usd: cost_usd.unwrap_or(0.0),
-                provider_call_count: 1,
+                provider_call_count: Some(1),
                 unpriced_calls: i64::from(cost_usd.is_none()),
                 usage_unknown_calls: 0,
                 unpriced: None,
+                pricing: None,
+                billing: None,
             },
             duration_ms: 5,
         }
@@ -733,7 +735,7 @@ mod trace_summary_pricing_tests {
         retried.usage.input_tokens = 7;
         retried.usage.output_tokens = 5;
         retried.usage.known_cost_usd = 0.0123;
-        retried.usage.provider_call_count = 2;
+        retried.usage.provider_call_count = Some(2);
         retried.usage.unpriced_calls = 1;
         retried.usage.usage_unknown_calls = 1;
 

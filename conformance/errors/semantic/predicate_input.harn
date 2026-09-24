@@ -1,5 +1,5 @@
 import "std/predicate"
 
-fn invalid(llm: HarnessLlm, policy: PredicatePolicy) -> PredicateOutcome {
+fn invalid(llm: HarnessLlm, policy: EvaluationPolicy) -> PredicateOutcome {
   return llm.evaluate_predicate("test.input", "Supported?", fn() { return true }, policy)
 }

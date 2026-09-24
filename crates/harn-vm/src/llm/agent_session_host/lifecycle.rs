@@ -442,6 +442,28 @@ pub(super) async fn host_agent_session_finalize(
         }
     }
 
+    // A run whose every closing draft was withdrawn has no answer to return,
+    // and why it has none is the only thing left that carries the meaning.
+    // Decide it HERE, before the terminal class, the typed outcome, the
+    // durable marker, the hooks and the checkpoint are derived, so every record
+    // agrees. Deciding it later, beside the visible text, would leave the
+    // published stop reason and the returned one disagreeing about one run.
+    // A run that sealed `done` accepted its own completion, so whatever reason
+    // it carries explains a finished run and must survive. Only a run that did
+    // NOT finish can be one the withdrawal explains.
+    let finished = final_status.is_empty() || final_status == "done";
+    let withdrawal_reason = (!finished)
+        .then(|| crate::agent_sessions::transcript(&session_id))
+        .flatten()
+        .as_ref()
+        .is_some_and(crate::llm::agent_result_projection::answer_was_withdrawn)
+        .then(|| {
+            crate::agent_sessions::last_withdrawal_reason(&session_id)
+                .unwrap_or_else(|| "the completion adjudicator rejected it".to_string())
+        });
+    if withdrawal_reason.is_some() {
+        stop_reason = "turn_withdrawn".to_string();
+    }
     let terminal_class = agent_terminal_class(&final_status, &stop_reason, terminal_error.as_ref());
     let suspension = crate::agent_events::AgentTerminalSuspension::from_status_value(
         opt_json(&status_dict, "suspension").as_ref(),
@@ -463,6 +485,12 @@ pub(super) async fn host_agent_session_finalize(
         .with_error(terminal_error.as_ref())
         .with_suspension(suspension.as_ref()),
     );
+    let mut terminal_outcome = terminal_outcome;
+    if let Some(reason) = withdrawal_reason.as_ref() {
+        if terminal_outcome.message.is_none() {
+            terminal_outcome.message = Some(reason.clone());
+        }
+    }
     if terminal_outcome.has_conflicting_evidence() {
         final_status = "unknown".to_string();
     }

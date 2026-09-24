@@ -38,7 +38,7 @@ fn every_configured_provider_prefix_is_removed_during_resolution() {
     assert_eq!(hf.id, "Qwen/Qwen3.6-35B-A3B");
     assert_eq!(hf.provider, "huggingface");
 
-    for selector in ["cerebras/gpt-oss-120b", "cerebras/zai-glm-4.7"] {
+    for selector in ["cerebras/gpt-oss-120b", "cerebras/qwen-3.8-27b"] {
         let model = resolve_model_info(selector);
         assert_eq!(model.id, selector.trim_start_matches("cerebras/"));
         assert_eq!(model.provider, "cerebras");

@@ -170,7 +170,7 @@ require_declared_operations_served = {fail_closed}
             "jsonrpc":"2.0",
             "id":2,
             "method":"session/new",
-            "params":{"cwd":temp.path()}
+            "params":{"cwd":temp.path(), "environmentPolicy": {"kind": "isolated", "grants": []}}
         }),
     );
     let session_id = created["result"]["sessionId"].as_str().unwrap();
@@ -314,6 +314,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             "method": "session/new",
             "params": {
                 "cwd": temp.path(),
+                "environmentPolicy": {"kind": "isolated", "grants": []},
             }
         }),
     );
@@ -511,7 +512,7 @@ pub pipeline main(harness: Harness) {
             "jsonrpc": "2.0",
             "id": 2,
             "method": "session/new",
-            "params": {"cwd": temp.path()},
+            "params": {"cwd": temp.path(), "environmentPolicy": {"kind": "isolated", "grants": []}},
         }),
     );
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
@@ -607,6 +608,7 @@ fn acp_session_truncate_mutates_runtime_state_in_place() {
             "method": "session/new",
             "params": {
                 "cwd": temp.path(),
+                "environmentPolicy": {"kind": "isolated", "grants": []},
             }
         }),
     );
@@ -740,6 +742,7 @@ default_provider = "openai"
             "method": "session/new",
             "params": {
                 "cwd": temp.path(),
+                "environmentPolicy": {"kind": "isolated", "grants": []},
             }
         }),
     );
@@ -787,6 +790,7 @@ fn serve_acp_stdio_closes_sessions_with_close_and_stop_spellings() {
                 "method": "session/new",
                 "params": {
                     "cwd": temp.path(),
+                    "environmentPolicy": {"kind": "isolated", "grants": []},
                 }
             }),
         );

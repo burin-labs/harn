@@ -66,10 +66,13 @@ mod cost_budget_tests;
 pub(crate) mod cost_context;
 #[cfg(test)]
 mod cost_context_tests;
+#[cfg(test)]
+mod cost_rate_card_tests;
 pub(crate) mod cost_route;
 #[cfg(test)]
 mod cost_route_pricing_tests;
 pub(crate) mod daemon;
+pub(crate) mod decision;
 pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod first_token;
@@ -137,6 +140,10 @@ pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
     !effort_probe_ungated()
 }
 pub(crate) mod reasoning_modes;
+pub mod reasoning_receipt;
+pub use reasoning_receipt::{
+    dropped_reasoning_receipts, peek_reasoning_receipts, reset_reasoning_receipts, ReasoningReceipt,
+};
 pub(crate) mod reminder_iteration;
 pub(crate) mod reminder_providers;
 mod rerank;
@@ -307,6 +314,7 @@ mod healthcheck;
 pub(crate) mod pairing_receipts;
 pub(crate) mod provider;
 mod provider_auth;
+pub(crate) mod provider_dispatch;
 pub(crate) mod providers;
 pub mod rate_governor;
 pub(crate) mod rate_limit;

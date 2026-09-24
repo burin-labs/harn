@@ -5,6 +5,7 @@
     "execution_id": null,
     "flight_recording": null,
     "gaps": [],
+    "reasoning_receipts": null,
     "schema_version": 0,
     "trace_spans": []
   },
@@ -40,8 +41,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:0c188319e01349ed1f9215b88bdc62d489e403d5ff78c5398dfde345d3ffc5ff",
-    "projection_id": "run_view:run_lineage_child:0c188319e013"
+    "projection_hash": "sha256:f3915f375b4b05059ee4e2085f1dc1592fbc4a195b68239badf9e5c9a82e4acd",
+    "projection_id": "run_view:run_lineage_child:f3915f375b4b"
   },
   "providers": [],
   "run": {

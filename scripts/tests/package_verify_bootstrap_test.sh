@@ -168,6 +168,46 @@ fi
 rm "$fixture/target/debug/harn-cli-aot-gen.exe"
 mv "$AOT_GENERATOR_TEMPLATE" "$fixture/target/debug/harn-cli-aot-gen"
 
+# Pin expiry is load-bearing: a stale workaround must stop changing Cargo
+# resolution on its deadline, and the log must name the upstream version.
+cat > "$tmp_root/bin/cargo" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$PIN_CALLS_FILE"
+SH
+chmod +x "$tmp_root/bin/cargo"
+export PIN_CALLS_FILE="$tmp_root/pin-calls"
+: > "$PIN_CALLS_FILE"
+apply_external_publish_pins "$tmp_root/Cargo.toml" 2026-09-23 > "$tmp_root/pin-active.out"
+if [[ "$(<"$PIN_CALLS_FILE")" != "update --manifest-path $tmp_root/Cargo.toml -p tinyvec --precise 1.12.0" ]]; then
+  echo 'active external publish pin did not constrain Cargo resolution' >&2
+  exit 1
+fi
+if ! grep -Fq 'state=active crate=tinyvec version=1.12.0 expires_on=2026-10-03' "$tmp_root/pin-active.out"; then
+  echo 'active pin receipt lost its version or expiry' >&2
+  exit 1
+fi
+
+: > "$PIN_CALLS_FILE"
+GITHUB_ACTIONS=true apply_external_publish_pins "$tmp_root/Cargo.toml" 2026-10-03 > "$tmp_root/pin-expired.out"
+if [[ -s "$PIN_CALLS_FILE" ]]; then
+  echo 'expired external publish pin still changed Cargo resolution' >&2
+  exit 1
+fi
+if ! grep -Fq 'state=expired crate=tinyvec version=1.12.0 expires_on=2026-10-03' "$tmp_root/pin-expired.out" || \
+   ! grep -Fq 'tinyvec 1.13.0' "$tmp_root/pin-expired.out" || \
+   ! grep -Fq '::warning title=External publish pin expired::' "$tmp_root/pin-expired.out"; then
+  echo 'expired pin receipt did not attribute the unlocked dependency risk' >&2
+  exit 1
+fi
+
+if (
+  external_publish_pins_table='tinyvec|1.12.0|not-a-date|broken external release'
+  apply_external_publish_pins "$tmp_root/Cargo.toml" 2026-09-23
+) > "$tmp_root/pin-malformed.out" 2>&1; then
+  echo 'malformed external publish pin was accepted' >&2
+  exit 1
+fi
+
 workflow="$repo_root/.github/workflows/ci.yml"
 if ! grep -Fq -- "- 'scripts/lib/package_verify_bootstrap.sh'" "$workflow"; then
   echo 'package bootstrap changes must route to the package-audit lane' >&2

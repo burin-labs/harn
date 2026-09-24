@@ -449,6 +449,25 @@ pub fn release_audit_source_plan(
   )
 }
 
+/**
+ * Return the residual lanes an accepted receipt would authorize, without one.
+ *
+ * A release harness runs this against the candidate before it cuts, so a
+ * defect in how those lanes accept its staged CLI is found before a live run.
+ */
+pub fn release_audit_residual_plan(
+  contract: ReleaseAuditContract,
+  expected_head_sha: string,
+) -> ReleaseAuditPlan {
+  return audit_plan(
+    residual_lanes(contract),
+    false,
+    "residual_only",
+    "local_residual",
+    lowercase(trim(expected_head_sha)),
+  )
+}
+
 /** Validate one closed proof receipt and return the only audit plan it may authorize. */
 pub fn release_audit_receipt_plan(
   contract: ReleaseAuditContract,
@@ -640,6 +659,7 @@ fn arg_spec() {
         {kind: "flag", name: "check_ci", long: "--check-ci", default: ""},
         {kind: "switch", name: "shell_plan", long: "--shell-plan", default: false},
         {kind: "switch", name: "source_only", long: "--source-only", default: false},
+        {kind: "switch", name: "residual_only", long: "--residual-only", default: false},
       ],
     },
   )
@@ -708,6 +728,11 @@ fn main(harness: Harness) {
   const warm_binary_sha256 = trim(parsed?.warm_binary_sha256 ?? "")
   const shell_plan = parsed?.shell_plan ?? false
   const source_only = parsed?.source_only ?? false
+  const residual_only = parsed?.residual_only ?? false
+  if source_only && residual_only {
+    harness.stdio.eprintln("--source-only and --residual-only are mutually exclusive")
+    harness.runtime.exit(2)
+  }
   if receipt_path == "" && expected_sha == "" {
     if ci_path != "" {
       harness.stdio.println(json_stringify({ok: true, reason: "ci_contract_matches", errors: []}))
@@ -717,6 +742,10 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   if receipt_path == "" {
+    if residual_only {
+      print_plan(harness.stdio, release_audit_residual_plan(contract, expected_sha), shell_plan)
+      return nil
+    }
     if source_only {
       print_plan(harness.stdio, release_audit_source_plan(contract, expected_sha), shell_plan)
       return nil

@@ -4,6 +4,7 @@ const READ_FIELDS: &[&str] = &[
     "/cache_read_input_tokens",
     "/prompt_tokens_details/cached_tokens",
     "/input_tokens_details/cached_tokens",
+    "/input_token_details/cached_tokens",
     "/cached_tokens",
     "/cache_read_tokens",
     "/cached_input_tokens",

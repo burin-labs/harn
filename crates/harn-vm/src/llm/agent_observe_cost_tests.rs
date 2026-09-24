@@ -27,7 +27,7 @@ fn response_event_and_returned_usage_share_priced_cost() {
         served_fast: false,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: crate::llm::api::ProviderTelemetry::default(),
+        telemetry: Box::default(),
     };
     let mut uncached = priced.clone();
     uncached.cache_read_tokens = 0;

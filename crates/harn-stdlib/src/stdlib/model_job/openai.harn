@@ -147,6 +147,12 @@ fn __openai_outputs_result(
   return Ok(outputs)
 }
 
+// The catalog owns which OpenAI model a tier names; this backend only asks
+// for the balanced tier so a catalog refresh never needs a code edit here.
+fn __openai_default_model(harness: Harness) -> string {
+  return to_string(harness.llm.resolve_model("openai/mid")?.id)
+}
+
 fn __openai_mime_type(format: OpenAiImageFormat) -> string {
   return format == "jpeg" ? "image/jpeg" : "image/" + to_string(format)
 }
@@ -196,7 +202,7 @@ pub fn openai_responses_image_backend(options: OpenAiImageBackendOptions) -> Mod
         return Err(unwrap_err(input))
       }
       let body = {
-        model: request.model ?? options.model ?? "gpt-5.6-sol",
+        model: request.model ?? options.model ?? __openai_default_model(harness),
         input: unwrap(input),
         tools: [__openai_tool(request, options)],
       }

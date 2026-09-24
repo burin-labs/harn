@@ -12,7 +12,7 @@ use serde_json::{json, Value as JsonValue};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::VmError;
 
@@ -246,6 +246,14 @@ where
             json!({
                 "cwd": runtime.cwd.clone(),
                 "mcpServers": runtime.mcp_servers.clone(),
+                // Harn is the client here, and the agent on the other end may
+                // not be Harn. State the policy anyway: this is the one place
+                // Harn would otherwise depend on somebody else's default for
+                // what its own session's children can read. `isolated` is what
+                // a Harn server already resolved an omission to, so nothing
+                // changes against one, and a peer that does not know the field
+                // ignores it.
+                "environmentPolicy": {"kind": "isolated", "grants": []},
             }),
             None,
         )
@@ -311,7 +319,7 @@ where
             vec![super::common::output_text_block(&collector.text)]
         },
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
     })
 }
 

@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
-        "line": 262,
         "reader": "__agent_lifecycle_await_enabled"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
-        "line": 254,
         "reader": "__agent_lifecycle_has_subagent_capability"
       }
     ],
@@ -46,7 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
-        "line": 251,
         "reader": "__agent_lifecycle_has_subagent_capability"
       }
     ],

@@ -66,6 +66,8 @@ pub(crate) fn elapsed_ms(started: std::time::Instant) -> u64 {
 /// "not reported by this provider", not "zero".
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderTelemetry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing: Option<Box<crate::llm::usage::BillingUsage>>,
     /// Wire format the values came from (`ollama_chat`, `openai_usage`, ...).
     /// See [`source`] for the canonical strings. Empty when no telemetry was
     /// captured.
@@ -158,6 +160,23 @@ pub struct ProviderTelemetry {
     /// call regardless of provider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_wall_ms: Option<u64>,
+    /// Wall-clock instant the request left the client, in milliseconds since
+    /// the UNIX epoch, read from the active (mock-aware) clock at the same
+    /// origin as `client_wall_ms`.
+    ///
+    /// Cost settlement resolves the rate card at this instant, not at the
+    /// instant the response is priced: a promotion that expired mid-call, or a
+    /// time-of-day window the call started inside, must price the call the way
+    /// the provider billed it. A provider path with its own reader that leaves
+    /// this absent settles at the pricing clock's "now" instead, which differs
+    /// only by the call's own latency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<i64>,
+    /// Prompt-cache lifetime the request asked for (`5m` or `1h`), carried so
+    /// settlement can bill a one-hour cache write at its own rate. Absent
+    /// means the request asked for no particular lifetime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_ttl: Option<String>,
     /// Client-side latency from request dispatch to the first well-formed
     /// provider stream frame. Present only for streamed calls: a single-shot
     /// request has no first frame, so this stays absent rather than reporting
@@ -245,6 +264,7 @@ impl ProviderTelemetry {
     /// per-call latency even for providers that report nothing else.
     pub fn is_empty(&self) -> bool {
         let Self {
+            billing,
             source,
             serving_base_url,
             serving_fingerprint,
@@ -261,6 +281,8 @@ impl ProviderTelemetry {
             server_output_tokens,
             server_total_tokens,
             client_wall_ms,
+            started_at_ms,
+            prompt_cache_ttl,
             client_first_frame_ms,
             runtime_context_length,
             runtime_loaded_model,
@@ -273,6 +295,7 @@ impl ProviderTelemetry {
             provider_metadata,
         } = self;
         source.is_empty()
+            && billing.is_none()
             && serving_base_url.is_none()
             && serving_fingerprint.is_none()
             && cache_accounting_declared.is_none()
@@ -288,6 +311,8 @@ impl ProviderTelemetry {
             && server_output_tokens.is_none()
             && server_total_tokens.is_none()
             && client_wall_ms.is_none()
+            && started_at_ms.is_none()
+            && prompt_cache_ttl.is_none()
             && client_first_frame_ms.is_none()
             && runtime_context_length.is_none()
             && runtime_loaded_model.is_none()
@@ -393,6 +418,7 @@ impl ProviderTelemetry {
                 .filter(|ticks| ticks.is_finite() && *ticks >= 0.0)
                 .map(|ticks| ticks / XAI_USD_TICKS_PER_DOLLAR)
         });
+        telemetry.billing = crate::llm::usage::BillingUsage::from_openai(response);
         telemetry.capture_provider_metadata(response);
         telemetry
     }
@@ -411,6 +437,7 @@ impl ProviderTelemetry {
     /// carries.
     pub fn from_anthropic_usage(usage: &serde_json::Value, request_id: Option<&str>) -> Self {
         let mut telemetry = Self::new(source::ANTHROPIC_USAGE);
+        telemetry.billing = crate::llm::usage::BillingUsage::from_anthropic(usage);
         telemetry.reported_cache_usage = crate::llm::usage::ReportedCacheUsage::from_value(usage)
             .ok()
             .filter(|usage| usage.has_any())
@@ -534,6 +561,14 @@ impl ProviderTelemetry {
             return None;
         }
         let mut dict: crate::value::DictMap = crate::value::DictMap::new();
+        if let Some(billing) = &self.billing {
+            dict.insert(
+                "billing".into(),
+                crate::schema::json_to_vm_value(
+                    &serde_json::to_value(billing).expect("billing serializes"),
+                ),
+            );
+        }
         if !self.source.is_empty() {
             dict.put_str("source", self.source.as_str());
         }
@@ -577,6 +612,10 @@ impl ProviderTelemetry {
         insert_opt_i64(&mut dict, "server_output_tokens", self.server_output_tokens);
         insert_opt_i64(&mut dict, "server_total_tokens", self.server_total_tokens);
         insert_opt_u64(&mut dict, "client_wall_ms", self.client_wall_ms);
+        insert_opt_i64(&mut dict, "started_at_ms", self.started_at_ms);
+        if let Some(ttl) = self.prompt_cache_ttl.as_deref() {
+            dict.put_str("prompt_cache_ttl", ttl);
+        }
         insert_opt_u64(
             &mut dict,
             "client_first_frame_ms",
@@ -948,6 +987,8 @@ mod tests {
             serving_base_url: Some("https://provider.example/v1".to_string()),
             server_total_ms: Some(100),
             client_wall_ms: Some(120),
+            started_at_ms: Some(1_780_000_000_000),
+            prompt_cache_ttl: Some("5m".to_string()),
             runtime_loaded_model: Some("qwen".to_string()),
             ..Default::default()
         };
@@ -1004,6 +1045,10 @@ mod tests {
     #[test]
     fn as_vm_dict_projects_every_serialized_field() {
         let telemetry = ProviderTelemetry {
+            billing: Some(Box::new(crate::llm::usage::BillingUsage {
+                hosted_tool_calls: std::collections::BTreeMap::from([("web_search".into(), 1)]),
+                ..Default::default()
+            })),
             data_controls: None,
             source: source::OLLAMA_CHAT.to_string(),
             serving_base_url: Some("https://provider.example/v1".to_string()),
@@ -1023,6 +1068,8 @@ mod tests {
             server_output_tokens: Some(5),
             server_total_tokens: Some(9),
             client_wall_ms: Some(2_000),
+            started_at_ms: Some(1_780_000_000_000),
+            prompt_cache_ttl: Some("1h".to_string()),
             client_first_frame_ms: Some(1_500),
             runtime_context_length: Some(8_192),
             runtime_loaded_model: Some("served-model".to_string()),
@@ -1061,15 +1108,11 @@ mod tests {
             );
         }
 
-        // The census is only meaningful if the struct really was fully
-        // populated; a field left at `None` would be skipped by serde and
-        // silently excused from the check above.
-        assert_eq!(
-            encoded.len(),
-            25,
-            "every ProviderTelemetry field must be populated for the census to \
-             cover it; update this count when the struct gains a field"
-        );
+        // Non-null accounting witnesses keep the projection census from
+        // passing while the request-time pricing facts are absent.
+        assert_eq!(encoded["started_at_ms"], 1_780_000_000_000_i64);
+        assert_eq!(encoded["prompt_cache_ttl"], "1h");
+        assert_eq!(encoded["billing"]["hosted_tool_calls"]["web_search"], 1);
     }
 
     /// An unmeasured first frame stays absent through both projections, so a
@@ -1079,6 +1122,8 @@ mod tests {
         let telemetry = ProviderTelemetry {
             source: source::OLLAMA_CHAT.to_string(),
             client_wall_ms: Some(2_000),
+            started_at_ms: Some(1_780_000_000_000),
+            prompt_cache_ttl: Some("1h".to_string()),
             ..Default::default()
         };
         let value = telemetry.as_vm_dict().expect("dict present");

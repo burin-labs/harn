@@ -53,6 +53,11 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         return;
     }
 
+    if cli.argument_schema {
+        commands::argument_schema::run();
+        return;
+    }
+
     let Some(subcommand) = cli.command else {
         // `arg_required_else_help` already shows help when no args are
         // supplied. We only land here if a top-level flag (e.g. a
@@ -745,6 +750,9 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 if code != 0 {
                     process::exit(code);
                 }
+            }
+            Some(EvalCommand::Calibrate(calibrate_args)) => {
+                process::exit(commands::eval_calibrate::run(calibrate_args).await)
             }
             Some(EvalCommand::ScopeTriage(scope_args)) => {
                 process::exit(commands::eval_scope_triage::run(scope_args).await)

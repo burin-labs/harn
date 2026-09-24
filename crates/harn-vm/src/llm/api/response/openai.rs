@@ -430,6 +430,7 @@ pub(crate) fn parse_openai_responses_response(
         telemetry.provider_cost_usd,
         served_fast,
     )
+    .with_billing(telemetry.billing.clone())
     .with_cache(
         cache_read_tokens,
         cache_write_tokens,
@@ -484,7 +485,7 @@ pub(crate) fn parse_openai_responses_response(
         served_fast,
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 
@@ -663,6 +664,7 @@ pub(super) fn parse_chat_completions_response(
         telemetry.provider_cost_usd,
         served_fast,
     )
+    .with_billing(telemetry.billing.clone())
     .with_cache(
         cache_read_tokens,
         cache_write_tokens,
@@ -752,6 +754,6 @@ pub(super) fn parse_chat_completions_response(
         served_fast,
         blocks,
         logprobs: extract_openai_choice_logprobs(choice),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }

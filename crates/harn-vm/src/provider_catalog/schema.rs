@@ -44,6 +44,7 @@ pub fn schema_value() -> Value {
                     "healthcheck": {"$ref": "#/$defs/healthcheck"},
                     "cache_usage_accounting": {"type": "boolean"},
                     "stream_usage_accounting": {"type": "boolean"},
+                    "platform_fee_percent": {"type": ["number", "null"], "minimum": 0},
                     "data_controls": {"$ref": "#/$defs/data_controls"},
                     "protocols": {"type": "array", "items": {"type": "string"}},
                     "features": {"type": "array", "items": {"type": "string"}},
@@ -401,6 +402,7 @@ pub fn schema_value() -> Value {
                     "output_per_mtok": {"type": "number", "minimum": 0},
                     "cache_read_per_mtok": {"type": ["number", "null"], "minimum": 0},
                     "cache_write_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                    "cache_write_1h_per_mtok": {"type": ["number", "null"], "minimum": 0},
                     "input_token_bands": {
                         "type": "array",
                         "items": {
@@ -417,7 +419,57 @@ pub fn schema_value() -> Value {
                     "promotions": {
                         "type": "array",
                         "items": {"$ref": "#/$defs/promotional_pricing"}
+                    },
+                    "schedules": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/recurring_pricing_window"}
+                    },
+                    "hosted_tool_fees": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "object",
+                            "required": ["per_1k_calls", "source_url"],
+                            "properties": {
+                                "per_1k_calls": {"type": "number", "minimum": 0},
+                                "free_per_month": {"type": ["integer", "null"], "minimum": 0},
+                                "source_url": {"type": "string"}
+                            },
+                            "additionalProperties": false
+                        }
+                    },
+                    "modality_rates": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "audio_input_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                            "audio_output_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                            "cached_audio_input_per_mtok": {"type": ["number", "null"], "minimum": 0}
+                        },
+                        "additionalProperties": false
                     }
+                },
+                "additionalProperties": false
+            },
+            "recurring_pricing_window": {
+                "type": "object",
+                "required": ["id", "days", "start", "end", "utc_offset", "input_multiplier", "output_multiplier", "source_url"],
+                "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "days": {
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": true,
+                        "items": {"enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}
+                    },
+                    "start": {"type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
+                    "end": {"type": "string", "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"},
+                    "utc_offset": {"type": "string", "pattern": "^[+-]([01][0-9]|2[0-3]):[0-5][0-9]$"},
+                    "input_multiplier": {"type": "number", "exclusiveMinimum": 0},
+                    "output_multiplier": {"type": "number", "exclusiveMinimum": 0},
+                    "cache_read_multiplier": {"type": ["number", "null"], "exclusiveMinimum": 0},
+                    "cache_write_multiplier": {"type": ["number", "null"], "exclusiveMinimum": 0},
+                    "source_url": {"type": "string", "minLength": 1},
+                    "review_after": {"type": "string", "format": "date"},
+                    "note": {"type": "string"}
                 },
                 "additionalProperties": false
             },
@@ -435,7 +487,8 @@ pub fn schema_value() -> Value {
                     "input_per_mtok": {"type": "number", "minimum": 0},
                     "output_per_mtok": {"type": "number", "minimum": 0},
                     "cache_read_per_mtok": {"type": ["number", "null"], "minimum": 0},
-                    "cache_write_per_mtok": {"type": ["number", "null"], "minimum": 0}
+                    "cache_write_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                    "cache_write_1h_per_mtok": {"type": ["number", "null"], "minimum": 0}
                 },
                 "additionalProperties": false
             },

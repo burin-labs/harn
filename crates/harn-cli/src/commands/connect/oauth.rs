@@ -6,6 +6,7 @@ use harn_vm::mcp_auth::{
     OAuthClientAuthOptions, DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL,
 };
 use sha2::{Digest, Sha256};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use url::Url;
 
@@ -15,8 +16,8 @@ use crate::package::{self, ConnectorSetupConfigurationField, ProviderOAuthManife
 
 use super::callback::{bind_loopback_listener, wait_for_oauth_response, OAuthCallbackError};
 use super::oauth_migration::{
-    load_legacy_oauth_registration, migrated_oauth_client_secret_required,
-    oauth_request_with_legacy_registration,
+    legacy_registration_missing_redirect, load_legacy_oauth_registration,
+    migrated_oauth_client_secret_required, oauth_request_with_legacy_registration,
 };
 use super::setup_events::{
     ConnectorSetupErrorCode, ConnectorSetupFailure, ConnectorSetupInteraction,
@@ -129,7 +130,15 @@ pub(super) async fn run_connect_registered_provider(
         let mut request = oauth_request_from_provider_metadata(provider, args, &metadata)?;
         if request.client_id.is_none() {
             if let Some(registration) = load_legacy_oauth_registration(provider).await? {
+                let missing_redirect =
+                    legacy_registration_missing_redirect(&request, &registration);
                 request = oauth_request_with_legacy_registration(request, registration);
+                if missing_redirect {
+                    request.redirect_uri = prompt_legacy_redirect_uri()?;
+                }
+                if request.authorization_endpoint.is_none() {
+                    request.authorization_endpoint = prompt_legacy_authorization_url()?;
+                }
                 if migrated_oauth_client_secret_required(&request) {
                     let secret = rpassword::prompt_password("OAuth client secret: ")
                         .map_err(|error| format!("failed to read OAuth client secret: {error}"))?;
@@ -165,6 +174,36 @@ pub(super) async fn run_connect_registered_provider(
     Err(format!(
         "provider '{provider}' has no supported authentication setup; declare OAuth metadata or providers.setup auth_type = \"api-key\" with exactly one outbound credential"
     ))
+}
+
+fn prompt_legacy_redirect_uri() -> Result<String, String> {
+    const GUIDANCE: &str = "The old OAuth credential did not record its redirect URI. Supply the exact URI registered for this client with --redirect-uri <uri>.";
+    if !io::stdin().is_terminal() {
+        return Err(GUIDANCE.to_string());
+    }
+    eprintln!("The old OAuth credential did not record its registered redirect URI.");
+    read_legacy_oauth_field("OAuth redirect URI registered for this client: ")?
+        .ok_or_else(|| GUIDANCE.to_string())
+}
+
+fn prompt_legacy_authorization_url() -> Result<Option<String>, String> {
+    if !io::stdin().is_terminal() {
+        return Ok(None);
+    }
+    eprintln!("The old OAuth credential did not record its authorization URL.");
+    read_legacy_oauth_field("OAuth authorization URL (Enter to discover from resource): ")
+}
+
+fn read_legacy_oauth_field(prompt: &str) -> Result<Option<String>, String> {
+    eprint!("{prompt}");
+    io::stderr()
+        .flush()
+        .map_err(|error| format!("failed to flush OAuth registration prompt: {error}"))?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| format!("failed to read OAuth registration field: {error}"))?;
+    Ok((!answer.trim().is_empty()).then(|| answer.trim().to_string()))
 }
 
 pub(super) fn oauth_metadata_with_setup_environment(

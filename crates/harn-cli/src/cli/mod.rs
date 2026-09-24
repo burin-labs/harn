@@ -122,8 +122,8 @@ pub(crate) use dump::{
     DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
-    EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs, EvalPromptMode,
-    EvalPromptOutput, EvalScopeTriageArgs, EvalSkillGateArgs, EvalToolCallsArgs,
+    EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
+    EvalPromptMode, EvalPromptOutput, EvalScopeTriageArgs, EvalSkillGateArgs, EvalToolCallsArgs,
     EvalToolCallsCommand, EvalToolCallsRegressionArgs,
 };
 pub(crate) use explain::{CatalogFormat, ExplainArgs};
@@ -168,7 +168,7 @@ pub(crate) use models::{
     ModelsCommand, ModelsInstallArgs, ModelsListArgs, ModelsListSort, ModelsLoraArgs,
     ModelsLoraBehaviorStrataPolicy, ModelsLoraCommand, ModelsLoraExportArgs, ModelsLoraInspectArgs,
     ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs, ModelsLoraPromoteArgs,
-    ModelsLoraTrainArgs, ModelsTestArgs,
+    ModelsLoraTrainArgs, ModelsTestArgs, RecommendOperation,
 };
 pub(crate) use netns_launch::{NetnsLaunchArgs, NetnsLaunchInvocation};
 pub(crate) use orchestrator::{
@@ -299,6 +299,10 @@ use clap::{Parser, Subcommand};
     arg_required_else_help = true
 )]
 pub(crate) struct Cli {
+    /// Emit the versioned argument tree used by the native CLI parser.
+    #[arg(long = "argument-schema", global = false)]
+    pub argument_schema: bool,
+
     /// Emit the JSON-schema catalog for every `harn` subcommand that
     /// exposes a structured `--json` envelope. Pair with
     /// `--command <name>` to print just one entry.

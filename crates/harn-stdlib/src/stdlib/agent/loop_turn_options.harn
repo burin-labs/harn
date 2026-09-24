@@ -1301,6 +1301,12 @@ pub const AGENT_LOOP_REJECTED_TURN_MARKER: string =
  * Passing a replacement keeps the turn count stable, so the directive still
  * lands on the next round. Drop only where no directive is owed.
  *
+ * The replacement is a bookkeeping turn, not an answer. The runtime flags it
+ * as such when it writes it, so the run's final text reports the last draft
+ * the adjudicator actually accepted, and reports nothing when it accepted
+ * none. Without that flag the placeholder is the trailing assistant message,
+ * and every consumer reads it as the model's closing report.
+ *
  * The role guard is the safety contract, not politeness. A turn whose tool
  * calls were dispatched is followed by its tool results, so it is never the
  * trailing message: this can only retire a bare assistant turn, which orphans
@@ -1313,6 +1319,7 @@ pub fn __agent_loop_pop_rejected_assistant_turn(
   agent: HarnessAgent,
   session_id: any,
   replacement: string = "",
+  reason: string = "",
 ) -> bool {
   const messages = agent_session_messages(agent, session_id)
   if len(messages) == 0 {
@@ -1322,9 +1329,5 @@ pub fn __agent_loop_pop_rejected_assistant_turn(
   if last?.role != "assistant" {
     return false
   }
-  const popped = agent_session_pop_last_assistant(agent, session_id)
-  if replacement != "" {
-    agent.inject(session_id, {role: "assistant", content: replacement})
-  }
-  return popped
+  return agent_session_pop_last_assistant(agent, session_id, replacement, reason)
 }

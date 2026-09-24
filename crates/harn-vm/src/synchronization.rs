@@ -1,3 +1,4 @@
+use crate::cancellation::cancelled_without_machine;
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -137,7 +138,7 @@ impl VmSyncRuntime {
         {
             let primitive = self.primitive(kind, key, capacity)?;
             primitive.record_cancel();
-            return Err(cancelled_vm_error());
+            return Err(cancelled_without_machine());
         }
 
         let primitive = self.primitive(kind, key, capacity)?;
@@ -175,7 +176,7 @@ impl VmSyncRuntime {
                         {
                             primitive.record_dequeued();
                             primitive.record_cancel();
-                            return Err(cancelled_vm_error());
+                            return Err(cancelled_without_machine());
                         }
                     }
                 }
@@ -192,7 +193,7 @@ impl VmSyncRuntime {
                         {
                             primitive.record_dequeued();
                             primitive.record_cancel();
-                            return Err(cancelled_vm_error());
+                            return Err(cancelled_without_machine());
                         }
                     }
                 }
@@ -377,12 +378,6 @@ impl Drop for VmSyncLease {
     fn drop(&mut self) {
         self.release();
     }
-}
-
-fn cancelled_vm_error() -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-        "kind:cancelled:VM cancelled by host",
-    )))
 }
 
 #[cfg(test)]

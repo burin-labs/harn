@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
-        "line": 69,
         "reader": "__agent_daemon_raw_resume_conditions"
       }
     ],
@@ -28,12 +27,10 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/helpers/options/routing.rs",
-        "line": 206,
         "reader": "get"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
-        "line": 276,
         "reader": "llm_equivalent_failover_enabled"
       }
     ],

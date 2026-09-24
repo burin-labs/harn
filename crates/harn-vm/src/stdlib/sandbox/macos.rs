@@ -341,13 +341,20 @@ fn render_profile_with_extra_read_roots(
     // writable when UserTemp is on — a socket file is a file — so pairing the
     // write with the bind is the grant, not a widening. A policy that opts
     // out of UserTemp still has to name every socket root itself.
+    //
+    // Binding creates the socket file, which is a file-write the bind rule
+    // does not carry. A root outside every writable root therefore also gets
+    // creation and removal, narrowed to socket vnodes so the root does not
+    // become a place to write ordinary files.
     for root in unix_socket_profile_roots(policy) {
         for path in sandbox_profile_path_aliases(&root.display().to_string()) {
             let escaped = sandbox_profile_escape(&path);
             profile.push_str(&format!(
                 "(allow network-bind (subpath \"{escaped}\"))\n\
                  (allow network-inbound (subpath \"{escaped}\"))\n\
-                 (allow network-outbound (subpath \"{escaped}\"))\n"
+                 (allow network-outbound (subpath \"{escaped}\"))\n\
+                 (allow file-write-create file-write-unlink \
+                 (require-all (subpath \"{escaped}\") (vnode-type SOCKET)))\n"
             ));
         }
     }

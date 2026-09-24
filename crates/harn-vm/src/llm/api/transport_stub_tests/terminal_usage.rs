@@ -162,7 +162,7 @@ message_wire_format = "ollama"
         assert_eq!(run_summary.cost.unpriced_calls, 0);
         assert_eq!(run_summary.cost.usage_unknown_calls, 0);
         let trace = crate::llm::trace::take_trace();
-        assert_eq!(trace[0].usage.provider_call_count, 2);
+        assert_eq!(trace[0].usage.provider_call_count, Some(2));
         let rendered_metrics = metrics.render_prometheus();
         for expected in [
             "harn_llm_calls_total{model=\"paid-empty\",outcome=\"retries_exhausted\",provider=\"terminal-priced-empty\"} 1",
@@ -329,7 +329,7 @@ message_wire_format = "openai"
         let trace = crate::llm::trace::take_trace();
         assert_eq!(trace.len(), 1, "terminal error has one logical trace call");
         assert_eq!(trace[0].usage.input_tokens, 30);
-        assert_eq!(trace[0].usage.provider_call_count, 2);
+        assert_eq!(trace[0].usage.provider_call_count, Some(2));
         let rendered_metrics = metrics.render_prometheus();
         for expected in [
             "harn_llm_calls_total{model=\"paid-empty\",outcome=\"retries_exhausted\",provider=\"terminal-openai-priced-empty\"} 1",

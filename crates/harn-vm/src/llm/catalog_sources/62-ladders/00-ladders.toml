@@ -22,7 +22,7 @@ steps = [
 [model_ladders.agent_frontier]
 label = "agent frontier route with transport fallback"
 steps = [
-  { model = "claude-opus-5", provider = "anthropic", label = "frontier" },
+  { model = "claude-opus-5-5", provider = "anthropic", label = "frontier" },
   { model = "claude-sonnet-5", provider = "anthropic", label = "fallback" },
 ]
 
@@ -42,7 +42,7 @@ steps = [
   { provider = "gemini", model = "gemini-3.5-flash-lite" },
   { provider = "openrouter", model = "google/gemini-2.5-flash" },
   { provider = "deepseek", model = "deepseek-v4-flash" },
-  { provider = "groq", model = "qwen/qwen3.6-27b" },
+  { provider = "groq", model = "qwen/qwen3.8-27b" },
   { provider = "cerebras", model = "gpt-oss-120b" },
   { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8" },
   { provider = "ollama", model = "llama3.2" },
@@ -71,8 +71,33 @@ steps = [
   { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
   { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
   { provider = "deepseek", model = "deepseek-v4-flash", label = "deepseek" },
-  { provider = "groq", model = "qwen/qwen3.6-27b", label = "groq" },
+  { provider = "groq", model = "qwen/qwen3.8-27b", label = "groq" },
   { provider = "cerebras", model = "gpt-oss-120b", label = "cerebras" },
   { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8", label = "together" },
   { provider = "mock", model = "mock-judge-default", label = "mock" },
+]
+
+# The approval reviewer's cheap tier. `std/agent/approval_review` resolves an
+# approval reviewer here when the caller's policy names no reviewer model and
+# the reviewer runs inside a loop. It keeps the loop's PROVIDER, whose
+# credential the run already holds, and trades the loop's model for this row:
+# a decision is one short structured verdict, and a frontier loop otherwise
+# pays frontier prices for every one of them.
+#
+# Like `judge`, this is a per-family table, not a fallback chain. A provider
+# with no row keeps the loop's own route; the reviewer never moves to a
+# provider the run holds no credential for.
+[model_ladders.approval_reviewer]
+label = "cheap approval reviewer model per provider family"
+steps = [
+  { provider = "anthropic", model = "claude-haiku-4-5-20251001", label = "anthropic" },
+  { provider = "openai", model = "gpt-4o-mini", label = "openai" },
+  { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
+  { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
+  { provider = "fireworks", model = "accounts/fireworks/models/gpt-oss-120b", label = "fireworks" },
+  { provider = "deepseek", model = "deepseek-v4-flash", label = "deepseek" },
+  { provider = "groq", model = "qwen/qwen3.8-27b", label = "groq" },
+  { provider = "cerebras", model = "gpt-oss-120b", label = "cerebras" },
+  { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8", label = "together" },
+  { provider = "mock", model = "mock-approval-reviewer", label = "mock" },
 ]

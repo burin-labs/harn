@@ -103,6 +103,7 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(ToolHandlerHostCall),
         Box::new(UntypedToolHandlerResult),
         Box::new(SchemaShapedToolParameters),
+        Box::new(UnboundedNativeDecisionState),
         Box::new(ApiDesign),
     ];
     // Ids address rules for per-rule config and `disable_rules`, so they
@@ -242,6 +243,29 @@ impl Rule for RemovedLlmOptions {
         out: &mut Vec<LintDiagnostic>,
     ) {
         crate::rules::removed_llm_options::check_removed_llm_options(program, ctx.harness, out);
+    }
+}
+/// Like `removed-llm-options`, this rule keys on a capability method call and
+/// needs the file's harness receiver facts to recognize it, which the `ast`
+/// macro arm does not pass along.
+struct UnboundedNativeDecisionState;
+
+impl Rule for UnboundedNativeDecisionState {
+    fn id(&self) -> &'static str {
+        "unbounded-native-decision-state"
+    }
+
+    fn check_program(
+        &mut self,
+        program: &[SNode],
+        ctx: &RuleCtx<'_>,
+        out: &mut Vec<LintDiagnostic>,
+    ) {
+        crate::rules::unbounded_decision_state::check_unbounded_native_decision_state(
+            program,
+            ctx.harness,
+            out,
+        );
     }
 }
 program_rule!(

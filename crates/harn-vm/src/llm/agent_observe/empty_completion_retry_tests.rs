@@ -91,7 +91,8 @@ fn empty_completion_retries_then_succeeds_on_second_attempt() {
         assert_eq!(result.text, "recovered");
         let usage = result.usage();
         assert_eq!(
-            usage.provider_call_count, 2,
+            usage.provider_call_count,
+            Some(2),
             "both completed responses are accounted"
         );
 
@@ -258,7 +259,8 @@ fn billed_noncommittal_completion_retries_then_succeeds() {
         assert_eq!(result.text, "recovered");
         let usage = result.usage();
         assert_eq!(
-            usage.provider_call_count, 2,
+            usage.provider_call_count,
+            Some(2),
             "the thrown billed attempt remains represented"
         );
         assert!(
@@ -629,7 +631,7 @@ fn empty_result() -> crate::llm::api::LlmResult {
         served_fast: false,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: crate::llm::api::ProviderTelemetry::default(),
+        telemetry: Box::default(),
     }
 }
 
@@ -979,7 +981,8 @@ fn a_discarded_empty_attempt_reaches_the_ledger_with_a_typed_reason() {
                 .usage()
         };
         assert_eq!(
-            baseline.provider_call_count, 1,
+            baseline.provider_call_count,
+            Some(1),
             "the baseline is one physical request"
         );
 
@@ -995,7 +998,8 @@ fn a_discarded_empty_attempt_reaches_the_ledger_with_a_typed_reason() {
             .usage();
 
         assert_eq!(
-            retried.provider_call_count, 2,
+            retried.provider_call_count,
+            Some(2),
             "the discarded attempt is in the ledger, not dropped from it"
         );
         assert_eq!(

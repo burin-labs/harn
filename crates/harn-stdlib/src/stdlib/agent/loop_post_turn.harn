@@ -525,6 +525,7 @@ pub fn agent_loop_post_turn_transition(
           harness.agent,
           session.session_id,
           AGENT_LOOP_REJECTED_TURN_MARKER,
+          trim(to_string(verdict?.feedback ?? "")),
         )
       }
       // Delivery, now that the transcript is in its final shape for this round.

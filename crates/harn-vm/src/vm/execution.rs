@@ -1,3 +1,4 @@
+use crate::cancellation::{cancelled_error, HandlerDispatch};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -910,19 +911,15 @@ impl crate::vm::Vm {
             ScopeInterruptResult::CancelTimedOut => {
                 self.cancel_spawned_tasks();
                 self.dispatch_handlers_for_observed_cancel().await?;
-                Err(Self::cancelled_error())
+                // The owner was consulted on the line above, so this
+                // cancellation has already had its chance to run handlers.
+                Err(cancelled_error(HandlerDispatch::Dispatched))
             }
         }
     }
 
     pub(crate) fn deadline_exceeded_error() -> VmError {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from("Deadline exceeded")))
-    }
-
-    pub(crate) fn cancelled_error() -> VmError {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "kind:cancelled:VM cancelled by host",
-        )))
     }
 
     /// Capture the current call stack as (fn_name, line, col, source_file) tuples.

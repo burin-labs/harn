@@ -63,7 +63,7 @@ fn anthropic_http_json_and_sse_normalize_prompt_totals_and_price() {
                 assert_eq!(result.cache_write_tokens, 100);
                 let usage = LlmUsage::from_result(&result);
                 assert_eq!(usage.input_tokens, fresh + 5100);
-                let detail = crate::llm::cost::pricing_detail_for(&result.provider, &result.model).unwrap();
+                let detail = crate::llm::cost::pricing_detail_for(&result.provider, &result.model, crate::llm::cost::settlement_now()).unwrap();
                 let expected_cost = (fresh as f64 * detail.input_per_1k
                     + 5000.0 * detail.cache_read_per_1k.unwrap()
                     + 100.0 * detail.cache_write_per_1k.unwrap()

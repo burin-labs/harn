@@ -99,6 +99,7 @@ pub(crate) fn config_from_artifact(
 
 fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::ProviderDef {
     llm_config::ProviderDef {
+        platform_fee_percent: provider.platform_fee_percent,
         display_name: Some(provider.display_name.clone()),
         icon: provider.icon.clone(),
         base_url: provider.endpoint.base_url.clone(),

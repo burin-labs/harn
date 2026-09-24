@@ -50,6 +50,7 @@ mod bounded_files;
 pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
+pub(crate) mod cancellation;
 pub mod canonical_json;
 pub mod channel_guardrails;
 pub mod channels;
@@ -79,6 +80,7 @@ pub mod harness_net;
 pub mod harness_system;
 pub mod harness_tenant;
 pub mod host_attachments;
+pub mod host_stdio;
 
 /// Placement policy for child-interpreter subtasks.
 ///

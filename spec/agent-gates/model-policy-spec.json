@@ -22,7 +22,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 360,
         "reader": "__workflow_agent_loop_options"
       }
     ],
@@ -40,7 +39,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 361,
         "reader": "__workflow_agent_loop_options"
       }
     ],
@@ -94,7 +92,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 366,
         "reader": "__workflow_agent_loop_options"
       }
     ],
@@ -196,7 +193,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
-        "line": 276,
         "reader": "__workflow_stage_tool_format"
       }
     ],

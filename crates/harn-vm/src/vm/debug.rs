@@ -1,3 +1,4 @@
+use crate::cancellation::{cancelled_error, HandlerDispatch};
 use std::sync::Arc;
 
 use crate::chunk::{Chunk, Constant};
@@ -391,8 +392,11 @@ impl Vm {
             return Err(err);
         }
         if self.is_cancel_requested() {
+            // Debug stepping observes the cancel itself, so it has to run the
+            // handlers before it throws, exactly as the between-ops poll does.
+            self.dispatch_handlers_for_observed_cancel().await?;
             self.cancel_spawned_tasks();
-            return Err(Self::cancelled_error());
+            return Err(cancelled_error(HandlerDispatch::Dispatched));
         }
         let current_line = self.upcoming_line();
         let line_changed = current_line != self.last_line && current_line > 0;

@@ -596,11 +596,7 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
         let (status, detail, fix_command) = match auth.credential_status {
             harn_vm::llm::ProviderCredentialStatus::Ok => {
                 any_credential_path = true;
-                (
-                    DoctorStatus::Ok,
-                    "credential resolved by dispatch".to_string(),
-                    None,
-                )
+                (DoctorStatus::Ok, "credential present".to_string(), None)
             }
             harn_vm::llm::ProviderCredentialStatus::Deferred => {
                 any_credential_path = true;
@@ -613,8 +609,12 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
             harn_vm::llm::ProviderCredentialStatus::NotRequired => {
                 (DoctorStatus::Skip, "no key required".to_string(), None)
             }
-            harn_vm::llm::ProviderCredentialStatus::Missing => {
-                let detail = if envs.is_empty() {
+            status @ (harn_vm::llm::ProviderCredentialStatus::Missing
+            | harn_vm::llm::ProviderCredentialStatus::NeedsUserApproval) => {
+                let detail = if status == harn_vm::llm::ProviderCredentialStatus::NeedsUserApproval
+                {
+                    "stored; needs a Keychain approval this process cannot show".to_string()
+                } else if envs.is_empty() {
                     "credential unavailable".to_string()
                 } else {
                     format!("missing: {}", envs.join(", "))

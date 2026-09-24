@@ -1405,16 +1405,19 @@ fn real_run_command_file_capture_does_not_wait_for_reparented_pipe_holder() {
     };
     let temp = tempfile::tempdir().expect("pid tempdir");
     let pid_path = temp.path().join("descendant.pid");
+    let parent_pid_path = temp.path().join("parent.pid");
     let script_path = temp.path().join("parent.py");
     let _cleanup_guard = PidFileCleanup {
         path: pid_path.clone(),
     };
     let parent = r#"
+import os
 import pathlib
 import subprocess
 import sys
 
-pid_path = sys.argv[1]
+pid_path, parent_pid_path = sys.argv[1:]
+pathlib.Path(parent_pid_path).write_text(str(os.getpid()))
 child = "import signal; signal.pause()"
 descendant = subprocess.Popen([sys.executable, "-c", child], start_new_session=True)
 pathlib.Path(pid_path).write_text(str(descendant.pid))
@@ -1426,15 +1429,18 @@ print("parent-exit", flush=True)
     capture.insert("transport".into(), vstr("file"));
     let mut req = dict();
     let command = format!(
-        "{} {} {}",
+        "{} {} {} {}",
         shell_words::quote(&python),
         shell_words::quote(&script_path.to_string_lossy()),
-        shell_words::quote(&pid_path.to_string_lossy())
+        shell_words::quote(&pid_path.to_string_lossy()),
+        shell_words::quote(&parent_pid_path.to_string_lossy())
     );
     req.insert("mode".into(), vstr("shell"));
     req.insert("command".into(), vstr(&command));
     req.insert("shell_id".into(), vstr("sh"));
-    req.insert("timeout_ms".into(), VmValue::Int(500));
+    // A generous bound catches a broken capture that waits for the escaped
+    // holder forever; elapsed time is not the assertion under test.
+    req.insert("timeout_ms".into(), VmValue::Int(10_000));
     req.insert("capture".into(), VmValue::dict(capture));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
@@ -1447,6 +1453,19 @@ print("parent-exit", flush=True)
         "file capture should preserve direct-run output: {stdout:?}"
     );
     assert!(resp.get("process_cleanup").is_none());
+    let parent_pid = std::fs::read_to_string(&parent_pid_path)
+        .expect("direct parent pid")
+        .parse::<i64>()
+        .expect("numeric direct parent pid");
+    let descendant_pid = std::fs::read_to_string(&pid_path)
+        .expect("escaped pipe holder pid")
+        .parse::<i64>()
+        .expect("numeric pipe holder pid");
+    assert_process_gone(parent_pid, "direct parent after capture returns");
+    assert!(
+        unix_process_exists(descendant_pid),
+        "file capture must return while escaped pipe holder {descendant_pid} is still alive"
+    );
 }
 
 #[test]

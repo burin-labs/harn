@@ -11,6 +11,13 @@ pub(super) struct CallAccounting {
     pub(super) projected_cost_usd: Option<f64>,
 }
 
+fn dict_field<'a>(value: &'a VmValue, key: &str) -> Option<&'a VmValue> {
+    match value {
+        VmValue::Dict(map) => map.get(key),
+        _ => None,
+    }
+}
+
 pub(super) fn resolve_call_accounting(
     usage: &VmValue,
     provider: &str,
@@ -20,6 +27,20 @@ pub(super) fn resolve_call_accounting(
     cache_read_tokens: i64,
     cache_write_tokens: i64,
 ) -> CallAccounting {
+    // This re-prices a ledger the session already recorded, so the card it
+    // must use is the one that settled the original call. The recorded ledger
+    // carries that instant; a ledger written before the field existed falls
+    // back to now, which is the behaviour this path already had.
+    let recorded = super::dict_get(usage, "pricing");
+    let settled_at = recorded
+        .and_then(|pricing| dict_field(pricing, "settled_at_ms"))
+        .and_then(|value| match value {
+            VmValue::Int(value) => Some(*value),
+            _ => None,
+        })
+        .map(crate::llm::cost::instant_from_wall_ms)
+        .unwrap_or_else(crate::llm::cost::settlement_now);
+    let cache_ttl = None;
     let explicit_cost = super::dict_get(usage, "cost_usd").and_then(|value| match value {
         VmValue::Float(value) => Some(*value),
         VmValue::Int(value) => Some(*value as f64),
@@ -35,6 +56,8 @@ pub(super) fn resolve_call_accounting(
                 output_tokens,
                 cache_read_tokens,
                 cache_write_tokens,
+                settled_at,
+                cache_ttl,
             )
         })?
     });

@@ -73,7 +73,7 @@ pub const RELEASE_PATH_FILTER_OUTPUT = "$"
 pub const RELEASE_PATH_FILTER_BRANCH = "[[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]"
 
 pub const RELEASE_WORKFLOW_CONCURRENCY_GROUP = "build-release-binaries-$"
-  + "{{ (github.event_name == 'workflow_dispatch' && inputs.candidate_source_sha != '' && format('candidate-{0}', inputs.candidate_source_sha)) || (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && github.ref_type == 'branch' && format('branch-{0}', github.run_id)) || inputs.tag || github.ref_name }}"
+  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
 
 pub const RELEASE_WORKFLOW_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}"
@@ -83,11 +83,6 @@ pub const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
 
 pub const RELEASE_BUILD_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' }}"
-
-pub const RELEASE_ACTIVE_TAG_SELECTOR =
-  "(.event == \"push\" and ((.headBranch // \"\") | test(\"^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+(-[0-9A-Za-z.-]+)?$\")))"
-
-pub const RELEASE_ACTIVE_DISPATCH_SELECTOR = "(.event == \"workflow_dispatch\")"
 
 pub const RELEASE_BUILD_IF = "needs.setup.outputs.should_build_binaries == 'true'"
 
@@ -165,6 +160,17 @@ pub const COLOCATED_TESTS_DISABLE_VAR = "HARN_CI_DISABLE_COLOCATED_TESTS"
 pub const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 
 pub const HOSTED_LINUX_RUNNER = "ubuntu-latest"
+
+/**
+ * The producer's hosted rung, which is deliberately not the shared one.
+ *
+ * The persistent compile lane is the only job whose work is bounded by the
+ * box rather than by waiting, so it is the only one worth paying a larger
+ * vendor runner for. Every other hosted Linux job stays on the shared
+ * default, which is what keeps a change here from quietly moving the whole
+ * workflow onto paid capacity.
+ */
+pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-8core"
 
 pub const HOSTED_RUNNER_TIER = "github-hosted"
 
@@ -329,6 +335,32 @@ pub const CI_WORKFLOW_CONCURRENCY_GROUP = "$"
  */
 pub const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_request' }}"
 
+/**
+ * The slow E2E suite needs the same per-commit key, for the same reason.
+ *
+ * `cancel-in-progress: false` keeps a running main push alive, but it does not
+ * keep a waiting one: GitHub holds at most one pending run per group and
+ * cancels the older pending run when a newer one arrives. A main push queued
+ * behind an executing run is therefore evicted by the push after it, with zero
+ * jobs, so the `notify` job never runs and nothing records that the commit has
+ * no slow-suite result. This suite has no merge-group trigger and its only
+ * push trigger is main, so the push term is written on the event rather than
+ * on the ref, and `schedule` and `workflow_dispatch` keep the ref key.
+ */
+pub const E2E_WORKFLOW_CONCURRENCY_GROUP = "$"
+  + "{{ github.workflow }}-$"
+  + "{{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}"
+
+/**
+ * Only a newer commit on the same pull request supersedes an E2E run.
+ *
+ * Adding the opt-in label must not cancel the run that label just started, so
+ * this narrows to `synchronize` rather than cancelling every pull-request
+ * event.
+ */
+pub const E2E_WORKFLOW_CANCEL_POLICY = "$"
+  + "{{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}"
+
 pub const MAIN_ONLY_RUST_IF =
   "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
 
@@ -378,7 +410,7 @@ pub const RELEASE_CACHE_SHARED_KEY = "release-$" + "{{ matrix.target }}"
 pub const RELEASE_CACHE_SOURCE_KEY = "$" + "{{ matrix.rust_cache_broad_restore_prefix }}"
 
 pub const RELEASE_CACHE_SAVE_ENV = "$"
-  + "{{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false' }}"
+  + "{{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}"
 
 pub const RELEASE_CACHE_SAVE_REQUEST = "$"
   + "{{ env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true' }}"
@@ -820,19 +852,6 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
     errors = errors
       + [
         "${RELEASE_BINARY_WORKFLOW}:build must let only real main-branch warms supersede a target warm",
-      ]
-  }
-  const resolve_run = (workflow?.jobs?.setup?.steps ?? []).filter({ step -> step?.id == "resolve" })
-    .to_list()[0]?.run
-    ?? ""
-  if !contains(resolve_run, RELEASE_ACTIVE_TAG_SELECTOR) {
-    errors = errors
-      + ["${RELEASE_BINARY_WORKFLOW}:setup must recognize active tag-release runs"]
-  }
-  if contains(resolve_run, RELEASE_ACTIVE_DISPATCH_SELECTOR) {
-    errors = errors
-      + [
-        "${RELEASE_BINARY_WORKFLOW}:setup must not misclassify benchmark or warm dispatches as releases",
       ]
   }
   return errors
@@ -1599,22 +1618,55 @@ pub fn ci_cache_policy_errors(
   return errors + rust_cache_reader_errors(policy, workflows)
 }
 
-/** Keep one current pull-request proof and an executed result per main head. */
-pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
+/**
+ * One key per main commit, and nothing that supersedes a main push.
+ *
+ * Both halves are needed and neither implies the other. The key stops a later
+ * push from evicting a run that is still pending, and the cancel policy stops
+ * one from killing a run already executing. A workflow missing either leaves
+ * main commits whose run never executed, and a branch reporting nothing looks
+ * exactly like a branch reporting green.
+ */
+fn per_commit_concurrency_errors(
+  workflow: dict,
+  name: string,
+  group: string,
+  cancel: string,
+) -> list<string> {
   let errors: list<string> = []
-  if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
+  if trim(workflow?.concurrency?.group ?? "") != group {
     errors = errors
       + [
-        "ci.yml concurrency.group must give each main push its own key while preserving PR, merge-group, and ref keys",
+        "${name} concurrency.group must give each main push its own key while preserving the other event keys",
       ]
   }
-  if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != CI_WORKFLOW_CANCEL_POLICY {
+  if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != cancel {
     errors = errors
       + [
-        "ci.yml must cancel superseded pull-request runs only; nothing may supersede a main push, so every head sha keeps an executed result",
+        "${name} must cancel superseded pull-request runs only; nothing may supersede a main push, so every head sha keeps an executed result",
       ]
   }
   return errors
+}
+
+/** Keep one current pull-request proof and an executed result per main head. */
+pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
+  return per_commit_concurrency_errors(
+    workflow,
+    "ci.yml",
+    CI_WORKFLOW_CONCURRENCY_GROUP,
+    CI_WORKFLOW_CANCEL_POLICY,
+  )
+}
+
+/** Same contract for the slow E2E suite, whose main pushes are its only proof. */
+pub fn e2e_workflow_concurrency_errors(workflow: dict) -> list<string> {
+  return per_commit_concurrency_errors(
+    workflow,
+    "e2e.yml",
+    E2E_WORKFLOW_CONCURRENCY_GROUP,
+    E2E_WORKFLOW_CANCEL_POLICY,
+  )
 }
 
 pub fn owned_producer_condition() -> string {
@@ -1649,7 +1701,7 @@ pub fn producer_runner_expression(runner: string) -> string {
   return producer_rung_expression(
     "'${runner}'",
     "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')",
-    "'${HOSTED_LINUX_RUNNER}'",
+    "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
   )
 }
 

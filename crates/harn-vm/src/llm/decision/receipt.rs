@@ -1,0 +1,165 @@
+//! What an evaluation leaves behind.
+//!
+//! A receipt proves what was evaluated, what came back, and what it consumed.
+//! It does not certify that the model's evidence is true. Its cache identity
+//! fields are the complete key the later cache and tape work keys off, so that
+//! work reads the receipt rather than re-deriving the digest from source.
+
+use serde::{Deserialize, Serialize};
+
+use super::answer::Answer;
+use super::question::QuestionSet;
+
+pub const EVALUATION_RECEIPT_SCHEMA: &str = "harn.evaluation.receipt.v1";
+
+/// Where the answers came from. `live` is the only source that makes a
+/// provider request; the rest report zero attempts and keep the original
+/// usage as provenance only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluationSource {
+    Live,
+    Cache,
+    Tape,
+    Fixture,
+}
+
+/// Whether the usage on this receipt is known. Unknown usage keeps its
+/// reservation and is marked here; it is never recorded as free.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountingStatus {
+    Settled,
+    UsageUnknown,
+    NotDispatched,
+}
+
+/// The complete cache key, named field by field rather than pre-hashed, so a
+/// consumer can see which facts a reuse decision rests on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvaluationIdentity {
+    pub input_digest: String,
+    pub canonical_input_type: String,
+    pub question_set_digest: String,
+    pub policy_digest: String,
+    pub evaluator_instruction_version: String,
+    pub output_schema_version: String,
+    pub backend_kind: String,
+    pub protocol: String,
+}
+
+/// One question's raw answer as the backend reported it, before conversion.
+/// A calibration study reads these, not the derived confidence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EvaluationQuestionReceipt {
+    pub id: String,
+    pub kind: String,
+    pub confidence_kind: Option<String>,
+    pub raw_probabilities: std::collections::BTreeMap<String, f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EvaluationReceipt {
+    pub schema: String,
+    pub evaluation_id: String,
+    pub site_id: String,
+    pub identity: EvaluationIdentity,
+    pub requested_provider: String,
+    pub requested_model: String,
+    /// The identity the provider served, exactly as it returned it. Absent
+    /// when nothing was dispatched or the provider named nothing.
+    pub served_model: Option<String>,
+    pub questions: Vec<EvaluationQuestionReceipt>,
+    pub outcome_kind: String,
+    /// Physical provider requests. A local refusal records zero, and that zero
+    /// is the claim the #8540 falsifiers check.
+    pub physical_attempts: u32,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    /// Admitted from the route's declared price. Absent when the price is
+    /// unknown, which refuses dispatch rather than charging nothing.
+    pub cost_usd: Option<f64>,
+    pub accounting_status: AccountingStatus,
+    pub source: EvaluationSource,
+    pub elapsed_ms: u64,
+    /// Present when the provider explained a refusal the evaluator mapped onto
+    /// an arm, such as the reported reason behind `state_too_large`.
+    pub provider_reason: Option<String>,
+    pub estimated_state_tokens: Option<usize>,
+    pub limit_tokens: Option<usize>,
+}
+
+impl EvaluationReceipt {
+    /// A receipt for an evaluation that never dispatched. Every local refusal
+    /// uses this, so a zero attempt count is written by one owner.
+    #[allow(clippy::too_many_arguments)]
+    pub fn not_dispatched(
+        evaluation_id: String,
+        site_id: String,
+        identity: EvaluationIdentity,
+        requested_provider: String,
+        requested_model: String,
+        questions: &QuestionSet,
+        outcome_kind: &str,
+        elapsed_ms: u64,
+    ) -> Self {
+        Self {
+            schema: EVALUATION_RECEIPT_SCHEMA.into(),
+            evaluation_id,
+            site_id,
+            identity,
+            requested_provider,
+            requested_model,
+            served_model: None,
+            questions: questions
+                .questions
+                .iter()
+                .map(|question| EvaluationQuestionReceipt {
+                    id: question.id.clone(),
+                    kind: question.body.kind().as_str().into(),
+                    confidence_kind: None,
+                    raw_probabilities: Default::default(),
+                })
+                .collect(),
+            outcome_kind: outcome_kind.into(),
+            physical_attempts: 0,
+            input_tokens: None,
+            output_tokens: None,
+            cost_usd: None,
+            accounting_status: AccountingStatus::NotDispatched,
+            source: EvaluationSource::Live,
+            elapsed_ms,
+            provider_reason: None,
+            estimated_state_tokens: None,
+            limit_tokens: None,
+        }
+    }
+
+    /// Replace the question census with the answers actually returned, keeping
+    /// every declared question in place so an unanswered one stays visible.
+    pub fn record_answers(&mut self, answers: &[Answer]) {
+        for question in self.questions.iter_mut() {
+            let Some(answer) = answers
+                .iter()
+                .find(|answer| answer.question_id == question.id)
+            else {
+                continue;
+            };
+            question.confidence_kind = Some(
+                match answer.confidence_kind {
+                    super::answer::ConfidenceKind::BinaryProbability => "binary_probability",
+                    super::answer::ConfidenceKind::DistributionShape => "distribution_shape",
+                    super::answer::ConfidenceKind::ModelRationale => "model_rationale",
+                }
+                .into(),
+            );
+            question.raw_probabilities = answer.raw_probabilities.clone();
+        }
+    }
+
+    /// The opaque handle a caller receives. The journal owns the contents; a
+    /// caller can correlate but cannot read the evaluation out of the string.
+    pub fn reference(&self) -> String {
+        self.evaluation_id.clone()
+    }
+}

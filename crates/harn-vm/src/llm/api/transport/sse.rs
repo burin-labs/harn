@@ -338,22 +338,33 @@ pub(super) fn non_stream_body_error(provider: &str, error: reqwest::Error) -> Vm
     reqwest_send_error(provider, "response body", error)
 }
 
-/// Shared reqwest-`Error`-kind classifier for streaming sends, non-streaming
-/// sends, and non-streaming response-body reads. Maps the reqwest kind to an explicit
-/// [`crate::value::ErrorCategory`] (carried on a `CategorizedError`) so the
-/// retry/observability layer reads a typed category rather than re-deriving it
-/// from the message text. `phase` ("stream" / "request") only flavors the
-/// human-readable message; the typed category drives retry decisions.
-pub(super) fn reqwest_send_error(provider: &str, phase: &str, error: reqwest::Error) -> VmError {
+/// The one way a `reqwest::Error` becomes a `VmError` on an LLM path: streaming
+/// sends, non-streaming sends, provider-specific sends, and response-body reads.
+/// Maps the reqwest kind to an explicit [`crate::value::ErrorCategory`] (carried
+/// on a `CategorizedError`) so the retry/observability layer reads a typed
+/// category rather than re-deriving it from the message text.
+///
+/// The message cannot carry that decision. reqwest's `Display` for every
+/// transport failure is `error sending request for url (...)`; whether it was a
+/// refused connect, a DNS failure or a reset lives in the source chain, which
+/// `redact_reqwest_error` drops. `phase` only flavors the human-readable
+/// message; the typed category drives retry decisions.
+pub(crate) fn reqwest_send_error(provider: &str, phase: &str, error: reqwest::Error) -> VmError {
     use crate::value::ErrorCategory;
     let (kind, category) = if error.is_timeout() {
         ("timeout", Some(ErrorCategory::Timeout))
     } else if error.is_connect() {
         ("connect", Some(ErrorCategory::TransientNetwork))
-    } else if error.is_request() {
+    } else if error.is_builder() {
         // A malformed request build is the caller's fault, not a transient
         // network blip — leave it uncategorized so it is not blindly retried.
         ("request_build", None)
+    } else if error.is_request() {
+        // reqwest wraps every failure of the HTTP client future in this kind:
+        // a connection closed before the response, a reset mid-write, an HTTP/2
+        // GOAWAY. `is_builder` is where a malformed request lands, so what is
+        // left here is the transport, and the transport is transient.
+        ("send", Some(ErrorCategory::TransientNetwork))
     } else if error.is_body() || error.is_decode() {
         // `Response::text()` drains bytes through reqwest's decode wrapper, so
         // a connection reset or truncated body reports `is_decode()` even
@@ -1338,6 +1349,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         served_fast,
     )
     .with_reported_total(telemetry.server_total_tokens)
+    .with_billing(telemetry.billing.clone())
     .with_cache(
         cache_read_tokens,
         cache_write_tokens,
@@ -1446,6 +1458,6 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         served_fast,
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }

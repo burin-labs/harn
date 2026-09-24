@@ -10,12 +10,10 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/config_builtins/healthcheck_builtins.rs",
-        "line": 43,
         "reader": "crate::test_env::env_var_seamed"
       },
       {
         "file": "crates/harn-vm/src/orchestration/stage_options.rs",
-        "line": 82,
         "reader": "non_empty_env"
       }
     ],

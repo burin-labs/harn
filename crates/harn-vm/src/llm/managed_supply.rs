@@ -481,12 +481,12 @@ mod tests {
             version: MANAGED_SUPPLY_VERSION,
             logical_route: ManagedSupplyLogicalRoute {
                 provider: "groq".to_string(),
-                model: "qwen/qwen3.6-27b".to_string(),
-                capability_fingerprint: capability_fingerprint("groq", "qwen/qwen3.6-27b"),
+                model: "qwen/qwen3.8-27b".to_string(),
+                capability_fingerprint: capability_fingerprint("groq", "qwen/qwen3.8-27b"),
             },
         };
         validate_request(&request).expect("canonical logical route");
-        let served = compatible_served_route(&request, "groq", "qwen/qwen3.6-27b")
+        let served = compatible_served_route(&request, "groq", "qwen/qwen3.8-27b")
             .expect("same-capability route");
         assert_eq!(served.provider, "groq");
 
@@ -501,7 +501,7 @@ mod tests {
             version: MANAGED_SUPPLY_VERSION,
             logical_route: ManagedSupplyLogicalRoute {
                 provider: "groq".to_string(),
-                model: "qwen/qwen3.6-27b".to_string(),
+                model: "qwen/qwen3.8-27b".to_string(),
                 capability_fingerprint: "0".repeat(64),
             },
         };

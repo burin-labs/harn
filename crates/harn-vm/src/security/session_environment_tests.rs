@@ -60,6 +60,143 @@ fn command_grant(
     }
 }
 
+fn literal_grant(name: &str, value: &str, expose: Option<&str>) -> GrantSpec {
+    GrantSpec {
+        name: name.to_string(),
+        source: GrantSourceSpec::Literal {
+            value: value.to_string(),
+        },
+        expose_as_env: expose.map(str::to_string),
+        for_command: None,
+    }
+}
+
+/// The case the source exists for: a value the launcher does not hold, which
+/// the child must nevertheless see, and which is the empty string.
+///
+/// Several developer tools read an empty variable as an explicit "off" that
+/// differs from the variable being absent. A snapshot source cannot express
+/// that for a name the launcher has never set, because it resolves by reading
+/// the launcher and fails when there is nothing to read.
+///
+/// The pairing with the absent name is the point. Without it this would pass
+/// on an implementation that dropped the grant entirely, since both readings
+/// would then be "not there".
+#[test]
+fn a_literal_empty_value_reaches_the_child_and_an_absent_name_does_not() {
+    let specs = vec![literal_grant("wrapper_off", "", Some("TOOL_WRAPPER"))];
+    let environment = SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &no_env)
+        .expect("granted accepts a literal");
+    let resolved =
+        crate::security::environment_policy::resolve_env(&environment, &no_env, &|_, _| None)
+            .expect("resolve");
+    assert_eq!(
+        resolved.get("TOOL_WRAPPER").map(String::as_str),
+        Some(""),
+        "a literal empty value must reach the child as an empty string"
+    );
+    assert!(
+        !resolved.contains_key("TOOL_WRAPPER_NOT_DECLARED"),
+        "a name nobody declared must not appear, or the case above proves nothing"
+    );
+}
+
+/// A stated value is used verbatim, including whitespace the other sources
+/// would trim. `Env` and `SecretStore` carry names, where whitespace is a
+/// typo; this one carries a value, where it may be the point.
+#[test]
+fn a_literal_value_is_used_verbatim() {
+    let specs = vec![
+        literal_grant("plain", "off", Some("PLAIN")),
+        literal_grant("spaced", "  two  ", Some("SPACED")),
+    ];
+    let environment = SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &no_env)
+        .expect("granted accepts literals");
+    let resolved =
+        crate::security::environment_policy::resolve_env(&environment, &no_env, &|_, _| None)
+            .expect("resolve");
+    assert_eq!(resolved.get("PLAIN").map(String::as_str), Some("off"));
+    assert_eq!(resolved.get("SPACED").map(String::as_str), Some("  two  "));
+}
+
+/// The two sources stay distinct. A snapshot grant still resolves by reading
+/// the launcher, and still fails when the launcher has nothing, so adding a
+/// stated value has not turned every source into one.
+#[test]
+fn a_snapshot_grant_still_cannot_carry_a_stated_value() {
+    let specs = vec![env_grant("from_launcher", "ABSENT_VAR", Some("EXPOSED"))];
+    let err = SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &no_env)
+        .expect_err("a snapshot of nothing must still fail");
+    assert_eq!(
+        err,
+        EnvironmentPolicyError::MissingEnv {
+            name: "from_launcher".to_string(),
+            var: "ABSENT_VAR".to_string(),
+        }
+    );
+}
+
+/// A credential cannot be declared as a constant. There is no registry of
+/// names the secret vocabulary claims, so the guard keys on the reference
+/// scheme, which is the one structural marker that exists.
+///
+/// The second half is the control: an ordinary value that merely mentions the
+/// scheme later in the string is not a reference and must still be allowed,
+/// or the guard would be a substring match on anything.
+#[test]
+fn a_literal_stating_a_secret_reference_is_refused() {
+    let reference = format!("{}vault/key", crate::secrets::SECRET_REF_SCHEME);
+    let specs = vec![literal_grant("smuggled", &reference, Some("TOKEN"))];
+    let err = SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &no_env)
+        .expect_err("a literal secret reference must be refused");
+    assert_eq!(
+        err,
+        EnvironmentPolicyError::LiteralSecretReference {
+            name: "smuggled".to_string(),
+        }
+    );
+
+    let mentions = format!("see {} for details", crate::secrets::SECRET_REF_SCHEME);
+    let specs = vec![literal_grant("prose", &mentions, Some("NOTE"))];
+    let environment = SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &no_env)
+        .expect("a value that merely mentions the scheme is not a reference");
+    let resolved =
+        crate::security::environment_policy::resolve_env(&environment, &no_env, &|_, _| None)
+            .expect("resolve");
+    assert_eq!(
+        resolved.get("NOTE").map(String::as_str),
+        Some(mentions.as_str())
+    );
+}
+
+/// A literal is a grant, so the policy kind that forbids grants forbids this
+/// one too. Without this the new source would be a way around `Isolated`.
+#[test]
+fn isolated_rejects_a_literal_like_any_other_grant() {
+    let specs = vec![literal_grant("wrapper_off", "", Some("TOOL_WRAPPER"))];
+    let err = SessionEnvironment::launch(EnvironmentPolicyKind::Isolated, specs, &no_env)
+        .expect_err("isolated must reject a literal grant");
+    assert!(
+        matches!(err, EnvironmentPolicyError::PolicyForbidsGrants { .. }),
+        "a literal must be refused as a grant, got {err:?}"
+    );
+}
+
+/// The receipt says `literal`, so a reader can tell a stated value from a
+/// snapshotted one without reading the declaration.
+#[test]
+fn a_literal_grant_names_its_source_in_the_receipt() {
+    let specs = vec![literal_grant("wrapper_off", "", Some("TOOL_WRAPPER"))];
+    let environment = SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &no_env)
+        .expect("granted accepts a literal");
+    let receipts = environment.receipts();
+    let receipt = receipts
+        .iter()
+        .find(|receipt| receipt.name == "wrapper_off")
+        .expect("the grant must be receipted");
+    assert_eq!(receipt.source_kind, "literal");
+}
+
 #[test]
 fn isolated_rejects_any_grant_at_launch() {
     let specs = vec![secret_grant("gh_token", "gh", "token", None)];

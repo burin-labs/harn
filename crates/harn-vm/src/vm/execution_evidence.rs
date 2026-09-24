@@ -16,6 +16,10 @@ impl Vm {
             return;
         }
         self.execution_id = crate::observability::execution_scope::mint_execution_scope();
+        // One run's receipts must never be persisted onto the next run's
+        // record, so the collector is cleared at the top-level boundary that
+        // mints the new execution identity.
+        crate::llm::reset_reasoning_receipts();
         self.flight_recorder = self.flight_recorder_max_events.map(|max_events| {
             crate::flight_recorder::FlightRecorder::new(self.execution_id.clone(), max_events)
         });
@@ -41,7 +45,22 @@ impl Vm {
         flight_recording: Option<crate::flight_recorder::FlightRecordingArtifact>,
         gaps: Vec<crate::orchestration::RunEvidenceGapRecord>,
     ) -> crate::orchestration::ExecutionEvidenceRecord {
+        let mut gaps = gaps;
+        let dropped = crate::llm::dropped_reasoning_receipts();
+        if dropped > 0 {
+            // A truncated list must not read as the whole run. The overflow is
+            // named as a gap rather than left to look like a short run.
+            gaps.push(crate::orchestration::RunEvidenceGapRecord {
+                component: "reasoning_receipts".to_string(),
+                code: "receipt_limit_exceeded".to_string(),
+                message: format!(
+                    "{dropped} reasoning receipts past the first {} were not retained",
+                    crate::llm::reasoning_receipt::MAX_REASONING_RECEIPTS
+                ),
+            });
+        }
         crate::orchestration::ExecutionEvidenceRecord {
+            reasoning_receipts: Some(crate::llm::peek_reasoning_receipts()),
             schema_version: crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
             execution_id: Some(self.execution_id.to_string()),
             trace_spans: self

@@ -10,10 +10,8 @@ export HARN_BIN="${HARN_BIN:-$(command -v harn)}"
 ./scripts/harn_bin.sh -- test scripts/tests/release_staging_test.harn
 
 # These execute the production owners against local repositories and API
-# fixtures. The provenance suite calls stage_release_tools.sh itself, then
-# executes the staged verifier with the contract removed and restored.
+# fixtures.
 readonly suites=(
-  verify_release_archive_provenance
   release_tag_main_ancestry
   release_version
   release_publication_policy

@@ -162,9 +162,13 @@ connector credentials.
 
 Credentials written before the shared keyring namespace was introduced remain
 unavailable to connector runs. When `harn connect <provider>` needs a missing
-client id, it reads the old workspace entry once and recovers only OAuth
-registration metadata: client id, endpoints, scopes, resource, authentication
-method, and redirect URI. It never reuses the old access token, refresh token,
-or client secret; confidential clients prompt for the client secret again, and
-successful authorization writes a complete credential to the current
-namespace.
+client id, it reads the old workspace entry once and recovers available OAuth
+registration metadata. Older Harn releases did not store the redirect URI, so
+interactive setup asks for the exact callback registered for that client and
+offers an authorization URL prompt when that field is missing. Press Enter to
+use OAuth discovery, or supply the URL if the provider does not support it. For
+unattended setup, pass `--redirect-uri <uri>` and, when discovery is unavailable,
+`--auth-url <url>`.
+Harn never reuses the old access token, refresh token, or client secret;
+confidential clients prompt for the client secret again. Successful
+registration writes a complete credential to the current namespace.

@@ -11,10 +11,9 @@ The table is exercised on every release-relevant PR by the
 (`scripts/release_smoke.harn`). A regression on any row surfaces as a
 `::error::release-smoke (<platform>): <capability> failed` annotation
 that points at the specific (platform, capability) pair, not just
-"smoke matrix failed". Artifact smokes fire after `Build release binaries`
-finalizes a GitHub release; a published release is not declarable-ready
-until `./scripts/check_release_smoke.sh vX.Y.Z` reports a successful
-covering run.
+"smoke matrix failed". Artifact smokes run inside each release candidate's
+`Build release binaries` run, on that run's own archives, and a release is
+promoted only from a run where they passed.
 
 ## Capability matrix
 

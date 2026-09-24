@@ -174,32 +174,9 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
-# Qwen 3.6 on Groq speaks clean OpenAI-shape native tool calls (Groq
-# parses the Qwen tool format server-side); no reported parity issues.
-# Its `reasoning_effort` field is a two-state mode switch rather than an
-# effort ladder: `none` selects instruct mode and `default` selects thinking
-# mode. Harn projects those provider words from `thinking: false | true` so
-# callers do not mistake `default` for an effort level. Live Groq probes on
-# 2026-08-26 confirmed both modes.
-[[provider.groq]]
-model_match = "qwen/qwen3.6*"
-native_tools = true
-preferred_tool_format = "native"
-tools_exclude_response_format = true
-recommended_endpoint = "/chat/completions"
-text_tool_wire_format_supported = true
-structured_output = "native"
-thinking_modes = ["toggle"]
-reasoning_disable_supported = true
-reasoning_wire_format = "groq_qwen"
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-
+# Removed 2026-09-20 with the qwen/qwen3.6-27b catalog row: Groq's live
+# /models index no longer lists any Qwen 3.6 route. The Qwen 3.8 rule below
+# is the only Groq Qwen rule now.
 # Qwen 3.8's Groq route supports explicit none/low/medium/high reasoning
 # effort. Omitting the field keeps Groq's model-selected default. A 2026-08-26
 # live probe also confirmed native tools, strict JSON Schema, vision metadata,

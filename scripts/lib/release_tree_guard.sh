@@ -38,26 +38,38 @@ require_existing_release_tag_checkout() {
   echo "Finalize recovery from existing tag $FINALIZE_TAG at $(git rev-parse HEAD)"
 }
 
-# Fail loud if unfolded `changelog.d/<id>.<category>.md` fragments remain.
-#
-# The fold (fragments -> `## vX.Y.Z` CHANGELOG.md section) lives in the
-# bump-fleet `release_harn.harn prepare` flow (apply_draft_release_notes ->
-# lib/changelog.harn). `release_ship.sh` does not fold. Invoking release_ship
-# directly with fragments still present would ship a release whose CHANGELOG
-# has no entries for them and whose --finalize renders empty release notes.
-require_no_unfolded_fragments() {
+# Print each unfolded `changelog.d/<id>.<category>.md` fragment in the current
+# checkout, one path per line. Shell callers that must decide before a Harn
+# binary exists read fragments here. `scripts/release_changelog_fold.harn` owns
+# the fold and names the same categories; `release_ship.sh --prepare` runs the
+# guard below after the fold, so a fragment this listing sees and the fold
+# skips fails prepare instead of shipping without its entry.
+unfolded_fragment_paths() {
   local dir="changelog.d"
   [[ -d "$dir" ]] || return 0
-  local frags=()
   local category fragment base
   for category in breaking added changed deprecated removed fixed security; do
     for fragment in "$dir"/*."$category".md; do
       [[ -e "$fragment" ]] || continue
       base="$(basename "$fragment")"
       [[ "$base" == README* || "$base" == _* ]] && continue
-      frags+=("$fragment")
+      printf '%s\n' "$fragment"
     done
   done
+}
+
+# Fail loud if unfolded `changelog.d/<id>.<category>.md` fragments remain.
+#
+# `release_ship.sh --prepare` folds fragments into the `## vX.Y.Z` section
+# (scripts/release_changelog_fold.harn) and then runs this guard. Finalizing a
+# tree that still carries fragments would ship a release whose CHANGELOG has no
+# entries for them and whose --finalize renders empty release notes.
+require_no_unfolded_fragments() {
+  local frags=()
+  local fragment
+  while IFS= read -r fragment; do
+    [[ -n "$fragment" ]] && frags+=("$fragment")
+  done < <(unfolded_fragment_paths)
   if (( ${#frags[@]} == 0 )); then
     return 0
   fi
@@ -98,14 +110,14 @@ require_no_unfolded_fragments() {
   fi
 
   {
-    echo "error: ${#frags[@]} unfolded changelog fragment(s) remain in $dir/:"
+    echo "error: ${#frags[@]} unfolded changelog fragment(s) remain in changelog.d/:"
     printf '  - %s\n' "${frags[@]}"
-    echo "hint: release_ship.sh does not fold changelog fragments; the fold is"
-    echo "      part of the release_harn.harn 'prepare' flow. Either:"
-    echo "        (a) drive the release through 'release_harn.harn ... prepare'"
-    echo "            (recommended; it folds fragments, drafts + repairs notes), or"
-    echo "        (b) fold them into CHANGELOG.md's top '## vX.Y.Z' section by hand"
-    echo "            and 'git rm' the fragment files, then re-run."
+    echo "hint: the Release vX.Y.Z pull request folds changelog fragments. Either:"
+    echo "        (a) open it with the 'Open release PR' workflow"
+    echo "            (.github/workflows/bump-release.yml), which runs"
+    echo "            'release_ship.sh --prepare' and folds every fragment, or"
+    echo "        (b) run 'harn run scripts/release_changelog_fold.harn -- fold"
+    echo "            --version X.Y.Z' and commit the result, then re-run."
     echo "      Shipping now would omit these entries from the release notes."
     echo "      If the release is ALREADY TAGGED, neither remedy can reach the"
     echo "      tag's tree; use --allow-unfolded-fragments with --finalize to"

@@ -10,12 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1224,
-        "reader": "__agent_stall_apply_action_signal"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1232,
         "reader": "__agent_stall_apply_action_signal"
       }
     ],
@@ -33,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 346,
         "reader": "__agent_stall_config"
       }
     ],
@@ -51,22 +44,18 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 359,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 723,
         "reader": "__agent_stall_observe_core"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 900,
         "reader": "agent_stall_observe_completed_dispatch"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 210,
         "reader": "agent_stall_verified_write_satisfied"
       }
     ],
@@ -84,22 +73,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 343,
-        "reader": "__agent_stall_config"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 344,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 791,
         "reader": "__agent_stall_observe_core"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 883,
         "reader": "agent_stall_observe_completed_dispatch"
       }
     ],
@@ -117,17 +98,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 414,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1048,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1045,
         "reader": "__agent_stall_apply_repair"
       }
     ],
@@ -145,22 +119,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 394,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1247,
         "reader": "__agent_stall_apply_action_signal"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1257,
-        "reader": "__agent_stall_apply_action_signal"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 453,
         "reader": "__agent_stall_register_trip"
       }
     ],
@@ -178,12 +144,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 369,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 290,
         "reader": "__agent_stall_warning_record"
       }
     ],
@@ -201,12 +165,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 366,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 397,
         "reader": "agent_stall_inject_feedback"
       }
     ],
@@ -224,12 +186,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 342,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 398,
         "reader": "agent_stall_inject_feedback"
       }
     ],
@@ -247,12 +207,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 341,
         "reader": "agent_monologue_actuation_take_for_turn"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 473,
         "reader": "__agent_stall_config"
       }
     ],
@@ -270,12 +228,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 39,
         "reader": "agent_stall_repair_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 193,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -293,22 +249,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1042,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1050,
         "reader": "__agent_stall_apply_repair"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 187,
         "reader": "agent_stall_no_net_progress"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 38,
         "reader": "agent_stall_repair_config"
       }
     ],
@@ -326,27 +274,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1053,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1054,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1073,
         "reader": "__agent_stall_apply_repair"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 40,
         "reader": "agent_stall_repair_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 195,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -364,7 +299,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 161,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -382,17 +316,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 378,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 599,
-        "reader": "__agent_stall_observe_no_progress"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 624,
         "reader": "__agent_stall_observe_no_progress"
       }
     ],
@@ -410,7 +337,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 183,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -428,12 +354,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 361,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 901,
         "reader": "agent_stall_observe_completed_dispatch"
       }
     ],
@@ -451,17 +375,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 380,
-        "reader": "__agent_stall_classify_trip"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 381,
         "reader": "__agent_stall_classify_trip"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 382,
         "reader": "__agent_stall_config"
       }
     ],
@@ -479,22 +396,18 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
-        "line": 128,
         "reader": "__agent_loop_post_edit_reverify_mandated"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1015,
         "reader": "__agent_stall_apply_repair"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 36,
         "reader": "agent_stall_repair_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 211,
         "reader": "agent_stall_verified_write_satisfied"
       }
     ],
@@ -512,17 +425,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 79,
         "reader": "__agent_stall_fold_verify_state"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 93,
-        "reader": "__agent_stall_fold_verify_state"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 157,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -540,12 +446,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1117,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1129,
         "reader": "__agent_stall_apply_repair"
       }
     ],
@@ -563,22 +463,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 349,
         "reader": "__agent_stall_classify_trip"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1015,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1162,
         "reader": "__agent_stall_apply_repair"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 35,
         "reader": "agent_stall_repair_config"
       }
     ],
@@ -596,7 +488,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 336,
         "reader": "__agent_stall_config"
       }
     ],
@@ -614,17 +505,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 350,
-        "reader": "__agent_stall_classify_trip"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 354,
         "reader": "__agent_stall_classify_trip"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 384,
         "reader": "__agent_stall_config"
       }
     ],
@@ -642,17 +526,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 389,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 661,
-        "reader": "__agent_stall_observe_parse_rejection"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 676,
         "reader": "__agent_stall_observe_parse_rejection"
       }
     ],
@@ -670,17 +547,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 357,
-        "reader": "__agent_stall_classify_trip"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 361,
         "reader": "__agent_stall_classify_trip"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 376,
         "reader": "__agent_stall_config"
       }
     ],
@@ -698,32 +568,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 366,
-        "reader": "__agent_stall_classify_trip"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 370,
         "reader": "__agent_stall_classify_trip"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 371,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 905,
-        "reader": "agent_stall_observe_completed_dispatch"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 903,
-        "reader": "agent_stall_observe_completed_dispatch"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 920,
         "reader": "agent_stall_observe_completed_dispatch"
       }
     ],
@@ -741,17 +593,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 373,
-        "reader": "__agent_stall_classify_trip"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 377,
         "reader": "__agent_stall_classify_trip"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 375,
         "reader": "__agent_stall_config"
       }
     ],
@@ -769,17 +614,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn",
-        "line": 34,
         "reader": "__agent_loop_call_budget_new"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
-        "line": 49,
         "reader": "agent_loop_run_settings"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 41,
         "reader": "agent_stall_repair_config"
       }
     ],
@@ -797,17 +639,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn",
-        "line": 36,
         "reader": "__agent_loop_call_budget_new"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
-        "line": 51,
         "reader": "agent_loop_run_settings"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 42,
         "reader": "agent_stall_repair_config"
       }
     ],
@@ -825,12 +664,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 419,
         "reader": "__agent_stall_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1033,
         "reader": "__agent_stall_apply_repair"
       }
     ],
@@ -848,17 +685,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1189,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1174,
         "reader": "__agent_stall_apply_repair"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 37,
         "reader": "agent_stall_repair_config"
       }
     ],
@@ -876,22 +706,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 383,
-        "reader": "__agent_stall_classify_trip"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
-        "line": 384,
         "reader": "__agent_stall_classify_trip"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 341,
-        "reader": "__agent_stall_config"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "line": 353,
         "reader": "__agent_stall_config"
       }
     ],
@@ -909,27 +727,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1024,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1084,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1088,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1086,
-        "reader": "__agent_stall_apply_repair"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-        "line": 1099,
         "reader": "__agent_stall_apply_repair"
       }
     ],
@@ -947,12 +744,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 180,
-        "reader": "agent_stall_no_net_progress"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 178,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -970,7 +761,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 166,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -988,7 +778,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 164,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -1006,17 +795,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn",
-        "line": 35,
         "reader": "__agent_loop_call_budget_new"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
-        "line": 50,
         "reader": "agent_loop_run_settings"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 43,
         "reader": "agent_stall_repair_config"
       }
     ],

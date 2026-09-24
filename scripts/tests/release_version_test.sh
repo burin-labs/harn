@@ -75,7 +75,7 @@ fi
 
 tmp_repo="$(mktemp -d)"
 trap 'rm -rf "$tmp_repo"' EXIT
-git -C "$tmp_repo" init --quiet
+git -C "$tmp_repo" init -b main --quiet
 git -C "$tmp_repo" config user.name "Release Version Test"
 git -C "$tmp_repo" config user.email "release-version-test@example.com"
 git -C "$tmp_repo" config commit.gpgsign false
@@ -213,5 +213,28 @@ if [[ "$(cd "$tmp_repo" && release_latest_stable_tag)" != "v1.2.4" ]]; then
   echo "release_version_test: latest stable tag selection accepted a prerelease or invalid tag" >&2
   exit 1
 fi
+
+# The candidate trigger: a push is a release exactly when the workspace version
+# changes to a stable X.Y.Z.
+workspace_manifest=$'[workspace]\nmembers = []\n\n[workspace.package]\nversion = "0.10.142"\n\n[workspace.dependencies]\nserde = { version = "1" }\n'
+if [[ "$(release_workspace_version <<<"$workspace_manifest")" != "0.10.142" ]]; then
+  echo "release_version_test: workspace version was not read from [workspace.package]" >&2
+  exit 1
+fi
+if [[ -n "$(release_workspace_version <<<$'[workspace]\nmembers = []\n')" ]]; then
+  echo "release_version_test: a manifest with no version reported one" >&2
+  exit 1
+fi
+release_push_is_stable_version_change 0.10.142-dev 0.10.142
+release_push_is_stable_version_change 0.10.141 0.10.142
+release_push_is_stable_version_change "" 0.10.142
+for pair in "0.10.142 0.10.142" "0.10.142 0.10.143-dev" "0.10.142-dev 0.10.143-rc.1" \
+  "0.10.141 0.10" "0.10.141 "; do
+  read -r previous current <<<"$pair"
+  if release_push_is_stable_version_change "$previous" "${current:-}"; then
+    echo "release_version_test: '$previous' -> '${current:-}' was treated as a release" >&2
+    exit 1
+  fi
+done
 
 echo "release version projection tests passed"

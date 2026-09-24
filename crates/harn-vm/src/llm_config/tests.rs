@@ -465,9 +465,11 @@ fn capability_tags_include_structured_capability_flags() {
 }
 
 #[test]
-fn cerebras_gemma_4_catalog_row_preserves_public_route_metadata() {
-    let model = model_catalog_entry("gemma-4-31b")
-        .expect("Cerebras Gemma 4's public serverless route must be catalogued");
+fn cerebras_qwen_38_catalog_row_preserves_public_route_metadata() {
+    // Cerebras retired the Gemma 4 route this test used to read. Qwen 3.8 27B
+    // is its multimodal serverless replacement, at the same rates and window.
+    let model = model_catalog_entry("qwen-3.8-27b")
+        .expect("Cerebras Qwen 3.8's public serverless route must be catalogued");
 
     assert_eq!(model.provider, "cerebras");
     assert_eq!(model.context_window, 131_072);
@@ -483,11 +485,11 @@ fn cerebras_gemma_4_catalog_row_preserves_public_route_metadata() {
     );
     let pricing = model
         .pricing
-        .expect("Cerebras Gemma 4's public token rates must be catalogued");
+        .expect("Cerebras Qwen 3.8's public token rates must be catalogued");
     assert_eq!(pricing.input_per_mtok, 0.99);
     assert_eq!(pricing.output_per_mtok, 1.49);
 
-    let capabilities = crate::llm::capabilities::lookup("cerebras", "gemma-4-31b");
+    let capabilities = crate::llm::capabilities::lookup("cerebras", "qwen-3.8-27b");
     assert!(capabilities.native_tools);
     assert!(capabilities.vision_supported);
     assert_eq!(capabilities.structured_output.as_deref(), Some("native"));
@@ -635,8 +637,12 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
                 output_per_mtok: 2.5,
                 cache_read_per_mtok: Some(0.25),
                 cache_write_per_mtok: None,
+                cache_write_1h_per_mtok: None,
                 input_token_bands: Vec::new(),
                 promotions: Vec::new(),
+                schedules: Vec::new(),
+                hosted_tool_fees: Default::default(),
+                modality_rates: None,
             }),
             deprecated: false,
             deprecation_note: None,
@@ -744,14 +750,22 @@ embedding_max_tokens = 8191
 fn retired_groq_llama_models_are_absent_from_bundled_catalog() {
     reset_overrides();
 
-    for model in ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"] {
+    // `qwen/qwen3.6-27b` joins the retired list here rather than only losing
+    // its row. It was this test's "still available" control until Groq's live
+    // index dropped it, and a retirement that only moves the control leaves
+    // nothing stopping the id from coming back.
+    for model in [
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "qwen/qwen3.6-27b",
+    ] {
         assert!(
             model_catalog_entry(model).is_none(),
             "retired Groq model `{model}` must not be selected from the bundled catalog"
         );
     }
 
-    let active = model_catalog_entry("qwen/qwen3.6-27b")
+    let active = model_catalog_entry("qwen/qwen3.8-27b")
         .expect("the current Groq catalog route must remain available");
     assert_eq!(active.provider, "groq");
 }

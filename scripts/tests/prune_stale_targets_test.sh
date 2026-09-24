@@ -24,7 +24,7 @@ mkdir -p \
   "$storage/release-gate-target/live-root" \
   "$storage/release-gate-target/orphan-root" \
   "$repos/live-root"
-git -C "$repos/live-root" init -q
+git -C "$repos/live-root" init -b main -q
 
 # Everything is old enough to prune, so only the keep-set decides.
 touch -t 202001010000 \
@@ -237,7 +237,7 @@ run_size_gc() {
 # all. 2 MiB apiece, so any ceiling below 6 MiB must bite.
 for n in old mid new; do
   mkdir -p "$size_repos/$n"
-  git -C "$size_repos/$n" init -q 2>/dev/null || true
+  git -C "$size_repos/$n" init -b main -q 2>/dev/null || true
   mkdir -p "$size_storage/harn-target/repos-$n"
   dd if=/dev/zero of="$size_storage/harn-target/repos-$n/blob" bs=1024 count=2048 \
     >/dev/null 2>&1

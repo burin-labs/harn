@@ -308,9 +308,9 @@ mod tests {
         // Moonshot's API pins temperature/top_p to one value and 400s on any
         // other; the general `*kimi*` rule strips both so callers never hit it.
         for id in [
-            "moonshot/kimi-k2.5",
             "moonshot/kimi-k2.6",
             "moonshot/kimi-k2.7-code",
+            "moonshot/kimi-k3",
         ] {
             let caps = lookup("moonshot", id);
             assert!(
@@ -341,7 +341,7 @@ mod tests {
     fn cerebras_tools_exclude_response_format() {
         reset();
         assert!(lookup("cerebras", "gpt-oss-120b").tools_exclude_response_format);
-        assert!(lookup("cerebras", "zai-glm-4.7").tools_exclude_response_format);
+        assert!(lookup("cerebras", "qwen-3.8-27b").tools_exclude_response_format);
         assert!(!lookup("openai", "gpt-4o").tools_exclude_response_format);
     }
 
@@ -352,7 +352,7 @@ mod tests {
             lookup("groq", "openai/gpt-oss-20b").tools_exclude_response_format,
             "Groq rejects native tools combined with response_format"
         );
-        assert!(lookup("groq", "qwen/qwen3.6-27b").tools_exclude_response_format);
+        assert!(lookup("groq", "qwen/qwen3.8-27b").tools_exclude_response_format);
     }
 
     #[test]
@@ -473,14 +473,20 @@ mod tests {
     }
 
     #[test]
-    fn groq_qwen_36_declares_thinking_toggle() {
+    fn groq_qwen_38_declares_reasoning_effort_levels() {
+        // Groq retired the Qwen 3.6 route, whose `reasoning_effort` was a
+        // two-state toggle. Qwen 3.8 is Groq's only Qwen route and takes a
+        // real effort ladder, `none` included.
         reset();
-        let caps = lookup("groq", "qwen/qwen3.6-27b");
-        assert_eq!(caps.thinking_modes, vec!["toggle"]);
-        assert!(caps.reasoning_disable_supported);
-        assert_eq!(caps.reasoning_wire_format.as_deref(), Some("groq_qwen"));
-        assert!(!caps.reasoning_effort_supported);
-        assert!(caps.reasoning_effort_levels.is_empty());
+        let caps = lookup("groq", "qwen/qwen3.8-27b");
+        assert_eq!(caps.thinking_modes, vec!["effort"]);
+        assert!(caps.reasoning_effort_supported);
+        assert!(caps.reasoning_none_supported);
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            vec!["none", "low", "medium", "high"]
+        );
+        assert!(caps.reasoning_wire_format.is_none());
     }
 
     #[test]
@@ -880,7 +886,7 @@ mod tests {
         // Inline-style local/open-weight routes emit inline `<think>` in text.
         assert!(lookup("ollama", "qwen3.6:35b-a3b-coding-nvfp4").emits_inline_reasoning);
         assert!(lookup("moonshot", "moonshot/kimi-k2.6").emits_inline_reasoning);
-        assert!(lookup("cerebras", "zai-glm-4.7").emits_inline_reasoning);
+        assert!(lookup("cerebras", "qwen-3.8-27b").emits_inline_reasoning);
         // Hosted providers surface reasoning in a dedicated channel, not inline
         // `<think>` in the text body — the quirk stays off so their text passes
         // through the envelope untouched.
