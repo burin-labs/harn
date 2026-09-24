@@ -99,9 +99,28 @@ fn a_structured_llm_route_can_actually_honour_a_schema() {
         );
     }
     assert!(
-        structured >= 4,
+        structured >= 7,
         "measured only {structured} structured_llm routes; the curated chat set is larger"
     );
+}
+
+#[test]
+fn gateway_chat_decisions_are_explicitly_admitted_and_resolve_the_same_protocol() {
+    for id in [
+        "openai/gpt-5.4-nano",
+        "openai/gpt-5.4-mini",
+        "vercel/openai/gpt-5.4-nano",
+    ] {
+        let entry = llm_config::model_catalog_entry(id).expect("curated gateway row exists");
+        assert!(
+            entry.supports_operation(ModelOperation::TextGeneration),
+            "{id}"
+        );
+        assert!(entry.supports_operation(ModelOperation::Decision), "{id}");
+        let contract = decision_contract_for_route(&entry.provider, id)
+            .expect("gateway decision contract resolves");
+        assert_eq!(contract.protocol, DecisionProtocol::StructuredLlm, "{id}");
+    }
 }
 
 #[test]
