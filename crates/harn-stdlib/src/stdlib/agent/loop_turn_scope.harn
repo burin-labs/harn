@@ -546,7 +546,8 @@ pub fn __agent_loop_wrapup_eligible_status(final_status: string, stop_reason: st
     || final_status == "completion_unverified"
     || final_status == "verify_exhausted"
     || final_status == "stuck"
-    || (final_status == "done" && stop_reason == "explicit_completion_claim")
+    || (final_status == "done"
+      && (stop_reason == "explicit_completion_claim" || stop_reason == "verified_policy_stop"))
 }
 
 /**

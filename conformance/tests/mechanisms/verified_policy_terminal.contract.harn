@@ -1,0 +1,190 @@
+import { agent_completion_gate } from "std/agent/completion_gate"
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import {
+  __agent_loop_resolve_verified_policy_stop,
+  __agent_loop_terminal_verification_from_directive,
+} from "std/agent/loop_terminal"
+import { llm_text, with_llm_script } from "std/testing"
+import { repair_test_tools } from "../../fixtures/agents/repair_tools"
+
+fn accepted_verification() -> dict {
+  return {
+    action: "accept",
+    receipt: {
+      evidence_id: "verified-1",
+      verification: {oracle_expected: true, observed: "passed", command: "fixture-verify"},
+      requirements: {pending_count: 0},
+      pending_tool_batch_effect_count: 0,
+      gap_count: 0,
+    },
+  }
+}
+
+fn run_live_case(
+  harness: Harness,
+  verify_passes: bool,
+  later_failure: bool = false,
+  custom_stop: bool = false,
+) -> dict {
+  const turns = if later_failure {
+    [
+      {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
+      {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+      {text: "", tool_calls: [{id: "t2", name: "run_test", arguments: {}}]},
+      llm_text("I am still considering the next step."),
+    ]
+  } else {
+    [
+      {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
+      {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+      llm_text("I am still considering the next step."),
+    ]
+  }
+  return with_llm_script(
+    harness.llm,
+    turns,
+    { ->
+      const session = "verified-policy-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Repair and verify the fixture.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            tools: repair_test_tools("test failed: assertion X", true, "read"),
+            tool_format: "native",
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 4,
+            max_nudges: 0,
+            final_wrapup: false,
+            post_turn_callback: { turn ->
+              if custom_stop && turn.iteration >= 2 {
+                return {stop: true, stop_reason: "fixture_policy_stop", needs_verify: false}
+              }
+              return "Continue until the policy bound."
+            },
+            stall_diagnostics: {enabled: true, repair_aware: true, post_edit_reverify: true},
+          }
+            + agent_completion_gate(
+              harness.runtime,
+              {
+                facts: { _ctx ->
+                  return {
+                    source_write_count: 1,
+                    verify: {ok: verify_passes, command: "fixture-verify"},
+                  }
+                },
+              },
+            ),
+        ) },
+      )
+      return captured.result
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const evidence = __agent_loop_terminal_verification_from_directive(accepted_verification())
+  assert(evidence != nil, "an accepted positive verifier must be readable")
+  for status in ["budget_exhausted", "verify_exhausted", "completion_unverified", "stuck"] {
+    const resolved = __agent_loop_resolve_verified_policy_stop(
+      status,
+      "fixture_policy_stop",
+      evidence,
+      nil,
+      nil,
+    )
+    assert_eq(resolved.final_status, "done")
+    assert_eq(resolved.stop_reason, "verified_policy_stop")
+    assert_eq(resolved.converted.prior_status, status)
+  }
+  const custom = __agent_loop_resolve_verified_policy_stop(
+    "done",
+    "fixture_policy_stop",
+    evidence,
+    nil,
+    nil,
+  )
+  assert_eq(custom.stop_reason, "fixture_policy_stop")
+  assert_eq(custom.observed.evidence_id, "verified-1")
+  for status in [
+    "suspended",
+    "cancelled",
+    "provider_error",
+    "error",
+    "input_guardrail",
+    "scope_alert",
+    "blocked",
+    "unknown",
+  ] {
+    const unchanged = __agent_loop_resolve_verified_policy_stop(
+      status,
+      "fixture_policy_stop",
+      evidence,
+      nil,
+      nil,
+    )
+    assert_eq(unchanged.final_status, status)
+  }
+  const natural = __agent_loop_resolve_verified_policy_stop(
+    "done",
+    "explicit_completion_claim",
+    evidence,
+    nil,
+    nil,
+  )
+  assert_eq(natural.stop_reason, "explicit_completion_claim")
+  const red = __agent_loop_terminal_verification_from_directive(
+    accepted_verification()
+      + {
+        receipt: accepted_verification().receipt
+          + {verification: {oracle_expected: true, observed: "failed", command: "fixture-verify"}},
+      },
+  )
+  assert_eq(red, nil)
+  const pending = __agent_loop_terminal_verification_from_directive(
+    accepted_verification()
+      + {receipt: accepted_verification().receipt + {requirements: {pending_count: 1}}},
+  )
+  assert_eq(pending, nil)
+  const missing_evidence = __agent_loop_terminal_verification_from_directive(
+    accepted_verification()
+      + {receipt: accepted_verification().receipt + {evidence_id: "", gap_count: nil}},
+  )
+  assert_eq(missing_evidence, nil)
+  const errored = __agent_loop_resolve_verified_policy_stop(
+    "stuck",
+    "fixture_policy_stop",
+    evidence,
+    {message: "provider failed"},
+    nil,
+  )
+  assert_eq(errored.final_status, "stuck")
+  const live_green = run_live_case(harness, true)
+  const live_red = run_live_case(harness, false)
+  const live_invalidated = run_live_case(harness, true, true)
+  const live_custom = run_live_case(harness, true, false, true)
+  assert_eq(live_green.status, "done")
+  assert_eq(live_green.stop_reason, "verified_policy_stop")
+  assert_eq(live_green.verified_policy_stop.prior_status, "stuck")
+  assert_eq(live_red.status, "stuck")
+  assert_eq(live_invalidated.status, "stuck")
+  assert_eq(live_invalidated?.verified_policy_stop, nil)
+  assert_eq(live_custom.status, "done")
+  assert_eq(live_custom.stop_reason, "fixture_policy_stop")
+  assert(to_string(live_custom?.terminal_verification?.evidence_id ?? "") != "")
+  assert_eq(live_custom?.terminal_verification?.command, "fixture-verify")
+  harness.stdio.println("policy_rows=5")
+  harness.stdio.println("positive_live=" + to_string(live_green.status == "done"))
+  harness.stdio.println("red_live=" + to_string(live_red.status == "stuck"))
+  harness.stdio.println("later_failure_blocks=" + to_string(live_invalidated.status == "stuck"))
+  harness.stdio.println(
+    "custom_stop_preserved=" + to_string(live_custom.stop_reason == "fixture_policy_stop"),
+  )
+}
