@@ -114,7 +114,7 @@ fn persists_typed_repair_claim_without_feedback_prose_matching() {
         &serde_json::json!({
             "iteration": 7,
             "tool": "edit",
-            "visible_text_prefix": "prose may change independently",
+            "text": "prose may change independently",
         }),
     )
     .expect("typed repair feedback")

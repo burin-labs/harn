@@ -1086,6 +1086,14 @@ pub enum AgentEvent {
         catalog_parity: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         override_reason: Option<String>,
+        /// Format actually sent after explicit-route steering. Absence keeps
+        /// older records distinct from a route that made no change.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        applied_format: Option<String>,
+        /// Whether the requested format was changed for this route. Preserve
+        /// explicit false rather than inferring it from a missing field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        steered: Option<bool>,
     },
     /// Emitted when a `tool_caller` middleware (see std/llm/tool_middleware)
     /// attaches structured audit metadata to a tool call — typically a

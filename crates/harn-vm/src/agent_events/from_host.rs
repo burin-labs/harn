@@ -294,74 +294,171 @@ fn host_event_policy(event_type: &str) -> Option<&'static HostEventPolicy> {
 /// Payload keys the emitter wrote that no reader of the decoded event can see.
 ///
 /// `AgentEvent` is an internally-tagged enum with no `deny_unknown_fields`, so
-/// `serde` discards a key the target variant does not declare. The discard is
-/// the whole defect: the emit succeeds, the run succeeds, and the field is
-/// missing only for whoever reads the timeline afterwards.
+/// `serde` discards a key the target variant does not declare. The decoded
+/// event is compared with the payload before it can be published.
 ///
-/// The census is a round trip rather than a hand-written key list. Serializing
-/// the decoded event answers "what will a reader actually see" from the same
-/// derives that did the dropping, so it cannot drift out of date the way a
-/// second copy of every variant's fields would. The registry supplies only
-/// what a round trip cannot know: which arms keep the payload whole, and which
-/// keys are read under a different name.
+/// Serializing the decoded event answers "what will a reader actually see"
+/// without a second copy of every variant's fields. A generic field can be
+/// consumed but omitted by `skip_serializing_if`; for those candidates, a
+/// second decode with a type-sensitive probe distinguishes a declared field
+/// from one `serde` ignores. The policy supplies only what the round trip
+/// cannot know for special arms: whole payloads and folded keys.
 ///
 /// A `null` input value is not reported. Every optional field skips
 /// serializing when absent, so an explicit `null` round-trips to nothing
 /// through a field that does exist and is not evidence of a drop.
 fn dropped_payload_keys(
+    session_id: &str,
     policy: &HostEventPolicy,
     payload: &Value,
     event: &AgentEvent,
-) -> Vec<String> {
+    normalized: Option<&Map<String, Value>>,
+) -> Result<Vec<String>, VmError> {
     let folded: &[&str] = match policy.payload_consumption {
-        PayloadConsumption::Whole => return Vec::new(),
+        PayloadConsumption::Whole => return Ok(Vec::new()),
         PayloadConsumption::Fields => &[],
         PayloadConsumption::FieldsFolding(keys) => keys,
     };
     let Value::Object(sent) = payload else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let Ok(Value::Object(read)) = serde_json::to_value(event) else {
-        return Vec::new();
+    let read = serde_json::to_value(event).map_err(|error| {
+        reject(
+            session_id,
+            format!(
+                "cannot inspect decoded `{}` event: {error}",
+                policy.event_type
+            ),
+            payload,
+        )
+    })?;
+    let Value::Object(read) = read else {
+        return Err(reject(
+            session_id,
+            format!("decoded `{}` event is not an object", policy.event_type),
+            payload,
+        ));
     };
-    sent.iter()
+    Ok(sent
+        .iter()
         .filter(|(key, value)| {
-            !value.is_null() && !read.contains_key(*key) && !folded.contains(&key.as_str())
+            if value.is_null() || read.contains_key(*key) || folded.contains(&key.as_str()) {
+                return false;
+            }
+            match normalized {
+                Some(normalized) => !generic_field_is_consumed(normalized, key),
+                None => {
+                    !special_field_is_consumed(session_id, policy.event_type, payload, event, key)
+                }
+            }
         })
         .map(|(key, _)| key.clone())
-        .collect()
+        .collect())
 }
 
-/// Report each dropped key once per session, through the loud-boundary funnel.
-///
-/// [`crate::boundary::BoundaryFailureKind::Dropped`] already names this exact
-/// shape — bytes consumed that produced neither action nor error — so the
-/// signal joins the boundary vocabulary that exists rather than inventing a
-/// parallel one. It is deliberately not an error: the population of stray keys
-/// is known to be non-empty and some of it is load-bearing on live paths, so
-/// refusing the event here would turn an invisible loss into a dead run.
-fn report_dropped_payload_keys(
+fn field_probe_value(value: &Value) -> Value {
+    match value {
+        Value::String(text) if text == "__harn_field_probe__" => {
+            Value::String("__harn_field_probe_2__".to_string())
+        }
+        Value::String(_) => Value::String("__harn_field_probe__".to_string()),
+        Value::Bool(value) => Value::Bool(!value),
+        Value::Number(number) if number.as_i64() == Some(0) => Value::from(1),
+        Value::Number(_) => Value::from(0),
+        Value::Array(values) if values.is_empty() => {
+            Value::Array(vec![Value::String("__harn_field_probe__".to_string())])
+        }
+        Value::Array(_) => Value::Array(Vec::new()),
+        Value::Object(values) if values.is_empty() => Value::Object(Map::from_iter([(
+            "__harn_field_probe__".to_string(),
+            Value::Bool(true),
+        )])),
+        Value::Object(_) => Value::Object(Map::new()),
+        Value::Null => Value::Null,
+    }
+}
+
+fn special_field_is_consumed(
     session_id: &str,
     event_type: &str,
-    policy: &HostEventPolicy,
     payload: &Value,
-    event: &AgentEvent,
-) {
-    for key in dropped_payload_keys(policy, payload, event) {
+    decoded: &AgentEvent,
+    key: &str,
+) -> bool {
+    let Value::Object(original) = payload else {
+        return false;
+    };
+    let Some(value) = original.get(key) else {
+        return false;
+    };
+    let mut probe = original.clone();
+    probe.insert(key.to_string(), field_probe_value(value));
+    let Some(probed) = from_host_special(session_id, event_type, &Value::Object(probe)) else {
+        return false;
+    };
+    serde_json::to_value(probed).ok() != serde_json::to_value(decoded).ok()
+}
+
+/// `serde_ignored` cannot see ignored fields inside an internally tagged
+/// enum, because serde buffers its variant body before visiting fields. Probe
+/// only a key absent from the decoded event: an unknown key leaves the event
+/// identical, whereas a declared field either rejects the deliberately wrong
+/// type or changes the decoded event. This also recognizes known empty strings,
+/// arrays and maps skipped during serialization.
+fn generic_field_is_consumed(normalized: &Map<String, Value>, key: &str) -> bool {
+    let Ok(baseline) = serde_json::from_value::<AgentEvent>(Value::Object(normalized.clone()))
+    else {
+        return false;
+    };
+    let mut probe = normalized.clone();
+    let marker = if probe.get(key).and_then(Value::as_str) == Some("__harn_field_probe__") {
+        "__harn_field_probe_2__"
+    } else {
+        "__harn_field_probe__"
+    };
+    probe.insert(key.to_string(), Value::String(marker.to_string()));
+    match serde_json::from_value::<AgentEvent>(Value::Object(probe)) {
+        Err(_) => true,
+        Ok(probed) => serde_json::to_value(probed)
+            .ok()
+            .zip(serde_json::to_value(baseline).ok())
+            .is_some_and(|(probed, baseline)| probed != baseline),
+    }
+}
+
+/// Refuse a registered event before publishing it if a payload key would vanish.
+/// Emit the boundary failure once per session and key even when the Harn caller
+/// catches the returned error, as the stdlib emitters commonly do.
+fn reject_dropped_payload_keys(
+    session_id: &str,
+    event_type: &str,
+    payload: &Value,
+    dropped: Vec<String>,
+) -> Result<(), VmError> {
+    if dropped.is_empty() {
+        return Ok(());
+    }
+    for key in &dropped {
         if !crate::agent_sessions::mark_dropped_host_payload_key_warning(
-            session_id, event_type, &key,
+            session_id, event_type, key,
         ) {
             continue;
         }
         crate::boundary::BoundaryFailure::new(
             crate::boundary::BoundaryId::HostEventIngest,
-            crate::boundary::BoundaryFailureKind::Dropped,
+            crate::boundary::BoundaryFailureKind::Unrecognized,
             format!("`{event_type}` payload key `{key}` is not read by any field of the event it becomes"),
         )
         .in_session(session_id)
-        .with_excerpt(&payload.to_string())
+        // The payload may include tool arguments or credentials. The key and
+        // event type suffice to repair the contract without publishing values.
+        .with_dropped_bytes(payload.to_string().len())
         .report();
     }
+    Err(VmError::Runtime(format!(
+        "{HOST_AGENT_EMIT_EVENT}: `{event_type}` payload has unrecognized keys: {}",
+        dropped.join(", ")
+    )))
 }
 
 impl AgentEvent {
@@ -376,10 +473,8 @@ impl AgentEvent {
     /// journal or emit the dropped name.
     ///
     /// A registered type whose payload carries a key no field of the resulting
-    /// event reads is accepted, and the lost key is reported once per session
-    /// through the loud-boundary funnel. It is a report rather than a refusal
-    /// because live emitters are known to pass keys nothing consumes; see
-    /// [`dropped_payload_keys`].
+    /// event reads is rejected before publication. The boundary failure is
+    /// reported once per session and key even if the emitter catches the error.
     pub fn from_host_payload(
         session_id: &str,
         event_type: &str,
@@ -389,11 +484,24 @@ impl AgentEvent {
             warn_unknown_host_event_once(session_id, event_type);
             return Ok(None);
         };
-        let event = match from_host_special(session_id, event_type, payload) {
-            Some(event) => event,
-            None => from_host_generic(session_id, event_type, payload)?,
+        let (event, dropped) = match from_host_special(session_id, event_type, payload) {
+            Some(event) => {
+                let dropped = dropped_payload_keys(session_id, policy, payload, &event, None)?;
+                (event, dropped)
+            }
+            None => {
+                let (event, normalized) = from_host_generic(session_id, event_type, payload)?;
+                let mut dropped =
+                    dropped_payload_keys(session_id, policy, payload, &event, Some(&normalized))?;
+                if matches!(event_type, "tool_call" | "tool_call_update")
+                    && payload.get("audit").is_some_and(|value| !value.is_null())
+                {
+                    dropped.push("audit".to_string());
+                }
+                (event, dropped)
+            }
         };
-        report_dropped_payload_keys(session_id, event_type, policy, payload, &event);
+        reject_dropped_payload_keys(session_id, event_type, payload, dropped)?;
         Ok(Some(event))
     }
 
@@ -682,13 +790,14 @@ fn feedback_streak(payload: &Value) -> Option<usize> {
 }
 
 /// Generic path: allowlist-check, normalize the payload to match the
-/// enum's serde shape, deserialize, then override the ambient `audit`
-/// for the two tool-call variants.
+/// enum's serde shape, deserialize, then override the ambient `audit` for the
+/// two tool-call variants. Return the normalized input for the skipped-field
+/// probe in [`dropped_payload_keys`].
 fn from_host_generic(
     session_id: &str,
     event_type: &str,
     payload: &Value,
-) -> Result<AgentEvent, VmError> {
+) -> Result<(AgentEvent, Map<String, Value>), VmError> {
     let mut obj = match payload {
         Value::Object(map) => map.clone(),
         _ => Map::new(),
@@ -699,13 +808,14 @@ fn from_host_generic(
         "session_id".to_string(),
         Value::String(session_id.to_string()),
     );
-    let mut event: AgentEvent = serde_json::from_value(Value::Object(obj)).map_err(|error| {
-        reject(
-            session_id,
-            format!("invalid `{event_type}` payload: {error}"),
-            payload,
-        )
-    })?;
+    let mut event: AgentEvent =
+        serde_json::from_value(Value::Object(obj.clone())).map_err(|error| {
+            reject(
+                session_id,
+                format!("invalid `{event_type}` payload: {error}"),
+                payload,
+            )
+        })?;
     // `tool_call` / `tool_call_update` carry the mutation-session audit
     // context active at emit time, never a payload-supplied value.
     if let AgentEvent::ToolCall { audit, .. } | AgentEvent::ToolCallUpdate { audit, .. } =
@@ -713,7 +823,7 @@ fn from_host_generic(
     {
         *audit = crate::orchestration::current_mutation_session();
     }
-    Ok(event)
+    Ok((event, obj))
 }
 
 /// Refuse a malformed payload of a *registered* host event, loudly.
