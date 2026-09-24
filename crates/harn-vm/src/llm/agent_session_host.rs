@@ -478,15 +478,15 @@ fn first_dict_i64(sources: &[&VmValue], keys: &[&str]) -> i64 {
 
 fn first_provider_cache_usage_i64(
     sources: &[&VmValue],
-    extractor: fn(&serde_json::Value) -> i64,
-) -> i64 {
+    extractor: fn(&serde_json::Value) -> Result<i64, VmError>,
+) -> Result<i64, VmError> {
     for source in sources {
-        let tokens = extractor(&vm_to_json(source));
+        let tokens = extractor(&vm_to_json(source))?;
         if tokens != 0 {
-            return tokens;
+            return Ok(tokens);
         }
     }
-    0
+    Ok(0)
 }
 
 fn opt_str(map: &crate::value::DictMap, key: &str) -> Option<String> {
@@ -926,9 +926,9 @@ fn host_agent_session_record_usage_builtin(
         first_dict_i64(&[&llm_block, &usage_block, &llm_result], &["output_tokens"]);
     let usage_sources = [&llm_result, &usage_block, &llm_block];
     let cache_read_tokens =
-        first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_read_tokens);
+        first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_read_tokens)?;
     let cache_write_tokens =
-        first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_write_tokens);
+        first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_write_tokens)?;
     let provider = dict_get(&llm_result, "provider")
         .map(|v| v.display())
         .unwrap_or_default();

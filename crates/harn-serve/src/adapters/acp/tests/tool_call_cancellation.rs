@@ -9,7 +9,7 @@ async fn session_cancel_tool_call_targets_registered_call() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;

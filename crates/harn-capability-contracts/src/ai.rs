@@ -6,6 +6,27 @@ capability_method!(
     "Read the model catalog."
 );
 capability_method!(
+    llm_evaluate_predicate,
+    "harness.llm.evaluate_predicate",
+    ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    harn_builtin_meta::predicate::EVALUATE_PREDICATE,
+    "Evaluate a declared probabilistic predicate and require an explicit outcome disposition."
+);
+capability_method!(
+    llm_evaluate,
+    "harness.llm.evaluate",
+    ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    harn_builtin_meta::predicate::EVALUATE,
+    "Evaluate a declared question set over one shared state and require an explicit outcome disposition."
+);
+capability_method!(
+    llm_estimate_state_tokens,
+    "harness.llm.estimate_state_tokens",
+    [],
+    harn_builtin_meta::predicate::ESTIMATE_STATE_TOKENS,
+    "Measure a state with the evaluator's own token estimator, the one its state ceiling compares against."
+);
+capability_method!(
     llm_catalog_refresh,
     "harness.llm.catalog_refresh",
     ["llm.mutate@const=catalog"],
@@ -648,8 +669,8 @@ capability_method!(
     // runtime-owned, not model-facing state effects. Inflated contracts
     // reject under agent-loop execution policy and abort turns mid-flight.
     [],
-    "__cap_agent_session_pop_last_assistant(session_id: string) -> dict",
-    "Remove and return the last assistant message."
+    "__cap_agent_session_pop_last_assistant(session_id: string, replacement?: string, reason?: string) -> dict",
+    "Remove the last assistant message, optionally leaving a bookkeeping turn in its place."
 );
 capability_method!(
     agent_session_record_tool_results,

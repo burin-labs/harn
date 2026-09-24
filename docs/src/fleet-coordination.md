@@ -237,14 +237,17 @@ without mistaking unavailable process visibility for death. This is the
 appropriate lifetime for an authoritative measurement that must not expire
 mid-run.
 
-`whole-machine` remains the default resource class for existing callers.
+`whole-machine` remains the default resource class for acquisition and the
+Harn `host_lease_status` wrapper.
 `rust-heavy` is a separate capacity-one class for CPU-, linker-, and
 cache-intensive Cargo work, so independent Rust verification can serialize
 without conflating it with every host-level activity. A domain names an
 independent capacity-one lease within a resource class. Use stable, semantic
 domains when one host must serialize several unrelated workflows. The default
-domain preserves the original single-lease behavior. Inspect and release the
-same resource and domain explicitly:
+domain preserves the original single-lease behavior. CLI `status` without
+`--resource-class` inspects every registered resource class and every domain
+with active or pending work. An optional `--domain` restricts that overview.
+Inspect and release one resource and domain explicitly:
 
 ```bash
 harn host lease status \
@@ -259,6 +262,23 @@ harn host lease release \
     --lease-id "$lease_id" \
     --json
 ```
+
+Status includes `active` ownership and an ordered `pending` list from the
+same admission queue used to choose the next worker. An absent active lease
+does not imply idle while requests remain pending. Each pending entry carries
+`waiter_id`, `priority_class`, `requested_at_ms`, `deadline_at_ms`, `owner_pid`,
+and `recoverable`; supervised workloads use their durable run id as the
+waiter id. Expired or confirmed dead-process queue entries are removed using
+the admission cleanup policy. Unknown process liveness preserves the entry.
+
+The CLI envelope is version 4. An unscoped status returns
+`data: {schema_version, host, observed_at_ms, resources}`, with one scoped
+status per resource and domain. Even an idle host reports the registered
+classes in the default domain, so an empty observation cannot masquerade as
+an idle scheduler. Passing `--resource-class` retains the single-resource
+shape and defaults its domain to `default`. Scoped status records are version
+5 and require `pending`, including an empty list for a measured empty queue.
+Registry failures remain typed errors rather than empty observations.
 
 When an acquire or status operation transactionally removes an expired or
 dead-owner lease, its receipt includes the exact prior handle in `recovered`.

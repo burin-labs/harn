@@ -36,4 +36,15 @@ pipeline main(harness: Harness) {
   harness.stdio.println(len(tagged.tool_calls))
   harness.stdio.println(len(tagged.protocol_violations) == 1)
   harness.stdio.println(contains(tagged.protocol_violations[0].message, "<tool_call>"))
+  for answer in ["{\"verdict\":\"pass\"}", "[1,2]", "[{\"verdict\":\"pass\"}]", "{}"] {
+    const parsed = agent_parse_tool_calls(harness.agent, answer, nil, "json")
+    assert(len(parsed.tool_calls) == 0, "ordinary JSON answers must not dispatch tools")
+    assert(len(parsed.tool_parse_errors) == 0, "ordinary JSON must not trigger tool repair")
+    assert(len(parsed.protocol_violations) == 0, "ordinary JSON is not a call envelope")
+    assert(parsed.prose == answer, "answer data must survive for output validation")
+  }
+  for malformed in ["{\"name\":\"\",\"args\":{}}", "```tool\n{\"verdict\":\"pass\"}\n```"] {
+    const parsed = agent_parse_tool_calls(harness.agent, malformed, nil, "json")
+    assert(len(parsed.tool_parse_errors) > 0, "malformed declared calls still need repair")
+  }
 }

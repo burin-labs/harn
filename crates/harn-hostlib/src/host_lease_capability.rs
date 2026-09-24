@@ -7,6 +7,7 @@
 //! layout or parsing the `harn host lease` CLI envelope.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use harn_vm::{VmResourceGuardHandle, VmValue};
@@ -14,9 +15,9 @@ use harn_vm::{VmResourceGuardHandle, VmValue};
 use crate::error::HostlibError;
 use crate::host_lease::{
     HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseDeferReceipt, HostLeaseHandle,
-    HostLeaseMetadataUpdateReceipt, HostLeasePriorityClass, HostLeaseQueueEvidence,
-    HostLeaseReleaseReceipt, HostLeaseRequest, HostLeaseResourceClass, HostLeaseState,
-    HostLeaseStore, DEFAULT_HOST_LEASE_DOMAIN,
+    HostLeaseMetadataUpdateReceipt, HostLeasePendingRequest, HostLeasePriorityClass,
+    HostLeaseQueueEvidence, HostLeaseReleaseReceipt, HostLeaseRequest, HostLeaseResourceClass,
+    HostLeaseState, HostLeaseStore, DEFAULT_HOST_LEASE_DOMAIN,
 };
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
@@ -462,6 +463,12 @@ fn state_to_value(state: &HostLeaseState) -> Result<VmValue, HostlibError> {
         ("observed_at_ms", VmValue::Int(state.observed_at_ms)),
         ("active", active),
         (
+            "pending",
+            VmValue::List(Arc::new(
+                state.pending.iter().map(pending_to_value).collect(),
+            )),
+        ),
+        (
             "recovered_stale_lease",
             VmValue::Bool(state.recovered_stale_lease),
         ),
@@ -475,6 +482,24 @@ fn state_to_value(state: &HostLeaseState) -> Result<VmValue, HostlibError> {
                 .unwrap_or(VmValue::Nil),
         ),
     ]))
+}
+
+fn pending_to_value(pending: &HostLeasePendingRequest) -> VmValue {
+    build_dict([
+        ("waiter_id", str_value(&pending.waiter_id)),
+        ("priority_class", str_value(pending.priority_class.as_str())),
+        ("requested_at_ms", VmValue::Int(pending.requested_at_ms)),
+        ("deadline_at_ms", VmValue::Int(pending.deadline_at_ms)),
+        (
+            "owner_pid",
+            pending
+                .owner_pid
+                .map(i64::from)
+                .map(VmValue::Int)
+                .unwrap_or(VmValue::Nil),
+        ),
+        ("recoverable", VmValue::Bool(pending.recoverable)),
+    ])
 }
 
 fn handle_to_value(
@@ -553,6 +578,7 @@ mod tests {
             domain: DEFAULT_HOST_LEASE_DOMAIN.to_string(),
             observed_at_ms: 42,
             active: None,
+            pending: Vec::new(),
             recovered_stale_lease: true,
             recovered: Some(HostLeaseHandle {
                 schema_version: 1,

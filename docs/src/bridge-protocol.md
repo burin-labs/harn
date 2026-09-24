@@ -156,7 +156,7 @@ that route on it keep working unchanged. Concretely:
 | `log`                  | `level`, `message`, `fields`                                                                                                           |
 | `fs_watch`             | `subscriptionId`, `events`                                                                                                             |
 | `worker_update`        | `workerId`, `workerName`, `workerTask`, `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`                               |
-| `transcript_compacted` | `receiptId`, `schemaVersion`, `mode`, `reason`, `strategy`, `engineStrategy`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`, `instructionMode`, `instructionSource`, `compactionPolicy`, `recap` |
+| `transcript_compacted` | `receiptId`, `schemaVersion`, `mode`, `reason`, `strategy`, `engineStrategy`, `requestedStrategy`, `resolvedThresholdTokens`, `thresholdSource`, `hardLimitTokens`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`, `instructionMode`, `instructionSource`, `compactionPolicy`, `recap`, `sourceMeasurement` |
 | `transcript_projected` | `policy`, `reason`, `prefixHash`, `keptCount`, `droppedCount`, `providerSafetyBlocked`, `redactedCount`, `reclaimedTokens`, `rootsConsulted`, `redactionPointers` |
 | `handoff`              | `handoffId`, `artifactId`, `handoff`                                                                                                   |
 | `skill_activated`      | `skillName`, `iteration`, `reason`                                                                                                     |
@@ -172,6 +172,23 @@ Hosts migrating from pre-#905 builds must read these fields from
 `_meta.harn.<field>` instead of the update root. The fixture
 `crates/harn-serve/tests/fixtures/acp/session_update_extensions.json`
 pins the new wire shape verbatim.
+
+The schema in `conformance/protocols/schemas/acp-session-update.schema.json`
+owns the generated extension records. Decode Harn extensions through Rust's
+`ACPTypedSessionUpdate` or Swift's `HarnACPTypedSessionUpdate`, then read the
+variant's typed `meta.harn` fields. These decoders enforce required fields,
+identity constraints, and conditional requirements such as the escape tool on
+a write-access stance transition. They do not accept the retired root-field
+envelopes. Standard `available_commands_update` keeps `availableCommands` at
+the update root. The generated TypeScript union is `ACPTypedSessionUpdate`;
+`ACPHarnExtensionUpdate` aliases it, so the envelope cannot bypass required
+fields through a generic extension. Static types do not replace runtime schema
+validation.
+
+The Rust and Swift binding checks consume the adapter's same 17-kind fixture,
+round-trip every field, and refuse the corresponding empty-metadata controls.
+Replay markers and explicit null metadata are also checked. The former
+`HARN_TYPED_SESSION_UPDATE_PAYLOADS` field-table constant is removed.
 
 `reminder_emitted` is sent when a pending system reminder is rendered
 into the next model request. Its payload lives at
@@ -668,8 +685,10 @@ Payload:
 ```
 
 On the ACP adapter surface, hosts can wake the daemon by sending a pending
-user-message inject. `session/inject` accepts `{sessionId, mode, content}`
-where `content` is a string or ACP content-block array, then responds
+user-message inject. `session/inject` accepts `{sessionId, mode, content,
+goal?}` where `content` is a string or ACP content-block array and the
+optional `goal` (`{objective}`, steer or interrupt only) retargets the run, then
+responds
 immediately with `status: "accepted"` and an agent-owned `messageId`. Harn
 later delivers the same id as `session/update` with `sessionUpdate:
 "user_message"`. `mode: "interrupt_immediate"` drains at the next eligible

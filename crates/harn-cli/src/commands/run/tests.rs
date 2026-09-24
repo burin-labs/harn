@@ -5,8 +5,8 @@ use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
     eval_source_for_code, execute_explain_cost, execute_run, execute_run_with_options,
     install_cli_llm_mock_mode, persist_cli_llm_mock_recording, run_sandbox_attestation,
-    split_eval_header, CliLlmMockMode, ProjectRuntimeMode, RunExecutionOptions, RunProfileOptions,
-    RunSandboxOptions, StdoutPassthroughGuard,
+    split_eval_header, CliLlmMockMode, ProjectRuntimeMode, RunExecutionOptions, RunProcessGrants,
+    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
 };
 // Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
 // a forked child), so an unconditional import is dead on Windows and trips
@@ -17,6 +17,7 @@ use super::EnvironmentPolicyConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+mod eval_source;
 mod evidence;
 mod exit_status;
 mod host_dispatch;
@@ -168,61 +169,6 @@ async fn execute_standalone_run(path: &str) -> super::RunOutcome {
 }
 
 #[test]
-fn split_eval_header_no_imports_returns_full_body() {
-    let (header, body) = split_eval_header("log(1 + 2)");
-    assert_eq!(header, "");
-    assert_eq!(body, "log(1 + 2)");
-}
-
-#[test]
-fn split_eval_header_lifts_leading_imports() {
-    let code = "import \"./lib\"\nimport { x } from \"std/math\"\nlog(x)";
-    let (header, body) = split_eval_header(code);
-    assert_eq!(header, "import \"./lib\"\nimport { x } from \"std/math\"");
-    assert_eq!(body, "log(x)");
-}
-
-#[test]
-fn split_eval_header_keeps_pub_import_and_comments_in_header() {
-    let code = "// header comment\npub import { y } from \"./lib\"\n\nfoo()";
-    let (header, body) = split_eval_header(code);
-    assert_eq!(
-        header,
-        "// header comment\npub import { y } from \"./lib\"\n"
-    );
-    assert_eq!(body, "foo()");
-}
-
-#[test]
-fn split_eval_header_does_not_lift_imports_after_other_statements() {
-    let code = "const a = 1\nimport \"./lib\"";
-    let (header, body) = split_eval_header(code);
-    assert_eq!(header, "");
-    assert_eq!(body, "const a = 1\nimport \"./lib\"");
-}
-
-#[test]
-fn eval_source_wraps_pipeline_body_snippets() {
-    assert_eq!(
-        eval_source_for_code("let x = 1\n__io_println(x)"),
-        "pipeline main(harness: Harness, task: unknown) {\nlet x = 1\n__io_println(x)\n}"
-    );
-}
-
-#[test]
-fn eval_source_keeps_full_harn_programs_unnested() {
-    let code = "pipeline default(harness: Harness) {\n  harness.stdio.println(\"ok\")\n}\n";
-    assert_eq!(eval_source_for_code(code), code);
-}
-
-#[test]
-fn eval_source_keeps_imported_full_harn_programs_unnested() {
-    let code =
-        "import { x } from \"./lib\"\n\npipeline default(harness: Harness) {\n  harness.stdio.println(x)\n}\n";
-    assert_eq!(eval_source_for_code(code), code);
-}
-
-#[test]
 fn cli_llm_mock_roundtrips_logprobs() {
     let mock = harn_vm::llm::parse_llm_mock_value(&serde_json::json!({
         "text": "visible",
@@ -322,9 +268,39 @@ fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
 #[test]
 fn default_run_policy_keeps_loopback_separate_from_remote_network() {
     let workspace = Path::new("/tmp/workspace");
-    let default = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, false);
-    let network = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], true, false);
-    let loopback = default_run_capability_policy(workspace, &[], &[], &[], &[], &[], false, true);
+    let default = default_run_capability_policy(
+        workspace,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        RunProcessGrants::default(),
+    );
+    let network = default_run_capability_policy(
+        workspace,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        RunProcessGrants {
+            network: true,
+            ..RunProcessGrants::default()
+        },
+    );
+    let loopback = default_run_capability_policy(
+        workspace,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        RunProcessGrants {
+            loopback: true,
+            ..RunProcessGrants::default()
+        },
+    );
 
     assert_eq!(default.side_effect_level.as_deref(), Some("process_exec"));
     assert_eq!(network.side_effect_level.as_deref(), Some("network"));
@@ -391,6 +367,11 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["process_network_enabled"], true);
     assert_eq!(metadata["process_loopback_requested"], false);
     assert_eq!(metadata["process_loopback_enabled"], true);
+    // This run asks for no socket roots, and the receipt has to say that
+    // rather than omit the field: a reader who sees an empty root list and no
+    // disposition cannot tell "nothing was requested" from "a backend quietly
+    // declined to scope it".
+    assert_eq!(metadata["process_unix_socket_enforcement"], "not_requested");
     assert_eq!(
         metadata["process_network_mode"],
         if cfg!(target_os = "macos") {
@@ -618,8 +599,7 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
         &[],
         &[],
         &[],
-        false,
-        false,
+        RunProcessGrants::default(),
     );
 
     assert_eq!(policy.side_effect_level.as_deref(), Some("process_exec"));

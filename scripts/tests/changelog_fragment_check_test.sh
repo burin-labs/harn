@@ -11,7 +11,7 @@ new_repo() {
   local name=$1
   local dir="$tmp_root/$name"
   mkdir -p "$dir"
-  git -C "$dir" init -q
+  git -C "$dir" init -b main -q
   git -C "$dir" config user.name "Harn Test"
   git -C "$dir" config user.email "harn-test@example.invalid"
   git -C "$dir" config commit.gpgsign false

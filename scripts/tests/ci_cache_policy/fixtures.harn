@@ -71,6 +71,19 @@ pub fn ci_concurrency() {
   }
 }
 
+pub fn e2e_concurrency() {
+  return {
+    group: gha_expression("github.workflow")
+      + "-"
+      + gha_expression(
+        "github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref",
+      ),
+    "cancel-in-progress": gha_expression(
+      "github.event_name == 'pull_request' && github.event.action == 'synchronize'",
+    ),
+  }
+}
+
 pub fn cache_refresh_generation_steps(miss_guard: string) {
   return {
     steps: [
@@ -196,7 +209,7 @@ pub fn release_binary_workflow() {
     concurrency: {
       group: "build-release-binaries-"
         + gha_expression(
-          "(github.event_name == 'workflow_dispatch' && inputs.candidate_source_sha != '' && format('candidate-{0}', inputs.candidate_source_sha)) || (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && github.ref_type == 'branch' && format('branch-{0}', github.run_id)) || inputs.tag || github.ref_name",
+          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
         ),
       "cancel-in-progress": gha_expression(
         "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)",
@@ -223,10 +236,7 @@ pub fn release_binary_workflow() {
                 "steps.release-build-inputs.outputs.release_build_inputs || 'false'",
               ),
             },
-            run: "if [[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]; then\n  :\nfi\n"
-              + "select(\n"
-              + "  (.event == \"push\" and ((.headBranch // \"\") | test(\"^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+(-[0-9A-Za-z.-]+)?$\")))\n"
-              + ")",
+            run: "if [[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]; then\n  :\nfi\n",
           },
         ],
       },
@@ -379,7 +389,7 @@ pub fn workflows() {
           permissions: {actions: "write", contents: "write"},
           env: {
             HARN_RELEASE_CACHE_SAVE_ENABLED: gha_expression(
-              "((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false'",
+              "((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false'",
             ),
           },
           steps: [

@@ -67,6 +67,21 @@ Rules:
   `metadata.transcript_budget.last_action` so hosts can explain why context was
   trimmed or compacted.
 
+The provider's transport role does not determine product visibility. A context
+directive can travel as a user-role message while its canonical event and text
+blocks remain internal. The runtime uses the directive's typed identity marker
+to make that distinction; matching a text prefix would also hide genuine user
+messages.
+
+Public narration accompanying a native tool call stays a message in its original
+position. Separate tool lifecycle events carry the call and result. A result
+updates the tool node without replacing the narration, including when one
+assistant message introduces several tool calls.
+
+These visibility and message-kind decisions happen when recording the event;
+they do not rewrite older stored events. Tool input projection prefers normalized
+arguments and falls back to recorded raw arguments when needed.
+
 Persistence split:
 
 - Hosts should persist asset files and any product-level chat/session metadata

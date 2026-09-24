@@ -1,0 +1,170 @@
+// Tests for scripts/release_changelog_fold.harn, the release fold's one owner.
+//
+// The three `*_EXPECTED` texts were produced by the release harness's fold
+// (the implementation this module replaces) on these exact inputs, so each
+// comparison is byte for byte against the fold that shipped earlier releases.
+import { with_temp_dir } from "std/testing"
+import {
+  ReleaseFragmentFile,
+  apply_release_changelog_fold,
+  fold_release_changelog,
+  is_release_changelog_fragment_name,
+  release_section_findings,
+} from "../release_changelog_fold.harn"
+
+const BASIC_CHANGELOG =
+  "# Changelog\n\nAll notable changes to this project are documented here.\n\n## v1.2.3\n\n### Fixed\n\n- **Older fix (#10).** Kept as published.\n"
+
+const BASIC_FILES: list<ReleaseFragmentFile> = [
+  {name: ".gitkeep", body: ""},
+  {name: ".markdownlint-cli2.jsonc", body: "{}\n"},
+  {name: "8012.fixed.md", body: "- **Retry budget is spent on retries (#8012).**\n"},
+  {
+    name: "8218.fixed.md",
+    body:
+      "- **Lint no longer flags `parallel` options (#8218).** Locals used only\n  in options are no longer reported.\n- Second bullet in the same fragment.\n",
+  },
+  {
+    name: "8557.added.md",
+    body:
+      "- **Parser accepts trailing commas in records (#8557).** Records written\n  across lines may end with a comma.\n",
+  },
+  {name: "8646.security.md", body: "- **Token no longer logged (#8646).**\n"},
+  {name: "9.breaking.md", body: "A bare paragraph with no bullet marker (#9).\n"},
+  {name: "README.md", body: "# fragments\n"},
+  {name: "migration-2026-05.changed.md", body: "- Slug id fragment (migration).\n"},
+]
+
+const BASIC_EXPECTED =
+  "# Changelog\n\nAll notable changes to this project are documented here.\n\n## v1.2.4\n\n### Breaking\n\n- A bare paragraph with no bullet marker (#9).\n\n### Added\n\n- **Parser accepts trailing commas in records (#8557).** Records written\n  across lines may end with a comma.\n\n### Changed\n\n- Slug id fragment (migration).\n\n### Fixed\n\n- **Retry budget is spent on retries (#8012).**\n- **Lint no longer flags `parallel` options (#8218).** Locals used only\n  in options are no longer reported.\n- Second bullet in the same fragment.\n\n### Security\n\n- **Token no longer logged (#8646).**\n\n## v1.2.3\n\n### Fixed\n\n- **Older fix (#10).** Kept as published.\n"
+
+const UNRELEASED_CHANGELOG =
+  "# Changelog\n\n## Unreleased\n\n### Fixed\n\n- **Operator-typed fix (#700).** Authored directly.\n\n### Notes\n\n- A free-form operator note.\n\n## v1.2.3\n\n- old\n"
+
+const UNRELEASED_FILES: list<ReleaseFragmentFile> = [
+  {name: "701.fixed.md", body: "- **Fragment fix (#701).**\n"},
+  {name: "702.added.md", body: "- **Fragment feature (#702).**\n"},
+]
+
+const UNRELEASED_EXPECTED =
+  "# Changelog\n\n## v1.2.4\n\n### Added\n\n- **Fragment feature (#702).**\n\n### Fixed\n\n- **Operator-typed fix (#700).** Authored directly.\n\n- **Fragment fix (#701).**\n\n### Notes\n\n- A free-form operator note.\n\n## v1.2.3\n\n- old\n"
+
+const EXISTING_TOP_CHANGELOG =
+  "# Changelog\n\n## Unreleased\n\n### Added\n\n- **Late addition (#801).**\n\n## v1.2.4\n\n### Added\n\n- **Earlier addition (#800).**\n\n### Fixed\n\n- **Earlier fix (#799).**\n\n## v1.2.3\n\n- old\n"
+
+const EXISTING_TOP_FILES: list<ReleaseFragmentFile> = [
+  {name: "802.fixed.md", body: "- **Fragment fix (#802).**\n"},
+]
+
+const EXISTING_TOP_EXPECTED =
+  "# Changelog\n\n## v1.2.4\n\n### Added\n\n- **Late addition (#801).**\n\n- **Earlier addition (#800).**\n\n### Fixed\n\n- **Fragment fix (#802).**\n\n- **Earlier fix (#799).**\n\n## v1.2.3\n\n- old\n"
+
+fn write_fixture(fs: HarnessFs, root: string, changelog: string, files: list<ReleaseFragmentFile>) {
+  fs.mkdir(path_join(root, "changelog.d"))
+  fs.write_text(path_join(root, "CHANGELOG.md"), changelog)
+  for file in files {
+    fs.write_text(path_join(root, "changelog.d", file.name), file.body)
+  }
+}
+
+@test
+pipeline test_fold_matches_the_release_harness_on_every_category() {
+  const fold = fold_release_changelog(BASIC_CHANGELOG, BASIC_FILES, "1.2.4")
+  assert_eq(fold.findings, [])
+  assert(fold.success)
+  assert_eq(fold.text, BASIC_EXPECTED)
+  assert_eq(len(fold.fragments), 6)
+}
+
+@test
+pipeline test_fold_matches_the_release_harness_with_operator_unreleased_bullets() {
+  const fold = fold_release_changelog(UNRELEASED_CHANGELOG, UNRELEASED_FILES, "1.2.4")
+  assert(fold.success)
+  assert_eq(fold.text, UNRELEASED_EXPECTED)
+}
+
+@test
+pipeline test_fold_matches_the_release_harness_when_the_version_section_exists() {
+  const fold = fold_release_changelog(EXISTING_TOP_CHANGELOG, EXISTING_TOP_FILES, "1.2.4")
+  assert(fold.success)
+  assert_eq(fold.message, "merged Unreleased notes into existing v1.2.4 section")
+  assert_eq(fold.text, EXISTING_TOP_EXPECTED)
+}
+
+@test
+pipeline test_apply_writes_the_changelog_and_deletes_only_folded_fragments(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_fixture(harness.fs, root, BASIC_CHANGELOG, BASIC_FILES)
+      apply_release_changelog_fold(harness.fs, root, "1.2.4")
+      assert_eq(harness.fs.read_text(path_join(root, "CHANGELOG.md")), BASIC_EXPECTED)
+      assert_eq(
+        harness.fs.list_dir(path_join(root, "changelog.d")).sorted(),
+        [".gitkeep", ".markdownlint-cli2.jsonc", "README.md"],
+      )
+    },
+  )
+}
+
+@test
+pipeline test_an_empty_fragment_refuses_and_writes_nothing(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const files = BASIC_FILES + [{name: "8700.fixed.md", body: "\n"}]
+      write_fixture(harness.fs, root, BASIC_CHANGELOG, files)
+      const refusal = try {
+        apply_release_changelog_fold(harness.fs, root, "1.2.4")
+        ""
+      } catch (e) {
+        to_string(e)
+      }
+      assert(contains(refusal, "changelog.d/8700.fixed.md"), refusal)
+      assert_eq(harness.fs.read_text(path_join(root, "CHANGELOG.md")), BASIC_CHANGELOG)
+      assert(harness.fs.exists(path_join(root, "changelog.d", "8012.fixed.md")))
+    },
+  )
+}
+
+@test
+pipeline test_no_fragments_and_no_unreleased_entries_refuses() {
+  const fold = fold_release_changelog(BASIC_CHANGELOG, [], "1.2.4")
+  assert(!fold.success)
+  assert(contains(fold.message, "no release notes for v1.2.4"), fold.message)
+  assert_eq(fold.text, BASIC_CHANGELOG)
+}
+
+@test
+pipeline test_an_already_folded_changelog_is_unchanged() {
+  const fold = fold_release_changelog(BASIC_EXPECTED, [], "1.2.4")
+  assert(fold.success)
+  assert(!fold.changed)
+  assert_eq(fold.text, BASIC_EXPECTED)
+}
+
+@test
+pipeline test_a_fragment_missing_from_the_section_is_a_finding() {
+  const fold = fold_release_changelog(BASIC_CHANGELOG, BASIC_FILES, "1.2.4")
+  const lost = fold.fragments
+    + [{id: "8999", category: "fixed", body: "- **Never folded (#8999).**", file: "8999.fixed.md"}]
+  assert_eq(release_section_findings(fold.text, "1.2.4", fold.fragments), [])
+  assert_eq(
+    release_section_findings(fold.text, "1.2.4", lost),
+    ["changelog.d fragment 8999 (fixed) is not represented in the `## v1.2.4` section"],
+  )
+  assert_eq(
+    release_section_findings(BASIC_CHANGELOG, "1.2.4", []),
+    ["CHANGELOG top section is `## v1.2.3`; expected `## v1.2.4`"],
+  )
+}
+
+@test
+pipeline test_fragment_names_follow_the_category_convention() {
+  assert(is_release_changelog_fragment_name("8012.fixed.md"))
+  assert(is_release_changelog_fragment_name("migration-2026-05.changed.md"))
+  assert(!is_release_changelog_fragment_name("README.md"))
+  assert(!is_release_changelog_fragment_name(".gitkeep"))
+  assert(!is_release_changelog_fragment_name("8012.unknown.md"))
+  assert(!is_release_changelog_fragment_name("8012.fixed.txt"))
+}

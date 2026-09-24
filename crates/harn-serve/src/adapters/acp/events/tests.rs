@@ -1647,6 +1647,11 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
 async fn vendor_extension_session_update_fields_live_under_meta_harn() {
     let actual = collect_notifications(extension_fixture_events()).await;
 
+    // The compaction block is generated from the receipt, so its expected
+    // field set is read off the receipt too rather than listed a second time.
+    let compaction_meta =
+        fixture_compaction_receipt("compaction-fixture-1", None, None, None).to_acp_meta();
+    let compaction_fields: Vec<&str> = compaction_meta.keys().map(String::as_str).collect();
     let expectations: &[(&str, &[&str])] = &[
         (
             "artifact",
@@ -1688,24 +1693,7 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
             "tool_search_result",
             &["toolUseId", "promoted", "strategy", "mode"],
         ),
-        (
-            "transcript_compacted",
-            &[
-                "receiptId",
-                "schemaVersion",
-                "mode",
-                "reason",
-                "strategy",
-                "engineStrategy",
-                "archivedMessages",
-                "estimatedTokensBefore",
-                "estimatedTokensAfter",
-                "snapshotAssetId",
-                "instructionMode",
-                "instructionSource",
-                "compactionPolicy",
-            ],
-        ),
+        ("transcript_compacted", &compaction_fields),
         (
             "transcript_projected",
             &[

@@ -54,6 +54,8 @@ pub enum GrantSource {
     Env,
     /// A pointer into the `secret_store` facade, resolved on use.
     SecretStore,
+    /// A value stated outright by the declaration.
+    Literal,
 }
 
 impl GrantSource {
@@ -62,6 +64,7 @@ impl GrantSource {
         match self {
             GrantSource::Env => "env",
             GrantSource::SecretStore => "secret_store",
+            GrantSource::Literal => "literal",
         }
     }
 }
@@ -76,6 +79,22 @@ pub enum GrantSourceSpec {
     Env { var: String },
     /// A `secret_store` account/key pointer, resolved lazily on exposure.
     SecretStore { account: String, key: String },
+    /// A value the declaration states outright, used verbatim.
+    ///
+    /// The other two sources name where a value will come from. This one is
+    /// the value, which is why it exists: a host sometimes has to say what a
+    /// child should hold rather than hope the launcher holds it. The case
+    /// that forced it is the empty string, because several developer tools
+    /// read an empty variable as an explicit "off" that differs from the
+    /// variable being absent, and a snapshot source cannot express "off" for
+    /// a name the launcher has never set.
+    ///
+    /// Not a secret channel. A literal is written in the declaration and
+    /// travels with it, so it is exactly as visible as the declaration is.
+    /// Credentials belong in [`GrantSourceSpec::SecretStore`], which stays a
+    /// pointer and stays revocable, and a literal that states a secret
+    /// reference is refused at launch rather than trusted to a reader.
+    Literal { value: String },
 }
 
 impl GrantSourceSpec {
@@ -83,6 +102,7 @@ impl GrantSourceSpec {
         match self {
             GrantSourceSpec::Env { .. } => GrantSource::Env,
             GrantSourceSpec::SecretStore { .. } => GrantSource::SecretStore,
+            GrantSourceSpec::Literal { .. } => GrantSource::Literal,
         }
     }
 }
@@ -186,6 +206,31 @@ impl GrantSpec {
                     key: key.to_string(),
                 }
             }
+            GrantSourceSpec::Literal { value } => {
+                // A secret reference is not a constant. The vocabulary has a
+                // source for credentials and it stays a pointer, so the store
+                // remains the single source of truth and the grant remains
+                // revocable. A credential written here would be laundered
+                // into the declaration, where it is as durable as the
+                // declaration is. There is no registry of names the secret
+                // vocabulary claims, so this keys on the reference scheme,
+                // which is the one structural marker that exists.
+                if value
+                    .trim_start()
+                    .starts_with(crate::secrets::SECRET_REF_SCHEME)
+                {
+                    return Err(EnvironmentPolicyError::LiteralSecretReference {
+                        name: name.to_string(),
+                    });
+                }
+                // Otherwise verbatim, including an empty value and including
+                // surrounding whitespace. The other two sources trim because
+                // they carry a NAME, where whitespace is a typo. This one
+                // carries a VALUE, where whitespace may be the point, and
+                // trimming would be the vocabulary quietly editing what the
+                // host said.
+                ResolvedRef::Literal(value)
+            }
         };
         Ok(SessionGrant {
             name: name.to_string(),
@@ -210,6 +255,8 @@ enum ResolvedRef {
     /// a pointer (not a snapshot) so the upstream source stays the single
     /// source of truth and the grant remains revocable.
     SecretStore { account: String, key: String },
+    /// A value the declaration stated. Held as given.
+    Literal(String),
 }
 
 /// A grant validated and resolved once at the launch boundary. Consumers read
@@ -282,7 +329,7 @@ impl SessionGrant {
     ) -> Option<Result<(String, String), EnvironmentPolicyError>> {
         let var = self.expose_as_env.as_ref()?;
         let value = match &self.resolved_ref {
-            ResolvedRef::EnvSnapshot(value) => value.clone(),
+            ResolvedRef::EnvSnapshot(value) | ResolvedRef::Literal(value) => value.clone(),
             ResolvedRef::SecretStore { account, key } => match resolve_secret(account, key) {
                 Some(value) => value,
                 None => {
@@ -583,6 +630,32 @@ impl SessionEnvironment {
         self.grants.iter().map(SessionGrant::receipt).collect()
     }
 
+    /// Every environment variable name a child of this session can see, sorted
+    /// and deduplicated. Names only; a value never appears here.
+    ///
+    /// This answers the question a reader of a run record actually has, which
+    /// the policy kind alone does not: *what did this run hand to the
+    /// processes that executed tool calls?* `Isolated` and `Granted` are
+    /// already allowlist-filtered in the snapshot, so this is that filtered
+    /// set plus anything a grant exposes. `Inherited` returns the launcher's
+    /// whole set, which is the honest answer for a session that asked to
+    /// inherit it, and is usually the moment a reader notices how large it is.
+    ///
+    /// Command-bound grants are included: a name reachable by some child is
+    /// exposed by this run, and a receipt that hid it behind the binding
+    /// would understate the run's authority.
+    pub fn admitted_environment_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.launcher_snapshot.keys().cloned().collect();
+        for grant in &self.grants {
+            if let Some(var) = grant.receipt().exposed_as_env {
+                names.push(var);
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
     /// Materialize the session-scoped process environment overlay: the
     /// `(VAR, value)` pairs for every grant that opted into `expose_as_env`
     /// without a `for_command` binding. Empty for an isolated policy.
@@ -727,6 +800,9 @@ pub enum EnvironmentPolicyError {
     EmptyName,
     /// An `env` source named an empty variable.
     EmptyEnvVar { name: String },
+    /// A `literal` source stated a secret reference as its value. Credentials
+    /// belong in a `secret_store` source, which stays a revocable pointer.
+    LiteralSecretReference { name: String },
     /// A `secret_store` source named an empty account or key.
     EmptySecretRef { name: String },
     /// An `expose_as_env` target was an empty variable name.
@@ -767,6 +843,12 @@ impl fmt::Display for EnvironmentPolicyError {
                 f,
                 "[environment_policy.empty_grant_name] grant spec has an empty name"
             ),
+            EnvironmentPolicyError::LiteralSecretReference { name } => {
+                write!(
+                    f,
+                    "[environment_policy.literal_secret_reference] grant '{name}' literal source states a secret reference; declare it as a secret_store source instead"
+                )
+            }
             EnvironmentPolicyError::EmptyEnvVar { name } => {
                 write!(
                     f,
@@ -849,6 +931,7 @@ impl EnvironmentPolicyError {
         match self {
             Self::EmptyName => "environment_policy.empty_grant_name",
             Self::EmptyEnvVar { .. } => "environment_policy.empty_source_variable",
+            Self::LiteralSecretReference { .. } => "environment_policy.literal_secret_reference",
             Self::EmptySecretRef { .. } => "environment_policy.empty_secret_reference",
             Self::EmptyExposeVar { .. } => "environment_policy.empty_exposure_target",
             Self::EmptyForCommand { .. } => "environment_policy.empty_for_command",
@@ -873,7 +956,8 @@ impl EnvironmentPolicyError {
             .as_object_mut()
             .expect("environment policy diagnostic is an object");
         match self {
-            Self::EmptyEnvVar { name }
+            Self::LiteralSecretReference { name }
+            | Self::EmptyEnvVar { name }
             | Self::EmptySecretRef { name }
             | Self::EmptyExposeVar { name }
             | Self::EmptyForCommand { name }
@@ -925,573 +1009,5 @@ impl EnvironmentPolicyError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn no_env(_: &str) -> Option<String> {
-        None
-    }
-
-    fn env_from(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
-        move |var: &str| {
-            pairs
-                .iter()
-                .find(|(name, _)| *name == var)
-                .map(|(_, value)| value.to_string())
-        }
-    }
-
-    fn env_grant(name: &str, var: &str, expose: Option<&str>) -> GrantSpec {
-        GrantSpec {
-            name: name.to_string(),
-            source: GrantSourceSpec::Env {
-                var: var.to_string(),
-            },
-            expose_as_env: expose.map(str::to_string),
-            for_command: None,
-        }
-    }
-
-    fn secret_grant(name: &str, account: &str, key: &str, expose: Option<&str>) -> GrantSpec {
-        GrantSpec {
-            name: name.to_string(),
-            source: GrantSourceSpec::SecretStore {
-                account: account.to_string(),
-                key: key.to_string(),
-            },
-            expose_as_env: expose.map(str::to_string),
-            for_command: None,
-        }
-    }
-
-    fn command_grant(
-        name: &str,
-        account: &str,
-        key: &str,
-        expose: &str,
-        for_command: &str,
-    ) -> GrantSpec {
-        GrantSpec {
-            name: name.to_string(),
-            source: GrantSourceSpec::SecretStore {
-                account: account.to_string(),
-                key: key.to_string(),
-            },
-            expose_as_env: Some(expose.to_string()),
-            for_command: Some(for_command.to_string()),
-        }
-    }
-
-    #[test]
-    fn isolated_rejects_any_grant_at_launch() {
-        let specs = vec![secret_grant("gh_token", "gh", "token", None)];
-        let err = SessionEnvironment::launch(EnvironmentPolicyKind::Isolated, specs, &no_env)
-            .expect_err("isolated must reject grants");
-        assert_eq!(
-            err,
-            EnvironmentPolicyError::PolicyForbidsGrants {
-                policy: EnvironmentPolicyKind::Isolated,
-                attempted: 1
-            }
-        );
-
-        // Both isolated constructors are structurally empty. The overall
-        // session default remains inherited.
-        let environment =
-            SessionEnvironment::launch(EnvironmentPolicyKind::Isolated, vec![], &no_env).unwrap();
-        assert!(environment.is_isolated());
-        assert!(environment.grants().is_empty());
-        assert!(environment.receipts().is_empty());
-        assert!(SessionEnvironment::isolated().grants().is_empty());
-        assert_eq!(
-            EnvironmentPolicyKind::default(),
-            EnvironmentPolicyKind::Inherited
-        );
-    }
-
-    #[test]
-    fn granted_policy_resolves_once_into_typed_record() {
-        let env = env_from(&[("FIREWORKS_API_KEY", "fw-secret-value")]);
-        let specs = vec![
-            env_grant("fireworks", "FIREWORKS_API_KEY", Some("FIREWORKS_API_KEY")),
-            secret_grant("gh_token", "gh", "token", Some("GH_TOKEN")),
-        ];
-        let environment =
-            SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &env).unwrap();
-
-        let grants = environment.grants();
-        assert_eq!(grants.len(), 2);
-        // Downstream reads the typed record without re-branching on the spec.
-        assert_eq!(grants[0].name(), "fireworks");
-        assert_eq!(grants[0].source_kind(), GrantSource::Env);
-        assert_eq!(grants[0].exposed_env_var(), Some("FIREWORKS_API_KEY"));
-        assert_eq!(grants[1].name(), "gh_token");
-        assert_eq!(grants[1].source_kind(), GrantSource::SecretStore);
-        assert_eq!(grants[1].exposed_env_var(), Some("GH_TOKEN"));
-
-        // Exposure materializes uniform (VAR, value) pairs. The secret store
-        // pointer is resolved here, once, through the embedder closure.
-        let resolve_secret = |account: &str, key: &str| -> Option<String> {
-            (account == "gh" && key == "token").then(|| "ghp-secret-token".to_string())
-        };
-        let mut pairs = environment.env_exposure(&resolve_secret).unwrap();
-        pairs.sort();
-        assert_eq!(
-            pairs,
-            vec![
-                (
-                    "FIREWORKS_API_KEY".to_string(),
-                    "fw-secret-value".to_string()
-                ),
-                ("GH_TOKEN".to_string(), "ghp-secret-token".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn secret_pointer_is_not_resolved_at_launch() {
-        // Resolution of a secret_store grant must not read the value at launch.
-        // A panicking secret resolver proves exposure is lazy, and an unexposed
-        // grant never calls the resolver at all.
-        let specs = vec![secret_grant("gh_token", "gh", "token", None)];
-        let environment =
-            SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &no_env).unwrap();
-        let never = |_: &str, _: &str| -> Option<String> {
-            panic!("secret resolver must not run for an unexposed grant")
-        };
-        assert!(environment.env_exposure(&never).unwrap().is_empty());
-    }
-
-    #[test]
-    fn env_grant_snapshots_value_at_launch() {
-        // The launcher env yields "live-at-launch"; the snapshot must hold that
-        // value afterward — the child never reads the live environment.
-        let at_launch = env_from(&[("TOKEN", "live-at-launch")]);
-        let specs = vec![env_grant("t", "TOKEN", Some("TOKEN"))];
-        let environment =
-            SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &at_launch).unwrap();
-
-        let never_secret = |_: &str, _: &str| -> Option<String> { None };
-        let pairs = environment.env_exposure(&never_secret).unwrap();
-        assert_eq!(
-            pairs,
-            vec![("TOKEN".to_string(), "live-at-launch".to_string())]
-        );
-        // The resolved grant is unaffected by any later env — it holds the
-        // launch-time snapshot.
-        assert_eq!(
-            environment.env_exposure(&never_secret).unwrap(),
-            vec![("TOKEN".to_string(), "live-at-launch".to_string())]
-        );
-    }
-
-    #[test]
-    fn restricted_policies_do_not_retain_unrelated_launcher_values() {
-        let snapshot = BTreeMap::from([
-            ("PATH".to_string(), "/bin".to_string()),
-            (
-                "UNRELATED_SECRET".to_string(),
-                "must-not-be-retained".to_string(),
-            ),
-        ]);
-        let granted = SessionEnvironment::launch_from_snapshot(
-            EnvironmentPolicyKind::Granted,
-            Vec::new(),
-            snapshot,
-            &no_env,
-        )
-        .unwrap();
-        assert_eq!(granted.launcher_value("PATH"), Some("/bin"));
-        assert_eq!(granted.launcher_value("UNRELATED_SECRET"), None);
-    }
-
-    #[test]
-    fn receipts_record_shape_and_never_the_value() {
-        let env = env_from(&[("FIREWORKS_API_KEY", "fw-secret-value")]);
-        let specs = vec![
-            env_grant("fireworks", "FIREWORKS_API_KEY", Some("FIREWORKS_API_KEY")),
-            secret_grant("gh_token", "gh", "token", None),
-        ];
-        let environment =
-            SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &env).unwrap();
-
-        let receipts = environment.receipts();
-        assert_eq!(
-            receipts,
-            vec![
-                GrantReceipt {
-                    name: "fireworks".to_string(),
-                    source_kind: "env".to_string(),
-                    exposed_as_env: Some("FIREWORKS_API_KEY".to_string()),
-                    for_command: None,
-                },
-                GrantReceipt {
-                    name: "gh_token".to_string(),
-                    source_kind: "secret_store".to_string(),
-                    exposed_as_env: None,
-                    for_command: None,
-                },
-            ]
-        );
-
-        // The serialized receipts must never contain the snapshotted value or
-        // the secret pointer. (SessionGrant/SessionEnvironment are not Serialize,
-        // so this is also enforced at compile time; assert it at runtime too.)
-        let json = serde_json::to_string(&receipts).unwrap();
-        assert!(
-            !json.contains("fw-secret-value"),
-            "receipt leaked env value"
-        );
-        assert!(!json.contains("gh/token"), "receipt leaked secret pointer");
-        assert!(json.contains("\"source_kind\":\"env\""));
-        assert!(json.contains("\"source_kind\":\"secret_store\""));
-    }
-
-    #[test]
-    fn grant_spec_is_value_free_over_the_wire() {
-        // A GrantSpec (the config contract) carries the env var NAME and the
-        // secret pointer, never a value — safe to serialize into a config.
-        let spec = env_grant("fireworks", "FIREWORKS_API_KEY", Some("FIREWORKS_API_KEY"));
-        let json = serde_json::to_string(&spec).unwrap();
-        let round: GrantSpec = serde_json::from_str(&json).unwrap();
-        assert_eq!(round, spec);
-        assert!(json.contains("\"env\""));
-        assert!(json.contains("FIREWORKS_API_KEY"));
-
-        // Policy kind is a typed, defaulted config field (inherited by default).
-        assert_eq!(
-            serde_json::from_str::<EnvironmentPolicyKind>("\"granted\"").unwrap(),
-            EnvironmentPolicyKind::Granted
-        );
-        assert_eq!(
-            EnvironmentPolicyKind::default(),
-            EnvironmentPolicyKind::Inherited
-        );
-    }
-
-    #[test]
-    fn missing_env_source_fails_at_launch() {
-        let specs = vec![env_grant("t", "ABSENT_VAR", None)];
-        let err = SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &no_env)
-            .expect_err("absent env var must fail resolution");
-        assert_eq!(
-            err,
-            EnvironmentPolicyError::MissingEnv {
-                name: "t".to_string(),
-                var: "ABSENT_VAR".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn resolve_rejects_empty_fields() {
-        let env = env_from(&[("X", "v")]);
-        assert_eq!(
-            SessionEnvironment::launch(
-                EnvironmentPolicyKind::Granted,
-                vec![env_grant("", "X", None)],
-                &env
-            ),
-            Err(EnvironmentPolicyError::EmptyName)
-        );
-        assert_eq!(
-            SessionEnvironment::launch(
-                EnvironmentPolicyKind::Granted,
-                vec![env_grant("t", "", None)],
-                &env
-            ),
-            Err(EnvironmentPolicyError::EmptyEnvVar {
-                name: "t".to_string()
-            })
-        );
-        assert_eq!(
-            SessionEnvironment::launch(
-                EnvironmentPolicyKind::Granted,
-                vec![secret_grant("t", "acct", "", None)],
-                &env
-            ),
-            Err(EnvironmentPolicyError::EmptySecretRef {
-                name: "t".to_string()
-            })
-        );
-        assert_eq!(
-            SessionEnvironment::launch(
-                EnvironmentPolicyKind::Granted,
-                vec![env_grant("t", "X", Some(" "))],
-                &env
-            ),
-            Err(EnvironmentPolicyError::EmptyExposeVar {
-                name: "t".to_string()
-            })
-        );
-    }
-
-    #[test]
-    fn duplicate_names_and_targets_fail_with_stable_codes() {
-        let env = env_from(&[("A", "a"), ("B", "b")]);
-        let duplicate_name = SessionEnvironment::launch(
-            EnvironmentPolicyKind::Granted,
-            vec![
-                env_grant("token", "A", Some("A")),
-                env_grant("token", "B", Some("B")),
-            ],
-            &env,
-        )
-        .unwrap_err();
-        assert_eq!(duplicate_name.code(), "environment_policy.duplicate_grant");
-
-        let duplicate_target = SessionEnvironment::launch(
-            EnvironmentPolicyKind::Granted,
-            vec![
-                env_grant("a", "A", Some("TOKEN")),
-                env_grant("b", "B", Some("TOKEN")),
-            ],
-            &env,
-        )
-        .unwrap_err();
-        assert_eq!(
-            duplicate_target.code(),
-            "environment_policy.duplicate_exposure_target"
-        );
-    }
-
-    #[test]
-    fn child_policy_can_only_narrow_parent_authority() {
-        let snapshot = BTreeMap::from([
-            ("TOKEN".to_string(), "parent-value".to_string()),
-            ("PATH".to_string(), "/bin".to_string()),
-        ]);
-        let parent = SessionEnvironment::launch_from_snapshot(
-            EnvironmentPolicyKind::Inherited,
-            Vec::new(),
-            snapshot.clone(),
-            &|name| snapshot.get(name).cloned(),
-        )
-        .unwrap();
-        let child = parent
-            .narrow(
-                EnvironmentPolicyKind::Granted,
-                vec![env_grant("token", "TOKEN", Some("TOKEN"))],
-            )
-            .unwrap();
-        assert_eq!(child.kind(), EnvironmentPolicyKind::Granted);
-        assert_eq!(child.grants().len(), 1);
-
-        let error = child
-            .narrow(EnvironmentPolicyKind::Inherited, Vec::new())
-            .unwrap_err();
-        assert_eq!(error.code(), "environment_policy.child_exceeds_parent");
-        assert_eq!(error.to_json()["parentPolicy"], "granted");
-        assert_eq!(error.to_json()["requestedPolicy"], "inherited");
-
-        let error = child
-            .narrow(
-                EnvironmentPolicyKind::Granted,
-                vec![env_grant("other", "OTHER_TOKEN", Some("OTHER_TOKEN"))],
-            )
-            .unwrap_err();
-        let diagnostic = error.to_json();
-        assert_eq!(
-            diagnostic["code"],
-            "environment_policy.child_exceeds_parent"
-        );
-        assert_eq!(diagnostic["parentPolicy"], "granted");
-        assert_eq!(diagnostic["requestedPolicy"], "granted");
-        assert_eq!(diagnostic["grant"], "other");
-        assert!(diagnostic["message"]
-            .as_str()
-            .unwrap()
-            .contains("unchanged subset of the parent grants"));
-    }
-
-    #[test]
-    fn command_bound_grant_is_absent_from_session_exposure() {
-        let resolve_secret = |account: &str, key: &str| -> Option<String> {
-            (account == "gh" && key == "token").then(|| "ghp-secret-token".to_string())
-        };
-        let environment = SessionEnvironment::launch(
-            EnvironmentPolicyKind::Granted,
-            vec![
-                env_grant("fireworks", "FIREWORKS_API_KEY", Some("FIREWORKS_API_KEY")),
-                command_grant("gh_token", "gh", "token", "GH_TOKEN", "gh"),
-            ],
-            &env_from(&[("FIREWORKS_API_KEY", "fw-secret-value")]),
-        )
-        .unwrap();
-
-        // Ambient exposure keeps the provider key and hides the command-bound token.
-        let ambient = environment.env_exposure(&resolve_secret).unwrap();
-        assert_eq!(
-            ambient,
-            vec![(
-                "FIREWORKS_API_KEY".to_string(),
-                "fw-secret-value".to_string()
-            )]
-        );
-        assert_eq!(
-            environment
-                .env_exposure_for("GH_TOKEN", &resolve_secret)
-                .unwrap(),
-            None
-        );
-
-        // Only a matching spawn sees GH_TOKEN.
-        let mut for_gh = environment
-            .env_exposure_for_command("gh", &resolve_secret)
-            .unwrap();
-        for_gh.sort();
-        assert_eq!(
-            for_gh,
-            vec![
-                (
-                    "FIREWORKS_API_KEY".to_string(),
-                    "fw-secret-value".to_string()
-                ),
-                ("GH_TOKEN".to_string(), "ghp-secret-token".to_string()),
-            ]
-        );
-        let for_git = environment
-            .env_exposure_for_command("/usr/bin/git", &resolve_secret)
-            .unwrap();
-        assert_eq!(
-            for_git,
-            vec![(
-                "FIREWORKS_API_KEY".to_string(),
-                "fw-secret-value".to_string()
-            )]
-        );
-        assert!(environment
-            .env_exposure_for_command("/usr/local/bin/gh", &resolve_secret)
-            .unwrap()
-            .into_iter()
-            .any(|(var, _)| var == "GH_TOKEN"));
-        assert_eq!(command_basename("C:\\Tools\\gh.exe"), "gh");
-
-        let receipts = environment.receipts();
-        assert_eq!(receipts[1].for_command.as_deref(), Some("gh"));
-        assert_eq!(receipts[1].exposed_as_env.as_deref(), Some("GH_TOKEN"));
-    }
-
-    #[test]
-    fn for_command_requires_expose_and_rejects_paths() {
-        let err = SessionEnvironment::launch(
-            EnvironmentPolicyKind::Granted,
-            vec![GrantSpec {
-                name: "gh_token".to_string(),
-                source: GrantSourceSpec::SecretStore {
-                    account: "gh".to_string(),
-                    key: "token".to_string(),
-                },
-                expose_as_env: None,
-                for_command: Some("gh".to_string()),
-            }],
-            &no_env,
-        )
-        .unwrap_err();
-        assert_eq!(err.code(), "environment_policy.for_without_expose");
-
-        let err = SessionEnvironment::launch(
-            EnvironmentPolicyKind::Granted,
-            vec![GrantSpec {
-                name: "gh_token".to_string(),
-                source: GrantSourceSpec::SecretStore {
-                    account: "gh".to_string(),
-                    key: "token".to_string(),
-                },
-                expose_as_env: Some("GH_TOKEN".to_string()),
-                for_command: Some("/usr/bin/gh".to_string()),
-            }],
-            &no_env,
-        )
-        .unwrap_err();
-        assert_eq!(err.code(), "environment_policy.invalid_for_command");
-    }
-
-    /// Exercised directly, not through `launch` (which reads this process's
-    /// real `std::env::vars_os`), so it holds on every host.
-    #[test]
-    fn a_case_insensitive_insert_updates_the_existing_key_not_a_second_one() {
-        let mut map = BTreeMap::new();
-        map.insert(
-            "Path".to_string(),
-            "C:\\nodejs;C:\\Windows\\System32".to_string(),
-        );
-        insert_env_value_case_insensitive(
-            &mut map,
-            "PATH",
-            "C:\\nodejs;C:\\Windows\\System32;C:\\extra".to_string(),
-        );
-        assert_eq!(
-            map.len(),
-            1,
-            "must update the existing 'Path' key, not add a second 'PATH' key: {map:?}"
-        );
-        assert_eq!(
-            map.get("Path").map(String::as_str),
-            Some("C:\\nodejs;C:\\Windows\\System32;C:\\extra"),
-            "the original casing is preserved, only the value is refreshed: {map:?}"
-        );
-        assert!(
-            !map.contains_key("PATH"),
-            "no second key should exist under the allowlist's own casing: {map:?}"
-        );
-    }
-
-    #[test]
-    fn a_case_insensitive_insert_adds_a_new_key_when_none_matches() {
-        let mut map = BTreeMap::new();
-        insert_env_value_case_insensitive(&mut map, "HOME", "/root".to_string());
-        assert_eq!(map.get("HOME").map(String::as_str), Some("/root"));
-    }
-
-    /// End-to-end: `launch` -> `resolve_env` -> a real spawned child
-    /// resolves `node` whenever the parent does (harn#7993). `#[cfg(windows)]`:
-    /// nothing to prove where OS and allowlist casing cannot diverge.
-    #[cfg(windows)]
-    #[test]
-    fn an_inherited_child_resolves_node_whenever_the_parent_does() {
-        let parent_has_node = std::process::Command::new("cmd")
-            .args(["/D", "/C", "where node"])
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false);
-        if !parent_has_node {
-            return; // nothing to prove without node on this machine's PATH
-        }
-        let environment =
-            SessionEnvironment::launch(EnvironmentPolicyKind::Inherited, vec![], &no_env)
-                .expect("inherited launch never fails");
-        let resolve_secret = |_: &str, _: &str| -> Option<String> { None };
-        let env = crate::security::resolve_env(&environment, &no_env, &resolve_secret)
-            .expect("inherited resolve_env never fails");
-        let path_entries: Vec<(&String, &String)> = env
-            .iter()
-            .filter(|(key, _)| key.eq_ignore_ascii_case("PATH"))
-            .collect();
-        assert_eq!(
-            path_entries.len(),
-            1,
-            "exactly one PATH-shaped key must reach the child: {:?}",
-            env.keys().collect::<Vec<_>>()
-        );
-        // Byte-for-byte, not just present: Inherited must not rebuild PATH.
-        let parent_path = std::env::var("PATH").expect("this process has a PATH to compare");
-        assert_eq!(
-            path_entries[0].1, &parent_path,
-            "an Inherited child's PATH must equal the parent's PATH exactly"
-        );
-        let output = std::process::Command::new("cmd")
-            .args(["/D", "/C", "where node"])
-            .env_clear()
-            .envs(&env)
-            .output()
-            .expect("spawn cmd for the child-side probe");
-        assert!(
-            output.status.success(),
-            "parent resolved node on PATH but an Inherited-policy child did not: \
-             stdout={:?} stderr={:?}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-    }
-}
+#[path = "session_environment_tests.rs"]
+mod tests;

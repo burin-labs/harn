@@ -45,6 +45,7 @@ captured = [
   "CURRENT_LOOP_SINKS",
   "CURRENT_SESSION_STACK",
   "LLM_CONFIG_OVERRIDES_CONTEXT",
+  "SCOPE",
   "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
   "LLM_CAPABILITY_OVERRIDES_CONTEXT",
   "LLM_MOCK_CONTEXT",
@@ -257,6 +258,12 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
+path = "src/llm/admission.rs"
+statics = ["SCOPE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/llm/call.rs"
 statics = ["IN_FLIGHT_LLM_CALLS"]
 category = "logical_task"
@@ -299,6 +306,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/llm/helpers/options/tool_choice.rs"
+statics = ["FORCED_TOOL_CHOICE_WARN_ONCE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/llm/provider.rs"
 statics = ["PROVIDER_NAMES", "DEFAULTS_REGISTERED"]
 category = "logical_task"
@@ -331,6 +344,12 @@ plan = "thread_private_test"
 [[thread_local]]
 path = "src/llm/trace.rs"
 statics = ["LLM_TRACE", "LLM_TRACING_ENABLED"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/reasoning_receipt.rs"
+statics = ["RECEIPTS", "DROPPED"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

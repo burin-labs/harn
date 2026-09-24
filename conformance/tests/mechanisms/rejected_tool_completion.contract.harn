@@ -1,0 +1,65 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract.harn"
+
+/**
+ * Trigger: rejected tool syntax, with or without a completion marker.
+ * Effect: the next turn repairs and executes the tool within the iteration bound.
+ * Negative: an explicit host stop does not request repair.
+ */
+pipeline default(harness: Harness) {
+  const marker = harness.fs.workspace_temp_dir() + "/rejected-tool-completion"
+  tool read_project_file(path: string) -> string {
+    harness.fs.write_text(marker, path)
+    return "READ_TOOL_CANARY"
+  }
+  const malformed =
+    "Read it.```tool\n{\"name\":\"read_project_file\",\"args\":{\"path\":\"README.md\"}}\n```Done."
+  const repaired =
+    "```tool\n{\"name\":\"read_project_file\",\"args\":{\"path\":\"README.md\"}}\n```"
+  for suffix in [" ##DONE##", ""] {
+    harness.fs.write_text(marker, "")
+    with_llm_script(
+      harness.llm,
+      [llm_text(malformed + suffix), llm_text(repaired), llm_text("READ_TOOL_CANARY ##DONE##")],
+      { ->
+        const options: AgentSpec = {
+          provider: "mock",
+          tool_format: "json",
+          tools: read_project_file,
+          loop_until_done: true,
+          max_iterations: 3,
+        }
+        const result = agent_loop(harness, "Read README.md.", nil, options)
+        assert_eq(result.status, "done")
+        assert_eq(harness.fs.read_text(marker), "README.md")
+        assert(result.visible_text.contains("READ_TOOL_CANARY"))
+        assert_eq(len(harness.llm.mock_calls()), 3, "repair must not ask a second classifier")
+        contract_effect(harness.stdio, "rejected_attempt_repairs${suffix}", result.status == "done")
+      },
+    )
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text(malformed + " ##DONE##")],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        tool_format: "json",
+        tools: read_project_file,
+        loop_until_done: true,
+        max_iterations: 3,
+        post_turn_callback: { _info -> {stop: true, stop_reason: "host_said_stop"} },
+      }
+      const result = agent_loop(harness, "Read README.md.", nil, options)
+      assert_eq(result.stop_reason, "host_said_stop")
+      assert_eq(len(harness.llm.mock_calls()), 1, "explicit host stop must remain authoritative")
+      contract_negative(
+        harness.stdio,
+        "host_stop_does_not_repair",
+        len(harness.llm.mock_calls()) > 1,
+      )
+    },
+  )
+}

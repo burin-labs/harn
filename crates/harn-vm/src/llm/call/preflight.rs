@@ -28,10 +28,20 @@ pub(super) async fn execute(
     let _render_guard = crate::stdlib::template::LlmRenderContextGuard::enter(
         crate::stdlib::template::LlmRenderContext::resolve(&provider, &model),
     );
-    match super::execute_llm_call(ctx, opts, options, None, None).await {
+    // One measurement scope per logical call, whichever surface entered it.
+    // A thrown terminal carries the count the same way `agent_loop`'s does,
+    // so a consumer can tell a refusal before dispatch from a failure after.
+    let ledger = crate::llm::provider_dispatch::ProviderDispatchLedger::default();
+    let outcome = crate::llm::provider_dispatch::with_provider_dispatch_ledger(
+        ledger.clone(),
+        super::execute_llm_call(ctx, opts, options, None, None),
+    )
+    .await;
+    match outcome {
         Ok(value) => Ok(value),
-        Err(error) => Err(VmError::Thrown(super::build_llm_error_dict(
-            &error, &provider, &model,
-        ))),
+        Err(error) => Err(crate::llm::provider_dispatch::stamp_thrown_terminal(
+            VmError::Thrown(super::build_llm_error_dict(&error, &provider, &model)),
+            &ledger,
+        )),
     }
 }

@@ -15,7 +15,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 payload_file="$(mktemp "${TMPDIR:-/tmp}/agent-shell-guard.XXXXXX")"
 decision_file="$(mktemp "${TMPDIR:-/tmp}/agent-shell-guard-decision.XXXXXX")"
 deadline_marker="${decision_file}.deadline"
-trap 'rm -f "$payload_file" "$decision_file" "$deadline_marker"' EXIT
+fault_file="${decision_file}.fault"
+trap 'rm -f "$payload_file" "$decision_file" "$deadline_marker" "$fault_file"' EXIT
 cat >"$payload_file"
 
 # Never build from a hook. Prefer an explicit binary, then a repository wrapper
@@ -100,7 +101,15 @@ resolve_harn() {
 
 resolved_harn="$(resolve_harn)"
 IFS=$'\t' read -r harn_mode harn_runner <<<"$resolved_harn"
-[[ -n "$harn_runner" && -x "$harn_runner" ]] || exit 0
+# No interpreter means no policy, and the command is allowed so the very setup
+# that installs the interpreter stays runnable. Say so on stderr: an allow
+# nobody can see is the same silence this adapter was fixed to stop emitting,
+# and an operator whose guard is off should learn it from the guard rather than
+# from whatever it failed to stop.
+if [[ -z "$harn_runner" || ! -x "$harn_runner" ]]; then
+  printf '%s\n' "agent shell guard is OFF: no usable policy interpreter at ${harn_runner:-<none found>}; every command is allowed until one is installed" >&2
+  exit 0
+fi
 
 # The policy uses core data functions, stdin/stdout, and Harn's deterministic
 # command parser. That parser is the only non-core builtin allowed here; the
@@ -112,7 +121,12 @@ guard_command=(
   "$harn_runner" run
 )
 [[ "$harn_mode" == "standalone" ]] && guard_command+=(--standalone)
-guard_command+=(--allow=command_risk_scan "$script_dir/agent_shell_guard.harn")
+# `lowercase` folds Windows path spellings before the disposable-path match.
+# Standalone mode permits no builtin that is not granted, and an ungranted one
+# does not degrade: it throws, the adapter fails closed, and every `trash`
+# command outside a POSIX temp root is refused with an interpreter error in
+# place of a rule. The unit tests never saw it because they run in a full host.
+guard_command+=(--allow=command_risk_scan,lowercase "$script_dir/agent_shell_guard.harn")
 
 # The worktree rule may only name an admission command this repository actually
 # has. The guard runs in a hook host with no filesystem builtin, so the answer
@@ -121,13 +135,79 @@ guard_command+=(--allow=command_risk_scan "$script_dir/agent_shell_guard.harn")
 # second and allows on the first. Keep the path in step with
 # WORKTREE_ADMISSION_POLICY in agent_shell_guard_policy.harn; the guard refuses
 # by name if the two ever disagree.
+# One row per repository the command could mean, not one answer for this
+# installation. Measuring only our own root answered for the wrong repository
+# whenever a command pointed elsewhere, and named an admission command that
+# does not exist there. The guard owns argv and picks the row; this owns the
+# filesystem and measures every plausible root. Keep the path and the walk in
+# step with WORKTREE_ADMISSION_POLICY in agent_shell_guard_policy.harn; the
+# guard refuses by name if the two ever disagree.
 guard_repo_root="$(cd "$script_dir/.." && pwd -P)"
-HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION=""
-if [[ -f "$guard_repo_root/scripts/fleet-worktree-admit.ts" ]]; then
-  HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION="scripts/fleet-worktree-admit.ts"
-fi
+
+# Walk up from a directory to the nearest repository root, bounded.
+guard_repository_root_of() {
+  local directory="$1" depth=0
+  [[ -d "$directory" ]] || return 1
+  directory="$(cd "$directory" 2>/dev/null && pwd -P)" || return 1
+  while ((depth < 12)); do
+    if [[ -e "$directory/.git" ]]; then
+      printf '%s\n' "$directory"
+      return 0
+    fi
+    [[ "$directory" == "/" ]] && return 1
+    directory="$(dirname "$directory")"
+    ((depth += 1))
+  done
+  return 1
+}
+
+# The admission command a root owns, empty when it owns none. The row is keyed
+# by the spelling the caller used, not by the resolved path: the guard matches
+# the directory as it appears in the command, and on macOS a resolved root
+# routinely differs from it by a /private prefix, which would leave every
+# target looking unmeasured.
+guard_admission_row() {
+  local key="$1" root="$2"
+  if [[ -f "$root/scripts/fleet-worktree-admit.ts" ]]; then
+    printf '%s\t%s\n' "$key" "scripts/fleet-worktree-admit.ts"
+  else
+    printf '%s\t\n' "$key"
+  fi
+}
+
+# Our own root first: it is the answer when the command names no directory.
+guard_admission_rows="$(guard_admission_row "$guard_repo_root" "$guard_repo_root")"
+# Then every absolute path token in the command, keyed by the token itself and
+# answered from the repository it sits in. Tokenisation only, so the semantic
+# decision about which one the command targets stays in the guard.
+while IFS= read -r guard_token; do
+  [[ -n "$guard_token" ]] || continue
+  guard_candidate="$(guard_repository_root_of "$guard_token" || true)"
+  [[ -n "$guard_candidate" ]] || continue
+  case $'\n'"$guard_admission_rows"$'\n' in
+    *$'\n'"$guard_token"$'\t'*) continue ;;
+  esac
+  guard_admission_rows+=$'\n'"$(guard_admission_row "$guard_token" "$guard_candidate")"
+done < <(tr -c '[:alnum:]/._@+~-' '\n' <"$payload_file" | grep '^/' | sort -u)
+
+HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION="$guard_admission_rows"
 export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION
 export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION_CHECKED=1
+
+# The Make targets this repository declares. A build tool that is not universal
+# (`swift`, unlike `cargo`) may only be redirected to a target that exists, and
+# the guard cannot read the filesystem to find out. Read the phony and rule
+# declarations of the root Makefile: a name at the start of a line followed by
+# `:`, excluding `:=` assignments and the dot-prefixed directives.
+guard_make_targets=""
+if [[ -f "$guard_repo_root/Makefile" ]]; then
+  guard_make_targets="$(
+    sed -n 's/^\([A-Za-z0-9][A-Za-z0-9._+-]*\)[[:space:]]*:[^=].*$/\1/p;s/^\([A-Za-z0-9][A-Za-z0-9._+-]*\)[[:space:]]*:$/\1/p' \
+      "$guard_repo_root/Makefile" 2>/dev/null | sort -u | tr '\n' ' '
+  )"
+fi
+export HARN_EXT_SHELL_GUARD_MAKE_TARGETS="$guard_make_targets"
+export HARN_EXT_SHELL_GUARD_MAKE_TARGETS_CHECKED=1
 
 # A PreToolUse hook holds the agent's shell call open for as long as it runs, so
 # the harness timeout is the wrong backstop: by the time it fires the agent has
@@ -174,11 +254,26 @@ run_with_deadline() {
 
 guard_status=0
 if [[ "${AGENT_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then
-  run_with_deadline "${guard_command[@]}" >"$decision_file" || guard_status=$?
+  run_with_deadline "${guard_command[@]}" >"$decision_file" 2> >(tee "$fault_file" >&2) \
+    || guard_status=$?
 else
-  run_with_deadline "${guard_command[@]}" >"$decision_file" 2>/dev/null \
+  run_with_deadline "${guard_command[@]}" >"$decision_file" 2>"$fault_file" \
     || guard_status=$?
 fi
+
+# What the policy said as it failed, flattened to one JSON-safe line. The
+# reason is the difference between "the guard is off" and "the guard faulted
+# and here is why", and the second is the only one an operator can act on.
+# Keep the head, not the tail: an interpreter prints the thrown message first
+# and the source excerpt after it, so trimming from the end preserves the
+# reason and drops the listing.
+guard_fault_reason() {
+  local text=""
+  [[ -s "$fault_file" ]] || return 0
+  text="$(tr -d '\000-\010\013\014\016-\037' <"$fault_file" | tr '\n\r\t' '   ' \
+    | sed 's/[\\"]/ /g' | tr -s ' ' | head -c 400)"
+  printf '%s' "$text"
+}
 
 # 124 is the conventional deadline status; 137 and 143 are SIGKILL and SIGTERM.
 # All mean the same thing here: the deny-class policy did not produce a
@@ -189,6 +284,25 @@ elif [[ "$guard_status" == "124" || "$guard_status" == "137" || "$guard_status" 
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Repository command policy timed out before producing a verdict; retry when host load subsides."}}'
   if [[ "${AGENT_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then
     echo "agent-shell-guard: policy exceeded ${deadline_seconds}s; failing closed" >&2
+  fi
+else
+  # The policy ran and faulted. Every other status used to fall through to an
+  # empty verdict, which the host reads as an allow, so one throw anywhere in
+  # the evaluation switched every rule off at once and said nothing. The
+  # in-process suite cannot catch that: it calls the evaluator directly and
+  # never runs under this host's builtin restrictions, so a rule reaching for
+  # a denied builtin threw on every command with the whole suite green.
+  #
+  # An interpreter that is missing or not executable is a different case and
+  # is still allowed, deliberately, so a fresh clone or a mid-rebuild tree
+  # stays usable. That one is settled above, before the policy is ever run, so
+  # reaching here means the interpreter existed and the evaluation failed.
+  printf '%s%s%s\n' \
+    '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Repository command policy faulted before producing a verdict, so no rule was applied: ' \
+    "$(guard_fault_reason)" \
+    '"}}'
+  if [[ "${AGENT_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then
+    echo "agent-shell-guard: policy exited ${guard_status}; failing closed" >&2
   fi
 fi
 exit 0

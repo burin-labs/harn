@@ -1,624 +1,228 @@
-//! Typed Harn `session/update` extension payloads.
-//!
-//! Canonical ACP variants already have host-language structs. Harn extensions
-//! used to collapse to a discriminator plus `_meta` lump, so hosts re-picked
-//! identity fields by hand and silently dropped new required ones. This table
-//! is the single owner: dump every language from it, and fail if the live
-//! extension registry or schema `$defs` grow a required identity field that
-//! has no generated struct.
+//! Session-update bindings projected from the adapter's owning JSON schema.
 
-#[cfg(test)]
-use harn_serve::adapters::acp::HARN_SESSION_UPDATE_EXTENSIONS;
+use super::records::{FieldKind, Record, Target};
+use super::schema_records::SchemaRecords;
+use super::support::ProtocolArtifactSource;
+use serde_json::{json, Map, Value};
 
-use super::records::{Field as PayloadField, FieldKind as PayloadFieldKind, Integer, Target};
-use std::borrow::Cow;
+pub(super) const SOURCE: &str = "conformance/protocols/schemas/acp-session-update.schema.json";
 
-#[derive(Clone, Copy)]
-pub(super) struct SessionUpdatePayload {
-    pub discriminator: &'static str,
-    pub type_stem: &'static str,
-    pub fields: &'static [PayloadField],
+pub(super) struct SessionUpdatePayloads {
+    pub variants: Vec<(String, String)>,
+    pub records: Vec<Record>,
+    schemas: Vec<Value>,
 }
 
-const fn field(
-    wire_name: &'static str,
-    rust_name: &'static str,
-    kind: PayloadFieldKind,
-    required: bool,
-    identity: bool,
-) -> PayloadField {
-    PayloadField {
-        wire_name: Cow::Borrowed(wire_name),
-        rust_name: Cow::Borrowed(rust_name),
-        kind,
-        required,
-        identity,
+impl SessionUpdatePayloads {
+    pub(super) fn load(source: &ProtocolArtifactSource) -> Result<Self, String> {
+        Self::parse(&source.read_text(SOURCE)?)
     }
-}
 
-const fn req_id(
-    wire_name: &'static str,
-    rust_name: &'static str,
-    kind: PayloadFieldKind,
-) -> PayloadField {
-    field(wire_name, rust_name, kind, true, true)
-}
-
-const fn req(
-    wire_name: &'static str,
-    rust_name: &'static str,
-    kind: PayloadFieldKind,
-) -> PayloadField {
-    field(wire_name, rust_name, kind, true, false)
-}
-
-const fn opt(
-    wire_name: &'static str,
-    rust_name: &'static str,
-    kind: PayloadFieldKind,
-) -> PayloadField {
-    field(wire_name, rust_name, kind, false, false)
-}
-
-/// Every Harn `session/update` extension the adapter advertises, with the
-/// identity fields hosts must decode as first-class properties.
-pub(super) const TYPED_SESSION_UPDATE_PAYLOADS: &[SessionUpdatePayload] = &[
-    SessionUpdatePayload {
-        discriminator: "artifact",
-        type_stem: "Artifact",
-        fields: &[
-            req_id(
-                "artifactId",
-                "artifact_id",
-                PayloadFieldKind::NonEmptyString,
-            ),
-            opt("kind", "kind", PayloadFieldKind::String),
-            opt("title", "title", PayloadFieldKind::String),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "available_commands_update",
-        type_stem: "AvailableCommands",
-        fields: &[req_id(
-            "availableCommands",
-            "available_commands",
-            PayloadFieldKind::Json,
-        )],
-    },
-    SessionUpdatePayload {
-        discriminator: "fs_watch",
-        type_stem: "FsWatch",
-        fields: &[
-            req_id(
-                "subscriptionId",
-                "subscription_id",
-                PayloadFieldKind::NonEmptyString,
-            ),
-            req_id("events", "events", PayloadFieldKind::Json),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "handoff",
-        type_stem: "Handoff",
-        fields: &[
-            req_id("handoffId", "handoff_id", PayloadFieldKind::NonEmptyString),
-            req_id(
-                "artifactId",
-                "artifact_id",
-                PayloadFieldKind::NonEmptyString,
-            ),
-            req_id("handoff", "handoff", PayloadFieldKind::Json),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "hitl_request",
-        type_stem: "HitlRequest",
-        fields: &[
-            req_id("requestId", "request_id", PayloadFieldKind::NonEmptyString),
-            req("kind", "kind", PayloadFieldKind::String),
-            req("payload", "payload", PayloadFieldKind::Json),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "hitl_resolved",
-        type_stem: "HitlResolved",
-        fields: &[
-            req_id("requestId", "request_id", PayloadFieldKind::NonEmptyString),
-            req("kind", "kind", PayloadFieldKind::String),
-            req("outcome", "outcome", PayloadFieldKind::Json),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "live_session_client",
-        type_stem: "LiveSessionClient",
-        fields: &[
-            req_id("action", "action", PayloadFieldKind::NonEmptyString),
-            opt("state", "state", PayloadFieldKind::Json),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "log",
-        type_stem: "Log",
-        fields: &[
-            req_id("message", "message", PayloadFieldKind::NonEmptyString),
-            opt("level", "level", PayloadFieldKind::String),
-            opt("fields", "fields", PayloadFieldKind::Json),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "progress",
-        type_stem: "Progress",
-        fields: &[
-            req_id("message", "message", PayloadFieldKind::NonEmptyString),
-            opt("phase", "phase", PayloadFieldKind::String),
-            opt(
-                "progress",
-                "progress",
-                PayloadFieldKind::Integer(Integer::HostCount),
-            ),
-            opt(
-                "total",
-                "total",
-                PayloadFieldKind::Integer(Integer::HostCount),
-            ),
-            opt("data", "data", PayloadFieldKind::Json),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "reminder_emitted",
-        type_stem: "ReminderEmitted",
-        fields: &[
-            req_id(
-                "reminderId",
-                "reminder_id",
-                PayloadFieldKind::NonEmptyString,
-            ),
-            opt("reminder", "reminder", PayloadFieldKind::Json),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "skill_activated",
-        type_stem: "SkillActivated",
-        fields: &[
-            req_id("skillName", "skill_name", PayloadFieldKind::NonEmptyString),
-            opt(
-                "iteration",
-                "iteration",
-                PayloadFieldKind::Integer(Integer::HostCount),
-            ),
-            opt("reason", "reason", PayloadFieldKind::String),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "skill_deactivated",
-        type_stem: "SkillDeactivated",
-        fields: &[
-            req_id("skillName", "skill_name", PayloadFieldKind::NonEmptyString),
-            opt(
-                "iteration",
-                "iteration",
-                PayloadFieldKind::Integer(Integer::HostCount),
-            ),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "skill_narrow",
-        type_stem: "SkillNarrow",
-        fields: &[
-            req_id(
-                "removedTools",
-                "removed_tools",
-                PayloadFieldKind::StringList,
-            ),
-            req_id(
-                "remainingTools",
-                "remaining_tools",
-                PayloadFieldKind::StringList,
-            ),
-            opt("reason", "reason", PayloadFieldKind::String),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "skill_scope_tools",
-        type_stem: "SkillScopeTools",
-        fields: &[
-            req_id("skillName", "skill_name", PayloadFieldKind::NonEmptyString),
-            req_id(
-                "allowedTools",
-                "allowed_tools",
-                PayloadFieldKind::StringList,
-            ),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "stance_transition",
-        type_stem: "StanceTransition",
-        fields: &[
-            req_id("phase", "phase", PayloadFieldKind::NonEmptyString),
-            opt("escapeTool", "escape_tool", PayloadFieldKind::String),
-            opt(
-                "allowedTools",
-                "allowed_tools",
-                PayloadFieldKind::StringList,
-            ),
-            opt("justification", "justification", PayloadFieldKind::String),
-            opt("consent", "consent", PayloadFieldKind::String),
-            opt("reason", "reason", PayloadFieldKind::String),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "tool_search_query",
-        type_stem: "ToolSearchQuery",
-        fields: &[
-            req_id("toolUseId", "tool_use_id", PayloadFieldKind::NonEmptyString),
-            req_id("name", "name", PayloadFieldKind::NonEmptyString),
-            req("query", "query", PayloadFieldKind::Json),
-            opt("strategy", "strategy", PayloadFieldKind::String),
-            opt("mode", "mode", PayloadFieldKind::String),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "tool_search_result",
-        type_stem: "ToolSearchResult",
-        fields: &[
-            req_id("toolUseId", "tool_use_id", PayloadFieldKind::NonEmptyString),
-            req("promoted", "promoted", PayloadFieldKind::Json),
-            opt("strategy", "strategy", PayloadFieldKind::String),
-            opt("mode", "mode", PayloadFieldKind::String),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "transcript_compacted",
-        type_stem: "TranscriptCompacted",
-        fields: &[
-            req_id("mode", "mode", PayloadFieldKind::String),
-            req_id("strategy", "strategy", PayloadFieldKind::String),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "transcript_projected",
-        type_stem: "TranscriptProjected",
-        fields: &[
-            req_id("policy", "policy", PayloadFieldKind::String),
-            req("reason", "reason", PayloadFieldKind::String),
-        ],
-    },
-    SessionUpdatePayload {
-        discriminator: "worker_update",
-        type_stem: "Worker",
-        fields: &[
-            req_id("workerId", "worker_id", PayloadFieldKind::NonEmptyString),
-            req_id("event", "event", PayloadFieldKind::NonEmptyString),
-            req_id("status", "status", PayloadFieldKind::NonEmptyString),
-            req("terminal", "terminal", PayloadFieldKind::Bool),
-            opt("workerName", "worker_name", PayloadFieldKind::String),
-            opt("workerTask", "worker_task", PayloadFieldKind::String),
-            opt("workerMode", "worker_mode", PayloadFieldKind::String),
-            opt("metadata", "metadata", PayloadFieldKind::Json),
-            opt("audit", "audit", PayloadFieldKind::Json),
-        ],
-    },
-];
-
-pub(super) fn ts_payload_type_name(payload: &SessionUpdatePayload) -> String {
-    format!("ACP{}Update", payload.type_stem)
-}
-
-pub(super) fn rust_payload_type_name(payload: &SessionUpdatePayload) -> String {
-    format!("ACP{}Update", payload.type_stem)
-}
-
-pub(super) fn swift_payload_type_name(payload: &SessionUpdatePayload) -> String {
-    format!("HarnACP{}Update", payload.type_stem)
-}
-
-pub(super) fn python_payload_type_name(payload: &SessionUpdatePayload) -> String {
-    format!("ACP{}Update", payload.type_stem)
-}
-
-pub(super) fn go_payload_type_name(payload: &SessionUpdatePayload) -> String {
-    format!("ACP{}Update", payload.type_stem)
-}
-
-/// Fail the dump tests when the live adapter registry and this table diverge.
-#[cfg(test)]
-pub(super) fn typed_payload_registry_gaps() -> Vec<String> {
-    let table: Vec<&str> = TYPED_SESSION_UPDATE_PAYLOADS
-        .iter()
-        .map(|payload| payload.discriminator)
-        .collect();
-    let mut gaps = Vec::new();
-    for advertised in HARN_SESSION_UPDATE_EXTENSIONS {
-        if !table.contains(advertised) {
-            gaps.push(format!(
-                "HARN_SESSION_UPDATE_EXTENSIONS lists `{advertised}` without a typed payload struct"
-            ));
+    pub(super) fn parse(text: &str) -> Result<Self, String> {
+        let schema: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
+        let variants = schema["$defs"]["HarnExtensionUpdate"]["oneOf"]
+            .as_array()
+            .ok_or("HarnExtensionUpdate.oneOf must enumerate the typed payloads")?;
+        if variants.is_empty() {
+            return Err("HarnExtensionUpdate must not be empty".into());
         }
-    }
-    for payload in TYPED_SESSION_UPDATE_PAYLOADS {
-        if !HARN_SESSION_UPDATE_EXTENSIONS.contains(&payload.discriminator) {
-            gaps.push(format!(
-                "typed payload `{}` is not in HARN_SESSION_UPDATE_EXTENSIONS",
-                payload.discriminator
-            ));
+        let mut payloads = Vec::new();
+        let mut definitions = Map::new();
+        let mut order = Vec::new();
+        let mut schemas = Vec::new();
+        for variant in variants {
+            let reference = variant["$ref"]
+                .as_str()
+                .ok_or("payload must reference a definition")?;
+            let key = reference
+                .strip_prefix("#/$defs/")
+                .ok_or("payload reference must be local")?;
+            let mut shape = schema["$defs"]
+                .get(key)
+                .ok_or_else(|| format!("missing payload {key}"))?
+                .clone();
+            merge_properties(&mut shape, &schema["$defs"]["HarnExtensionUpdate"])?;
+            let discriminator = shape["properties"]["sessionUpdate"]["const"]
+                .as_str()
+                .ok_or_else(|| format!("{key} must pin sessionUpdate"))?;
+            if payloads.iter().any(|(kind, _)| kind == discriminator) {
+                return Err(format!("duplicate session update {discriminator}"));
+            }
+            let stem = key.strip_suffix("Update").unwrap_or(key);
+            let name = format!("ACP{stem}Update");
+            lift_record(&name, shape.clone(), &mut definitions, &mut order)?;
+            payloads.push((discriminator.to_owned(), name));
+            schemas.push(shape.clone());
         }
-        if !payload
-            .fields
+        let names = order
             .iter()
-            .any(|field| field.identity && field.required)
-        {
-            gaps.push(format!(
-                "typed payload `{}` has no required identity field",
-                payload.discriminator
-            ));
+            .map(|key: &String| (key.as_str(), key.clone()))
+            .collect::<Vec<_>>();
+        let normalized = json!({"$defs": definitions});
+        let records = SchemaRecords {
+            schema: &normalized,
+            names: &names,
+            label: "session update",
+            require_all: false,
+            metadata: |_, _, shape| {
+                Ok(if shape.as_object().is_some_and(Map::is_empty) {
+                    Some(FieldKind::Json)
+                } else {
+                    None
+                })
+            },
+        }
+        .load_extensible()?;
+        Ok(Self {
+            variants: payloads,
+            records,
+            schemas,
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn load_for_tests() -> Self {
+        Self::load(
+            &ProtocolArtifactSource::from_anchor(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+                .expect("workspace source"),
+        )
+        .expect("session-update schema")
+    }
+
+    pub(super) fn append(&self, out: &mut String, target: Target) {
+        out.push('\n');
+        for record in &self.records {
+            let mut record = record.clone();
+            if matches!(target, Target::Swift) {
+                record.name = format!("Harn{}", record.name);
+                for field in &mut record.fields {
+                    swift_names(&mut field.kind);
+                }
+            }
+            record.append_mutable(out, target, true);
+        }
+        match target {
+            Target::Rust => self.append_rust_union(out),
+            Target::Swift => self.append_swift_union(out),
+            Target::Typescript => {
+                out.push_str("export type ACPTypedSessionUpdate =\n");
+                out.push_str(&self.typescript_union_members());
+                out.push('\n');
+            }
+            _ => {}
         }
     }
-    gaps
-}
 
-#[cfg(test)]
-pub(super) fn schema_required_identity_gaps(schema_text: &str) -> Result<Vec<String>, String> {
-    let schema: serde_json::Value = serde_json::from_str(schema_text)
-        .map_err(|error| format!("session-update schema is not JSON: {error}"))?;
-    let defs = schema
-        .get("$defs")
-        .and_then(|value| value.as_object())
-        .ok_or_else(|| "session-update schema is missing $defs".to_string())?;
-    let session_update = defs
-        .get("SessionUpdate")
-        .and_then(|value| value.get("oneOf"))
-        .and_then(|value| value.as_array())
-        .ok_or_else(|| "SessionUpdate.oneOf is missing".to_string())?;
-
-    let mut gaps = Vec::new();
-    for entry in session_update {
-        let Some(def_name) = entry
-            .get("$ref")
-            .and_then(|value| value.as_str())
-            .and_then(|reference| reference.strip_prefix("#/$defs/"))
-        else {
-            continue;
-        };
-        if matches!(
-            def_name,
-            "UserMessage"
-                | "UserMessageChunk"
-                | "AgentMessageChunk"
-                | "AgentThoughtChunk"
-                | "ToolCall"
-                | "ToolCallUpdate"
-                | "Plan"
-                | "CurrentModeUpdate"
-                | "ConfigOptionUpdate"
-                | "SessionInfoUpdate"
-                | "SessionTruncated"
-                | "HarnExtensionUpdate"
-        ) {
-            continue;
-        }
-        let Some(payload) = TYPED_SESSION_UPDATE_PAYLOADS.iter().find(|payload| {
-            payload.type_stem == def_name || format!("{}Update", payload.type_stem) == def_name
-        }) else {
-            gaps.push(format!(
-                "schema $defs.{def_name} is in SessionUpdate.oneOf but has no typed dump struct"
-            ));
-            continue;
-        };
-        let Some(required) = defs
-            .get(def_name)
-            .and_then(|value| value.get("required"))
-            .and_then(|value| value.as_array())
-        else {
-            continue;
-        };
-        for field_name in required.iter().filter_map(|value| value.as_str()) {
-            if field_name == "sessionUpdate" || field_name == "_meta" {
-                continue;
-            }
-            if !payload
-                .fields
-                .iter()
-                .any(|field| field.wire_name == field_name && field.required)
-            {
-                gaps.push(format!(
-                    "schema $defs.{def_name} requires `{field_name}` but the typed dump struct does not"
-                ));
-            }
-        }
-    }
-    Ok(gaps)
-}
-
-pub(super) fn append_typescript_session_update_payloads(out: &mut String) {
-    out.push_str(
-        "\n/** Harn-owned `session/update` extension payloads. Identity fields are first-class; `_meta` remains for vendor extras. */\n",
-    );
-    out.push_str("export const HARN_TYPED_SESSION_UPDATE_PAYLOADS = {\n");
-    for payload in TYPED_SESSION_UPDATE_PAYLOADS {
-        let identity = payload
-            .fields
+    pub(super) fn typescript_union_members(&self) -> String {
+        self.variants
             .iter()
-            .filter(|field| field.identity)
-            .map(|field| format!("\"{}\"", field.wire_name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push_str(&format!(
-            "  {}: {{ typeName: \"{}\", identity: [{identity}] }},\n",
-            payload.discriminator,
-            ts_payload_type_name(payload)
-        ));
+            .map(|(_, name)| format!("  | {name}\n"))
+            .collect()
     }
-    out.push_str("} as const\n");
-    for payload in TYPED_SESSION_UPDATE_PAYLOADS {
-        out.push_str(&format!(
-            "\nexport interface {} {{\n  sessionUpdate: \"{}\"\n",
-            ts_payload_type_name(payload),
-            payload.discriminator
-        ));
-        for field in payload.fields {
-            let ts_type = field.kind.type_name(Target::Typescript);
-            if field.required {
-                out.push_str(&format!("  {}: {}\n", field.wire_name, ts_type));
-            } else {
-                out.push_str(&format!("  {}?: {}\n", field.wire_name, ts_type));
-            }
+
+    fn append_rust_union(&self, out: &mut String) {
+        out.push_str("fn deserialize_present_session_update_value<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {\n    Value::deserialize(deserializer).map(Some)\n}\n\n");
+        out.push_str("#[derive(Clone, Debug, PartialEq, Eq, Serialize)]\n#[serde(untagged)]\npub enum ACPTypedSessionUpdate {\n");
+        for (_, name) in &self.variants {
+            out.push_str(&format!("    {}({name}),\n", rust_variant(name)));
         }
-        out.push_str("  _meta?: ACPExtensionMeta<ACPObject>\n}\n");
-    }
-}
-
-pub(super) fn typescript_session_update_union_members() -> String {
-    let mut members = String::new();
-    for payload in TYPED_SESSION_UPDATE_PAYLOADS {
-        members.push_str(&format!("  | {}\n", ts_payload_type_name(payload)));
-    }
-    members
-}
-
-pub(super) fn append_rust_session_update_payloads(out: &mut String) {
-    out.push_str(
-        "\n/// Harn-owned `session/update` extension payloads. Identity fields are first-class.\n",
-    );
-    out.push_str("pub const HARN_TYPED_SESSION_UPDATE_PAYLOADS: &[(&str, &str, &[&str])] = &[\n");
-    for payload in TYPED_SESSION_UPDATE_PAYLOADS {
-        let identity = payload
-            .fields
-            .iter()
-            .filter(|field| field.identity)
-            .map(|field| format!("\"{}\"", field.wire_name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push_str(&format!(
-            "    (\"{}\", \"{}\", &[{identity}]),\n",
-            payload.discriminator,
-            rust_payload_type_name(payload)
-        ));
-    }
-    out.push_str("];\n");
-    for payload in TYPED_SESSION_UPDATE_PAYLOADS {
-        out.push_str(&format!(
-            "\n#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
-             #[serde(rename_all = \"camelCase\")]\n\
-             pub struct {} {{\n\
-             \x20   pub session_update: String,\n",
-            rust_payload_type_name(payload)
-        ));
-        for field in payload.fields {
-            let rust_type = rust_field_type(field);
-            if field.required {
-                out.push_str(&format!("    pub {}: {rust_type},\n", field.rust_name));
-            } else {
-                out.push_str("    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n");
-                out.push_str(&format!(
-                    "    pub {}: Option<{rust_type}>,\n",
-                    field.rust_name
-                ));
-            }
+        out.push_str("}\n\nimpl<'de> Deserialize<'de> for ACPTypedSessionUpdate {\n    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {\n        let value = Value::deserialize(deserializer)?;\n        match value.get(\"sessionUpdate\").and_then(Value::as_str) {\n");
+        for ((kind, name), schema) in self.variants.iter().zip(&self.schemas) {
+            out.push_str(&format!("            Some({kind:?}) => {{\n"));
+            super::session_update_validation::append_checks(out, schema, Target::Rust);
+            out.push_str(&format!("                serde_json::from_value(value).map(Self::{}).map_err(serde::de::Error::custom)\n            }},\n", rust_variant(name)));
         }
-        out.push_str(
-            "    #[serde(default, skip_serializing_if = \"Option::is_none\", rename = \"_meta\")]\n\
-             \x20   pub meta: Option<Value>,\n\
-             }\n",
-        );
+        out.push_str("            _ => Err(serde::de::Error::custom(\"unknown typed session update\")),\n        }\n    }\n}\n\n");
     }
-}
 
-fn rust_field_type(field: &PayloadField) -> String {
-    field.kind.type_name(Target::Rust)
-}
-
-pub(super) fn append_swift_session_update_payloads(out: &mut String) {
-    out.push_str(
-        "\n/// Harn-owned `session/update` extension payloads. Identity fields are first-class.\n",
-    );
-    for payload in TYPED_SESSION_UPDATE_PAYLOADS {
-        out.push_str(&format!(
-            "\npublic struct {}: Codable, Sendable, Equatable {{\n\
-             \x20   public var sessionUpdate: HarnACPSessionUpdate\n",
-            swift_payload_type_name(payload)
-        ));
-        for field in payload.fields {
-            let swift_type = field.kind.type_name(Target::Swift);
-            if field.required {
-                out.push_str(&format!(
-                    "    public var {}: {swift_type}\n",
-                    field.wire_name
-                ));
-            } else {
-                out.push_str(&format!(
-                    "    public var {}: {swift_type}?\n",
-                    field.wire_name
-                ));
-            }
+    fn append_swift_union(&self, out: &mut String) {
+        out.push_str("public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {\n");
+        for (kind, name) in &self.variants {
+            out.push_str(&format!("    case {kind}(Harn{name})\n"));
         }
-        out.push_str("    public var meta: HarnACPExtensionMeta?\n\n");
-        out.push_str("    enum CodingKeys: String, CodingKey {\n        case sessionUpdate\n");
-        for field in payload.fields {
-            out.push_str(&format!("        case {}\n", field.wire_name));
-        }
-        out.push_str("        case meta = \"_meta\"\n    }\n}\n");
-    }
-}
-
-pub(super) fn append_python_session_update_payloads(out: &mut String) {
-    for payload in TYPED_SESSION_UPDATE_PAYLOADS {
-        out.push_str(&format!(
-            "\n@dataclass\nclass {}(_HarnDataclass):\n    sessionUpdate: str\n",
-            python_payload_type_name(payload)
-        ));
-        let (required, optional): (Vec<&PayloadField>, Vec<&PayloadField>) =
-            payload.fields.iter().partition(|field| field.required);
-        for field in required {
+        out.push_str("\n    public init(from decoder: Decoder) throws {\n        let container = try decoder.singleValueContainer()\n        let value = try container.decode(HarnACPValue.self)\n        switch value[\"sessionUpdate\"]?.stringValue {\n");
+        for ((kind, name), schema) in self.variants.iter().zip(&self.schemas) {
+            out.push_str(&format!("        case {kind:?}:\n"));
+            super::session_update_validation::append_checks(out, schema, Target::Swift);
             out.push_str(&format!(
-                "    {}: {}\n",
-                field.wire_name,
-                field.kind.optional_type(Target::Python, true)
+                "            self = .{kind}(try container.decode(Harn{name}.self))\n"
             ));
         }
-        for field in optional {
+        out.push_str("        default: throw DecodingError.dataCorruptedError(in: container, debugDescription: \"unknown typed session update\")\n        }\n    }\n\n    public func encode(to encoder: Encoder) throws {\n        switch self {\n");
+        for (kind, _) in &self.variants {
             out.push_str(&format!(
-                "    {}: {} = None\n",
-                field.wire_name,
-                field.kind.optional_type(Target::Python, false)
+                "        case .{kind}(let update): try update.encode(to: encoder)\n"
             ));
         }
-        out.push_str("    _meta: Optional[HarnExtensionMeta] = None\n");
+        out.push_str("        }\n    }\n}\n\n");
     }
 }
 
-pub(super) fn append_go_session_update_payloads(out: &mut String) {
-    for payload in TYPED_SESSION_UPDATE_PAYLOADS {
-        out.push_str(&format!(
-            "\n// {} is the typed Harn `{}` session/update payload.\ntype {} struct {{\n\tSessionUpdate string `json:\"sessionUpdate\"`\n",
-            go_payload_type_name(payload),
-            payload.discriminator,
-            go_payload_type_name(payload)
-        ));
-        for field in payload.fields {
-            let go_name = pascal_ident(&field.wire_name);
-            let go_type = field.kind.optional_type(Target::Go, field.required);
-            let omit = if field.required { "" } else { ",omitempty" };
-            let tag = format!("json:\"{}{omit}\"", field.wire_name);
-            out.push_str(&format!("\t{go_name} {go_type} `{tag}`\n"));
-        }
-        out.push_str("\tMeta *HarnExtensionMeta `json:\"_meta,omitempty\"`\n}\n");
-    }
+fn rust_variant(name: &str) -> &str {
+    name.strip_prefix("ACP")
+        .and_then(|name| name.strip_suffix("Update"))
+        .expect("session-update record name")
 }
 
-fn pascal_ident(value: &str) -> String {
-    let mut out = String::new();
-    let mut capitalize = true;
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if capitalize {
-                out.extend(ch.to_uppercase());
-            } else {
-                out.push(ch);
+fn merge_properties(shape: &mut Value, common: &Value) -> Result<(), String> {
+    let Some(properties) = common["properties"].as_object() else {
+        return Ok(());
+    };
+    let target = shape["properties"]
+        .as_object_mut()
+        .ok_or("shared metadata needs an object")?;
+    for (name, field) in properties {
+        if let Some(existing) = target.get_mut(name) {
+            if field["properties"].is_object() {
+                merge_properties(existing, field)?;
+            } else if existing != field {
+                return Err(format!("conflicting shared metadata field {name}"));
             }
-            capitalize = false;
         } else {
-            capitalize = true;
+            target.insert(name.clone(), field.clone());
         }
     }
-    out
+    Ok(())
+}
+
+/// Name inline records before the shared schema reader resolves their fields.
+/// Children are inserted first so Python annotations refer to existing classes.
+fn lift_record(
+    name: &str,
+    mut shape: Value,
+    definitions: &mut Map<String, Value>,
+    order: &mut Vec<String>,
+) -> Result<(), String> {
+    let properties = shape["properties"]
+        .as_object_mut()
+        .ok_or_else(|| format!("{name} requires properties"))?;
+    for (field, child) in properties {
+        if child["type"] == "object" && child["properties"].is_object() {
+            let suffix = field.trim_start_matches('_');
+            let mut chars = suffix.chars();
+            let suffix = chars
+                .next()
+                .map(|c| c.to_uppercase().to_string())
+                .unwrap_or_default()
+                + chars.as_str();
+            let child_name = format!("{name}{suffix}");
+            lift_record(&child_name, child.take(), definitions, order)?;
+            *child = json!({"$ref": format!("#/$defs/{child_name}")});
+        }
+    }
+    if definitions.insert(name.to_owned(), shape).is_some() {
+        return Err(format!("duplicate session-update record {name}"));
+    }
+    order.push(name.to_owned());
+    Ok(())
+}
+
+fn swift_names(kind: &mut FieldKind) {
+    match kind {
+        FieldKind::Named(name) => *name = format!("Harn{name}"),
+        FieldKind::List(inner) | FieldKind::Nullable(inner) | FieldKind::DefaultList(inner) => {
+            swift_names(inner);
+        }
+        _ => {}
+    }
 }

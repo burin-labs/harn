@@ -154,8 +154,11 @@ fn __prelude_receipt(
   side_effects: list?,
 ) {
   const options = opts ?? {}
-  const {started_at = "", completed_at = started_at, persona = "persona_prelude"} = options
-    ?? {}
+  // `completed_at` defaults to `started_at`, which is a sibling of the same
+  // destructuring and therefore not yet bound while the pattern is being
+  // matched. Bind it after the pattern instead (#8459).
+  const {started_at = "", persona = "persona_prelude"} = options ?? {}
+  const completed_at = options?.completed_at ?? started_at
   const input_digest = options?.inputs_digest ?? __prelude_digest(options?.input)
   const output_digest = options?.outputs_digest ?? __prelude_digest(result)
   return {
@@ -1041,9 +1044,11 @@ fn __prelude_persona_patch_for_group(group: dict, opts: dict?) -> string {
   const persona = __prelude_persona_identifier(group.persona)
   const kind = __prelude_persona_identifier(group.repair_kind)
   const downstream = __prelude_persona_identifier(group.downstream_action)
-  const {step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step"} =
-    opts
-    ?? {}
+  // `function_name` defaults from `step_name`, its sibling in the same
+  // destructuring, which is not bound yet while the pattern is matched.
+  // Bind it after the pattern instead (#8459).
+  const {step_name = "crystallized_${persona}_${kind}_${downstream}"} = opts ?? {}
+  const function_name = opts?.function_name ?? (step_name + "_step")
   const key = group.key
   const input_digest = group.input_digest
   const output_digest = group.output_digest

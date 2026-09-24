@@ -70,7 +70,8 @@ Each group reports:
 - `known_cost_usd` — measured cost only
 - `unpriced_calls` / `usage_unknown_calls` — provider requests whose cost or
   token usage is absent
-- `input_tokens` / `output_tokens`
+- `input_tokens` / `output_tokens`; input counts include cache reads and writes
+  on every provider
 - `cache_read_tokens` / `cache_write_tokens`
 - `cache_savings_usd` — sum of the runtime's per-call cache-savings estimate
 - `cache_hit_ratio` — response-weighted mean of the runtime's normalized

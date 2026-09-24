@@ -194,6 +194,20 @@ impl ConcurrentSessionControls {
                     return true;
                 }
             };
+        let goal = match session_inject_goal(params, mode) {
+            Ok(goal) => goal,
+            Err(message) => {
+                send_routed_error(output, id, -32602, &message);
+                emit_routed_control_outcome(
+                    &session_id,
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id}),
+                    Some("invalid_goal"),
+                );
+                return true;
+            }
+        };
         // The caller's own word, before `bridge_mode_for_session_inject`
         // normalized it onto a delivery checkpoint.
         let requested_mode = params
@@ -222,6 +236,7 @@ impl ConcurrentSessionControls {
                 message_id.clone(),
                 recorded_text,
             )
+            .with_goal(goal)
             .with_actor(actor.clone()),
         );
         let response = harn_vm::jsonrpc::response(
@@ -507,6 +522,11 @@ pub(super) struct Session {
     pub(super) current_mode_id: String,
     /// Session-level budget override applied to subsequent prompt turns.
     pub(super) budget: SessionBudget,
+    /// Live execution allowance. Forks share it and later prompt turns retain it.
+    pub(super) admission: Option<harn_vm::llm::ConservativeLlmBudget>,
+    /// A cold restore or a prompt without admission cannot later acquire a
+    /// fresh allowance that would omit earlier provider work.
+    pub(super) admission_unavailable: bool,
     /// Prompt executions emitted to profile output for this ACP session.
     pub(super) profile_turn: u64,
     /// The environment policy this session launched under, resolved once at

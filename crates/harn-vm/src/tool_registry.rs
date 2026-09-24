@@ -841,6 +841,7 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmEr
             ));
         }
     };
+    contract::reject_schema_shaped_parameter_map(params)?;
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
     for (name, definition) in params.iter() {

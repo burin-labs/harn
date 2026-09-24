@@ -97,3 +97,45 @@ package_verify_prepare_tools() {
   fi
   "$aot_generator" --workspace-root "$root_dir" --check
 }
+
+# Resolver-latest has no lockfile. A known broken external release may be
+# pinned temporarily, but every pin has a review date after which it stops
+# changing resolution automatically. The date and reason are part of the
+# machine-read table, not a comment that a gate cannot enforce.
+# Fields: crate | last good version | expiry (UTC) | broken release and cause.
+external_publish_pins_table='
+tinyvec|1.12.0|2026-10-03|tinyvec 1.13.0 published 2026-09-02 does not compile because vec! is unreachable in tinyvec.rs
+'
+
+apply_external_publish_pins() {
+  local manifest="$1"
+  local today="${2:-$(date -u +%F)}"
+  local crate precise_version expires_on reason
+  local LC_COLLATE=C
+
+  if [[ ! "$today" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "error: external publish pin clock must be a UTC YYYY-MM-DD date" >&2
+    return 1
+  fi
+  while IFS='|' read -r crate precise_version expires_on reason; do
+    [[ -n "$crate$precise_version$expires_on$reason" ]] || continue
+    if [[ ! "$crate" =~ ^[A-Za-z0-9_-]+$ || \
+          ! "$precise_version" =~ ^[0-9][A-Za-z0-9.+-]*$ || \
+          ! "$expires_on" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ || \
+          -z "$reason" ]]; then
+      echo "error: malformed external publish pin for $crate" >&2
+      return 1
+    fi
+    if [[ "$today" < "$expires_on" ]]; then
+      printf 'external_publish_pin state=active crate=%s version=%s expires_on=%s reason=%s\n' \
+        "$crate" "$precise_version" "$expires_on" "$reason"
+      cargo update --manifest-path "$manifest" -p "$crate" --precise "$precise_version"
+    else
+      printf 'external_publish_pin state=expired crate=%s version=%s expires_on=%s reason=%s\n' \
+        "$crate" "$precise_version" "$expires_on" "$reason"
+      if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+        echo "::warning title=External publish pin expired::$crate $precise_version expired on $expires_on; resolver-latest is checking current registry versions. $reason"
+      fi
+    fi
+  done <<<"$external_publish_pins_table"
+}

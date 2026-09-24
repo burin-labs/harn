@@ -58,6 +58,7 @@ exempt_checks = [
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
   "check-scheduled-workflows",       # validates the scheduled-workflow claim and cadence registry
+  "check-e2e-trigger-contract",      # validates the E2E suite's own pull-request trigger contract and its reporter, not a generated mirror
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs",                     # semantic documentation-check aggregator
   "check-docs-portable",            # the half of check-docs a published release can judge
@@ -286,7 +287,7 @@ description = "Checked documentation diagnostic examples projected from real com
 gen = "sync-docs-diagnostics"
 check = "check-docs-snippets"
 outputs = ["docs/diagnostic-examples.json"]
-sources = ["docs/src/**/*.md", "scripts/check_docs_snippets.harn", "crates/harn-parser/src/diagnostic_codes.rs", "crates/harn-parser/src/diagnostic_codes/"]
+sources = ["docs/src/**/*.md", ".harn-docs.toml", "scripts/check_docs_snippets.harn", "scripts/docs_snippet_policy.harn", "crates/harn-parser/src/diagnostic_codes.rs", "crates/harn-parser/src/diagnostic_codes/"]
 ci = true
 make_all = true
 
@@ -359,6 +360,7 @@ outputs = [
 ]
 sources = [
   "spec/openapi.yaml",
+  "conformance/protocols/schemas/acp-session-update.schema.json",
   "crates/harn-cli/src/commands/",
   "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn",
   "crates/harn-vm/src/mcp_tasks.rs",
@@ -662,6 +664,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-gate-path-visibility" = "source"
 "check-python-boundary" = "source"
 "check-harn-syntax-sensitive-scans" = "source"
+"check-e2e-trigger-contract" = "source"
 "check-agent-guidance" = "source"
 "check-loud-boundaries" = "source"
 "check-turn-end-boundary" = "source"

@@ -15,9 +15,9 @@ use crate::llm_config::{
 use chrono::{NaiveDate, Utc};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 10;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 12;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v10.json";
+    "https://harnlang.com/schemas/provider-catalog.v12.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -37,13 +37,23 @@ mod automatic_eligibility_tests;
 mod bindings;
 #[cfg(test)]
 mod cache_accounting_tests;
+mod decision_contract;
+#[cfg(test)]
+mod decision_contract_tests;
 #[cfg(test)]
 mod display_name_tests;
 mod from_artifact;
+pub use decision_contract::{decision_contract_for_route, DecisionContract};
+mod pricing_validation;
+use pricing_validation::validate_pricing;
+mod predicate_admission;
+pub use predicate_admission::{predicate_model_catalog_identity, validate_predicate_models};
 mod harn_binding;
 mod local_runtime;
 #[cfg(test)]
 mod local_runtime_tests;
+#[cfg(test)]
+mod operation_tests;
 #[cfg(test)]
 mod pricing_tests;
 #[cfg(test)]
@@ -215,6 +225,7 @@ fn artifact_to_json(artifact: &ProviderCatalogArtifact) -> Result<String, serde_
 
 fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
     CatalogProvider {
+        platform_fee_percent: provider.platform_fee_percent,
         display_name: provider
             .display_name
             .clone()
@@ -414,7 +425,8 @@ fn catalog_model(
         capability_tags.push("batch".to_string());
     }
     let batch = catalog_batch_support(batch_api, &caps);
-    let embedding_model = model.is_embedding_model();
+    let operations = model.normalized_operations();
+    let text_generation = operations.contains(&llm_config::ModelOperation::TextGeneration);
     CatalogModel {
         aliases,
         data_controls: model.data_controls.clone(),
@@ -440,32 +452,33 @@ fn catalog_model(
             .local_memory
             .clone()
             .filter(|memory| !memory.is_empty()),
-        modalities: modalities_from_caps(&caps, embedding_model),
+        modalities: modalities_from_caps(&caps, &operations),
+        operations,
         tool_support: ModelToolSupport {
-            native: !embedding_model && caps.native_tools,
-            text: !embedding_model && caps.text_tool_wire_format_supported,
-            preferred_format: (!embedding_model)
+            native: text_generation && caps.native_tools,
+            text: text_generation && caps.text_tool_wire_format_supported,
+            preferred_format: text_generation
                 .then(|| caps.preferred_tool_format.clone())
                 .flatten(),
-            parity: (!embedding_model)
+            parity: text_generation
                 .then(|| caps.tool_mode_parity.clone())
                 .flatten(),
-            parity_source: (!embedding_model)
+            parity_source: text_generation
                 .then(|| {
                     caps.tool_mode_parity_source
                         .map(|source| source.as_str().to_string())
                 })
                 .flatten(),
-            parity_notes: (!embedding_model)
+            parity_notes: text_generation
                 .then(|| caps.tool_mode_parity_notes.clone())
                 .flatten(),
             empirical_parity: None,
-            tool_search: if embedding_model {
-                Vec::new()
-            } else {
+            tool_search: if text_generation {
                 caps.tool_search.clone()
+            } else {
+                Vec::new()
             },
-            max_tools: (!embedding_model).then_some(caps.max_tools).flatten(),
+            max_tools: text_generation.then_some(caps.max_tools).flatten(),
         },
         structured_output,
         format_preferences: ModelFormatPreferences {
@@ -668,7 +681,7 @@ fn aliases_by_model(aliases: &[(String, AliasDef)]) -> BTreeMap<(String, String)
 
 fn modalities_from_caps(
     caps: &llm::capabilities::Capabilities,
-    embedding_model: bool,
+    operations: &[llm_config::ModelOperation],
 ) -> ModelModalities {
     let mut input = vec!["text".to_string()];
     if caps.vision || caps.vision_supported {
@@ -685,7 +698,10 @@ fn modalities_from_caps(
     }
     ModelModalities {
         input,
-        output: vec![if embedding_model { "embedding" } else { "text" }.to_string()],
+        output: operations
+            .iter()
+            .map(|operation| operation.output_modality().into())
+            .collect(),
     }
 }
 
@@ -835,172 +851,6 @@ fn pricing_total(model: &CatalogModel) -> f64 {
         .as_ref()
         .map(|pricing| pricing.input_per_mtok + pricing.output_per_mtok)
         .unwrap_or(f64::MAX)
-}
-
-fn validate_pricing(
-    model: &CatalogModel,
-    pricing: &ModelPricing,
-    result: &mut ProviderCatalogValidation,
-) {
-    for (field, value) in [
-        ("input_per_mtok", Some(pricing.input_per_mtok)),
-        ("output_per_mtok", Some(pricing.output_per_mtok)),
-        ("cache_read_per_mtok", pricing.cache_read_per_mtok),
-        ("cache_write_per_mtok", pricing.cache_write_per_mtok),
-    ] {
-        if value.is_some_and(|value| value < 0.0) {
-            result.errors.push(format!(
-                "model {} pricing.{} must be non-negative",
-                model.id, field
-            ));
-        }
-    }
-    let mut previous_minimum = 0;
-    for band in &pricing.input_token_bands {
-        if band.minimum_input_tokens == 0 {
-            result.errors.push(format!(
-                "model {} pricing.input_token_bands minimum_input_tokens must be positive",
-                model.id
-            ));
-        }
-        if band.minimum_input_tokens <= previous_minimum {
-            result.errors.push(format!(
-                "model {} pricing.input_token_bands must be ordered by unique ascending minimum_input_tokens",
-                model.id
-            ));
-        }
-        previous_minimum = band.minimum_input_tokens;
-        for (field, value) in [
-            ("input_multiplier", band.input_multiplier),
-            ("output_multiplier", band.output_multiplier),
-        ] {
-            if value <= 0.0 {
-                result.errors.push(format!(
-                    "model {} pricing.input_token_bands.{} must be positive",
-                    model.id, field
-                ));
-            }
-        }
-    }
-
-    let mut promotion_ids = BTreeSet::new();
-    let mut promotion_windows = Vec::new();
-    for promotion in &pricing.promotions {
-        if promotion.id.trim().is_empty() || !promotion_ids.insert(promotion.id.as_str()) {
-            result.errors.push(format!(
-                "model {} pricing.promotions must use unique non-empty ids",
-                model.id
-            ));
-        }
-        if promotion.source_url.trim().is_empty() {
-            result.errors.push(format!(
-                "model {} pricing.promotions[{}].source_url cannot be empty",
-                model.id, promotion.id
-            ));
-        }
-        for (field, value) in [
-            ("input_per_mtok", Some(promotion.input_per_mtok)),
-            ("output_per_mtok", Some(promotion.output_per_mtok)),
-            ("cache_read_per_mtok", promotion.cache_read_per_mtok),
-            ("cache_write_per_mtok", promotion.cache_write_per_mtok),
-        ] {
-            if value.is_some_and(|value| value < 0.0) {
-                result.errors.push(format!(
-                    "model {} pricing.promotions[{}].{} must be non-negative",
-                    model.id, promotion.id, field
-                ));
-            }
-        }
-        let Ok(starts_on) = NaiveDate::parse_from_str(&promotion.starts_on, "%Y-%m-%d") else {
-            result.errors.push(format!(
-                "model {} pricing.promotions[{}].starts_on must be YYYY-MM-DD",
-                model.id, promotion.id
-            ));
-            continue;
-        };
-        let starts_at = match promotion.starts_at.as_deref() {
-            Some(value) => match OffsetDateTime::parse(value, &Rfc3339) {
-                Ok(value) => value.unix_timestamp_nanos(),
-                Err(_) => {
-                    result.errors.push(format!(
-                        "model {} pricing.promotions[{}].starts_at must be RFC 3339",
-                        model.id, promotion.id
-                    ));
-                    continue;
-                }
-            },
-            None => catalog_date_start_nanos(starts_on),
-        };
-        let ends_on = match promotion.ends_on.as_deref() {
-            Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
-                Ok(date) => Some(date),
-                Err(_) => {
-                    result.errors.push(format!(
-                        "model {} pricing.promotions[{}].ends_on must be YYYY-MM-DD",
-                        model.id, promotion.id
-                    ));
-                    continue;
-                }
-            },
-            None => None,
-        };
-        let ends_at = match promotion.ends_at.as_deref() {
-            Some(value) => match OffsetDateTime::parse(value, &Rfc3339) {
-                Ok(value) => Some(value.unix_timestamp_nanos()),
-                Err(_) => {
-                    result.errors.push(format!(
-                        "model {} pricing.promotions[{}].ends_at must be RFC 3339",
-                        model.id, promotion.id
-                    ));
-                    continue;
-                }
-            },
-            None => ends_on
-                .and_then(|end| end.succ_opt())
-                .map(catalog_date_start_nanos),
-        };
-        if ends_at.is_some_and(|end| end <= starts_at) {
-            result.errors.push(format!(
-                "model {} pricing.promotions[{}] ends before it starts",
-                model.id, promotion.id
-            ));
-        }
-        if let Some(value) = promotion.review_after.as_deref() {
-            match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
-                Ok(date) if date >= starts_on => {}
-                Ok(_) => result.errors.push(format!(
-                    "model {} pricing.promotions[{}].review_after precedes starts_on",
-                    model.id, promotion.id
-                )),
-                Err(_) => result.errors.push(format!(
-                    "model {} pricing.promotions[{}].review_after must be YYYY-MM-DD",
-                    model.id, promotion.id
-                )),
-            }
-        }
-        promotion_windows.push((promotion.id.as_str(), starts_at, ends_at));
-    }
-    for (index, (left_id, left_start, left_end)) in promotion_windows.iter().enumerate() {
-        for (right_id, right_start, right_end) in promotion_windows.iter().skip(index + 1) {
-            let left_reaches_right = left_end.is_none_or(|end| *right_start < end);
-            let right_reaches_left = right_end.is_none_or(|end| *left_start < end);
-            if left_reaches_right && right_reaches_left {
-                result.errors.push(format!(
-                    "model {} pricing promotions {:?} and {:?} overlap",
-                    model.id, left_id, right_id
-                ));
-            }
-        }
-    }
-}
-
-fn catalog_date_start_nanos(date: NaiveDate) -> i128 {
-    i128::from(
-        date.and_hms_opt(0, 0, 0)
-            .expect("a valid date has a midnight")
-            .and_utc()
-            .timestamp(),
-    ) * 1_000_000_000
 }
 
 fn validate_batch_support(

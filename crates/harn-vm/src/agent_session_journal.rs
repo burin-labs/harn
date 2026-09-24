@@ -12,6 +12,7 @@ use harn_session_store::{
     SessionWriteLease,
 };
 
+use crate::agent_sessions::event_facts as facts;
 use crate::stdlib::session_store;
 use crate::value::{DictMap, VmError};
 
@@ -342,7 +343,16 @@ fn append_event_for_mutation(
             let source_event_id = source_event_id(&event.payload);
             let message_id = message_id(&event.payload);
             let tool_call_id = tool_call_id(&event.payload);
-            if tool_call_id.is_some() && matches!(&event.kind, SessionEventKind::Message) {
+            // A narrated native call has a public message as well as tool
+            // lifecycle events. Converting that message into a tool row lets
+            // the result merge erase its text and chronological position.
+            let has_public_text = facts::string_at(&event.payload, facts::VISIBILITY).as_deref()
+                == Some("public")
+                && facts::semantic_string(&event.payload, &facts::TEXT).is_some();
+            if tool_call_id.is_some()
+                && matches!(&event.kind, SessionEventKind::Message)
+                && !has_public_text
+            {
                 event.kind = SessionEventKind::ToolCall;
             }
             apply_identity(
@@ -588,6 +598,10 @@ fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
 }
+
+#[cfg(test)]
+#[path = "agent_session_journal_public_timeline_tests.rs"]
+mod public_timeline_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1121,6 +1135,12 @@ pipeline main(harness: Harness, task: unknown) {{
       entries: [{{content: "Project recap facts", status: "completed"}}],
     }},
   }}]}})
+  harness.llm.mock_enqueue({{text: "", tool_calls: [{{
+    id: "known-result-one", name: "noop", arguments: {{query: "first"}},
+  }}]}})
+  harness.llm.mock_enqueue({{text: "", tool_calls: [{{
+    id: "known-result-two", name: "noop", arguments: {{query: "second"}},
+  }}]}})
   harness.llm.mock_enqueue({{text: "##DONE##"}})
   let tools = tool_registry()
   tools = tool_define(
@@ -1128,9 +1148,10 @@ pipeline main(harness: Harness, task: unknown) {{
     "noop",
     "Return a deterministic result.",
     {{
-      handler: {{ _args -> "ok" }},
-      parameters: {{}},
+      handler: {{ args -> "known durable result: " + args.query }},
+      parameters: {{query: {{type: "string"}}}},
       returns: {{type: "string"}},
+      annotations: {{kind: "read"}},
     }},
   )
   const result = agent_loop(
@@ -1146,7 +1167,9 @@ pipeline main(harness: Harness, task: unknown) {{
       progress_tool: {{}},
       tool_format: "native",
       loop_until_done: true,
-      max_iterations: 4,
+      iteration_budget: {{
+        mode: "adaptive", initial: 2, max: 6, extend_by: 2, expose_decisions: true,
+      }},
     }},
   )
   harness.stdio.println(result.status)
@@ -1155,6 +1178,9 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.stdio.println(result.recap.snapshot.coverage.matched)
   harness.stdio.println(result.recap.snapshot.query.fromEventId)
   harness.stdio.println(result.recap.snapshot.projectionHash)
+  assert(result.adaptive_budget.extensions_used > 0)
+  assert(result.adaptive_budget.decisions[0].action == "extend")
+  harness.stdio.println("budget:" + json_stringify(result.adaptive_budget))
 }}
 "###,
         );
@@ -1317,11 +1343,40 @@ pipeline main(harness: Harness, task: unknown) {{
             projected.metadata["run_clock"]["finished_at_source"],
             "agent_run_terminal"
         );
-        assert_eq!(projected.tool_recordings.len(), 1);
+        assert_eq!(projected.tool_recordings.len(), 3);
         assert!(
             projected.tool_recordings[0].duration_ms.is_some(),
             "the live terminal tool update must retain its measured duration"
         );
+        let known_result = projected
+            .tool_recordings
+            .iter()
+            .find(|record| record.tool_use_id == "known-result-one")
+            .expect("the known tool call must be recorded");
+        assert!(
+            known_result.result.contains("known durable result: first"),
+            "the live journal must preserve the tool output: {known_result:?}"
+        );
+        let budget = projected
+            .metadata
+            .get("adaptive_budget")
+            .expect("the sealed run must carry the exposed budget account");
+        let returned_budget: serde_json::Value = serde_json::from_str(
+            output
+                .lines()
+                .find_map(|line| line.strip_prefix("budget:"))
+                .expect("the loop must return its budget account"),
+        )
+        .expect("parse returned budget account");
+        assert_eq!(
+            budget, &returned_budget,
+            "the durable account must match the returned account exactly"
+        );
+        assert_eq!(budget["initial"], 2);
+        assert_eq!(budget["extensions_used"], 1);
+        assert_eq!(budget["decisions"][0]["action"], "extend");
+        assert_eq!(budget["decisions"][0]["old_limit"], 2);
+        assert_eq!(budget["decisions"][0]["new_limit"], 4);
         assert!(projected.evidence.execution_id.is_some());
         assert!(projected
             .evidence

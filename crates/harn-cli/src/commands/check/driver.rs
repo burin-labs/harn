@@ -325,6 +325,7 @@ fn internal_failure(file: &Path, want_text: bool) -> CheckedFile {
         report: CheckFileReport {
             path,
             status: CheckFileStatus::Error,
+            predicate_manifest: None,
             diagnostics: vec![CheckDiagnostic {
                 source: "check",
                 severity: "error",
@@ -648,6 +649,12 @@ mod tests {
             report: CheckFileReport {
                 path: file.to_string_lossy().into_owned(),
                 status: CheckFileStatus::Ok,
+                predicate_manifest: Some(
+                    harn_kernel::predicate::PredicateManifest::from_checked_sites(
+                        &file.to_string_lossy(),
+                        &[],
+                    ),
+                ),
                 diagnostics: Vec::new(),
             },
             strict: false,

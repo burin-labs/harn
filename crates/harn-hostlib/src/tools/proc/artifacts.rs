@@ -14,6 +14,11 @@ static ARTIFACTS: LazyLock<Mutex<ArtifactRegistry>> =
 static ACTIVE_ARTIFACT_LEASES: LazyLock<Mutex<BTreeMap<PathBuf, File>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
 static LAST_RETENTION_SWEEP: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+/// One descriptor per artifact namespace, held for the life of the process,
+/// standing in for the one this process used to hold per completed command.
+/// In production a process uses a single namespace, so this is one descriptor.
+static SESSION_LEASES: LazyLock<Mutex<BTreeMap<PathBuf, File>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 const RETENTION_ENV: &str = "HARN_COMMAND_ARTIFACT_RETENTION_SECS";
 const MAX_DIRS_ENV: &str = "HARN_COMMAND_ARTIFACT_MAX_DIRS";
@@ -25,6 +30,7 @@ const DEFAULT_MAX_DIRS: usize = 512;
 const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
 const ACTIVE_LEASE_FILE: &str = ".active.lock";
+const SESSION_LEASE_PREFIX: &str = ".session-";
 const ARTIFACT_NAMESPACE_PREFIX: &str = "harn-command-artifacts";
 const LEGACY_NAMESPACE_LEASE_PREFIX: &str = ".harn-command-artifacts";
 const NAMESPACE_LEASE_FILE: &str = ".namespace.lock";
@@ -478,7 +484,23 @@ fn register_completed_artifacts_with_options(
             );
             Ok(())
         },
-    )
+    )?;
+    // The active lease answers one question: is a command running in this
+    // directory right now. A completed one is not, and holding its descriptor
+    // until the directory is retired spends one per command for the life of
+    // the session. That is how a long session ran out of descriptors: the
+    // retention cap is measured in directories, 512 of them by default, while
+    // the cost was paid in descriptors against a per-process limit of 256, so
+    // the process died of exhaustion before retention ever trimmed anything.
+    //
+    // Nothing is weakened by releasing here. The sweep skips any directory
+    // younger than the retention window before it ever consults the lease, so
+    // a completed artifact is protected by that window, which is the policy
+    // that is supposed to govern it. The lease still protects a command that
+    // is genuinely running, whose directory can go stale while it works, and
+    // the marker file stays on disk until the artifact is retired.
+    release_artifact_lease(&dir);
+    Ok(())
 }
 
 fn retire_completed_artifacts_under_namespace(
@@ -600,6 +622,9 @@ fn mark_artifacts_active_under_namespace(
         .expect("active command artifact lease store poisoned");
     if active_leases.contains_key(&dir) {
         return Ok(());
+    }
+    if let Some(namespace) = dir.parent() {
+        hold_session_lease(namespace);
     }
     let lease_path = dir.join(ACTIVE_LEASE_FILE);
     let lease = OpenOptions::new()
@@ -931,6 +956,7 @@ fn sweep_command_artifact_dirs_except(
     now: SystemTime,
     current_dir: Option<&Path>,
 ) {
+    sweep_stale_session_leases(temp_dir);
     let mut dirs = collect_command_artifact_dirs(temp_dir);
     dirs.sort_by_key(|dir| dir.modified);
     let mut live_count = dirs.len();
@@ -971,6 +997,109 @@ fn sweep_command_artifact_dirs_except(
     }
 }
 
+/// The session lease a process holds while it can still serve its own
+/// completed results.
+fn session_lease_path(namespace: &Path, pid: u32) -> PathBuf {
+    namespace.join(format!("{SESSION_LEASE_PREFIX}{pid}.lock"))
+}
+
+/// Take this process's session lease once, under the namespace lock.
+///
+/// A completed command's own lock used to be what told another process that
+/// its results were still being served, at the cost of one descriptor per
+/// command. This says the same thing once, for the whole session.
+fn hold_session_lease(namespace: &Path) {
+    let mut held = SESSION_LEASES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if held.contains_key(namespace) {
+        return;
+    }
+    let path = session_lease_path(namespace, std::process::id());
+    let Ok(lease) = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+    else {
+        return;
+    };
+    if harn_flock::lock_with_deadline(
+        &lease,
+        &path,
+        harn_flock::LockMode::Exclusive,
+        ACTIVE_LEASE_LOCK_TIMEOUT,
+    )
+    .is_ok()
+    {
+        held.insert(namespace.to_path_buf(), lease);
+    }
+}
+
+/// Whether the process that owns `pid`'s artifacts is still serving them.
+///
+/// Only a process that took a session lease counts. An artifact directory
+/// named after some unrelated live process is not claimed by anything and
+/// stays evictable, which is what keeps a live stranger from starving fresh
+/// output.
+fn owner_session_is_live(namespace: &Path, pid: u32) -> bool {
+    let path = session_lease_path(namespace, pid);
+    let Ok(lease) = OpenOptions::new().read(true).write(true).open(&path) else {
+        return false;
+    };
+    match lease.try_lock() {
+        Ok(()) => {
+            let _ = lease.unlock();
+            false
+        }
+        // Held, or unreadable: either way, assume the owner is still serving.
+        Err(_) => true,
+    }
+}
+
+/// Remove session leases whose owning process is gone.
+///
+/// A lease file is one per process, not one per command, but a machine that
+/// runs many sessions would still accumulate them forever. Both this and the
+/// acquisition run under the namespace lock, so a lease that can be taken here
+/// belongs to no live session and is safe to delete.
+fn sweep_stale_session_leases(namespace: &Path) {
+    let Ok(entries) = std::fs::read_dir(namespace) else {
+        return;
+    };
+    let own = session_lease_path(namespace, std::process::id());
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == own {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(SESSION_LEASE_PREFIX) || !name.ends_with(".lock") {
+            continue;
+        }
+        let Ok(lease) = OpenOptions::new().read(true).write(true).open(&path) else {
+            continue;
+        };
+        if lease.try_lock().is_ok() {
+            let _ = lease.unlock();
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+/// Whether this process still has the directory in its completed registry.
+fn dir_is_registered(path: &Path) -> bool {
+    ARTIFACTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .completed
+        .iter()
+        .any(|artifact| artifact.path == path)
+}
+
 fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
     if ACTIVE_ARTIFACT_LEASES
         .lock()
@@ -978,6 +1107,25 @@ fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
         .contains_key(&dir.path)
     {
         return true;
+    }
+    // A completed result stays readable while its owner is still serving it.
+    // This is the guarantee the per-command descriptor used to provide, now
+    // answered once per process instead of once per command.
+    if let (Some(namespace), Some(name)) = (
+        dir.path.parent(),
+        dir.path.file_name().and_then(|name| name.to_str()),
+    ) {
+        if let Some(owner) = parse_command_artifact_dir_name(name) {
+            if owner == std::process::id() {
+                // Our own directories answer from the registry, so the ones we
+                // have already evicted stay evictable.
+                if dir_is_registered(&dir.path) {
+                    return true;
+                }
+            } else if owner_session_is_live(namespace, owner) {
+                return true;
+            }
+        }
     }
     let lease_path = dir.path.join(ACTIVE_LEASE_FILE);
     let Ok(metadata) = std::fs::symlink_metadata(&lease_path) else {
@@ -1024,364 +1172,5 @@ fn parse_command_artifact_dir_name(name: &str) -> Option<u32> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use filetime::FileTime;
-    use tempfile::tempdir;
-
-    fn artifact_dir(parent: &Path, pid: u32, nanos: u128, counter: u64) -> PathBuf {
-        parent.join(format!("harn-command-cmd_{pid}_{nanos}_{counter}"))
-    }
-
-    fn create_artifact_dir(parent: &Path, pid: u32, nanos: u128, counter: u64) -> PathBuf {
-        let path = artifact_dir(parent, pid, nanos, counter);
-        std::fs::create_dir(&path).unwrap();
-        std::fs::write(path.join("combined.txt"), "output").unwrap();
-        path
-    }
-
-    fn set_dir_mtime(path: &Path, time: SystemTime) {
-        let file_time = FileTime::from_system_time(time);
-        filetime::set_file_mtime(path, file_time).unwrap();
-    }
-
-    fn artifacts_in(dir: &Path) -> CommandArtifacts {
-        CommandArtifacts {
-            output_path: dir.join("combined.txt"),
-            stdout_path: dir.join("stdout.txt"),
-            stderr_path: dir.join("stderr.txt"),
-            line_count: 0,
-            byte_count: 0,
-            output_sha256: String::new(),
-        }
-    }
-
-    fn dead_pid() -> u32 {
-        (900_000..=999_999)
-            .find(|pid| {
-                crate::process_liveness::process_liveness(*pid)
-                    == crate::process_liveness::ProcessLiveness::Dead
-            })
-            .expect("test host should have an unused high pid")
-    }
-
-    #[test]
-    fn command_artifact_sweep_deletes_stale_artifact_dirs() {
-        let temp = tempdir().unwrap();
-        let now = SystemTime::now();
-        let stale = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
-        set_dir_mtime(&stale, now - Duration::from_secs(10));
-
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
-
-        assert!(!stale.exists());
-    }
-
-    #[test]
-    fn command_artifact_sweep_preserves_recent_artifact_dirs() {
-        let temp = tempdir().unwrap();
-        let now = SystemTime::now();
-        let recent = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
-        set_dir_mtime(&recent, now - Duration::from_secs(3));
-
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
-
-        assert!(recent.exists());
-    }
-
-    #[test]
-    fn command_artifact_sweep_removes_completed_current_process_artifact_dirs() {
-        let temp = tempdir().unwrap();
-        let now = SystemTime::now();
-        let completed = create_artifact_dir(temp.path(), std::process::id(), 100, 1);
-        set_dir_mtime(&completed, now - Duration::from_secs(10));
-
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
-
-        assert!(!completed.exists());
-    }
-
-    #[test]
-    fn command_artifact_sweep_preserves_active_current_process_artifact_dirs() {
-        let temp = tempdir().unwrap();
-        let now = SystemTime::now();
-        let active = create_artifact_dir(temp.path(), std::process::id(), 100, 1);
-        let artifacts = CommandArtifacts {
-            output_path: active.join("combined.txt"),
-            stdout_path: active.join("stdout.txt"),
-            stderr_path: active.join("stderr.txt"),
-            line_count: 0,
-            byte_count: 0,
-            output_sha256: String::new(),
-        };
-        mark_artifacts_active(&artifacts).unwrap();
-        set_dir_mtime(&active, now - Duration::from_secs(10));
-
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
-
-        assert!(active.exists());
-        mark_artifacts_inactive(&artifacts);
-    }
-
-    #[test]
-    fn command_artifact_sweep_uses_cross_process_active_lease_not_pid_liveness() {
-        let temp = tempdir().unwrap();
-        let now = SystemTime::UNIX_EPOCH + Duration::from_hours(1);
-        let active = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
-        let lease_path = active.join(ACTIVE_LEASE_FILE);
-        let lease = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(lease_path)
-            .unwrap();
-        lease.lock().unwrap();
-        set_dir_mtime(&active, now - Duration::from_secs(10));
-
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
-        assert!(active.exists());
-
-        lease.unlock().unwrap();
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
-        assert!(!active.exists());
-    }
-
-    #[test]
-    fn contended_command_artifact_lease_names_itself() {
-        let temp = tempdir().unwrap();
-        let active = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
-        let artifacts = CommandArtifacts {
-            output_path: active.join("combined.txt"),
-            stdout_path: active.join("stdout.txt"),
-            stderr_path: active.join("stderr.txt"),
-            line_count: 0,
-            byte_count: 0,
-            output_sha256: String::new(),
-        };
-        let lease_path = active.join(ACTIVE_LEASE_FILE);
-        let holder = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lease_path)
-            .unwrap();
-        holder.lock().unwrap();
-
-        let error = mark_artifacts_active_with_timeout(&artifacts, Duration::ZERO).unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains(&lease_path.display().to_string()));
-        assert!(error.to_string().contains("timed out"));
-    }
-
-    #[test]
-    fn namespace_admission_precedes_artifact_directory_publication() {
-        let temp = tempdir().unwrap();
-        let dir = artifact_dir(temp.path(), std::process::id(), 200, 1);
-        let artifacts = CommandArtifacts {
-            output_path: dir.join("combined.txt"),
-            stdout_path: dir.join("stdout.txt"),
-            stderr_path: dir.join("stderr.txt"),
-            line_count: 0,
-            byte_count: 0,
-            output_sha256: String::new(),
-        };
-        let namespace_path = artifact_namespace_lease_path(temp.path());
-        let holder = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&namespace_path)
-            .unwrap();
-        holder.lock().unwrap();
-
-        let error =
-            create_and_mark_artifacts_active_with_timeout(&artifacts, Duration::ZERO).unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains(&namespace_path.display().to_string()));
-        assert!(!dir.exists(), "directory became visible before its lease");
-    }
-
-    #[test]
-    fn registration_failure_releases_active_lease_without_namespace_reacquisition() {
-        let temp = tempdir().unwrap();
-        let dir = artifact_dir(temp.path(), std::process::id(), 300, 1);
-        let artifacts = artifacts_in(&dir);
-        create_and_mark_artifacts_active_with_timeout(&artifacts, Duration::ZERO).unwrap();
-
-        let namespace_path = artifact_namespace_lease_path(temp.path());
-        let holder = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&namespace_path)
-            .unwrap();
-        holder.lock().unwrap();
-
-        let error = register_completed_artifacts_with_guard_options(
-            "command-registration-failure",
-            Some("handle-registration-failure"),
-            &artifacts,
-            ActiveArtifactLeaseGuard::new(&artifacts),
-            1,
-            Duration::ZERO,
-        )
-        .unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains(&namespace_path.display().to_string()));
-        assert!(
-            !ACTIVE_ARTIFACT_LEASES
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .contains_key(&dir),
-            "failure guard must release without waiting for the held namespace lock"
-        );
-        let probe = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(dir.join(ACTIVE_LEASE_FILE))
-            .unwrap();
-        probe.try_lock().unwrap();
-        probe.unlock().unwrap();
-        drop(probe);
-        holder.unlock().unwrap();
-        drop(holder);
-    }
-
-    #[test]
-    fn completed_fifo_evicts_oldest_aliases_and_releases_its_lease() {
-        let temp = tempdir().unwrap();
-        let first_dir = artifact_dir(temp.path(), std::process::id(), 400, 1);
-        let second_dir = artifact_dir(temp.path(), std::process::id(), 400, 2);
-        let first = artifacts_in(&first_dir);
-        let second = artifacts_in(&second_dir);
-        create_and_mark_artifacts_active_with_timeout(&first, Duration::ZERO).unwrap();
-        create_and_mark_artifacts_active_with_timeout(&second, Duration::ZERO).unwrap();
-
-        let mut store = ArtifactRegistry::default();
-        store.by_id.insert("command-first".into(), first.clone());
-        store.by_id.insert("handle-first".into(), first);
-        store.by_id.insert("command-second".into(), second.clone());
-        store.by_id.insert("handle-second".into(), second.clone());
-        store.completed.push_back(CompletedArtifact {
-            path: first_dir.clone(),
-            completed_at: SystemTime::UNIX_EPOCH,
-        });
-        store.completed.push_back(CompletedArtifact {
-            path: second_dir.clone(),
-            completed_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
-        });
-
-        retire_completed_artifacts_under_namespace(&mut store, 1, None);
-
-        assert!(!store.by_id.contains_key("command-first"));
-        assert!(!store.by_id.contains_key("handle-first"));
-        assert!(store.by_id.contains_key("command-second"));
-        assert!(store.by_id.contains_key("handle-second"));
-        assert_eq!(store.completed.len(), 1);
-        let active = ACTIVE_ARTIFACT_LEASES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        assert!(!active.contains_key(&first_dir));
-        assert!(active.contains_key(&second_dir));
-        drop(active);
-        mark_artifacts_inactive(&second);
-    }
-
-    #[test]
-    fn fallback_registration_uses_the_same_bounded_alias_fifo() {
-        let temp = tempdir().unwrap();
-        let first_dir = artifact_dir(temp.path(), std::process::id(), 500, 1);
-        let second_dir = artifact_dir(temp.path(), std::process::id(), 500, 2);
-        let first = artifacts_in(&first_dir);
-        let second = artifacts_in(&second_dir);
-        let mut store = ArtifactRegistry::default();
-
-        register_completed_artifacts_in_store(
-            &mut store,
-            "fallback-command-first",
-            Some("fallback-handle-first"),
-            &first,
-            1,
-            ArtifactLeaseCleanup::LeaseOnly,
-        );
-        register_completed_artifacts_in_store(
-            &mut store,
-            "fallback-command-second",
-            Some("fallback-handle-second"),
-            &second,
-            1,
-            ArtifactLeaseCleanup::LeaseOnly,
-        );
-
-        assert!(!store.by_id.contains_key("fallback-command-first"));
-        assert!(!store.by_id.contains_key("fallback-handle-first"));
-        assert!(store.by_id.contains_key("fallback-command-second"));
-        assert!(store.by_id.contains_key("fallback-handle-second"));
-        assert_eq!(store.completed.len(), 1);
-        assert_eq!(store.completed.front().unwrap().path, second_dir);
-    }
-
-    #[test]
-    fn command_artifact_sweep_preserves_malformed_names() {
-        let temp = tempdir().unwrap();
-        let now = SystemTime::now();
-        let malformed = temp.path().join("harn-command-cmd_123_not-nanos_1");
-        std::fs::create_dir(&malformed).unwrap();
-        set_dir_mtime(&malformed, now - Duration::from_secs(10));
-
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
-
-        assert!(malformed.exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn command_artifact_sweep_does_not_follow_symlinks() {
-        use std::os::unix::fs::symlink;
-
-        let temp = tempdir().unwrap();
-        let now = SystemTime::now();
-        let target = temp.path().join("target");
-        std::fs::create_dir(&target).unwrap();
-        std::fs::write(target.join("keep.txt"), "keep").unwrap();
-        let link = artifact_dir(temp.path(), dead_pid(), 100, 1);
-        symlink(&target, &link).unwrap();
-
-        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
-
-        assert!(link.exists());
-        assert_eq!(
-            std::fs::read_to_string(target.join("keep.txt")).unwrap(),
-            "keep"
-        );
-    }
-
-    #[test]
-    fn command_artifact_pressure_sweep_removes_oldest_dead_dirs_over_limit() {
-        let temp = tempdir().unwrap();
-        let now = SystemTime::now();
-        let pid = dead_pid();
-        let first = create_artifact_dir(temp.path(), pid, 100, 1);
-        let second = create_artifact_dir(temp.path(), pid, 200, 1);
-        let third = create_artifact_dir(temp.path(), pid, 300, 1);
-        set_dir_mtime(&first, now - Duration::from_mins(30));
-        set_dir_mtime(&second, now - Duration::from_mins(20));
-        set_dir_mtime(&third, now - Duration::from_mins(10));
-
-        sweep_command_artifact_dirs(temp.path(), Duration::from_hours(1), 2, now);
-
-        assert!(!first.exists());
-        assert!(second.exists());
-        assert!(third.exists());
-    }
-}
+#[path = "artifacts/tests.rs"]
+mod tests;

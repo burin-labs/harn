@@ -106,12 +106,10 @@ impl AzureOpenAiProvider {
             AzureAuth::ApiKey(key) => req.header("api-key", key),
             AzureAuth::Bearer(token) => req.header("Authorization", format!("Bearer {token}")),
         };
-        let response = req.send().await.map_err(|error| {
-            vm_err(format!(
-                "azure_openai API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))
-        })?;
+        let response = req
+            .send()
+            .await
+            .map_err(|error| crate::llm::api::reqwest_send_error("azure_openai", "API", error))?;
         if !response.status().is_success() {
             return Err(crate::llm::api::err_for_non_success_with_dialect(
                 dialect,

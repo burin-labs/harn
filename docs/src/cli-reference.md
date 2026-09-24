@@ -58,7 +58,7 @@ harn run --resume .harn/workers/worker_...json
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
 | `--allow-process-loopback` | Allow confined child processes to serve and connect over IPv4 or IPv6 loopback without opening remote egress. Supported on macOS; other local sandbox backends fail closed. |
-| `--allow-process-network` | Allow child network while retaining filesystem/process confinement. On macOS, child traffic stays denied until `HARN_EGRESS_*` or `harness.net.egress_policy(...)` configures an allow decision through the managed proxy. On other local platforms Harn does not attach that proxy; the grant raises the capability ceiling and children have unrestricted sockets. See [Managed child-process egress](./sandboxing.md#managed-child-process-egress). |
+| `--allow-process-network` | Allow child network while retaining filesystem/process confinement. On macOS, children reach public hosts through the managed proxy while private and loopback addresses stay denied; `HARN_EGRESS_*` or `harness.net.egress_policy(...)` narrows that default. On other local platforms Harn does not attach that proxy; the grant raises the capability ceiling and children have unrestricted sockets. See [Managed child-process egress](./sandboxing.md#managed-child-process-egress). |
 | `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--sandbox-write-root <path>` | Let spawned subprocesses write an extra root without granting Harn filesystem builtins access |
@@ -440,7 +440,14 @@ targets produce a static error and the VM is never started — the same
 `call target ... is not defined or imported` message you see from
 `harn check`.
 
-The inline `-e <code>` form is wrapped in `pipeline main(harness: Harness, task) { ... }`
+A complete `fn main` or pipeline program passed with `-e <code>` executes as
+written, with the same entrypoint behavior as a file. For example:
+
+```sh
+harn run -e 'fn main(harness: Harness) { harness.stdio.println("hello") }'
+```
+
+An inline body snippet is wrapped in `pipeline main(harness: Harness, task) { ... }`
 and run as a temp file in the current directory, so:
 
 - Leading `import "..."` (and `pub import { ... } from "..."`) lines
@@ -2834,7 +2841,10 @@ default port, no query string, no fragment, and no trailing slash.
 `harn connect <provider>` reads authentication metadata for providers in the
 nearest `harn.toml` `[[providers]]` table. OAuth metadata starts the browser
 flow; flags such as `--client-id`, `--scope`, `--auth-url`, and `--token-url`
-override that metadata for one run.
+override that metadata for one run. An old OAuth credential that did not record
+its registered callback prompts for the exact URI. A missing authorization URL
+can be supplied at the next prompt or discovered from the resource. Unattended
+setup supplies the callback with `--redirect-uri <uri>`.
 
 For `auth_type = "api-key"` with one outbound `required_secrets` entry, the
 same command prompts without echoing the key. Inbound verification secrets do

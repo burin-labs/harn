@@ -32,13 +32,39 @@ import {
   agent_stall_initial_checkpoint,
 } from "std/agent/stall_checkpoint"
 
+/**
+ * What the agent loop's error channel carries.
+ *
+ * Most of the loop throws a string. The terminal-callback epilogue throws a
+ * record, and `llm_dispatch` throws one through this same channel from inside
+ * a helper the checker cannot see through. Declaring the union says what is
+ * actually here, so the strict-types policy judges the epilogue's throw
+ * instead of it being routed around a gate that only sees inline throws.
+ */
+type AgentLoopFailure = string | dict
+
 @complexity(allow)
 pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_opts: any) {
   let opts = initial_opts
   let iteration = 0
   let session_finalized = false
   let audit_background_tasks = []
-  const run = try {
+  let successful_tools_seen = []
+  let rejected_tools_seen = []
+  let current_max = 0
+  // Hoisted beside `current_max` for the same reason: the error epilogue below
+  // runs outside the try block and reports the same budget the in-loop
+  // terminal boundary reports. Reading the spec field again down there would
+  // add a second, differently shaped read of the same option.
+  let iteration_budget = nil
+  let terminal_callback_attempted = false
+  // One invoker serves ordinary terminal decisions and the error epilogue.
+  // Mark entry before calling host code: a callback that throws is not retried.
+  const notify_terminal = { terminal_opts, terminal ->
+    terminal_callback_attempted = true
+    return agent_compute_terminal_callback(harness.agent, session, terminal_opts, terminal)
+  }
+  let run: Result<_, AgentLoopFailure> = try {
     opts = agent_mcp_bootstrap_if_needed(harness.tools, session, opts)
     const primary_llm_opts = __agent_loop_effective_llm_options(harness.llm, opts)
     const primary_provider = to_string(primary_llm_opts?.provider ?? "")
@@ -61,8 +87,6 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let turns_since_progress = 0
     let turns_since_loop_progress = 0
     let fallback_index = 0
-    let successful_tools_seen = []
-    let rejected_tools_seen = []
     // Per-CALL tallies, kept beside the name lists rather than derived from
     // them: `__merge_tool_names` deduplicates by name, so those lengths are
     // distinct-tool counts and would mislabel a call count if reported as one.
@@ -87,7 +111,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let stall_recovery_evidence_revision = ""
     const max_verify_attempts = opts?.max_verify_attempts ?? 20
     const budget = opts.iteration_budget
-    let current_max = budget.initial
+    iteration_budget = budget
+    current_max = budget.initial
     let extensions_used = 0
     let budget_decisions = []
     let consecutive_failure_count = 0
@@ -112,6 +137,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     // exactly one application.
     let command_hold_cap_tokens = nil
     while true {
+      terminal_callback_attempted = false
       while iteration < current_max {
         // The turn-setup phase owns the four pre-request guards and the
         // assembly of this turn's options, prompt and prefill (harn#7753). It
@@ -1127,6 +1153,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           last_tool_rejection_category: last_tool_rejection_category,
           feedback_history: feedback_history,
         },
+        notify_terminal,
       )
       opts = terminal_boundary.opts
       final_status = terminal_boundary.final_status
@@ -1193,6 +1220,41 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       projection_state,
     )
     final_result
+  }
+  if is_err(run) && !terminal_callback_attempted && opts?.terminal_callback != nil {
+    const error = unwrap_err(run)
+    const terminal = __agent_loop_boundary_terminal_record(error_category(error), iteration, error)
+    // Call the terminal invoker by name rather than through the closure: the
+    // epilogue runs outside the loop, and naming the owner keeps this read of
+    // the agent options auditable at the same origin the in-loop path uses.
+    const notification = try {
+      agent_compute_terminal_callback(
+        harness.agent,
+        session,
+        opts,
+        {
+          iteration: iteration,
+          final_status: terminal.final_status,
+          stop_reason: terminal.stop_reason,
+          terminal_error: terminal?.error,
+          max_iterations: current_max,
+          iteration_budget: iteration_budget,
+          session_successful_tools: successful_tools_seen,
+          session_rejected_tools: rejected_tools_seen,
+        },
+      )
+    }
+    if is_err(notification) {
+      run = try {
+        throw {
+          kind: "agent_loop_terminal_callback_failed",
+          category: "internal",
+          reason: "terminal_callback_failed",
+          message: "agent loop failed and its terminal callback also failed",
+          cause: {terminal_error: error, callback_error: unwrap_err(notification)},
+        }
+      }
+    }
   }
   return __agent_loop_finish_run(
     harness.agent,

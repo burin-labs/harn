@@ -2,19 +2,78 @@ use std::path::{Path, PathBuf};
 
 use crate::commands::hardware::{GpuKind, HardwareSnapshot};
 
+use harn_vm::llm_config::ModelOperation;
+
 use super::recommend::{
     ram_bucket_from_available_bytes, recommendation_gpu_from_kind, CloudModel, LocalModel,
-    RecommendationTable,
+    OperationRoute, RecommendationTable,
 };
 
-pub(super) fn detect_cloud_model() -> Option<CloudModel> {
+/// The first cloud provider with a usable key whose resolved starter model
+/// actually declares `operation`.
+///
+/// The operation check is not decoration. A decision-only route such as
+/// `typesafe/jev-latest` is a perfectly good catalog row with a perfectly good
+/// credential, and without this filter a provider whose default resolves to
+/// one would be recommended as a starter chat model — a model that cannot talk
+/// back. A provider whose resolved model does not declare the operation is
+/// skipped rather than accepted, so absence of a match reads as "no route",
+/// never as "any route".
+pub(super) fn detect_cloud_model(operation: ModelOperation) -> Option<CloudModel> {
     for provider in cloud_provider_candidates() {
-        if cloud_provider_key_available(&provider) {
-            let model_id = cloud_model_for_provider(&provider);
-            return Some(CloudModel { provider, model_id });
+        if !cloud_provider_key_available(&provider) {
+            continue;
         }
+        let model_id = cloud_model_for_provider(&provider);
+        if !route_supports_operation(&provider, &model_id, operation) {
+            continue;
+        }
+        return Some(CloudModel { provider, model_id });
     }
     None
+}
+
+/// Whether the catalog row behind `(provider, model_id)` declares `operation`.
+///
+/// An unknown route returns `false`: a row Harn cannot resolve has made no
+/// claim, and treating "not found" as "supported" is exactly how a decision
+/// row would leak into a text recommendation.
+pub(super) fn route_supports_operation(
+    provider: &str,
+    model_id: &str,
+    operation: ModelOperation,
+) -> bool {
+    harn_vm::llm_config::model_catalog_id_for_route(provider, model_id)
+        .and_then(|id| harn_vm::llm_config::model_catalog_entry(&id))
+        .is_some_and(|entry| entry.supports_operation(operation))
+}
+
+/// Every catalog route declaring `operation`, with its provider credential
+/// status and, for decision routes, the protocol it is dialled over.
+pub(super) fn operation_routes(operation: ModelOperation) -> Vec<OperationRoute> {
+    harn_vm::llm_config::model_catalog_entries()
+        .into_iter()
+        .filter(|(_, entry)| entry.supports_operation(operation))
+        .map(|(catalog_id, entry)| {
+            let credential_status = harn_vm::llm::provider_auth_status(&entry.provider)
+                .credential_status
+                .as_str()
+                .to_string();
+            let protocol = harn_vm::provider_catalog::decision_contract_for_route(
+                &entry.provider,
+                &catalog_id,
+            )
+            .map(|contract| contract.protocol.as_str().to_string());
+            OperationRoute {
+                catalog_id,
+                provider: entry.provider.clone(),
+                served_model_id: entry.wire_model.clone(),
+                availability: entry.availability.as_str().to_string(),
+                credential_status,
+                decision_protocol: protocol,
+            }
+        })
+        .collect()
 }
 
 /// Providers to check for a usable key, best first: the configured default,

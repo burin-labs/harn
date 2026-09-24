@@ -116,7 +116,8 @@ thinking_block_style = "reasoning_summary"
 # That combination turns a routine effort=none or temperature-bearing preset
 # into a provider 400 at request time, so keep this row ahead of the wildcard.
 [[provider.openai]]
-model_match = "gpt-6*"
+# Bare `gpt-6` is the Astra pointer, so it carries Astra's narrowed ladder.
+model_match = ["gpt-6-astra*", "gpt-6"]
 prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
@@ -140,6 +141,54 @@ thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = false
 reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_tools_require_responses = true
+temperature_supported = false
+top_p_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# GPT-6 Sol and Luna share Astra's surface except that they accept effort
+# `none` (Astra does not). Probed 2026-09-22 against gpt-6-sol and gpt-6-luna:
+#   reasoning_effort none/low/medium/high/xhigh -> 200
+#   reasoning_effort minimal / max              -> 400 (model pages list max)
+#   temperature=0.2 at the default effort       -> 400 "Only the default (1)"
+#   temperature=0.2 / top_p=0.5 at effort none  -> 200
+#   function tools on /v1/chat/completions      -> 400 unless effort is none
+# Temperature and top_p stay unsupported rather than reasoning-conditional:
+# the default effort is `medium`, so a call that leaves thinking unset still
+# reasons, and a conditional rule would admit a temperature the API rejects.
+# The Astra row above must stay first; this wildcard backstops the rest of the
+# GPT-6 family.
+[[provider.openai]]
+model_match = "gpt-6*"
+prompt_caching = true
+advanced_generation_options = ["logprobs", "verbosity"]
+native_tools = true
+preferred_tool_format = "native"
+requires_completion_tokens = true
+defer_loading = true
+tool_search = ["hosted", "client"]
+responses_api = true
+hosted_tools = ["web_search", "web_search_preview", "file_search", "code_interpreter", "image_generation", "computer_use", "mcp", "remote_mcp"]
+computer_use_style = "native_openai"
+screenshot_scaling = "original"
+safety_ack_flow = true
+remote_mcp = true
+conversation_state = true
+compaction = true
+background_mode = true
+tool_approval_policy = "provider_or_harn"
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
 reasoning_tools_require_responses = true
 temperature_supported = false
 top_p_supported = false
@@ -412,7 +461,7 @@ thinking_block_style = "reasoning_summary"
 # GPT rule so `none`/`max` effort and temperature/top_p are rejected locally
 # rather than costing a round trip.
 [[provider.openai]]
-model_match = "openai/gpt-6*"
+model_match = ["openai/gpt-6-astra*", "openai/gpt-6"]
 prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
@@ -423,6 +472,31 @@ thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = false
 reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+temperature_supported = false
+top_p_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# Gateway GPT-6 Sol / Luna slugs (including OpenRouter's `-pro` variants,
+# which sell the pro reasoning mode) accept effort `none` like the direct
+# route. Keep the Astra row above this wildcard.
+[[provider.openai]]
+model_match = "openai/gpt-6*"
+prompt_caching = true
+native_tools = true
+preferred_tool_format = "native"
+requires_completion_tokens = true
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
 temperature_supported = false
 top_p_supported = false
 prefers_xml_scaffolding = false

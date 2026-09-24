@@ -9,7 +9,7 @@ tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/repo"
 mkdir -p "$fixture/bin"
-git -C "$fixture" init -q
+git -C "$fixture" init -b main -q
 git -C "$fixture" config user.name "Harn test"
 git -C "$fixture" config user.email "harn-test@example.invalid"
 git -C "$fixture" config commit.gpgSign false
@@ -51,8 +51,19 @@ export SOURCE_GATE_CI_BINARY_SHA256="$(harn_source_gate_sha256 "$fake_harn")"
   harn_source_gate_bind_binary "$fake_harn"
   harn_source_gate_finish "$receipt" full_io worker 2 3 passed make conformance
   harn_source_gate_verify "$receipt" "$fake_harn"
+  actual="$(HARN_BIN="$fake_harn" "$repo_root/scripts/harn_bin.sh" --print-build-freshness)"
+  [[ "$actual" = "$SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID" ]] || {
+    echo "binary freshness print did not reuse verified hosted provenance" >&2
+    exit 1
+  }
 
   printf 'edited\n' >> source.txt
+  if HARN_BIN="$fake_harn" "$repo_root/scripts/harn_bin.sh" --print-build-freshness \
+      >"$tmp_root/hosted-stale.out" 2>&1; then
+    echo "hosted binary freshness accepted source edited after artifact verification" >&2
+    exit 1
+  fi
+  grep -Fq 'requires a clean tracked, index, and untracked state' "$tmp_root/hosted-stale.out"
   if harn_source_gate_verify "$receipt" "$fake_harn" >"$tmp_root/stale-edit.out" 2>&1; then
     echo "source gate accepted a receipt after a source edit" >&2
     exit 1

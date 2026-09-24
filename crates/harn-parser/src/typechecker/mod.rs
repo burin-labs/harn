@@ -13,12 +13,19 @@ mod exits;
 mod format;
 mod inference;
 pub mod method_registry;
+mod predicate;
+mod predicate_questions;
 mod schema_inference;
 mod scope;
 mod union;
 
 pub use exits::{block_definitely_exits, stmt_definitely_exits};
 pub use format::{format_type, shape_mismatch_detail};
+pub use predicate::{
+    canonical_type as canonical_predicate_type, PredicateModelRoute, PredicateSite,
+    PredicateSiteKind,
+};
+pub use predicate_questions::{PredicateQuestionKind, PredicateQuestionSpec};
 
 /// Substitute generic bindings with the same open-row folding used by type
 /// inference. Schema compilation calls this instead of carrying a second type
@@ -58,6 +65,8 @@ pub struct TypeCheckFacts {
     pub diagnostics: Vec<TypeDiagnostic>,
     pub inlay_hints: Vec<InlayHintInfo>,
     pub binding_types: Vec<BindingTypeInfo>,
+    /// Validated model-evaluation sites, including sites inside helper bodies.
+    pub predicate_sites: Vec<PredicateSite>,
 }
 
 /// Static info for one `import * as alias from "path"` binding.
@@ -204,6 +213,8 @@ pub struct TypeChecker {
     source: Option<String>,
     hints: Vec<InlayHintInfo>,
     binding_types: Vec<BindingTypeInfo>,
+    predicate_sites: Vec<PredicateSite>,
+    predicate_bindings: Vec<(crate::lexical::BindingId, Span)>,
     /// When true, flag unvalidated boundary-API values used in field access.
     strict_types: bool,
     /// Explicit process-bound compatibility mode for pre-Harness callers.
@@ -248,10 +259,6 @@ pub struct TypeChecker {
     namespace_imports: std::collections::HashMap<String, NamespaceImportBinding>,
     /// Local predicate functions whose bodies have passed contract checking.
     validated_type_predicates: HashSet<(usize, usize)>,
-    /// Compile-time environment populated by every successfully folded
-    /// `const` binding. Later const initializers see earlier values so
-    /// expressions like `const Y = X + 1` work.
-    const_env: crate::const_eval::ConstEnv,
     /// Coinductive guard for recursive-type subtype checks. Holds the
     /// pre-unfolding `(expected, actual)` pairs currently on the
     /// `types_compatible_at` stack. Re-encountering a pair means the walk has
@@ -421,6 +428,8 @@ impl TypeChecker {
             source: None,
             hints: Vec::new(),
             binding_types: Vec::new(),
+            predicate_sites: Vec::new(),
+            predicate_bindings: Vec::new(),
             strict_types: false,
             legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
             privileged_wire_builtins: false,
@@ -434,7 +443,6 @@ impl TypeChecker {
             imported_callable_decls: Vec::new(),
             namespace_imports: std::collections::HashMap::new(),
             validated_type_predicates: HashSet::new(),
-            const_env: crate::const_eval::ConstEnv::new(),
             subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }
     }
@@ -448,6 +456,8 @@ impl TypeChecker {
             source: None,
             hints: Vec::new(),
             binding_types: Vec::new(),
+            predicate_sites: Vec::new(),
+            predicate_bindings: Vec::new(),
             strict_types: strict,
             legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
             privileged_wire_builtins: false,
@@ -461,7 +471,6 @@ impl TypeChecker {
             imported_callable_decls: Vec::new(),
             namespace_imports: std::collections::HashMap::new(),
             validated_type_predicates: HashSet::new(),
-            const_env: crate::const_eval::ConstEnv::new(),
             subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }
     }

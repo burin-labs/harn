@@ -11,6 +11,7 @@ impl TypeChecker {
     ) {
         let context_checked = self.check_node_with_expected(value, type_ann.as_ref(), scope);
         let inferred = self.infer_type(value, scope);
+        self.record_predicate_binding(pattern, inferred.as_ref(), span, scope);
         let BindingPattern::Identifier(name) = pattern else {
             self.check_pattern_defaults(pattern, scope);
             self.define_pattern_vars_typed(pattern, &inferred, scope, false);
@@ -55,7 +56,9 @@ impl TypeChecker {
                 });
         }
         let projected = self.has_projection_contract(value, scope);
+        let folded = scope.const_value(value);
         scope.define_var(name, ty);
+        scope.const_values.insert(name.clone(), folded);
         scope.define_flow_alias(name, value.clone());
         if projected {
             scope.mark_projected(name);
@@ -71,9 +74,6 @@ impl TypeChecker {
                     scope.mark_untyped_source(name, &boundary);
                 }
             }
-        }
-        if let Ok(folded) = crate::const_eval::const_eval(value, &self.const_env) {
-            self.const_env.insert(name.clone(), folded);
         }
     }
 

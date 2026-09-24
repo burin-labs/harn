@@ -112,6 +112,7 @@ jobs:
       prompt_prose: ${{ steps.surface_filter.outputs.prompt_prose }}
       setup_action: ${{ steps.surface_filter.outputs.setup_action }}
       release_contract: ${{ steps.surface_filter.outputs.release_contract }}
+      release_residual: ${{ steps.surface_filter.outputs.release_residual }}
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -171,6 +172,8 @@ jobs:
               - 'scripts/allowed_long_strings.txt'
               - 'scripts/check_no_rust_prompt_prose.sh'
               - 'scripts/check_rust_prompt_prose.harn'
+              - 'scripts/check_cancellation_owner.sh'
+              - 'scripts/check_cancellation_owner.harn'
             setup_action:
               - '.github/actions/setup-harn/**'
               - '.github/workflows/ci.yml'
@@ -201,6 +204,17 @@ jobs:
               - 'scripts/*development*'
               - 'scripts/tests/*release*'
               - 'scripts/tests/*development*'
+            # Everything the release residual audit lanes execute or read as
+            # their contract: the gate and its lanes, the Make targets they
+            # call, and the docs, spec, and grammar checks among them.
+            release_residual:
+              - '.github/workflows/ci.yml'
+              - '.markdownlint-cli2.jsonc'
+              - 'Makefile'
+              - 'scripts/**'
+              - 'spec/**'
+              - 'tree-sitter-harn/**'
+              - 'website/**'
             package_audit:
               - '.github/workflows/ci.yml'
               - 'Cargo.lock'
@@ -331,8 +345,8 @@ jobs:
         # `pull_request`: honour the paths filter — a docs/website/markdown-only
         #   PR skips the heavy Linux Rust lanes for fast, cheap feedback. A
         #   release/vX.Y.Z PR whose diff is only release metadata also skips
-        #   those PR-head lanes because `release_harn` already ran the release
-        #   audit locally; merge_group below remains the full backstop.
+        #   those PR-head lanes: its content is a version bump and folded notes,
+        #   and merge_group below runs the full backstop before it can land.
         # `merge_group`: default to `rust=true` so the speculative merge commit
         #   catches cross-PR interaction regressions. The only skip is a
         #   stacked docs-only tail whose incremental diff from the previous
@@ -448,7 +462,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The action's default glob is `*.{md,markdown}`, the repository root
+      # only. The release docs lane lints `**/*.md`, so a violation anywhere
+      # else passed here and was found for the first time by a release.
       - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        with:
+          globs: "**/*.md"
 
   # Release semantics have two enforcers: this repository's release scripts and
   # workflows, and the release orchestrator that drives cuts. When they
@@ -528,6 +547,64 @@ jobs:
       - name: Rehearse release staging and development cutover offline
         run: bash scripts/release_rehearsal.sh
 
+  # The release residual audit lanes on this change's exact-commit CLI.
+  #
+  # A release runs these lanes (generated files, docs, grammar, security,
+  # smoke) on the candidate's shipped CLI before it promotes anything. A change
+  # to what they execute runs them here first, through the same
+  # `release_gate.sh` entry point and the same downloaded-binary proof, so a
+  # change that breaks a late check is refused before it merges instead of at
+  # the next release.
+  release-residual-audit:
+    name: Release residual audit
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true'
+    runs-on: ubuntu-latest
+    # Hang backstop, not a performance budget.
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: tree-sitter-harn/package-lock.json
+      - name: Install ripgrep
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: ripgrep
+          check-command: rg
+      - uses: ./.github/actions/rust-toolchain
+      # A release generates this ignored payload before its audit, and the
+      # candidate build uploads it beside the archives. Generate it the same
+      # way so the generated-files lane checks real bytes.
+      - name: Generate the CLI AOT payload
+        run: make gen-cli-aot && make check-cli-aot
+      - name: Wait for shared Harn binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - name: Run the release residual audit
+        run: ./scripts/release_gate.sh audit --residual-only
+
   # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
   # already below the SLO; the full test graph is owned by rust-check-inputs so the
   # repository pays for one behavior build rather than two competing builds.
@@ -579,7 +656,7 @@ jobs:
         with:
           components: clippy
       - name: Install cargo-machete
-        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: cargo-machete@0.9.2
       - uses: ./.github/actions/rust-cache
@@ -617,7 +694,7 @@ jobs:
   # owned capacity anyway, so the probe is skipped rather than failed for them.
   runner-availability:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d924b47e5f445468454904f2bb32c6f9b4f050eb
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -693,7 +770,7 @@ jobs:
         && needs.runner-availability.outputs.capacity != ''
         && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
-        || 'ubuntu-latest' }}
+        || 'ubuntu-8core' }}
     timeout-minutes: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
@@ -721,6 +798,10 @@ jobs:
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       # The producer is the only sticky-cache writer. Fifteen GiB covered the
       # previously measured workspace graph and caps storage near $7.50/month.
+      # The owned pool's store is a host-wide directory a supervised server
+      # already owns, and a client cannot resize a running server's cache, so
+      # this figure binds the vendor rung only. The owned pool's ceiling lives
+      # with the host unit that starts that server.
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: >-
         ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
@@ -785,8 +866,13 @@ jobs:
           cache-bin: false
           cache-workspace-crates: "true"
           save: "true"
+      # Read the counters before the first compile, so the summary below can
+      # report what this job did rather than what the machine has done since
+      # its cache server last started.
+      - name: Record the sccache baseline
+        run: ./scripts/ci/sccache_baseline.sh
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
@@ -816,10 +902,29 @@ jobs:
         timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 16 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
-        run: >-
-          ./scripts/ci/rust_artifact.sh build-security
-          "$RUNNER_TEMP/harn-security.tar.zst"
-          "$GITHUB_SHA"
+        run: |
+          # Log-only: report the largest resident process this build reached,
+          # so a later kill can be read against a measured peak instead of a
+          # guess. Printed by GNU time after the command returns, so a runner
+          # shutdown mid-step still leaves nothing.
+          timer=()
+          if [ -x /usr/bin/time ]; then
+            timer=(/usr/bin/time -v)
+          fi
+          "${timer[@]}" ./scripts/ci/rust_artifact.sh build-security \
+            "$RUNNER_TEMP/harn-security.tar.zst" \
+            "$GITHUB_SHA"
+      # This step has been killed by a signal at around 330 seconds on hosted
+      # runners, well inside its own budget, leaving only ordinary Compiling
+      # lines and exit 143. Nothing on this path installs a signal handler, so
+      # each occurrence has produced silence rather than evidence. Report the
+      # machine here instead: whether memory ran out, whether the kernel says
+      # it killed something, and what was actually resident. Failure-only, so
+      # a green run pays nothing.
+      - name: Report host state after a failed security archive build
+        if: failure()
+        continue-on-error: true
+        run: ./scripts/ci/report_host_state.sh "security archive build"
       - name: Upload security test archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -863,8 +968,16 @@ jobs:
       - name: Mark workspace test success
         id: workspace-tests-ok
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
+      # Report the compiler cache on every tier, named by nothing it excludes.
+      # Guarding this on a single tier is what let the owned pool run for
+      # weeks with nobody able to say whether it was compiling warm or cold:
+      # the rung that skips the summary produces no counters, and no counters
+      # reads exactly like a healthy cache. The script names an absent sccache
+      # rather than reporting a measured zero, and it leaves a
+      # host-supervised server running instead of stopping one other jobs are
+      # still using.
       - name: Summarize and stop sccache
-        if: always() && env.HARN_RUNNER_TIER == 'blacksmith'
+        if: always()
         run: ./scripts/ci/finalize_sccache.sh
 
   # GitHub job dependencies wait for terminal producer state, even when an
@@ -963,7 +1076,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: nextest@0.9.132
       - name: Start workspace test archive download timer
@@ -1051,7 +1164,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: nextest@0.9.132
       - name: Download security test archive
@@ -1545,6 +1658,100 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # The refusals that are cheap enough to run before the merge.
+  #
+  # A gate that runs only after the merge cannot refuse anything. Its one
+  # available action is to turn the default branch red once the change is
+  # already in, and on a pull request its absence reads exactly like its
+  # success. These three cost 24 seconds together, need no build and no Node,
+  # and two of them already resolve their base as the first parent precisely
+  # so they read correctly on the synthetic merge commit a pull request is
+  # checked out as. They were simply never reached there.
+  #
+  # The expensive remainder stays in `audit-scripts`. Fourteen minutes is a
+  # cost argument, which is a different question from whether a gate can
+  # refuse, and `scripts/ci_cache_policy/policy_core.harn` records both.
+  fast-policy-gates:
+    name: Check fast repository policies
+    # Same live-artifact barrier as the other consumers of the shared CLI.
+    needs: [changes, rust-artifacts-ready]
+    # No event condition, deliberately. The contract asserts its absence
+    # rather than the absence of one spelling, because any event term here
+    # would put these refusals back behind the merge.
+    if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Both base-relative guards below walk to the first parent, so the
+          # history has to reach it.
+          fetch-depth: 0
+          # Same reason the expensive lane sets this, argued in full there.
+          # Persisted credentials leave an `include.path` in .git/config
+          # pointing outside the workspace, git cannot read it inside the
+          # Harn sandbox, and every base read then resolves to none. The two
+          # guards below fail closed on that, so without this the job reds on
+          # every pull request. Nothing here pushes.
+          persist-credentials: false
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      # `if: always()` on every step below is the point of this job's shape,
+      # the same reason the expensive lane carries it: a step that fails must
+      # not skip the ones after it, or one red hides its siblings.
+      - name: Reject flaky test patterns
+        if: always()
+        run: make lint-test-patterns
+      - name: Check no retroactive CHANGELOG edits
+        if: always()
+        # GitHub checks out pull requests and merge groups as synthetic merge
+        # commits. HEAD^1 is the current base, while the event payload's
+        # pull-request-open base SHA can become stale as the branch advances.
+        run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn -- --base HEAD^1'
+      - name: Check no undeclared protocol symbol removals
+        if: always()
+        # spec/protocol-artifacts/ is a downstream contract: integrators
+        # compile against the exported names. check-protocol-artifacts
+        # regenerates and compares, so a symbol the generator stops emitting
+        # vanishes from both sides and stays green -- which is why this guard
+        # exists beside it. Same first-parent base as the CHANGELOG guard.
+        env:
+          PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
+        run: make check-protocol-symbol-removals
+      # The contract that keeps the three refusals above reachable from a pull
+      # request is itself a policy check, and the expensive sweep that also
+      # runs it is push-only. Running it only there would mean a re-added
+      # event condition is refused after the merge it was supposed to gate --
+      # the exact shape this job exists to remove. It is one Harn script and
+      # needs no build, so it belongs on both sides.
+      - name: Check CI cache and gate ownership policy
+        if: always()
+        run: make check-ci-cache-policy
+      # The policies that read only committed source through the bundled CLI.
+      # They used to be reachable only from the push-only lane, so a stdlib
+      # type error could not be refused before it merged: main went red and
+      # every branch downstream inherited a failure it did not cause. They need
+      # no warm artifact, no Node and no compile, which is what makes them
+      # eligible here. The Makefile owns which policies those are, so this step
+      # and the expensive sweep cannot disagree about the list.
+      - name: Check source-only repository policies
+        if: always()
+        run: make repository-policies-source
+
   audit-scripts:
     name: Check repository policies
     # Consumes only the small portable CLI bundle through the same live
@@ -1602,12 +1809,6 @@ jobs:
       - name: Check prompts are not embedded in Rust
         if: needs.changes.outputs.prompt_prose == 'true'
         run: make lint-no-rust-prompt-prose
-      # This source-only Harn ratchet needs only the exact portable CLI above.
-      # Keep it ahead of Node setup and both integration sweeps so a flaky-test
-      # pattern fails the head before minutes of unrelated work have elapsed.
-      - name: Reject flaky test patterns
-        if: always()
-        run: make lint-test-patterns
       # `make spec-lint` must run the repository's declared Redocly CLI, not
       # let npx fall back to an unrelated registry package. Keep this install
       # in the already-required audit lane, where the snapshot check can reuse
@@ -1641,23 +1842,6 @@ jobs:
       - name: Run repository policy checks
         if: always()
         run: make repository-policies
-      - name: Check no retroactive CHANGELOG edits
-        if: always()
-        # GitHub checks out PRs and merge groups as synthetic merge commits.
-        # HEAD^1 is the current base, while the event payload's PR-open base
-        # SHA can become stale as main advances.
-        run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn -- --base HEAD^1'
-      - name: Check no undeclared protocol symbol removals
-        if: always()
-        # spec/protocol-artifacts/ is a downstream contract: integrators compile
-        # against the exported names. check-protocol-artifacts regenerates and
-        # compares, so a symbol the generator stops emitting vanishes from both
-        # sides and stays green -- which is why this guard exists beside it, and
-        # why that check now runs in `repository-policies` above rather than
-        # only in the local aggregate. Same HEAD^1 base as the CHANGELOG guard.
-        env:
-          PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
-        run: make check-protocol-symbol-removals
 
   windows-plan:
     name: Windows CI routing
@@ -1926,7 +2110,7 @@ jobs:
         shell: bash
         run: ./scripts/ci/windows_storage_budget.sh report after_restore
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: nextest@0.9.132
       # The `burin-mini` playground fixtures shell out to `node` from inside
@@ -2085,7 +2269,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
       - name: Install pinned cross CLI
-        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: cross@0.2.5
           fallback: none
@@ -2479,7 +2663,7 @@ jobs:
       # availability-dependent security signal without blocking every PR or
       # merge group when the external API returns 5xx.
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
           version: "1.26.1"
           online-audits: false
@@ -2520,6 +2704,7 @@ jobs:
         package-audit,
         lint-md,
         release-contract,
+        release-residual-audit,
         rust-checks,
         rust-producer-capacity,
         rust-check-inputs,
@@ -2529,6 +2714,7 @@ jobs:
         rust-security,
         stack-frames,
         harn-audit,
+        fast-policy-gates,
         source-length-ratchet,
         ci-walltime-report,
         audit-scripts,
@@ -2620,6 +2806,15 @@ jobs:
           require_result "$release_contract_result" \
             "Release contract failed, or did not report a verdict while release-relevant paths were touched." [ "$release_contract_expected" != "true" ]
 
+          # The release residual audit runs when this change can alter what a
+          # release's late checks execute. It needs the exact-commit CLI, so it
+          # is expected exactly when the Rust lanes ran and its paths changed.
+          release_residual_result="${{ needs['release-residual-audit'].result }}"
+          release_residual_expected="${{ needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true' }}"
+          echo "Release residual audit: $release_residual_result (expected=$release_residual_expected)"
+          require_result "$release_residual_result" \
+            "Release residual audit failed, or did not report a verdict while its paths were touched." [ "$release_residual_expected" != "true" ]
+
           # Rust checks remain pre-merge product proof. Repository policies are
           # handled separately below as a main-only integration ratchet.
           rust_checks_result="${{ needs['rust-checks'].result }}"
@@ -2710,6 +2905,11 @@ jobs:
           echo "Source file lengths: $source_length_result"
           require_result "$source_length_result" \
             "Source file-length ratchet failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          fast_policy_result="${{ needs['fast-policy-gates'].result }}"
+          echo "Fast repository policies: $fast_policy_result"
+          require_result "$fast_policy_result" \
+            "Fast repository policy gates failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           ci_walltime_report_result="${{ needs['ci-walltime-report'].result }}"
           echo "CI timing report: $ci_walltime_report_result"

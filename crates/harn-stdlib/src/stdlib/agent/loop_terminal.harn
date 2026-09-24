@@ -127,12 +127,11 @@ pub fn __agent_loop_terminal_seals_natural(
 }
 
 /*
- * The turn engine and terminal policy have different control-flow contracts.
- * Keep reserve verification and the one-shot terminal callback here; callers
- * receive an explicit `action` instead of smuggling `continue`/`break` across
- * a module boundary.
+ * Resolve reserved verification before notifying the host. Every terminal
+ * result returns through the boundary below; only an actual continuation
+ * skips notification.
  */
-pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: dict) -> dict {
+fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -> dict {
   let opts = state.opts
   let final_status = state.final_status
   let stop_reason = state.stop_reason
@@ -288,24 +287,68 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
     }
     stop_reason = reserve_kind + "_failed"
   }
-  if final_status != "" && state.suspend_result == nil && terminal_error == nil
-    && __agent_loop_grant_allowed(call_budget, "terminal_report")
-    && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
-    const terminal_outcome = agent_compute_terminal_callback(
-      harness.agent,
-      session,
+  return state
+    + {
+      action: "break",
+      opts: opts,
+      final_status: final_status,
+      stop_reason: stop_reason,
+      terminal_write_unverified: terminal_write_unverified,
+      stall_state: stall_state,
+      call_budget: call_budget,
+      verify_attempts: verify_attempts,
+      verify_completion_judge_invocations: verify_completion_judge_invocations,
+      verify_completion_judge_vetoes: verify_completion_judge_vetoes,
+      current_max: current_max,
+      budget_exhausted_emitted: budget_exhausted_emitted,
+      budget_decisions: budget_decisions,
+      terminal_error: terminal_error,
+      feedback_history: feedback_history,
+    }
+}
+
+pub fn __agent_loop_terminal_boundary(
+  harness: Harness,
+  session: dict,
+  initial_state: dict,
+  notify_terminal: fn(dict, dict) -> dict,
+) -> dict {
+  const state = __agent_loop_prepare_terminal(harness, session, initial_state)
+  if state.action == "continue" {
+    return state
+  }
+  let opts = state.opts
+  let final_status = state.final_status
+  let stop_reason = state.stop_reason
+  let call_budget = state.call_budget
+  let current_max = state.current_max
+  let budget_exhausted_emitted = state.budget_exhausted_emitted
+  let budget_decisions = state.budget_decisions
+  const terminal_error = state.terminal_error
+  // Notification and rescue are two decisions, and only the second one is
+  // rationed. The callback is how an embedder learns the run ended at all, so
+  // it fires on every seal; the grant budget and the continue policy decide
+  // only whether the loop will accept an extension from it. Folding them into
+  // one gate is why a run that threw, or one that spent its last grant,
+  // sealed in silence.
+  if state.suspend_result == nil {
+    const rescue_allowed = terminal_error == nil
+      && __agent_loop_grant_allowed(call_budget, "terminal_report")
+      && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason)
+    const terminal_outcome = notify_terminal(
       opts,
       {
         iteration: state.iteration,
         final_status: final_status,
-        stop_reason: stop_reason ?? "",
+        stop_reason: __agent_loop_sealed_stop_reason(stop_reason, final_status),
+        terminal_error: terminal_error,
         max_iterations: current_max,
         iteration_budget: state.budget,
         session_successful_tools: state.successful_tools_seen,
         session_rejected_tools: state.rejected_tools_seen,
       },
     )
-    if terminal_outcome.kind == "continue" {
+    if terminal_outcome.kind == "continue" && rescue_allowed {
       call_budget = __agent_loop_record_grant(call_budget, "terminal_report")
       opts = __apply_post_turn_options(opts, terminal_outcome)
       const old_limit = current_max
@@ -339,6 +382,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
           opts: opts,
           final_status: final_status,
           stop_reason: stop_reason,
+          call_budget: call_budget,
           current_max: current_max,
           budget_decisions: budget_decisions,
           budget_exhausted_emitted: budget_exhausted_emitted,
@@ -418,15 +462,9 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
       stop_reason: stop_reason,
       abandonment: abandonment,
       declared_artifacts: declared_artifacts,
-      terminal_write_unverified: terminal_write_unverified,
       call_budget: call_budget,
-      verify_attempts: verify_attempts,
-      verify_completion_judge_invocations: verify_completion_judge_invocations,
-      verify_completion_judge_vetoes: verify_completion_judge_vetoes,
       current_max: current_max,
       budget_exhausted_emitted: budget_exhausted_emitted,
       budget_decisions: budget_decisions,
-      terminal_error: terminal_error,
-      feedback_history: feedback_history,
     }
 }

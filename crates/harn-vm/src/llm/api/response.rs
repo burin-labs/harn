@@ -2,7 +2,7 @@
 //! shape and the OpenAI-compatible `choices[0].message` shape; streaming
 //! variants live in [`super::transport`].
 
-use crate::llm::usage::ProviderUsageReceipt;
+use crate::llm::usage::{InputTokenBasis, ProviderUsageReceipt};
 use crate::value::{VmError, VmValue};
 
 use super::result::{LlmResult, RawProviderToolCall};
@@ -14,10 +14,9 @@ mod cache_mapping_tests;
 mod test_support;
 
 mod boundary;
-mod cache_mapping;
 mod completion_contract;
 mod openai;
-pub(crate) use cache_mapping::{extract_cache_read_tokens, extract_cache_write_tokens};
+pub(crate) use crate::llm::usage::{extract_cache_read_tokens, extract_cache_write_tokens};
 pub(crate) use completion_contract::{
     billed_noncommittal_completion_error, empty_generation_error,
     is_billed_noncommittal_completion, is_length_stop_reason, openai_message_content_block_types,
@@ -166,10 +165,9 @@ pub(crate) fn parse_llm_response(
 
         let reported_input_tokens = json["usage"]["input_tokens"].as_i64();
         let reported_output_tokens = json["usage"]["output_tokens"].as_i64();
-        let input_tokens = reported_input_tokens.unwrap_or(0);
         let output_tokens = reported_output_tokens.unwrap_or(0);
-        let cache_read_tokens = extract_cache_read_tokens(&json["usage"]);
-        let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
+        let cache_read_tokens = extract_cache_read_tokens(&json["usage"])?;
+        let cache_write_tokens = extract_cache_write_tokens(&json["usage"])?;
         let stop_reason = json["stop_reason"].as_str().map(|s| s.to_string());
         let request_id = json["id"].as_str().filter(|value| !value.is_empty());
         let telemetry = ProviderTelemetry::from_anthropic_usage(&json["usage"], request_id);
@@ -179,12 +177,15 @@ pub(crate) fn parse_llm_response(
             telemetry.provider_cost_usd,
             crate::llm::serving_tiers::served_fast(model, json),
         )
+        .with_billing(telemetry.billing.clone())
         .with_cache(
             cache_read_tokens,
             cache_write_tokens,
             telemetry.cache_accounting_declared,
             true,
-        );
+        )
+        .with_input_basis(InputTokenBasis::Fresh)?;
+        let input_tokens = provider_usage.input_tokens().unwrap_or(0);
 
         if text.is_empty() && thinking_text.is_empty() && tool_calls.is_empty() && blocks.is_empty()
         {
@@ -226,7 +227,7 @@ pub(crate) fn parse_llm_response(
             served_fast: crate::llm::serving_tiers::served_fast(model, json),
             blocks,
             logprobs: Vec::new(),
-            telemetry,
+            telemetry: Box::new(telemetry),
         })
     } else {
         openai::parse_chat_completions_response(json, provider, model, tools_offered)
@@ -565,7 +566,7 @@ mod tests {
             }
         });
 
-        assert_eq!(extract_cache_write_tokens(&usage), 100);
+        assert_eq!(extract_cache_write_tokens(&usage).unwrap(), 100);
     }
     #[test]
     fn cache_tokens_support_openai_responses_details_shape() {
@@ -578,8 +579,8 @@ mod tests {
             }
         });
 
-        assert_eq!(extract_cache_read_tokens(&usage), 120);
-        assert_eq!(extract_cache_write_tokens(&usage), 40);
+        assert_eq!(extract_cache_read_tokens(&usage).unwrap(), 120);
+        assert_eq!(extract_cache_write_tokens(&usage).unwrap(), 40);
     }
     #[test]
     fn cache_tokens_support_deepseek_prompt_cache_hit_field() {
@@ -592,7 +593,7 @@ mod tests {
             "completion_tokens": 42,
             "prompt_cache_hit_tokens": 8800
         });
-        assert_eq!(extract_cache_read_tokens(&usage), 8800);
+        assert_eq!(extract_cache_read_tokens(&usage).unwrap(), 8800);
     }
     #[test]
     fn cache_tokens_support_openrouter_cache_subobject_shape() {
@@ -607,8 +608,8 @@ mod tests {
                 "write_input_tokens": 220
             }
         });
-        assert_eq!(extract_cache_read_tokens(&usage), 8800);
-        assert_eq!(extract_cache_write_tokens(&usage), 220);
+        assert_eq!(extract_cache_read_tokens(&usage).unwrap(), 8800);
+        assert_eq!(extract_cache_write_tokens(&usage).unwrap(), 220);
     }
 
     #[test]

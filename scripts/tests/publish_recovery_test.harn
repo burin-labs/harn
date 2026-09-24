@@ -252,3 +252,110 @@ pipeline test_publish_failure_categories_are_closed(harness: Harness, task: unkn
   )
   assert_eq(publish_failure_category("authentication token rejected"), "permanent")
 }
+
+@test
+pipeline test_publish_http_failures_are_narrowly_classified() {
+  for status in [500, 502, 503, 504] {
+    for output in [
+      "failed to get a 200 OK response, got ${status}",
+      "headers:\n  HTTP/2 ${status}\n  server: registry",
+      "HTTP/1.1 ${status} Service Unavailable",
+      "HTTP/3 ${status}",
+    ] {
+      assert_eq(publish_failure_category(output), "transient_network")
+    }
+  }
+  for output in [
+    "authentication token rejected",
+    "failed to get a 200 OK response, got 401",
+    "HTTP/2 403",
+    "HTTP/2 422",
+    "HTTP/2 501",
+    "HTTP/2 5030",
+    "failed to get a 200 OK response, got 5030",
+    "validation failed at line 503",
+    "package version 1.503.0 rejected",
+    "unknown failure",
+  ] {
+    assert_eq(publish_failure_category(output), "permanent")
+  }
+}
+
+@test
+pipeline test_publish_recovery_resumes_dag_after_registry_503(harness: Harness) {
+  const attempts = harness.runtime.atomic(0)
+  const beta_published = harness.runtime.atomic(0)
+  const waited_ms = harness.runtime.atomic(0)
+  const adapters: PublishAdapters = {
+    probe: { name, _version ->
+      if name == "alpha" || (name == "beta" && harness.runtime.atomic_get(beta_published) == 1) {
+        return {status: "visible"}
+      }
+      return {status: "missing"}
+    },
+    publish: { package ->
+      assert(package.name != "alpha", "a visible crate must not be uploaded again")
+      const attempt = harness.runtime.atomic_add(attempts, 1) + 1
+      if attempt == 1 {
+        assert_eq(package.name, "beta")
+        return {
+          success: false,
+          output: "failed to get a 200 OK response, got 503\n  headers:\n  HTTP/2 503",
+        }
+      }
+      if package.name == "beta" {
+        harness.runtime.atomic_set(beta_published, 1)
+      } else {
+        assert_eq(harness.runtime.atomic_get(beta_published), 1)
+      }
+      return {success: true}
+    },
+    wait: { delay_ms ->
+      harness.runtime.atomic_add(waited_ms, delay_ms)
+      return nil
+    },
+  }
+  const receipt = publish_recover(
+    PACKAGES,
+    adapters,
+    {max_publish_attempts: 2, transient_network_delay_ms: 19},
+  )
+  assert(receipt.ok)
+  assert_eq(receipt.already_present, ["alpha"])
+  assert_eq(receipt.published, ["beta", "gamma"])
+  assert_eq(receipt.failed, [])
+  assert_eq(receipt.remaining, [])
+  assert_eq(harness.runtime.atomic_get(attempts), 3)
+  assert_eq(harness.runtime.atomic_get(waited_ms), 19)
+}
+
+@test
+pipeline test_publish_recovery_stops_after_registry_503_budget(harness: Harness) {
+  const attempts = harness.runtime.atomic(0)
+  const waited_ms = harness.runtime.atomic(0)
+  const adapters: PublishAdapters = {
+    probe: { _name, _version -> return {status: "missing"} },
+    publish: { _package ->
+      harness.runtime.atomic_add(attempts, 1)
+      return {success: false, output: "failed to get a 200 OK response, got 503"}
+    },
+    wait: { delay_ms ->
+      harness.runtime.atomic_add(waited_ms, delay_ms)
+      return nil
+    },
+  }
+  const receipt = publish_recover(
+    PACKAGES,
+    adapters,
+    {max_publish_attempts: 2, transient_network_delay_ms: 19},
+  )
+  assert(!receipt.ok)
+  assert_eq(receipt.published, [])
+  assert_eq(receipt.already_present, [])
+  assert_eq(len(receipt.failed), 1)
+  assert_eq(receipt.failed[0]?.category, "transient_network")
+  assert_eq(receipt.failed[0]?.name, "alpha")
+  assert_eq(receipt.remaining, ["beta", "gamma"])
+  assert_eq(harness.runtime.atomic_get(attempts), 2)
+  assert_eq(harness.runtime.atomic_get(waited_ms), 19)
+}

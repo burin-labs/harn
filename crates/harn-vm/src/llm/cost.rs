@@ -4,9 +4,19 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
+use crate::llm::api::PromptCacheTtl;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
+use time::OffsetDateTime;
+
+mod pricing;
+use pricing::pricing_detail_for_usage;
+pub(crate) use pricing::pricing_per_1k_for;
+pub(crate) use pricing::{
+    instant_from_wall_ms, pricing_detail_for, pricing_detail_for_tier, settlement_now,
+    PricingDetail, PricingSource,
+};
 
 thread_local! {
     static LLM_BUDGET: RefCell<Option<f64>> = const { RefCell::new(None) };
@@ -73,6 +83,7 @@ fn record_observed_session_usage(usage: &crate::llm::usage::LlmUsage) {
 
 /// Reset thread-local cost state. Call between test runs to avoid leaking.
 pub(crate) fn reset_cost_state() {
+    super::admission::reset_unscoped_state();
     LLM_BUDGET.with(|b| *b.borrow_mut() = None);
     LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
     LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = None);
@@ -198,6 +209,7 @@ pub fn peek_llm_token_budget() -> Option<u64> {
 // with `LlmBudget` in `std/llm/options.harn`.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub(crate) struct LlmBudgetEnvelope {
+    pub admission: Option<super::admission::AdmissionMode>,
     pub max_cost_usd: Option<f64>,
     pub total_budget_usd: Option<f64>,
     pub max_input_tokens: Option<i64>,
@@ -206,7 +218,8 @@ pub(crate) struct LlmBudgetEnvelope {
 
 impl LlmBudgetEnvelope {
     pub(crate) fn is_empty(&self) -> bool {
-        self.max_cost_usd.is_none()
+        self.admission.is_none()
+            && self.max_cost_usd.is_none()
             && self.total_budget_usd.is_none()
             && self.max_input_tokens.is_none()
             && self.max_output_tokens.is_none()
@@ -313,6 +326,20 @@ fn parse_budget_fields(
     fields: &crate::value::DictMap,
     envelope: &mut LlmBudgetEnvelope,
 ) -> Result<(), VmError> {
+    if let Some(value) = fields.get("admission") {
+        match value {
+            VmValue::Nil => {}
+            VmValue::String(mode) if mode.as_str() == "conservative" => {
+                envelope.admission = Some(super::admission::AdmissionMode::Conservative);
+            }
+            _ => {
+                return Err(categorized_error(
+                    "budget.admission: expected conservative",
+                    ErrorCategory::BudgetExceeded,
+                ))
+            }
+        }
+    }
     if let Some(value) = fields.get("max_cost_usd") {
         envelope.max_cost_usd = Some(numeric_value(value, "max_cost_usd")?);
     }
@@ -349,6 +376,12 @@ pub(crate) fn parse_budget(
             }
         }
     }
+    if envelope.admission.is_some() && envelope.total_budget_usd.is_none() {
+        return Err(categorized_error(
+            "budget.admission conservative requires total_budget_usd",
+            ErrorCategory::BudgetExceeded,
+        ));
+    }
     Ok((!envelope.is_empty()).then_some(envelope))
 }
 
@@ -380,20 +413,18 @@ pub(crate) fn project_llm_call_cost(
         super::cost_context::project_llm_call_tokens(opts);
     let output_budget_tokens = projected_output_tokens;
     let observed = peek_observed_session_usage();
+    // A projection is a pre-call check, so the card it must respect is the one
+    // in force now: the call it admits starts within milliseconds.
+    let at = settlement_now();
+    let cache_ttl = opts.prompt_cache_ttl;
     let (costed_output_tokens, projected_cost_usd, basis) = match observed.mean_output_tokens() {
         Some(mean_output_tokens) => {
             let costed_output_tokens = mean_output_tokens.clamp(0, output_budget_tokens);
-            let ratio = cache_hit_ratio(
-                observed.input_tokens,
-                observed.cache_read_tokens,
-                observed.cache_write_tokens,
-            )
-            .clamp(0.0, 1.0);
+            let ratio =
+                cache_hit_ratio(observed.input_tokens, observed.cache_read_tokens).clamp(0.0, 1.0);
             let cache_read_tokens = (projected_input_tokens.max(0) as f64 * ratio).round() as i64;
-            // `pricing_aware_call_cost_with_cache` treats a cache count
-            // that fits inside `input_tokens` as a subset of it, so the
-            // uncached remainder is priced at the input rate and the
-            // cached share at the cache-read rate.
+            // Input is the full prompt; the uncached remainder is priced at
+            // the input rate and the cached share at the cache-read rate.
             let cost = pricing_aware_call_cost_with_cache(
                 &opts.provider,
                 &opts.model,
@@ -401,6 +432,8 @@ pub(crate) fn project_llm_call_cost(
                 costed_output_tokens,
                 cache_read_tokens,
                 0,
+                at,
+                cache_ttl,
             );
             match cost {
                 Some(cost) => (costed_output_tokens, cost, ProjectionBasis::Observed),
@@ -413,6 +446,7 @@ pub(crate) fn project_llm_call_cost(
                         &opts.model,
                         projected_input_tokens,
                         costed_output_tokens,
+                        at,
                     ),
                     ProjectionBasis::Observed,
                 ),
@@ -425,6 +459,7 @@ pub(crate) fn project_llm_call_cost(
                 &opts.model,
                 projected_input_tokens,
                 output_budget_tokens,
+                at,
             ),
             ProjectionBasis::WorstCase,
         ),
@@ -574,139 +609,6 @@ pub(crate) fn check_llm_preflight_budget(
     Ok(projection)
 }
 
-/// Resolved pricing for a (provider, model) pair, expressed per 1k tokens.
-/// The `source` discriminates how the rate was found so callers (CLI cost
-/// explanation, economics helpers, `cost_route` summaries) can report it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PricingDetail {
-    pub input_per_1k: f64,
-    pub output_per_1k: f64,
-    pub cache_read_per_1k: Option<f64>,
-    pub cache_write_per_1k: Option<f64>,
-    pub source: PricingSource,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PricingSource {
-    /// Exact model entry in the catalog (configured `[llm.models.<id>]`).
-    CatalogModel,
-    /// The model's accelerated-serving tier (`serving_tiers[].pricing`), used
-    /// when the provider confirmed it served the request fast.
-    CatalogServingTier,
-    /// Provider-level catalog economics (`[llm.providers.<name>]`).
-    ProviderEconomics,
-}
-
-impl PricingSource {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            PricingSource::CatalogModel => "catalog_model",
-            PricingSource::CatalogServingTier => "catalog_serving_tier",
-            PricingSource::ProviderEconomics => "provider_economics",
-        }
-    }
-}
-
-/// Resolve catalog pricing for the route identity reported by a transport.
-fn model_pricing_for_observed_route(
-    provider: &str,
-    model: &str,
-) -> Option<crate::llm_config::ModelPricing> {
-    crate::llm_config::model_pricing_per_mtok_for_route(provider, model).or_else(|| {
-        // Mock responses carry the modeled provider's model identity while the
-        // transport remains `mock`. Preserve catalog-backed budget accounting
-        // without weakening provider scoping for any real route.
-        (provider == "mock")
-            .then(|| crate::llm_config::model_pricing_per_mtok(model))
-            .flatten()
-    })
-}
-
-/// Resolve full pricing detail for a (provider, model) pair. Prefers the
-/// provider-scoped catalog entry, then falls back to provider economics.
-/// Returns `None` for unknown pricing — callers must decide whether to
-/// surface that explicitly or coerce to 0.0.
-pub(crate) fn pricing_detail_for(provider: &str, model: &str) -> Option<PricingDetail> {
-    if let Some(pricing) = model_pricing_for_observed_route(provider, model) {
-        return Some(PricingDetail {
-            input_per_1k: pricing.input_per_mtok / 1000.0,
-            output_per_1k: pricing.output_per_mtok / 1000.0,
-            cache_read_per_1k: pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
-            cache_write_per_1k: pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
-            source: PricingSource::CatalogModel,
-        });
-    }
-    let (input, output, _) = crate::llm_config::provider_economics(provider);
-    match (input, output) {
-        (Some(input_per_1k), Some(output_per_1k)) => Some(PricingDetail {
-            input_per_1k,
-            output_per_1k,
-            cache_read_per_1k: None,
-            cache_write_per_1k: None,
-            source: PricingSource::ProviderEconomics,
-        }),
-        _ => None,
-    }
-}
-
-fn pricing_detail_for_usage(
-    provider: &str,
-    model: &str,
-    input_tokens: i64,
-) -> Option<PricingDetail> {
-    if let Some(pricing) = model_pricing_for_observed_route(provider, model)
-        .map(|pricing| pricing.for_input_tokens(input_tokens))
-    {
-        return Some(PricingDetail {
-            input_per_1k: pricing.input_per_mtok / 1000.0,
-            output_per_1k: pricing.output_per_mtok / 1000.0,
-            cache_read_per_1k: pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
-            cache_write_per_1k: pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
-            source: PricingSource::CatalogModel,
-        });
-    }
-    pricing_detail_for(provider, model)
-}
-
-pub(crate) fn pricing_per_1k_for(provider: &str, model: &str) -> Option<(f64, f64)> {
-    pricing_detail_for(provider, model).map(|p| (p.input_per_1k, p.output_per_1k))
-}
-
-/// Resolve pricing for a (provider, model) pair, billing at the premium
-/// accelerated-serving tier when `served_fast` is set and the catalog declares
-/// explicit tier rates or an economic multiplier. Falls back to standard
-/// pricing when the request was served at the standard tier, such as after a
-/// capacity downgrade.
-pub(crate) fn pricing_detail_for_tier(
-    provider: &str,
-    model: &str,
-    served_fast: bool,
-    input_tokens: i64,
-) -> Option<PricingDetail> {
-    if served_fast {
-        if let Some(mut pricing) = crate::llm_config::model_serving_tier_pricing_per_mtok_for_route(
-            provider,
-            model,
-            crate::llm::serving_tiers::FAST_TIER_ID,
-        ) {
-            if let Some(model_pricing) =
-                crate::llm_config::model_pricing_per_mtok_for_route(provider, model)
-            {
-                pricing.input_token_bands = model_pricing.input_token_bands;
-            }
-            let pricing = pricing.for_input_tokens(input_tokens);
-            return Some(PricingDetail {
-                input_per_1k: pricing.input_per_mtok / 1000.0,
-                output_per_1k: pricing.output_per_mtok / 1000.0,
-                cache_read_per_1k: pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
-                cache_write_per_1k: pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
-                source: PricingSource::CatalogServingTier,
-            });
-        }
-    }
-    pricing_detail_for_usage(provider, model, input_tokens)
-}
-
 pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
     let (_, _, latency) = crate::llm_config::provider_economics(provider);
     latency
@@ -738,8 +640,13 @@ fn authored_rate_decimal(rate: f64) -> Decimal {
 /// does all arithmetic in `Decimal`. Division by 1,000,000 is an exact
 /// base-10 rescale, so the result carries no representational error.
 /// Returns `Decimal::ZERO` when the model has no catalog entry.
-pub fn calculate_cost_decimal(model: &str, input_tokens: i64, output_tokens: i64) -> Decimal {
-    let Some(pricing) = crate::llm_config::model_pricing_for_input_tokens(model, input_tokens)
+pub fn calculate_cost_decimal(
+    model: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+    at: OffsetDateTime,
+) -> Decimal {
+    let Some(pricing) = crate::llm_config::model_pricing_for_input_tokens(model, input_tokens, at)
     else {
         return Decimal::ZERO;
     };
@@ -756,12 +663,14 @@ pub fn calculate_cost_for_provider(
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
+    at: OffsetDateTime,
 ) -> f64 {
-    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens) else {
+    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens, at) else {
         return 0.0;
     };
     (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)
         / 1000.0
+        * (1.0 + detail.platform_fee_percent / 100.0)
 }
 
 /// Per-call USD cost with cache accounting, preserving unknown pricing.
@@ -775,17 +684,20 @@ pub(crate) fn pricing_aware_call_cost_with_cache(
     output_tokens: i64,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
+    at: OffsetDateTime,
+    cache_ttl: Option<PromptCacheTtl>,
 ) -> Option<f64> {
     if provider.eq_ignore_ascii_case("mock") {
         return Some(0.0);
     }
-    let detail = pricing_detail_for_usage(provider, model, input_tokens)?;
+    let detail = pricing_detail_for_usage(provider, model, input_tokens, at)?;
     Some(project_call_cost(
         &detail,
         input_tokens,
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
+        cache_ttl,
     ))
 }
 
@@ -801,35 +713,24 @@ pub fn pricing_aware_call_cost(
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
+    at: OffsetDateTime,
 ) -> Option<f64> {
     if provider.eq_ignore_ascii_case("mock") {
         return Some(0.0);
     }
-    let detail = pricing_detail_for_usage(provider, model, input_tokens)?;
+    let detail = pricing_detail_for_usage(provider, model, input_tokens, at)?;
     Some(
         (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)
-            / 1000.0,
+            / 1000.0
+            * (1.0 + detail.platform_fee_percent / 100.0),
     )
 }
 
-pub(crate) fn cache_hit_ratio(
-    input_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-) -> f64 {
-    let input_tokens = input_tokens.max(0);
-    let cache_read_tokens = cache_read_tokens.max(0);
-    let cache_write_tokens = cache_write_tokens.max(0);
-    let reported_cache_tokens = cache_read_tokens.saturating_add(cache_write_tokens);
-    let total_prompt_tokens = if reported_cache_tokens <= input_tokens {
-        input_tokens
-    } else {
-        input_tokens.saturating_add(reported_cache_tokens)
-    };
-    if total_prompt_tokens == 0 {
+pub(crate) fn cache_hit_ratio(input_tokens: i64, cache_read_tokens: i64) -> f64 {
+    if input_tokens <= 0 {
         0.0
     } else {
-        cache_read_tokens as f64 / total_prompt_tokens as f64
+        cache_read_tokens.max(0) as f64 / input_tokens as f64
     }
 }
 
@@ -839,13 +740,15 @@ pub(crate) fn cache_savings_usd_for_provider(
     input_tokens: i64,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
+    at: OffsetDateTime,
+    cache_ttl: Option<PromptCacheTtl>,
 ) -> f64 {
-    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens) else {
+    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens, at) else {
         return 0.0;
     };
     let input_rate = detail.input_per_1k;
     let cache_read_rate = detail.cache_read_per_1k.unwrap_or(input_rate);
-    let cache_write_rate = detail.cache_write_per_1k.unwrap_or(input_rate);
+    let (cache_write_rate, _) = detail.cache_write_rate(cache_ttl);
     let cache_read_savings =
         cache_read_tokens.max(0) as f64 * (input_rate - cache_read_rate) / 1000.0;
     let cache_write_savings =
@@ -936,6 +839,7 @@ fn llm_cost_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
         &model,
         input_tokens,
         output_tokens,
+        settlement_now(),
     )))
 }
 
@@ -944,6 +848,9 @@ fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
     let (total_input, total_output, _duration, call_count) = super::trace::peek_trace_summary();
     let total_cost = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
     let mut result = BTreeMap::new();
+    if let Some(admission) = super::admission::receipt() {
+        result.insert("admission".to_string(), admission);
+    }
     result.insert("total_cost".to_string(), VmValue::Float(total_cost));
     result.insert("input_tokens".to_string(), VmValue::Int(total_input));
     result.insert("output_tokens".to_string(), VmValue::Int(total_output));
@@ -1185,7 +1092,7 @@ fn llm_pricing_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             "llm_pricing: model is required".to_string(),
         ));
     }
-    Ok(pricing_detail_for(&provider, &model)
+    Ok(pricing_detail_for(&provider, &model, settlement_now())
         .map(|detail| pricing_detail_to_vm_value(&provider, &model, &detail))
         .unwrap_or(VmValue::Nil))
 }
@@ -1352,14 +1259,15 @@ fn llm_compare_costs_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
                 )))
             }
         };
-        let detail = pricing_detail_for_usage(&provider, &model, input_tokens);
-        let projection = detail.map(|d| {
+        let detail = pricing_detail_for_usage(&provider, &model, input_tokens, settlement_now());
+        let projection = detail.as_ref().map(|d| {
             project_call_cost(
-                &d,
+                d,
                 input_tokens,
                 output_tokens,
                 cache_read_tokens,
                 cache_write_tokens,
+                None,
             ) * calls as f64
         });
         let mut row = BTreeMap::new();
@@ -1398,28 +1306,20 @@ pub(crate) fn project_call_cost(
     output_tokens: i64,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
+    cache_ttl: Option<PromptCacheTtl>,
 ) -> f64 {
     let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
-    let cache_write_rate = detail.cache_write_per_1k.unwrap_or(detail.input_per_1k);
-    // Providers report cache tokens under two conventions. OpenAI folds cached
-    // tokens into `input_tokens`, so cached counts must be subtracted to avoid
-    // double-billing. Anthropic (and OpenRouter-Anthropic) report `input_tokens`
-    // already excluding cache, with cache counts in separate fields, so the raw
-    // input is the non-cached remainder. Normalize the same way `cache_hit_ratio`
-    // does: if the cache total fits within input, treat cache as a subset;
-    // otherwise treat input as already exclusive of cache.
+    let (cache_write_rate, _) = detail.cache_write_rate(cache_ttl);
+    // Provider adapters normalize input to the full prompt before pricing.
+    // Counts cannot reveal whether a provider's wire input included cache.
     let cache_total = cache_read_tokens.saturating_add(cache_write_tokens);
-    let billable_input = if cache_total <= input_tokens {
-        input_tokens - cache_total
-    } else {
-        input_tokens
-    }
-    .max(0);
+    let billable_input = input_tokens.saturating_sub(cache_total).max(0);
     (billable_input as f64 * detail.input_per_1k
         + output_tokens as f64 * detail.output_per_1k
         + cache_read_tokens as f64 * cache_read_rate
         + cache_write_tokens as f64 * cache_write_rate)
         / 1000.0
+        * (1.0 + detail.platform_fee_percent / 100.0)
 }
 
 fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerInfo) -> VmValue {

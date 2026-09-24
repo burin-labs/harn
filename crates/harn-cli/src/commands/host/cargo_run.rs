@@ -94,6 +94,9 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     // Observed before the spawn, so a rebuild that lands mid-run is visible
     // when the worker is reaped without a terminal state of its own.
     let binary = BinaryWitness::observe(PathBuf::from(&executable));
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    );
     let spec = harn_hostlib::process::SpawnSpec {
         builtin: "harn_host_lease_run_cargo",
         program: executable,
@@ -984,6 +987,9 @@ fn run_cargo_workload(
             );
         }
     };
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    );
     let mut child = match harn_hostlib::process::spawn_process(spec) {
         Ok(child) => child,
         Err(error) => {
@@ -1036,6 +1042,9 @@ fn run_cargo_workload(
             );
         }
     };
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    );
     let mut child = match harn_hostlib::process::spawn_process(spec) {
         Ok(child) => child,
         Err(error) => {

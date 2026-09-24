@@ -36,6 +36,7 @@ mod command_probe_parent_liveness;
 mod conformance_json_cli;
 mod conformance_process_lifetime_e2e;
 mod coverage_cli;
+mod decision_route_admission;
 mod demo_cli_e2e;
 mod dev_cli;
 mod dispatch_aot;
@@ -44,6 +45,7 @@ mod dispatch_snapshot;
 mod doctor_cli;
 mod doctor_dispatch;
 mod environment_registry_cli;
+mod eval_calibrate_cli;
 mod eval_cluster_dispatch;
 mod eval_coding_agent_cli;
 mod eval_coding_agent_dispatch;
@@ -84,6 +86,7 @@ mod path_metadata_persistence_cli;
 mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
 mod precompile_dispatch;
+mod predicate_contract;
 mod provider_catalog_sources;
 mod provider_dispatch_audit;
 mod providers_dispatch;
@@ -120,7 +123,7 @@ mod workflow_authoring_eval;
 mod workflow_cli;
 mod workflow_patch_cli;
 
-const _: [(&str, fn()); 7] = [
+const _: [(&str, fn()); 12] = [
     (
         required_pr_e2e::CASES[0],
         eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs,
@@ -148,5 +151,25 @@ const _: [(&str, fn()); 7] = [
     (
         required_pr_e2e::CASES[6],
         trace_import_dispatch::converts_generic_trace_jsonl_to_cli_fixture,
+    ),
+    (
+        required_pr_e2e::CASES[7],
+        predicate_contract::predicate_helper_manifest_survives_warm_cache_and_tracks_changed_question,
+    ),
+    (
+        required_pr_e2e::CASES[8],
+        predicate_contract::predicate_checker_refuses_boolean_use_after_imported_helper,
+    ),
+    (
+        required_pr_e2e::CASES[9],
+        predicate_contract::predicate_census_refuses_an_invalid_imported_site,
+    ),
+    (
+        required_pr_e2e::CASES[10],
+        predicate_contract::predicate_embedding_model_is_refused_at_check_time,
+    ),
+    (
+        required_pr_e2e::CASES[11],
+        predicate_contract::predicate_operation_admission_invalidates_cached_success,
     ),
 ];

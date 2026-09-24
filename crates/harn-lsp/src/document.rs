@@ -1,6 +1,4 @@
-use harn_parser::analysis::{
-    AnalysisDatabase, AnalysisError, SourceId, SourceVersion, TypeCheckConfig,
-};
+use harn_parser::analysis::{AnalysisDatabase, AnalysisError, SourceId, SourceVersion};
 use harn_parser::{Node, SNode};
 use harn_vm::stdlib::template::outline::OutlineBlock;
 use tower_lsp::lsp_types::*;
@@ -149,10 +147,29 @@ impl DocumentState {
     }
 
     fn analyze_harn_program(&mut self, uri: Option<&Url>) {
-        let analysis = match self
-            .analysis
-            .typecheck(&self.source_id, TypeCheckConfig::new())
-        {
+        let file_path = uri.and_then(|uri| uri.to_file_path().ok());
+        // Parse through the same cache the checker uses. Import signatures must
+        // reach that checker before diagnostics are projected to the editor.
+        let has_imports = self.analysis.parse(&self.source_id).is_ok_and(|parsed| {
+            parsed.program.iter().any(|node| {
+                matches!(
+                    &node.node,
+                    Node::ImportDecl { .. }
+                        | Node::SelectiveImport { .. }
+                        | Node::NamespaceImport { .. }
+                )
+            })
+        });
+        let module_graph = file_path
+            .as_deref()
+            .filter(|_| has_imports)
+            .map(|path| harn_modules::build_with_source(path, &self.source));
+        let config = file_path
+            .as_deref()
+            .zip(module_graph.as_ref())
+            .map(|(path, graph)| graph.typecheck_import_config_for_file(path))
+            .unwrap_or_default();
+        let mut analysis = match self.analysis.typecheck(&self.source_id, config) {
             Ok(analysis) => analysis,
             Err(error) => {
                 match error {
@@ -169,6 +186,11 @@ impl DocumentState {
                 return;
             }
         };
+        analysis
+            .diagnostics
+            .extend(harn_vm::provider_catalog::validate_predicate_models(
+                &analysis.predicate_sites,
+            ));
         let program = analysis.program;
         let type_diags = analysis.diagnostics;
         self.inlay_hints = analysis.inlay_hints;
@@ -213,14 +235,6 @@ impl DocumentState {
         }
         self.invariant_diagnostics = invariant_report.diagnostics;
 
-        let file_path = uri.and_then(|uri| uri.to_file_path().ok());
-        let has_selective_import = program
-            .iter()
-            .any(|node| matches!(&node.node, Node::SelectiveImport { .. }));
-        let module_graph = file_path
-            .as_deref()
-            .filter(|_| has_selective_import)
-            .map(|file_path| harn_modules::build_with_source(file_path, &self.source));
         if let (Some(file_path), Some(module_graph)) = (file_path.as_deref(), module_graph.as_ref())
         {
             for issue in module_graph.selective_import_issues(file_path) {
@@ -518,6 +532,67 @@ fn handler(fs: HarnessFs) {
         );
         assert_eq!(diagnostic.source.as_deref(), Some("harn-typecheck"));
         assert!(diagnostic.message.contains("parameter `raw`"));
+    }
+
+    #[test]
+    fn predicate_obligations_surface_as_lsp_errors() {
+        let state = DocumentState::new(
+            r#"
+fn main(harness: Harness) {
+  const policy = {
+    backend: "structured_llm", provider: "mock", model: "fixture",
+    effort: "low", temperature: 0.0, threshold: 0.8,
+    evaluation_cost_limit: 0.0, run_cost_limit: 0.0,
+  }
+  const result = harness.llm.evaluate_predicate("boolean", "Supported?", {value: 1}, policy)
+  if result {}
+  harness.stdio.println(result.value.verdict)
+  harness.llm.evaluate_predicate("unused", "Supported?", {value: 1}, policy)
+  const invalid = harness.llm.evaluate_predicate("input", "Supported?", fn() {}, policy)
+  harness.stdio.println(invalid.kind)
+  const erased: any = harness.llm
+  const dynamic = erased.evaluate_predicate("erased", "Supported?", {value: 1}, policy)
+  harness.stdio.println(dynamic)
+}
+"#
+            .into(),
+        );
+        for code in [
+            "HARN-TYP-030",
+            "HARN-TYP-031",
+            "HARN-TYP-032",
+            "HARN-TYP-033",
+            "HARN-TYP-034",
+            "HARN-TYP-035",
+        ] {
+            let diagnostic = state.diagnostics.iter().find(|diagnostic| {
+                matches!(diagnostic.code.as_ref(), Some(NumberOrString::String(value)) if value == code)
+            }).unwrap_or_else(|| panic!("missing {code}: {:?}", state.diagnostics));
+            assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
+            assert_eq!(diagnostic.source.as_deref(), Some("harn-typecheck"));
+            assert!(diagnostic.range.start.line > 0);
+        }
+    }
+
+    #[test]
+    fn imported_predicate_outcome_cannot_select_an_lsp_boolean_branch() {
+        use harn_parser::builtin_signatures::TyExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.harn");
+        let outcome =
+            harn_parser::format_type(&harn_builtin_meta::predicate::OUTCOME.to_type_expr());
+        write(
+            &temp.path().join("helper.harn"),
+            &format!("pub fn assess() -> {outcome} {{ throw \"fixture\" }}"),
+        );
+        let source = "import { assess } from \"./helper\"\nfn main(harness: Harness) { const result = assess(); if result {} }\n";
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+        let state =
+            DocumentState::new_for_language_with_rules(source.into(), "harn", &uri, &workspace);
+        assert!(state.diagnostics.iter().any(|diagnostic| {
+            matches!(diagnostic.code.as_ref(), Some(NumberOrString::String(code)) if code == "HARN-TYP-031")
+        }), "{:?}", state.diagnostics);
     }
 
     #[test]

@@ -73,10 +73,17 @@ impl NativeKeyringError {
             Self::Keyring(KeyringError::PlatformFailure(error))
                 if error
                     .downcast_ref::<security_framework::base::Error>()
-                    .is_some_and(|error| error.code() == -25308) =>
+                    .is_some_and(|error| {
+                        // errSecInteractionNotAllowed: common for SSH/headless
+                        // agents whose login keychain cannot present an unlock
+                        // prompt. errSecAuthFailed is what an item's access
+                        // control answers once this process has turned
+                        // dialogs off (see `keychain_interaction_allowed`):
+                        // the approval dialog it would have shown, refused.
+                        error.code() == -25308
+                            || (error.code() == -25293 && !keychain_interaction_allowed())
+                    }) =>
             {
-                // errSecInteractionNotAllowed: common for SSH/headless agents
-                // whose login keychain cannot present an unlock prompt.
                 Some(NativeKeyringUnavailable::InteractionRequired)
             }
             // A store that never answers is the same fact the macOS arm
@@ -296,6 +303,9 @@ impl NativeKeyring {
 fn platform_store() -> Result<Arc<CredentialStore>, NativeKeyringError> {
     #[cfg(all(feature = "native-keyring", target_os = "macos"))]
     {
+        if !keychain_interaction_allowed() {
+            disable_keychain_interaction_for_process();
+        }
         let store: Arc<CredentialStore> = apple_native_keyring_store::keychain::Store::new()?;
         return Ok(store);
     }
@@ -320,6 +330,51 @@ fn platform_store() -> Result<Arc<CredentialStore>, NativeKeyringError> {
     }
     #[allow(unreachable_code)]
     Err(KeyringError::NoDefaultStore.into())
+}
+
+/// Opts a process with no terminal back into Keychain dialogs, for a host that
+/// launches Harn without one while a person is at the machine.
+pub const SECRET_INTERACTIVE_ENV: &str = "HARN_SECRET_INTERACTIVE";
+
+/// Whether this process may raise a macOS Keychain access dialog.
+///
+/// A dialog needs someone to answer it. A test run, an eval, an agent's
+/// subprocess or a scheduled job has no terminal and nobody watching, so a
+/// read there either blocks on a prompt forever or interrupts whoever is at
+/// the machine. Worse, a Keychain ACL binds to the binary's code identity, and
+/// every rebuild of an ad hoc signed `harn` is a new one: "Always Allow" never
+/// sticks, so the prompt returns on every build.
+///
+/// So a process prompts only when it has a terminal on stdin and is not
+/// running under CI, or when [`SECRET_INTERACTIVE_ENV`] says a person is
+/// present. Everywhere else a read that would prompt fails as
+/// [`SecretError::NeedsUserApproval`].
+pub fn keychain_interaction_allowed() -> bool {
+    use std::io::IsTerminal;
+    match std::env::var(SECRET_INTERACTIVE_ENV).ok().as_deref() {
+        Some("1" | "true") => return true,
+        Some("0" | "false") => return false,
+        _ => {}
+    }
+    let under_ci =
+        std::env::var_os("CI").is_some_and(|value| !value.is_empty() && value != "false");
+    std::io::stdin().is_terminal() && !under_ci
+}
+
+/// Turn Keychain dialogs off for the rest of this process.
+///
+/// The setting is process-wide, which is why it is applied once, when the
+/// platform store is first opened, and never scoped to one call: a scoped lock
+/// re-enables dialogs on drop while another thread may be mid-read. Leaking the
+/// guard is the point. A failure to apply it is not fatal; the read that
+/// follows can still prompt, which is the behavior this replaces.
+#[cfg(all(feature = "native-keyring", target_os = "macos"))]
+fn disable_keychain_interaction_for_process() {
+    if let Ok(lock) =
+        security_framework::os::macos::keychain::SecKeychain::disable_user_interaction()
+    {
+        std::mem::forget(lock);
+    }
 }
 
 #[derive(Debug)]
@@ -365,7 +420,7 @@ impl SecretProvider for KeyringSecretProvider {
         match self
             .keyring
             .get(&account_name(id))
-            .map_err(|error| backend_error("read", error))?
+            .map_err(|error| read_error(id, error))?
         {
             Some(bytes) => {
                 emit_secret_access_event("keyring", id);
@@ -407,7 +462,7 @@ impl SecretProvider for KeyringSecretProvider {
     async fn contains(&self, id: &SecretId) -> Result<bool, SecretError> {
         self.keyring
             .contains(&account_name(id))
-            .map_err(|error| backend_error("read", error))
+            .map_err(|error| read_error(id, error))
     }
 
     async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
@@ -424,6 +479,18 @@ impl SecretProvider for KeyringSecretProvider {
     fn supports_versions(&self) -> bool {
         false
     }
+}
+
+/// A read the platform refused because it wanted a person at a dialog is
+/// typed, so callers can say "needs approval" instead of "missing".
+fn read_error(id: &SecretId, error: NativeKeyringError) -> SecretError {
+    if error.unavailable_reason() == Some(NativeKeyringUnavailable::InteractionRequired) {
+        return SecretError::NeedsUserApproval {
+            provider: "keyring".to_string(),
+            id: id.clone(),
+        };
+    }
+    backend_error("read", error)
 }
 
 fn backend_error(operation: &str, error: NativeKeyringError) -> SecretError {

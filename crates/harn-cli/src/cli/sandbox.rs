@@ -24,8 +24,8 @@ pub(crate) struct SandboxArgs {
     #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
     pub no_sandbox: bool,
     /// Permit policy-managed child network while retaining the worktree
-    /// sandbox. Child traffic remains denied until HARN_EGRESS_* or
-    /// harness.net.egress_policy configures an allow decision.
+    /// sandbox. Children reach public hosts; private and loopback addresses
+    /// stay denied, and HARN_EGRESS_* or harness.net.egress_policy narrows it.
     #[arg(
         long = "allow-process-network",
         action = clap::ArgAction::SetTrue,
@@ -73,15 +73,40 @@ pub(crate) struct SandboxArgs {
         conflicts_with = "no_sandbox"
     )]
     pub sandbox_write_root: Vec<PathBuf>,
-    /// Directories under which subprocesses may bind and connect Unix-domain
-    /// sockets (build servers, compiler daemons). Repeatable; grants no IP
-    /// networking. Unsupported OS backends fail closed.
+    /// Directories under which subprocesses may serve Unix-domain sockets
+    /// (build servers, compiler daemons). Repeatable; grants no IP
+    /// networking. Where a backend cannot scope a connection by path it
+    /// grants the serving half only and refuses to connect. Unsupported OS
+    /// backends fail closed.
     #[arg(
         long = "sandbox-unix-socket-root",
         value_name = "PATH",
         conflicts_with = "no_sandbox"
     )]
     pub sandbox_unix_socket_root: Vec<PathBuf>,
+    /// Let subprocesses enumerate their own entries in the process
+    /// filesystem, which some managed runtimes need in order to identify
+    /// themselves during startup. Read-only, grants no network authority,
+    /// and fails closed on a kernel that cannot keep a sandboxed task from
+    /// inspecting its neighbours.
+    #[arg(
+        long = "sandbox-allow-process-self-introspection",
+        conflicts_with = "no_sandbox"
+    )]
+    pub sandbox_allow_process_self_introspection: bool,
+    /// Absolute path to the installed helper that builds a private network
+    /// namespace for a confined child, which is how loopback-only child
+    /// networking is rendered on backends that cannot express it any other
+    /// way. Supplied rather than derived: on hosts that restrict
+    /// unprivileged namespaces the permission is granted per executable path
+    /// by host policy, and that grant has to name one stable installed file.
+    /// Without it a loopback grant is refused, never weakened.
+    #[arg(
+        long = "netns-launcher",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub netns_launcher: Option<String>,
     /// Session environment: `inherited` snapshots the launcher (default),
     /// `isolated` admits runtime essentials only, and `granted` adds the
     /// declared `--grant` set. This is independent of the filesystem sandbox.

@@ -410,7 +410,7 @@ fn exhausted_stream_aborts_are_unpriced_requests_not_a_measured_zero() {
             crate::llm::usage::UsageAccountingStatus::Unknown,
             "no usage frame arrived, so the accounting is unknown, not reported"
         );
-        assert_eq!(ledger.provider_call_count, 2);
+        assert_eq!(ledger.provider_call_count, Some(2));
         assert_eq!(ledger.usage_unknown_calls, 2);
         assert_eq!(ledger.unpriced_calls, 2);
         assert_eq!(

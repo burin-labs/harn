@@ -28,12 +28,45 @@ Inspection and package-management commands such as `cargo tree` and
 For a real one-off, add `HARN_ALLOW_RAW_CARGO=1` to that command. The escape is
 visible in the shell call and does not weaken later calls.
 
+### Build tools that only some repositories own
+
+Every repository wiring this guard is a Cargo workspace, so the table above
+applies everywhere. Other build tools do not, and a repository cannot be told
+to run a Make target it has never declared. Those rules therefore fire only
+where the adapter has measured the target in the root `Makefile`:
+
+| Instead of | Run | Fires when the Makefile declares |
+|---|---|---|
+| `swift build` | `make swift-build` | `swift-build` |
+| `swift test` | `make swift-test` | `swift-test` |
+
+The one-off escape is `HARN_ALLOW_RAW_SWIFT=1`. A repository with no such
+target, or one whose `Makefile` the adapter could not read, is left alone: the
+rule is inert there rather than pointing at a command that does not exist.
+
+This is the opposite of how the worktree rule treats an unreadable census, and
+deliberately so. Refusing raw worktree creation on an unknown answer prevents
+real harm wherever it fires; refusing `swift test` on an unknown answer would
+send the operator to a target that may not be there.
+
 ## Admit Fleet worktrees before creating them
 
 Agent shell calls cannot run raw `git worktree add`. Use the owning
 `fleet-worktree-admit` command, which acquires the remote lease and records the
 joined ledger and recovery receipts before it creates the worktree. The guard
 does not expose an environment-variable bypass for this rule.
+
+The guard answers for the repository the command targets, not for the one it is
+installed in. A `git -C <path>` invocation names that repository, and so does an
+absolute `cd` earlier in the same command, which holds for everything after it.
+A relative `cd` is ignored: the hook payload carries no working directory to
+resolve it against.
+
+A repository that carries no admission command of its own is not exempt. An
+admission command admits whichever repository it is pointed at, so the refusal
+names the one configured for another measured repository together with the
+argument that points it at the target. Where no measured repository carries one
+there is nothing to name, and raw creation is allowed.
 
 This restriction does not affect people, continuous integration, repository
 scripts, `git worktree list`, or retirement through `git worktree remove`.
@@ -122,11 +155,16 @@ declarations.
 The adapter bounds policy execution below the host hook deadline. It first
 sends TERM, then KILL after a short grace so an interpreter descendant cannot
 keep the hook pipe open. Exit statuses 124, 137, and 143 deny the command
-because the policy timed out or was interrupted before proving it safe. A
-missing interpreter or another runtime failure remains fail-open so a broken
-local installation cannot lock the agent out of recovery. Policy output is
-published only after a successful interpreter exit; partial output from a crash
-or timeout is discarded instead of becoming a malformed host decision.
+because the policy timed out or was interrupted before proving it safe. Any
+other non-zero exit denies as well, naming the failure: the interpreter ran and
+the evaluation produced no verdict, so no rule was applied. A missing or
+non-executable interpreter is the one remaining fail-open, decided before the
+policy runs, so a broken local installation cannot lock the agent out of
+recovery; that allow prints one stderr line saying the guard is off and which
+interpreter path was missing, so it is never silent. Policy output is published
+only after a successful interpreter exit;
+partial output from a crash or timeout is discarded instead of becoming a
+malformed host decision.
 
 See the current [Codex hooks reference](https://developers.openai.com/codex/config-advanced#hooks)
 and [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) for the
@@ -160,7 +198,9 @@ printf '%s' '{"tool_name":"Bash","tool_input":{"command":"cargo test"}}' \
 ```
 
 The adapter deliberately ignores an invalid executable path and remains
-fail-open. Debug mode preserves Harn startup and policy errors on stderr.
+fail-open, because no policy ran, announcing on stderr that the guard is off.
+Once a policy does run, a failure denies. Debug mode preserves Harn startup and
+policy errors on stderr.
 
 ## Reuse the policy in another repository
 

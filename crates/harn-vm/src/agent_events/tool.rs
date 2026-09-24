@@ -253,6 +253,18 @@ pub enum DenialGate {
     /// A dynamic permission rule (`when`/`unless` predicate) denied the
     /// call.
     DynamicPermission,
+    /// The workspace path boundary refused a declared path argument: the
+    /// path is malformed, or it resolves outside the workspace and no
+    /// external root admits it. This is a scope answer, not an approval
+    /// one — it is decided before any configured approval rule is
+    /// consulted and it does not change when approval is turned off, so a
+    /// reader told "approval" here goes and inspects the wrong control.
+    WorkspaceBoundary,
+    /// The deny-by-default sensitive-path guard refused a declared path
+    /// argument (credential files, private keys, and the like). Also
+    /// decided ahead of the configured rules, and also not an approval
+    /// decision.
+    SensitivePath,
     /// A static approval policy decided `deny`.
     ApprovalPolicy,
     /// Approval was required (`ask`) but could not be requested because no
@@ -272,13 +284,15 @@ pub enum DenialGate {
 }
 
 impl DenialGate {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::ToolCeiling,
         Self::MalformedToolWrapper,
         Self::CapabilityCeiling,
         Self::SideEffectCeiling,
         Self::ArgConstraint,
         Self::DynamicPermission,
+        Self::WorkspaceBoundary,
+        Self::SensitivePath,
         Self::ApprovalPolicy,
         Self::ApprovalUnavailable,
         Self::HostRejected,
@@ -295,6 +309,8 @@ impl DenialGate {
             Self::SideEffectCeiling => "side_effect_ceiling",
             Self::ArgConstraint => "arg_constraint",
             Self::DynamicPermission => "dynamic_permission",
+            Self::WorkspaceBoundary => "workspace_boundary",
+            Self::SensitivePath => "sensitive_path",
             Self::ApprovalPolicy => "approval_policy",
             Self::ApprovalUnavailable => "approval_unavailable",
             Self::HostRejected => "host_rejected",
@@ -315,6 +331,8 @@ impl DenialGate {
             Self::SideEffectCeiling => "Side-effect ceiling denial",
             Self::ArgConstraint => "Tool argument constraint denial",
             Self::DynamicPermission => "Dynamic permission denial",
+            Self::WorkspaceBoundary => "Workspace boundary denial",
+            Self::SensitivePath => "Sensitive path denial",
             Self::ApprovalPolicy => "Approval policy denial",
             Self::ApprovalUnavailable => "Approval unavailable denial",
             Self::HostRejected => "Host rejection denial",
@@ -410,6 +428,18 @@ pub struct ToolDenial {
     /// Workspace paths the denied call declared, when the tool annotates
     /// path arguments. Empty for tools that declare no paths.
     pub denied_paths: Vec<String>,
+    /// Command lines the denied call declared, when it declared any. Empty for
+    /// the many tools that run no command.
+    ///
+    /// A refusal a reader cannot act on is the failure this exists to prevent.
+    /// A gate that files bare particulars — a host that says no and gives no
+    /// reason is the common one — leaves a record naming the gate and nothing
+    /// else, and the refusal frequently ends the run, so there is nowhere left
+    /// to recover the command from. The dispatch boundary holds the call at
+    /// the moment it writes the record, and the same event already carries the
+    /// arguments beside this object, so naming the command here discloses
+    /// nothing new; it puts the fact where consumers read.
+    pub denied_commands: Vec<String>,
     /// Whether re-issuing the identical call could ever succeed. Capability
     /// and side-effect ceilings, argument allow-lists, and policy/approval
     /// denials are terminal (`false`); a host harness should fail or pivot
@@ -454,6 +484,7 @@ impl ToolDenial {
             gate,
             capability,
             denied_paths: Vec::new(),
+            denied_commands: Vec::new(),
             retryable: false,
             reason: gate.render_reason(particulars),
             denial_class: None,
@@ -480,6 +511,7 @@ impl ToolDenial {
             gate,
             capability,
             denied_paths: Vec::new(),
+            denied_commands: Vec::new(),
             retryable: true,
             reason: gate.render_reason(particulars),
             denial_class: None,
@@ -568,6 +600,7 @@ impl Serialize for ToolDenial {
         let mut field_count = 3;
         field_count += usize::from(self.capability.is_some());
         field_count += usize::from(!self.denied_paths.is_empty());
+        field_count += usize::from(!self.denied_commands.is_empty());
         field_count += usize::from(self.denial_class.is_some());
         field_count += usize::from(self.class_repeat_count.is_some());
         field_count += usize::from(self.side_effect_ceiling.is_some());
@@ -580,6 +613,9 @@ impl Serialize for ToolDenial {
         }
         if !self.denied_paths.is_empty() {
             record.serialize_field("denied_paths", &self.denied_paths)?;
+        }
+        if !self.denied_commands.is_empty() {
+            record.serialize_field("denied_commands", &self.denied_commands)?;
         }
         record.serialize_field("retryable", &self.retryable)?;
         record.serialize_field("reason", &self.reason)?;
@@ -609,6 +645,8 @@ struct ToolDenialRecord {
     capability: Option<String>,
     #[serde(default)]
     denied_paths: Vec<String>,
+    #[serde(default)]
+    denied_commands: Vec<String>,
     retryable: bool,
     reason: String,
     #[serde(default)]
@@ -652,6 +690,7 @@ impl<'de> Deserialize<'de> for ToolDenial {
             gate: record.gate,
             capability: record.capability,
             denied_paths: record.denied_paths,
+            denied_commands: record.denied_commands,
             retryable: record.retryable,
             reason,
             denial_class: record.denial_class,

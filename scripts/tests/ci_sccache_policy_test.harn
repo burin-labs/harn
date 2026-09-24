@@ -130,11 +130,7 @@ fn persistent_lane(
         if: "env.HARN_RUNNER_TIER != 'blacksmith'",
         with: cache_inputs,
       },
-      {
-        name: "Summarize and stop sccache",
-        if: "always() && env.HARN_RUNNER_TIER == 'blacksmith'",
-        run: "./scripts/ci/finalize_sccache.sh",
-      },
+      {name: "Summarize and stop sccache", if: "always()", run: "./scripts/ci/finalize_sccache.sh"},
     ],
   }
   if write_cache {
@@ -392,6 +388,29 @@ fn workflow() {
         "timeout-minutes": 15,
         steps: [{name: "Check source file lengths"}],
       },
+      "fast-policy-gates": {
+        "runs-on": "ubuntu-latest",
+        needs: artifact_consumer_needs,
+        // No event term: the refusals here must be able to refuse a pull
+        // request, which is the whole reason this job exists.
+        if: artifact_consumer_if,
+        "timeout-minutes": 15,
+        steps: [
+          {
+            uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            with: {"fetch-depth": 0, "persist-credentials": false},
+          },
+          {name: "Verify shared Harn binary"},
+          {name: "Reject flaky test patterns", run: "make lint-test-patterns"},
+          {name: "Check no retroactive CHANGELOG edits"},
+          {
+            name: "Check no undeclared protocol symbol removals",
+            run: "make check-protocol-symbol-removals",
+          },
+          {name: "Check CI cache and gate ownership policy", run: "make check-ci-cache-policy"},
+          {name: "Check source-only repository policies", run: "make repository-policies-source"},
+        ],
+      },
       "audit-scripts": {
         "runs-on": "ubuntu-latest",
         needs: artifact_consumer_needs,
@@ -403,7 +422,6 @@ fn workflow() {
             if: "needs.changes.outputs.prompt_prose == 'true'",
             run: "make lint-no-rust-prompt-prose",
           },
-          {name: "Reject flaky test patterns", run: "make lint-test-patterns"},
           {uses: "./.github/actions/node-cache"},
           {name: "Run pre-warm shell gates without Cargo"},
           {run: "make test-pr-gate-post-warm-integrations"},
@@ -889,48 +907,143 @@ pipeline test_rejects_prompt_prose_check_in_compile_lane(harness: Harness, task:
 }
 
 @test
-pipeline test_rejects_late_or_duplicated_flaky_test_pattern_policy(
+pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
   harness: Harness,
   task: unknown,
 ) {
   const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  const fast_job = valid.jobs["fast-policy-gates"]
   const policy_job = valid.jobs["audit-scripts"]
-  const without_early_policy = policy_job.steps.filter(
-    { step -> trim(step?.run ?? "") != "make lint-test-patterns" },
-  )
-    .to_list()
-  const late = {
+  // Moved back behind the merge. Both halves are asserted: the cheap job
+  // losing it, and the expensive job gaining it. Checking only one would pass
+  // while the refusal was merely deleted, or while a duplicate still burned
+  // fourteen minutes after the fact.
+  const moved_back = {
     ...valid,
     jobs: {
       ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps.filter(
+          { step -> trim(step?.run ?? "") != "make lint-test-patterns" },
+        )
+          .to_list(),
+      },
       "audit-scripts": {
         ...policy_job,
-        steps: without_early_policy
+        steps: policy_job.steps
           + [{name: "Reject flaky test patterns", run: "make lint-test-patterns"}],
       },
     },
   }
-  const late_errors = ci_linux_lane_policy_errors(late)
+  const moved_errors = ci_linux_lane_policy_errors(moved_back)
   assert(
-    late_errors.contains(
-      "ci.yml:audit-scripts must reject flaky test patterns immediately after exact CLI source policies and before setup or integration sweeps",
+    moved_errors.contains(
+      "ci.yml:fast-policy-gates must own exactly one invocation to reject flaky test patterns",
     ),
   )
+  assert(
+    moved_errors.contains(
+      "ci.yml:audit-scripts must not reject flaky test patterns behind the merge",
+    ),
+  )
+  // Duplicated inside the cheap job.
   const duplicated = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "audit-scripts": {
-        ...policy_job,
-        steps: policy_job.steps + [{run: "make lint-test-patterns"}],
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps + [{run: "make lint-test-patterns"}],
       },
     },
   }
   assert(
     ci_linux_lane_policy_errors(duplicated).contains(
-      "ci.yml:audit-scripts must own exactly one make lint-test-patterns invocation",
+      "ci.yml:fast-policy-gates must own exactly one invocation to reject flaky test patterns",
     ),
   )
+  // Made expensive. Running before the merge is earned by staying cheap, so
+  // the moment this job grows a sweep it has stopped satisfying the rule that
+  // put it there.
+  const fattened = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps + [{run: "make test-pr-gate-post-warm-integrations"}],
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(fattened).contains(
+      "ci.yml:fast-policy-gates must not run make test-pr-gate-post-warm-integrations; it would stop being cheap",
+    ),
+  )
+  // Left reachable only from the push-only sweep. The rule would then refuse
+  // a re-added event condition one merge after it landed.
+  const unreachable = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps.filter(
+          { step -> trim(step?.run ?? "") != "make check-ci-cache-policy" },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(unreachable).contains(
+      "ci.yml:fast-policy-gates must run this contract itself, or it cannot refuse before a merge",
+    ),
+  )
+  // Credentials persisted back onto the checkout. Git then cannot read its
+  // own config inside the sandbox and both base-relative guards fail closed.
+  const credentialed = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps.map(
+          { step ->
+            if contains(trim(step?.uses ?? ""), "actions/checkout@") {
+              {...step, with: {"fetch-depth": 0}}
+            } else {
+              step
+            }
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const credential_message =
+    "ci.yml:fast-policy-gates must check out with persist-credentials: false,"
+    + " or its base-relative guards cannot read a base"
+  assert(ci_linux_lane_policy_errors(credentialed).contains(credential_message))
+  // A job with no checkout at all must not satisfy the rule by having nothing
+  // to persist, which is the shape that let the defect through in the first
+  // place.
+  const uncheckedout = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "fast-policy-gates": {
+        ...fast_job,
+        steps: fast_job.steps.filter(
+          { step -> !contains(trim(step?.uses ?? ""), "actions/checkout@") },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(ci_linux_lane_policy_errors(uncheckedout).contains(credential_message))
 }
 
 @test
@@ -1013,6 +1126,40 @@ pipeline test_rejects_a_producer_cache_guard_that_names_only_the_hosted_tier(har
       "ci.yml:rust-check-inputs must restore rust-cache on every tier except Blacksmith, which has its own sticky sccache",
     ),
     "a guard naming only the hosted tier must be refused; got ${to_string(errors)}",
+  )
+}
+
+/**
+ * The cache summary must not name the tiers it knows. A tier left off that
+ * list emits no counters, and a rung with no counters is indistinguishable
+ * from one with a warm cache, so a fully cold compile reports as a clean
+ * pass. This is the defect that hid the owned pool's cache behaviour.
+ */
+pipeline test_rejects_a_cache_summary_guard_that_names_one_tier(harness: Harness) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  const guarded = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-check-inputs": {
+        ...producer,
+        steps: producer.steps.map(
+          fn(step) {
+            if trim(to_string(step?.name ?? "")) != "Summarize and stop sccache" {
+              return step
+            }
+            return {...step, if: "always() && env.HARN_RUNNER_TIER == 'blacksmith'"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(guarded)
+  assert(
+    errors.contains("ci.yml:rust-check-inputs must finalize its job-owned sccache daemon"),
+    "a summary guard naming one tier must be refused; got ${to_string(errors)}",
   )
 }
 
@@ -1153,7 +1300,7 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
     .split("\n")
     .filter({ name -> trim(name) != "" })
     .to_list()
-  assert_eq(test_names.count, 9)
+  assert_eq(test_names.count, 10)
   const rendered = harness.process.run(
     {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: []},
   )

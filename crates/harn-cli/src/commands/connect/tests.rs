@@ -1,3 +1,4 @@
+use super::oauth_migration::legacy_registration_missing_redirect;
 use super::store::load_connect_index;
 use super::*;
 use crate::cli::ConnectGithubArgs;
@@ -268,6 +269,60 @@ async fn legacy_oauth_migration_recovers_registration_without_token_material() {
         migrated_oauth_client_secret_required(&request),
         "a confidential legacy client must ask for its secret again before opening a browser"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn authentic_old_token_requires_the_registered_redirect_again() {
+    use harn_vm::secrets::{MemorySecretProvider, SecretId};
+
+    // This is the StoredConnectorToken shape written before the namespace
+    // change. That writer did not persist its authorization or redirect URI.
+    let id = SecretId::new("acme", "oauth-token");
+    let legacy = MemorySecretProvider::new("harn/legacy-workspace").with_secret(
+        id.clone(),
+        br#"{
+            "provider":"acme",
+            "access_token":"old-token",
+            "token_endpoint":"https://auth.example.com/token",
+            "client_id":"legacy-client",
+            "token_endpoint_auth_method":"none",
+            "resource":"https://api.example.com/",
+            "connected_at_unix":1
+        }"#,
+    );
+    let registration = load_legacy_oauth_registration_from(&legacy, &id)
+        .await
+        .expect("old keyring entry is readable")
+        .expect("registration fields exist");
+    let request = OAuthConnectRequest {
+        provider: "acme".to_string(),
+        resource: "https://api.example.com/".to_string(),
+        authorization_endpoint: None,
+        token_endpoint: None,
+        registration_endpoint: None,
+        client_id: None,
+        client_secret: None,
+        scopes: None,
+        redirect_uri: DEFAULT_OAUTH_REDIRECT_URI.to_string(),
+        token_auth_method: None,
+        no_open: true,
+        json: false,
+    };
+    assert!(legacy_registration_missing_redirect(
+        &request,
+        &registration
+    ));
+    let explicitly_set = OAuthConnectRequest {
+        redirect_uri: "http://127.0.0.1:48765/oauth/callback".to_string(),
+        ..request.clone()
+    };
+    assert!(!legacy_registration_missing_redirect(
+        &explicitly_set,
+        &registration
+    ));
+    let merged = oauth_request_with_legacy_registration(request, registration);
+    assert_eq!(merged.client_id.as_deref(), Some("legacy-client"));
+    assert_eq!(merged.redirect_uri, DEFAULT_OAUTH_REDIRECT_URI);
 }
 
 #[tokio::test(flavor = "current_thread")]

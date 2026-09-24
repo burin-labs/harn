@@ -29,23 +29,111 @@ fn accounted_result() -> LlmResult {
         served_fast: false,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry {
+        telemetry: Box::new(ProviderTelemetry {
             cache_accounting_declared: Some(true),
             ..ProviderTelemetry::default()
-        },
+        }),
         attempts: ProviderAttempts {
             total: 3,
             rate_limited: 1,
             empty_completion: 1,
             other: 0,
-            completed_retry_usage: vec![super::LlmUsage::from_probe_counts(
+            completed_retry_usage: vec![super::LlmUsage::from_provider_receipt(
                 "anthropic",
                 "claude-sonnet-4-20250514",
-                250,
-                10,
+                &ProviderUsageReceipt::new(Some(250), Some(10), None, false)
+                    .with_cache(0, 0, None, false),
             )],
         },
     }
+}
+
+#[test]
+fn reported_hosted_search_is_billed_or_explicitly_unpriced() {
+    let _guard = crate::llm::env_guard();
+    let mut response = accounted_result();
+    response.model = "claude-sonnet-4-5-20250929".into();
+    let plain = LlmUsage::from_result(&response).cost_usd.unwrap();
+    *response.telemetry = ProviderTelemetry::from_anthropic_usage(
+        &json!({
+            "input_tokens": 1000, "output_tokens": 100,
+            "server_tool_use": {"web_search_requests": 1}
+        }),
+        Some("search-receipt"),
+    );
+    let searched = LlmUsage::from_result(&response);
+    assert!((searched.cost_usd.unwrap() - plain - 0.01).abs() < 1e-12);
+    assert_eq!(
+        searched.billing.as_ref().unwrap().hosted_tool_calls["web_search"],
+        1
+    );
+    assert!(searched
+        .pricing
+        .as_ref()
+        .unwrap()
+        .hosted_tool_unpriced
+        .is_empty());
+
+    // An unknown hosted tool cannot look fully priced.
+    response
+        .telemetry
+        .billing
+        .as_mut()
+        .unwrap()
+        .hosted_tool_calls = std::collections::BTreeMap::from([("unknown_hosted_tool".into(), 1)]);
+    let unpriced = LlmUsage::from_result(&response);
+    assert_eq!(unpriced.accounting_status, UsageAccountingStatus::Partial);
+    assert_eq!(unpriced.unpriced_calls, 1);
+    assert_eq!(unpriced.projected_cost_usd(), None);
+    let aggregate = LlmUsage::aggregate(&[unpriced.clone()]);
+    assert_eq!(aggregate.cost_usd, unpriced.cost_usd);
+    assert_eq!(aggregate.accounting_status, UsageAccountingStatus::Partial);
+    assert_eq!(
+        unpriced.pricing.as_ref().unwrap().hosted_tool_unpriced,
+        ["unknown_hosted_tool"]
+    );
+
+    // An authoritative provider total is retained without a second surcharge.
+    response.telemetry.provider_cost_usd = Some(0.123);
+    let authoritative = LlmUsage::from_result(&response);
+    assert_eq!(authoritative.cost_usd, Some(0.123));
+    assert_eq!(authoritative.unpriced_calls, 0);
+}
+
+#[test]
+fn receipt_retains_request_instant_and_audio_counts_without_inventing_rates() {
+    let _guard = crate::llm::env_guard();
+    let wire = json!({
+        "input_tokens": 1000, "output_tokens": 100,
+        "input_token_details": {"audio_tokens": 200, "cached_tokens": 100},
+        "output_token_details": {"audio_tokens": 50}
+    });
+    let mut receipt = ProviderUsageReceipt::from_openai_usage_tokens(&wire)
+        .unwrap()
+        .with_cache(
+            super::extract_cache_read_tokens(&wire).unwrap(),
+            super::extract_cache_write_tokens(&wire).unwrap(),
+            None,
+            true,
+        );
+    assert_eq!(receipt.cache_read_tokens, 100);
+    receipt.started_at_ms = Some(1_790_000_000_000);
+    let roundtrip = ProviderUsageReceipt::from_vm_value(&receipt.to_vm_value()).unwrap();
+    assert_eq!(roundtrip, receipt);
+    let usage = LlmUsage::from_provider_receipt("openai", "gpt-5.6-luna", &roundtrip);
+    assert_eq!(
+        usage.pricing.as_ref().unwrap().settled_at_ms,
+        1_790_000_000_000
+    );
+    assert_eq!(
+        usage.billing.as_ref().unwrap().audio_input_tokens,
+        Some(200)
+    );
+    assert_eq!(
+        usage.pricing.as_ref().unwrap().modality_unpriced,
+        ["audio_input", "audio_output"]
+    );
+    assert_eq!(usage.projected_cost_usd(), None);
 }
 
 /// A locally served call that reports no token usage at all, which is what
@@ -60,10 +148,10 @@ fn self_hosted_result_without_usage() -> LlmResult {
         cache_supported: false,
         model: "some-locally-served-model".to_string(),
         provider: "llamacpp".to_string(),
-        telemetry: ProviderTelemetry {
+        telemetry: Box::new(ProviderTelemetry {
             cache_accounting_declared: Some(false),
             ..ProviderTelemetry::default()
-        },
+        }),
         attempts: ProviderAttempts::default(),
         ..accounted_result()
     }
@@ -91,7 +179,7 @@ fn live_tool_probe_preserves_missing_usage_as_unknown() {
         model: "Qwen/Qwen3.6-Plus".to_string(),
         input_tokens: 0,
         output_tokens: 0,
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
         attempts: ProviderAttempts::default(),
         ..accounted_result()
     };
@@ -111,11 +199,11 @@ fn live_tool_probe_preserves_missing_usage_as_unknown() {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
-        telemetry: ProviderTelemetry {
+        telemetry: Box::new(ProviderTelemetry {
             server_prompt_tokens: Some(0),
             server_output_tokens: Some(0),
             ..ProviderTelemetry::default()
-        },
+        }),
         ..accounted_result()
     });
     assert_eq!(
@@ -161,8 +249,7 @@ fn partial_provider_error_receipt_stays_explicitly_unknown() {
         Some(3)
     );
 
-    let usage =
-        LlmUsage::from_provider_error_receipt("anthropic", "claude-sonnet-4-20250514", &receipt);
+    let usage = LlmUsage::from_provider_receipt("anthropic", "claude-sonnet-4-20250514", &receipt);
 
     assert_eq!(usage.input_tokens, 9);
     assert_eq!(usage.output_tokens, 0);
@@ -232,7 +319,7 @@ fn a_recovered_retry_reports_partial_accounting_instead_of_a_black_out() {
         call.unpriced_calls, 1,
         "the discarded attempt stays visible"
     );
-    assert_eq!(call.provider_call_count, 2);
+    assert_eq!(call.provider_call_count, Some(2));
     assert_eq!(
         call.unpriced_reason(),
         Some(super::UnpricedReason::UsageUnreported),
@@ -344,7 +431,7 @@ fn a_severed_stream_reads_apart_from_a_request_that_never_answered() {
         Some(priced.known_cost_usd),
         "the priced sibling stays a measurement"
     );
-    assert_eq!(severed.provider_call_count, 2);
+    assert_eq!(severed.provider_call_count, Some(2));
     assert_eq!(severed.usage_unknown_calls, 1);
 }
 
@@ -352,7 +439,7 @@ fn a_severed_stream_reads_apart_from_a_request_that_never_answered() {
 fn terminal_unknown_ledger_counts_every_physical_attempt() {
     let usage = LlmUsage::unknown_attempts(3);
 
-    assert_eq!(usage.provider_call_count, 3);
+    assert_eq!(usage.provider_call_count, Some(3));
     assert_eq!(usage.unpriced_calls, 3);
     assert_eq!(usage.usage_unknown_calls, 3);
     assert_eq!(usage.cost_usd, None);
@@ -373,7 +460,7 @@ fn terminal_ledger_preserves_completed_receipts_before_unknown_attempts() {
     // projection, which is what a ceiling consumer fails closed on.
     assert_eq!(usage.cost_usd, Some(0.25));
     assert_eq!(usage.projected_cost_usd(), None);
-    assert_eq!(usage.provider_call_count, 3);
+    assert_eq!(usage.provider_call_count, Some(3));
     assert_eq!(usage.unpriced_calls, 2);
     assert_eq!(usage.usage_unknown_calls, 2);
     assert_eq!(usage.accounting_status, UsageAccountingStatus::Partial);
@@ -384,7 +471,8 @@ fn legacy_ledger_reconstructs_one_call_without_losing_known_cost() {
     let mut usage = LlmUsage::known_zero_attempt();
     usage.cost_usd = Some(0.25);
     usage.known_cost_usd = 0.0;
-    usage.provider_call_count = 0;
+    // A ledger recorded before the field existed carries no count at all.
+    usage.provider_call_count = None;
 
     let summary = summarize_usage_cost_certainty([&usage]);
 
@@ -392,6 +480,57 @@ fn legacy_ledger_reconstructs_one_call_without_losing_known_cost() {
     assert_eq!(summary.provider_call_count, 1);
     assert_eq!(summary.unpriced_calls, 0);
     assert_eq!(summary.usage_unknown_calls, 0);
+}
+
+/// The falsifier for burin-labs/harn#8529: a measured zero must survive the
+/// fold as zero. Reading an integer zero as the legacy marker minted every
+/// pre-dispatch refusal into one unpriced call.
+#[test]
+fn measured_zero_folds_as_zero_not_as_a_legacy_call() {
+    let usage = LlmUsage::no_provider_request();
+    assert_eq!(usage.provider_call_count, Some(0));
+
+    let summary = summarize_usage_cost_certainty([&usage]);
+
+    assert_eq!(summary.provider_call_count, 0);
+    assert_eq!(summary.unpriced_calls, 0);
+    assert_eq!(summary.usage_unknown_calls, 0);
+    assert_eq!(summary.known_cost_usd, 0.0);
+    assert_eq!(summary.projected_cost_usd(), Some(0.0));
+    assert!(!summary.unprojectable);
+
+    // Composed with a real request, the zero adds nothing and hides nothing.
+    let real = LlmUsage::unknown_attempt();
+    let composed = summarize_usage_cost_certainty([&usage, &real]);
+    assert_eq!(composed.provider_call_count, 1);
+    assert_eq!(composed.unpriced_calls, 1);
+}
+
+/// A legacy ledger and a measured zero must serialize differently, or a
+/// round trip would collapse one into the other.
+#[test]
+fn absent_count_and_measured_zero_serialize_distinctly() {
+    let mut legacy = LlmUsage::known_zero_attempt();
+    legacy.provider_call_count = None;
+    let measured = LlmUsage::no_provider_request();
+
+    let legacy_json = serde_json::to_value(&legacy).unwrap();
+    let measured_json = serde_json::to_value(&measured).unwrap();
+    assert!(legacy_json.get("provider_call_count").is_none());
+    assert_eq!(measured_json["provider_call_count"], 0);
+
+    let legacy_dict = legacy.to_vm_dict(&ProviderAttempts::default());
+    let measured_dict = measured.to_vm_dict(&ProviderAttempts::default());
+    assert!(legacy_dict.get("provider_call_count").is_none());
+    assert!(matches!(
+        measured_dict.get("provider_call_count"),
+        Some(VmValue::Int(0))
+    ));
+
+    let back: LlmUsage = serde_json::from_value(legacy_json).unwrap();
+    assert_eq!(back.provider_call_count, None);
+    let back: LlmUsage = serde_json::from_value(measured_json).unwrap();
+    assert_eq!(back.provider_call_count, Some(0));
 }
 
 #[test]
@@ -454,7 +593,7 @@ fn missing_stream_usage_stays_unknown_instead_of_becoming_free() {
     result.model = "accounts/fireworks/models/minimax-m3".to_string();
     result.input_tokens = 0;
     result.output_tokens = 0;
-    result.telemetry = ProviderTelemetry::from_openai_response(
+    *result.telemetry = ProviderTelemetry::from_openai_response(
         &serde_json::json!({"usage": {}}),
         Some("chatcmpl-without-usage"),
     );
@@ -588,6 +727,85 @@ fn extracts_bedrock_usage_tokens() {
 
     assert_eq!(usage.input_tokens, Some(17));
     assert_eq!(usage.output_tokens, Some(23));
+}
+
+#[test]
+fn saved_anthropic_probes_normalize_input_and_preserve_cache_pricing() {
+    for fresh in [40, 6000] {
+        let expected = (fresh as f64 + 500.0 + 125.0 + 40.0) / 1_000_000.0;
+        for raw in [
+            json!({"input_tokens": fresh, "output_tokens": 8, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 100}),
+            json!({"input_tokens": fresh + 5100, "output_tokens": 8, "cache_read_tokens": 5000, "cache_write_tokens": 100}),
+            json!({"prompt_tokens": fresh + 5100, "completion_tokens": 8, "prompt_tokens_details": {"cached_tokens": 5000, "cache_write_tokens": 100}}),
+        ] {
+            let usage = extract_probe_usage(
+                "anthropic",
+                "claude-haiku-4-5-20251001",
+                &json!({"usage": raw}),
+            )
+            .unwrap();
+            assert_eq!(usage.input_tokens, Some(fresh + 5100));
+            assert_eq!(usage.output_tokens, Some(8));
+            assert!((usage.cost_usd.unwrap() - expected).abs() < 1e-10);
+        }
+    }
+}
+
+#[test]
+fn saved_bedrock_and_gemini_cache_usage_have_comparable_totals() {
+    for raw in [
+        json!({"usage": {"inputTokens": 40, "outputTokens": 8, "cacheReadInputTokens": 5000, "cacheWriteInputTokens": 0}}),
+        json!({"usageMetadata": {"promptTokenCount": 5040, "candidatesTokenCount": 8, "cachedContentTokenCount": 5000}}),
+    ] {
+        let usage = extract_probe_usage("unknown", "unknown", &raw).unwrap();
+        assert_eq!(usage.input_tokens, Some(5040));
+        assert_eq!(usage.output_tokens, Some(8));
+    }
+}
+
+#[test]
+fn saved_anthropic_stream_merges_partial_cumulative_usage() {
+    let response = json!({"frames": [
+        {"type": "message_start", "message": {"usage": {
+            "input_tokens": 40, "output_tokens": 0, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 100,
+        }}},
+        {"type": "message_delta", "usage": {"output_tokens": 8, "cache_creation_input_tokens": 200}},
+        {"type": "message_stop"},
+    ]});
+    let usage = extract_probe_usage("anthropic", "claude-haiku-4-5-20251001", &response).unwrap();
+    assert_eq!(usage.input_tokens, Some(5240));
+    assert_eq!(usage.output_tokens, Some(8));
+    assert!((usage.cost_usd.unwrap() - 0.00083).abs() < 1e-10);
+}
+
+#[test]
+fn saved_probe_missing_and_invalid_usage_cannot_become_a_priced_zero() {
+    assert!(extract_probe_usage("anthropic", "claude-haiku-4-5-20251001", &json!({})).is_none());
+    for raw in [
+        json!({"output_tokens": 8, "cache_read_input_tokens": 5000}),
+        json!({"input_tokens": -1, "output_tokens": 8, "cache_read_input_tokens": 5000}),
+        json!({"input_tokens": 40, "output_tokens": 8, "cache_read_tokens": 5000}),
+        json!({"input_tokens": 5040, "output_tokens": 8, "cache_read_tokens": 5000, "cache_supported": false}),
+    ] {
+        let usage = extract_probe_usage(
+            "anthropic",
+            "claude-haiku-4-5-20251001",
+            &json!({"usage": raw}),
+        )
+        .unwrap();
+        assert_eq!(usage.input_tokens, None);
+        assert_eq!(usage.cost_usd, None);
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
+    }
+    let zero = extract_probe_usage(
+        "anthropic",
+        "claude-haiku-4-5-20251001",
+        &json!({"usage": {"input_tokens": 0, "output_tokens": 0}}),
+    )
+    .unwrap();
+    assert_eq!(zero.input_tokens, Some(0));
+    assert_eq!(zero.cost_usd, Some(0.0));
+    assert_eq!(zero.accounting_status, UsageAccountingStatus::Reported);
 }
 
 #[test]

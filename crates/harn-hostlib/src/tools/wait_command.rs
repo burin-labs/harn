@@ -1,6 +1,6 @@
 //! `tools/wait_command` — wait for one background command completion.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use harn_vm::VmValue;
 
@@ -26,43 +26,23 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     if let Some(result) = drain_matching_result(&session_id, &handle_id) {
         return Ok(result);
     }
-    if let Some(result) = super::long_running::terminal_result_for_handle(&handle_id) {
-        return Ok(mark_tool_result(result));
-    }
-
-    if timeout_ms > 0 {
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if let Some(result) = super::long_running::wait_for_result(&handle_id, remaining) {
-            // The waiter publishes the normal inbox feedback before waking
-            // direct waiters. Consume that matching entry so explicit wait
-            // preserves the historical "result is delivered once" contract.
+    match super::long_running::wait_for_result(&handle_id, Duration::from_millis(timeout_ms)) {
+        super::long_running::BackgroundWaitOutcome::Completed(result) => {
+            // The same waiter publishes inbox feedback before notifying direct
+            // waiters. Consume only this handle's copy; sibling feedback stays.
             let _ = drain_matching_result(&session_id, &handle_id);
             return Ok(mark_tool_result(result));
         }
-        if let Some(result) = drain_matching_result(&session_id, &handle_id) {
-            return Ok(result);
+        super::long_running::BackgroundWaitOutcome::Unknown => {
+            return Err(HostlibError::InvalidParameter {
+                builtin: NAME,
+                param: "handle_id",
+                message: format!(
+                    "unknown command handle {handle_id:?}; use the handle returned by run_command"
+                ),
+            });
         }
-
-        // The inbox is keyed per-session, but multiple concurrent background
-        // handles can share one session (notably `session_id == ""` under
-        // `harn test`/headless). `wait_sync` only parks on "this session has
-        // *any* entry", so a sibling handle's completion can wake us; the
-        // single drain below would then requeue that foreign entry and report
-        // our handle as still running. Loop until either our handle's result
-        // arrives or the deadline elapses, re-parking for the remaining budget
-        // after each foreign wakeup.
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            let _ = harn_vm::orchestration::agent_inbox::wait_sync(&session_id, remaining);
-            if let Some(result) = drain_matching_result(&session_id, &handle_id) {
-                return Ok(result);
-            }
-        }
+        super::long_running::BackgroundWaitOutcome::Running => {}
     }
 
     let mut builder = ResponseBuilder::new()
@@ -188,50 +168,38 @@ mod tests {
         field(value, "handle_id")
     }
 
-    /// Regression test for the shared-session-inbox race.
-    ///
-    /// Two background handles (`H1`, `H2`) share one session inbox (the
-    /// empty-session case under `harn test`/headless). A sibling's completion
-    /// (`H2`) is enqueued FIRST, then our handle's completion (`H1`) arrives
-    /// from another thread *during* the wait. The old single-shot code would
-    /// drain once on the first wakeup, find only `H2`, requeue it, and falsely
-    /// report `H1` as `running`. The deadline loop must skip past `H2`'s
-    /// wakeup and return `H1`'s result.
+    /// A real registered handle waits on its own notifier, even when a sibling
+    /// already has feedback in the session inbox. No wall-clock sleep is needed.
     #[test]
-    fn wait_skips_foreign_wakeup_and_returns_own_result() {
+    fn wait_skips_foreign_feedback_and_returns_registered_result() {
+        use crate::process::{install_spawner, ExitStatus, MockProcessConfig, MockSpawner};
         let session = fresh_session_id();
-
-        // A foreign sibling completion is already queued before we wait.
+        let spawner = std::sync::Arc::new(MockSpawner::new());
+        let controller = spawner.enqueue(MockProcessConfig::running());
+        let _guard = install_spawner(spawner);
+        let info = super::super::long_running::spawn_long_running(
+            NAME,
+            "echo".into(),
+            vec!["mock".into()],
+            None,
+            std::collections::BTreeMap::new(),
+            session.clone(),
+        )
+        .expect("registered mock command");
         agent_inbox::push(&session, "tool_result", &result_for("H2"), "test");
-
-        // Our handle's completion lands shortly after the wait begins, on a
-        // separate thread — modelling the real waiter thread that pushes the
-        // `tool_result` for our handle while we are parked.
-        let push_session = session.clone();
-        let pusher = std::thread::spawn(move || {
-            // Park briefly so `handle` has entered its first `wait_sync`. The
-            // correctness of the test does not depend on this sleep being
-            // long enough: even if H1 is already present, the initial drain
-            // would return it; the sleep just steers the common case through
-            // the loop path that the old code got wrong.
-            std::thread::sleep(Duration::from_millis(50));
-            agent_inbox::push(&push_session, "tool_result", &result_for("H1"), "test");
-        });
-
-        // Generous timeout: the assertion is on the RESULT, not on timing.
-        let value = handle(&wait_args(&session, "H1", 5_000)).expect("handle ok");
-        pusher.join().expect("pusher join");
-
-        assert_eq!(
-            status_of(&value).as_deref(),
-            Some("completed"),
-            "wait must return H1's completed result, not falsely report running"
-        );
-        assert_eq!(handle_of(&value).as_deref(), Some("H1"));
-
-        // H2's foreign completion must remain queued (requeued, not consumed).
+        let wait_session = session.clone();
+        let wait_handle = info.handle_id.clone();
+        let waiter =
+            std::thread::spawn(move || handle(&wait_args(&wait_session, &wait_handle, 5_000)));
+        controller.complete_with(ExitStatus::from_code(0));
+        let value = waiter
+            .join()
+            .expect("waiter join")
+            .expect("completed command");
+        assert_eq!(status_of(&value).as_deref(), Some("completed"));
+        assert_eq!(handle_of(&value).as_deref(), Some(info.handle_id.as_str()));
         let leftover = agent_inbox::drain(&session);
-        assert_eq!(leftover.len(), 1, "H2's completion must still be queued");
+        assert_eq!(leftover.len(), 1, "the sibling completion remains queued");
         let parsed: serde_json::Value = serde_json::from_str(&leftover[0].content).expect("json");
         assert_eq!(parsed.get("handle_id").and_then(|v| v.as_str()), Some("H2"));
     }
@@ -240,7 +208,7 @@ mod tests {
     /// completions are already in the inbox, with the foreign one (`H2`) at
     /// the head. `drain_matching_result` must scan past `H2` and select `H1`
     /// while requeueing `H2`. This guards the drain/requeue selection logic
-    /// the deadline loop relies on.
+    /// shared inbox delivery relies on.
     #[test]
     fn drain_selects_own_handle_past_foreign_head() {
         let session = fresh_session_id();
@@ -271,15 +239,23 @@ mod tests {
         );
     }
 
-    /// The `timeout_ms == 0` non-blocking poll must not park: a missing handle
-    /// returns `running` immediately even with a foreign entry queued.
+    /// Neither poll nor wait can report an unregistered handle as running.
+    /// A nonzero budget must not turn an invalid handle into a timed wait.
     #[test]
-    fn zero_timeout_is_nonblocking_poll() {
+    fn unknown_handle_is_refused_for_poll_and_wait() {
         let session = fresh_session_id();
         agent_inbox::push(&session, "tool_result", &result_for("H2"), "test");
-        let value = handle(&wait_args(&session, "H1", 0)).expect("handle ok");
-        assert_eq!(status_of(&value).as_deref(), Some("running"));
-        assert_eq!(handle_of(&value).as_deref(), Some("H1"));
+        for timeout_ms in [0, 120_000] {
+            let error = handle(&wait_args(&session, "H1", timeout_ms)).unwrap_err();
+            assert!(matches!(
+                error,
+                HostlibError::InvalidParameter {
+                    param: "handle_id",
+                    ..
+                }
+            ));
+            assert!(error.to_string().contains("unknown command handle"));
+        }
         // The foreign entry is untouched by a poll for a different handle.
         assert_eq!(agent_inbox::pending_count(&session), 1);
     }

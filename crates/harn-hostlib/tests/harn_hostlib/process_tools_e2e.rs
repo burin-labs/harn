@@ -44,10 +44,27 @@ fn registry() -> BuiltinRegistry {
     registry
 }
 
+/// Declares, for every spawn in this module, that the child inherits this
+/// test process's environment.
+///
+/// These tests are tests OF the process host, and what they assert is
+/// spawning, capture, timeouts and signals, not credential scope. They used
+/// to get the inheriting behaviour by saying nothing, which is exactly the
+/// shape harn#8477 removed: an inheriting spawn now refuses unless a session
+/// environment says so. Saying it here keeps each test asserting what it is
+/// about, and keeps the refusal meaningful — `process_session_environment`
+/// owns the case where nothing is declared.
+fn declare_inherited() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
+    harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    )
+}
+
 pub(super) fn call(
     builtin: &str,
     request: harn_vm::value::DictMap,
 ) -> Result<VmValue, HostlibError> {
+    let _environment = declare_inherited();
     let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
         "process_tools_e2e::owner_death_guardian_fixture",
@@ -202,6 +219,9 @@ fn owner_death_supervisor_fixture() {
     if std::env::var_os(OWNER_DEATH_SUPERVISOR_ENV).is_none() {
         return;
     }
+    // A separate process, so it does not go through this module's `call`
+    // helper and declares its own inheriting environment (harn#8477).
+    let _environment = declare_inherited();
     let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
         "process_tools_e2e::owner_death_guardian_fixture",
@@ -1385,16 +1405,19 @@ fn real_run_command_file_capture_does_not_wait_for_reparented_pipe_holder() {
     };
     let temp = tempfile::tempdir().expect("pid tempdir");
     let pid_path = temp.path().join("descendant.pid");
+    let parent_pid_path = temp.path().join("parent.pid");
     let script_path = temp.path().join("parent.py");
     let _cleanup_guard = PidFileCleanup {
         path: pid_path.clone(),
     };
     let parent = r#"
+import os
 import pathlib
 import subprocess
 import sys
 
-pid_path = sys.argv[1]
+pid_path, parent_pid_path = sys.argv[1:]
+pathlib.Path(parent_pid_path).write_text(str(os.getpid()))
 child = "import signal; signal.pause()"
 descendant = subprocess.Popen([sys.executable, "-c", child], start_new_session=True)
 pathlib.Path(pid_path).write_text(str(descendant.pid))
@@ -1406,15 +1429,18 @@ print("parent-exit", flush=True)
     capture.insert("transport".into(), vstr("file"));
     let mut req = dict();
     let command = format!(
-        "{} {} {}",
+        "{} {} {} {}",
         shell_words::quote(&python),
         shell_words::quote(&script_path.to_string_lossy()),
-        shell_words::quote(&pid_path.to_string_lossy())
+        shell_words::quote(&pid_path.to_string_lossy()),
+        shell_words::quote(&parent_pid_path.to_string_lossy())
     );
     req.insert("mode".into(), vstr("shell"));
     req.insert("command".into(), vstr(&command));
     req.insert("shell_id".into(), vstr("sh"));
-    req.insert("timeout_ms".into(), VmValue::Int(500));
+    // A generous bound catches a broken capture that waits for the escaped
+    // holder forever; elapsed time is not the assertion under test.
+    req.insert("timeout_ms".into(), VmValue::Int(10_000));
     req.insert("capture".into(), VmValue::dict(capture));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
@@ -1427,6 +1453,19 @@ print("parent-exit", flush=True)
         "file capture should preserve direct-run output: {stdout:?}"
     );
     assert!(resp.get("process_cleanup").is_none());
+    let parent_pid = std::fs::read_to_string(&parent_pid_path)
+        .expect("direct parent pid")
+        .parse::<i64>()
+        .expect("numeric direct parent pid");
+    let descendant_pid = std::fs::read_to_string(&pid_path)
+        .expect("escaped pipe holder pid")
+        .parse::<i64>()
+        .expect("numeric pipe holder pid");
+    assert_process_gone(parent_pid, "direct parent after capture returns");
+    assert!(
+        unix_process_exists(descendant_pid),
+        "file capture must return while escaped pipe holder {descendant_pid} is still alive"
+    );
 }
 
 #[test]

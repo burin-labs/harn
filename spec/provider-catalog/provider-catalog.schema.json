@@ -775,6 +775,14 @@
         "open_weight": {
           "type": "boolean"
         },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/model_operation"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
         "performance": {
           "$ref": "#/$defs/performance"
         },
@@ -862,6 +870,7 @@
       "required": [
         "id",
         "name",
+        "operations",
         "display_name",
         "provider",
         "aliases",
@@ -1208,6 +1217,13 @@
       ],
       "type": "object"
     },
+    "model_operation": {
+      "enum": [
+        "text_generation",
+        "embedding",
+        "decision"
+      ]
+    },
     "performance": {
       "additionalProperties": false,
       "properties": {
@@ -1256,12 +1272,46 @@
             "null"
           ]
         },
+        "cache_write_1h_per_mtok": {
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "cache_write_per_mtok": {
           "minimum": 0,
           "type": [
             "number",
             "null"
           ]
+        },
+        "hosted_tool_fees": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "free_per_month": {
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "per_1k_calls": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "source_url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "per_1k_calls",
+              "source_url"
+            ],
+            "type": "object"
+          },
+          "type": "object"
         },
         "input_per_mtok": {
           "minimum": 0,
@@ -1293,6 +1343,36 @@
           },
           "type": "array"
         },
+        "modality_rates": {
+          "additionalProperties": false,
+          "properties": {
+            "audio_input_per_mtok": {
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "audio_output_per_mtok": {
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_mtok": {
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "output_per_mtok": {
           "minimum": 0,
           "type": "number"
@@ -1300,6 +1380,12 @@
         "promotions": {
           "items": {
             "$ref": "#/$defs/promotional_pricing"
+          },
+          "type": "array"
+        },
+        "schedules": {
+          "items": {
+            "$ref": "#/$defs/recurring_pricing_window"
           },
           "type": "array"
         }
@@ -1314,6 +1400,13 @@
       "additionalProperties": false,
       "properties": {
         "cache_read_per_mtok": {
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cache_write_1h_per_mtok": {
           "minimum": 0,
           "type": [
             "number",
@@ -1435,6 +1528,13 @@
         },
         "performance": {
           "$ref": "#/$defs/performance"
+        },
+        "platform_fee_percent": {
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "protocols": {
           "items": {
@@ -1644,6 +1744,87 @@
       "required": [
         "param_path",
         "value"
+      ],
+      "type": "object"
+    },
+    "recurring_pricing_window": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_read_multiplier": {
+          "exclusiveMinimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cache_write_multiplier": {
+          "exclusiveMinimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "days": {
+          "items": {
+            "enum": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat",
+              "sun"
+            ]
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "end": {
+          "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "input_multiplier": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "note": {
+          "type": "string"
+        },
+        "output_multiplier": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "review_after": {
+          "format": "date",
+          "type": "string"
+        },
+        "source_url": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "start": {
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "type": "string"
+        },
+        "utc_offset": {
+          "pattern": "^[+-]([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "days",
+        "start",
+        "end",
+        "utc_offset",
+        "input_multiplier",
+        "output_multiplier",
+        "source_url"
       ],
       "type": "object"
     },
@@ -1939,7 +2120,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v10.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v12.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1983,10 +2164,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v10.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v12.json"
     },
     "schema_version": {
-      "const": 10
+      "const": 12
     },
     "variants": {
       "items": {

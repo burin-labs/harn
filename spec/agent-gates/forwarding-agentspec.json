@@ -6,7 +6,11 @@
     "owner": "__collect_unread_keys",
     "evidence": "The schema walker receives the complete option dict. Its value parameter stays an independently required origin so future literal option reads remain audited.",
     "consumers": [
-      {"scope": "AgentSpec", "function": "__collect_unread_keys", "parameter": "value"}
+      {
+        "scope": "AgentSpec",
+        "function": "__collect_unread_keys",
+        "parameter": "value"
+      }
     ]
   },
   {
@@ -3292,6 +3296,34 @@
         "scope": "AgentSpec",
         "function": "__validate_agent_loop_option_keys",
         "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "__terminal_callback_verdict(opts, payload)",
+    "owner": "__terminal_callback_verdict",
+    "evidence": "Consumer __terminal_callback_verdict.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__terminal_callback_verdict",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+    "expression": "__post_turn_verdict_result(\n    agent,\n    session,\n    opts,\n    verdict,\n    \"terminal_callback\",\n  )",
+    "owner": "__post_turn_verdict_result",
+    "evidence": "Consumer __post_turn_verdict_result._opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; the parameter is unread there and its name records that.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__post_turn_verdict_result",
+        "parameter": "_opts"
       }
     ]
   }

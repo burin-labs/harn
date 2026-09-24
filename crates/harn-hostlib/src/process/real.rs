@@ -108,7 +108,11 @@ impl ProcessSpawner for RealSpawner {
             ));
         }
 
-        let (mut command, cleanup_token) = prepare_command(&spec, None)?;
+        let PreparedSpawn {
+            mut command,
+            cleanup_token,
+            ..
+        } = prepare_command(&spec, None)?;
         #[cfg(target_os = "windows")]
         let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment
             || spec.configure_process_group
@@ -161,18 +165,32 @@ impl ProcessSpawner for RealSpawner {
     }
 }
 
+/// A command ready to spawn, with the one fact about it that `Command` cannot
+/// report back: whether its environment was cleared, so that `get_envs()` is
+/// the child's WHOLE environment rather than a patch over an inherited one.
+pub(crate) struct PreparedSpawn {
+    pub(crate) command: Command,
+    pub(crate) cleanup_token: String,
+    /// Read only by the Unix process-owner guardian; Windows contains a
+    /// process tree with a Job Object and never re-creates the command.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub(crate) env_cleared: bool,
+}
+
 pub(crate) fn prepare_command(
     spec: &SpawnSpec,
     cleanup_token: Option<String>,
-) -> Result<(Command, String), ProcessError> {
+) -> Result<PreparedSpawn, ProcessError> {
     if spec.program.is_empty() {
         return Err(ProcessError::InvalidArgv(
             "first element of argv must be a non-empty program name".to_string(),
         ));
     }
 
-    let mut command = process_sandbox::std_command_for(&spec.program, &spec.args)
-        .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+    let (mut command, session_closed) =
+        process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
+            .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+    let env_cleared = session_closed || spec.env_mode == EnvMode::Replace;
 
     let mut env: Vec<_> = spec
         .env
@@ -193,15 +211,48 @@ pub(crate) fn prepare_command(
         EnvMode::Replace => {
             command.env_clear();
         }
-        // `InheritClean`/`Patch` inherit the full parent environment. Strip
-        // secret-bearing variables (provider `*_API_KEY`s, `GITHUB_TOKEN`,
-        // `HARN_CLOUD_API_KEY`, etc.) so build/test commands — and the model
-        // that reads their stdout as the tool result — never see them.
-        // Caller-supplied `env` below is applied afterward and is an
-        // explicit opt-in, so it is intentionally not filtered here.
+        // The inheriting modes. `std_command_for` above has already closed the
+        // environment against the session policy when one is installed: it
+        // cleared the child's environment and repopulated it from the policy's
+        // allowlist plus the session's declared grants. What is left to do here
+        // is decide what happens when no policy is installed, and to keep the
+        // name denylist as a second layer over the set the policy admitted.
         EnvMode::InheritClean | EnvMode::Patch => {
+            let mode = match spec.env_mode {
+                EnvMode::InheritClean => "inherit_clean",
+                EnvMode::Patch => "patch",
+                EnvMode::Replace => unreachable!("handled by the arm above"),
+            };
+            // Absence is refused, not honored. Without a policy the closing
+            // step above is a no-op, so the child would receive the calling
+            // process's whole environment with only the name denylist between
+            // it and a credential. A denylist cannot be that boundary: it
+            // matches an explicit list, a set of prefixes, and seven suffixes,
+            // and every credential named outside those walks through. Refusing
+            // is what stops a missing policy from reading as a permissive one
+            // (harn#8477).
+            let Some(session) = harn_vm::stdlib::process::current_session_environment() else {
+                return Err(ProcessError::SessionEnvironmentMissing {
+                    builtin: spec.builtin,
+                    mode,
+                });
+            };
+            // Defence in depth over what the policy admitted, never over what
+            // the session deliberately granted. A run that grants a provider
+            // credential has stated that this child needs it, and a name-shaped
+            // guess must not overrule a declaration: doing so would strip the
+            // credential back out and leave the run failing to authenticate
+            // with nothing naming the cause.
+            let granted: std::collections::BTreeSet<String> = session
+                .receipts()
+                .into_iter()
+                .filter_map(|receipt| receipt.exposed_as_env)
+                .collect();
             for (key, _) in std::env::vars_os() {
                 if let Some(name) = key.to_str() {
+                    if granted.contains(name) {
+                        continue;
+                    }
                     if super::handle::is_sensitive_env_name(name) {
                         command.env_remove(&key);
                     }
@@ -296,7 +347,11 @@ pub(crate) fn prepare_command(
         (_, false) => Stdio::null(),
     });
 
-    Ok((command, cleanup_token))
+    Ok(PreparedSpawn {
+        command,
+        cleanup_token,
+        env_cleared,
+    })
 }
 
 /// Record only the non-secret facts needed to diagnose command-resolution
@@ -414,7 +469,7 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
     let inherited_cleanup_token = std::env::var(harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV)
         .ok()
         .filter(|token| !token.is_empty());
-    let (mut command, _cleanup_token) = prepare_command(&spec, inherited_cleanup_token)?;
+    let mut command = prepare_command(&spec, inherited_cleanup_token)?.command;
     // `exec` replaces this process on success, so the only value it can return
     // is an error. It loses the same race for the same reason, so it crosses
     // the window the same way.

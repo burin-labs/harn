@@ -9,6 +9,7 @@
 //! config row as a `VmValue`.
 
 mod batch_projection;
+mod cache_report;
 mod capability_projection;
 mod catalog_builtins;
 mod catalog_projection;
@@ -57,6 +58,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
 }
 
 const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
+    &cache_report::LLM_CACHE_CONFORMANCE_BUILTIN_DEF,
     &PROVIDER_CAPABILITIES_BUILTIN_DEF,
     &PROBE_PROVIDER_CAPABILITIES_BUILTIN_DEF,
     &PROVIDER_CAPABILITIES_INSTALL_BUILTIN_DEF,

@@ -466,6 +466,7 @@
     "list_providers_native",
     "llm_apply_reasoning_policy",
     "llm_available_providers",
+    "llm_cache_conformance",
     "llm_call",
     "llm_call_safe",
     "llm_call_structured",

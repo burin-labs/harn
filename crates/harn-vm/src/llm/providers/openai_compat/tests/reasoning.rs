@@ -448,18 +448,31 @@ fn openrouter_disabled_thinking_emits_reasoning_enabled_false() {
 }
 
 #[test]
-fn groq_qwen_36_projects_thinking_toggle_to_provider_modes() {
-    let mut enabled = base_request_payload();
-    enabled.provider = "groq".to_string();
-    enabled.model = "qwen/qwen3.6-27b".to_string();
-    enabled.thinking = ThinkingConfig::Enabled {
-        budget_tokens: None,
+fn groq_qwen_38_projects_thinking_to_reasoning_effort() {
+    // Groq retired the Qwen 3.6 route whose `reasoning_effort` was the
+    // two-state `default`/`none` toggle this test used to pin. Qwen 3.8 takes
+    // a real effort ladder, so the explicit levels project straight through and
+    // a bare `Enabled` leaves Groq's model-selected default in place.
+    let body_for = |thinking: ThinkingConfig| {
+        let mut payload = base_request_payload();
+        payload.provider = "groq".to_string();
+        payload.model = "qwen/qwen3.8-27b".to_string();
+        payload.thinking = thinking;
+        OpenAiCompatibleProvider::build_request_body(&payload)
     };
-    let enabled_body = OpenAiCompatibleProvider::build_request_body(&enabled);
-    assert_eq!(enabled_body["reasoning_effort"], "default");
 
-    let mut disabled = enabled;
-    disabled.thinking = ThinkingConfig::Disabled;
-    let disabled_body = OpenAiCompatibleProvider::build_request_body(&disabled);
-    assert_eq!(disabled_body["reasoning_effort"], "none");
+    let enabled_body = body_for(ThinkingConfig::Enabled {
+        budget_tokens: None,
+    });
+    assert!(enabled_body.get("reasoning_effort").is_none());
+
+    let none_body = body_for(ThinkingConfig::Effort {
+        level: ReasoningEffort::None,
+    });
+    assert_eq!(none_body["reasoning_effort"], "none");
+
+    let high_body = body_for(ThinkingConfig::Effort {
+        level: ReasoningEffort::High,
+    });
+    assert_eq!(high_body["reasoning_effort"], "high");
 }

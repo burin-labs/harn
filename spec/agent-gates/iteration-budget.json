@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 169,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -28,22 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 143,
-        "reader": "__normalize_iteration_budget"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 148,
-        "reader": "__normalize_iteration_budget"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 144,
-        "reader": "__normalize_iteration_budget"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 146,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -61,7 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 127,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -79,17 +61,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
-        "line": 61,
         "reader": "agent_loop_run_settings"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "line": 90,
         "reader": "__agent_loop_run"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 116,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -107,7 +86,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 103,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -125,7 +103,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 86,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -143,7 +120,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 136,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -161,7 +137,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 165,
         "reader": "__normalize_iteration_budget"
       }
     ],
@@ -179,7 +154,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
-        "line": 160,
         "reader": "__normalize_iteration_budget"
       }
     ],

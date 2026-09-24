@@ -1,0 +1,536 @@
+/**
+ * Fold `changelog.d/<id>.<category>.md` fragments into CHANGELOG.md's release
+ * section and delete the folded fragments.
+ *
+ * This is the one owner of the release fold. `release_ship.sh --prepare` runs
+ * it before the version bump, so the `Release vX.Y.Z` pull request carries the
+ * folded notes and the fragment deletions in the same commit.
+ *
+ * The fold has three steps. Fragments are parsed and assembled into `###`
+ * category blocks by `std/changelog`. Those blocks merge into `## Unreleased`,
+ * preserving any bullets an operator typed there by hand. Then `## Unreleased`
+ * becomes `## vX.Y.Z`, or merges into an existing top `## vX.Y.Z`. The result
+ * is accepted only when the top section is `## vX.Y.Z`, has a bullet, and
+ * represents every folded fragment.
+ *
+ * Usage:
+ *   harn run scripts/release_changelog_fold.harn -- fold --version X.Y.Z [--root PATH]
+ */
+import {
+  ChangelogCategory,
+  ChangelogFragment,
+  changelog_assemble_fragments,
+  changelog_find_section,
+  changelog_merge_unreleased,
+  changelog_parse_fragment,
+  changelog_parse_sections,
+} from "std/changelog"
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { parse_release } from "std/semver"
+import { path_visibility, require_scanned } from "./path_visibility.harn"
+
+const CHECK_NAME = "Release changelog fold"
+
+/**
+ * The categories a release fragment may declare, in published heading order.
+ * `release_tree_guard.sh` and the pull-request fragment gate name the same
+ * slugs; a fragment the guard sees and this fold skips fails prepare.
+ */
+pub const RELEASE_CHANGELOG_CATEGORIES: list<ChangelogCategory> = [
+  {slug: "breaking", heading: "Breaking"},
+  {slug: "added", heading: "Added"},
+  {slug: "changed", heading: "Changed"},
+  {slug: "deprecated", heading: "Deprecated"},
+  {slug: "removed", heading: "Removed"},
+  {slug: "fixed", heading: "Fixed"},
+  {slug: "security", heading: "Security"},
+]
+
+/** One fragment file as read from `changelog.d/`. */
+pub type ReleaseFragmentFile = {name: string, body: string}
+
+/** The fold's decision: the new CHANGELOG text and the fragments it consumed. */
+pub type ReleaseChangelogFold = {
+  success: bool,
+  message: string,
+  text: string,
+  changed: bool,
+  fragments: list<ChangelogFragment>,
+  findings: list<string>,
+}
+
+type HeadingOffset = {heading: string, version: string?, start: int, end: int}
+
+type Subsection = {heading: string, body: string}
+
+/**
+ * Is this file name a release fragment? Name-only: `<id>.<category>.md` with a
+ * category this fold knows. README.md, .gitkeep, and lint config are not.
+ */
+pub fn is_release_changelog_fragment_name(name: string) -> bool {
+  const trimmed = trim(name)
+  if trimmed == "" || starts_with(trimmed, ".") || !ends_with(trimmed, ".md") {
+    return false
+  }
+  const parts = split(trimmed, ".")
+  if len(parts) < 3 {
+    return false
+  }
+  const category = parts[len(parts) - 2] ?? ""
+  for known in RELEASE_CHANGELOG_CATEGORIES {
+    if known.slug == category {
+      return true
+    }
+  }
+  return false
+}
+
+fn changelog_version_heading(line: string?) -> string? {
+  const matches = regex_captures("^## v([^\\s]+)\\s*$", trim(line ?? ""))
+  if len(matches) == 0 {
+    return nil
+  }
+  const version = matches[0].groups[0]
+  return parse_release(version) == nil ? nil : version
+}
+
+fn changelog_top_from_text(text: string) -> string {
+  const sections = changelog_parse_sections(text)
+  if is_err(sections) {
+    return ""
+  }
+  for section in unwrap(sections) {
+    const version = changelog_version_heading(section.heading)
+    if version != nil {
+      return version
+    }
+  }
+  return ""
+}
+
+fn changelog_named_section_from_text(text: string, target_heading: string) -> string {
+  const section = changelog_find_section(text, target_heading)
+  return is_ok(section) ? unwrap(section).body : ""
+}
+
+fn changelog_heading_offsets(text: string) -> list<HeadingOffset> {
+  let headings: list<HeadingOffset> = []
+  let offset = 0
+  for line in split(text, "\n") {
+    const version = changelog_version_heading(line)
+    const heading = trim(line)
+    if version != nil || heading == "## Unreleased" {
+      headings = headings.push(
+        {heading: heading, version: version, start: offset, end: offset + len(line)},
+      )
+    }
+    offset = offset + len(line) + 1
+  }
+  return headings
+}
+
+fn first_version_heading(headings: list<HeadingOffset>) -> HeadingOffset? {
+  for heading in headings {
+    if heading.version != nil {
+      return heading
+    }
+  }
+  return nil
+}
+
+fn first_unreleased_heading(headings: list<HeadingOffset>) -> HeadingOffset? {
+  for heading in headings {
+    if heading.heading == "## Unreleased" {
+      return heading
+    }
+  }
+  return nil
+}
+
+fn next_heading_start(headings: list<HeadingOffset>, after_start: int) -> int? {
+  for heading in headings {
+    if heading.start > after_start {
+      return heading.start
+    }
+  }
+  return nil
+}
+
+fn changelog_body_for(text: string, heading: HeadingOffset?, section_end: int) -> string {
+  if heading == nil {
+    return ""
+  }
+  return trim(text[heading.end:section_end])
+}
+
+fn changelog_subsections(body: string) -> list<Subsection> {
+  let sections: list<Subsection> = []
+  let current_heading = ""
+  let current_lines: list<string> = []
+  for line in split(trim(body), "\n") {
+    if starts_with(trim(line), "### ") {
+      sections = sections.push({heading: current_heading, body: trim(current_lines.join("\n"))})
+      current_heading = trim(line)
+      current_lines = []
+    } else {
+      current_lines = current_lines.push(line)
+    }
+  }
+  sections = sections.push({heading: current_heading, body: trim(current_lines.join("\n"))})
+  return sections.filter({ section -> section.heading != "" || section.body != "" }).to_list()
+}
+
+fn changelog_render_subsections(sections: list<Subsection>) -> string {
+  let parts: list<string> = []
+  for section in sections {
+    const body = trim(section.body)
+    if body == "" {
+      continue
+    }
+    if section.heading == "" {
+      parts = parts.push(body)
+    } else {
+      parts = parts.push(section.heading + "\n\n" + body)
+    }
+  }
+  return parts.join("\n\n")
+}
+
+fn changelog_merge_release_bodies(unreleased_body: string, release_body: string) -> string {
+  const pending = changelog_subsections(unreleased_body)
+  let release_sections = changelog_subsections(release_body)
+  let prepend: list<Subsection> = []
+  for pending_section in pending {
+    let merged = false
+    let next_sections: list<Subsection> = []
+    for release_section in release_sections {
+      if !merged && pending_section.heading != ""
+        && pending_section.heading == release_section.heading {
+        const merged_body = trim(pending_section.body) + "\n\n" + trim(release_section.body)
+        next_sections = next_sections.push({heading: release_section.heading, body: merged_body})
+        merged = true
+      } else {
+        next_sections = next_sections.push(release_section)
+      }
+    }
+    if merged {
+      release_sections = next_sections
+    } else {
+      prepend = prepend.push(pending_section)
+    }
+  }
+  return changelog_render_subsections(prepend + release_sections)
+}
+
+/**
+ * Promote `## Unreleased` to `## v${version}`.
+ *
+ * A top `## v${version}` with no `## Unreleased` above it is already folded and
+ * is returned unchanged. A `## Unreleased` above an existing `## v${version}`
+ * merges into it by subsection. Otherwise a non-empty `## Unreleased` is
+ * renamed in place. With nothing unreleased there are no release notes, and
+ * the release refuses rather than publish an empty section.
+ */
+pub fn promote_unreleased_section(
+  text: string,
+  version: string,
+) -> {success: bool, changed: bool, text: string, message: string} {
+  const headings = changelog_heading_offsets(text)
+  const first = first_version_heading(headings)
+  const unreleased = first_unreleased_heading(headings)
+  const unreleased_before_first = unreleased != nil
+    && (first == nil || unreleased.start < first.start)
+  if first != nil && first.version == version && !unreleased_before_first {
+    return {
+      success: true,
+      changed: false,
+      text: text,
+      message: "CHANGELOG.md already starts with v${version}",
+    }
+  }
+  if first != nil && first.version == version && unreleased_before_first {
+    const first_end = next_heading_start(headings, first.start) ?? len(text)
+    const merged_body = changelog_merge_release_bodies(
+      changelog_body_for(text, unreleased, first.start),
+      changelog_body_for(text, first, first_end),
+    )
+    const release_text = "## v${version}\n\n" + merged_body + "\n\n"
+    return {
+      success: true,
+      changed: true,
+      text: text[0:unreleased.start] + release_text + text[first_end:len(text)],
+      message: "merged Unreleased notes into existing v${version} section",
+    }
+  }
+  if unreleased_before_first {
+    const unreleased_end = first == nil ? len(text) : first.start
+    const unreleased_body = trim(text[unreleased.end:unreleased_end])
+    if unreleased_body != "" {
+      const release_text = "## v${version}\n\n" + unreleased_body + "\n\n"
+      return {
+        success: true,
+        changed: true,
+        text: text[0:unreleased.start] + release_text + text[unreleased_end:len(text)],
+        message:
+          "renamed `## Unreleased` to `## v${version}` (preserved authored entries verbatim)",
+      }
+    }
+  }
+  return {
+    success: false,
+    changed: false,
+    text: text,
+    message:
+      "no release notes for v${version}: changelog.d has no fragments and CHANGELOG.md has no `## Unreleased` entries",
+  }
+}
+
+fn section_bullet_lines(body: string) -> int {
+  let count = 0
+  for line in split(body, "\n") {
+    const t = trim(line)
+    if starts_with(t, "- ") || starts_with(t, "* ") {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn fragment_representative_line(body: string) -> string {
+  for line in split(body, "\n") {
+    const t = trim(line)
+    if t == "" {
+      continue
+    }
+    if starts_with(t, "- ") || starts_with(t, "* ") {
+      return trim(t[2:len(t)])
+    }
+    return t
+  }
+  return ""
+}
+
+/**
+ * Check a folded CHANGELOG: the top section is `## v${version}`, it carries a
+ * bullet, and the first content line of every folded fragment appears in it.
+ */
+pub fn release_section_findings(
+  text: string,
+  version: string,
+  fragments: list<ChangelogFragment>,
+) -> list<string> {
+  const top = changelog_top_from_text(text)
+  if top != version {
+    return ["CHANGELOG top section is `## v${top}`; expected `## v${version}`"]
+  }
+  let findings: list<string> = []
+  const body = changelog_named_section_from_text(text, "## v${version}")
+  if section_bullet_lines(body) <= 0 {
+    findings = findings + ["`## v${version}` section has no categorized bullets"]
+  }
+  for fragment in fragments {
+    const marker = fragment_representative_line(fragment.body)
+    if marker != "" && !contains(body, marker) {
+      findings = findings
+        + [
+          "changelog.d fragment ${fragment.id} (${fragment.category}) is not represented in the `## v${version}` section",
+        ]
+    }
+  }
+  return findings
+}
+
+fn failed_fold(
+  text: string,
+  message: string,
+  fragments: list<ChangelogFragment>,
+) -> ReleaseChangelogFold {
+  return {
+    success: false,
+    message: message,
+    text: text,
+    changed: false,
+    fragments: fragments,
+    findings: [message],
+  }
+}
+
+/**
+ * Fold fragment files into a CHANGELOG body for `version`. Pure: the caller
+ * reads the files and persists the result.
+ *
+ * A file whose name is a release fragment must parse. An empty body or a
+ * malformed id fails the fold instead of being skipped, because a skipped
+ * fragment would stay on disk and its entry would be missing from the notes.
+ */
+pub fn fold_release_changelog(
+  original: string,
+  files: list<ReleaseFragmentFile>,
+  version: string,
+) -> ReleaseChangelogFold {
+  let fragments: list<ChangelogFragment> = []
+  for file in files {
+    if !is_release_changelog_fragment_name(file.name) {
+      continue
+    }
+    const parsed = changelog_parse_fragment(
+      file.name,
+      trim(file.body),
+      RELEASE_CHANGELOG_CATEGORIES,
+    )
+    if is_err(parsed) {
+      return failed_fold(
+        original,
+        "changelog.d/${file.name}: ${unwrap_err(parsed).message}",
+        fragments,
+      )
+    }
+    fragments = fragments.push(unwrap(parsed))
+  }
+  let merged_text = original
+  let merged_changed = false
+  if len(fragments) > 0 {
+    const assembled = changelog_assemble_fragments(fragments, RELEASE_CHANGELOG_CATEGORIES)
+    if is_err(assembled) {
+      return failed_fold(original, unwrap_err(assembled).message, fragments)
+    }
+    const merged = changelog_merge_unreleased(
+      original,
+      unwrap(assembled),
+      RELEASE_CHANGELOG_CATEGORIES,
+    )
+    if is_err(merged) {
+      return failed_fold(original, unwrap_err(merged).message, fragments)
+    }
+    merged_text = unwrap(merged).text
+    merged_changed = unwrap(merged).changed
+  }
+  const promoted = promote_unreleased_section(merged_text, version)
+  if !promoted.success {
+    return failed_fold(original, promoted.message, fragments)
+  }
+  const findings = release_section_findings(promoted.text, version, fragments)
+  return {
+    success: len(findings) == 0,
+    message: promoted.message,
+    text: promoted.text,
+    changed: promoted.changed || merged_changed,
+    fragments: fragments,
+    findings: findings,
+  }
+}
+
+/**
+ * Read every fragment file in `changelog.d/`, sorted by name. A missing
+ * directory has no fragments. A denied one refuses: it must not read as a
+ * release with nothing to fold.
+ */
+pub fn read_fragment_files(fs: HarnessFs, root: string) -> list<ReleaseFragmentFile> {
+  const dir = path_join(root, "changelog.d")
+  const seen = path_visibility(fs, CHECK_NAME, dir)
+  if seen.denial != "" {
+    throw seen.denial
+  }
+  if !seen.exists {
+    return []
+  }
+  // Git tracks no empty directory, so a checked-out changelog.d always lists at
+  // least one file; zero entries means the listing failed.
+  // scan-refused: require_scanned on entries below.
+  const entries = fs.list_dir(dir).sorted()
+  require_scanned(CHECK_NAME, "changelog.d entries", len(entries))
+  let files: list<ReleaseFragmentFile> = []
+  for entry in entries {
+    const name = to_string(entry)
+    if !is_release_changelog_fragment_name(name) {
+      continue
+    }
+    files = files.push({name: name, body: fs.read_text(path_join(dir, name))})
+  }
+  return files
+}
+
+/**
+ * Fold the release notes in place under `root`: write CHANGELOG.md and delete
+ * every folded fragment. Throws with the findings when the fold is refused, and
+ * writes nothing in that case.
+ */
+pub fn apply_release_changelog_fold(
+  fs: HarnessFs,
+  root: string,
+  version: string,
+) -> ReleaseChangelogFold {
+  const changelog_path = path_join(root, "CHANGELOG.md")
+  const seen = path_visibility(fs, CHECK_NAME, changelog_path)
+  if seen.denial != "" {
+    throw seen.denial
+  }
+  if !seen.exists {
+    throw "missing CHANGELOG.md under " + root
+  }
+  const fold = fold_release_changelog(
+    fs.read_text(changelog_path),
+    read_fragment_files(fs, root),
+    version,
+  )
+  if !fold.success {
+    throw fold.findings.join("\n")
+  }
+  if fold.changed {
+    fs.write_text(changelog_path, fold.text)
+  }
+  for fragment in fold.fragments {
+    fs.delete(path_join(root, "changelog.d", fragment.file ?? ""))
+  }
+  return fold
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "release_changelog_fold",
+      args: [
+        {kind: "positional", name: "action", required: true},
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+        {kind: "flag", name: "version", long: "--version", parse: "string", default: ""},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) -> int {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/release_changelog_fold.harn -- fold --version X.Y.Z [--root PATH]",
+    )
+    return 0
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    return 2
+  }
+  const parsed = unwrap(parsed_result)
+  const action = to_string(parsed.options?.action ?? "")
+  const root_value = to_string(parsed.options?.root ?? "")
+  const root = path_normalize(
+    root_value == "" ? path_join(harness.fs.source_dir(), "..") : root_value,
+  )
+  const version = trim(to_string(parsed.options?.version ?? ""))
+  try {
+    if action != "fold" {
+      throw "unknown action: " + action
+    }
+    if regex_match("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", version) == nil {
+      throw "--version must be a stable X.Y.Z release version, got '" + version + "'"
+    }
+    const fold = apply_release_changelog_fold(harness.fs, root, version)
+    harness.stdio.println(
+      "Folded ${len(fold.fragments)} changelog fragment(s) into v${version}: ${fold.message}",
+    )
+    return 0
+  } catch (e) {
+    harness.stdio.eprintln("error: " + to_string(e))
+    return 1
+  }
+}

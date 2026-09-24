@@ -35,18 +35,24 @@ use super::{Algorithm, BudgetSpec, Quota, RouteLimits};
 /// once; multiple occurrences merge by taking the last-write-wins.
 pub fn limits_and_budget_from_attributes(
     attrs: &[Attribute],
-) -> (Option<RouteLimits>, Option<BudgetSpec>) {
+) -> Result<(Option<RouteLimits>, Option<BudgetSpec>), String> {
     let mut limits: Option<RouteLimits> = None;
     let mut budget: Option<BudgetSpec> = None;
 
     for attr in attrs {
         match attr.name.as_str() {
             "limits" => limits = Some(parse_limits(attr, limits.take())),
-            "budget" => budget = Some(parse_budget(attr, budget.take())),
+            "budget" => budget = Some(parse_budget(attr, budget.take())?),
             _ => continue,
         }
     }
-    (limits, budget)
+    if let Some(spec) = &mut budget {
+        spec.conservative_ceiling()?;
+        if spec.llm_admission.is_none() {
+            spec.llm_cost_usd = spec.llm_cost_usd.map(|value| value.max(0.0));
+        }
+    }
+    Ok((limits, budget))
 }
 
 fn parse_limits(attr: &Attribute, base: Option<RouteLimits>) -> RouteLimits {
@@ -92,7 +98,7 @@ fn parse_limits(attr: &Attribute, base: Option<RouteLimits>) -> RouteLimits {
     limits
 }
 
-fn parse_budget(attr: &Attribute, base: Option<BudgetSpec>) -> BudgetSpec {
+fn parse_budget(attr: &Attribute, base: Option<BudgetSpec>) -> Result<BudgetSpec, String> {
     let mut budget = base.unwrap_or_default();
     for arg in &attr.args {
         let Some(key) = arg.name.as_deref() else {
@@ -101,8 +107,16 @@ fn parse_budget(attr: &Attribute, base: Option<BudgetSpec>) -> BudgetSpec {
         match key {
             "llm_cost_usd" => {
                 if let Some(value) = float_value(arg) {
-                    budget.llm_cost_usd = Some(value.max(0.0));
+                    budget.llm_cost_usd = Some(value);
                 }
+            }
+            "llm_admission" => {
+                let mode = string_value(arg)
+                    .ok_or_else(|| "llm_admission must be conservative".to_string())?;
+                budget.llm_admission = Some(
+                    serde_json::from_value(serde_json::Value::String(mode))
+                        .map_err(|_| "llm_admission must be conservative".to_string())?,
+                );
             }
             "llm_tokens" => {
                 if let Some(value) = int_value(arg) {
@@ -122,7 +136,7 @@ fn parse_budget(attr: &Attribute, base: Option<BudgetSpec>) -> BudgetSpec {
             _ => continue,
         }
     }
-    budget
+    Ok(budget)
 }
 
 fn string_value(arg: &harn_parser::AttributeArg) -> Option<String> {

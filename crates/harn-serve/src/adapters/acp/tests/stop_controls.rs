@@ -541,6 +541,13 @@ fn accepted_cancel_kills_only_the_cancelled_sessions_background_children() {
         "adapters::acp::tests::stop_controls::stop_controls_owner_death_guardian_fixture",
         "--nocapture",
     ]);
+    // This test spawns its sleepers directly rather than through a session,
+    // so it declares its own inheriting environment. What it asserts is that
+    // a cancel reaches one session's children and not another's, which is
+    // unrelated to credential scope (harn#8477).
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    );
 
     fn spawn_sleeper(session_id: &str) -> u32 {
         harn_hostlib::tools::long_running::spawn_long_running(
@@ -657,10 +664,12 @@ fn outcomes_with_action<'a>(
 /// after it must each become a typed control record, and the record must
 /// say it reached the session's event stream.
 ///
-/// The two assertions that carry the claim are the exact counts: exactly
-/// one steer row and exactly one stop row. A reader that classified every
-/// accepted control as a stop, or that emitted a row per loop iteration,
-/// fails on the count rather than passing the existence check.
+/// The assertions that carry the claim are the exact counts: exactly two
+/// steer rows (one plain, one retargeting that carries its goal) and exactly
+/// one stop row. A reader that classified every accepted control as a stop,
+/// or that emitted a row per loop iteration, fails on the count rather than
+/// passing the existence check. A queued note that tries to carry a goal is
+/// refused with a rejected outcome, since it never reaches the model.
 #[tokio::test(flavor = "current_thread")]
 async fn accepted_steer_and_stop_are_recorded_as_typed_control_events() {
     let local = tokio::task::LocalSet::new();
@@ -773,6 +782,7 @@ pipeline default(harness: Harness, task: unknown) {{
             );
 
             const STEER_TEXT: &str = "if no typed code exists, say so and stop";
+            const RETARGET_OBJECTIVE: &str = "Reply with exactly the single word BRAVO.";
             request_tx
                 .send(serde_json::json!({
                     "jsonrpc": "2.0",
@@ -813,6 +823,74 @@ pipeline default(harness: Harness, task: unknown) {{
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
             assert!(inject_accepted, "session/inject never answered");
+
+            // A retargeting steer (id 5) and a queued note that tries to carry
+            // a goal (id 6). The first must be accepted and recorded with its
+            // goal; the second must be refused, since a queued note never
+            // reaches the model and cannot retire what the model was shown.
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "session/inject",
+                    "params": {
+                        "sessionId": session_id.clone(),
+                        "mode": "steer",
+                        "content": "change of plan: reply BRAVO",
+                        "goal": {"objective": RETARGET_OBJECTIVE},
+                    },
+                }))
+                .expect("send session/inject retarget");
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 6,
+                    "method": "session/inject",
+                    "params": {
+                        "sessionId": session_id.clone(),
+                        "mode": "queue",
+                        "content": "note for later",
+                        "goal": {"objective": RETARGET_OBJECTIVE},
+                    },
+                }))
+                .expect("send session/inject queue with goal");
+            let mut replies: std::collections::BTreeMap<i64, serde_json::Value> =
+                std::collections::BTreeMap::new();
+            for _ in 0..200 {
+                while let Ok(line) = response_rx.try_recv() {
+                    let message: serde_json::Value =
+                        serde_json::from_str(&line).expect("ACP JSON line");
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                    }
+                    if let Some(id @ (5 | 6)) = message["id"].as_i64() {
+                        replies.insert(id, message.clone());
+                    }
+                    seen.push(message);
+                }
+                if replies.len() == 2 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            assert_eq!(
+                replies
+                    .get(&5)
+                    .map(|reply| reply["result"]["status"].clone()),
+                Some(serde_json::json!("accepted")),
+                "a retargeting steer must be accepted: {replies:#?}"
+            );
+            assert_eq!(
+                replies.get(&6).map(|reply| reply["error"]["code"].clone()),
+                Some(serde_json::json!(-32602)),
+                "a queued note carrying a goal must be refused: {replies:#?}"
+            );
 
             request_tx
                 .send(serde_json::json!({
@@ -856,11 +934,33 @@ pipeline default(harness: Harness, task: unknown) {{
             let steers = outcomes_with_action(&seen, "steer");
             assert_eq!(
                 steers.len(),
-                1,
-                "expected exactly one accepted steer control event; saw {:#?}",
+                2,
+                "expected exactly two accepted steer control events, one plain and \
+                 one retargeting; saw {:#?}",
                 control_outcomes(&seen)
             );
             let steer = steers[0];
+            assert!(
+                steer["metadata"].get("goal").is_none(),
+                "a plain steer amends the run and must carry no goal: {steer}"
+            );
+            let retarget = steers[1];
+            assert_eq!(
+                retarget["metadata"]["goal"]["objective"], RETARGET_OBJECTIVE,
+                "the retargeting steer's goal must reach the control record: {retarget}"
+            );
+            assert_eq!(retarget["metadata"]["recorded"], "recorded", "{retarget}");
+            let refused: Vec<_> = control_outcomes(&seen)
+                .into_iter()
+                .filter(|params| params["reason"] == "invalid_goal")
+                .collect();
+            assert_eq!(
+                refused.len(),
+                1,
+                "the refused queue-with-goal must publish a rejected outcome: {:#?}",
+                control_outcomes(&seen)
+            );
+            assert_eq!(refused[0]["status"], "rejected");
             assert_eq!(
                 steer["metadata"]["requestedMode"], "steer",
                 "the caller's own mode word must survive: {steer}"

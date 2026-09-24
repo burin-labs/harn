@@ -20,6 +20,15 @@ pub type HostLeaseHandle = {
   metadata: dict,
 }
 
+pub type HostLeasePendingRequest = {
+  waiter_id: string,
+  priority_class: HostLeasePriorityClass,
+  requested_at_ms: int,
+  deadline_at_ms: int,
+  owner_pid?: int,
+  recoverable: bool,
+}
+
 pub type HostLeaseStatus = {
   schema_version: int,
   host: string,
@@ -27,6 +36,7 @@ pub type HostLeaseStatus = {
   domain: string,
   observed_at_ms: int,
   active?: HostLeaseHandle,
+  pending: list<HostLeasePendingRequest>,
   recovered_stale_lease: bool,
   recovered?: HostLeaseHandle,
 }

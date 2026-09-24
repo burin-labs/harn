@@ -28,7 +28,7 @@
 # etc. directly in the test binary) stay in the PR suite — they're seconds-fast
 # and would otherwise leak runtime regressions to nightly. Add a new file here
 # when it lands rather than letting it default into the e2e tier.
-default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and binary(harn_cli_fast)) or (package(harn-cli) and binary(harn_cli_e2e) and test(/eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs|models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts|models_dispatch::core::models_recommend_human_text_has_model_and_rationale|models_dispatch::lora_inspect_plan::models_lora_inspect_human_text_includes_launch_hint|providers_dispatch::provider_tool_scorecard_human_reports_catalog_mismatch_codes|time_cli::time_run_setup_error_does_not_claim_a_lazy_module_load|trace_import_dispatch::converts_generic_trace_jsonl_to_cli_fixture/))"
+default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and binary(harn_cli_fast)) or (package(harn-cli) and binary(harn_cli_e2e) and test(/eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs|models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts|models_dispatch::core::models_recommend_human_text_has_model_and_rationale|models_dispatch::lora_inspect_plan::models_lora_inspect_human_text_includes_launch_hint|providers_dispatch::provider_tool_scorecard_human_reports_catalog_mismatch_codes|predicate_contract::predicate_helper_manifest_survives_warm_cache_and_tracks_changed_question|predicate_contract::predicate_checker_refuses_boolean_use_after_imported_helper|predicate_contract::predicate_census_refuses_an_invalid_imported_site|predicate_contract::predicate_embedding_model_is_refused_at_check_time|predicate_contract::predicate_operation_admission_invalidates_cached_success|time_cli::time_run_setup_error_does_not_claim_a_lazy_module_load|trace_import_dispatch::converts_generic_trace_jsonl_to_cli_fixture/))"
 # Any test that runs longer than 15s is considered "slow"; if it exceeds
 # the 60s hard cap three times it is terminated so the suite keeps moving.
 slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
@@ -42,7 +42,7 @@ fail-fast = false
 # CI profile is stricter: one warning at 30s, hard kill at 120s.
 # Inherits the same default-filter as the default profile (fast suite only).
 [profile.ci]
-default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and binary(harn_cli_fast)) or (package(harn-cli) and binary(harn_cli_e2e) and test(/eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs|models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts|models_dispatch::core::models_recommend_human_text_has_model_and_rationale|models_dispatch::lora_inspect_plan::models_lora_inspect_human_text_includes_launch_hint|providers_dispatch::provider_tool_scorecard_human_reports_catalog_mismatch_codes|time_cli::time_run_setup_error_does_not_claim_a_lazy_module_load|trace_import_dispatch::converts_generic_trace_jsonl_to_cli_fixture/))"
+default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and binary(harn_cli_fast)) or (package(harn-cli) and binary(harn_cli_e2e) and test(/eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs|models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts|models_dispatch::core::models_recommend_human_text_has_model_and_rationale|models_dispatch::lora_inspect_plan::models_lora_inspect_human_text_includes_launch_hint|providers_dispatch::provider_tool_scorecard_human_reports_catalog_mismatch_codes|predicate_contract::predicate_helper_manifest_survives_warm_cache_and_tracks_changed_question|predicate_contract::predicate_checker_refuses_boolean_use_after_imported_helper|predicate_contract::predicate_census_refuses_an_invalid_imported_site|predicate_contract::predicate_embedding_model_is_refused_at_check_time|predicate_contract::predicate_operation_admission_invalidates_cached_success|time_cli::time_run_setup_error_does_not_claim_a_lazy_module_load|trace_import_dispatch::converts_generic_trace_jsonl_to_cli_fixture/))"
 slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
 leak-timeout = { period = "10s", result = "fail" }
 fail-fast = false
@@ -225,9 +225,14 @@ test-group = "harn-windows-sandbox"
 # rebuilds, so a loaded developer machine can legitimately cross the generic
 # 60s ceiling even though every advance is bounded. Keep the wider budget on
 # this exact recovery claim instead of weakening the workspace default.
+#
+# On the hosted ci lanes this budget was also the whole margin: 30s x 4 is the
+# ci profile's own 120s, and the case measured median 38s / worst 53s on Linux,
+# 34s / 47s on macOS and 59s / 62s on Windows (2026-09-22 green runs). 60s x 4
+# is a 240s ceiling, 3.9x the slowest pass on any platform.
 [[profile.default.overrides]]
 filter = 'package(harn-vm) and test(native_adapter_recovers_a_decision_after_its_first_attestation_fails)'
-slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
 
 # Transport-layer LLM tests do real localhost TCP with a 3s accept deadline.
 # They're bounded internally but give them a bit more room than the default
@@ -333,17 +338,20 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 # prediction until a Windows run measures it, and a prediction is not a reason
 # to leave the cliff in place.
 #
-# The period is sized to the measured worst pass rather than to the median:
-# 60s x 4 leaves a 240s ceiling, about 2.5x the slowest green run, while
-# `terminate-after` stays at the profile default so a genuine hang is still
-# caught, just later. This is a budget correction, not a hang exemption.
+# The period is sized to the measured worst pass rather than to the median.
+# 60s x 4 was first sized at 2.5x the slowest green run, then a slow hosted VM
+# (run 35749349845) passed it at 219.8s, 92% of that ceiling, against a median
+# of 88.7s across thirteen Windows runs on 2026-09-22. 60s x 6 is a 360s
+# ceiling: 4x the median and 1.6x the slow-VM pass. `terminate-after` still
+# bounds it, so a genuine hang is caught, just later. This is a budget
+# correction, not a hang exemption.
 #
 # Scope is anchored to this one case on purpose. Its playground siblings keep
-# the default ceiling, so a real slow-test regression in one of them still
-# trips immediately.
+# the Windows platform budget at the end of this file, so a real slow-test
+# regression in one of them still trips sooner.
 [[profile.default.overrides]]
 filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::windows_sandboxed_run_child_can_read_the_host_node_toolchain/)'
-slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
+slow-timeout = { period = "60s", terminate-after = 6, grace-period = "10s" }
 
 # The two heavy burin-mini playground cases are not wall-clock budget tests,
 # but they have the same relationship to their neighbours: their cost is
@@ -396,6 +404,59 @@ threads-required = "num-cpus"
 [[profile.default.overrides]]
 filter = 'package(harn-vm) and test(persisted_10k_event_tool_timeline_opens_under_500ms)'
 threads-required = "num-cpus"
+
+# ---------------------------------------------------------------------------
+# Hosted-platform budgets
+# ---------------------------------------------------------------------------
+# The ci profile's 120s cap is a hang detector, and a hang detector has to
+# clear the slowest honest pass with room to spare. The target here is a worst
+# observed pass at or under a third of the cap. Measured on 2026-09-22 from the
+# green `--profile ci` workspace runs of each hosted lane (eight Linux, seven
+# macOS, thirteen Windows), plus the failed Windows release certification
+# 35749349845.
+#
+# macOS: one case misses the target. It runs SwiftPM under the outer sandbox:
+# 39.0 39.3 42.9 43.3 49.1 66.1 85.0s, median 43.3s, worst at 71% of the
+# cap. 60s x 4 is 240s, 2.8x the worst and 5.5x the median.
+[[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "macos")' }
+filter = 'package(harn-vm) and test(=stdlib::sandbox::workspace_env_integration::swiftpm_from_a_project_script_uses_the_outer_sandbox)'
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
+
+# Windows misses the target as a platform, not as a few tests. Hosted Windows
+# runs every process- and file-heavy case several times slower than Linux (the
+# burin-mini explain case: about 10s on Linux, 68-89s on Windows), and the
+# variance between Windows VMs is not uniform across tests. On the slow VM of
+# run 35749349845 the whole suite was 1.4x slower, but individual cases were
+# 2.4x to 6x their own median:
+#
+#   burin_mini_explain_repo_fixture_run_passes          median 78s  -> killed at 120s
+#   windows_sandbox_fix_keeps_writes_confined_...       median 75s  -> killed at 120s
+#   host_lease ... same_class_waiters_are_fifo_...      median 27s  -> killed at 120s
+#   process::windows ... closing_job_owner_kills_...    median 18s  -> 109s
+#   generic_agent_loop_projects_the_current_run_...     median 22s  -> 79s
+#
+# Tuning each of those after it fails repeats the release-certification miss
+# one test at a time, and the next one is whichever case the next slow VM
+# stretches. So every Windows test without its own budget gets 60s x 5, a 300s
+# ceiling: 3.4x the slowest ordinary Windows pass (89.1s) and 2.8x the slowest
+# slow-VM pass (109s). The two slowest cases sit at 25% and 26% of it at
+# median. The three cases that VM killed have no measured duration past 120s.
+# At the 2.4x their playground sibling stretched on that VM, the playground
+# cases need about 190s; at 6x, the host-lease case needs about 160s. A VM that
+# stretched a playground case 6x (about 470s) would still kill it: that is the
+# known limit of a fixed ceiling.
+#
+# This must stay the last override that sets `slow-timeout`. nextest applies
+# the first matching override per setting, so every per-test budget above
+# still wins over it, and it only fills the gap the ci profile default leaves.
+# It is scoped to the host platform, so Linux and macOS keep the 120s cap
+# where no case but the one above comes near it. The same ceiling applies to
+# the default profile on a Windows developer machine.
+[[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "windows")' }
+filter = 'all()'
+slow-timeout = { period = "60s", terminate-after = 5, grace-period = "10s" }
 
 # ---------------------------------------------------------------------------
 # E2E profile overrides

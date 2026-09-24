@@ -462,6 +462,17 @@ pub(super) fn normalize_generation_stream(
 
 /// Reject caller-selected controls that the final route cannot represent.
 pub(crate) fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result<(), VmError> {
+    if let Some(model) = crate::llm_config::model_catalog_id_for_route(&opts.provider, &opts.model)
+        .and_then(|id| crate::llm_config::model_catalog_entry(&id))
+    {
+        if !model.supports_operation(crate::llm_config::ModelOperation::TextGeneration) {
+            return Err(crate::llm::call::invalid_request_error(
+                "model does not declare required operation `text_generation`",
+                &opts.provider,
+                &opts.model,
+            ));
+        }
+    }
     validate_token_bias_route(&opts.logit_bias, &opts.provider, &opts.model).map_err(|detail| {
         crate::llm::call::invalid_request_error(
             format!("option `logit_bias` is invalid for the resolved route: {detail}"),
@@ -694,6 +705,63 @@ mod tests {
         let rendered = format!("{error:?}");
         assert!(rendered.contains("tiktoken:o200k_base"));
         assert!(rendered.contains("tiktoken:cl100k_base"));
+    }
+
+    #[test]
+    fn generation_refuses_a_known_non_text_operation_before_transport() {
+        struct ClearOverlay;
+        impl Drop for ClearOverlay {
+            fn drop(&mut self) {
+                crate::llm_config::clear_user_overrides();
+            }
+        }
+        let _guard = ClearOverlay;
+        crate::llm_config::set_user_overrides(Some(
+            crate::llm_config::parse_config_toml(
+                r#"
+[models.synthetic-decision-only]
+name = "Decision only"
+provider = "openrouter"
+context_window = 8192
+operations = ["decision"]
+"#,
+            )
+            .unwrap(),
+        ));
+        let decision = crate::llm::api::LlmCallOptions {
+            provider: "openrouter".into(),
+            model: "synthetic-decision-only".into(),
+            ..Default::default()
+        };
+        assert!(
+            validate_options(&decision).is_err(),
+            "gateway defaults cannot turn a decision route into a chat route"
+        );
+        let options = crate::llm::api::LlmCallOptions {
+            provider: "openai".to_string(),
+            model: "text-embedding-3-small".to_string(),
+            ..Default::default()
+        };
+        let error = validate_options(&options).expect_err("embedding is not text generation");
+        let VmError::Thrown(value) = error else {
+            panic!("typed request error expected")
+        };
+        let fields = value.as_dict().unwrap();
+        assert!(
+            matches!(fields.get("category"), Some(VmValue::String(value)) if value == "invalid_request")
+        );
+        assert!(
+            matches!(fields.get("model"), Some(VmValue::String(value)) if value == "text-embedding-3-small")
+        );
+        assert!(
+            matches!(fields.get("message"), Some(VmValue::String(value)) if value.contains("text_generation"))
+        );
+        validate_options(&crate::llm::api::LlmCallOptions {
+            provider: "openai".into(),
+            model: "gpt-5.6-sol".into(),
+            ..Default::default()
+        })
+        .expect("adjacent declared text route remains supported");
     }
 
     #[test]

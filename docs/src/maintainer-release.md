@@ -33,9 +33,14 @@ scripts/watch_harn_release.sh \
 The hosted workflow owns source freezing, audits, hosted platform
 certification, the GitHub-signed release commit, immutable tag, release PR, and
 auto-merge. The watcher is resumable by exact receipt and owns missing-asset
-recovery, PR re-arming, release finalization, main-cache warming, and transient
-ref cleanup. A visible tag or prerelease is an intermediate state, not release
+recovery, PR re-arming, release finalization, and transient ref cleanup. Pass
+`--warm-cache` to request the five-target cache warm; otherwise its receipt stays
+`not_requested`. A visible tag or prerelease is an intermediate state, not release
 completion.
+
+The hosted workflow's `converge_fleet` input controls downstream updates. Setting
+it to `false` leaves that work for a later explicit request or the regular fleet
+schedule. The crate publisher does not start a second update controller.
 
 Do not invoke `scripts/release_ship.sh` or the local `release_harn.harn` harness
 for a normal live release. They are implementation and development surfaces;

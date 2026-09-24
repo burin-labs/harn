@@ -1,0 +1,172 @@
+// A repeated attributed refusal over an observed verifier pass ends before the
+// judge cap. A new criterion and an unverified run keep their full budget.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+const CONTRACT = {
+  requirements: [
+    {requirement_id: "delivery", name: "Deliver the answer", evidence_roles: ["assistant_output"]},
+    {requirement_id: "review", name: "Review the answer", evidence_roles: ["assistant_output"]},
+  ],
+}
+
+fn refusal(id: string, criterion: string, delivery_met: bool = true) -> string {
+  return json_stringify(
+    {
+      verdict: "continue",
+      detail: "Address the remaining concern.",
+      gap_class: "missing_artifact",
+      gaps: [
+        {
+          criterion: criterion,
+          requirement_id: id,
+          gap_class: "missing_artifact",
+          detail: "Address the remaining concern.",
+        },
+      ],
+      requirement_report: [
+        {requirement_id: "delivery", met: delivery_met, evidence_refs: [-1]},
+        {requirement_id: "review", met: true, evidence_refs: [-1]},
+      ],
+    },
+  )
+}
+
+fn evidence_tools() {
+  return tool_define(
+    tool_registry(),
+    "inspect",
+    "Inspect the current answer.",
+    {
+      handler: { _args -> "A new fact was observed." },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+}
+
+fn run_case(
+  harness: Harness,
+  second_id: string,
+  verifier_passes: bool,
+  new_tool_evidence: bool = false,
+  delivery_met: bool = true,
+) -> dict {
+  const sid = "verified-criterion-repeat-" + harness.random.uuid()
+  const before_second = [
+    llm_text("First answer. ##DONE##"),
+    llm_text(refusal("delivery", "Deliver the answer", delivery_met)),
+  ]
+  const tool_turn = if new_tool_evidence {
+    [{text: "", tool_calls: [{id: "inspect-1", name: "inspect", arguments: {}}]}]
+  } else {
+    []
+  }
+  const after_second = [
+    llm_text("Second answer. ##DONE##"),
+    llm_text(refusal(second_id, "The answer requirement", delivery_met)),
+    llm_text("Third answer. ##DONE##"),
+    llm_text(refusal(second_id, "The answer requirement", delivery_met)),
+    llm_text("Fourth answer. ##DONE##"),
+  ]
+  return with_llm_script(
+    harness.llm,
+    before_second + tool_turn + after_second,
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        sid,
+        fn() { return agent_loop(
+          harness,
+          "Deliver and review the answer.",
+          nil,
+          {
+            provider: "mock",
+            session_id: sid,
+            tools: if new_tool_evidence {
+              evidence_tools()
+            } else {
+              nil
+            },
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 8,
+            max_nudges: 8,
+            done_sentinel: "##DONE##",
+            final_wrapup: false,
+            verify_completion: if verifier_passes {
+              { _info ->
+                return {
+                  confirm: true,
+                  reason: "verified",
+                  verification: {
+                    oracle_expected: true,
+                    command: "fixture verifier",
+                    observed: "passed",
+                    observed_at_evidence_index: nil,
+                  },
+                }
+              }
+            } else {
+              nil
+            },
+            verify_completion_judge: {
+              provider: "mock",
+              max_invocations: 3,
+              requirement_contract: CONTRACT,
+            },
+          },
+        ) },
+      )
+      const receipts = captured.events.filter(
+        { event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema == "harn.completion_directive_receipt.v1"
+        },
+      )
+        .to_list()
+      return {result: captured.result, receipts: receipts, calls: len(harness.llm.mock_calls())}
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const repeated = run_case(harness, "delivery", true)
+  assert_eq(repeated.result.status, "done")
+  assert_eq(repeated.result.stop_reason, "repeated_criterion_over_verified_pass")
+  assert_eq(repeated.result.completion_judge.invocations, 2)
+  assert_eq(repeated.result.completion_judge.cap_reached, false)
+  assert_eq(repeated.calls, 4)
+  assert_eq(repeated.receipts[1].checkpoint.repeated_verified_criteria, ["delivery"])
+  assert_eq(repeated.receipts[1].checkpoint.verification.observed, "passed")
+  contract_effect(harness.stdio, "repeated_stops_before_cap", repeated.calls == 4)
+  const changed = run_case(harness, "review", true)
+  assert_eq(changed.result.status, "done")
+  assert_eq(changed.result.stop_reason, "repeated_criterion_over_verified_pass")
+  assert_eq(changed.result.completion_judge.invocations, 3)
+  assert_eq(changed.calls, 6)
+  contract_negative(harness.stdio, "new_criterion_stops_early", changed.calls == 4)
+  const changed_evidence = run_case(harness, "delivery", true, true)
+  assert_eq(changed_evidence.result.status, "done")
+  assert_eq(changed_evidence.result.stop_reason, "repeated_criterion_over_verified_pass")
+  assert_eq(changed_evidence.result.completion_judge.invocations, 3)
+  assert_eq(changed_evidence.calls, 7)
+  contract_negative(harness.stdio, "new_evidence_stops_early", changed_evidence.calls == 4)
+  const pending = run_case(harness, "delivery", true, false, false)
+  assert_eq(pending.result.status, "completion_unverified")
+  assert_eq(pending.result.stop_reason, "completion_judge_cap_reached")
+  assert_eq(pending.result.completion_judge.invocations, 3)
+  contract_negative(
+    harness.stdio,
+    "pending_requirement_stops_verified",
+    pending.result.status == "done",
+  )
+  const unverified = run_case(harness, "delivery", false)
+  assert_eq(unverified.result.status, "completion_unverified")
+  assert_eq(unverified.result.stop_reason, "completion_judge_cap_reached")
+  assert_eq(unverified.result.completion_judge.cap_reached, true)
+  contract_negative(harness.stdio, "unverified_stops_verified", unverified.result.status == "done")
+}

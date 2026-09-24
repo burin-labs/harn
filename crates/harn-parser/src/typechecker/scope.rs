@@ -188,6 +188,11 @@ pub(super) struct TypeScope {
     /// Immutable expression aliases used by flow analysis. `None` shadows a
     /// same-named alias from an outer scope.
     pub(super) flow_aliases: ScopeMap<Option<SNode>>,
+    /// Folded immutable values, captured at declaration time. None shadows an
+    /// outer value when a parameter, mutable binding, or assignment replaces it.
+    pub(super) const_values: ScopeMap<Option<crate::const_eval::ConstValue>>,
+    /// Captured values written by nested callables cannot be constant-folded.
+    pub(super) const_unstable_vars: ScopeSet,
     /// Mutable vars declared as unannotated `let x = nil`. A local `false`
     /// entry shadows a parent widenable marker after a new declaration or
     /// after the first successful widening assignment.
@@ -267,6 +272,8 @@ impl TypeScope {
             narrowed_vars: ScopeMap::new(),
             narrowed_paths: ScopeMap::new(),
             flow_aliases: ScopeMap::new(),
+            const_values: ScopeMap::new(),
+            const_unstable_vars: ScopeSet::new(),
             nil_widenable_vars: ScopeMap::new(),
             schema_bindings: ScopeMap::new(),
             untyped_sources: ScopeMap::new(),
@@ -385,6 +392,8 @@ impl TypeScope {
             narrowed_vars: ScopeMap::new(),
             narrowed_paths: ScopeMap::new(),
             flow_aliases: ScopeMap::new(),
+            const_values: ScopeMap::new(),
+            const_unstable_vars: ScopeSet::new(),
             nil_widenable_vars: ScopeMap::new(),
             schema_bindings: ScopeMap::new(),
             untyped_sources: ScopeMap::new(),
@@ -393,6 +402,21 @@ impl TypeScope {
             closure_mutated_vars: ScopeSet::new(),
             parent: Some(parent),
         }
+    }
+
+    fn const_binding(&self, name: &str) -> Option<&crate::const_eval::ConstValue> {
+        if self.const_unstable_vars.contains(name) {
+            return None;
+        }
+        match self.const_values.get(name) {
+            Some(value) => value.as_ref(),
+            None => self.parent.as_ref()?.const_binding(name),
+        }
+    }
+
+    pub(super) fn const_value(&self, node: &SNode) -> Option<crate::const_eval::ConstValue> {
+        crate::const_eval::const_eval_with_resolver(node, &|name| self.const_binding(name).cloned())
+            .ok()
     }
 
     pub(super) fn get_var(&self, name: &str) -> Option<&InferredType> {
@@ -708,6 +732,7 @@ impl TypeScope {
         }
         self.vars.insert(name.to_string(), ty);
         self.flow_aliases.insert(name.to_string(), None);
+        self.const_values.insert(name.to_string(), None);
         self.record_contracts
             .insert(name.to_string(), RecordContract::Inferred);
     }

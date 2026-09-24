@@ -7,7 +7,7 @@ fn cache_read_tokens_cover_anthropic_and_openai_chat_shapes() {
         "cache_read_input_tokens": 10_000,
         "cache_creation_input_tokens": 0
     });
-    assert_eq!(extract_cache_read_tokens(&anthropic), 10_000);
+    assert_eq!(extract_cache_read_tokens(&anthropic).unwrap(), 10_000);
 
     let openai = serde_json::json!({
         "prompt_tokens": 10_200,
@@ -15,7 +15,7 @@ fn cache_read_tokens_cover_anthropic_and_openai_chat_shapes() {
             "cached_tokens": 10_000
         }
     });
-    assert_eq!(extract_cache_read_tokens(&openai), 10_000);
+    assert_eq!(extract_cache_read_tokens(&openai).unwrap(), 10_000);
 }
 
 #[test]
@@ -27,5 +27,5 @@ fn cache_read_tokens_cover_together_flat_shape() {
         "cached_tokens": 10_000
     });
 
-    assert_eq!(extract_cache_read_tokens(&together), 10_000);
+    assert_eq!(extract_cache_read_tokens(&together).unwrap(), 10_000);
 }

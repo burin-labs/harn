@@ -53,6 +53,11 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         return;
     }
 
+    if cli.argument_schema {
+        commands::argument_schema::run();
+        return;
+    }
+
     let Some(subcommand) = cli.command else {
         // `arg_required_else_help` already shows help when no args are
         // supplied. We only land here if a top-level flag (e.g. a
@@ -80,6 +85,19 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 eprintln!("error: {error}");
                 process::exit(1);
             }
+        }
+        Command::NetnsLaunch(_) => {
+            // Unreachable: the pre-runtime dispatcher claims this invocation
+            // before the runtime that owns this match is built. Refusing
+            // rather than running it keeps the failure legible, because the
+            // namespace this helper exists to create cannot be created from
+            // here: a user namespace is refused to a multi-threaded caller,
+            // and the runtime's worker threads are already up.
+            eprintln!(
+                "error: the namespace helper must run before the runtime starts; reaching it \
+                 here means the pre-runtime dispatcher did not recognise the invocation"
+            );
+            process::exit(1);
         }
         Command::Skill(args) => match args.command {
             SkillCommand::List(list) => commands::skills::run_list(&list),
@@ -732,6 +750,9 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 if code != 0 {
                     process::exit(code);
                 }
+            }
+            Some(EvalCommand::Calibrate(calibrate_args)) => {
+                process::exit(commands::eval_calibrate::run(calibrate_args).await)
             }
             Some(EvalCommand::ScopeTriage(scope_args)) => {
                 process::exit(commands::eval_scope_triage::run(scope_args).await)

@@ -98,7 +98,7 @@ async fn start_acp_channel_session_with_config(
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": cwd},
+            "params": {"cwd": cwd, "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .expect("send session/new");
     let created = recv_json(&mut response_rx).await;
@@ -175,7 +175,7 @@ async fn session_inject_host_event_round_trips_typed_tool_result() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -296,7 +296,7 @@ async fn session_remind_accepts_typed_reminder_payload() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -338,7 +338,7 @@ async fn session_reminder_pending_list_and_revoke_controls() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -469,7 +469,7 @@ async fn session_remind_rejects_user_message_payload() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -508,7 +508,7 @@ async fn session_cancel_tool_call_returns_not_found_when_no_call_in_flight() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -544,7 +544,7 @@ async fn session_cancel_tool_call_rejects_missing_tool_call_id() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -582,7 +582,7 @@ async fn session_inject_accepts_with_message_id_and_delivers_same_id() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -633,7 +633,7 @@ async fn session_inject_requires_active_prompt_bridge() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -672,7 +672,7 @@ async fn session_cancel_is_idempotent_and_actor_attributed() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -719,7 +719,7 @@ async fn session_inject_revoke_and_replace_pending_messages() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -806,7 +806,7 @@ async fn session_inject_state_survives_prompt_bridge_replacement() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -900,7 +900,7 @@ async fn session_inject_reports_unknown_and_already_delivered_ids() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -972,7 +972,7 @@ async fn session_inject_rejects_cross_actor_mutation() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -1051,7 +1051,7 @@ async fn acp_session_rollback_and_redo_move_transcript_and_filesystem_together()
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": dir.path().to_string_lossy()},
+            "params": {"cwd": dir.path().to_string_lossy(), "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -1140,7 +1140,7 @@ async fn acp_session_restore_tool_call_restores_pre_image_and_emits_update() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": dir.path().to_string_lossy()},
+            "params": {"cwd": dir.path().to_string_lossy(), "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -1476,6 +1476,7 @@ fn every_session_dispatch_arm_checks_authentication() {
 
 mod caching;
 mod commands;
+mod conservative_admission;
 mod emit_response;
 mod event_log_barrier;
 mod host_call_turn_cache;
@@ -1484,6 +1485,7 @@ mod oauth_redirect;
 mod prompt_errors;
 mod runtime_overrides;
 mod served_agent_turn;
+mod session_environment;
 mod session_recap;
 mod session_restore;
 mod sessions;

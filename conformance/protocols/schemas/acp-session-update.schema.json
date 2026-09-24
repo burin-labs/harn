@@ -363,17 +363,6 @@
         { "$ref": "#/$defs/ConfigOptionUpdate" },
         { "$ref": "#/$defs/SessionInfoUpdate" },
         { "$ref": "#/$defs/SessionTruncated" },
-        { "$ref": "#/$defs/SkillActivated" },
-        { "$ref": "#/$defs/SkillDeactivated" },
-        { "$ref": "#/$defs/SkillScopeTools" },
-        { "$ref": "#/$defs/SkillNarrow" },
-        { "$ref": "#/$defs/ToolSearchQuery" },
-        { "$ref": "#/$defs/ToolSearchResult" },
-        { "$ref": "#/$defs/TranscriptCompacted" },
-        { "$ref": "#/$defs/ReminderEmitted" },
-        { "$ref": "#/$defs/Handoff" },
-        { "$ref": "#/$defs/FsWatch" },
-        { "$ref": "#/$defs/WorkerUpdate" },
         { "$ref": "#/$defs/HarnExtensionUpdate" }
       ]
     },
@@ -597,82 +586,155 @@
     },
     "SkillActivated": {
       "type": "object",
-      "required": ["sessionUpdate", "skillName"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "skill_activated" },
-        "skillName": { "type": "string", "minLength": 1 },
-        "iteration": { "type": "integer", "minimum": 0 }
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["skillName", "iteration"], "additionalProperties": true,
+            "properties": {
+              "skillName": { "type": "string", "minLength": 1, "pattern": "\\S" },
+              "iteration": { "type": "integer", "minimum": 0 },
+              "reason": { "type": "string" }
+            }
+          } }
+        }
       }
     },
     "SkillDeactivated": {
       "type": "object",
-      "required": ["sessionUpdate", "skillName"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "skill_deactivated" },
-        "skillName": { "type": "string", "minLength": 1 }
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["skillName"], "additionalProperties": true,
+            "properties": {
+              "skillName": { "type": "string", "minLength": 1, "pattern": "\\S" },
+              "iteration": { "type": "integer", "minimum": 0 }
+            }
+          } }
+        }
       }
     },
     "SkillScopeTools": {
       "type": "object",
-      "required": ["sessionUpdate", "skillName", "allowedTools"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "skill_scope_tools" },
-        "skillName": { "type": "string", "minLength": 1 },
-        "allowedTools": {
-          "type": "array",
-          "items": { "type": "string" }
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["skillName", "allowedTools"], "additionalProperties": true,
+            "properties": {
+              "skillName": { "type": "string", "minLength": 1, "pattern": "\\S" },
+              "allowedTools": { "type": "array", "items": { "type": "string" } }
+            }
+          } }
         }
       }
     },
     "SkillNarrow": {
       "type": "object",
-      "required": ["sessionUpdate", "removedTools", "remainingTools"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "skill_narrow" },
-        "reason": { "type": "string" },
-        "removedTools": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "remainingTools": {
-          "type": "array",
-          "items": { "type": "string" }
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["removedTools", "remainingTools"], "additionalProperties": true,
+            "properties": {
+              "reason": { "type": "string" },
+              "removedTools": { "type": "array", "items": { "type": "string" } },
+              "remainingTools": { "type": "array", "items": { "type": "string" } },
+              "policy": {}, "removedToolDetails": {}, "keptToolDetails": {}
+            }
+          } }
         }
       }
     },
     "ToolSearchQuery": {
       "type": "object",
-      "required": ["sessionUpdate", "toolUseId", "name", "query"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "tool_search_query" },
-        "toolUseId": { "type": "string", "minLength": 1 },
-        "name": { "type": "string", "minLength": 1 },
-        "query": {}
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["toolUseId", "name", "query"], "additionalProperties": true,
+            "properties": {
+              "toolUseId": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "query": {},
+              "strategy": { "type": "string" },
+              "mode": { "type": "string" }
+            }
+          } }
+        }
       }
     },
     "ToolSearchResult": {
       "type": "object",
-      "required": ["sessionUpdate", "toolUseId", "promoted"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "tool_search_result" },
-        "toolUseId": { "type": "string", "minLength": 1 },
-        "promoted": { "type": "array" }
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["toolUseId", "promoted"], "additionalProperties": true,
+            "properties": {
+              "toolUseId": { "type": "string", "minLength": 1 },
+              "promoted": { "type": "array", "items": {} },
+              "strategy": { "type": "string" },
+              "mode": { "type": "string" }
+            }
+          } }
+        }
       }
     },
     "TranscriptCompacted": {
       "type": "object",
-      "required": ["sessionUpdate", "mode", "strategy"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "transcript_compacted" },
-        "mode": { "type": "string" },
-        "strategy": { "type": "string" }
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object",
+            "required": [
+              "mode", "strategy", "snapshotAssetId", "reason", "receiptId", "schemaVersion",
+              "engineStrategy", "requestedStrategy", "resolvedThresholdTokens", "thresholdSource",
+              "hardLimitTokens", "archivedMessages", "estimatedTokensBefore", "estimatedTokensAfter",
+              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "mode": { "type": "string" }, "strategy": { "type": "string" },
+              "reason": { "type": "string" }, "receiptId": { "type": "string" },
+              "schemaVersion": { "type": "integer", "minimum": 0 },
+              "snapshotAssetId": { "type": ["string", "null"] }, "engineStrategy": { "type": "string" },
+              "archivedMessages": { "type": "integer", "minimum": 0 },
+              "estimatedTokensBefore": { "type": "integer", "minimum": 0 },
+              "estimatedTokensAfter": { "type": "integer", "minimum": 0 },
+              "instructionMode": { "type": ["string", "null"] }, "instructionSource": { "type": ["string", "null"] },
+              "compactionPolicy": {}, "recap": {},
+              "requestedStrategy": { "type": ["string", "null"] },
+              "resolvedThresholdTokens": { "type": ["integer", "null"], "minimum": 0 },
+              "thresholdSource": { "type": ["string", "null"] },
+              "hardLimitTokens": { "type": ["integer", "null"], "minimum": 0 },
+              "sourceMeasurement": {}
+            }
+          } }
+        }
       }
     },
     "ReminderEmitted": {
@@ -710,6 +772,7 @@
                       "items": { "type": "string" }
                     },
                     "body": { "type": "string" },
+                    "authority": { "type": "string" },
                     "roleHint": {
                       "enum": ["system", "developer", "user_block", "ephemeral_cache"]
                     },
@@ -728,65 +791,251 @@
     },
     "Handoff": {
       "type": "object",
-      "required": ["sessionUpdate", "handoffId", "artifactId", "handoff"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "handoff" },
-        "handoffId": { "type": "string", "minLength": 1 },
-        "artifactId": { "type": "string", "minLength": 1 },
-        "handoff": { "type": "object" }
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["handoffId", "artifactId", "handoff"], "additionalProperties": true,
+            "properties": {
+              "handoffId": { "type": "string", "minLength": 1 },
+              "artifactId": { "type": "string", "minLength": 1 },
+              "handoff": { "type": "object", "additionalProperties": true }
+            }
+          } }
+        }
       }
     },
     "FsWatch": {
       "type": "object",
-      "required": ["sessionUpdate", "subscriptionId", "events"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "fs_watch" },
-        "subscriptionId": { "type": "string", "minLength": 1 },
-        "events": { "type": "array" }
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["subscriptionId", "events"], "additionalProperties": true,
+            "properties": {
+              "subscriptionId": { "type": "string", "minLength": 1 },
+              "events": { "type": "array", "items": {} }
+            }
+          } }
+        }
       }
     },
     "WorkerUpdate": {
       "type": "object",
-      "required": ["sessionUpdate", "workerId", "event", "status", "terminal"],
-      "additionalProperties": true,
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "worker_update" },
-        "workerId": { "type": "string", "minLength": 1 },
-        "event": { "type": "string", "minLength": 1 },
-        "status": { "type": "string", "minLength": 1 },
-        "terminal": { "type": "boolean" }
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["workerId", "event", "status", "terminal", "metadata"], "additionalProperties": true,
+            "properties": {
+              "workerId": { "type": "string", "minLength": 1, "pattern": "\\S" },
+              "event": { "type": "string", "minLength": 1, "pattern": "\\S" },
+              "status": { "type": "string", "minLength": 1, "pattern": "\\S" },
+              "terminal": { "type": "boolean" },
+              "workerName": { "type": "string" }, "workerTask": { "type": "string" },
+              "workerMode": { "type": "string" }, "metadata": {}, "audit": {}
+            }
+          } }
+        }
+      }
+    },
+    "Artifact": {
+      "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "artifact" },
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["artifactId", "title", "spec", "metadata", "provenance"], "additionalProperties": true,
+            "properties": {
+              "artifactId": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string" }, "title": { "type": ["string", "null"] },
+              "mimeType": { "type": "string" }, "fallback": { "type": "string" },
+              "sizeBytes": { "type": "integer", "minimum": 0 },
+              "spec": {}, "metadata": {}, "provenance": {}
+            }
+          } }
+        }
+      }
+    },
+    "AvailableCommands": {
+      "type": "object", "required": ["sessionUpdate", "availableCommands"], "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "available_commands_update" },
+        "availableCommands": { "type": "array", "items": {} }
+      }
+    },
+    "HitlRequest": {
+      "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "hitl_request" },
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["requestId", "kind", "payload"], "additionalProperties": true,
+            "properties": {
+              "requestId": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string" }, "payload": {}
+            }
+          } }
+        }
+      }
+    },
+    "HitlResolved": {
+      "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "hitl_resolved" },
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["requestId", "kind", "outcome"], "additionalProperties": true,
+            "properties": {
+              "requestId": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string" }, "outcome": {}
+            }
+          } }
+        }
+      }
+    },
+    "LiveSessionClient": {
+      "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "live_session_client" },
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["action", "state"], "additionalProperties": true,
+            "properties": {
+              "action": { "type": "string", "minLength": 1 }, "state": {}
+            }
+          } }
+        }
+      }
+    },
+    "Log": {
+      "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "log" },
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["message", "level"], "additionalProperties": true,
+            "properties": {
+              "message": { "type": "string" }, "level": { "type": "string" }, "fields": {}
+            }
+          } }
+        }
+      }
+    },
+    "Progress": {
+      "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "progress" },
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["message", "phase"], "additionalProperties": true,
+            "properties": {
+              "message": { "type": "string" }, "phase": { "type": "string" },
+              "progress": { "type": "integer" }, "total": { "type": "integer" }, "data": {},
+              "kind": { "type": "string" },
+              "pendingCount": { "type": "integer", "minimum": 0 },
+              "totalBytes": { "type": "integer", "minimum": 0 },
+              "pendingWrites": { "type": "array", "items": {} }
+            }
+          } }
+        }
+      }
+    },
+    "StanceTransition": {
+      "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "stance_transition" },
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["phase"], "additionalProperties": true,
+            "properties": {
+              "phase": { "type": "string", "minLength": 1, "pattern": "\\S" },
+              "escapeTool": { "type": "string" },
+              "allowedTools": { "type": "array", "items": { "type": "string" } },
+              "justification": { "type": "string" }, "consent": { "type": "string" }, "reason": { "type": "string" }
+            },
+            "allOf": [{
+              "if": { "properties": { "phase": { "enum": ["write_access_granted", "write_access_denied"] } } },
+              "then": {
+                "required": ["escapeTool"],
+                "properties": { "escapeTool": { "type": "string", "minLength": 1, "pattern": "\\S" } }
+              }
+            }]
+          } }
+        }
+      }
+    },
+    "TranscriptProjected": {
+      "type": "object", "required": ["sessionUpdate", "_meta"], "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "transcript_projected" },
+        "_meta": {
+          "type": "object", "required": ["harn"], "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "required": ["policy", "reason"], "additionalProperties": true,
+            "properties": {
+              "policy": { "type": "string" }, "reason": { "type": "string" },
+              "droppedCount": { "type": "integer", "minimum": 0 },
+              "keptCount": { "type": "integer", "minimum": 0 },
+              "prefixHash": { "type": "string" }, "providerSafetyBlocked": { "type": "boolean" },
+              "redactedCount": { "type": "integer", "minimum": 0 },
+              "reclaimedTokens": { "type": "integer", "minimum": 0 },
+              "rootsConsulted": { "type": "array", "items": {} },
+              "redactionPointers": { "type": "array", "items": {} }
+            }
+          } }
+        }
       }
     },
     "HarnExtensionUpdate": {
       "type": "object",
-      "required": ["sessionUpdate", "_meta"],
-      "additionalProperties": true,
       "properties": {
-        "sessionUpdate": {
-          "enum": [
-            "artifact",
-            "available_commands_update",
-            "fs_watch",
-            "handoff",
-            "hitl_request",
-            "hitl_resolved",
-            "log",
-            "progress",
-            "skill_activated",
-            "skill_deactivated",
-            "skill_narrow",
-            "skill_scope_tools",
-            "tool_search_query",
-            "tool_search_result",
-            "transcript_compacted",
-            "transcript_projected",
-            "worker_update"
-          ]
-        },
-        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
-      }
+        "_meta": {
+          "type": "object", "additionalProperties": true,
+          "properties": { "harn": {
+            "type": "object", "additionalProperties": true,
+            "properties": { "replayed": { "type": "boolean" } }
+          } }
+        }
+      },
+      "oneOf": [
+        { "$ref": "#/$defs/Artifact" },
+        { "$ref": "#/$defs/AvailableCommands" },
+        { "$ref": "#/$defs/FsWatch" },
+        { "$ref": "#/$defs/Handoff" },
+        { "$ref": "#/$defs/HitlRequest" },
+        { "$ref": "#/$defs/HitlResolved" },
+        { "$ref": "#/$defs/LiveSessionClient" },
+        { "$ref": "#/$defs/Log" },
+        { "$ref": "#/$defs/Progress" },
+        { "$ref": "#/$defs/ReminderEmitted" },
+        { "$ref": "#/$defs/SkillActivated" },
+        { "$ref": "#/$defs/SkillDeactivated" },
+        { "$ref": "#/$defs/SkillNarrow" },
+        { "$ref": "#/$defs/SkillScopeTools" },
+        { "$ref": "#/$defs/StanceTransition" },
+        { "$ref": "#/$defs/ToolSearchQuery" },
+        { "$ref": "#/$defs/ToolSearchResult" },
+        { "$ref": "#/$defs/TranscriptCompacted" },
+        { "$ref": "#/$defs/TranscriptProjected" },
+        { "$ref": "#/$defs/WorkerUpdate" }
+      ]
     }
   }
 }

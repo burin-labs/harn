@@ -172,12 +172,55 @@ fn clamp_effort_for_disabled_thinking(body: &mut serde_json::Value, model: &str)
     set_output_config_effort(body, CEILING);
 }
 
-/// Fable/Mythos always think and reject an explicit disabled thinking config.
-/// Sonnet 5 also defaults thinking on, but it accepts
-/// `thinking: {type:"disabled"}` as the explicit off switch.
+/// Models whose thinking is always on (Fable, Mythos, Opus 5.5+) reject an
+/// explicit `thinking: {type:"disabled"}` with a 400. The catalog owns that
+/// fact as `reasoning_disable_supported`; Sonnet 5 and Opus 5 default thinking
+/// on but still accept the explicit off switch.
 fn model_rejects_disabled_thinking(model: &str) -> bool {
-    let lower = model.to_lowercase();
-    lower.contains("claude-fable-") || lower.contains("claude-mythos-")
+    !crate::llm::capabilities::lookup("anthropic", model).reasoning_disable_supported
+}
+
+/// Lower a thinking-off request onto the wire.
+///
+/// Through Opus 4.8 an omitted `thinking` field is the off switch, so nothing
+/// is written. Generation-5 models think when the field is omitted, so the
+/// ones that accept it get an explicit `{type:"disabled"}`. The always-on
+/// models reject that, and their closest legal request is the lowest effort:
+/// without it they think at the API default (`medium` on Opus 5.5, `high` on
+/// Fable), which is the opposite of what the caller asked for. An effort the
+/// caller already set is left alone.
+fn lower_thinking_off(body: &mut serde_json::Value, model: &str) {
+    if !model_defaults_to_adaptive_thinking(model) {
+        return;
+    }
+    if !model_rejects_disabled_thinking(model) {
+        body["thinking"] = serde_json::json!({ "type": "disabled" });
+        return;
+    }
+    if let Some(object) = body.as_object_mut() {
+        object.remove("thinking");
+    }
+    let has_effort = body
+        .get("output_config")
+        .and_then(|config| config.get("effort"))
+        .is_some();
+    if !has_effort && model_supports_anthropic_effort(model) {
+        set_output_config_effort(body, ANTHROPIC_EFFORT_LADDER[0]);
+    }
+}
+
+/// A caller override merged after the builder can still carry
+/// `thinking: {type:"disabled"}` to an always-on model, which is a 400.
+/// Re-lower it the same way the builder lowers a thinking-off request.
+fn relower_disabled_thinking_override(body: &mut serde_json::Value, model: &str) {
+    let disabled = body
+        .get("thinking")
+        .and_then(|thinking| thinking.get("type"))
+        .and_then(serde_json::Value::as_str)
+        == Some("disabled");
+    if disabled && model_rejects_disabled_thinking(model) {
+        lower_thinking_off(body, model);
+    }
 }
 
 fn model_supports_anthropic_effort(model: &str) -> bool {
@@ -293,6 +336,7 @@ pub(crate) fn reconcile_request_body(
     remove_unsupported_assistant_prefill(body, provider, &wire_model);
     strip_unsupported_sampling_params(body, &wire_model, thinking, provider_contract_probe);
     if crate::llm::catalog_may_shape_requested_reasoning() {
+        relower_disabled_thinking_override(body, &wire_model);
         clamp_effort_for_disabled_thinking(body, &wire_model);
     }
 }
@@ -751,13 +795,7 @@ impl AnthropicProvider {
             // generation-5 models the field defaults to adaptive, so a
             // `Disabled` config has to say so explicitly or the model thinks
             // anyway (and bills for it).
-            ThinkingConfig::Disabled => {
-                if model_defaults_to_adaptive_thinking(&opts.model)
-                    && !model_rejects_disabled_thinking(&opts.model)
-                {
-                    body["thinking"] = serde_json::json!({ "type": "disabled" });
-                }
-            }
+            ThinkingConfig::Disabled => lower_thinking_off(&mut body, &opts.model),
             ThinkingConfig::Adaptive => {
                 body["thinking"] = serde_json::json!({ "type": "adaptive" });
             }
@@ -771,10 +809,8 @@ impl AnthropicProvider {
                     if !model_defaults_to_adaptive_thinking(&opts.model) {
                         body["thinking"] = serde_json::json!({ "type": "adaptive" });
                     }
-                } else if model_defaults_to_adaptive_thinking(&opts.model)
-                    && !model_rejects_disabled_thinking(&opts.model)
-                {
-                    body["thinking"] = serde_json::json!({ "type": "disabled" });
+                } else {
+                    lower_thinking_off(&mut body, &opts.model);
                 }
             }
             ThinkingConfig::Enabled { budget_tokens }
@@ -1221,7 +1257,7 @@ pub(crate) fn tool_choice_forces_tool_use(value: &serde_json::Value) -> bool {
 /// in the shared `allowed_tool_choice_modes` vocabulary. An empty list is the
 /// catalog stating no restriction, which is the case for every Anthropic route
 /// except the ones that removed the feature.
-fn forced_tool_choice_allowed(caps: &crate::llm::capabilities::Capabilities) -> bool {
+pub(crate) fn forced_tool_choice_allowed(caps: &crate::llm::capabilities::Capabilities) -> bool {
     caps.allowed_tool_choice_modes.is_empty()
         || caps
             .allowed_tool_choice_modes

@@ -22,13 +22,14 @@ mod reminders;
 mod routing;
 mod system_prompt;
 mod thinking;
+mod tool_choice;
 mod tool_search;
 mod validate;
 
 pub(crate) use directive_placement::uncommitted_directives;
 pub(crate) use reminders::{
     apply_rendered_reminder_messages, directive_envelope_message, has_directive_commit_metadata,
-    pending_reminders_from_session, render_pending_reminders,
+    pending_reminders_from_session, render_pending_reminders, DIRECTIVE_IDS_KEY,
 };
 #[cfg(test)]
 pub(crate) use reminders::{strip_directive_commit_metadata, tracked_directive_envelope_message};
@@ -60,6 +61,8 @@ mod routing_test_support;
 mod routing_tests;
 #[cfg(test)]
 mod thinking_effort_tests;
+#[cfg(test)]
+mod tool_choice_tests;
 
 // Shared imports re-exported across the whole `options` subtree so each
 // submodule only needs `use super::*;`.

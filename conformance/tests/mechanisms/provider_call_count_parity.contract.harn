@@ -1,0 +1,95 @@
+// The physical provider request count has one authority: the observed
+// transport boundary. `agent_loop` and `llm_call` must therefore report the
+// same count for the same event. Before the call-scoped dispatch ledger,
+// `agent_loop` measured through its session while a bare structured call
+// measured nothing and asserted one unknown attempt, so a refusal that never
+// dispatched read as one unpriced call on one surface and zero on the other
+// (burin-labs/harn#8529).
+//
+// Every case runs on the mock provider: no request leaves the process and no
+// credential is needed.
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+const REFUSING_BUDGET = {max_input_tokens: 1}
+
+fn structured_call(llm: HarnessLlm, budget: dict?) -> dict {
+  const options = {provider: "mock", model: "mock", max_tokens: 32}
+    + if budget == nil {
+      {}
+    } else {
+      {budget: budget}
+    }
+  return llm.call_structured_result(
+    "Reply with an object.",
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["ok"],
+      properties: {ok: {type: "boolean"}},
+    },
+    options,
+  )
+}
+
+fn loop_run(harness: Harness, budget: dict?) -> dict {
+  const options = {provider: "mock", model: "mock", max_iterations: 1, final_wrapup: false}
+    + if budget == nil {
+      {}
+    } else {
+      {budget: budget}
+    }
+  return agent_loop(harness, "Reply briefly.", nil, options)
+}
+
+pipeline default(harness: Harness) {
+  // TRIGGER: a budget refusal projected before any request is built. Both
+  // surfaces must report a measured zero, and the structured envelope must
+  // not carry an unpriced or usage-unknown attempt for a request it never made.
+  const refused_loop = loop_run(harness, REFUSING_BUDGET)
+  const refused_call = structured_call(harness.llm, REFUSING_BUDGET)
+  contract_effect(
+    harness.stdio,
+    "pre_dispatch_refusal_agent_loop_measures_zero",
+    refused_loop.status == "budget_exhausted" && refused_loop.provider_call_count == 0,
+  )
+  contract_effect(
+    harness.stdio,
+    "pre_dispatch_refusal_structured_call_measures_zero",
+    !(refused_call.ok ?? true) && refused_call.usage?.provider_call_count == 0
+      && refused_call.usage?.unpriced_calls == 0
+      && refused_call.usage?.usage_unknown_calls == 0,
+  )
+  contract_effect(
+    harness.stdio,
+    "pre_dispatch_refusal_surfaces_agree",
+    refused_loop.provider_call_count == refused_call.usage?.provider_call_count,
+  )
+  contract_effect(
+    harness.stdio,
+    "pre_dispatch_refusal_costs_exactly_zero",
+    refused_call.usage?.cost_usd == 0.0 && refused_call.usage?.known_cost_usd == 0.0,
+  )
+  // NEGATIVE: one real request must still count as one on both surfaces. A
+  // measurement that answered zero to everything would pass the trigger above
+  // and fail here.
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"ok\": true}"), llm_text("ok")],
+    { ->
+      const answered_call = structured_call(harness.llm, nil)
+      const answered_loop = loop_run(harness, nil)
+      contract_negative(
+        harness.stdio,
+        "negative_real_request_still_counts_on_structured_call",
+        answered_call.usage?.provider_call_count != 1,
+      )
+      contract_negative(
+        harness.stdio,
+        "negative_real_request_still_counts_on_agent_loop",
+        answered_loop.provider_call_count != 1,
+      )
+    },
+  )
+}

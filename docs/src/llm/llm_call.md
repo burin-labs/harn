@@ -158,12 +158,12 @@ or derive cache behavior independently.
 
 | Field | Type | Description |
 |---|---|---|
-| `input_tokens` | int | Input/prompt token count |
+| `input_tokens` | int | Full prompt token count, including cache reads and cache writes, on every provider |
 | `output_tokens` | int | Output/completion token count |
 | `reported_total_tokens` | int \| nil | Whole-call token count reported directly by the provider. This preserves total-only receipts without assigning tokens to an unknown input/output component. |
 | `cost_usd` | float \| nil | Cache- and serving-tier-adjusted catalog price for this response; `nil` (not `0`) when pricing is unknown |
 | `known_cost_usd` | float | Priced lower bound across all physical provider calls, retained when `cost_usd` is unknown because one call was unpriced |
-| `provider_call_count` | int | Physical provider calls represented by this logical call, including retries |
+| `provider_call_count` | int | Physical provider calls represented by this logical call, including retries. Measured at the transport boundary, so it is `0` for a terminal that never dispatched (a budget refusal, an admission denial, an argument error) and agrees with `agent_loop`'s count for the same event. A thrown `llm_call` error dict carries the same field. |
 | `unpriced_calls` | int | Physical calls without known catalog pricing |
 | `usage_unknown_calls` | int | Physical calls that returned no authoritative token or cost accounting |
 | `cache_read_tokens` | int | Prompt tokens served from provider-side cache |
@@ -176,6 +176,30 @@ or derive cache behavior independently.
 | `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
 | `provider_telemetry` | dict | Raw provider-reported usage/telemetry, passed through when present |
 | `provider_attempts` | dict | How many provider requests this one logical call took, and why the extra ones happened (see below) |
+
+Anthropic's wire `input_tokens` and Bedrock Converse's `inputTokens` count fresh
+input only. Harn adds the provider's
+cache-read and cache-write counts before recording `usage.input_tokens`. For
+example, 40 fresh tokens, 5,000 cache reads, and 100 cache writes become 5,140
+input tokens. The unmodified counter remains in
+`usage.provider_telemetry.server_prompt_tokens`; Anthropic failed-response receipts retain
+it as `reported_input_tokens`. OpenAI-compatible prompt totals already include
+cache and are not increased. Historical Anthropic and Bedrock records produced before this
+normalization can still contain fresh-only input counts.
+
+`harn provider cache-probe --usage-fixture <file>` applies the same accounting
+to saved usage. Raw Anthropic fixtures use `cache_read_input_tokens` and
+`cache_creation_input_tokens`; normalized Harn fixtures use `cache_read_tokens`
+and `cache_write_tokens` with an inclusive `input_tokens`. Inconsistent
+normalized counts remain errors. An omitted cache counter remains missing,
+distinct from a reported zero.
+
+Cache conformance reports use schema version 2. Missing prompt or cache-read
+evidence yields `usage_unreported`, including canonical usage whose
+`cache_visibility` is `undeclared`. The report counts those runs and fails the
+dogfood gate rather than claiming a measured miss. Malformed or conflicting
+counter aliases yield `provider_field_inconsistent`. A positive cache read does
+not require an output or cache-write counter.
 
 For llama.cpp calls, `usage.provider_telemetry` also separates prompt size from
 prompt work:
@@ -930,6 +954,100 @@ reason: "budget_exceeded", projected_cost_usd: ...})`.
 `agent_loop` accepts the same envelope. `max_*` limits apply to each model turn;
 `total_budget_usd` is an aggregate loop budget and exits gracefully with
 `status: "budget_exhausted"` before starting a turn that would exceed it.
+
+### Conservative admission
+
+The default budget uses request estimates and observed output/cache usage. For
+before-transport monetary admission, opt in on the first call of an execution:
+
+```harn
+import { LlmBudget } from "std/llm/options"
+
+const bounded: LlmBudget = {
+  admission: "conservative", total_budget_usd: 0.60,
+}
+const answer = try {
+  harness.llm.call("Return one word", nil, {
+    provider: "openai", model: "gpt-6-luna",
+    max_tokens: 64, budget: bounded,
+  })
+}
+const admission = harness.llm.session_cost().admission
+```
+
+This mode reserves the full catalog context at the highest applicable input
+and cache rates, plus the requested output limit at the highest output rate.
+It does not use a tokenizer estimate, past short completions, or cache hits to
+reduce the next reservation. A known-price attempt that cannot fit is refused
+before provider transport. An explicit `max_cost_usd` also limits each attempt.
+
+One execution and its inherited inline/spawned work share the reservation
+ledger. The first conservative call fixes the ceiling; later calls may tighten
+it but cannot widen it or disable it by omitting `budget`. Activation after an
+unreserved attempt is refused. Independent top-level executions have separate
+ledgers. Allocate disjoint budgets to separate processes: for an experiment,
+actor and grader allocations across both arms must sum to the whole allowance.
+The runtime does not turn separate process budgets into a shared batch cap.
+
+Full, streaming, offthread, retry, and fallback attempts use the same admission
+boundary. Complete, consistent provider token counters release only the unused
+part of the reservation, at conservative rates without cache discounts. Errors,
+cancellation, and missing usage retain the full amount as uncertain, including
+failures that might have occurred before sending. They are never free retries.
+
+Supported billing shapes are direct OpenAI text and direct Anthropic text with
+ordinary five-minute caching, exact catalog pricing, a context limit, and a
+positive output cap. Complete Anthropic fresh-input, cache-read, cache-write,
+and output counters settle at conservative rates. Missing cache categories
+retain the full input-context bound and release only unused output allowance;
+missing categories are never treated as known zero. This can exhaust an
+allowance well before actual spend; read the separate admission receipt. One-hour caching is refused even
+when requested in an inline cache-control block. Premium serving, media,
+hosted provider tools, opaque provider overrides, expiring promotional rates,
+and unpriced or other provider routes are refused. Fill-in-the-middle
+completion, provider conformance probes, and healthcheck/warm-up operations
+also refuse an active conservative scope; run any required preflight separately
+under its own allocation before starting the bounded execution. Generic HTTP,
+connector and subprocess charges are outside `LlmBudget`. Ordinary function tools are
+supported. This is enforcement against the catalog's provider contract, not an
+invoice guarantee: if reported usage exceeds the reserved bound, Harn records
+it, reports a contract violation, and refuses subsequent attempts.
+
+`harness.llm.session_cost().admission` is absent in default mode. When active it
+contains `mode`, `ceiling_usd`, `settled_upper_usd`, `in_flight_usd`,
+`uncertain_usd`, `denied_attempts`, and `contract_broken`. Monetary fields are
+exact decimal strings. A known output-limit or route violation stops further
+admission even when missing usage prevents complete settlement.
+Denials retain the terminal `budget_exceeded` contract and add a typed
+`admission_reason`, such as `unknown_pricing`, `unsupported_billing_shape`, or
+`insufficient_allowance`.
+
+These are reservation facts, separate from the existing actual-usage totals
+and their unknown-usage indicators; `settled_upper_usd` is not billed spend.
+
+### Native host budgets
+
+Rust embedders can retain one `harn_vm::llm::ConservativeLlmBudget` handle and
+wrap their futures with `scope`. Its `receipt` exposes the same reservation
+facts. Cloning a handle shares its ledger. Module initialization and later VM
+entries within that scope consume one allowance; asynchronous suspension does
+not expose it to another host task. A nested handle may tighten the parent but
+cannot replace it with a different allowance.
+
+Served calls opt in with
+`@budget(llm_admission: "conservative", llm_cost_usd: 0.6)`. The scope starts
+before loading module code and covers the handler. Each independent served call
+gets a separate allowance, so callers must allocate across calls themselves.
+
+An ACP embedder sets `BudgetSpec.llm_admission` to
+`Some(AdmissionMode::Conservative)` alongside `llm_cost_usd`. The live session
+retains its ledger across prompt turns and shares it with session forks.
+Changing the session budget cannot raise or remove an activated ceiling.
+Configure this before the first prompt: cold-restored sessions cannot prove
+their prior reservation state and refuse conservative admission. Start a new
+independently allocated run instead. Durable worker declarations currently
+refuse this mode before module execution; their persisted grant lifecycle is
+not yet supported. These host scopes still do not allocate across processes.
 
 | Function | Description |
 |---|---|

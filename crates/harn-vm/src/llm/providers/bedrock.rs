@@ -23,6 +23,7 @@ use crate::llm::providers::common::{
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
+use crate::llm::usage::{InputTokenBasis, PromptTokenCounts};
 use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
 
@@ -141,6 +142,18 @@ impl BedrockProvider {
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
         strip_anthropic_sampling_params(&mut body, request);
+        // Converse does not lower through `DialectContract`, and its only
+        // reasoning-bearing field arrives through provider overrides, so the
+        // receipt is taken here — after overrides and the sampling strip —
+        // rather than at the body builder, which never sets one.
+        crate::llm::reasoning_receipt::record(
+            &request.provider,
+            &request.model,
+            "bedrock_converse",
+            &request.thinking,
+            &["additionalModelRequestFields.thinking"],
+            &body,
+        );
         let body_bytes = serde_json::to_vec(&body)
             .map_err(|error| vm_err(format!("bedrock request serialization failed: {error}")))?;
         let path = format!(
@@ -171,12 +184,10 @@ impl BedrockProvider {
         for (name, value) in signed.headers {
             req = req.header(name, value);
         }
-        let response = req.send().await.map_err(|error| {
-            vm_err(format!(
-                "bedrock API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))
-        })?;
+        let response = req
+            .send()
+            .await
+            .map_err(|error| crate::llm::api::reqwest_send_error("bedrock", "API", error))?;
         if !response.status().is_success() {
             return Err(crate::llm::api::err_for_non_success("bedrock", response).await);
         }
@@ -540,10 +551,29 @@ fn parse_bedrock_converse_response(
             }
         }
     }
-    result.input_tokens = json["usage"]["inputTokens"].as_i64().unwrap_or(0);
+    let reported_input_tokens = json["usage"]["inputTokens"].as_i64();
     result.output_tokens = json["usage"]["outputTokens"].as_i64().unwrap_or(0);
-    result.cache_read_tokens = json["usage"]["cacheReadInputTokens"].as_i64().unwrap_or(0);
-    result.cache_write_tokens = json["usage"]["cacheWriteInputTokens"].as_i64().unwrap_or(0);
+    result.cache_read_tokens = crate::llm::usage::extract_cache_read_tokens(&json["usage"])?;
+    result.cache_write_tokens = crate::llm::usage::extract_cache_write_tokens(&json["usage"])?;
+    // Converse counts only fresh input, including when the model is not Claude.
+    // https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html
+    result.input_tokens = reported_input_tokens
+        .map(|input| {
+            PromptTokenCounts::from_reported(
+                input,
+                result.cache_read_tokens,
+                result.cache_write_tokens,
+                InputTokenBasis::Fresh,
+            )
+            .map(|counts| counts.total)
+            .map_err(vm_err)
+        })
+        .transpose()?
+        .unwrap_or(0);
+    *result.telemetry =
+        crate::llm::api::ProviderTelemetry::new(crate::llm::api::telemetry_source::BEDROCK_USAGE);
+    result.telemetry.server_prompt_tokens = reported_input_tokens;
+    result.telemetry.server_output_tokens = json["usage"]["outputTokens"].as_i64();
     result.stop_reason = json["stopReason"].as_str().map(str::to_string);
     Ok(result)
 }
@@ -1140,10 +1170,24 @@ mod tests {
         });
         let result = parse_bedrock_converse_response(&json, "anthropic.claude-3-5-sonnet-v2:0")
             .expect("result");
-        assert_eq!(result.input_tokens, 5);
+        assert_eq!(result.input_tokens, 29);
+        assert_eq!(result.telemetry.server_prompt_tokens, Some(5));
         assert_eq!(result.output_tokens, 7);
         assert_eq!(result.cache_read_tokens, 11);
         assert_eq!(result.cache_write_tokens, 13);
+    }
+
+    #[test]
+    fn converse_prompt_total_does_not_depend_on_cache_being_larger_than_fresh_input() {
+        let json = json!({
+            "output": {"message": {"content": [{"text": "hi"}]}},
+            "usage": {"inputTokens": 6000, "outputTokens": 8, "cacheReadInputTokens": 5000, "cacheWriteInputTokens": 100},
+            "stopReason": "end_turn"
+        });
+        let result =
+            parse_bedrock_converse_response(&json, "anthropic.claude-3-5-sonnet-v2:0").unwrap();
+        assert_eq!(result.input_tokens, 11100);
+        assert_eq!(result.telemetry.server_prompt_tokens, Some(6000));
     }
 
     #[test]

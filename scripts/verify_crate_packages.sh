@@ -148,12 +148,18 @@ emit_dependency_resolution_receipts() {
     IFS=$'\t' read -r package package_version dependency requirement minimum resolution_name <<<"$row"
     resolved="$(resolved_dependency_version \
       "$metadata_path" "$package" "$package_version" "$resolution_name")"
-    if [[ "$require_minimum" == "1" && "$resolved" != "$minimum" ]]; then
+    # A contract with no declared minimum has no floor to assert. It is a
+    # ceiling: the requirement names the first version that breaks, and the
+    # resolver-latest build is its whole proof. Keep emitting its receipt so
+    # the resolved version stays visible in both phases. `none` is the plan's
+    # absent-field token; the row never carries an empty field, because tab is
+    # IFS whitespace and an empty one would shift every later field left.
+    if [[ "$require_minimum" == "1" && "$minimum" != "none" && "$resolved" != "$minimum" ]]; then
       echo "error: $phase resolved $package dependency $dependency to $resolved, expected minimum $minimum" >&2
       return 1
     fi
-    printf 'dependency_resolution phase=%s package=%s@%s dependency=%s requirement=%s resolved=%s\n' \
-      "$phase" "$package" "$package_version" "$dependency" "$requirement" "$resolved"
+    printf 'dependency_resolution phase=%s package=%s@%s dependency=%s requirement=%s minimum=%s resolved=%s\n' \
+      "$phase" "$package" "$package_version" "$dependency" "$requirement" "$minimum" "$resolved"
   done
 }
 
@@ -163,6 +169,10 @@ select_dependency_minimums() {
   local entry selected_dependency selected_minimum found
   for row in "${dependency_contract_rows[@]}"; do
     IFS=$'\t' read -r _package _package_version dependency _requirement minimum _resolution_name <<<"$row"
+    # No declared minimum means no declared-minimum pin for this dependency.
+    if [[ "$minimum" == "none" ]]; then
+      continue
+    fi
     found=0
     for entry in "${selected[@]}"; do
       IFS=$'\t' read -r selected_dependency selected_minimum <<<"$entry"
@@ -179,37 +189,6 @@ select_dependency_minimums() {
     fi
   done
   printf '%s\n' "${selected[@]}"
-}
-
-# `check_packaged_workspace`'s resolver-latest phase deliberately carries no
-# lock: it resolves against whatever is newest on crates.io today, so it
-# always builds the exact set a fresh downstream `cargo add` would get right
-# now. That is also its whole exposure — any transitive dependency that
-# ships a compile-broken release fails this workspace with no relation to a
-# Harn code change, and `--locked`/`--frozen` cannot help (there is no lock
-# for that synthetic workspace to honor). Each row below is one such known
-# release excluded by pinning it to the last good version, so the next
-# external break is one row to add and the fix is one row to delete once the
-# crate publishes a working release. `crate` / `precise_version` feed
-# `cargo update --manifest-path ... -p <crate> --precise <precise_version>`;
-# `reason` and `date_added` are for humans grepping this table, not read by
-# any script.
-#
-# crate    precise_version  reason                                                date_added
-external_publish_pins_table='
-tinyvec  1.12.0           tinyvec 1.13.0 (published 2026-09-02) does not compile: `vec!` is unreachable in tinyvec.rs, an upstream defect  2026-09-03
-'
-
-apply_external_publish_pins() {
-  local manifest="$1"
-  local line crate precise_version rest
-  while IFS= read -r line; do
-    [[ -n "${line// /}" ]] || continue
-    read -r crate precise_version rest <<<"$line"
-    [[ -n "$crate" ]] || continue
-    echo "=== Pinning $crate to $precise_version in the resolver-latest workspace (external_publish_pins_table: $rest) ==="
-    cargo update --manifest-path "$manifest" -p "$crate" --precise "$precise_version"
-  done <<<"$external_publish_pins_table"
 }
 
 stdlib_version="$(package_version harn-stdlib)"

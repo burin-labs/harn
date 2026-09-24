@@ -1,6 +1,6 @@
 use super::blocks::append_coalesced_text_block;
 use super::*;
-use crate::llm::usage::ProviderUsageReceipt;
+use crate::llm::usage::{InputTokenBasis, ProviderUsageReceipt};
 
 /// Consume an SSE streaming response from an already-sent request.
 /// Parses `data: {...}` lines from the response body, then defers to
@@ -338,22 +338,33 @@ pub(super) fn non_stream_body_error(provider: &str, error: reqwest::Error) -> Vm
     reqwest_send_error(provider, "response body", error)
 }
 
-/// Shared reqwest-`Error`-kind classifier for streaming sends, non-streaming
-/// sends, and non-streaming response-body reads. Maps the reqwest kind to an explicit
-/// [`crate::value::ErrorCategory`] (carried on a `CategorizedError`) so the
-/// retry/observability layer reads a typed category rather than re-deriving it
-/// from the message text. `phase` ("stream" / "request") only flavors the
-/// human-readable message; the typed category drives retry decisions.
-pub(super) fn reqwest_send_error(provider: &str, phase: &str, error: reqwest::Error) -> VmError {
+/// The one way a `reqwest::Error` becomes a `VmError` on an LLM path: streaming
+/// sends, non-streaming sends, provider-specific sends, and response-body reads.
+/// Maps the reqwest kind to an explicit [`crate::value::ErrorCategory`] (carried
+/// on a `CategorizedError`) so the retry/observability layer reads a typed
+/// category rather than re-deriving it from the message text.
+///
+/// The message cannot carry that decision. reqwest's `Display` for every
+/// transport failure is `error sending request for url (...)`; whether it was a
+/// refused connect, a DNS failure or a reset lives in the source chain, which
+/// `redact_reqwest_error` drops. `phase` only flavors the human-readable
+/// message; the typed category drives retry decisions.
+pub(crate) fn reqwest_send_error(provider: &str, phase: &str, error: reqwest::Error) -> VmError {
     use crate::value::ErrorCategory;
     let (kind, category) = if error.is_timeout() {
         ("timeout", Some(ErrorCategory::Timeout))
     } else if error.is_connect() {
         ("connect", Some(ErrorCategory::TransientNetwork))
-    } else if error.is_request() {
+    } else if error.is_builder() {
         // A malformed request build is the caller's fault, not a transient
         // network blip — leave it uncategorized so it is not blindly retried.
         ("request_build", None)
+    } else if error.is_request() {
+        // reqwest wraps every failure of the HTTP client future in this kind:
+        // a connection closed before the response, a reset mid-write, an HTTP/2
+        // GOAWAY. `is_builder` is where a malformed request lands, so what is
+        // left here is the transport, and the transport is transient.
+        ("send", Some(ErrorCategory::TransientNetwork))
     } else if error.is_body() || error.is_decode() {
         // `Response::text()` drains bytes through reqwest's decode wrapper, so
         // a connection reset or truncated body reports `is_decode()` even
@@ -664,6 +675,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     let mut stop_reason: Option<String> = None;
     let mut cache_read_tokens: i64 = 0;
     let mut cache_write_tokens: i64 = 0;
+    let mut anthropic_cache_usage = Box::<crate::llm::usage::ReportedCacheUsage>::default();
     // Counter for fallback streaming-tool-call ids when a provider sent
     // an empty id on the first tool_use block. Kept stable across the
     // stream so the coalesced updates reuse the same id the dispatcher
@@ -782,14 +794,9 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                     }
                     served_fast |= crate::llm::serving_tiers::served_fast(model, &json["message"]);
                     let usage = &json["message"]["usage"];
-                    let cr = extract_cache_read_tokens(usage);
-                    if cr > 0 {
-                        cache_read_tokens = cr;
-                    }
-                    let cw = extract_cache_write_tokens(usage);
-                    if cw > 0 {
-                        cache_write_tokens = cw;
-                    }
+                    anthropic_cache_usage.merge_value(usage)?;
+                    cache_read_tokens = anthropic_cache_usage.read_tokens.unwrap_or(0);
+                    cache_write_tokens = anthropic_cache_usage.write_tokens.unwrap_or(0);
                     if let Some(rid) = json["message"]["id"].as_str() {
                         if !rid.is_empty() {
                             anth_request_id = Some(rid.to_string());
@@ -977,14 +984,9 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                         reported_output_tokens = Some(n);
                     }
                     let usage = &json["usage"];
-                    let cr = extract_cache_read_tokens(usage);
-                    if cr > 0 {
-                        cache_read_tokens = cr;
-                    }
-                    let cw = extract_cache_write_tokens(usage);
-                    if cw > 0 {
-                        cache_write_tokens = cw;
-                    }
+                    anthropic_cache_usage.merge_value(usage)?;
+                    cache_read_tokens = anthropic_cache_usage.read_tokens.unwrap_or(0);
+                    cache_write_tokens = anthropic_cache_usage.write_tokens.unwrap_or(0);
                     if let Some(sr) = json["delta"]["stop_reason"].as_str() {
                         stop_reason = Some(sr.to_string());
                     }
@@ -1167,11 +1169,11 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                     output_tokens = n;
                     reported_output_tokens = Some(n);
                 }
-                let cr = extract_cache_read_tokens(usage);
+                let cr = extract_cache_read_tokens(usage)?;
                 if cr > 0 {
                     cache_read_tokens = cr;
                 }
-                let cw = extract_cache_write_tokens(usage);
+                let cw = extract_cache_write_tokens(usage)?;
                 if cw > 0 {
                     cache_write_tokens = cw;
                 }
@@ -1347,12 +1349,20 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         served_fast,
     )
     .with_reported_total(telemetry.server_total_tokens)
+    .with_billing(telemetry.billing.clone())
     .with_cache(
         cache_read_tokens,
         cache_write_tokens,
         telemetry.cache_accounting_declared,
         true,
     );
+    let provider_usage = if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
+        let receipt = provider_usage.with_input_basis(InputTokenBasis::Fresh)?;
+        input_tokens = receipt.input_tokens().unwrap_or(0);
+        receipt
+    } else {
+        provider_usage
+    };
     if text.is_empty()
         && thinking_text.is_empty()
         && output_tokens > 0
@@ -1408,13 +1418,17 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     };
     if telemetry.is_empty()
         && dialect.stream_protocol() == StreamProtocol::AnthropicSse
-        && (input_tokens > 0 || output_tokens > 0)
+        && (reported_input_tokens.is_some() || reported_output_tokens.is_some())
     {
         let usage = serde_json::json!({
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
+            "input_tokens": reported_input_tokens,
+            "output_tokens": reported_output_tokens,
         });
         telemetry = ProviderTelemetry::from_anthropic_usage(&usage, anth_request_id.as_deref());
+    }
+    if dialect.stream_protocol() == StreamProtocol::AnthropicSse && anthropic_cache_usage.has_any()
+    {
+        telemetry.reported_cache_usage = Some(anthropic_cache_usage);
     }
     telemetry.capture_request_id(provider_request_id);
     // Written after the loop, never inside it: the usage frame replaces
@@ -1444,6 +1458,6 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         served_fast,
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }

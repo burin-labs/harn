@@ -40,6 +40,7 @@ pub(crate) async fn vm_call_completion_full(
     prefix: &str,
     suffix: Option<&str>,
 ) -> Result<LlmResult, VmError> {
+    crate::llm::admission::check_auxiliary(opts.budget.as_ref(), "fill-in-the-middle completion")?;
     if opts.provider == "mock" {
         return Ok(mock_completion_response(prefix, suffix));
     }
@@ -169,13 +170,10 @@ async fn vm_call_completion_openai_style(
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
-    let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{} completion API error: {}",
-            opts.provider,
-            crate::egress::redact_reqwest_error(&e)
-        ))))
-    })?;
+    let response = req
+        .send()
+        .await
+        .map_err(|e| crate::llm::api::reqwest_send_error(&opts.provider, "completion", e))?;
 
     let json = completion_json_response(&opts.provider, response).await?;
 
@@ -199,8 +197,8 @@ async fn vm_call_completion_openai_style(
         raw_tool_calls: Vec::new(),
         input_tokens: json["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0),
-        cache_read_tokens: extract_cache_read_tokens(&json["usage"]),
-        cache_write_tokens: extract_cache_write_tokens(&json["usage"]),
+        cache_read_tokens: extract_cache_read_tokens(&json["usage"])?,
+        cache_write_tokens: extract_cache_write_tokens(&json["usage"])?,
         cache_supported: true,
         model: opts.model.clone(),
         provider: opts.provider.clone(),
@@ -215,7 +213,7 @@ async fn vm_call_completion_openai_style(
             "visibility": "public",
         })],
         logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 
@@ -300,13 +298,10 @@ async fn vm_call_completion_ollama(
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
-    let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{} completion API error: {}",
-            opts.provider,
-            crate::egress::redact_reqwest_error(&e)
-        ))))
-    })?;
+    let response = req
+        .send()
+        .await
+        .map_err(|e| crate::llm::api::reqwest_send_error(&opts.provider, "completion", e))?;
     let json = completion_json_response(&opts.provider, response).await?;
     if let Some(err) = json["error"].as_str() {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -341,7 +336,7 @@ async fn vm_call_completion_ollama(
             "visibility": "public",
         })],
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 

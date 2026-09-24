@@ -42,6 +42,8 @@ pub use config::*;
 pub use data_controls::*;
 pub use harn_provider_catalog::model_def::*;
 pub use harn_provider_catalog::presentation::*;
+pub use harn_provider_catalog::pricing::*;
+pub use harn_provider_catalog::ModelOperation;
 pub use loading::*;
 pub use overlay_audit::*;
 pub use provider_def::*;

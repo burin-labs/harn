@@ -280,6 +280,7 @@ fn external_declared_paths_are_denied_without_root() {
             cleanup: None,
             environment_policy: Default::default(),
             grants: Vec::new(),
+            admitted_environment: Vec::new(),
         },
     ));
     policy_with_path_annotation("read_file", ToolKind::Read);
@@ -582,4 +583,222 @@ fn approval_repeat_digest_ignores_argument_key_order() {
     let second: serde_json::Value = serde_json::from_str(r#"{"alpha":2,"zeta":1}"#).unwrap();
 
     assert_eq!(stable_json_digest(&first), stable_json_digest(&second));
+}
+
+/// bc#8748 / harn#8463. A refusal must name the rule that refused it.
+///
+/// Every deny used to leave this evaluator wearing `approval_policy`,
+/// including the two refusals the built-in guards make before a single
+/// configured rule is read. A person who had turned interactive approval off
+/// was told approval had denied them, and went to inspect a control that had
+/// no part in it. The falsifier is per source: each of the deciding
+/// mechanisms below must produce a DIFFERENT gate, so relabelling everything
+/// to one new value cannot pass either.
+#[test]
+fn each_deciding_source_names_its_own_gate() {
+    use crate::agent_events::DenialGate;
+
+    let temp = tempfile::tempdir().unwrap();
+    crate::stdlib::process::set_thread_execution_context(Some(
+        crate::orchestration::RunExecutionRecord {
+            cwd: Some(temp.path().to_string_lossy().into_owned()),
+            project_root: None,
+            source_dir: Some(temp.path().to_string_lossy().into_owned()),
+            env: BTreeMap::new(),
+            adapter: None,
+            repo_path: None,
+            worktree_path: None,
+            branch: None,
+            base_ref: None,
+            cleanup: None,
+            environment_policy: Default::default(),
+            grants: Vec::new(),
+            admitted_environment: Vec::new(),
+        },
+    ));
+    policy_with_path_annotation("read_file", ToolKind::Read);
+
+    // The workspace path boundary: outside the workspace, no external root.
+    let outside = evaluate_tool_approval_policy(
+        &ToolApprovalPolicy::default(),
+        "read_file",
+        &serde_json::json!({"path": "/tmp/outside.txt"}),
+        None,
+    );
+    assert!(outside.is_deny());
+    assert_eq!(
+        outside
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.source.as_str()),
+        Some(SOURCE_DEFAULT_EXTERNAL_PATH),
+    );
+    assert_eq!(outside.denial_gate(), DenialGate::WorkspaceBoundary);
+
+    // The sensitive-path default, decided in the same pass but by a
+    // different rule, on a path INSIDE the workspace so the boundary above
+    // cannot be what refused it.
+    let sensitive = evaluate_tool_approval_policy(
+        &ToolApprovalPolicy::default(),
+        "read_file",
+        &serde_json::json!({"path": "config/.env"}),
+        None,
+    );
+    assert!(sensitive.is_deny());
+    assert_eq!(
+        sensitive
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.source.as_str()),
+        Some(SOURCE_DEFAULT_SENSITIVE_PATH),
+    );
+    assert_eq!(sensitive.denial_gate(), DenialGate::SensitivePath);
+
+    // NEGATIVE CONTROL. A configured approval decision is still an approval
+    // decision. Without this the change could pass by giving every refusal a
+    // new name, which would move the misreport rather than fix it.
+    let configured = evaluate_tool_approval_policy(
+        &ToolApprovalPolicy {
+            auto_deny: vec!["read_file".to_string()],
+            allow_sensitive_paths: true,
+            allow_external_paths: true,
+            ..Default::default()
+        },
+        "read_file",
+        &serde_json::json!({"path": "src/main.rs"}),
+        None,
+    );
+    assert!(configured.is_deny());
+    assert_eq!(configured.denial_gate(), DenialGate::ApprovalPolicy);
+
+    // The rendered signatures a person reads must differ too, or the typed
+    // gate is legible and the message still is not.
+    // Through the same constructor the dispatch seam uses, so this asserts
+    // production behaviour and not a re-derivation of it.
+    let rendered = [&outside, &sensitive, &configured].map(|decision| {
+        let denial = decision.terminal_denial();
+        assert_eq!(denial.gate, decision.denial_gate());
+        assert!(!denial.retryable, "a policy refusal is terminal");
+        (denial.reason, denial.denied_paths)
+    });
+    // The subject is a typed value, not only prose. A configured deny that
+    // did not refuse ON a path declares none, so "empty" keeps meaning
+    // "no path was the reason" instead of "nobody filled this in".
+    assert_eq!(rendered[0].1, vec!["/tmp/outside.txt".to_string()]);
+    // The sensitive-path guard reports the path it resolved and matched on,
+    // which for a workspace-relative argument is the absolute form.
+    assert_eq!(rendered[1].1.len(), 1, "{:?}", rendered[1].1);
+    assert!(
+        rendered[1].1[0].ends_with("config/.env"),
+        "{:?}",
+        rendered[1].1
+    );
+    assert!(rendered[2].1.is_empty(), "{:?}", rendered[2].1);
+    let rendered = rendered.map(|(reason, _)| reason);
+    assert!(
+        rendered[0].starts_with("Workspace boundary denial:"),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered[1].starts_with("Sensitive path denial:"),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered[2].starts_with("Approval policy denial:"),
+        "{rendered:?}"
+    );
+    // The subject the boundary refused is named, not only described.
+    assert!(rendered[0].contains("/tmp/outside.txt"), "{rendered:?}");
+
+    pop_execution_policy();
+    crate::stdlib::process::set_thread_execution_context(None);
+}
+
+/// A deny carrying no matched rule cannot silently become a path denial.
+#[test]
+fn a_ruleless_deny_stays_an_approval_denial() {
+    use crate::agent_events::DenialGate;
+    assert_eq!(denial_gate_for_source(None), DenialGate::ApprovalPolicy);
+    assert_eq!(
+        denial_gate_for_source(Some("auto_deny")),
+        DenialGate::ApprovalPolicy,
+    );
+    assert_eq!(
+        denial_gate_for_source(Some("repeat_limit")),
+        DenialGate::ApprovalPolicy,
+    );
+    assert_eq!(
+        denial_gate_for_source(Some(SOURCE_DEFAULT_PATH_GUARD)),
+        DenialGate::WorkspaceBoundary,
+    );
+}
+
+/// The half of #8463 that is easy to overstate, pinned so it cannot be.
+///
+/// `denied_paths` was never empty before this change: the dispatch seam
+/// backfilled it with EVERY path the call declared whenever the denial
+/// carried none. So the improvement is not "a path is named where none was",
+/// it is "the path that actually refused is named instead of the whole
+/// declared set". On a single-path call the two are indistinguishable, which
+/// is why this test uses a tool that declares two and refuses on one.
+#[test]
+fn a_path_refusal_names_the_path_that_refused_not_every_path_declared() {
+    let temp = tempfile::tempdir().unwrap();
+    crate::stdlib::process::set_thread_execution_context(Some(
+        crate::orchestration::RunExecutionRecord {
+            cwd: Some(temp.path().to_string_lossy().into_owned()),
+            project_root: None,
+            source_dir: Some(temp.path().to_string_lossy().into_owned()),
+            env: BTreeMap::new(),
+            adapter: None,
+            repo_path: None,
+            worktree_path: None,
+            branch: None,
+            base_ref: None,
+            cleanup: None,
+            environment_policy: Default::default(),
+            grants: Vec::new(),
+            admitted_environment: Vec::new(),
+        },
+    ));
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "move_file".to_string(),
+        ToolAnnotations {
+            kind: ToolKind::Move,
+            side_effect_level: SideEffectLevel::WorkspaceWrite,
+            arg_schema: ToolArgSchema {
+                path_params: vec!["from".to_string(), "to".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+    push_execution_policy(CapabilityPolicy {
+        tool_annotations: annotations,
+        ..Default::default()
+    });
+
+    // `from` is inside the workspace and unobjectionable; `to` is what the
+    // boundary refuses.
+    let args = serde_json::json!({"from": "src/main.rs", "to": "/tmp/outside.txt"});
+    let decision =
+        evaluate_tool_approval_policy(&ToolApprovalPolicy::default(), "move_file", &args, None);
+    assert!(decision.is_deny());
+
+    let declared = crate::orchestration::current_tool_declared_paths("move_file", &args);
+    assert!(
+        declared.len() > 1,
+        "this test measures nothing unless the call declares more than one path: {declared:?}"
+    );
+
+    let denial = decision.terminal_denial();
+    assert_eq!(
+        denial.denied_paths,
+        vec!["/tmp/outside.txt".to_string()],
+        "the refusal must name the path that refused, not the declared set {declared:?}"
+    );
+
+    pop_execution_policy();
+    crate::stdlib::process::set_thread_execution_context(None);
 }

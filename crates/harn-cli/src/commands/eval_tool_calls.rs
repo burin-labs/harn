@@ -446,6 +446,7 @@ fn phase_report(model: ModelSelector, output: RawPhaseOutput) -> PhaseReport {
         model_id,
         input_tokens.max(0),
         output_tokens.max(0),
+        harn_vm::llm_config::pricing_clock_now(),
     );
     let cost_usd = cost.unwrap_or(0.0);
     PhaseReport {

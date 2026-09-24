@@ -44,6 +44,7 @@ pub fn schema_value() -> Value {
                     "healthcheck": {"$ref": "#/$defs/healthcheck"},
                     "cache_usage_accounting": {"type": "boolean"},
                     "stream_usage_accounting": {"type": "boolean"},
+                    "platform_fee_percent": {"type": ["number", "null"], "minimum": 0},
                     "data_controls": {"$ref": "#/$defs/data_controls"},
                     "protocols": {"type": "array", "items": {"type": "string"}},
                     "features": {"type": "array", "items": {"type": "string"}},
@@ -240,86 +241,8 @@ pub fn schema_value() -> Value {
                 },
                 "additionalProperties": false
             },
-            "model": {
-                "type": "object",
-                "required": [
-                    "id",
-                    "name",
-                    "display_name",
-                    "provider",
-                    "aliases",
-                    "context_window",
-                    "modalities",
-                    "tool_support",
-                    "structured_output",
-                    "format_preferences",
-                    "reasoning",
-                    "prompt_cache",
-                    "deprecation",
-                    "availability",
-                    "quality_tags",
-                    "capability_tags",
-                    "family",
-                    "lineage",
-                    "tier"
-                ],
-                "properties": {
-                    "id": {"type": "string", "minLength": 1},
-                    "name": {"type": "string", "minLength": 1},
-                    "data_controls": {"$ref": "#/$defs/model_data_controls"},
-                    "display_name": {"type": "string", "minLength": 1},
-                    "blurb": {"type": "string", "minLength": 1},
-                    "provider": {"type": "string", "minLength": 1},
-                    "aliases": {"type": "array", "items": {"type": "string"}},
-                    "context_window": {"type": "integer", "minimum": 1},
-                    "logical_model": {"type": "string", "minLength": 1},
-                    "equivalence_group": {"type": "string", "minLength": 1},
-                    "served_variant": {"type": "string", "minLength": 1},
-                    "wire_model": {"type": "string", "minLength": 1},
-                    "api_dialect": {"type": "string", "minLength": 1},
-                    "rate_limits": {"$ref": "#/$defs/rate_limits"},
-                    "performance": {"$ref": "#/$defs/performance"},
-                    "architecture": {"$ref": "#/$defs/architecture"},
-                    "local_memory": {"$ref": "#/$defs/local_memory"},
-                    "runtime_context_window": {"type": "integer", "minimum": 1},
-                    "stream_timeout": {"type": "number", "exclusiveMinimum": 0},
-                    "modalities": {"$ref": "#/$defs/modalities"},
-                    "tool_support": {"$ref": "#/$defs/tool_support"},
-                    "structured_output": {"type": "string"},
-                    "format_preferences": {"$ref": "#/$defs/format_preferences"},
-                    "reasoning": {"$ref": "#/$defs/reasoning"},
-                    "prompt_cache": {"type": "boolean"},
-                    "batch": {"$ref": "#/$defs/model_batch_support"},
-                    "pricing": {"$ref": "#/$defs/pricing"},
-                    "deprecation": {"$ref": "#/$defs/deprecation"},
-                    "availability": {"enum": ["serverless", "dedicated", "unknown"]},
-                    "quality_tags": {"type": "array", "items": {"type": "string"}},
-                    "capability_tags": {"type": "array", "items": {"type": "string"}},
-                    "family": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-                    "lineage": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-                    "complementary_with": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"}},
-                    "avoid_as_reviewer_for": {"type": "array", "items": {"type": "string", "minLength": 1}},
-                    "completion_review": {"$ref": "#/$defs/completion_review"},
-                    "tier": {"enum": ["small", "mid", "frontier", "reasoning"]},
-                    "open_weight": {"type": "boolean"},
-                    "strengths": {"type": "array", "items": {"type": "string"}},
-                    "benchmarks": {"type": "object", "additionalProperties": {"type": "number"}},
-                    "serving_tiers": {
-                        "type": "array",
-                        "items": {"$ref": "#/$defs/serving_tier"}
-                    },
-                    "reasoning_modes": {
-                        "type": "array",
-                        "items": {"$ref": "#/$defs/reasoning_mode"}
-                    },
-                    "released": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
-                    "row_kind": {"enum": ["snapshot", "selector"]},
-                    "current_snapshot": {"type": "string", "minLength": 1},
-                    "embedding_dim": {"type": "integer", "minimum": 1},
-                    "embedding_max_tokens": {"type": "integer", "minimum": 1}
-                },
-                "additionalProperties": false
-            },
+            "model": model_schema(),
+            "model_operation": {"enum": llm_config::ModelOperation::ALL},
             "completion_review": {
                 "type": "object",
                 "required": ["evidence"],
@@ -479,6 +402,7 @@ pub fn schema_value() -> Value {
                     "output_per_mtok": {"type": "number", "minimum": 0},
                     "cache_read_per_mtok": {"type": ["number", "null"], "minimum": 0},
                     "cache_write_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                    "cache_write_1h_per_mtok": {"type": ["number", "null"], "minimum": 0},
                     "input_token_bands": {
                         "type": "array",
                         "items": {
@@ -495,7 +419,57 @@ pub fn schema_value() -> Value {
                     "promotions": {
                         "type": "array",
                         "items": {"$ref": "#/$defs/promotional_pricing"}
+                    },
+                    "schedules": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/recurring_pricing_window"}
+                    },
+                    "hosted_tool_fees": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "object",
+                            "required": ["per_1k_calls", "source_url"],
+                            "properties": {
+                                "per_1k_calls": {"type": "number", "minimum": 0},
+                                "free_per_month": {"type": ["integer", "null"], "minimum": 0},
+                                "source_url": {"type": "string"}
+                            },
+                            "additionalProperties": false
+                        }
+                    },
+                    "modality_rates": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "audio_input_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                            "audio_output_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                            "cached_audio_input_per_mtok": {"type": ["number", "null"], "minimum": 0}
+                        },
+                        "additionalProperties": false
                     }
+                },
+                "additionalProperties": false
+            },
+            "recurring_pricing_window": {
+                "type": "object",
+                "required": ["id", "days", "start", "end", "utc_offset", "input_multiplier", "output_multiplier", "source_url"],
+                "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "days": {
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": true,
+                        "items": {"enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}
+                    },
+                    "start": {"type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
+                    "end": {"type": "string", "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"},
+                    "utc_offset": {"type": "string", "pattern": "^[+-]([01][0-9]|2[0-3]):[0-5][0-9]$"},
+                    "input_multiplier": {"type": "number", "exclusiveMinimum": 0},
+                    "output_multiplier": {"type": "number", "exclusiveMinimum": 0},
+                    "cache_read_multiplier": {"type": ["number", "null"], "exclusiveMinimum": 0},
+                    "cache_write_multiplier": {"type": ["number", "null"], "exclusiveMinimum": 0},
+                    "source_url": {"type": "string", "minLength": 1},
+                    "review_after": {"type": "string", "format": "date"},
+                    "note": {"type": "string"}
                 },
                 "additionalProperties": false
             },
@@ -513,7 +487,8 @@ pub fn schema_value() -> Value {
                     "input_per_mtok": {"type": "number", "minimum": 0},
                     "output_per_mtok": {"type": "number", "minimum": 0},
                     "cache_read_per_mtok": {"type": ["number", "null"], "minimum": 0},
-                    "cache_write_per_mtok": {"type": ["number", "null"], "minimum": 0}
+                    "cache_write_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                    "cache_write_1h_per_mtok": {"type": ["number", "null"], "minimum": 0}
                 },
                 "additionalProperties": false
             },
@@ -773,5 +748,70 @@ pub fn schema_value() -> Value {
                 "additionalProperties": false
             }
         }
+    })
+}
+
+// Keep the model contract in its own frame: expanding the complete catalog in
+// one json! expression keeps every definition's temporaries on the same stack.
+fn model_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": [
+            "id", "name", "operations", "display_name", "provider", "aliases",
+            "context_window", "modalities", "tool_support", "structured_output",
+            "format_preferences", "reasoning", "prompt_cache", "deprecation",
+            "availability", "quality_tags", "capability_tags", "family", "lineage", "tier"
+        ],
+        "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "name": {"type": "string", "minLength": 1},
+            "data_controls": {"$ref": "#/$defs/model_data_controls"},
+            "display_name": {"type": "string", "minLength": 1},
+            "blurb": {"type": "string", "minLength": 1},
+            "provider": {"type": "string", "minLength": 1},
+            "aliases": {"type": "array", "items": {"type": "string"}},
+            "context_window": {"type": "integer", "minimum": 1},
+            "logical_model": {"type": "string", "minLength": 1},
+            "equivalence_group": {"type": "string", "minLength": 1},
+            "served_variant": {"type": "string", "minLength": 1},
+            "wire_model": {"type": "string", "minLength": 1},
+            "api_dialect": {"type": "string", "minLength": 1},
+            "rate_limits": {"$ref": "#/$defs/rate_limits"},
+            "performance": {"$ref": "#/$defs/performance"},
+            "architecture": {"$ref": "#/$defs/architecture"},
+            "local_memory": {"$ref": "#/$defs/local_memory"},
+            "runtime_context_window": {"type": "integer", "minimum": 1},
+            "stream_timeout": {"type": "number", "exclusiveMinimum": 0},
+            "modalities": {"$ref": "#/$defs/modalities"},
+            "tool_support": {"$ref": "#/$defs/tool_support"},
+            "structured_output": {"type": "string"},
+            "format_preferences": {"$ref": "#/$defs/format_preferences"},
+            "reasoning": {"$ref": "#/$defs/reasoning"},
+            "prompt_cache": {"type": "boolean"},
+            "batch": {"$ref": "#/$defs/model_batch_support"},
+            "pricing": {"$ref": "#/$defs/pricing"},
+            "deprecation": {"$ref": "#/$defs/deprecation"},
+            "availability": {"enum": ["serverless", "dedicated", "unknown"]},
+            "quality_tags": {"type": "array", "items": {"type": "string"}},
+            "capability_tags": {"type": "array", "items": {"type": "string"}},
+            "family": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+            "lineage": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+            "complementary_with": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"}},
+            "avoid_as_reviewer_for": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "completion_review": {"$ref": "#/$defs/completion_review"},
+            "tier": {"enum": ["small", "mid", "frontier", "reasoning"]},
+            "open_weight": {"type": "boolean"},
+            "strengths": {"type": "array", "items": {"type": "string"}},
+            "benchmarks": {"type": "object", "additionalProperties": {"type": "number"}},
+            "serving_tiers": {"type": "array", "items": {"$ref": "#/$defs/serving_tier"}},
+            "reasoning_modes": {"type": "array", "items": {"$ref": "#/$defs/reasoning_mode"}},
+            "released": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+            "row_kind": {"enum": ["snapshot", "selector"]},
+            "current_snapshot": {"type": "string", "minLength": 1},
+            "operations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/model_operation"}},
+            "embedding_dim": {"type": "integer", "minimum": 1},
+            "embedding_max_tokens": {"type": "integer", "minimum": 1}
+        },
+        "additionalProperties": false
     })
 }

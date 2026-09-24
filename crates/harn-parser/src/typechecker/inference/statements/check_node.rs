@@ -3,6 +3,7 @@ use super::*;
 impl TypeChecker {
     pub(in crate::typechecker) fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
+        self.check_predicate_node(snode, scope);
         match &snode.node {
             Node::ConstBinding {
                 pattern,
@@ -20,6 +21,7 @@ impl TypeChecker {
                 let context_checked =
                     self.check_node_with_expected(value, type_ann.as_ref(), scope);
                 let inferred = self.infer_type(value, scope);
+                self.record_predicate_binding(pattern, inferred.as_ref(), span, scope);
                 if let BindingPattern::Identifier(name) = pattern {
                     if let Some(expected) = type_ann {
                         if !context_checked {

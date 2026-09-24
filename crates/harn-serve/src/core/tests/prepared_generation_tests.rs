@@ -1,5 +1,43 @@
 use super::*;
 
+struct AdmissionProbe;
+
+impl VmConfigurator for AdmissionProbe {
+    fn configure(&self, vm: &mut Vm) -> Result<(), DispatchError> {
+        vm.register_builtin("test_admission_ceiling", |_args, _output| {
+            let nested = harn_vm::llm::ConservativeLlmBudget::new(10.0)?;
+            Ok(VmValue::String(
+                nested.receipt()?.ceiling_usd.to_string().into(),
+            ))
+        });
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn conservative_dispatch_covers_module_initialization_and_handler() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("admission.harn");
+    std::fs::write(
+        &path,
+        r#"
+const initialized = test_admission_ceiling()
+@budget(llm_admission: "conservative", llm_cost_usd: 0.01)
+pub fn check() -> list<string> {
+  return [initialized, test_admission_ceiling()]
+}
+"#,
+    )
+    .unwrap();
+    let mut config = DispatchCoreConfig::for_script(&path);
+    config.vm_configurator = Arc::new(AdmissionProbe);
+    let core = DispatchCore::new(config).unwrap();
+    for _ in 0..2 {
+        let response = core.dispatch(request("check")).await.unwrap();
+        assert_eq!(response.value, serde_json::json!(["0.01", "0.01"]));
+    }
+}
+
 fn request(function: &str) -> CallRequest {
     CallRequest {
         adapter: "mcp".to_string(),

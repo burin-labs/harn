@@ -15,13 +15,23 @@ path = "src/bin/harn_test_echo_env.rs"
 # cargo-machete text-matches crate names; `md-5` is imported as `md5::*` and
 # the renamed form trips the heuristic. Keep it in the ignore list.
 [package.metadata.cargo-machete]
-ignored = ["md-5"]
+# aws-smithy-types constrains the published SDK graph; Harn does not import it.
+ignored = ["md-5", "aws-smithy-types"]
 
 [package.metadata.harn.package_verify]
 # The MCP elicitation adapter reads rmcp's ordered-schema extension. The field
 # exists in 3.1.4 but not in 3.1.0 or 3.2.0, so publication must prove the
 # packaged crate at this minimum and at Cargo's latest admitted resolution.
-dependency_contracts = [{ name = "rmcp", minimum = "3.1.4" }]
+dependency_contracts = [
+    { name = "rmcp", minimum = "3.1.4" },
+    # No minimum: the Smithy constraint is a ceiling, not a floor. Pinning a
+    # floor here is a treadmill, because the other AWS crates in the same
+    # published graph raise their own floors independently — `aws-config`
+    # 1.12.0 requires `^1.6.3` and `aws-sigv4` 1.5.3 requires `^1.6.4`, so any
+    # minimum we name conflicts with whichever sibling moved last. The
+    # resolver-latest build against the newest admitted graph is the proof.
+    { name = "aws-smithy-types" },
+]
 
 [features]
 default = ["full"]
@@ -46,7 +56,7 @@ http-compression = ["reqwest/brotli", "reqwest/deflate", "reqwest/gzip", "reqwes
 # AWS SDK credential discovery and SigV4 signing for Bedrock and signed HTTP.
 # Catalog/request-shape semantics stay available to lean builds; live AWS
 # authentication fails closed unless the product selects this family.
-cloud-aws = ["dep:aws-config", "dep:aws-credential-types", "dep:aws-sigv4"]
+cloud-aws = ["dep:aws-config", "dep:aws-credential-types", "dep:aws-sigv4", "dep:aws-smithy-types"]
 # Operating-system credential-store adapters. The typed secrets API remains in
 # lean embedders and reports no default store until the product opts in.
 native-keyring = [
@@ -78,31 +88,48 @@ otel = [
 testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"]
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.136-dev" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.136-dev" }
-harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.136-dev" }
-harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.136-dev" }
-harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.136-dev" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.142" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.142" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.142" }
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.142" }
+harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.142" }
 linkme = "0.3"
-lopdf = { version = "0.44", default-features = false, features = ["wasm_js"], optional = true }
+lopdf = { version = "0.45", default-features = false, features = ["wasm_js"], optional = true }
 parking_lot = "0.12"
 pin-project-lite = "0.2"
-harn-clock = { path = "../harn-clock", version = "=0.10.136-dev" }
-harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.136-dev" }
-harn-flock = { path = "../harn-flock", version = "=0.10.136-dev" }
-harn-glob = { path = "../harn-glob", version = "=0.10.136-dev" }
-harn-session-store = { path = "../harn-session-store", version = "=0.10.136-dev" }
-harn-sqlite = { path = "../harn-sqlite", version = "=0.10.136-dev" }
-harn-ir = { path = "../harn-ir", version = "=0.10.136-dev" }
-harn-kernel = { path = "../harn-kernel", version = "=0.10.136-dev" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.136-dev" }
-harn-modules = { path = "../harn-modules", version = "=0.10.136-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.136-dev" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.136-dev" }
+harn-clock = { path = "../harn-clock", version = "=0.10.142" }
+harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.142" }
+harn-flock = { path = "../harn-flock", version = "=0.10.142" }
+harn-glob = { path = "../harn-glob", version = "=0.10.142" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.142" }
+harn-sqlite = { path = "../harn-sqlite", version = "=0.10.142" }
+harn-ir = { path = "../harn-ir", version = "=0.10.142" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.142" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.142" }
+harn-modules = { path = "../harn-modules", version = "=0.10.142" }
+harn-parser = { path = "../harn-parser", version = "=0.10.142" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.142" }
 async-trait = "0.1"
 aws-config = { version = "1.10.1", optional = true }
 aws-credential-types = { version = "1.3.0", optional = true }
 aws-sigv4 = { version = "1.5.1", optional = true }
+# Smithy JSON 0.63 cannot compile against the Document API in types 1.7.
+# Keep this constraint in the published AWS feature so fresh consumers receive
+# the compatible graph too. Remove when the SDK supports the new Document API.
+#
+# The bound is a range rather than a single point release because that is what
+# the incompatibility actually says: every 1.6.x patch is admissible and only
+# 1.7 and later are not. An exact pin also desynchronizes from the
+# `dependency_contracts` minimum above, which no dependency bot can see: a
+# proposed patch rewrites the requirement here, leaves the minimum behind, and
+# `Verify publishable crates` fails in its declared-minimum phase because
+# `cargo update --precise <minimum>` cannot satisfy an exact pin on a later
+# version (#8436).
+#
+# `<1.7.0` is the whole constraint. The lower bound only keeps the range from
+# admitting ancient releases; the sibling AWS crates raise the effective floor
+# on their own, which is why the contract above declares no minimum.
+aws-smithy-types = { version = ">=1.6.3, <1.7.0", optional = true }
 postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 quick_cache = "0.7"
 # Persistent (immutable, structurally shared) collections backing VmValue's
@@ -112,7 +139,7 @@ quick_cache = "0.7"
 imbl = { version = "7", features = ["serde"] }
 chrono = "0.4"
 chrono-tz = "0.10.4"
-croner = "3.0.1"
+croner = "4.0.0"
 regex = "1"
 scraper = { version = "0.27", optional = true }
 serde_json = { version = "1", features = ["unbounded_depth"] }
@@ -123,7 +150,7 @@ reqwest-eventsource = "0.6"
 rmcp = { version = "=3.1.4", default-features = false, features = ["client", "transport-child-process"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "aws_lc_rs"] }
-jsonschema = { version = "0.52", default-features = false }
+jsonschema = { version = "0.56", default-features = false }
 rcgen = "0.14"
 libc = "0.2"
 tokio-stream = "0.1"
@@ -199,8 +226,8 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = ["
 tracing-opentelemetry = { version = "0.33", optional = true }
 zeroize = "1"
 flate2 = { version = "1.1.9", optional = true }
-zstd = "0.13.3"
-brotli = { version = "8.0.2", optional = true }
+zstd = "0.14.0"
+brotli = { version = "9.0.0", optional = true }
 tar = { version = "0.4.46", default-features = false }
 zip = { version = "8", default-features = false, features = ["deflate-flate2"], optional = true }
 x509-parser = "0.18.1"

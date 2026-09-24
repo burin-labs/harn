@@ -100,7 +100,7 @@ async fn acp_authenticate_uses_shared_auth_policy() {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "session/new",
-                    "params": {"cwd": "."},
+                    "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send unauthenticated session/new");
             let blocked = recv_json(&mut response_rx).await;
@@ -132,7 +132,7 @@ async fn acp_authenticate_uses_shared_auth_policy() {
                     "jsonrpc": "2.0",
                     "id": 3,
                     "method": "session/new",
-                    "params": {"cwd": "."},
+                    "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send authenticated session/new");
             let created = recv_json(&mut response_rx).await;
@@ -239,7 +239,7 @@ async fn acp_session_new_advertises_session_mode_state_and_config_options() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -319,7 +319,7 @@ async fn acp_session_load_includes_current_mode_state() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -378,7 +378,7 @@ async fn acp_session_resume_includes_current_mode_state_without_replay() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -581,7 +581,7 @@ async fn acp_set_mode_emits_current_mode_update_notification() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -636,7 +636,7 @@ async fn acp_set_mode_is_idempotent_when_mode_unchanged() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -689,7 +689,7 @@ async fn acp_set_config_option_updates_mode() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -763,7 +763,7 @@ async fn acp_set_mode_validates_inputs() {
             "jsonrpc": "2.0",
             "id": 2,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -820,7 +820,7 @@ async fn acp_architect_mode_blocks_destructive_writes_in_prompt() {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "session/new",
-                    "params": {"cwd": dir.path().display().to_string()},
+                    "params": {"cwd": dir.path().display().to_string(), "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send session/new");
             let created = recv_json(&mut response_rx).await;
@@ -931,7 +931,7 @@ async fn acp_code_mode_allows_writes_in_prompt() {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "session/new",
-                    "params": {"cwd": dir.path().display().to_string()},
+                    "params": {"cwd": dir.path().display().to_string(), "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send session/new");
             let created = recv_json(&mut response_rx).await;
@@ -1010,7 +1010,7 @@ async fn acp_session_fork_inherits_parent_current_mode() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -1072,7 +1072,7 @@ async fn acp_set_config_option_pins_model_and_emits_update() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -1176,7 +1176,7 @@ async fn acp_set_config_option_pins_thought_level_and_emits_update() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -1415,7 +1415,7 @@ async fn acp_set_config_option_rejects_unknown_model_provider() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -1466,7 +1466,7 @@ async fn acp_set_config_option_rejects_unknown_config_id() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;

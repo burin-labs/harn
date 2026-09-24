@@ -6,6 +6,42 @@ use super::*;
 
 const RETIRED_DEEPSEEK_DIRECT_IDS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
 
+fn validate_model_operations(model: &CatalogModel, result: &mut ProviderCatalogValidation) {
+    let operations: BTreeSet<_> = model.operations.iter().copied().collect();
+    if operations.is_empty() || operations.len() != model.operations.len() {
+        result.errors.push(format!(
+            "model {} operations must be nonempty and unique",
+            model.id
+        ));
+    }
+    if operations.contains(&llm_config::ModelOperation::Embedding) != model.embedding_dim.is_some()
+    {
+        result.errors.push(format!(
+            "model {} embedding operation and embedding_dim must be declared together",
+            model.id
+        ));
+    }
+    let expected: Vec<_> = model
+        .operations
+        .iter()
+        .map(|operation| operation.output_modality())
+        .collect();
+    if model.modalities.output != expected {
+        result.errors.push(format!(
+            "model {} output modalities contradict operations",
+            model.id
+        ));
+    }
+    if !operations.contains(&llm_config::ModelOperation::TextGeneration)
+        && (model.tool_support.native || model.tool_support.text)
+    {
+        result.errors.push(format!(
+            "model {} tool support requires text_generation",
+            model.id
+        ));
+    }
+}
+
 pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogValidation {
     let mut result = ProviderCatalogValidation::default();
     if artifact.schema_version != PROVIDER_CATALOG_SCHEMA_VERSION {
@@ -70,6 +106,15 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
             );
         }
         validate_extra_headers(provider, &mut result);
+        if provider
+            .platform_fee_percent
+            .is_some_and(|fee| !fee.is_finite() || fee < 0.0)
+        {
+            result.errors.push(format!(
+                "provider {} platform_fee_percent must be finite and nonnegative",
+                provider.id
+            ));
+        }
         if let Some(healthcheck) = &provider.healthcheck {
             validate_provider_healthcheck(provider, healthcheck, &mut result);
         }
@@ -100,6 +145,7 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
     let mut model_pairs = BTreeSet::new();
     let mut dispatch_pairs = BTreeSet::new();
     for model in &artifact.models {
+        validate_model_operations(model, &mut result);
         if model.display_name.trim().is_empty() {
             result
                 .errors

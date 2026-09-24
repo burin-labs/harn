@@ -14,6 +14,22 @@
 
 use serde_json::Value;
 
+/// Canonical journal identity, with fallbacks for older transcript envelopes.
+pub(crate) fn tool_call_id(event: &harn_session_store::StoredEvent) -> Option<String> {
+    event
+        .headers
+        .get("tool_call_id")
+        .cloned()
+        .or_else(|| string_at(&event.payload, TOOL_CALL_ID))
+        .or_else(|| {
+            event
+                .payload
+                .pointer(TOOL_RESULT_FACT_CALL_ID)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
 /// Pointer to the terminal loop status recorded on an `agent_run_terminal`
 /// event, e.g. `"done"`. [`crate::llm::agent_terminal_class`] owns what the
 /// values mean.
@@ -24,11 +40,13 @@ pub(crate) const FINAL_STATUS: &str = "/transcript_event/metadata/final_status";
 pub(crate) const STOP_REASON: &str = "/transcript_event/metadata/stop_reason";
 /// VM-owned execution identity stamped on the invocation boundary.
 pub(crate) const EXECUTION_ID: &str = "/transcript_event/metadata/execution_id";
-/// Terminal error text, when the loop ended on one.
+/// Terminal error value, either structured diagnostics or legacy text.
 pub(crate) const TERMINAL_ERROR: &str = "/transcript_event/metadata/error";
 /// Coarse terminal classification assigned by
 /// [`crate::llm::agent_terminal_class`].
 pub(crate) const TERMINAL_CLASS: &str = "/transcript_event/metadata/terminal_class";
+/// Fine-grained class carried by the producer-owned typed terminal.
+pub(crate) const TERMINAL_OUTCOME_CLASS: &str = "/transcript_event/metadata/terminal/terminalClass";
 /// Producer-owned terminal kind recorded by `agent_session_finalize`.
 pub(crate) const TERMINAL_KIND: &str = "/transcript_event/metadata/terminal/kind";
 /// Producer-owned terminal attribution paired with [`TERMINAL_KIND`].
@@ -36,6 +54,8 @@ pub(crate) const TERMINAL_OWNER: &str = "/transcript_event/metadata/terminal/own
 /// Producer-owned explanation paired with [`TERMINAL_KIND`]. This can be more
 /// precise than the legacy loop-level [`STOP_REASON`].
 pub(crate) const TERMINAL_REASON: &str = "/transcript_event/metadata/terminal/reason";
+/// Loop-owned budget account, present when decision exposure was requested.
+pub(crate) const ADAPTIVE_BUDGET: &str = "/transcript_event/metadata/adaptive_budget";
 
 /// Provider-assigned name of the model that served an `llm_call`.
 pub(crate) const MODEL: &str = "/transcript_event/metadata/model";
@@ -113,12 +133,13 @@ pub(crate) const TOOL_NAME_ANY: [&str; 3] = [
     "/raw_message/tool_calls/0/name",
 ];
 /// Tool arguments across the transcript envelope and both raw-message
-/// placements. Distinct from [`TOOL_RAW_INPUT`], which is only the envelope's
-/// pre-normalization copy.
-pub(crate) const TOOL_INPUT_ANY: [&str; 3] = [
+/// placements, falling back to the envelope's pre-normalization copy when no
+/// more specific input was recorded.
+pub(crate) const TOOL_INPUT_ANY: [&str; 4] = [
     "/transcript_event/metadata/input",
     "/raw_message/input",
     "/raw_message/tool_calls/0/arguments",
+    TOOL_RAW_INPUT,
 ];
 /// Tool output, preferring the structured metadata copy over the rendered text
 /// a human would read.

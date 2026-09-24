@@ -185,6 +185,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("list_providers_native", "harness.llm.list_providers_native"),
     ("llm_apply_reasoning_policy", "harness.llm.apply_reasoning_policy"),
     ("llm_available_providers", "harness.llm.available_providers"),
+    ("llm_cache_conformance", "harness.llm.cache_conformance"),
     ("llm_call", "harness.llm.call"),
     ("llm_call_safe", "harness.llm.call_safe"),
     ("llm_call_structured", "harness.llm.call_structured"),

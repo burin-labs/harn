@@ -94,6 +94,26 @@ pub struct CompactionReceipt {
     pub source_measurement: Option<CompactionSourceMeasurement>,
 }
 
+/// Receipt fields the ACP notification envelope already carries, so the
+/// `_meta.harn` projection leaves them out.
+const ACP_META_ENVELOPE_FIELDS: [&str; 2] = ["session_id", "transcript_id"];
+
+fn snake_to_camel(key: &str) -> String {
+    let mut out = String::with_capacity(key.len());
+    let mut upper_next = false;
+    for ch in key.chars() {
+        if ch == '_' {
+            upper_next = true;
+        } else if upper_next {
+            out.extend(ch.to_uppercase());
+            upper_next = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 /// Generate a fresh, unique compaction receipt id.
 pub fn new_compaction_receipt_id() -> String {
     format!("compaction-{}", uuid::Uuid::now_v7())
@@ -104,6 +124,25 @@ impl CompactionReceipt {
     /// the transcript event.
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+    }
+
+    /// Project the receipt for the ACP `transcript_compacted` extension block
+    /// (`_meta.harn`): every receipt field except the envelope-redundant
+    /// session and transcript ids, keyed in camelCase, `None` fields present as
+    /// `null`. Derived from the receipt's own serialization so a field added to
+    /// the receipt reaches ACP without a second hand-maintained list; the
+    /// previous key-by-key projection silently dropped `requested_strategy` and
+    /// `source_measurement`, the two fields that make a requested-versus-applied
+    /// divergence and its summary size legible from the record alone.
+    pub fn to_acp_meta(&self) -> serde_json::Map<String, serde_json::Value> {
+        let serde_json::Value::Object(fields) = self.to_json() else {
+            return serde_json::Map::new();
+        };
+        fields
+            .into_iter()
+            .filter(|(key, _)| !ACP_META_ENVELOPE_FIELDS.contains(&key.as_str()))
+            .map(|(key, value)| (snake_to_camel(&key), value))
+            .collect()
     }
 
     /// Read a receipt embedded under `metadata.receipt` on a transcript
@@ -244,6 +283,63 @@ mod tests {
         })))
         .expect("embedded receipt decodes");
         assert_eq!(decoded, receipt);
+    }
+
+    #[test]
+    fn acp_meta_projects_every_receipt_field_except_the_envelope_ids() {
+        let receipt = CompactionReceipt {
+            schema_version: COMPACTION_RECEIPT_SCHEMA_VERSION,
+            receipt_id: "compaction-abc".to_string(),
+            session_id: Some("session-1".to_string()),
+            transcript_id: Some("session-1".to_string()),
+            mode: "auto".to_string(),
+            reason: "threshold".to_string(),
+            strategy: "llm".to_string(),
+            engine_strategy: "observation_mask".to_string(),
+            requested_strategy: Some("llm".to_string()),
+            resolved_threshold_tokens: Some(11_133),
+            threshold_source: Some("compact_threshold".to_string()),
+            hard_limit_tokens: None,
+            archived_messages: 4,
+            estimated_tokens_before: 11_256,
+            estimated_tokens_after: 5_353,
+            snapshot_asset_id: None,
+            instruction_mode: None,
+            instruction_source: None,
+            compaction_policy: None,
+            recap: None,
+            source_measurement: Some(CompactionSourceMeasurement {
+                source_message_count: Some(4),
+                source_bytes: Some(35_583),
+                summary_bytes: Some(20_174),
+                carried_source_bytes: Some(0),
+            }),
+        };
+        let meta = receipt.to_acp_meta();
+        let serde_json::Value::Object(fields) = receipt.to_json() else {
+            panic!("receipt serializes as an object");
+        };
+        // The projection is generated from the receipt: every serialized field
+        // other than the envelope ids appears, camelCased, with the same value.
+        for (key, value) in &fields {
+            let projected = snake_to_camel(key);
+            if ACP_META_ENVELOPE_FIELDS.contains(&key.as_str()) {
+                assert!(
+                    !meta.contains_key(&projected),
+                    "{projected} is envelope-owned"
+                );
+                continue;
+            }
+            assert_eq!(meta.get(&projected), Some(value), "{projected} reaches ACP");
+        }
+        assert_eq!(meta.len(), fields.len() - ACP_META_ENVELOPE_FIELDS.len());
+        // The two fields the hand-picked projection dropped are the point.
+        assert_eq!(meta["requestedStrategy"], serde_json::json!("llm"));
+        assert_eq!(
+            meta["sourceMeasurement"]["summary_bytes"],
+            serde_json::json!(20_174)
+        );
+        assert_eq!(meta["hardLimitTokens"], serde_json::Value::Null);
     }
 
     #[test]

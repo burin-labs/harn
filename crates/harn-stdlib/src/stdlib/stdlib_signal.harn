@@ -11,7 +11,16 @@ pub type InterruptOptions = {
   graceful_timeout_ms?: int,
 }
 
-pub type InterruptRegistration = {handle: int, signals: list<string>, once: bool}
+/**
+ * What `on_interrupt` hands back.
+ *
+ * `signals` is nil when the handler asked for no filter, which is the default
+ * and means it runs on every cancellation, including one that carries no
+ * signal at all such as a host stopping the session. A list means the handler
+ * asked for those signals and only those. An empty list is refused on the way
+ * in, so nil and a list can never be confused.
+ */
+pub type InterruptRegistration = {handle: int, signals: list<string>?, once: bool}
 
 pub fn on_interrupt(
   handler: fn() -> unknown,

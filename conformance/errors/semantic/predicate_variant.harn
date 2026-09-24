@@ -1,0 +1,8 @@
+import "std/predicate"
+
+fn invalid(llm: HarnessLlm, policy: EvaluationPolicy) {
+  const result = llm.evaluate_predicate("test.variant", "Supported?", {value: 1}, policy)
+  if result.value.verdict {
+    throw "selected a branch without narrowing the outcome"
+  }
+}

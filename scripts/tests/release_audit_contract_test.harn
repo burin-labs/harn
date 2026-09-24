@@ -2,6 +2,7 @@ import { omit } from "std/json"
 import {
   release_audit_contract_parse,
   release_audit_receipt_plan,
+  release_audit_residual_plan,
   release_audit_source_plan,
 } from "../release_audit_contract"
 
@@ -118,6 +119,12 @@ pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task: 
   assert_eq(accepted.receipt_reused, true)
   assert_eq(accepted.proof_kind, "hosted_platform")
   assert_eq(accepted.lane_names, ["release-metadata"])
+  // The pre-cut rehearsal runs exactly the lanes an accepted receipt would.
+  const residual = release_audit_residual_plan(cfg, SHA)
+  assert_eq(residual.reason, "residual_only")
+  assert_eq(residual.receipt_reused, false)
+  assert_eq(residual.lane_names, accepted.lane_names)
+  assert_eq(residual.lane_runners, accepted.lane_runners)
   const advanced_base = release_audit_receipt_plan(
     cfg,
     {...receipt(), source: {...receipt().source, remote_sha_after: OTHER_SHA}},

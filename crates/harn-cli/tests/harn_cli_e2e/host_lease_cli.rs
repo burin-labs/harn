@@ -11,6 +11,55 @@ use crate::test_util;
 use test_util::process::run_harn_e2e;
 
 #[test]
+fn default_status_observes_pending_cargo_in_named_domains() {
+    let temp = TempDir::new().unwrap();
+    let store = harn_hostlib::HostLeaseStore::for_root(temp.path()).unwrap();
+    let run = store
+        .begin_run(
+            "pending-worker",
+            harn_hostlib::HostLeasePriorityClass::Interactive,
+            harn_hostlib::HostLeaseResourceKey {
+                machine: "status-fixture".to_string(),
+                resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
+                domain: "verification".to_string(),
+            },
+            harn_hostlib::HostLeaseExecutionContext::cargo(temp.path(), temp.path(), None),
+            60_000,
+        )
+        .unwrap();
+    let root = temp.path().to_string_lossy();
+    let output = run_harn_e2e(
+        &[
+            "host",
+            "lease",
+            "status",
+            "--host",
+            "status-fixture",
+            "--json",
+        ],
+        &[(harn_hostlib::HOST_LEASE_ROOT_ENV, root.as_ref())],
+    );
+    assert_eq!(output.exit_code, 0, "{}", output.stderr);
+    let envelope: serde_json::Value = serde_json::from_str(&output.stdout).unwrap();
+    let resources = envelope["data"]["resources"]
+        .as_array()
+        .expect("default status must inspect every resource and domain on the host");
+    let pending = resources
+        .iter()
+        .find(|resource| resource["domain"] == "verification")
+        .expect("pending-only domains must be visible");
+    assert_eq!(pending["resource_class"], "rust-heavy");
+    assert_eq!(pending["pending"][0]["waiter_id"], run.run_id);
+    let text = run_harn_e2e(
+        &["host", "lease", "status", "--host", "status-fixture"],
+        &[(harn_hostlib::HOST_LEASE_ROOT_ENV, root.as_ref())],
+    );
+    assert_eq!(text.exit_code, 0);
+    assert!(text.stdout.contains("1 pending"), "{}", text.stdout);
+    assert!(!text.stdout.contains("is available"), "{}", text.stdout);
+}
+
+#[test]
 fn host_lease_store_initialization_failure_preserves_json_contract() {
     let temp = TempDir::new().expect("create temp directory");
     let invalid_root = temp.path().join("not-a-directory");
@@ -31,7 +80,7 @@ fn host_lease_store_initialization_failure_preserves_json_contract() {
     );
     let envelope: serde_json::Value =
         serde_json::from_str(&output.stdout).expect("failure output is a JSON envelope");
-    assert_eq!(envelope["schemaVersion"], 3);
+    assert_eq!(envelope["schemaVersion"], 4);
     assert_eq!(envelope["ok"], false);
     assert_eq!(envelope["error"]["code"], "host_lease_store");
 }

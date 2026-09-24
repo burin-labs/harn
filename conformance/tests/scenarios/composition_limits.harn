@@ -2,7 +2,7 @@ pipeline main(harness: Harness) {
   const tools = [
     {
       name: "read_file",
-      parameters: {type: "object", required: ["path"]},
+      inputSchema: {type: "object", required: ["path"]},
       annotations: {kind: "read", side_effect_level: "read_only"},
       metadata: {mock_output: {text: "hello"}},
     },
@@ -27,7 +27,7 @@ pipeline main(harness: Harness) {
     [
       {
         name: "write_file",
-        parameters: {type: "object"},
+        inputSchema: {type: "object"},
         annotations: {kind: "edit", side_effect_level: "workspace_write"},
       },
     ],

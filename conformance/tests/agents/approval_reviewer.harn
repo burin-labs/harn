@@ -69,6 +69,15 @@ pipeline default(harness: Harness) {
       llm_text(
         "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
       ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
+      ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
+      ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
+      ),
     ],
     { _ ->
       const reviewer = approval_reviewer_for(
@@ -96,10 +105,57 @@ pipeline default(harness: Harness) {
         empty_policy_reviewer({tool: "read_file", category: "read_a_source_file"}).approved == true,
         "an empty caller policy must inherit the bundled verdict thresholds",
       )
+      // A policy that names no reviewer model keeps the loop's provider, whose
+      // credential the run holds, but not the loop's model: it runs on that
+      // provider's cheap catalog row at the lowest reasoning the route takes.
+      const routed = empty_policy_reviewer(
+        {
+          tool: "read_file",
+          category: "read_a_source_file",
+          route: {provider: "mock", model: "loop-route-model"},
+        },
+      )
+      assert(
+        routed.reviewer_model == "mock-approval-reviewer",
+        "an unrouted reviewer must run on its provider's catalog reviewer row, not the loop's model",
+      )
+      assert(
+        routed.reviewer_route_source == "catalog_role",
+        "the decision must name its route source",
+      )
+      // A provider with no catalog row keeps the loop's own route rather than
+      // moving to a provider the run may hold no credential for.
+      const unlisted = empty_policy_reviewer(
+        {
+          tool: "read_file",
+          category: "read_a_source_file",
+          route: {provider: "unlisted-provider", model: "loop-route-model"},
+        },
+      )
+      assert(
+        unlisted.reviewer_model == "loop-route-model",
+        "a provider with no catalog reviewer row must keep the loop's route",
+      )
+      assert(unlisted.reviewer_route_source == "loop_route", "the fallback must name itself")
+      // A caller that names a reviewer model decides, whatever the loop runs on.
+      const named_reviewer = approval_reviewer_for(
+        harness,
+        {reviewer: {provider: "mock", model: "caller-reviewer"}},
+        "Read the requested source file.",
+      )
+      const named = named_reviewer(
+        {
+          tool: "read_file",
+          category: "read_a_source_file",
+          route: {provider: "mock", model: "loop-route-model"},
+        },
+      )
+      assert(named.reviewer_model == "caller-reviewer", "a named reviewer model must win")
+      assert(named.reviewer_route_source == "caller", "a named model must say the caller chose it")
       const calls = harness.llm.mock_calls()
       assert(
-        len(calls) == 2,
-        "the floor case must not call the model; both ordinary cases must call it exactly once",
+        len(calls) == 5,
+        "the floor case must not call the model; each ordinary case must call it exactly once",
       )
       assert(
         contains(calls[0].system, "Use the stated goal as the authorization boundary."),
@@ -123,15 +179,18 @@ pipeline default(harness: Harness) {
     unreviewed.ok == false,
     "CONTROL: with no reviewer the ask must die unanswered, or this whole test is vacuous",
   )
-  // The exact gate is the runtime's business and differs by posture: an ask
-  // with no bridge lands on `approval_unavailable`, while a posture that
-  // already collapsed the ask lands on `approval_policy`. Both are "refused
-  // with nobody to ask", which is what the seam answers. Pinning one would make
-  // this test fail on a posture change that broke nothing.
+  // This refusal is NOT an approval decision, and the disjunction that used to
+  // stand here said it was. The call reads `.env`, so the deny-by-default
+  // sensitive-path guard refuses it before any approval rule is consulted and
+  // before the ask could reach a bridge. Every deny used to be reported as
+  // `approval_policy` regardless of which rule decided, which is what made the
+  // old expectation look right. Now that a refusal names its own rule the gate
+  // is exact, so this control pins it instead of accepting a family: a posture
+  // change cannot move a decision that posture never took part in, and a
+  // change that DID route this through approval would now be caught here.
   assert(
-    unreviewed.denial.gate == "approval_unavailable"
-      || unreviewed.denial.gate == "approval_policy",
-    "CONTROL: refusal must come from an approval gate, got: ${unreviewed.denial.gate}",
+    unreviewed.denial.gate == "sensitive_path",
+    "CONTROL: the sensitive-path guard must be what refused, got: ${unreviewed.denial.gate}",
   )
   // 1. The same call, the same policy, WITH a granting reviewer: it proceeds.
   //    Paired against the control above, this isolates the reviewer as the only

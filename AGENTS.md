@@ -257,8 +257,11 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `scripts/watch_harn_release.sh --tag vX.Y.Z --repo <harn-checkout> --yes-live-release`.
 - Run the watcher from the `harn-bump-fleet` checkout so its pinned runtime,
   environment loader, release lease, and cleanup authority stay canonical.
-  Completion requires the release PR, complete asset manifest, main-cache
-  warm, and transient-ref cleanup—not just a visible tag or GitHub release.
+  Completion requires the release PR, complete asset manifest, and transient-ref
+  cleanup. Cache warming is explicit: pass `--warm-cache` when required, and
+  otherwise retain its `not_requested` receipt instead of claiming it passed.
+  Downstream convergence belongs to hosted release and its `converge_fleet`
+  input; the crate publisher does not start a second update controller.
 - Dry-run the full release gate with
   `./scripts/release_gate.sh full --bump patch --dry-run`.
 - Dry-run crate publishing with `./scripts/publish.sh --dry-run`.

@@ -4,6 +4,39 @@ use serde_json::Value as JsonValue;
 
 use crate::test_util::process::harn_e2e_command;
 
+#[test]
+fn declared_tool_runs_through_the_cli_argument_dictionary() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("declared.harn");
+    fs::write(
+        &path,
+        r#"
+fn main(harness: Harness) {
+  tool greet(name: string, suffix: string = "!") -> string {
+    return "Hello, " + name + suffix
+  }
+  harness.tools.mcp_tools(greet)
+}
+"#,
+    )
+    .expect("write declared tool");
+    let output = harn_e2e_command()
+        .args(["tool", "run"])
+        .arg(&path)
+        .args(["greet", "--harn-input", r#"{"name":"Ada"}"#, "--json"])
+        .output()
+        .expect("run declared tool");
+    assert!(
+        output.status.success(),
+        "declared tool failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<JsonValue>(&output.stdout).expect("tool JSON"),
+        serde_json::json!("Hello, Ada!")
+    );
+}
+
 fn fixture() -> (tempfile::TempDir, String) {
     let temp = tempfile::tempdir().expect("tempdir");
     let path = temp.path().join("widgets.harn");

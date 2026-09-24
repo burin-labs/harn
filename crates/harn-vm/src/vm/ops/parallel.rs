@@ -878,7 +878,9 @@ mod scheduler_tests {
             while !lower_token.load(std::sync::atomic::Ordering::SeqCst) {
                 std::hint::spin_loop();
             }
-            Err(crate::vm::Vm::cancelled_error())
+            Err(crate::cancellation::cancelled_error(
+                crate::cancellation::HandlerDispatch::Dispatched,
+            ))
         });
         let higher_signal = Arc::clone(&lower_started);
         let higher: Branch = Box::pin(async move {

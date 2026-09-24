@@ -1222,5 +1222,19 @@
         "parameter": "opts"
       }
     ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+    "expression": "agent_compute_terminal_callback(\n        harness.agent,\n        session,\n        opts,\n        {\n          iteration: iteration,\n          final_status: terminal.final_status,\n          stop_reason: terminal.stop_reason,\n          terminal_error: terminal?.error,\n          max_iterations: current_max,\n          iteration_budget: iteration_budget,\n          session_successful_tools: successful_tools_seen,\n          session_rejected_tools: rejected_tools_seen,\n        },\n      )",
+    "owner": "agent_compute_terminal_callback",
+    "evidence": "The error epilogue notifies through the same terminal invoker the in-loop boundary uses, so an exit by throw reaches the embedder exactly as an ordinary seal does. Consumer agent_compute_terminal_callback.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_compute_terminal_callback",
+        "parameter": "opts"
+      }
+    ]
   }
 ]

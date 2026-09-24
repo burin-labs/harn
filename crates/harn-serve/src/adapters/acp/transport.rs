@@ -700,7 +700,7 @@ mod websocket_tests {
                     "jsonrpc": "2.0",
                     "id": 2,
                     "method": "session/new",
-                    "params": {"cwd": "."},
+                    "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .unwrap()
                 .into(),

@@ -83,6 +83,7 @@ pub(crate) struct AmbientExecutionScope {
     llm_transcript: LlmTranscriptAmbient,
     /// Inline fixtures and observations shared by one VM execution tree.
     llm_mock: LlmMockContext,
+    llm_admission: crate::llm::admission::AdmissionScope,
     connector_ctx: Vec<ConnectorCtx>,
     /// Outbound-network policy shared by one pipeline execution tree.
     egress_policy: Option<EgressPolicyContext>,
@@ -205,6 +206,7 @@ impl AmbientExecutionScope {
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
             llm_transcript: clone_via_swap(swap_llm_transcript_ambient),
             llm_mock: current_llm_mock_context(),
+            llm_admission: clone_via_swap(crate::llm::admission::swap_scope),
             egress_policy: clone_via_swap(swap_policy_context),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
@@ -269,6 +271,7 @@ impl AmbientExecutionScope {
             llm_render: clone_via_swap(swap_llm_render_stack),
             llm_transcript: clone_via_swap(swap_llm_transcript_ambient),
             llm_mock: current_llm_mock_context(),
+            llm_admission: clone_via_swap(crate::llm::admission::swap_scope),
             connector_ctx: clone_via_swap(swap_active_harn_connector_ctx),
             egress_policy: clone_via_swap(swap_policy_context),
             session_stack: clone_via_swap(swap_current_session_stack),
@@ -338,6 +341,7 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.llm_render, swap_llm_render_stack);
         swap_slot(&mut self.llm_transcript, swap_llm_transcript_ambient);
         swap_slot(&mut self.llm_mock, swap_llm_mock_context);
+        swap_slot(&mut self.llm_admission, crate::llm::admission::swap_scope);
         swap_slot(&mut self.connector_ctx, swap_active_harn_connector_ctx);
         swap_slot(&mut self.egress_policy, swap_policy_context);
         swap_slot(&mut self.session_stack, swap_current_session_stack);

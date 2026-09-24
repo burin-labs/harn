@@ -30,6 +30,8 @@ pub mod agent_events;
 mod agent_lifecycle_cleanup;
 pub(crate) mod agent_session_journal;
 pub mod agent_session_restore;
+#[cfg(test)]
+mod agent_session_terminal_evidence_tests;
 pub mod agent_sessions;
 pub mod agent_transcript_budget;
 pub mod atomic_io;
@@ -48,6 +50,7 @@ mod bounded_files;
 pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
+pub(crate) mod cancellation;
 pub mod canonical_json;
 pub mod channel_guardrails;
 pub mod channels;
@@ -77,6 +80,7 @@ pub mod harness_net;
 pub mod harness_system;
 pub mod harness_tenant;
 pub mod host_attachments;
+pub mod host_stdio;
 
 /// Placement policy for child-interpreter subtasks.
 ///
@@ -156,6 +160,10 @@ pub(crate) mod shared_state;
 pub mod shells;
 pub mod skills;
 pub mod stdlib;
+/// What the active backend does with a Unix-socket grant, so a launcher can
+/// disclose the shape it actually applied rather than the shape the field
+/// name suggests.
+pub use stdlib::sandbox::unix_socket_enforcement;
 /// Session-metadata change notification for surfaces that project a session.
 pub use stdlib::session_change::{
     subscribe as subscribe_session_changes, SessionChangeSubscription,

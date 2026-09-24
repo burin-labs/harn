@@ -904,6 +904,34 @@ cannot enter the third-party body. The provider catalog's
 `stream_options.include_usage` extension is emitted; an absent declaration
 fails closed.
 
+### Model operations
+
+Model rows declare `operations` as a closed set of `text_generation`,
+`embedding`, and `decision`. Catalog schema 11 requires the normalized set on
+every exported model and preserves it through runtime reload and the generated
+Harn, TypeScript, and Swift bindings. Unknown operation names fail decoding.
+
+An older source row without `operations` retains its existing job: `embedding`
+when it has `embedding_dim`, otherwise `text_generation`. This compatibility
+rule never grants `decision`. An explicit set replaces the legacy inference.
+Catalog validation requires embedding dimensions and the embedding operation
+to agree. Output modalities and tool support are projected from operations, so
+a decision-only row does not advertise text generation or text tools.
+
+Predicate evaluation requires a declared `decision` operation. How that
+operation is dialled is a separate, typed capability, because decision
+endpoints are not interchangeable chat endpoints: a capability rule names a
+closed `decision_protocol` of `typesafe_system_one`, `vercel_evaluate`,
+`openrouter_decisions`, or `structured_llm`, alongside `decision_question_kinds`
+and, for the native protocols, published `decision_limits`. An unknown protocol
+fails the capability load rather than falling back to the chat backend.
+
+`structured_llm` is the one protocol that dials the ordinary chat endpoint, so a
+route using it needs `text_generation` as well. A native decision route needs
+`decision` alone and must not inherit a chat transport. Declaring an operation
+does not establish model quality. See the
+[predicate contract](../predicates.md) for check-time admission.
+
 ### Field-wise catalog patches with `[patch.models]`
 
 An overlay's `[models.<id>]` table replaces the whole model row, which is
@@ -1079,7 +1107,7 @@ harness.llm.call("Summarize the change.", nil, {
     providerOptions: {
       gateway: {
         sort: "cost",
-        models: ["google/gemini-3.1-flash-lite-preview"],
+        models: ["google/gemini-3.1-flash-lite"],
       },
     },
   },
@@ -1205,7 +1233,7 @@ Ask for a posture in provider-neutral terms:
 
 ```harn
 harness.llm.call({
-  model: "gpt-5.6",
+  model: "gpt-6-sol",
   messages: messages,
   data_controls: "strictest_available",
 })
@@ -1302,7 +1330,7 @@ is specified in the script.
 ### Model resolution guarantees
 
 Harn resolves a model selector and its provider as one decision before a
-provider call. A qualified selector such as `openai:gpt-5.6-sol` is a hard
+provider call. A qualified selector such as `openai:gpt-6-sol` is a hard
 provider constraint. Harn rejects it if the catalog assigns the model to a
 different provider, if a separate `provider` option disagrees, or if a later
 routing step changes the provider. It does not fall through to the default or
@@ -1313,7 +1341,7 @@ provider registry declares the `model_proxy` feature. A custom adapter, the
 generic local OpenAI-compatible adapter, or a catalogued router may deliberately
 serve an upstream model identity, while its selected adapter remains a hard
 transport constraint. This keeps gateways and test adapters composable without
-allowing `ollama:gpt-5.6-sol` or another contradictory namespace-owned selector
+allowing `ollama:gpt-6-sol` or another contradictory namespace-owned selector
 to escape to the wrong provider.
 
 An explicit provider can name a private or newly released model that is not in

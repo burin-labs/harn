@@ -48,7 +48,9 @@ use super::driver::CheckedFile;
 /// Bumped to 2 when the two rendered-text fields collapsed into one, since the
 /// entry no longer deserializes (harn#6168). A stale entry is a miss, not a
 /// failure — it is re-checked and rewritten.
-const RESULT_CACHE_SCHEMA: u32 = 2;
+/// Version 3 retains the predicate site manifest; older entries cannot prove
+/// that zero sites were measured.
+const RESULT_CACHE_SCHEMA: u32 = 4;
 
 /// Kill switch for just the check-result cache (the shared
 /// `HARN_BYTECODE_CACHE=0` toggle also disables it).
@@ -245,6 +247,10 @@ pub(super) fn result_cache_key(
     fold("harn-version", base.harn_version.as_bytes());
     fold("compiler-tag", &[base.compiler_tag]);
     fold("check-fingerprint", CHECK_FINGERPRINT.as_bytes());
+    fold(
+        "predicate-model-operations",
+        &harn_vm::provider_catalog::predicate_model_catalog_identity(),
+    );
     fold("path", path_str.as_bytes());
     fold("invariants", &[u8::from(check_invariants)]);
     for name in lint_exemptions {
@@ -339,6 +345,7 @@ struct CachedCheckResult {
     schema: u32,
     status: CachedStatus,
     diagnostics: Vec<CachedDiagnostic>,
+    predicate_manifest: Option<harn_kernel::predicate::PredicateManifest>,
     rendered_text: String,
     probes: Vec<Probe>,
 }
@@ -438,6 +445,7 @@ pub(super) fn load(
             path: path_str.to_string(),
             status,
             diagnostics,
+            predicate_manifest: cached.predicate_manifest,
         },
         strict: config.strict,
         text,
@@ -452,6 +460,7 @@ pub(super) fn store(key: &[u8; 32], checked: &CheckedFile, probes: Vec<Probe>) {
     }
     let cached = CachedCheckResult {
         schema: RESULT_CACHE_SCHEMA,
+        predicate_manifest: checked.report.predicate_manifest.clone(),
         status: match checked.report.status {
             CheckFileStatus::Ok => CachedStatus::Ok,
             CheckFileStatus::Warning => CachedStatus::Warning,

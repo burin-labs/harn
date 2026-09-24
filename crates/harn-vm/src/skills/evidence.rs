@@ -20,7 +20,7 @@ pub const SKILL_ACTIVATION_EVIDENCE_SCHEMA_VERSION: u32 = 1;
 /// renderer so the budget accounting matches byte-for-byte.
 pub const CATALOG_HEADER: &str = concat!(
     "## Available skills\n\n",
-    "These skills are available. Call `load_skill({ name: \"<skill-id>\" })` to load the full body of a skill when it becomes relevant.\n\n",
+    "These skills are available. Call `load_skill({ name: \"<skill-id>\" })` to load the full body of a skill when it becomes relevant. The user's instructions take precedence over a skill's guidance.\n\n",
 );
 
 /// Where a skill sits in the disclosure lifecycle. Registry-derived states
@@ -324,7 +324,7 @@ mod tests {
         ];
         // Budget fits the header + one card + the omission suffix, but not a
         // second card.
-        let evidence = build_activation_evidence(&inputs, 260, &[], &[]);
+        let evidence = build_activation_evidence(&inputs, CATALOG_HEADER.len() + 109, &[], &[]);
         assert_eq!(evidence.shown, vec!["alpha".to_string()]);
         assert_eq!(
             evidence.omitted,

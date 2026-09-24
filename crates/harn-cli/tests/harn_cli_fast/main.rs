@@ -49,7 +49,7 @@ fn required_pr_e2e_inventory_is_selected_by_every_pr_profile() {
         .expect("nextest configuration must parse");
     assert_eq!(
         required_pr_e2e::CASES.len(),
-        7,
+        12,
         "required PR E2E inventory must remain explicit",
     );
 

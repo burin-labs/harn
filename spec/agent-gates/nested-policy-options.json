@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 525,
         "reader": "__cl_decision_wording"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
-        "line": 519,
         "reader": "__cl_decision_wording"
       }
     ],
@@ -46,22 +44,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
-        "line": 145,
-        "reader": "__dispatch_structured_output_schema"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
-        "line": 146,
         "reader": "__dispatch_structured_output_schema"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
-        "line": 165,
-        "reader": "__agent_loop_output_contract"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
-        "line": 166,
         "reader": "__agent_loop_output_contract"
       }
     ],
@@ -79,7 +65,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
-        "line": 196,
         "reader": "__agent_loop_next_tool_output_contract"
       }
     ],
@@ -97,7 +82,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 505,
         "reader": "__agent_mcp_initialize_advisory_prompt"
       }
     ],
@@ -115,12 +99,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
-        "line": 172,
         "reader": "__with_mcp_tool_ceiling"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
-        "line": 79,
         "reader": "__stance_policy_patch"
       }
     ],
@@ -138,17 +120,14 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 194,
         "reader": "__validate_judge_cadence"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-        "line": 81,
         "reader": "__turn_end_judge_when_due"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-        "line": 189,
         "reader": "__agent_turn_end_judge_stall_cadence"
       }
     ],
@@ -166,7 +145,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/workflow/stage.harn",
-        "line": 836,
         "reader": "__stage_max_attempts"
       }
     ],
@@ -184,7 +162,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 177,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -202,7 +179,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 163,
         "reader": "agent_stall_no_net_progress"
       }
     ],
@@ -220,7 +196,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
-        "line": 181,
         "reader": "agent_stall_no_net_progress"
       }
     ],

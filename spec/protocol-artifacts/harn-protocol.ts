@@ -1223,207 +1223,380 @@ export interface ACPSessionTruncatedUpdate {
   reason?: string
 }
 
-/** Harn-owned `session/update` extension payloads. Identity fields are first-class; `_meta` remains for vendor extras. */
-export const HARN_TYPED_SESSION_UPDATE_PAYLOADS = {
-  artifact: { typeName: "ACPArtifactUpdate", identity: ["artifactId"] },
-  available_commands_update: { typeName: "ACPAvailableCommandsUpdate", identity: ["availableCommands"] },
-  fs_watch: { typeName: "ACPFsWatchUpdate", identity: ["subscriptionId", "events"] },
-  handoff: { typeName: "ACPHandoffUpdate", identity: ["handoffId", "artifactId", "handoff"] },
-  hitl_request: { typeName: "ACPHitlRequestUpdate", identity: ["requestId"] },
-  hitl_resolved: { typeName: "ACPHitlResolvedUpdate", identity: ["requestId"] },
-  live_session_client: { typeName: "ACPLiveSessionClientUpdate", identity: ["action"] },
-  log: { typeName: "ACPLogUpdate", identity: ["message"] },
-  progress: { typeName: "ACPProgressUpdate", identity: ["message"] },
-  reminder_emitted: { typeName: "ACPReminderEmittedUpdate", identity: ["reminderId"] },
-  skill_activated: { typeName: "ACPSkillActivatedUpdate", identity: ["skillName"] },
-  skill_deactivated: { typeName: "ACPSkillDeactivatedUpdate", identity: ["skillName"] },
-  skill_narrow: { typeName: "ACPSkillNarrowUpdate", identity: ["removedTools", "remainingTools"] },
-  skill_scope_tools: { typeName: "ACPSkillScopeToolsUpdate", identity: ["skillName", "allowedTools"] },
-  stance_transition: { typeName: "ACPStanceTransitionUpdate", identity: ["phase"] },
-  tool_search_query: { typeName: "ACPToolSearchQueryUpdate", identity: ["toolUseId", "name"] },
-  tool_search_result: { typeName: "ACPToolSearchResultUpdate", identity: ["toolUseId"] },
-  transcript_compacted: { typeName: "ACPTranscriptCompactedUpdate", identity: ["mode", "strategy"] },
-  transcript_projected: { typeName: "ACPTranscriptProjectedUpdate", identity: ["policy"] },
-  worker_update: { typeName: "ACPWorkerUpdate", identity: ["workerId", "event", "status"] },
-} as const
+export interface ACPArtifactUpdateMetaHarn {
+  artifactId: string
+  title: string | null
+  spec: ACPValue
+  metadata: ACPValue
+  provenance: ACPValue
+  fallback?: string
+  kind?: string
+  mimeType?: string
+  replayed?: boolean
+  sizeBytes?: number
+}
+
+export interface ACPArtifactUpdateMeta {
+  harn: ACPArtifactUpdateMetaHarn
+}
 
 export interface ACPArtifactUpdate {
   sessionUpdate: "artifact"
-  artifactId: string
-  kind?: string
-  title?: string
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPArtifactUpdateMeta
+}
+
+export interface ACPAvailableCommandsUpdateMetaHarn {
+  replayed?: boolean
+}
+
+export interface ACPAvailableCommandsUpdateMeta {
+  harn?: ACPAvailableCommandsUpdateMetaHarn
 }
 
 export interface ACPAvailableCommandsUpdate {
   sessionUpdate: "available_commands_update"
-  availableCommands: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
+  availableCommands: ACPValue[]
+  _meta?: ACPAvailableCommandsUpdateMeta
+}
+
+export interface ACPFsWatchUpdateMetaHarn {
+  subscriptionId: string
+  events: ACPValue[]
+  replayed?: boolean
+}
+
+export interface ACPFsWatchUpdateMeta {
+  harn: ACPFsWatchUpdateMetaHarn
 }
 
 export interface ACPFsWatchUpdate {
   sessionUpdate: "fs_watch"
-  subscriptionId: string
-  events: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPFsWatchUpdateMeta
+}
+
+export interface ACPHandoffUpdateMetaHarn {
+  handoffId: string
+  artifactId: string
+  handoff: Record<string, ACPValue>
+  replayed?: boolean
+}
+
+export interface ACPHandoffUpdateMeta {
+  harn: ACPHandoffUpdateMetaHarn
 }
 
 export interface ACPHandoffUpdate {
   sessionUpdate: "handoff"
-  handoffId: string
-  artifactId: string
-  handoff: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPHandoffUpdateMeta
+}
+
+export interface ACPHitlRequestUpdateMetaHarn {
+  requestId: string
+  kind: string
+  payload: ACPValue
+  replayed?: boolean
+}
+
+export interface ACPHitlRequestUpdateMeta {
+  harn: ACPHitlRequestUpdateMetaHarn
 }
 
 export interface ACPHitlRequestUpdate {
   sessionUpdate: "hitl_request"
+  _meta: ACPHitlRequestUpdateMeta
+}
+
+export interface ACPHitlResolvedUpdateMetaHarn {
   requestId: string
   kind: string
-  payload: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
+  outcome: ACPValue
+  replayed?: boolean
+}
+
+export interface ACPHitlResolvedUpdateMeta {
+  harn: ACPHitlResolvedUpdateMetaHarn
 }
 
 export interface ACPHitlResolvedUpdate {
   sessionUpdate: "hitl_resolved"
-  requestId: string
-  kind: string
-  outcome: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPHitlResolvedUpdateMeta
+}
+
+export interface ACPLiveSessionClientUpdateMetaHarn {
+  action: string
+  state: ACPValue
+  replayed?: boolean
+}
+
+export interface ACPLiveSessionClientUpdateMeta {
+  harn: ACPLiveSessionClientUpdateMetaHarn
 }
 
 export interface ACPLiveSessionClientUpdate {
   sessionUpdate: "live_session_client"
-  action: string
-  state?: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPLiveSessionClientUpdateMeta
+}
+
+export interface ACPLogUpdateMetaHarn {
+  message: string
+  level: string
+  fields?: ACPValue
+  replayed?: boolean
+}
+
+export interface ACPLogUpdateMeta {
+  harn: ACPLogUpdateMetaHarn
 }
 
 export interface ACPLogUpdate {
   sessionUpdate: "log"
+  _meta: ACPLogUpdateMeta
+}
+
+export interface ACPProgressUpdateMetaHarn {
   message: string
-  level?: string
-  fields?: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
+  phase: string
+  data?: ACPValue
+  kind?: string
+  pendingCount?: number
+  pendingWrites?: ACPValue[]
+  progress?: number
+  replayed?: boolean
+  total?: number
+  totalBytes?: number
+}
+
+export interface ACPProgressUpdateMeta {
+  harn: ACPProgressUpdateMetaHarn
 }
 
 export interface ACPProgressUpdate {
   sessionUpdate: "progress"
-  message: string
-  phase?: string
-  progress?: number
-  total?: number
-  data?: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPProgressUpdateMeta
+}
+
+export interface ACPReminderEmittedUpdateMetaHarnReminder {
+  reminderId: string
+  tags: string[]
+  body: string
+  roleHint: string
+  renderedRole: string
+  source: string
+  ttlTurns: number | null
+  authority?: string
+}
+
+export interface ACPReminderEmittedUpdateMetaHarn {
+  reminder: ACPReminderEmittedUpdateMetaHarnReminder
+  replayed?: boolean
+}
+
+export interface ACPReminderEmittedUpdateMeta {
+  harn: ACPReminderEmittedUpdateMetaHarn
 }
 
 export interface ACPReminderEmittedUpdate {
   sessionUpdate: "reminder_emitted"
-  reminderId: string
-  reminder?: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPReminderEmittedUpdateMeta
+}
+
+export interface ACPSkillActivatedUpdateMetaHarn {
+  skillName: string
+  iteration: number
+  reason?: string
+  replayed?: boolean
+}
+
+export interface ACPSkillActivatedUpdateMeta {
+  harn: ACPSkillActivatedUpdateMetaHarn
 }
 
 export interface ACPSkillActivatedUpdate {
   sessionUpdate: "skill_activated"
+  _meta: ACPSkillActivatedUpdateMeta
+}
+
+export interface ACPSkillDeactivatedUpdateMetaHarn {
   skillName: string
   iteration?: number
-  reason?: string
-  _meta?: ACPExtensionMeta<ACPObject>
+  replayed?: boolean
+}
+
+export interface ACPSkillDeactivatedUpdateMeta {
+  harn: ACPSkillDeactivatedUpdateMetaHarn
 }
 
 export interface ACPSkillDeactivatedUpdate {
   sessionUpdate: "skill_deactivated"
-  skillName: string
-  iteration?: number
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPSkillDeactivatedUpdateMeta
+}
+
+export interface ACPSkillNarrowUpdateMetaHarn {
+  removedTools: string[]
+  remainingTools: string[]
+  keptToolDetails?: ACPValue
+  policy?: ACPValue
+  reason?: string
+  removedToolDetails?: ACPValue
+  replayed?: boolean
+}
+
+export interface ACPSkillNarrowUpdateMeta {
+  harn: ACPSkillNarrowUpdateMetaHarn
 }
 
 export interface ACPSkillNarrowUpdate {
   sessionUpdate: "skill_narrow"
-  removedTools: string[]
-  remainingTools: string[]
-  reason?: string
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPSkillNarrowUpdateMeta
+}
+
+export interface ACPSkillScopeToolsUpdateMetaHarn {
+  skillName: string
+  allowedTools: string[]
+  replayed?: boolean
+}
+
+export interface ACPSkillScopeToolsUpdateMeta {
+  harn: ACPSkillScopeToolsUpdateMetaHarn
 }
 
 export interface ACPSkillScopeToolsUpdate {
   sessionUpdate: "skill_scope_tools"
-  skillName: string
-  allowedTools: string[]
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPSkillScopeToolsUpdateMeta
+}
+
+export interface ACPStanceTransitionUpdateMetaHarn {
+  phase: string
+  allowedTools?: string[]
+  consent?: string
+  escapeTool?: string
+  justification?: string
+  reason?: string
+  replayed?: boolean
+}
+
+export interface ACPStanceTransitionUpdateMeta {
+  harn: ACPStanceTransitionUpdateMetaHarn
 }
 
 export interface ACPStanceTransitionUpdate {
   sessionUpdate: "stance_transition"
-  phase: string
-  escapeTool?: string
-  allowedTools?: string[]
-  justification?: string
-  consent?: string
-  reason?: string
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPStanceTransitionUpdateMeta
+}
+
+export interface ACPToolSearchQueryUpdateMetaHarn {
+  toolUseId: string
+  name: string
+  query: ACPValue
+  mode?: string
+  replayed?: boolean
+  strategy?: string
+}
+
+export interface ACPToolSearchQueryUpdateMeta {
+  harn: ACPToolSearchQueryUpdateMetaHarn
 }
 
 export interface ACPToolSearchQueryUpdate {
   sessionUpdate: "tool_search_query"
+  _meta: ACPToolSearchQueryUpdateMeta
+}
+
+export interface ACPToolSearchResultUpdateMetaHarn {
   toolUseId: string
-  name: string
-  query: ACPValue
-  strategy?: string
+  promoted: ACPValue[]
   mode?: string
-  _meta?: ACPExtensionMeta<ACPObject>
+  replayed?: boolean
+  strategy?: string
+}
+
+export interface ACPToolSearchResultUpdateMeta {
+  harn: ACPToolSearchResultUpdateMetaHarn
 }
 
 export interface ACPToolSearchResultUpdate {
   sessionUpdate: "tool_search_result"
-  toolUseId: string
-  promoted: ACPValue
-  strategy?: string
-  mode?: string
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPToolSearchResultUpdateMeta
+}
+
+export interface ACPTranscriptCompactedUpdateMetaHarn {
+  mode: string
+  strategy: string
+  snapshotAssetId: string | null
+  reason: string
+  receiptId: string
+  schemaVersion: number
+  engineStrategy: string
+  requestedStrategy: string | null
+  resolvedThresholdTokens: number | null
+  thresholdSource: string | null
+  hardLimitTokens: number | null
+  archivedMessages: number
+  estimatedTokensBefore: number
+  estimatedTokensAfter: number
+  instructionMode: string | null
+  instructionSource: string | null
+  compactionPolicy: ACPValue
+  recap: ACPValue
+  sourceMeasurement: ACPValue
+  replayed?: boolean
+}
+
+export interface ACPTranscriptCompactedUpdateMeta {
+  harn: ACPTranscriptCompactedUpdateMetaHarn
 }
 
 export interface ACPTranscriptCompactedUpdate {
   sessionUpdate: "transcript_compacted"
-  mode: string
-  strategy: string
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPTranscriptCompactedUpdateMeta
+}
+
+export interface ACPTranscriptProjectedUpdateMetaHarn {
+  policy: string
+  reason: string
+  droppedCount?: number
+  keptCount?: number
+  prefixHash?: string
+  providerSafetyBlocked?: boolean
+  reclaimedTokens?: number
+  redactedCount?: number
+  redactionPointers?: ACPValue[]
+  replayed?: boolean
+  rootsConsulted?: ACPValue[]
+}
+
+export interface ACPTranscriptProjectedUpdateMeta {
+  harn: ACPTranscriptProjectedUpdateMetaHarn
 }
 
 export interface ACPTranscriptProjectedUpdate {
   sessionUpdate: "transcript_projected"
-  policy: string
-  reason: string
-  _meta?: ACPExtensionMeta<ACPObject>
+  _meta: ACPTranscriptProjectedUpdateMeta
 }
 
-export interface ACPWorkerUpdate {
-  sessionUpdate: "worker_update"
+export interface ACPWorkerUpdateMetaHarn {
   workerId: string
   event: string
   status: string
   terminal: boolean
+  metadata: ACPValue
+  audit?: ACPValue
+  replayed?: boolean
+  workerMode?: string
   workerName?: string
   workerTask?: string
-  workerMode?: string
-  metadata?: ACPValue
-  audit?: ACPValue
-  _meta?: ACPExtensionMeta<ACPObject>
 }
 
-export interface ACPHarnExtensionUpdate {
-  sessionUpdate: HarnACPSessionUpdateExtension
-  _meta?: ACPExtensionMeta<ACPObject>
+export interface ACPWorkerUpdateMeta {
+  harn: ACPWorkerUpdateMetaHarn
 }
 
-export type ACPSessionUpdateEnvelope =
-  | ACPUserMessageUpdate
-  | ACPMessageChunkUpdate
-  | ACPToolCall
-  | ACPToolCallUpdate
-  | ACPPlanUpdate
-  | ACPSessionTruncatedUpdate
+export interface ACPWorkerUpdate {
+  sessionUpdate: "worker_update"
+  _meta: ACPWorkerUpdateMeta
+}
+
+export type ACPTypedSessionUpdate =
   | ACPArtifactUpdate
   | ACPAvailableCommandsUpdate
   | ACPFsWatchUpdate
@@ -1444,6 +1617,17 @@ export type ACPSessionUpdateEnvelope =
   | ACPTranscriptCompactedUpdate
   | ACPTranscriptProjectedUpdate
   | ACPWorkerUpdate
+
+
+export type ACPHarnExtensionUpdate = ACPTypedSessionUpdate
+
+export type ACPSessionUpdateEnvelope =
+  | ACPUserMessageUpdate
+  | ACPMessageChunkUpdate
+  | ACPToolCall
+  | ACPToolCallUpdate
+  | ACPPlanUpdate
+  | ACPSessionTruncatedUpdate
   | ACPHarnExtensionUpdate
 
 export interface ACPSessionUpdateParams {

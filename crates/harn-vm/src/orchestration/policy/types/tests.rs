@@ -181,6 +181,71 @@ fn tcp_loopback_is_host_owned_process_authority() {
         .expect_err("a flattened stage cannot invent loopback authority");
 }
 
+/// The helper path attenuates like the grant it renders, in both directions.
+///
+/// Naming an executable that may build a namespace is authority, not
+/// configuration: on a host that restricts unprivileged namespaces, that path
+/// is the whole of what host policy permitted. A nested request that could
+/// name its own would pick the binary; one that could drop the outer name
+/// would turn a rendered grant into a refusal at spawn time, which reads as a
+/// broken host rather than as a policy decision. Both directions are asserted
+/// because only checking the invent half would let the erase half regress
+/// silently.
+#[test]
+fn the_namespace_helper_path_is_host_owned_process_authority() {
+    let named = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            allow_tcp_loopback: true,
+            netns_launcher_path: Some("/opt/example/launch".to_string()),
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+    let unnamed = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            allow_tcp_loopback: true,
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+    let other = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            allow_tcp_loopback: true,
+            netns_launcher_path: Some("/tmp/attacker/launch".to_string()),
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+
+    assert_eq!(
+        named
+            .intersect(&unnamed)
+            .expect("a nested policy cannot erase the host helper path")
+            .process_sandbox
+            .netns_launcher_path
+            .as_deref(),
+        Some("/opt/example/launch"),
+    );
+    assert_eq!(
+        unnamed
+            .intersect(&named)
+            .expect("a nested policy cannot invent a helper path")
+            .process_sandbox
+            .netns_launcher_path,
+        None,
+    );
+    assert_eq!(
+        named
+            .intersect(&other)
+            .expect("a nested policy cannot substitute its own helper path")
+            .process_sandbox
+            .netns_launcher_path
+            .as_deref(),
+        Some("/opt/example/launch"),
+        "the ceiling names the executable; a nested request may not redirect it",
+    );
+}
+
 #[test]
 fn workspace_paths_enforces_paths_without_confining_processes() {
     let profile = SandboxProfile::WorkspacePaths;

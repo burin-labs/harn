@@ -11,6 +11,120 @@ use super::{command_output, ProcessCommandConfig, WORKSPACE_TMPDIR_NAME};
 
 struct PolicyGuard;
 
+#[cfg(target_os = "macos")]
+#[test]
+fn swiftpm_from_a_project_script_uses_the_outer_sandbox() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(
+        workspace.path().join("Package.swift"),
+        "// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(name: \"ScriptSandboxProbe\")\n",
+    )
+    .unwrap();
+    let _policy = enter_policy(workspace.path());
+    for invocation in [
+        "swift package dump-package",
+        "xcrun --sdk macosx swift package dump-package",
+    ] {
+        std::fs::write(
+            workspace.path().join("manifest.sh"),
+            format!("#!/bin/sh\nset -eu\nexec {invocation}\n"),
+        )
+        .unwrap();
+        let output = command_output(
+            "/bin/sh",
+            &["manifest.sh".to_string()],
+            &ProcessCommandConfig {
+                cwd: Some(workspace.path().to_path_buf()),
+                ..ProcessCommandConfig::default()
+            },
+        )
+        .unwrap_or_else(|error| panic!("project script {invocation}: {error:?}"));
+        assert!(
+            output.status.success(),
+            "{invocation}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let manifest: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(manifest["name"], "ScriptSandboxProbe", "{invocation}");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("sandbox_apply"));
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn swiftpm_adapted_environment_keeps_write_and_read_denials() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_file = outside.path().join("outside.txt");
+    std::fs::write(&outside_file, "outside-unchanged").unwrap();
+    let denied_file = workspace.path().join("denied.txt");
+    std::fs::write(&denied_file, "known-denied-fixture").unwrap();
+    let _guard = enter_policy(workspace.path());
+    let config = ProcessCommandConfig {
+        cwd: Some(workspace.path().to_path_buf()),
+        ..ProcessCommandConfig::default()
+    };
+    let env = super::active_workspace_process_env();
+    let path = env
+        .iter()
+        .find(|(key, _)| key == "PATH")
+        .expect("adapted PATH");
+    assert!(std::env::split_paths(&path.1)
+        .next()
+        .unwrap()
+        .join("swift")
+        .is_file());
+    let write = |target: &Path| {
+        command_output(
+            "/bin/sh",
+            &[
+                "-c".to_string(),
+                "printf known-write > \"$1\"".to_string(),
+                "write-probe".to_string(),
+                target.display().to_string(),
+            ],
+            &config,
+        )
+    };
+    let inside_file = workspace.path().join("inside.txt");
+    assert!(write(&inside_file).unwrap().status.success());
+    assert_eq!(
+        std::fs::read_to_string(&inside_file).unwrap(),
+        "known-write"
+    );
+    assert!(matches!(
+        write(&outside_file),
+        Err(crate::VmError::CategorizedError {
+            category: crate::value::ErrorCategory::ToolRejected,
+            ..
+        })
+    ));
+    assert_eq!(
+        std::fs::read_to_string(&outside_file).unwrap(),
+        "outside-unchanged"
+    );
+
+    let mut policy = crate::orchestration::current_execution_policy().unwrap();
+    policy.process_sandbox.read_deny_roots = vec![denied_file.display().to_string()];
+    // Replace the one policy slot owned by the guard, retaining the same
+    // isolated environment and generated launchers throughout the read matrix.
+    pop_execution_policy();
+    push_execution_policy(policy.clone());
+    let read = |target: &Path| command_output("/bin/cat", &[target.display().to_string()], &config);
+    assert_eq!(read(&inside_file).unwrap().stdout, b"known-write");
+    assert!(matches!(
+        read(&denied_file),
+        Err(crate::VmError::CategorizedError {
+            category: crate::value::ErrorCategory::ToolRejected,
+            ..
+        })
+    ));
+    policy.process_sandbox.read_deny_roots.clear();
+    pop_execution_policy();
+    push_execution_policy(policy);
+    assert_eq!(read(&denied_file).unwrap().stdout, b"known-denied-fixture");
+}
+
 impl Drop for PolicyGuard {
     fn drop(&mut self) {
         crate::stdlib::process::set_session_environment(None);

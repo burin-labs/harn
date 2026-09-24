@@ -414,3 +414,39 @@ fn wire_preserves_optional_and_false_compatibility() {
     assert_eq!(wire["tools"][0]["deferLoading"], false);
     assert_eq!(wire["tools"][0]["icons"][0]["theme"], "dark");
 }
+
+#[test]
+fn a_json_schema_handed_to_the_parameter_map_is_refused_by_name() {
+    for shape in [
+        vec![("type", crate::value::VmValue::String("object".into()))],
+        vec![
+            ("type", crate::value::VmValue::String("object".into())),
+            (
+                "properties",
+                crate::value::VmValue::dict(crate::value::DictMap::new()),
+            ),
+        ],
+    ] {
+        let mut params = crate::value::DictMap::new();
+        for (key, value) in shape {
+            params.insert(key.into(), value);
+        }
+        let error =
+            crate::tool_registry::params_to_json_schema(Some(&crate::value::VmValue::dict(params)))
+                .expect_err("a JSON Schema document is not a per-parameter map");
+        assert!(
+            error.to_string().contains("input_schema"),
+            "{error} must name the key that owns a complete schema"
+        );
+    }
+
+    let mut named = crate::value::DictMap::new();
+    named.insert(
+        "path".into(),
+        crate::value::VmValue::String("string".into()),
+    );
+    let schema =
+        crate::tool_registry::params_to_json_schema(Some(&crate::value::VmValue::dict(named)))
+            .expect("a per-parameter map still converts");
+    assert_eq!(schema["properties"]["path"]["type"], "string");
+}

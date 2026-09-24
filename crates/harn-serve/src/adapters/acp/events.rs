@@ -622,50 +622,11 @@ impl AgentEventSink for AcpAgentEventSink {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "transcript_compacted",
                 });
-                let mut harn_meta = serde_json::Map::new();
-                let mut put = |key: &str, value: serde_json::Value| {
-                    harn_meta.insert(key.to_string(), value);
-                };
-                // `receiptId` + `schemaVersion` give ACP consumers the stable
-                // runtime identity so they no longer synthesize a host-local
-                // UUID (harn#4995).
-                put("receiptId", receipt.receipt_id.clone().into());
-                put("schemaVersion", receipt.schema_version.into());
-                put("mode", receipt.mode.clone().into());
-                put("reason", receipt.reason.clone().into());
-                put("strategy", receipt.strategy.clone().into());
-                put("engineStrategy", receipt.engine_strategy.clone().into());
-                put("archivedMessages", receipt.archived_messages.into());
-                put(
-                    "estimatedTokensBefore",
-                    receipt.estimated_tokens_before.into(),
-                );
-                put(
-                    "estimatedTokensAfter",
-                    receipt.estimated_tokens_after.into(),
-                );
-                put(
-                    "snapshotAssetId",
-                    receipt
-                        .snapshot_asset_id
-                        .clone()
-                        .map_or(serde_json::Value::Null, serde_json::Value::String),
-                );
-                if let Some(instruction_mode) = &receipt.instruction_mode {
-                    put("instructionMode", instruction_mode.clone().into());
-                }
-                if let Some(instruction_source) = &receipt.instruction_source {
-                    put("instructionSource", instruction_source.clone().into());
-                }
-                if let Some(compaction_policy) = &receipt.compaction_policy {
-                    put("compactionPolicy", compaction_policy.clone());
-                }
-                if let Some(recap) = &receipt.recap {
-                    put(
-                        "recap",
-                        serde_json::to_value(recap).unwrap_or(serde_json::Value::Null),
-                    );
-                }
+                // The receipt owns its ACP projection (`receiptId` +
+                // `schemaVersion` give consumers the stable runtime identity,
+                // harn#4995; `requestedStrategy` + `sourceMeasurement` make a
+                // requested-versus-applied divergence legible, harn#8531).
+                let harn_meta = receipt.to_acp_meta();
                 merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,

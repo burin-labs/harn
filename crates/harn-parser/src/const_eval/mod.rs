@@ -235,8 +235,16 @@ pub type ConstEnv = HashMap<String, ConstValue>;
 /// return a [`ConstEvalError`]. The `env` argument supplies earlier
 /// `const` bindings visible to this expression.
 pub fn const_eval(node: &SNode, env: &ConstEnv) -> Result<ConstValue, ConstEvalError> {
+    const_eval_with_resolver(node, &|name| env.get(name).cloned())
+}
+
+/// Fold against lexical scope without materializing all visible bindings.
+pub(crate) fn const_eval_with_resolver(
+    node: &SNode,
+    resolve: &dyn Fn(&str) -> Option<ConstValue>,
+) -> Result<ConstValue, ConstEvalError> {
     let mut ctx = EvalCtx {
-        env,
+        resolve,
         steps: 0,
         depth: 0,
     };
@@ -244,7 +252,7 @@ pub fn const_eval(node: &SNode, env: &ConstEnv) -> Result<ConstValue, ConstEvalE
 }
 
 struct EvalCtx<'a> {
-    env: &'a ConstEnv,
+    resolve: &'a dyn Fn(&str) -> Option<ConstValue>,
     steps: u32,
     depth: u32,
 }
@@ -288,7 +296,7 @@ impl<'a> EvalCtx<'a> {
             Node::StringLiteral(s) | Node::RawStringLiteral(s) => Ok(ConstValue::String(s.clone())),
             Node::NilLiteral => Ok(ConstValue::Nil),
 
-            Node::Identifier(name) => ctx.env.get(name).cloned().ok_or_else(|| {
+            Node::Identifier(name) => (ctx.resolve)(name).ok_or_else(|| {
                 ConstEvalError::runtime(
                     node.span,
                     format!("`{name}` is not a const-known identifier"),
@@ -1153,7 +1161,7 @@ mod tests {
         // is reached.
         let env = ConstEnv::new();
         let mut ctx = EvalCtx {
-            env: &env,
+            resolve: &|name| env.get(name).cloned(),
             steps: 0,
             depth: MAX_DEPTH,
         };
@@ -1174,7 +1182,7 @@ mod tests {
         // approach the 100k-step budget.
         let env = ConstEnv::new();
         let mut ctx = EvalCtx {
-            env: &env,
+            resolve: &|name| env.get(name).cloned(),
             steps: MAX_STEPS,
             depth: 0,
         };
@@ -1194,7 +1202,7 @@ mod tests {
         // Pre-loading the counter to MAX_STEPS - 4 then folding a
         // 5-step expression must trip exactly once.
         let mut ctx = EvalCtx {
-            env: &env,
+            resolve: &|name| env.get(name).cloned(),
             steps: MAX_STEPS - 4,
             depth: 0,
         };

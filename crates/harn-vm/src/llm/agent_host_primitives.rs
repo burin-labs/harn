@@ -1158,11 +1158,9 @@ pub(super) async fn host_agent_dispatch_tool_call(
         }
         Some(decision) if decision.is_deny() => {
             emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
-            let denial = crate::agent_events::ToolDenial::terminal(
-                crate::agent_events::DenialGate::ApprovalPolicy,
-                None,
-                decision.reason,
-            );
+            // No gate is named here on purpose: the decision carries the one
+            // its deciding rule chose. See `PolicyEvaluation::terminal_denial`.
+            let denial = decision.terminal_denial();
             return Ok(deny_tool_call_value(
                 Some(&ctx),
                 &session_id,
@@ -1229,7 +1227,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         &approval_id,
                         &tool_name,
                         &decision,
-                        resolution,
+                        host_permission::attribute_reviewer_refusal(&decision, resolution),
                     );
                     let denial = crate::agent_events::ToolDenial::terminal(
                         crate::agent_events::DenialGate::HostRejected,

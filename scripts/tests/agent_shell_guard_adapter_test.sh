@@ -91,17 +91,21 @@ fi
 # guard is vendored in owns an admission command. The wrapper measures its own
 # tree, so both directions need their own fixture root rather than a different
 # payload, and both are exercised end to end through the adapter.
-worktree_payload='{"tool_name":"Bash","tool_input":{"command":"bash -lc '\''git -C /workspace worktree add ../unowned origin/main'\''"}}'
+# The rule answers for the repository the command targets, so each direction
+# points `-C` at a root this test built and knows the answer for. A repository
+# marker is what the wrapper walks up to find, and both roots need one before
+# they can be measured at all.
+mkdir -p "$fixture_root/.git"
 
-admitted_root="$(mktemp -d)"
+admitted_root="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$admitted_root"' EXIT
-mkdir -p "$admitted_root/scripts"
+mkdir -p "$admitted_root/scripts" "$admitted_root/.git"
 cp "$repo_root/scripts/agent-shell-guard.sh" "$admitted_root/scripts/"
 cp "$repo_root/scripts/agent_shell_guard.harn" "$admitted_root/scripts/"
 cp "$repo_root/scripts/agent_shell_guard_policy.harn" "$admitted_root/scripts/"
 printf '// admission\n' >"$admitted_root/scripts/fleet-worktree-admit.ts"
 worktree_blocked="$(
-  printf '%s' "$worktree_payload" \
+  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -lc 'git -C $admitted_root worktree add ../unowned origin/main'\"}}" \
     | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
 )"
 if [[ "$worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
@@ -115,12 +119,29 @@ fi
 # must be allowed. Naming a command the operator cannot run is the failure this
 # direction guards, and an empty verdict is how the adapter says "allowed".
 worktree_allowed="$(
-  printf '%s' "$worktree_payload" \
+  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -lc 'git -C $fixture_root worktree add ../unowned origin/main'\"}}" \
     | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
 )"
 if [[ -n "$worktree_allowed" ]]; then
   echo "adapter refused raw worktree creation where the repository owns no admission command" >&2
   printf '%s\n' "$worktree_allowed" >&2
+  exit 1
+fi
+
+# A target outside every measured root is not a target found to own nothing.
+# A path *inside* a measured repository is covered by that repository's row,
+# which is why this one points outside them all.
+# Without this arm the fix is a hole: the easy version of "answer for the
+# repository the command targets" allows anything it failed to resolve, which
+# is the whole absence-reads-as-success shape this rule exists to avoid.
+worktree_unmeasured="$(
+  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git -C /no-such-repository-8447/lane worktree add ../unowned origin/main\"}}" \
+    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$worktree_unmeasured" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$worktree_unmeasured" != *'could not tell'* ]]; then
+  echo "adapter treated an unmeasured target repository as one owning no admission command" >&2
+  printf '%s\n' "$worktree_unmeasured" >&2
   exit 1
 fi
 
@@ -226,8 +247,10 @@ if kill -0 "$hanging_child_pid" 2>/dev/null; then
 fi
 
 # Timeout and signal-shaped exits mean the policy produced no trustworthy
-# decision, so all three statuses deny. Other interpreter failures remain
-# fail-open so a broken local runtime cannot lock every shell call.
+# decision, so all three statuses deny. Every other non-zero status after the
+# policy has started denies as well: the interpreter was present and runnable,
+# the evaluation failed, and no rule was applied. An absent or non-executable
+# interpreter is the one case that still allows, settled before the policy runs.
 cat >"$fixture_root/status-harn" <<'STUB'
 #!/usr/bin/env bash
 if [[ "${GUARD_PARTIAL:-0}" == "1" ]]; then
@@ -254,21 +277,60 @@ crash_output="$(
     | GUARD_PARTIAL=1 GUARD_STATUS=9 HARN_BIN="$fixture_root/status-harn" \
       "$fixture_root/scripts/agent-shell-guard.sh"
 )"
-if [[ -n "$crash_output" ]]; then
-  echo "adapter did not fail open after an interpreter crash" >&2
+if [[ "$crash_output" != *'"permissionDecision":"deny"'* ]]; then
+  echo "adapter did not deny after the policy crashed" >&2
+  printf '%s\n' "$crash_output" >&2
+  exit 1
+fi
+if [[ "$crash_output" == *"must-not-escape"* ]]; then
+  echo "adapter let a partial verdict escape a crashed policy" >&2
   printf '%s\n' "$crash_output" >&2
   exit 1
 fi
 
+# A policy that throws is the shape that made this fail-open costly: the
+# in-process suite stays green because every rule still answers, while the
+# host reads the adapter's silence as an allow and runs the command. Keep the
+# throwing policy as a permanent fixture so that combination cannot return.
+mkdir -p "$fixture_root/throwing"
+cp "$repo_root/scripts/agent-shell-guard.sh" "$fixture_root/throwing/"
+cat >"$fixture_root/throwing/agent_shell_guard.harn" <<'HARN'
+fn main(harness: Harness) {
+  throw "deliberate top-of-decision fault"
+}
+HARN
+throw_output="$(
+  printf '%s' "$payload" \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/throwing/agent-shell-guard.sh"
+)"
+if [[ "$throw_output" != *'"permissionDecision":"deny"'* ]]; then
+  echo "adapter did not deny a policy that threw before deciding" >&2
+  printf '%s\n' "$throw_output" >&2
+  exit 1
+fi
+if [[ "$throw_output" != *"deliberate top-of-decision fault"* ]]; then
+  echo "adapter denied without naming the thrown reason" >&2
+  printf '%s\n' "$throw_output" >&2
+  exit 1
+fi
+
+# The one surviving fail-open. It stays an allow so the setup that installs the
+# interpreter is still runnable, but it must be audible: an allow that says
+# nothing is the same silence the fault path above was fixed to stop emitting.
 unavailable_output="$(
   printf '%s' "$payload" \
     | env -u HARN_BIN PATH=/usr/bin:/bin \
       AGENT_SHELL_GUARD_HARN_BIN="$fixture_root/missing-harn" \
-      "$fixture_root/scripts/agent-shell-guard.sh"
+      "$fixture_root/scripts/agent-shell-guard.sh" 2>"$fixture_root/unavailable.err"
 )"
 if [[ -n "$unavailable_output" ]]; then
   echo "adapter did not fail open when no interpreter was available" >&2
   printf '%s\n' "$unavailable_output" >&2
+  exit 1
+fi
+if ! grep -Fq "agent shell guard is OFF" "$fixture_root/unavailable.err"; then
+  echo "adapter allowed silently when no interpreter was available" >&2
+  cat "$fixture_root/unavailable.err" >&2
   exit 1
 fi
 
@@ -440,6 +502,112 @@ fallback_resolved="$(
 if [[ "$fallback_resolved" != *DEBUG-INTERPRETER-RAN* ]]; then
   echo "adapter dropped its debug-build fallback and left the shell unguarded" >&2
   printf '%s\n' "$fallback_resolved" >&2
+  exit 1
+fi
+
+# The Make-target measurement, end to end through the adapter. The policy
+# cannot read the filesystem, so this is the only place that proves the
+# wrapper's census reaches it. Both arms run against the same fixture with
+# only the Makefile changed, which is the one variable under test.
+make_root="$(cd "$(mktemp -d)" && pwd -P)"
+trap 'rm -rf "$fixture_root" "$order_root" "$make_root"' EXIT
+mkdir -p "$make_root/scripts"
+cp "$repo_root/scripts/agent-shell-guard.sh" "$make_root/scripts/"
+cp "$repo_root/scripts/agent_shell_guard.harn" "$make_root/scripts/"
+cp "$repo_root/scripts/agent_shell_guard_policy.harn" "$make_root/scripts/"
+
+swift_payload='{"tool_name":"Bash","tool_input":{"command":"swift test"}}'
+
+# A repository whose Makefile owns the target. The assignment and the
+# dot-directive are there so the reader cannot mistake a loose match for a
+# real declaration.
+cat >"$make_root/Makefile" <<'MAKE'
+.PHONY: build swift-build swift-test
+SWIFT_FLAGS := --disable-sandbox
+build:
+	echo build
+swift-build:
+	echo swift build
+swift-test:
+	echo swift test
+MAKE
+owned="$(
+  printf '%s' "$swift_payload" \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$owned" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$owned" != *'Run `make swift-test` instead'* ]]; then
+  echo "adapter did not refuse a bare swift test in a repository that owns the target" >&2
+  printf '%s\n' "$owned" >&2
+  exit 1
+fi
+
+# CONTROL: the same command in a repository whose Makefile does not declare it.
+# Without this arm, a rule that denied unconditionally would pass the test
+# above and then name a target the operator does not have.
+cat >"$make_root/Makefile" <<'MAKE'
+.PHONY: build
+build:
+	echo build
+MAKE
+unowned="$(
+  printf '%s' "$swift_payload" \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$unowned" ]]; then
+  echo "adapter refused a bare swift test in a repository with no swift-test target" >&2
+  printf '%s\n' "$unowned" >&2
+  exit 1
+fi
+
+# CONTROL: no Makefile at all is the same answer, and the Cargo rule, which is
+# unconditional, still fires there. A silent census failure would otherwise
+# look identical to this allow.
+rm -f "$make_root/Makefile"
+no_makefile="$(
+  printf '%s' "$swift_payload" \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$no_makefile" ]]; then
+  echo "adapter refused a bare swift test in a repository with no Makefile" >&2
+  printf '%s\n' "$no_makefile" >&2
+  exit 1
+fi
+still_guarded="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"cargo check"}}' \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$still_guarded" != *'"permissionDecision":"deny"'* ]]; then
+  echo "control: the guard produced no verdict at all, so the allows above prove nothing" >&2
+  printf '%s\n' "$still_guarded" >&2
+  exit 1
+fi
+
+# Every rule the policy owns must reach a verdict in the standalone host, not
+# only in the full host the unit tests run in. An ungranted builtin does not
+# degrade: it throws, the adapter fails closed, and the operator gets an
+# interpreter error where a rule should be. The disposable-path matcher folds
+# case for Windows spellings, and that fold is only reached past the POSIX temp
+# roots, so the arm below is the one a unit test cannot stand in for.
+windows_temp="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"trash %TEMP%/build.log"}}' \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$windows_temp" != *'visible Trash'* ]]; then
+  echo "the disposable-path rule did not reach a verdict in the standalone host" >&2
+  printf '%s\n' "$windows_temp" >&2
+  exit 1
+fi
+
+# CONTROL: the same rule on a user file allows. A fault would deny both, so
+# without this arm the deny above could be an error message rather than a rule.
+user_file="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"trash /Users/alice/Documents/report.txt"}}' \
+    | HARN_BIN="$HARN_BIN" "$make_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$user_file" ]]; then
+  echo "the disposable-path rule refused a user file, which it must never do" >&2
+  printf '%s\n' "$user_file" >&2
   exit 1
 fi
 

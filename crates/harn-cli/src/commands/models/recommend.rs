@@ -19,12 +19,12 @@ use std::io::Write as _;
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::ModelRecommendArgs;
+use crate::cli::{ModelRecommendArgs, RecommendOperation};
 use crate::commands::hardware::{collect_hardware_snapshot, GpuKind, HardwareSnapshot};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
-use super::recommend_sources::{detect_cloud_model, detect_local_model};
+use super::recommend_sources::{detect_cloud_model, detect_local_model, operation_routes};
 
 const RECOMMENDATIONS_TOML: &str = include_str!("../../../data/model_recommendations.toml");
 const RAM_BUCKETS: [RamBucket; 4] = [
@@ -107,16 +107,35 @@ pub(super) struct LocalModel {
     pub(super) cached: bool,
 }
 
+/// One catalog route offered for a non-default operation, with enough
+/// credential context to say whether it is usable right now. `served_model_id`
+/// and `availability` are carried because a documented-but-unreached route is
+/// listed too, and a reader has to be able to tell the two apart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(super) struct OperationRoute {
+    pub(super) catalog_id: String,
+    pub(super) provider: String,
+    pub(super) served_model_id: Option<String>,
+    pub(super) availability: String,
+    pub(super) credential_status: String,
+    pub(super) decision_protocol: Option<String>,
+}
+
 /// JSON payload handed to the embedded `cli/models/recommend` script.
 /// The script picks the matching rule and renders — see the script's
 /// docstring for the input contract.
 #[derive(Debug, Serialize)]
 struct RecommendDispatchPayload<'a> {
+    operation: &'a str,
     hardware: &'a HardwareSnapshot,
     has_provider_key: bool,
     cloud_model: Option<&'a CloudModel>,
     local_model: Option<&'a LocalModel>,
     recommendations: &'a [RecommendationRule],
+    /// Routes declaring the requested operation. Empty for the default
+    /// `text_generation` request, which is answered by the hardware rule
+    /// table rather than by a route listing.
+    routes: &'a [OperationRoute],
 }
 
 pub(crate) async fn run(args: &ModelRecommendArgs) {
@@ -127,8 +146,14 @@ pub(crate) async fn run(args: &ModelRecommendArgs) {
 }
 
 async fn run_dispatch(args: &ModelRecommendArgs) -> i32 {
+    let operation = args.operation.as_model_operation();
     let snapshot = collect_hardware_snapshot();
-    let cloud_model = detect_cloud_model();
+    let cloud_model = detect_cloud_model(harn_vm::llm_config::ModelOperation::TextGeneration);
+    let routes = if args.operation == RecommendOperation::TextGeneration {
+        Vec::new()
+    } else {
+        operation_routes(operation)
+    };
     let has_provider_key = cloud_model.is_some();
     let table = match load_recommendation_table() {
         Ok(table) => table,
@@ -144,6 +169,8 @@ async fn run_dispatch(args: &ModelRecommendArgs) -> i32 {
     let local_model = detect_local_model(&snapshot, &table);
 
     let payload = RecommendDispatchPayload {
+        operation: args.operation.as_catalog_name(),
+        routes: &routes,
         hardware: &snapshot,
         has_provider_key,
         cloud_model: cloud_model.as_ref(),

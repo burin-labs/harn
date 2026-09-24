@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Regression test for release_ship.sh's require_no_unfolded_fragments guardrail.
 #
-# Context: release_ship.sh does NOT fold changelog.d/*.<category>.md fragments
-# (the fold lives in the bump-fleet release_harn 'prepare' flow). Invoking
-# release_ship directly with fragments still present would ship a release whose
-# CHANGELOG omits them and whose --finalize renders empty notes. The guardrail
-# must fail loud before build-shaped work. This dogfoods the exact failure mode
-# hit during the v0.9.21 cut.
+# Context: only `release_ship.sh --prepare` folds changelog.d/*.<category>.md
+# fragments (scripts/release_changelog_fold.harn). Finalizing a tree that still
+# carries fragments would ship a release whose CHANGELOG omits them and whose
+# --finalize renders empty notes. The guardrail must fail loud before
+# build-shaped work. This dogfoods the exact failure mode hit during the
+# v0.9.21 cut.
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -16,11 +16,17 @@ guard_library="$repo_root/scripts/lib/release_tree_guard.sh"
 # Extract just the guardrail function so we can exercise it in isolation without
 # running the whole release (which builds crates). If the function is renamed or
 # removed this extraction yields nothing and the first assertion fails loudly.
+listing_src=$(sed -n '/^unfolded_fragment_paths() {/,/^}/p' "$guard_library")
+if [[ -z "$listing_src" ]]; then
+  echo "FAIL: unfolded_fragment_paths not found in $guard_library" >&2
+  exit 1
+fi
 guard_src=$(sed -n '/^require_no_unfolded_fragments() {/,/^}/p' "$guard_library")
 if [[ -z "$guard_src" ]]; then
   echo "FAIL: require_no_unfolded_fragments not found in $guard_library" >&2
   exit 1
 fi
+guard_src="$listing_src"$'\n'"$guard_src"
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -69,7 +75,7 @@ grep -q "1 unfolded changelog fragment" <<<"$err" \
   || { echo "FAIL: missing count in message: $err" >&2; exit 1; }
 grep -q "4199.fixed.md" <<<"$err" \
   || { echo "FAIL: message did not list the fragment: $err" >&2; exit 1; }
-grep -q "release_harn.harn" <<<"$err" \
+grep -q "release_changelog_fold.harn" <<<"$err" \
   || { echo "FAIL: message did not point at the fold remediation: $err" >&2; exit 1; }
 
 # --- Case 3: fragments across multiple categories -> FAIL, correct count ------

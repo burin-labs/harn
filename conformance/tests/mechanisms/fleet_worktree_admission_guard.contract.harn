@@ -2,21 +2,33 @@
 //
 // Contract = {trigger, effect, negative}:
 //   trigger  — an agent shell payload contains parser-recognized raw
-//              `git worktree add`, including behind a nested shell, in a
-//              repository the wrapper measured as owning an admission command;
+//              `git worktree add`, including behind a nested shell, aimed at
+//              a repository the wrapper measured as owning an admission
+//              command;
 //   effect   — the guard denies the call and names the owning command;
 //   negative — the owning admission command and read-only worktree inventory
 //              stay available, and a repository with no admission command is
 //              not refused at all.
 //
 // The refusal is CONDITIONAL on measurement, which is what this contract pins.
-// The wrapper reports two values: whether it looked, and what it found. Three
-// arms follow, and each one has its own control here:
-//   looked + found a known command  -> refuse, naming that command;
-//   looked + found nothing          -> allow, because the rule has no owner;
-//   did not look                    -> refuse, because an unreadable census
-//                                      must never read as an absent one.
-import { decision, worktree_admission_reported } from "../../../scripts/agent_shell_guard"
+// The wrapper reports a census: whether it looked, and one row per repository
+// root naming that repository's admission command or nothing. Each arm has its
+// own control here:
+//   looked + that root owns a known command -> refuse, naming that command;
+//   looked + that root owns nothing         -> allow, the rule has no owner;
+//   did not look                            -> refuse, because an unreadable
+//                                              census must never read as an
+//                                              absent one;
+//   looked, but no row covers the target    -> refuse as unmeasured, for the
+//                                              same reason.
+//
+// The last arm is what makes the rule answer for the repository a command
+// targets rather than for the one the guard happens to be vendored in.
+import {
+  UNMEASURED_MAKE_TARGETS,
+  decision,
+  worktree_admission_census,
+} from "../../../scripts/agent_shell_guard"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
 fn payload(command: string) -> string {
@@ -25,15 +37,23 @@ fn payload(command: string) -> string {
 
 pipeline default(harness: Harness) {
   // The wrapper looked and found this repository's admission command.
-  const owned = worktree_admission_reported("1", "scripts/fleet-worktree-admit.ts")
+  const owned = worktree_admission_census("1", "/workspace\tscripts/fleet-worktree-admit.ts")
   // The wrapper looked and this repository owns no admission command.
-  const unowned = worktree_admission_reported("1", "")
+  const unowned = worktree_admission_census("1", "/workspace\t")
   // No wrapper reported anything: the census is unreadable, not empty.
-  const unmeasured = worktree_admission_reported("", "")
+  const unmeasured = worktree_admission_census("", "")
   // The wrapper named a command this policy does not know: drift, not absence.
-  const drifted = worktree_admission_reported("1", "scripts/renamed-admit.ts")
-  const direct = decision(payload("git -C /workspace worktree add ../lane origin/main"), owned)
-  const nested = decision(payload("bash -lc 'git worktree add ../lane origin/main'"), owned)
+  const drifted = worktree_admission_census("1", "/workspace\tscripts/renamed-admit.ts")
+  const direct = decision(
+    payload("git -C /workspace worktree add ../lane origin/main"),
+    owned,
+    UNMEASURED_MAKE_TARGETS,
+  )
+  const nested = decision(
+    payload("bash -lc 'git worktree add ../lane origin/main'"),
+    owned,
+    UNMEASURED_MAKE_TARGETS,
+  )
   contract_effect(harness.stdio, "trigger_raw_worktree_add", !direct.allow && !nested.allow)
   contract_effect(
     harness.stdio,
@@ -46,6 +66,7 @@ pipeline default(harness: Harness) {
   const in_unowned_repo = decision(
     payload("git -C /workspace worktree add ../lane origin/main"),
     unowned,
+    UNMEASURED_MAKE_TARGETS,
   )
   contract_negative(
     harness.stdio,
@@ -57,6 +78,7 @@ pipeline default(harness: Harness) {
   const in_unmeasured_repo = decision(
     payload("git -C /workspace worktree add ../lane origin/main"),
     unmeasured,
+    UNMEASURED_MAKE_TARGETS,
   )
   contract_effect(
     harness.stdio,
@@ -68,13 +90,28 @@ pipeline default(harness: Harness) {
   const in_drifted_repo = decision(
     payload("git -C /workspace worktree add ../lane origin/main"),
     drifted,
+    UNMEASURED_MAKE_TARGETS,
   )
   contract_effect(
     harness.stdio,
     "effect_unknown_admission_command_refuses",
     !in_drifted_repo.allow && in_drifted_repo.reason.contains("does not know"),
   )
-  const live_control = decision(payload("cargo build"), owned)
+  // The rule answers for the repository the command targets. A target no
+  // measured root covers was never looked at, so it refuses rather than
+  // inheriting the answer for the guard's own repository.
+  const in_unmeasured_target = decision(
+    payload("git -C /elsewhere/lane worktree add ../lane origin/main"),
+    owned,
+    UNMEASURED_MAKE_TARGETS,
+  )
+  contract_effect(
+    harness.stdio,
+    "effect_unmeasured_target_repository_refuses",
+    !in_unmeasured_target.allow
+      && in_unmeasured_target.reason.contains("never looked at"),
+  )
+  const live_control = decision(payload("cargo build"), owned, UNMEASURED_MAKE_TARGETS)
   contract_effect(
     harness.stdio,
     "live_control_raw_cargo_is_also_denied",
@@ -83,8 +120,13 @@ pipeline default(harness: Harness) {
   const wrapper = decision(
     payload("./scripts/fleet-worktree-admit --issue-url https://github.com/acme/repo/issues/1"),
     owned,
+    UNMEASURED_MAKE_TARGETS,
   )
-  const inventory = decision(payload("git worktree list --porcelain"), owned)
+  const inventory = decision(
+    payload("git worktree list --porcelain"),
+    owned,
+    UNMEASURED_MAKE_TARGETS,
+  )
   contract_negative(
     harness.stdio,
     "negative_admission_and_inventory_not_denied",

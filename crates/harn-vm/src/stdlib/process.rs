@@ -61,8 +61,53 @@ pub fn set_session_environment(environment: Option<crate::security::SessionEnvir
 
 /// The environment policy governing subprocess env construction for the current
 /// task, or `None` on the legacy non-session path.
-pub(crate) fn current_session_environment() -> Option<crate::security::SessionEnvironment> {
+///
+/// Public because a host's process seam has to be able to tell "no policy is
+/// installed" apart from "a policy is installed and admits nothing". Those two
+/// look identical downstream — both produce a child the caller did not
+/// explicitly populate — and only the first is a defect. A seam that cannot
+/// ask this question ends up treating absence as permission.
+pub fn current_session_environment() -> Option<crate::security::SessionEnvironment> {
     SESSION_ENVIRONMENT_CONTEXT.with(|current| current.borrow().clone())
+}
+
+/// Declare a default environment for a surface that has none, for as long as
+/// the returned guard is held.
+///
+/// This is what a host surface wants, and the distinction from
+/// [`set_session_environment`] is the whole point of the function existing.
+///
+/// If a policy is already installed, this leaves it alone. A surface
+/// declaring its default must never overwrite a session that made a real
+/// choice: an MCP dispatch that happens inside an agent session would
+/// otherwise replace that session's `granted` policy with a permissive one
+/// and widen the very boundary the session asked for.
+///
+/// On drop it restores whatever was installed before rather than clearing.
+/// Clearing is not the inverse of installing, and a guard that cleared would
+/// leave an enclosing session with no policy at all — which, at a spawn seam,
+/// is an error rather than a default.
+#[must_use = "the declaration lasts only while the guard is held"]
+pub fn declare_session_environment_if_absent(
+    environment: crate::security::SessionEnvironment,
+) -> SessionEnvironmentGuard {
+    let previous = current_session_environment();
+    if previous.is_none() {
+        set_session_environment(Some(environment));
+    }
+    SessionEnvironmentGuard { previous }
+}
+
+/// Restores the session environment that was installed before its
+/// declaration, including on the panicking path.
+pub struct SessionEnvironmentGuard {
+    previous: Option<crate::security::SessionEnvironment>,
+}
+
+impl Drop for SessionEnvironmentGuard {
+    fn drop(&mut self) {
+        set_session_environment(self.previous.take());
+    }
 }
 
 /// Per-task ambient-scope swap of the session environment. Same rationale as
@@ -757,8 +802,11 @@ struct CapturedRun {
     duration_ms: i64,
 }
 
+#[path = "process_credential_presence.rs"]
+mod credential_presence;
 #[path = "process_program_resolution.rs"]
 mod program_resolution;
+pub(crate) use credential_presence::{session_env_presence, SessionEnvPresenceError};
 pub(crate) use program_resolution::{resolve_program_path, resolve_program_path_for_spawn};
 
 /// Shared synchronous spawn-and-capture core used by `harness.process.run` and
@@ -1314,6 +1362,13 @@ fn session_env_with(
 /// call site means a caller cannot accidentally keep reading the raw
 /// environment when a profile *is* active.
 pub(crate) fn session_env_var(name: &str) -> Result<Option<String>, VmError> {
+    session_env_var_with(name, &resolve_grant_secret)
+}
+
+fn session_env_var_with(
+    name: &str,
+    resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+) -> Result<Option<String>, VmError> {
     let Some(environment) = current_session_environment() else {
         return Ok(std::env::var(name).ok());
     };
@@ -1331,7 +1386,7 @@ pub(crate) fn session_env_var(name: &str) -> Result<Option<String>, VmError> {
         &environment,
         name,
         &session_env_lookup(&workspace_defaults),
-        &resolve_grant_secret,
+        resolve_secret,
     )
     .map_err(grant_env_error)?;
     Ok(resolved)

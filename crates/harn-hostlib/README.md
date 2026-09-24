@@ -192,6 +192,12 @@ startup. Windows uses a Job Object and the function returns `false`.
   `audit_id`.
   `background: true` returns the same envelope with `status: "running"` and
   a `handle_id`.
+- `tools/wait_command` polls that exact handle with `timeout_ms: 0`, or waits
+  for its completion with a positive timeout. Only a registered live command
+  can return `status: "running"`; completed results remain replayable within
+  retention. An unknown or retired handle raises an `invalid_parameter` error
+  without waiting. Copy the returned handle exactly; a failed lookup does not
+  cancel or replace any command.
 - `tools/read_command_output` range-reads the artifact for a `command_id`,
   `handle_id`, or explicit `path`. Use it when `stdout_truncated` or
   `stderr_truncated` says the inline copy was capped or when an agent needs to inspect large command output. Completed

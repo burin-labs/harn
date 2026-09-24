@@ -12,7 +12,7 @@
       },
       "elapsed_ms": 2100,
       "usage": {
-        "input_tokens": 3840,
+        "input_tokens": 40,
         "output_tokens": 96,
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 3800
@@ -28,7 +28,7 @@
       },
       "elapsed_ms": 900,
       "usage": {
-        "input_tokens": 3840,
+        "input_tokens": 40,
         "output_tokens": 96,
         "cache_read_input_tokens": 3800,
         "cache_creation_input_tokens": 0

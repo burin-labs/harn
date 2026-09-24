@@ -138,6 +138,11 @@ while IFS= read -r hit; do
   rest="${hit#*:}"
   line="${rest%%:*}"
   matched="${rest#*:}"
+  # The introduction names public applications as examples of Harn adoption.
+  # This exception applies only to product names, never private infrastructure.
+  if [[ "$path" == "README.md" ]]; then
+    continue
+  fi
   if is_allowlisted "$path"; then
     continue
   fi

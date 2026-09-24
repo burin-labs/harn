@@ -52,6 +52,18 @@ fn replay_env_flag() -> bool {
     false
 }
 
+/// Run `fut` as though the current dispatch were (or were not) a replay.
+///
+/// Tests enter the replay fact through its owner rather than setting a flag of
+/// their own, so a test cannot drift from what production reads.
+#[cfg(test)]
+pub(crate) async fn with_replay_scope<F: std::future::Future>(
+    is_replay: bool,
+    fut: F,
+) -> F::Output {
+    ACTIVE_DISPATCH_IS_REPLAY.scope(is_replay, fut).await
+}
+
 pub(crate) fn current_dispatch_wait_lease() -> Option<DispatchWaitLease> {
     ACTIVE_DISPATCH_WAIT_LEASE.with(|slot| slot.borrow().clone())
 }

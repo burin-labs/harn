@@ -75,17 +75,33 @@ Declares a named tool and registers it with a tool registry. The body is
 compiled as a closure and attached as the tool's handler. An optional
 `description` metadata string may appear as the first statement in the body.
 
+Every tool handler receives one argument dictionary, including handlers created
+by a `tool` declaration. The declaration binds dictionary fields to its typed
+parameters before executing the body. An omitted field uses its declared default;
+an explicitly supplied `nil` remains a supplied value and must satisfy the type.
+This is the same contract used by agent, CLI, and MCP tool dispatch. For example,
+`tool_find(search_files, "search_files").handler({query: "needle"})` invokes the
+declared handler with its default file glob.
+
 Annotated tool parameter and return types are lowered into the same schema
 model used by runtime validation and structured LLM I/O. Primitive types map to
 their JSON Schema equivalents, while nested shapes, `list<T>`,
 `dict<string, V>`, and unions produce nested schema objects. Parameters with
-default values are emitted as optional schema fields (`required: false`) and
-include their `default` value in the generated tool registry entry.
+default values are emitted as optional schema fields (`required: false`).
+Constant defaults also appear as schema metadata; defaults that depend on earlier
+arguments or captured values are evaluated when the handler runs. A rest parameter
+is an optional array-valued argument and receives an empty list when omitted.
 
 The result of a `tool` declaration is a tool registry dict (the return
 value of `tool_define`). Multiple `tool` declarations accumulate into
 separate registries; use `tool_registry()` and `tool_define(...)` for
 multi-tool registries.
+
+A declared tool value is also callable with positional arguments, like an
+ordinary function: `search_files("needle")`. Direct calls, pipes, spread calls,
+and callbacks invoke the same body as the registry handler and keep the declared
+defaults, rest parameters, and captured bindings. The registry handler itself
+continues to receive one dictionary of named arguments.
 
 Like `fn`, `tool` may be prefixed with `pub`.
 

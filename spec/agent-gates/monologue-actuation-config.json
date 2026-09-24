@@ -10,22 +10,18 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 42,
         "reader": "agent_monologue_actuation_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 95,
         "reader": "agent_monologue_actuation_observe"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 120,
         "reader": "agent_monologue_actuation_observe_completed_dispatch"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 225,
         "reader": "agent_monologue_actuation_take"
       }
     ],
@@ -43,62 +39,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 47,
         "reader": "agent_monologue_actuation_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 64,
-        "reader": "agent_monologue_actuation_config"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 235,
-        "reader": "agent_monologue_actuation_take"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 208,
-        "reader": "agent_monologue_actuation_take"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 233,
-        "reader": "agent_monologue_actuation_take"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 243,
-        "reader": "agent_monologue_actuation_take"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 253,
-        "reader": "agent_monologue_actuation_take"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 263,
-        "reader": "agent_monologue_actuation_take"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 275,
-        "reader": "agent_monologue_actuation_take"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 285,
-        "reader": "agent_monologue_actuation_take"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 295,
-        "reader": "agent_monologue_actuation_take"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 306,
         "reader": "agent_monologue_actuation_take"
       }
     ],
@@ -116,18 +60,11 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 52,
         "reader": "agent_monologue_actuation_config"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 127,
         "reader": "agent_monologue_actuation_observe_completed_dispatch"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 65,
-        "reader": "agent_monologue_actuation_config"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -144,7 +81,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "line": 57,
         "reader": "agent_monologue_actuation_config"
       }
     ],

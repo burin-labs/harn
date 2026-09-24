@@ -251,6 +251,7 @@ pub type AgentResult = {
   terminal: AgentTerminalOutcome,
   abandonment?: AgentAbandonment,
   declared_artifacts?: AgentDeclaredArtifactAudit,
+  adaptive_budget?: dict,
   error: any,
   text: string,
   visible_text: string,

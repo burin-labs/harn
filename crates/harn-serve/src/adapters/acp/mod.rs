@@ -443,6 +443,30 @@ fn bridge_mode_for_session_inject(params: &serde_json::Value) -> Result<&'static
     }
 }
 
+/// The retarget a `session/inject` steer carries, validated once here.
+///
+/// A `queue` note is refused a goal: it lands after the last model call, so a
+/// retarget riding on it would retire acceptance items for an objective the
+/// model was never shown.
+fn session_inject_goal(
+    params: &serde_json::Value,
+    bridge_mode: &str,
+) -> Result<Option<harn_session_store::ControlGoal>, String> {
+    let Some(raw) = params.get("goal").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    if bridge_mode == "audit_only" {
+        return Err(
+            "session/inject: `goal` retargets the run and needs mode `steer` or \
+             `interrupt_immediate`; a `queue` note never reaches the model"
+                .to_string(),
+        );
+    }
+    harn_session_store::ControlGoal::parse(raw)
+        .map(Some)
+        .map_err(|message| format!("session/inject: {message}"))
+}
+
 fn normalize_session_inject_content(
     method: &str,
     params: &serde_json::Value,
@@ -497,6 +521,9 @@ fn nonnegative_usize_param(
 
 fn budget_config_value(spec: &BudgetSpec) -> String {
     let mut value = serde_json::Map::new();
+    if let Some(mode) = spec.llm_admission {
+        value.insert("llm_admission".to_string(), serde_json::json!(mode));
+    }
     if let Some(cost) = spec.llm_cost_usd {
         value.insert("llm_cost_usd".to_string(), serde_json::json!(cost));
     }
@@ -513,9 +540,11 @@ fn budget_config_value(spec: &BudgetSpec) -> String {
 }
 
 fn normalize_budget_spec(mut spec: BudgetSpec) -> Option<BudgetSpec> {
-    spec.llm_cost_usd = spec
-        .llm_cost_usd
-        .and_then(|value| value.is_finite().then_some(value.max(0.0)));
+    if spec.llm_admission.is_none() {
+        spec.llm_cost_usd = spec
+            .llm_cost_usd
+            .and_then(|value| value.is_finite().then_some(value.max(0.0)));
+    }
     (!spec.is_empty()).then_some(spec)
 }
 
@@ -583,6 +612,12 @@ fn parse_budget_config_value(raw: &str) -> Result<SessionBudget, String> {
         );
     };
     let spec = BudgetSpec {
+        llm_admission: budget_field(object, &["llm_admission", "llmAdmission"])
+            .map(|value| {
+                serde_json::from_value(value.clone())
+                    .map_err(|_| "invalid_budget: llm_admission must be conservative".to_string())
+            })
+            .transpose()?,
         llm_cost_usd: parse_budget_cost_field(
             object,
             &["llm_cost_usd", "llmCostUsd"],
@@ -595,6 +630,8 @@ fn parse_budget_config_value(raw: &str) -> Result<SessionBudget, String> {
     if spec.is_empty() {
         return Err("invalid_budget: budget object must include at least one limit".to_string());
     }
+    spec.conservative_ceiling()
+        .map_err(|error| format!("invalid_budget: {error}"))?;
     Ok(SessionBudget::Custom(spec))
 }
 

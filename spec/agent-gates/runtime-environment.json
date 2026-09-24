@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/agent_observe.rs",
-        "line": 156,
         "reader": "env_flag_enabled"
       }
     ],
@@ -28,7 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/agent_observe/raw_provider_capture.rs",
-        "line": 46,
         "reader": "super::env_flag_enabled"
       }
     ],
@@ -46,7 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/agent_observe/transcript_ambient.rs",
-        "line": 217,
         "reader": "std::env::var"
       }
     ],
@@ -64,7 +61,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/api/openai_normalize.rs",
-        "line": 389,
         "reader": "std::env::var"
       }
     ],
@@ -82,7 +78,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/api/options.rs",
-        "line": 1283,
         "reader": "std::env::var"
       }
     ],
@@ -100,27 +95,10 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
-        "line": 521,
-        "reader": "std::env::var"
-      },
-      {
-        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
-        "line": 655,
-        "reader": "std::env::var"
-      },
-      {
-        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
-        "line": 1126,
-        "reader": "std::env::var"
-      },
-      {
-        "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
-        "line": 1292,
         "reader": "std::env::var"
       },
       {
         "file": "crates/harn-vm/src/llm/api/ollama.rs",
-        "line": 120,
         "reader": "OLLAMA_HOST_ENV"
       }
     ],
@@ -138,12 +116,10 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
-        "line": 1127,
         "reader": "std::env::var"
       },
       {
         "file": "crates/harn-vm/src/llm/api/ollama.rs",
-        "line": 116,
         "reader": "HARN_OLLAMA_NUM_CTX_ENV"
       }
     ],
@@ -161,12 +137,10 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
-        "line": 1128,
         "reader": "std::env::var"
       },
       {
         "file": "crates/harn-vm/src/llm/api/ollama.rs",
-        "line": 117,
         "reader": "HARN_OLLAMA_KEEP_ALIVE_ENV"
       }
     ],
@@ -184,7 +158,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
-        "line": 1417,
         "reader": "std::env::var"
       }
     ],
@@ -202,7 +175,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/config_builtins/healthcheck_builtins.rs",
-        "line": 43,
         "reader": "crate::test_env::env_var_seamed"
       }
     ],
@@ -220,12 +192,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/canon.harn",
-        "line": 148,
-        "reader": "get_or"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/canon.harn",
-        "line": 502,
         "reader": "get_or"
       }
     ],
@@ -243,7 +209,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/crystallization_curator.harn",
-        "line": 221,
         "reader": "get"
       }
     ],
@@ -261,7 +226,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/api/ollama.rs",
-        "line": 118,
         "reader": "HARN_OLLAMA_UNLOAD_GRACE_MS_ENV"
       }
     ],
@@ -279,7 +243,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/api/ollama.rs",
-        "line": 119,
         "reader": "OLLAMA_UNLOAD_GRACE_MS_ENV"
       }
     ],
@@ -297,7 +260,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/introspection.rs",
-        "line": 38,
         "reader": "HARN_HARNESS_ENV"
       }
     ],
@@ -315,7 +277,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/mod.rs",
-        "line": 107,
         "reader": "EFFORT_LADDER_UNGATED_ENV"
       }
     ],
@@ -333,7 +294,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/mod.rs",
-        "line": 329,
         "reader": "LLM_CALLS_DISABLED_ENV"
       }
     ],
@@ -351,7 +311,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/rate_governor.rs",
-        "line": 44,
         "reader": "RATE_GOVERNOR_ENABLED_ENV"
       }
     ],
@@ -369,7 +328,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/rate_limit.rs",
-        "line": 40,
         "reader": "DURABLE_RATE_LIMIT_ENABLED_ENV"
       }
     ],
@@ -387,7 +345,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/rate_limit.rs",
-        "line": 41,
         "reader": "DURABLE_RATE_LIMIT_STATE_PATH_ENV"
       }
     ],
@@ -405,7 +362,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/rate_limit.rs",
-        "line": 52,
         "reader": "DURABLE_RATE_LIMIT_MAX_WAIT_MS_ENV"
       }
     ],
@@ -423,7 +379,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/structural_experiments.rs",
-        "line": 35,
         "reader": "STRUCTURAL_EXPERIMENT_ENV"
       }
     ],
@@ -441,7 +396,6 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/tool_scorecard/fitness.rs",
-        "line": 14,
         "reader": "TOOL_FORMAT_FITNESS_PATH_ENV"
       }
     ],

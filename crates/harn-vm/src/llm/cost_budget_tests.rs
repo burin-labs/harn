@@ -32,3 +32,24 @@ fn flat_top_level_budget_fields_are_not_read() {
         .expect("no budget key")
         .is_none());
 }
+
+#[test]
+fn conservative_admission_requires_a_total_and_rejects_unknown_modes() {
+    for (mode, total, valid) in [
+        ("conservative", Some(0.6), true),
+        ("conservative", None, false),
+        ("estimated", Some(0.6), false),
+    ] {
+        let mut fields =
+            DictMap::from_iter([(intern_key("admission"), VmValue::String(mode.into()))]);
+        if let Some(total) = total {
+            fields.insert(intern_key("total_budget_usd"), VmValue::Float(total));
+        }
+        let options = DictMap::from_iter([(intern_key("budget"), VmValue::dict(fields))]);
+        assert_eq!(
+            parse_budget(Some(&options)).is_ok(),
+            valid,
+            "{mode} {total:?}"
+        );
+    }
+}

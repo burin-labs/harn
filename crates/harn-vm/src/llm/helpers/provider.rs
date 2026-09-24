@@ -390,7 +390,8 @@ pub(crate) fn vm_resolve_model_selector(
 }
 
 pub(crate) struct ResolvedProvider {
-    pub pdef: Option<crate::llm_config::ProviderDef>,
+    // Catalog growth must not enlarge every nested provider-probe future.
+    pub pdef: Option<Box<crate::llm_config::ProviderDef>>,
     pub base_url: String,
     pub endpoint: String,
 }
@@ -430,7 +431,7 @@ impl ResolvedProvider {
             .map(|p| p.chat_endpoint.clone())
             .unwrap_or_else(|| default_endpoint.to_string());
         ResolvedProvider {
-            pdef,
+            pdef: pdef.map(Box::new),
             base_url,
             endpoint,
         }
@@ -469,7 +470,7 @@ impl ResolvedProvider {
         mut req: reqwest::RequestBuilder,
         api_key: &str,
     ) -> reqwest::RequestBuilder {
-        req = crate::llm::api::apply_auth_headers(req, api_key, self.pdef.as_ref());
+        req = crate::llm::api::apply_auth_headers(req, api_key, self.pdef.as_deref());
         if let Some(p) = self.pdef.as_ref() {
             for (k, v) in &p.extra_headers {
                 req = req.header(k.as_str(), v.as_str());

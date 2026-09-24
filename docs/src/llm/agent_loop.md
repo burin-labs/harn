@@ -77,7 +77,7 @@ top-level keys before `v0.8`).
 | `visible_text` | string | Human-visible accumulated output |
 | `output` | any | Present when an `output` contract is set and the loop completed (`status` `"done"`). The terminal answer parsed as JSON and, for schema contracts, validated against the schema. |
 | `output_valid` | bool | Present when an `output` contract is set and the loop completed. `true` when the terminal answer parsed and, when applicable, validated (directly or after one repair call); otherwise `false`. |
-| `provider_call_count` | int | Session-owned count of physical provider dispatches. Measured zero is emitted explicitly. Transport, schema, and provider failures after dispatch count; cache/replay hits and routes rejected before dispatch do not. Uncaught loop errors expose the same field on `AgentLoopTerminalError`; it is `nil` only when the session ledger itself is unavailable. |
+| `provider_call_count` | int | Session-owned count of physical provider dispatches. Measured zero is emitted explicitly. Transport, schema, and provider failures after dispatch count; cache/replay hits and routes rejected before dispatch do not. Uncaught loop errors expose the same field on `AgentLoopTerminalError`; it is `nil` only when the session ledger itself is unavailable. The same transport-boundary measurement feeds `llm_call`'s `usage.provider_call_count`, so the two surfaces report one number for one event. |
 | `llm` | dict | LLM execution metrics — see below |
 | `tools` | dict | Tool invocation summary — see below |
 | `deferred_user_messages` | list | Queued human messages deferred until agent yield/completion |
@@ -1247,6 +1247,30 @@ fn finalize_after_read(turn) {
   return ""
 }
 ```
+
+### Terminal callback
+
+`terminal_callback(info)` records a terminal decision before the loop returns
+or propagates an error. It runs for natural completion, deadlines, exhausted
+budgets, terminal tool or provider errors, and thrown loop errors. A suspended
+session has not terminated and does not invoke it.
+
+The payload includes `final_status`, `stop_reason`, `terminal_error`,
+`iteration`, `max_iterations`, `iteration_budget`, and the session's successful
+and rejected tool names. Status and reason retain the loop's existing values;
+an otherwise empty completion status is reported as `done`. After the call,
+the returned `AgentResult.terminal` remains the authority for the finalized
+lifecycle classification.
+
+The callback may write an artifact and return `nil`. Returning a continuation
+uses the same verdict shape as `post_turn_callback`, but the loop permits at
+most one terminal rescue and only for eligible iteration or stall exits.
+Notification still runs after that allowance is spent. Errors, deadlines, and
+forced stops cannot be reopened by a callback. A rescued loop notifies again
+when it reaches its next terminal decision.
+
+A callback that throws is attempted once. If it also fails while recording a
+thrown loop error, the propagated error retains both causes.
 
 ### Example with retry
 

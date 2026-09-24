@@ -62,6 +62,12 @@ pub(super) async fn deny_tool_call(
         denial.denied_paths =
             crate::orchestration::current_tool_declared_paths(tool_name, tool_args);
     }
+    // Every gate, not just the ones that remember to. A gate names its own
+    // particulars; WHAT it refused is the same question for all of them, and
+    // this is the one place every denial passes through.
+    if denial.denied_commands.is_empty() {
+        denial.denied_commands = crate::orchestration::current_tool_declared_commands(tool_args);
+    }
     emit_permission_deny_event(
         session_id,
         tool_name,

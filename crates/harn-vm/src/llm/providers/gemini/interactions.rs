@@ -163,12 +163,10 @@ impl GeminiInteractions {
             attempt,
             &body,
         );
-        let response = http.send().await.map_err(|error| {
-            vm_err(format!(
-                "gemini API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))
-        })?;
+        let response = http
+            .send()
+            .await
+            .map_err(|error| crate::llm::api::reqwest_send_error("gemini", "API", error))?;
         if !response.status().is_success() {
             let status = response.status();
             let headers = response.headers().clone();
@@ -921,7 +919,7 @@ pub(crate) fn parse_response(
         stop_reason: interaction_stop_reason(json["status"].as_str()),
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 

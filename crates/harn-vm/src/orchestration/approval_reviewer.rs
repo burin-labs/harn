@@ -44,6 +44,13 @@ use std::sync::Arc;
 
 use crate::value::{VmClosure, VmError, VmValue};
 
+/// No reviewer was installed to reconsider a refusal.
+///
+/// One owner for the string because two seams record it: the review runner,
+/// which reports it as an outcome, and the grant seam, which stamps it onto the
+/// decision receipt without running a review at all.
+pub const NO_REVIEWER_INSTALLED: &str = "no_reviewer_installed";
+
 thread_local! {
     static APPROVAL_REVIEWER_STACK: RefCell<Vec<Arc<VmClosure>>> = const { RefCell::new(Vec::new()) };
     /// Re-entrancy depth. The reviewer session dispatches its own tool calls;
@@ -95,6 +102,10 @@ pub struct ApprovalReviewOutcome {
     pub authorization: Option<String>,
     /// Set when the reviewer never ran. Never set on a real verdict.
     pub unavailable_reason: Option<String>,
+    /// Why, in the reviewer's own words, when it said: the model call's error
+    /// or the unparseable reply. Redacted. Without it a reviewer that fails on
+    /// every call reads the same as one that was never consulted.
+    pub unavailable_detail: Option<String>,
 }
 
 impl ApprovalReviewOutcome {
@@ -107,6 +118,16 @@ impl ApprovalReviewOutcome {
             risk: None,
             authorization: None,
             unavailable_reason: Some(reason.to_string()),
+            unavailable_detail: None,
+        }
+    }
+
+    fn unavailable_with_detail(reason: &str, detail: Option<String>) -> Self {
+        Self {
+            unavailable_detail: detail
+                .filter(|detail| !detail.trim().is_empty())
+                .map(|detail| crate::egress::redact_diagnostic_text(&detail)),
+            ..Self::unavailable(reason)
         }
     }
 }
@@ -198,7 +219,7 @@ pub async fn run_approval_review(
     session_id: &str,
 ) -> ApprovalReviewOutcome {
     let Some(reviewer) = current_approval_reviewer() else {
-        return ApprovalReviewOutcome::unavailable("no_reviewer_installed");
+        return ApprovalReviewOutcome::unavailable(NO_REVIEWER_INSTALLED);
     };
     if APPROVAL_REVIEWER_DEPTH.with(|depth| *depth.borrow()) > 0 {
         return ApprovalReviewOutcome::unavailable("reviewer_reentrant");
@@ -217,10 +238,10 @@ pub async fn run_approval_review(
         // A raising reviewer is a refusal. Propagating the error would abort a
         // run over a failed *optional* rescue attempt, turning a recoverable
         // denial into a dead run.
-        Err(VmError::Runtime(message)) => {
-            ApprovalReviewOutcome::unavailable(&format!("reviewer_error: {message}"))
-        }
-        Err(_) => ApprovalReviewOutcome::unavailable("reviewer_error"),
+        Err(error) => ApprovalReviewOutcome::unavailable_with_detail(
+            "reviewer_error",
+            Some(error.to_string()),
+        ),
     };
     if outcome.reviewer_answered {
         record_verdict(session_id, outcome.approved);
@@ -251,7 +272,10 @@ fn parse_review_verdict(value: VmValue) -> ApprovalReviewOutcome {
     if !answered {
         let reason = string_field(&map, "unavailable_reason")
             .unwrap_or_else(|| "reviewer_did_not_answer".to_string());
-        return ApprovalReviewOutcome::unavailable(&reason);
+        return ApprovalReviewOutcome::unavailable_with_detail(
+            &reason,
+            string_field(&map, "detail"),
+        );
     }
     ApprovalReviewOutcome {
         approved,
@@ -260,6 +284,7 @@ fn parse_review_verdict(value: VmValue) -> ApprovalReviewOutcome {
         risk: string_field(&map, "risk"),
         authorization: string_field(&map, "authorization"),
         unavailable_reason: None,
+        unavailable_detail: None,
     }
 }
 
@@ -361,6 +386,60 @@ pub async fn maybe_grant_side_effect_by_auto_review(
     Some(granted)
 }
 
+/// Record that this seam was reached for a refusal and did NOT grant it.
+///
+/// The counterpart to [`PolicyEvaluation::grant_by_auto_review`], which lives
+/// on the decision because a grant rewrites it. A decline changes nothing about
+/// the decision and only annotates its receipt, so it belongs to the seam that
+/// declined rather than to the policy type.
+///
+/// `reviewer_answered` separates the two cases a reader must not confuse:
+/// `true` means a reviewer ran and said no, `false` means no verdict was
+/// obtained and `unavailable_reason` says which decline path fired.
+fn record_decline(
+    decision: &mut crate::orchestration::PolicyEvaluation,
+    reviewer_answered: bool,
+    rationale: &str,
+    unavailable_reason: Option<&str>,
+    unavailable_detail: Option<&str>,
+) {
+    if let Some(map) = decision.receipt.as_object_mut() {
+        map.insert(
+            "auto_review".to_string(),
+            serde_json::json!({
+                "approved": false,
+                "reviewer_answered": reviewer_answered,
+                "rationale": rationale,
+                "unavailable_reason": unavailable_reason,
+                "unavailable_detail": unavailable_detail,
+                "decider": "auto_reviewer",
+            }),
+        );
+    }
+}
+
+/// Whether a reviewer actually answered this refusal and said no.
+///
+/// Reads the annotation [`record_decline`] leaves on the receipt. A caller uses
+/// it to attribute the refusal to the layer that truly decided it: when the
+/// reviewer answered, a later host refusal is a formality and recording the
+/// host's default decider credits whoever the host names for a call the
+/// reviewer had already settled.
+///
+/// False for every decline the reviewer did not answer, so a seam that could
+/// not obtain a verdict never reads as one that refused.
+pub fn reviewer_refused(decision: &crate::orchestration::PolicyEvaluation) -> bool {
+    decision
+        .receipt
+        .get("auto_review")
+        .and_then(|entry| {
+            let answered = entry.get("reviewer_answered")?.as_bool()?;
+            let approved = entry.get("approved")?.as_bool()?;
+            Some(answered && !approved)
+        })
+        .unwrap_or(false)
+}
+
 /// Offer one refused decision to the reviewer, rewriting it in place on a grant.
 ///
 /// Returns whether the decision was granted, so the caller can record the
@@ -379,13 +458,22 @@ pub async fn maybe_grant_by_auto_review(
     tool_args: &serde_json::Value,
     session_id: &str,
 ) -> bool {
-    if !approval_reviewer_active() {
-        return false;
-    }
     let Some(decision) = decision else {
         return false;
     };
+    // Only a refusal is offered; an `Allow` is not this seam's business and
+    // must not be annotated as though a reviewer had weighed in on it.
     if !decision.is_deny() && !decision.is_ask() {
+        return false;
+    }
+    // A reviewer that is not installed is recorded, not skipped. This used to
+    // return here in silence, which is what made the two runs that matter
+    // indistinguishable: one whose reviewer refused, and one whose reviewer was
+    // never installed at all. The second then reached the host, and a host with
+    // nobody to ask produced a bare `host_rejected` -- a record naming the last
+    // layer to say no rather than the layer that was supposed to answer.
+    if !approval_reviewer_active() {
+        record_decline(decision, false, "", Some(NO_REVIEWER_INSTALLED), None);
         return false;
     }
     let request = serde_json::json!({
@@ -399,6 +487,17 @@ pub async fn maybe_grant_by_auto_review(
     });
     let outcome = run_approval_review(ctx, request, session_id).await;
     if !outcome.approved {
+        // Either a reviewer answered and said no, or the seam could not obtain
+        // a verdict and `unavailable_reason` says which of its decline paths
+        // fired. Both are recorded; neither is inferred from the absence of a
+        // grant.
+        record_decline(
+            decision,
+            outcome.reviewer_answered,
+            &outcome.rationale,
+            outcome.unavailable_reason.as_deref(),
+            outcome.unavailable_detail.as_deref(),
+        );
         return false;
     }
     decision.grant_by_auto_review(&outcome.rationale);
@@ -443,6 +542,37 @@ mod tests {
             outcome.unavailable_reason.as_deref(),
             Some("reviewer_unparseable")
         );
+    }
+
+    /// The reviewer's own account of why it could not answer reaches the
+    /// outcome, redacted. Before this only `unavailable_reason` survived, so a
+    /// reviewer failing authentication on every call read as "reviewer_error"
+    /// with nothing to say which credential it lacked.
+    #[test]
+    fn an_unavailable_reviewer_keeps_its_redacted_detail() {
+        let secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+        let outcome = parse_review_verdict(dict(&[
+            ("approved", VmValue::Bool(false)),
+            ("reviewer_answered", VmValue::Bool(false)),
+            ("unavailable_reason", text("reviewer_error")),
+            (
+                "detail",
+                text(&format!(
+                    "Missing API key: set ANTHROPIC_API_KEY (last tried {secret})"
+                )),
+            ),
+        ]));
+        assert!(!outcome.reviewer_answered);
+        assert_eq!(
+            outcome.unavailable_reason.as_deref(),
+            Some("reviewer_error")
+        );
+        let detail = outcome.unavailable_detail.expect("detail survives");
+        assert!(
+            detail.contains("Missing API key: set ANTHROPIC_API_KEY"),
+            "{detail}"
+        );
+        assert!(!detail.contains(secret), "detail leaked a key: {detail}");
     }
 
     #[test]

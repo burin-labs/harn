@@ -12,6 +12,8 @@ use crate::value::VmValue;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct ProviderUsageReceipt {
     pub(super) input_tokens: Option<i64>,
+    /// Unmodified input counter retained before conversion to the full prompt.
+    pub(super) reported_input_tokens: Option<i64>,
     pub(super) output_tokens: Option<i64>,
     pub(super) reported_total_tokens: Option<i64>,
     pub(super) cache_read_tokens: i64,
@@ -20,6 +22,9 @@ pub(crate) struct ProviderUsageReceipt {
     pub(super) cache_supported: bool,
     pub(super) provider_cost_usd: Option<f64>,
     pub(super) served_fast: bool,
+    pub(super) started_at_ms: Option<i64>,
+    pub(super) prompt_cache_ttl: Option<crate::llm::api::PromptCacheTtl>,
+    pub(super) billing: Option<Box<super::BillingUsage>>,
 }
 
 impl ProviderUsageReceipt {
@@ -31,6 +36,7 @@ impl ProviderUsageReceipt {
     ) -> Self {
         Self {
             input_tokens: input_tokens.filter(|tokens| *tokens >= 0),
+            reported_input_tokens: input_tokens.filter(|tokens| *tokens >= 0),
             output_tokens: output_tokens.filter(|tokens| *tokens >= 0),
             reported_total_tokens: None,
             cache_read_tokens: 0,
@@ -39,6 +45,9 @@ impl ProviderUsageReceipt {
             cache_supported: true,
             provider_cost_usd: provider_cost_usd.filter(|cost| cost.is_finite() && *cost >= 0.0),
             served_fast,
+            started_at_ms: None,
+            prompt_cache_ttl: None,
+            billing: None,
         }
     }
 
@@ -55,13 +64,46 @@ impl ProviderUsageReceipt {
             optional_non_negative_json_int(usage, &["total_tokens"]).ok()?;
         Some(
             Self::new(input_tokens, output_tokens, None, false)
-                .with_reported_total(reported_total_tokens),
+                .with_reported_total(reported_total_tokens)
+                .with_billing(super::BillingUsage::from_openai(
+                    &serde_json::json!({"usage": usage}),
+                )),
         )
     }
 
     pub(crate) fn with_reported_total(mut self, total_tokens: Option<i64>) -> Self {
         self.reported_total_tokens = total_tokens.filter(|tokens| *tokens >= 0);
         self
+    }
+
+    pub(crate) fn with_billing(mut self, billing: Option<Box<super::BillingUsage>>) -> Self {
+        self.billing = billing;
+        self
+    }
+
+    /// Convert after cache counters have arrived, including streamed failures.
+    pub(crate) fn with_input_basis(
+        mut self,
+        basis: super::InputTokenBasis,
+    ) -> Result<Self, crate::value::VmError> {
+        self.input_tokens = self
+            .input_tokens
+            .map(|input| {
+                super::PromptTokenCounts::from_reported(
+                    input,
+                    self.cache_read_tokens,
+                    self.cache_write_tokens,
+                    basis,
+                )
+                .map(|counts| counts.total)
+                .map_err(|reason| {
+                    crate::value::VmError::Runtime(format!(
+                        "invalid provider prompt usage: {reason}"
+                    ))
+                })
+            })
+            .transpose()?;
+        Ok(self)
     }
 
     pub(crate) fn has_any_reported_token_count(&self) -> bool {
@@ -101,8 +143,30 @@ impl ProviderUsageReceipt {
     pub(crate) fn to_vm_value(&self) -> VmValue {
         VmValue::dict(crate::value::DictMap::from_iter([
             (
+                crate::value::intern_key("billing"),
+                self.billing.as_ref().map_or(VmValue::Nil, |billing| {
+                    crate::schema::json_to_vm_value(
+                        &serde_json::to_value(billing).expect("billing serializes"),
+                    )
+                }),
+            ),
+            (
+                crate::value::intern_key("started_at_ms"),
+                self.started_at_ms.map_or(VmValue::Nil, VmValue::Int),
+            ),
+            (
+                crate::value::intern_key("prompt_cache_ttl"),
+                self.prompt_cache_ttl
+                    .map_or(VmValue::Nil, |ttl| VmValue::String(ttl.as_str().into())),
+            ),
+            (
                 crate::value::intern_key("input_tokens"),
                 self.input_tokens.map_or(VmValue::Nil, VmValue::Int),
+            ),
+            (
+                crate::value::intern_key("reported_input_tokens"),
+                self.reported_input_tokens
+                    .map_or(VmValue::Nil, VmValue::Int),
             ),
             (
                 crate::value::intern_key("output_tokens"),
@@ -159,6 +223,8 @@ impl ProviderUsageReceipt {
             return None;
         };
         let input_tokens = optional_non_negative_int(fields, "input_tokens").ok()?;
+        let reported_input_tokens =
+            optional_non_negative_int_if_present(fields, "reported_input_tokens").ok()?;
         let output_tokens = optional_non_negative_int(fields, "output_tokens").ok()?;
         let reported_total_tokens =
             optional_non_negative_int_if_present(fields, "reported_total_tokens").ok()?;
@@ -174,6 +240,7 @@ impl ProviderUsageReceipt {
         };
         Some(Self {
             input_tokens,
+            reported_input_tokens,
             output_tokens,
             reported_total_tokens,
             cache_read_tokens,
@@ -182,6 +249,17 @@ impl ProviderUsageReceipt {
             cache_supported: *cache_supported,
             provider_cost_usd,
             served_fast: *served_fast,
+            started_at_ms: optional_non_negative_int_if_present(fields, "started_at_ms").ok()?,
+            prompt_cache_ttl: fields
+                .get("prompt_cache_ttl")
+                .and_then(|value| match value {
+                    VmValue::String(value) => crate::llm::api::PromptCacheTtl::parse(value),
+                    _ => None,
+                }),
+            billing: fields.get("billing").and_then(|value| {
+                let json = crate::stdlib::json::vm_value_to_data_value(value);
+                serde_json::from_value(json).ok()
+            }),
         })
     }
 

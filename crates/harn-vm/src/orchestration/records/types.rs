@@ -436,6 +436,14 @@ pub struct ExecutionEvidenceRecord {
     /// A saved gap is preferable to silently presenting a partial record as
     /// complete evidence.
     pub gaps: Vec<RunEvidenceGapRecord>,
+    /// What reasoning directive each LLM call actually put on the wire.
+    ///
+    /// `None` and `Some([])` are different facts and must stay so: `None` is a
+    /// producer that never reported (an older runtime, or a record built from
+    /// a source that does not observe calls), while `Some([])` is a run that
+    /// made no LLM call. A consumer that treats the absent case as agreement
+    /// would read every old record as proof the wire carried what was asked.
+    pub reasoning_receipts: Option<Vec<crate::llm::ReasoningReceipt>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1295,6 +1303,12 @@ pub struct RunExecutionRecord {
     /// [`crate::security::GrantReceipt`]. `#[serde(default)]` on the struct
     /// loads pre-grants records with an empty vec.
     pub grants: Vec<crate::security::GrantReceipt>,
+    /// Every environment variable name this run's child processes could see.
+    /// Names only, never values. The policy kind says how the set was chosen;
+    /// this says what it actually was, which is the part a reader auditing a
+    /// run needs. `#[serde(default)]` on the struct loads older records with
+    /// an empty vec, which reads as unrecorded rather than as empty.
+    pub admitted_environment: Vec<String>,
 }
 
 #[cfg(test)]

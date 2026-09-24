@@ -2,13 +2,12 @@ name: Publish release
 
 # Fires on two triggers:
 #
-#   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path. The
-#      bump-fleet watcher creates the tag only after the exact Release PR
-#      squash-merges, at that merged commit on main. This trigger ships
-#      crates.io from the immutable tag while the binary workflow creates
-#      the GitHub release from the same merged source.
-#      The tag push (under the harn-release-bot App identity) also
-#      cascades to build-release-binaries.yml for tarballs + container.
+#   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path.
+#      promote-release.yml creates the tag, at the version commit on main,
+#      when it publishes the GitHub release from the files that commit's
+#      build-release-binaries.yml run built and checked. This trigger ships
+#      crates.io from that immutable tag. Release binaries are not built
+#      here or on the tag.
 #
 #   2. workflow_dispatch — manual recovery for the partial-failure case
 #      (tag pushed but crates.io publish was incomplete). With no
@@ -18,10 +17,10 @@ name: Publish release
 #      crates so manual re-fire is idempotent.
 #
 # Runs ./scripts/release_ship.sh --finalize, which dry-run publishes,
-# tags (no-op if already at HEAD), and publishes to crates.io. The
-# build-release-binaries.yml cascade creates/updates the GitHub release
-# only after the binary assets are ready, so a failed binary build cannot
-# leave a visible release page with zero artifacts.
+# tags (no-op if already at HEAD), and publishes to crates.io. Promotion
+# creates the GitHub release only from a candidate run whose files passed
+# every release check, so a failed binary build cannot leave a visible
+# release page with zero artifacts.
 #
 # Audit is skipped by default (RELEASE_FINALIZE_REAUDIT=0): the
 # merge-queue CI of the just-landed Release PR ran the same gates a
@@ -286,17 +285,13 @@ jobs:
           else
             DRIFT=false
             # No version drift on push-to-main: tag was already published
-            # by the tag-push trigger of this workflow (or by the
-            # build-release-binaries.yml tag trigger for the binaries).
-            # Observe release assets for operator diagnostics, but do
-            # not treat missing binary assets as Cargo publish drift.
-            # The tag-triggered build-release-binaries workflow owns
-            # archives, checksum sidecars, GitHub release finalization,
-            # and container publication. During a healthy main-anchored
-            # release, main can advance while that binary workflow is
-            # still uploading assets; re-running release_ship.sh from a
-            # main-push publish-release job cannot build those assets and
-            # only creates redundant release retries.
+            # by the tag-push trigger of this workflow. Observe release
+            # assets for operator diagnostics, but do not treat missing
+            # binary assets as Cargo publish drift. Promotion owns the
+            # archives, checksum sidecars, and the GitHub release;
+            # re-running release_ship.sh from a main-push publish-release
+            # job cannot produce those assets and only creates redundant
+            # release retries.
             if [[ "$EVENT_NAME" == "push" ]]; then
               # Distinguish a genuine incomplete asset set (warn) from a
               # transient or eventually-consistent query failure. The old
@@ -306,7 +301,7 @@ jobs:
               # a spurious red X on a routine main push right after the tag
               # publish (harn#2964: a `gh release view` raced the release becoming
               # visible). Retry briefly; if assets are still missing, leave DRIFT
-              # false and let build-release-binaries or the release harness recover.
+              # false and let promotion recover.
               RELEASE_ASSETS="__query_failed__"
               for _ in 1 2 3; do
                 if RELEASE_ASSETS="$(gh release view "$LATEST_TAG" --json assets --jq '.assets[].name' 2>/dev/null)"; then
@@ -337,7 +332,7 @@ jobs:
                 if (( ${#MISSING_ASSETS[@]} == 0 )); then
                   echo "::notice::$LATEST_TAG already published with all expected assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended main-anchored behavior."
                 else
-                  printf '::warning::%s is missing release assets: %s. Publish job will skip because build-release-binaries owns binary asset recovery; if this is not an active tag build, dispatch build-release-binaries.yml for %s.\n' "$LATEST_TAG" "${MISSING_ASSETS[*]}" "$LATEST_TAG"
+                  printf '::warning::%s is missing release assets: %s. Publish job will skip because promotion owns release assets; re-run promotion for %s from its candidate run.\n' "$LATEST_TAG" "${MISSING_ASSETS[*]}" "$LATEST_TAG"
                 fi
               fi
             else
@@ -420,7 +415,7 @@ jobs:
           cache-bin: false
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         continue-on-error: true
         with:
           tool: nextest@0.9.132
@@ -489,67 +484,6 @@ jobs:
             HARN_PUBLISH_SCRIPT="$RUNNER_TEMP/release-tools/publish.sh" \
             bash "$RUNNER_TEMP/release-tools/release_ship.sh" "${args[@]}"
 
-      # Downstream embedders pin this runtime by exact published version, so
-      # nothing they do can begin until the step above succeeds. Hand that
-      # fact to the fleet controller the moment it becomes true.
-      #
-      # This repository deliberately does not enumerate the repositories that
-      # embed it. `burin-labs/harn-bump-fleet` owns fleet membership in its
-      # `fleet.toml`, owns each embedder's update workflow, and owns the
-      # repair lane for updates that fail their checks. One dispatch hands it
-      # the version; the fan-out stays behind its manifest. A second list of
-      # embedder repositories here would be a competing source of truth for
-      # membership that nothing keeps in agreement with the first.
-      #
-      # Scoped to `actions: write` on that single repository — the least
-      # privilege that can start a workflow run in another repository, and
-      # narrower than the org-wide token the controller itself mints.
-      - name: Mint fleet dispatch token
-        id: fleet-dispatch-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: burin-labs
-          repositories: harn-bump-fleet
-          permission-actions: write
-
-      - name: Start downstream runtime updates
-        env:
-          GH_TOKEN: ${{ steps.fleet-dispatch-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          # Read the version from the tree we just published from, not from a
-          # workflow output. Every trigger path (tag push, main-push
-          # self-heal, manual recovery) has already checked out its publish
-          # ref by this point, so the workspace version is what reached
-          # crates.io by construction — no per-trigger reasoning to keep in
-          # sync with the drift detector above.
-          VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::notice::Published $VERSION is not a stable release; embedders track stable versions only, so no fleet update is dispatched."
-            exit 0
-          fi
-          # The controller is idempotent for an already-current version: each
-          # embedder's update short-circuits before any mutation when its pin
-          # already names this version. A duplicate dispatch (a re-run, or the
-          # daily schedule arriving right behind this one) is therefore a
-          # no-op rather than a stream of empty pull requests.
-          for attempt in 1 2 3; do
-            if gh api --method POST \
-              repos/burin-labs/harn-bump-fleet/actions/workflows/bump-fleet.yml/dispatches \
-              --input - <<JSON
-          {"ref": "main", "inputs": {"version": "v$VERSION"}}
-          JSON
-            then
-              echo "::notice::Dispatched fleet update for v$VERSION."
-              exit 0
-            fi
-            echo "Dispatch attempt $attempt failed; retrying." >&2
-            sleep 10
-          done
-          # v$VERSION is published and immutable at this point. Fail loudly
-          # rather than silently: the daily schedule will still pick the
-          # release up, but a whole day of embedder lag should not look green.
-          echo "::error::Published v$VERSION but could not dispatch the fleet update. Embedders will lag until the next scheduled run. Recover with: gh workflow run bump-fleet.yml --repo burin-labs/harn-bump-fleet -f version=v$VERSION"
-          exit 1
+      # Hosted release owns optional downstream convergence after publication.
+      # Its typed receipt and converge_fleet input govern that dispatch; the
+      # regular fleet schedule remains the recovery path for independent publishes.

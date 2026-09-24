@@ -7,7 +7,13 @@
       "IterationBudget"
     ],
     "parameters": [
-      {"function": "__with_mcp_tool_ceiling", "name": "opts", "path": ["iteration_budget"]},
+      {
+        "function": "__with_mcp_tool_ceiling",
+        "name": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      },
       {
         "function": "agent_mcp_bootstrap_if_needed",
         "name": "opts",
@@ -38,6 +44,34 @@
       },
       {
         "function": "__mcp_admit_tools",
+        "name": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      },
+      {
+        "function": "agent_compute_terminal_callback",
+        "name": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      },
+      {
+        "function": "__terminal_callback_verdict",
+        "name": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      },
+      {
+        "function": "__post_turn_verdict_result",
+        "name": "_opts",
+        "path": [
+          "iteration_budget"
+        ]
+      },
+      {
+        "function": "__interpret_verdict",
         "name": "opts",
         "path": [
           "iteration_budget"

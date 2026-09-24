@@ -200,14 +200,20 @@
             "engineStrategy": "observation_mask",
             "estimatedTokensAfter": 40,
             "estimatedTokensBefore": 100,
+            "hardLimitTokens": null,
             "instructionMode": "extend",
             "instructionSource": "host",
             "mode": "auto",
             "reason": "threshold",
+            "recap": null,
             "receiptId": "compaction-fixture-1",
+            "requestedStrategy": "summary",
+            "resolvedThresholdTokens": 1,
             "schemaVersion": 1,
             "snapshotAssetId": "asset-1",
-            "strategy": "summary"
+            "sourceMeasurement": null,
+            "strategy": "summary",
+            "thresholdSource": "runtime_config"
           }
         },
         "sessionUpdate": "transcript_compacted"

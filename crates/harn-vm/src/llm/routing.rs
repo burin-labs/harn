@@ -310,6 +310,7 @@ impl BudgetRules {
 
     pub(crate) fn envelope(&self) -> Option<LlmBudgetEnvelope> {
         let envelope = LlmBudgetEnvelope {
+            admission: None,
             max_cost_usd: self.per_call_usd,
             total_budget_usd: self.session_usd,
             max_input_tokens: None,

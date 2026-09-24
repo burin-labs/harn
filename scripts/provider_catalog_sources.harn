@@ -18,6 +18,144 @@
 import { web_fetch, web_parse_html } from "std/web"
 import "./provider_catalog_refresh.harn"
 
+/** OpenRouter UTC overrides become a peak card and disjoint discount windows. */
+pub fn openrouter_scheduled_pricing(wire: dict, base: dict) -> dict {
+  const overrides = (wire?.overrides ?? []).map({ row -> __pricing_bounds(row) })
+  if len(overrides) == 0 {
+    return base
+  }
+  let peak_in = base.input_per_mtok
+  let peak_out = base.output_per_mtok
+  let peak_cache = base?.cache_read_per_mtok
+  let boundaries = [0, 1440]
+  for window_rate in overrides {
+    boundaries = boundaries + [window_rate.begins, window_rate.until]
+    peak_in = max(peak_in, to_float(window_rate.prompt) * 1000000.0)
+    peak_out = max(peak_out, to_float(window_rate.completion) * 1000000.0)
+    if window_rate?.input_cache_read != nil {
+      peak_cache = max(peak_cache ?? 0.0, to_float(window_rate.input_cache_read) * 1000000.0)
+    }
+  }
+  if peak_in <= 0.0 || peak_out <= 0.0 {
+    throw "Recurring pricing needs positive peak input and output rates"
+  }
+  const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+  let schedules = []
+  for {index, value} in days.enumerate() {
+    const day = index
+    let start = 0
+    let previous = nil
+    for minute in boundaries.unique().sorted() {
+      let rate = nil
+      if minute < 1440 {
+        rate = {
+          input: base.input_per_mtok,
+          output: base.output_per_mtok,
+          cache: base?.cache_read_per_mtok,
+        }
+        let matches = 0
+        for window_rate in overrides {
+          if __pricing_applies(window_rate, days, day, minute) {
+            matches += 1
+            rate = {
+              input: to_float(window_rate.prompt) * 1000000.0,
+              output: to_float(window_rate.completion) * 1000000.0,
+              cache: if window_rate?.input_cache_read != nil {
+                to_float(window_rate.input_cache_read) * 1000000.0
+              } else {
+                base?.cache_read_per_mtok
+              },
+            }
+          }
+        }
+        if matches > 1 {
+          throw "Overlapping OpenRouter recurring pricing overrides"
+        }
+      }
+      if previous != nil && rate != previous {
+        if previous.input != peak_in || previous.output != peak_out
+          || previous.cache != peak_cache {
+          const start_text = __pricing_hhmm(start)
+          let window = {
+            id: "openrouter-" + substring(value, 0, 3) + "-" + replace(start_text, ":", ""),
+            days: [substring(value, 0, 3)],
+            start: start_text,
+            end: __pricing_hhmm(minute),
+            utc_offset: "+00:00",
+            input_multiplier: previous.input / peak_in,
+            output_multiplier: previous.output / peak_out,
+            source_url: "https://openrouter.ai/api/v1/models",
+          }
+          if peak_cache != nil && peak_cache > 0.0 && previous.cache != nil {
+            window = window + {cache_read_multiplier: previous.cache / peak_cache}
+          }
+          schedules = schedules + [window]
+        }
+        start = minute
+      }
+      previous = rate
+    }
+  }
+  return base
+    + {
+      input_per_mtok: peak_in,
+      output_per_mtok: peak_out,
+      cache_read_per_mtok: peak_cache,
+      schedules: schedules,
+    }
+}
+
+fn __pricing_bounds(row: dict) -> dict {
+  const start_hhmm = row?.utc_start ?? 0
+  const end_hhmm = row?.utc_end ?? 2400
+  const begins = to_int(start_hhmm / 100) * 60 + start_hhmm % 100
+  const until = to_int(end_hhmm / 100) * 60 + end_hhmm % 100
+  if begins < 0 || begins >= 1440 || until < 0 || until > 1440 || start_hhmm % 100 >= 60
+    || end_hhmm % 100 >= 60 {
+    throw "Invalid recurring pricing HHMM boundary"
+  }
+  const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+  if len(row?.utc_days ?? []) == 0 {
+    throw "Recurring pricing has no UTC days"
+  }
+  for day in row.utc_days {
+    if !contains(days, day) {
+      throw "Unknown recurring pricing UTC day"
+    }
+  }
+  return row + {begins: begins, until: until}
+}
+
+fn __pricing_applies(row: dict, days: list<string>, day: int, minute: int) -> bool {
+  const opening_day = if row.until <= row.begins && minute < row.until {
+    (day + 6) % 7
+  } else {
+    day
+  }
+  const inside = if row.until <= row.begins {
+    minute >= row.begins || minute < row.until
+  } else {
+    minute >= row.begins && minute < row.until
+  }
+  return contains(row.utc_days, days[opening_day]) && inside
+}
+
+fn __pricing_hhmm(minutes: int) -> string {
+  const hours = to_string(to_int(minutes / 60))
+  const remainder = to_string(minutes % 60)
+  return if len(hours) == 1 {
+    "0" + hours
+  } else {
+    hours
+  }
+    + ":"
+    + if len(remainder) == 1 {
+      "0" + remainder
+    } else {
+      remainder
+    }
+}
+
 fn __row_value(row: any, index: any) {
   if index == nil {
     return nil

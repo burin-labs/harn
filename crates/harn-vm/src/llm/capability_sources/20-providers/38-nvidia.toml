@@ -42,7 +42,7 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.nvidia]]
-model_match = "*nemotron-3-nano-30b-a3b*"
+model_match = "*nemotron-nano-3-30b-a3b*"
 native_tools = true
 preferred_tool_format = "native"
 tool_mode_parity = "interchangeable"
@@ -91,51 +91,12 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.nvidia]]
-model_match = "*minimax-m3*"
-native_tools = true
-preferred_tool_format = "native"
-structured_output = "delimited"
-thinking_modes = ["adaptive"]
-vision = true
-vision_supported = true
-video = true
-prompt_caching = true
-text_tool_wire_format_supported = true
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "delimited"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-
-[[provider.nvidia]]
 model_match = "*kimi-k2.6*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 prompt_caching = true
-vision = true
-vision_supported = true
-text_tool_wire_format_supported = true
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-
-[[provider.nvidia]]
-model_match = "*step-3.7-flash*"
-native_tools = true
-preferred_tool_format = "native"
-tool_mode_parity = "interchangeable"
-prompt_caching = true
-structured_output = "native"
-thinking_modes = ["enabled"]
-reasoning_disable_supported = false
 vision = true
 vision_supported = true
 text_tool_wire_format_supported = true

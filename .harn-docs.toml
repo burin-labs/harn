@@ -1,0 +1,22 @@
+version = 1
+include = [
+  "docs/src/**/*.md",
+  "docs/llm/*.md",
+  "README.md",
+  "CONTRIBUTING.md",
+  "website/*.md",
+]
+diagnostic_examples = "docs/diagnostic-examples.json"
+
+[defaults]
+validation = "parse"
+format = false
+lint = "off"
+# The documentation article fits 74 monospace columns without scrolling.
+line_width = 74
+
+[[rules]]
+include = ["README.md"]
+validation = "check"
+format = true
+lint = "strict"

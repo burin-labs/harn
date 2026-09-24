@@ -16,6 +16,7 @@
 //
 // Derived once, at the judge payload seam, and carried on the evidence
 // snapshot. No consumer re-derives it from raw transcript history.
+import { CompletionRequirement, CompletionRequirementContract } from "std/agent/options_types"
 import { agent_session_control_events, agent_session_messages } from "std/agent/state"
 
 /**
@@ -32,6 +33,20 @@ pub type CompletionSteer = {message_id: string, mode: string, content: string}
  * record is the only place it is visible.
  */
 pub type CompletionAcceptedStop = {control_id: string, method: string, status: string}
+
+/**
+ * An accepted steer that replaced the run's objective.
+ *
+ * A plain steer amends: the task and every acceptance item frozen under it
+ * still stand, and the steer is one more obligation. A retarget replaces the
+ * objective, and every requirement row declared under the previous objective
+ * is retired. Retired is its own state: the row is no longer owed, and it was
+ * not satisfied either, so no report may count it as met.
+ *
+ * Read only from a recorded control row, which is the replay record of the
+ * transition. The latest retarget wins.
+ */
+pub type CompletionRetarget = {control_id: string, message_id: string, objective: string}
 
 /**
  * How this obligation set learned what it knows.
@@ -61,7 +76,17 @@ pub type CompletionObligations = {
   original_task: string,
   steers: list<CompletionSteer>,
   accepted_stop?: CompletionAcceptedStop,
+  retarget?: CompletionRetarget,
   source?: CompletionObligationSource,
+}
+
+/**
+ * A requirement contract as it stands under the run's obligations, with the
+ * rows a retarget retired listed separately rather than dropped.
+ */
+pub type CompletionRequirementsUnderObligations = {
+  contract: CompletionRequirementContract?,
+  retired: list<CompletionRequirement>,
 }
 
 // `audit_only` messages drain at `loop_exit`, after the last model call. The
@@ -207,12 +232,24 @@ pub fn completion_obligations_from_control_events(
 ) -> CompletionObligations {
   let steers: list<CompletionSteer> = []
   let accepted_stop = nil
+  let retarget = nil
   for event in events ?? [] {
     const steer = __obligation_steer_from_control(event)
     if steer != nil {
       steers = steers.appending(steer)
     }
     const recorded = to_string(event?.provenance ?? "") == __OBLIGATION_RECORDED_PROVENANCE
+    const objective = trim(to_string(event?.goal?.objective ?? ""))
+    // A retarget retires acceptance items, so like a stop it is honored only
+    // from a row written at acceptance: a guessed retarget would silence work
+    // nobody withdrew.
+    if recorded && steer != nil && objective != "" {
+      retarget = {
+        control_id: to_string(event?.control_id ?? ""),
+        message_id: steer.message_id,
+        objective: objective,
+      }
+    }
     if recorded && to_string(event?.action ?? "") == "stop" {
       accepted_stop = {
         control_id: to_string(event?.control_id ?? ""),
@@ -227,10 +264,63 @@ pub fn completion_obligations_from_control_events(
     steers: steers,
     source: "control_record",
   }
-  if accepted_stop == nil {
-    return base
+  const with_retarget = if retarget == nil {
+    base
+  } else {
+    base + {retarget: retarget}
   }
-  return base + {accepted_stop: accepted_stop}
+  if accepted_stop == nil {
+    return with_retarget
+  }
+  return with_retarget + {accepted_stop: accepted_stop}
+}
+
+/**
+ * completion_obligations_objective.
+ *
+ * The objective a run is currently held to: the latest retarget's objective,
+ * or `task` when no steer replaced it. Every exit authority that names the
+ * run's goal reads it here, so none of them can restate an objective the user
+ * replaced.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_obligations_objective(nil, "ship the fix")
+ */
+pub fn completion_obligations_objective(
+  obligations: CompletionObligations?,
+  task: string,
+) -> string {
+  const objective = obligations?.retarget?.objective ?? ""
+  if objective == "" {
+    return task
+  }
+  return objective
+}
+
+/**
+ * completion_obligations_requirements.
+ *
+ * Apply the run's obligations to a requirement contract. Under a retarget every
+ * row was declared for the replaced objective, so the contract becomes nil (no
+ * acceptance item is owed) and each row is returned in `retired` for the caller
+ * to record. Without a retarget the contract is returned unchanged.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_obligations_requirements(nil, nil)
+ */
+pub fn completion_obligations_requirements(
+  contract: CompletionRequirementContract?,
+  obligations: CompletionObligations?,
+) -> CompletionRequirementsUnderObligations {
+  const retired: list<CompletionRequirement> = []
+  if obligations?.retarget == nil || contract == nil {
+    return {contract: contract, retired: retired}
+  }
+  return {contract: nil, retired: contract.requirements}
 }
 
 /**
@@ -286,6 +376,23 @@ fn __obligation_stop_prompt(accepted_stop: CompletionAcceptedStop?) -> string {
 }
 
 /**
+ * Follows the goal line, which already names the replacement objective. The
+ * original task is quoted so the evidence still reads in context, and labelled
+ * retired so it cannot be mistaken for a second goal.
+ */
+fn __obligation_retarget_prompt(obligations: CompletionObligations?) -> string {
+  if obligations?.retarget == nil {
+    return ""
+  }
+  return "\n\nThe user REPLACED this run's objective mid-run with the completion goal above."
+    + " The original task, and every requirement row or success criterion stated for it"
+    + " anywhere in this prompt, are retired: they are no longer owed, and they are not"
+    + " satisfied either. Do not order work toward them and do not count them as gaps."
+    + " Original task, retired:\n"
+    + __obligation_clip(trim(obligations.original_task))
+}
+
+/**
  * completion_obligations_prompt.
  *
  * Render the accepted steering block for an exit authority's prompt, with the
@@ -304,6 +411,7 @@ fn __obligation_stop_prompt(accepted_stop: CompletionAcceptedStop?) -> string {
 pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> string {
   const steers = obligations?.steers ?? []
   const stop_block = __obligation_stop_prompt(obligations?.accepted_stop)
+    + __obligation_retarget_prompt(obligations)
   if len(steers) == 0 {
     return stop_block
   }
@@ -363,11 +471,16 @@ pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> str
 pub fn completion_obligations_digest(obligations: CompletionObligations?) -> string {
   const steers = obligations?.steers ?? []
   const accepted_stop = obligations?.accepted_stop
+  const retarget = obligations?.retarget
   if len(steers) == 0 && accepted_stop == nil {
     return ""
   }
-  if accepted_stop == nil {
+  if accepted_stop == nil && retarget == nil {
     return "sha256:" + sha256(json_stringify(steers))
   }
-  return "sha256:" + sha256(json_stringify({steers: steers, accepted_stop: accepted_stop}))
+  if retarget == nil {
+    return "sha256:" + sha256(json_stringify({steers: steers, accepted_stop: accepted_stop}))
+  }
+  return "sha256:"
+    + sha256(json_stringify({steers: steers, accepted_stop: accepted_stop, retarget: retarget}))
 }

@@ -12,6 +12,8 @@ use super::{
 };
 use crate::llm::env_guard;
 
+mod admission;
+mod anthropic_admission;
 mod anthropic_egress;
 #[path = "transport_stub_tests/gemini_generate_content.rs"]
 mod gemini_generate_content;
@@ -688,7 +690,7 @@ fn ollama_empty_content_done_frame_retries_once() {
         assert_eq!(result.attempts.total, 2);
         assert_eq!(result.attempts.empty_completion, 1);
         let usage = result.usage();
-        assert_eq!(usage.provider_call_count, 2);
+        assert_eq!(usage.provider_call_count, Some(2));
         assert_eq!(usage.input_tokens, 10);
         assert_eq!(usage.output_tokens, 4);
         assert_eq!(usage.usage_unknown_calls, 0);
@@ -1488,3 +1490,5 @@ fn streaming_path_classifies_opaque_500_as_http_error() {
     assert!(err.contains("[http_error]"), "err was: {err}");
     assert!(err.contains("upstream exploded"), "err was: {err}");
 }
+
+mod prompt_accounting;

@@ -69,12 +69,16 @@ use paths::{
 };
 
 mod backend;
+mod build_command;
+pub(crate) use build_command::{build_std_command, build_tokio_command};
+mod command_for;
+pub use command_for::{std_command_for, std_command_for_with_env_state, tokio_command_for};
 #[cfg(all(test, target_os = "linux"))]
 mod enforcement_report;
 mod handler_env;
 mod introspection;
 #[cfg(target_os = "linux")]
-mod linux;
+pub(crate) mod linux;
 mod locked_append;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -102,6 +106,19 @@ pub(crate) mod process_cwd;
 use process_cwd::enforce_process_cwd_for_policy;
 pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
+mod policy_projection;
+#[cfg(target_os = "linux")]
+pub(crate) use policy_projection::process_sandbox_unix_socket_roots;
+pub use policy_projection::unix_socket_enforcement;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) use policy_projection::{
+    process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
+};
 mod replace;
 
 // Each backend uses one of these: platform helpers call `unavailable`; Linux confines in `pre_exec`.
@@ -111,7 +128,7 @@ mod replace;
 /// `pre_exec` callback, which nothing can carry across a process boundary; the
 /// other backends put theirs in the spawn's argv, which survives on its own.
 #[cfg(target_os = "linux")]
-pub use linux::{transferable_confinement, TransferableConfinement};
+pub use linux::{decode_seccomp_hex, transferable_confinement, TransferableConfinement};
 #[cfg(target_os = "linux")]
 pub(crate) use refusal::mechanism_skipped_warning;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -1157,67 +1174,6 @@ pub fn push_process_sandbox_scope(
     Ok(ProcessSandboxScopeGuard { pushed: true })
 }
 
-/// Close a freshly built command's environment under an active session policy:
-/// the choke point that makes the environment contract structural, since every
-/// spawn seam in the VM and `harn-hostlib` reaches a child through the three
-/// funnel fns below. Callers still layer `env`/`env_remove` on top afterward;
-/// sandbox confinement sets no env vars, so clearing cannot weaken it.
-macro_rules! close_env_for_session {
-    ($command:expr, $program:expr) => {
-        if let Some(env) =
-            crate::stdlib::process::session_closed_env_for_command($program, std::iter::empty())?
-        {
-            $command.env_clear();
-            for (key, value) in env {
-                $command.env(key, value);
-            }
-        }
-    };
-}
-
-pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
-    let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
-    let active = active_sandbox_policy();
-    let mut command = match active.as_ref() {
-        Some((policy, profile)) => {
-            build_std_command::<ActiveBackend>(&resolved_program, args, policy, *profile)?
-        }
-        None => {
-            let mut command = Command::new(&resolved_program);
-            command.args(args);
-            command
-        }
-    };
-    close_env_for_session!(command, program);
-    if let Some(proxy) = active.and_then(|(policy, _)| policy.process_network_proxy) {
-        process_output::apply_managed_proxy_env(&mut command, proxy);
-    }
-    Ok(command)
-}
-
-pub fn tokio_command_for(
-    program: &str,
-    args: &[String],
-) -> Result<tokio::process::Command, VmError> {
-    let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
-    let active = active_sandbox_policy();
-    let mut command = match active.as_ref() {
-        Some((policy, profile)) => {
-            build_tokio_command::<ActiveBackend>(&resolved_program, args, policy, *profile)?
-        }
-        None => {
-            let mut command = tokio::process::Command::new(&resolved_program);
-            command.args(args);
-            command
-        }
-    };
-    close_env_for_session!(command, program);
-    if let Some(proxy) = active.and_then(|(policy, _)| policy.process_network_proxy) {
-        process_output::apply_managed_proxy_env_tokio(&mut command, proxy);
-    }
-    Ok(command)
-}
-
 pub fn command_output(
     program: &str,
     args: &[String],
@@ -1310,44 +1266,6 @@ fn sandboxed_process_config(
             .any(|removed| key.eq_ignore_ascii_case(removed))
     });
     Ok(resolved)
-}
-
-fn build_std_command<B: SandboxBackend + ?Sized>(
-    program: &str,
-    args: &[String],
-    policy: &CapabilityPolicy,
-    profile: SandboxProfile,
-) -> Result<Command, VmError> {
-    ensure_managed_process_egress_supported::<B>(policy)?;
-    let mut command = Command::new(program);
-    command.args(args);
-    match B::prepare_std_command(program, args, &mut command, policy, profile)? {
-        PrepareOutcome::Direct => Ok(command),
-        PrepareOutcome::WrappedExec { wrapper, args } => {
-            let mut wrapped = Command::new(wrapper);
-            wrapped.args(args);
-            Ok(wrapped)
-        }
-    }
-}
-
-fn build_tokio_command<B: SandboxBackend + ?Sized>(
-    program: &str,
-    args: &[String],
-    policy: &CapabilityPolicy,
-    profile: SandboxProfile,
-) -> Result<tokio::process::Command, VmError> {
-    ensure_managed_process_egress_supported::<B>(policy)?;
-    let mut command = tokio::process::Command::new(program);
-    command.args(args);
-    match B::prepare_tokio_command(program, args, &mut command, policy, profile)? {
-        PrepareOutcome::Direct => Ok(command),
-        PrepareOutcome::WrappedExec { wrapper, args } => {
-            let mut wrapped = tokio::process::Command::new(wrapper);
-            wrapped.args(args);
-            Ok(wrapped)
-        }
-    }
 }
 
 fn ensure_managed_process_egress_supported<B: SandboxBackend + ?Sized>(
@@ -1731,26 +1649,6 @@ fn git_scope_extension_for_roots(
 ))]
 pub(crate) fn process_sandbox_readonly_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     normalized_read_only_roots(policy)
-}
-
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
-pub(crate) fn process_sandbox_policy_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.read_roots)
-}
-
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
-pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.write_roots)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]

@@ -35,8 +35,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:6e7ef721b63c4c67e91c3dd5b10ae9e4132145df3f8d831ad36bd83886042284",
-    "projection_id": "session_view:unknown:6e7ef721b63c"
+    "projection_hash": "sha256:628774c095c4956da64e64b16f718747825c14cf7888107accaf00127df064c8",
+    "projection_id": "session_view:unknown:628774c095c4"
   },
   "runs": [
     {
@@ -46,6 +46,7 @@
         "execution_id": null,
         "flight_recording": null,
         "gaps": [],
+        "reasoning_receipts": null,
         "schema_version": 0,
         "trace_spans": []
       },
@@ -81,8 +82,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:3f576d9f9c728afb804d9a97a82bf436c6beeb8dd8c02e3fb5d652e596e04432",
-        "projection_id": "run_view:run_legacy_sparse:3f576d9f9c72"
+        "projection_hash": "sha256:ed5c6d4c55f6e18e2e49f7ff7fb46cba10a200040fc43a131bc8a1255eef72cd",
+        "projection_id": "run_view:run_legacy_sparse:ed5c6d4c55f6"
       },
       "providers": [],
       "run": {

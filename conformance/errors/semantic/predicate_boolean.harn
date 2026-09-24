@@ -1,0 +1,8 @@
+import "std/predicate"
+
+fn invalid(llm: HarnessLlm, policy: EvaluationPolicy) {
+  const result = llm.evaluate_predicate("test.boolean", "Supported?", {value: 1}, policy)
+  if result {
+    throw "selected a branch without a verdict"
+  }
+}

@@ -980,6 +980,10 @@ async fn execute_live_probe_case(
     marker: &str,
     timeout_secs: u64,
 ) -> ToolConformanceCase {
+    if let Err(error) = super::admission::check_auxiliary(None, "provider conformance probes") {
+        return ToolConformanceCase::transport_error(mode, error.to_string(), None);
+    }
+
     let clock = harn_clock::RealClock::arc();
     let started_ms = clock.monotonic_ms();
     if base_url.is_none() {

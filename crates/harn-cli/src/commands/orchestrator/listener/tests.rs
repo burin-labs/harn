@@ -181,6 +181,17 @@ async fn next_acp_text(
     }
 }
 
+/// `session/new` params for a test session. The request is refused unless it
+/// states an environment policy, and naming it once here keeps the
+/// declaration from being longer than the call it decorates.
+fn isolated_env() -> JsonValue {
+    json!({"environmentPolicy": {"kind": "isolated", "grants": []}})
+}
+
+fn isolated_env_at(cwd: &str) -> JsonValue {
+    json!({"cwd": cwd, "environmentPolicy": {"kind": "isolated", "grants": []}})
+}
+
 async fn acp_request(
     socket: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -229,7 +240,7 @@ async fn new_acp_session(addr: std::net::SocketAddr) -> String {
     let (mut socket, _) = tokio_tungstenite::connect_async(authorized_acp_request(addr))
         .await
         .expect("connect acp websocket");
-    let response = acp_request(&mut socket, 1, "session/new", json!({})).await;
+    let response = acp_request(&mut socket, 1, "session/new", isolated_env()).await;
     response["result"]["sessionId"]
         .as_str()
         .expect("session id")
@@ -507,7 +518,7 @@ async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_activ
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
             .expect("authorized connect");
-    let created = acp_request(&mut socket, 1, "session/new", json!({})).await;
+    let created = acp_request(&mut socket, 1, "session/new", isolated_env()).await;
     let session_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")
@@ -558,7 +569,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
             .expect("owner connect");
-    let created = acp_request(&mut owner, 1, "session/new", json!({"cwd": cwd.clone()})).await;
+    let created = acp_request(&mut owner, 1, "session/new", isolated_env_at(&cwd)).await;
     let session_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")
@@ -654,7 +665,7 @@ async fn acp_websocket_multi_client_observer_attaches_to_live_session() {
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
             .expect("first connect");
-    let created = acp_request(&mut first_socket, 1, "session/new", json!({})).await;
+    let created = acp_request(&mut first_socket, 1, "session/new", isolated_env()).await;
     let session_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")
@@ -741,7 +752,7 @@ async fn acp_websocket_routes_host_requests_only_to_host_owner() {
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
             .expect("owner connect");
-    let created = acp_request(&mut owner, 1, "session/new", json!({})).await;
+    let created = acp_request(&mut owner, 1, "session/new", isolated_env()).await;
     let session_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")
@@ -838,7 +849,7 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
             .expect("connect");
-    let created = acp_request(&mut socket, 1, "session/new", json!({})).await;
+    let created = acp_request(&mut socket, 1, "session/new", isolated_env()).await;
     let session_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")
@@ -931,7 +942,7 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
             .expect("connect");
-    let created = acp_request(&mut socket, 1, "session/new", json!({})).await;
+    let created = acp_request(&mut socket, 1, "session/new", isolated_env()).await;
     let session_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")

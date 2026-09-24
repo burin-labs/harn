@@ -299,7 +299,7 @@ pub enum DeliveryCheckpoint {
 }
 
 impl QueuedUserMessageMode {
-    fn from_str(value: &str) -> Self {
+    pub(crate) fn from_str(value: &str) -> Self {
         match value {
             "interrupt_immediate" | "interrupt" => Self::InterruptImmediate,
             // `steer` is the ACP `session/inject` alias for mid-turn

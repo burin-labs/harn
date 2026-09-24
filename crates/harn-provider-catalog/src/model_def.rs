@@ -3,11 +3,9 @@
 //! local runtime/memory, and aliases) that make up a `ModelDef`.
 use std::collections::BTreeMap;
 
-use chrono::{NaiveDate, TimeZone as _, Utc};
 use serde::{Deserialize, Serialize};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-use super::ModelDataControlsDef;
+use super::{ModelDataControlsDef, ModelPricing};
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct HealthcheckDef {
@@ -330,200 +328,6 @@ pub struct AliasToolCallingDef {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_probe_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct ModelPricing {
-    pub input_per_mtok: f64,
-    pub output_per_mtok: f64,
-    #[serde(default)]
-    pub cache_read_per_mtok: Option<f64>,
-    #[serde(default)]
-    pub cache_write_per_mtok: Option<f64>,
-    /// Whole-request pricing that activates once provider-reported input usage
-    /// reaches a threshold. Providers such as OpenAI and Gemini charge every
-    /// token in a long-context request at the selected band's rates rather
-    /// than applying marginal pricing only above the boundary.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub input_token_bands: Vec<InputTokenPricingBand>,
-    /// Dated provider promotions. The base fields remain the durable rate
-    /// card, so a temporary discount never destroys the price to restore.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub promotions: Vec<PromotionalPricing>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct PromotionalPricing {
-    pub id: String,
-    pub starts_on: String,
-    /// Exact RFC 3339 activation instant when the provider publishes one.
-    /// `starts_on` remains the date-only fallback for existing catalogs.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub starts_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ends_on: Option<String>,
-    /// Exact RFC 3339 exclusive expiry instant. This takes precedence over
-    /// the inclusive date-only `ends_on` boundary when both are present.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ends_at: Option<String>,
-    /// Earliest date maintainers should confirm an open-ended promotion.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub review_after: Option<String>,
-    pub source_url: String,
-    pub input_per_mtok: f64,
-    pub output_per_mtok: f64,
-    #[serde(default)]
-    pub cache_read_per_mtok: Option<f64>,
-    #[serde(default)]
-    pub cache_write_per_mtok: Option<f64>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct InputTokenPricingBand {
-    /// Inclusive lower bound for this whole-request rate.
-    pub minimum_input_tokens: u64,
-    pub input_multiplier: f64,
-    pub output_multiplier: f64,
-}
-
-impl ModelPricing {
-    /// Resolve the rate card for the current UTC instant.
-    ///
-    /// Deterministic callers and tests should use [`Self::effective_at`].
-    pub fn effective_today(&self) -> Self {
-        use harn_clock::Clock as _;
-
-        self.effective_at(harn_clock::RealClock::new().now_utc())
-    }
-
-    /// Resolve the rate card at midnight UTC on a caller-supplied date.
-    /// Date-only promotion ends remain inclusive through that date.
-    pub fn effective_on(&self, date: NaiveDate) -> Self {
-        let at = Utc
-            .from_utc_datetime(
-                &date
-                    .and_hms_opt(0, 0, 0)
-                    .expect("a valid date has a midnight"),
-            )
-            .timestamp();
-        self.effective_at_unix_nanos(i128::from(at) * 1_000_000_000)
-    }
-
-    /// Resolve the rate card at a caller-supplied UTC instant. Invalid
-    /// promotion windows are ignored here and reported by catalog validation.
-    pub fn effective_at(&self, at: OffsetDateTime) -> Self {
-        self.effective_at_unix_nanos(at.unix_timestamp_nanos())
-    }
-
-    fn effective_at_unix_nanos(&self, at: i128) -> Self {
-        let active = self
-            .promotions
-            .iter()
-            .filter_map(|promotion| {
-                let (starts_at, ends_at) = promotion_window_nanos(promotion)?;
-                (starts_at <= at && ends_at.is_none_or(|end| at < end))
-                    .then_some((starts_at, promotion))
-            })
-            .max_by_key(|(starts_at, _)| *starts_at)
-            .map(|(_, promotion)| promotion);
-        let Some(promotion) = active else {
-            return self.clone();
-        };
-        Self {
-            input_per_mtok: promotion.input_per_mtok,
-            output_per_mtok: promotion.output_per_mtok,
-            cache_read_per_mtok: promotion.cache_read_per_mtok,
-            cache_write_per_mtok: promotion.cache_write_per_mtok,
-            input_token_bands: self.input_token_bands.clone(),
-            promotions: self.promotions.clone(),
-        }
-    }
-
-    pub fn scaled(&self, multiplier: f64) -> Self {
-        Self {
-            input_per_mtok: self.input_per_mtok * multiplier,
-            output_per_mtok: self.output_per_mtok * multiplier,
-            cache_read_per_mtok: self.cache_read_per_mtok.map(|rate| rate * multiplier),
-            cache_write_per_mtok: self.cache_write_per_mtok.map(|rate| rate * multiplier),
-            input_token_bands: self.input_token_bands.clone(),
-            promotions: self
-                .promotions
-                .iter()
-                .map(|promotion| PromotionalPricing {
-                    input_per_mtok: promotion.input_per_mtok * multiplier,
-                    output_per_mtok: promotion.output_per_mtok * multiplier,
-                    cache_read_per_mtok: promotion
-                        .cache_read_per_mtok
-                        .map(|rate| rate * multiplier),
-                    cache_write_per_mtok: promotion
-                        .cache_write_per_mtok
-                        .map(|rate| rate * multiplier),
-                    ..promotion.clone()
-                })
-                .collect(),
-        }
-    }
-
-    /// Resolve the whole-request rates for provider-reported input usage.
-    /// `max_by_key` keeps runtime selection correct even before catalog
-    /// validation reports an authoring-order mistake.
-    pub fn for_input_tokens(&self, input_tokens: i64) -> Self {
-        let input_tokens = u64::try_from(input_tokens).unwrap_or(0);
-        let Some(band) = self
-            .input_token_bands
-            .iter()
-            .filter(|band| band.minimum_input_tokens <= input_tokens)
-            .max_by_key(|band| band.minimum_input_tokens)
-        else {
-            return self.clone();
-        };
-        Self {
-            input_per_mtok: self.input_per_mtok * band.input_multiplier,
-            output_per_mtok: self.output_per_mtok * band.output_multiplier,
-            cache_read_per_mtok: self
-                .cache_read_per_mtok
-                .map(|rate| rate * band.input_multiplier),
-            cache_write_per_mtok: self
-                .cache_write_per_mtok
-                .map(|rate| rate * band.input_multiplier),
-            input_token_bands: self.input_token_bands.clone(),
-            promotions: self.promotions.clone(),
-        }
-    }
-}
-
-fn promotion_window_nanos(promotion: &PromotionalPricing) -> Option<(i128, Option<i128>)> {
-    let starts_at = if let Some(value) = promotion.starts_at.as_deref() {
-        OffsetDateTime::parse(value, &Rfc3339)
-            .ok()?
-            .unix_timestamp_nanos()
-    } else {
-        date_start_nanos(&promotion.starts_on)?
-    };
-    let ends_at = if let Some(value) = promotion.ends_at.as_deref() {
-        Some(
-            OffsetDateTime::parse(value, &Rfc3339)
-                .ok()?
-                .unix_timestamp_nanos(),
-        )
-    } else if let Some(value) = promotion.ends_on.as_deref() {
-        let end = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
-        let next_day = end.succ_opt()?;
-        Some(date_start_nanos(&next_day.to_string())?)
-    } else {
-        None
-    };
-    Some((starts_at, ends_at))
-}
-
-fn date_start_nanos(value: &str) -> Option<i128> {
-    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
-    Some(
-        i128::from(
-            Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?)
-                .timestamp(),
-        ) * 1_000_000_000,
-    )
 }
 
 /// Provider or model quota metadata. Providers publish these along several
@@ -942,6 +746,11 @@ fn default_completion_review_scrutiny() -> String {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ModelDef {
     pub name: String,
+    /// Supported jobs. Absence preserves legacy text/embedding rows; an
+    /// explicit set replaces that legacy interpretation, including an empty
+    /// set. Decision support is never inferred from a text capability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operations: Option<std::collections::BTreeSet<crate::ModelOperation>>,
     /// Compact label for persistent UI chrome. When omitted, provider-catalog
     /// generation derives one from `name`; full route identity remains in the
     /// model id, provider, and serving metadata.
@@ -1120,12 +929,29 @@ pub struct ModelDef {
 }
 
 impl ModelDef {
-    /// Whether this row represents an embeddings route rather than a chat or
-    /// completion model. Embedding dimensions are the typed discriminator:
-    /// they are required to interpret the response vector and are explicitly
-    /// absent from generative rows.
+    /// Resolve legacy rows at the catalog boundary. Consumers must use this
+    /// contract rather than interpreting embedding dimensions themselves.
+    pub fn supports_operation(&self, operation: crate::ModelOperation) -> bool {
+        self.operations.as_ref().map_or_else(
+            || match operation {
+                crate::ModelOperation::TextGeneration => self.embedding_dim.is_none(),
+                crate::ModelOperation::Embedding => self.embedding_dim.is_some(),
+                crate::ModelOperation::Decision => false,
+            },
+            |operations| operations.contains(&operation),
+        )
+    }
+
+    pub fn normalized_operations(&self) -> Vec<crate::ModelOperation> {
+        crate::ModelOperation::ALL
+            .into_iter()
+            .filter(|operation| self.supports_operation(*operation))
+            .collect()
+    }
+
+    /// Whether the operation contract includes embedding generation.
     pub fn is_embedding_model(&self) -> bool {
-        self.embedding_dim.is_some()
+        self.supports_operation(crate::ModelOperation::Embedding)
     }
 }
 

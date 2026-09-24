@@ -40,6 +40,16 @@ harn --json-schemas | jq '.data[] | {command, schemaVersion}'
 harn --json-schemas --command lint   # filter to one entry
 ```
 
+The native command-line argument tree is available separately through
+`harn --argument-schema`. It is projected from the same Clap parser that
+executes Harn CLI commands, including nested subcommands, aliases, positional
+and option arity, required arguments, and enumerated values. Its envelope
+has `schemaVersion: 1`; a host should pin the Harn release and reject an
+unknown schema version. `possibleValues: []` means the parser did not expose
+an enum, not that any value is valid: custom parsers and cross-argument rules
+remain Harn's final authority. This describes native `harn` commands, not
+another product's commands that happen to invoke Harn workflows.
+
 ### Error shape
 
 `error.code` is a stable lowercase identifier (e.g. `"lint_failed"`,

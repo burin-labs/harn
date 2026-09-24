@@ -12,8 +12,19 @@ use crate::value::{VmDictExt, VmValue};
 
 use super::api::{LlmResult, ProviderAttempts};
 
+mod billing;
+mod cache_fields;
+pub use billing::BillingUsage;
+mod prompt_tokens;
 mod receipt;
+mod reported_cache;
+pub(crate) use cache_fields::{
+    extract_cache_read_tokens, extract_cache_write_tokens, reported_cache_read_tokens,
+    reported_cache_write_tokens,
+};
+pub(crate) use prompt_tokens::{InputTokenBasis, PromptTokenCounts, ReportedTokenUsage};
 pub(crate) use receipt::ProviderUsageReceipt;
+pub use reported_cache::ReportedCacheUsage;
 
 /// The normalized accounting facts for one completed provider call.
 ///
@@ -114,6 +125,7 @@ impl UnpricedReason {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmUsage {
+    /// Full prompt size, including cache reads and writes, on every provider.
     pub input_tokens: i64,
     pub output_tokens: i64,
     /// Provider-reported whole-call token count when available. This remains
@@ -144,8 +156,15 @@ pub struct LlmUsage {
     pub known_cost_usd: f64,
     /// Provider requests represented by this ledger. Aggregated logical calls
     /// retain their physical transaction count instead of collapsing to one.
-    #[serde(default)]
-    pub provider_call_count: i64,
+    ///
+    /// `None` is a ledger recorded before this field existed, whose one-call
+    /// certainty `summarize_usage_cost_certainty` reconstructs from the
+    /// original stable fields. `Some(0)` is a measured zero: the producer
+    /// observed no dispatch. Reading an integer zero as "legacy" made the
+    /// second unrepresentable, so every pre-dispatch refusal folded into one
+    /// unpriced call (burin-labs/harn#8529).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_count: Option<i64>,
     #[serde(default)]
     pub unpriced_calls: i64,
     #[serde(default)]
@@ -160,6 +179,52 @@ pub struct LlmUsage {
     /// from `cost_usd` rather than letting the absent field read as clean.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unpriced: Option<Box<UnpricedFacts>>,
+    /// Which rate card settled this ledger's priced calls, and when.
+    ///
+    /// `None` is a ledger whose cost did not come from the catalog at all
+    /// (a provider-authoritative cost, a self-hosted zero, or an unpriced
+    /// attempt), or one recorded before this field existed. Boxed so the
+    /// ledger's own frame stays inside the stack-frame budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<Box<PricingFacts>>,
+    #[serde(default, flatten, deserialize_with = "billing::deserialize_optional")]
+    pub billing: Option<Box<BillingUsage>>,
+}
+
+/// How settlement picked the rate card for one ledger.
+///
+/// This exists so per-call spend is auditable after the fact: a reader can see
+/// which card, which whole-request band and which serving tier produced the
+/// recorded `cost_usd`, without re-resolving a catalog that may have moved.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PricingFacts {
+    /// `base`, `promotion:<id>`, or `schedule:<id>`.
+    pub rate_card: String,
+    /// The instant the card was resolved at: the call's start, not the moment
+    /// it was priced.
+    pub settled_at_ms: i64,
+    /// Whole-request input band applied, named by its lower bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_band_minimum: Option<u64>,
+    /// Serving tier whose rates applied, when the call was served on one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serving_tier: Option<String>,
+    /// True when the request asked for a cache lifetime this route publishes
+    /// no rate for, so the write settled at the short-lifetime rate. Naming it
+    /// keeps an under-count visible instead of silent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cache_ttl_unpriced: bool,
+    #[serde(default)]
+    pub platform_fee_estimate_usd: f64,
+    /// A catalog percentage is an estimate, not a provider-reported charge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform_fee_basis: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosted_tool_unpriced: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modality_unpriced: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monthly_allowance_unapplied: Vec<String>,
 }
 
 impl LlmUsage {
@@ -216,7 +281,7 @@ impl UsageCostCertainty {
     /// Whether any attempt folded here carried a price.
     #[must_use]
     pub const fn has_priced_attempt(&self) -> bool {
-        self.unpriced_calls < self.provider_call_count
+        self.unpriced_calls < self.provider_call_count || self.known_cost_usd > 0.0
     }
 }
 
@@ -227,16 +292,17 @@ pub fn summarize_usage_cost_certainty<'a>(
     usages
         .into_iter()
         .fold(UsageCostCertainty::default(), |mut summary, usage| {
-            // A zero call count identifies ledgers recorded before the
+            // An absent call count identifies ledgers recorded before the
             // aggregation fields existed. Reconstruct their one-call
-            // certainty from the original stable fields.
-            let legacy = usage.provider_call_count == 0;
+            // certainty from the original stable fields. A present zero is a
+            // measurement and folds as one.
+            let legacy = usage.provider_call_count.is_none();
             summary.known_cost_usd += if legacy {
                 usage.cost_usd.unwrap_or(0.0)
             } else {
                 usage.known_cost_usd
             };
-            summary.provider_call_count += if legacy { 1 } else { usage.provider_call_count };
+            summary.provider_call_count += usage.provider_call_count.unwrap_or(1);
             summary.unpriced_calls += if legacy {
                 i64::from(usage.cost_usd.is_none())
             } else {
@@ -329,6 +395,37 @@ fn unpriced_facts(
     })
 }
 
+/// A per-request receipt cannot describe several requests' instants, tiers,
+/// and fees. Aggregates retain it only when they contain one request.
+fn aggregate_pricing_facts(usages: &[LlmUsage]) -> Option<Box<PricingFacts>> {
+    match usages {
+        [usage] => usage.pricing.clone(),
+        _ => None,
+    }
+}
+
+/// Record which card, band and tier produced a catalog-settled cost.
+fn pricing_facts(
+    detail: &super::cost::PricingDetail,
+    settled_at_ms: i64,
+    cache_ttl: Option<super::api::PromptCacheTtl>,
+) -> PricingFacts {
+    PricingFacts {
+        rate_card: detail.rate_card.label(),
+        settled_at_ms,
+        input_band_minimum: detail.input_band_minimum,
+        serving_tier: matches!(
+            detail.source,
+            super::cost::PricingSource::CatalogServingTier
+        )
+        .then(|| super::serving_tiers::FAST_TIER_ID.to_string()),
+        cache_ttl_unpriced: !detail.cache_write_priced(cache_ttl),
+        platform_fee_basis: (detail.platform_fee_percent > 0.0)
+            .then(|| "catalog_estimate_funding_route_unknown".into()),
+        ..PricingFacts::default()
+    }
+}
+
 /// Tokens attributable to an attempt only when that attempt went unpriced.
 const fn unpriced_token_count(cost_usd: Option<f64>, input: i64, output: i64) -> i64 {
     if cost_usd.is_some() {
@@ -381,15 +478,8 @@ impl LlmUsage {
             cache_write_tokens,
             cache_supported,
             cache_accounting_declared,
-            cache_hit_ratio: (cache_accounting_declared == Some(true) && cache_supported).then(
-                || {
-                    super::cost::cache_hit_ratio(
-                        input_tokens,
-                        cache_read_tokens,
-                        cache_write_tokens,
-                    )
-                },
-            ),
+            cache_hit_ratio: (cache_accounting_declared == Some(true) && cache_supported)
+                .then(|| super::cost::cache_hit_ratio(input_tokens, cache_read_tokens)),
             cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
             cache_hit: usages.iter().any(|usage| usage.cache_hit),
             served_fast: usages.iter().any(|usage| usage.served_fast),
@@ -404,7 +494,7 @@ impl LlmUsage {
                 UsageAccountingStatus::Unknown
             },
             known_cost_usd: certainty.known_cost_usd,
-            provider_call_count: certainty.provider_call_count,
+            provider_call_count: Some(certainty.provider_call_count),
             unpriced_calls: certainty.unpriced_calls,
             usage_unknown_calls: certainty.usage_unknown_calls,
             unpriced: unpriced_facts(
@@ -412,6 +502,16 @@ impl LlmUsage {
                 certainty.unpriced_reason,
                 (!certainty.unprojectable).then_some(certainty.unpriced_projection_usd),
             ),
+            // Request instants and fees belong to the per-attempt receipts.
+            pricing: aggregate_pricing_facts(usages),
+            billing: usages
+                .iter()
+                .filter_map(|usage| usage.billing.as_deref())
+                .fold(None, |sum, value| {
+                    let mut sum = sum.unwrap_or_else(|| Box::new(BillingUsage::default()));
+                    sum.add(value);
+                    Some(sum)
+                }),
         }
     }
 
@@ -436,7 +536,27 @@ impl LlmUsage {
             cost_usd: Some(0.0),
             accounting_status: UsageAccountingStatus::Reported,
             known_cost_usd: 0.0,
-            provider_call_count: 1,
+            provider_call_count: Some(1),
+            unpriced_calls: 0,
+            usage_unknown_calls: 0,
+            unpriced: None,
+            ..Self::unknown_attempt()
+        }
+    }
+
+    /// A terminal that made no provider request at all.
+    ///
+    /// Distinct from `known_zero_attempt`, which is one real request that cost
+    /// nothing (a cache or replay hit). Here nothing was dispatched, so the
+    /// cost is exactly zero, there is no unpriced attempt to bound, and the
+    /// physical request count is a measured zero rather than an assumed one.
+    /// Pre-dispatch budget refusals and admission denials terminate here.
+    pub(crate) fn no_provider_request() -> Self {
+        Self {
+            cost_usd: Some(0.0),
+            accounting_status: UsageAccountingStatus::Reported,
+            known_cost_usd: 0.0,
+            provider_call_count: Some(0),
             unpriced_calls: 0,
             usage_unknown_calls: 0,
             unpriced: None,
@@ -469,7 +589,7 @@ impl LlmUsage {
             served_fast: false,
             accounting_status: UsageAccountingStatus::Unknown,
             known_cost_usd: 0.0,
-            provider_call_count: count,
+            provider_call_count: Some(count),
             unpriced_calls: count,
             usage_unknown_calls: count,
             // No response arrived, so neither a token count nor a price table
@@ -480,6 +600,9 @@ impl LlmUsage {
                 reason: UnpricedReason::NoResponse,
                 projection_usd: None,
             })),
+            // Nothing was priced, so no card settled anything.
+            pricing: None,
+            billing: None,
         }
     }
 
@@ -522,37 +645,72 @@ impl LlmUsage {
         // ceiling whole. `usage_unknown_calls` still records that the token
         // counts were missing: that stays unknown, only the cost does not.
         let free_route = crate::llm_config::provider_is_self_hosted(&result.provider);
+        // Settle at the instant the request left the client. A promotion that
+        // expired, or a time-of-day window the call started inside, priced the
+        // call as it began, not as it was accounted for.
+        let settled_at_ms = result
+            .telemetry
+            .started_at_ms
+            .unwrap_or_else(crate::stdlib::clock::now_wall_ms_unrecorded);
+        let at = super::cost::instant_from_wall_ms(settled_at_ms);
+        let cache_ttl = result
+            .telemetry
+            .prompt_cache_ttl
+            .as_deref()
+            .and_then(super::api::PromptCacheTtl::parse);
         // The price table is looked up whether or not the counts are usable,
         // because it is what separates an unpriced attempt that still has a
         // worst case from one that has none at any token count.
-        let table_cost = super::cost::pricing_detail_for_tier(
+        let detail = super::cost::pricing_detail_for_tier(
             &result.provider,
             &result.model,
             result.served_fast,
             result.input_tokens,
-        )
-        .map(|detail| {
+            at,
+        );
+        let token_cost = detail.as_ref().map(|detail| {
             super::cost::project_call_cost(
-                &detail,
+                detail,
                 result.input_tokens,
                 result.output_tokens,
                 result.cache_read_tokens,
                 result.cache_write_tokens,
+                cache_ttl,
             )
         });
+        let billing = result.telemetry.billing.clone();
+        let settlement = detail.as_ref().zip(token_cost).map(|(detail, cost)| {
+            billing
+                .as_deref()
+                .unwrap_or(&BillingUsage::default())
+                .settle(detail, cost)
+        });
+        let table_cost = settlement.as_ref().map(|settlement| settlement.total_usd);
+        let units_unpriced = authoritative_cost.is_none()
+            && !free_route
+            && (settlement
+                .as_ref()
+                .is_some_and(billing::BillingSettlement::has_unpriced_units)
+                || (!component_usage_known && billing.is_some())
+                || (result.cache_write_tokens > 0
+                    && detail
+                        .as_ref()
+                        .is_some_and(|detail| !detail.cache_write_priced(cache_ttl))));
         let cost_usd = authoritative_cost
             .or_else(|| free_route.then_some(0.0))
-            .or_else(|| component_usage_known.then_some(table_cost).flatten());
-        let (unpriced_reason, projected_cost_usd) = unpriced_projection(cost_usd, table_cost);
+            .or_else(|| {
+                (component_usage_known || billing.is_some())
+                    .then_some(table_cost)
+                    .flatten()
+            });
+        let (unpriced_reason, projected_cost_usd) = if units_unpriced {
+            (Some(UnpricedReason::Mixed), None)
+        } else {
+            unpriced_projection(cost_usd, table_cost)
+        };
         let cache_hit_ratio = (result.telemetry.cache_accounting_declared == Some(true)
             && result.cache_supported)
-            .then(|| {
-                super::cost::cache_hit_ratio(
-                    result.input_tokens,
-                    result.cache_read_tokens,
-                    result.cache_write_tokens,
-                )
-            });
+            .then(|| super::cost::cache_hit_ratio(result.input_tokens, result.cache_read_tokens));
         Self {
             input_tokens: result.input_tokens,
             output_tokens: result.output_tokens,
@@ -569,67 +727,55 @@ impl LlmUsage {
                 result.input_tokens,
                 result.cache_read_tokens,
                 result.cache_write_tokens,
+                at,
+                cache_ttl,
             ),
             cache_hit: result.cache_read_tokens > 0,
             served_fast: result.served_fast,
-            accounting_status: if usage_known || authoritative_cost.is_some() {
+            accounting_status: if units_unpriced {
+                UsageAccountingStatus::Partial
+            } else if usage_known || authoritative_cost.is_some() {
                 UsageAccountingStatus::Reported
             } else {
                 UsageAccountingStatus::Unknown
             },
             known_cost_usd: cost_usd.unwrap_or(0.0),
-            provider_call_count: 1,
-            unpriced_calls: i64::from(cost_usd.is_none()),
+            provider_call_count: Some(1),
+            unpriced_calls: i64::from(cost_usd.is_none() || units_unpriced),
             usage_unknown_calls: i64::from(!usage_known && authoritative_cost.is_none()),
             unpriced: unpriced_facts(
                 unpriced_token_count(cost_usd, result.input_tokens, result.output_tokens),
                 unpriced_reason,
                 projected_cost_usd,
             ),
+            // Only a catalog-settled cost has a card to name. A provider's own
+            // cost figure and a self-hosted zero did not come from one, and
+            // claiming a card for them would put the catalog's name on a
+            // number it did not produce.
+            pricing: (cost_usd.is_some() && authoritative_cost.is_none() && !free_route)
+                .then(|| {
+                    detail.as_ref().map(|detail| {
+                        let mut facts = pricing_facts(detail, settled_at_ms, cache_ttl);
+                        if let Some(settlement) = &settlement {
+                            facts.platform_fee_estimate_usd = settlement.platform_fee_estimate_usd;
+                            facts.hosted_tool_unpriced = settlement.hosted_tool_unpriced.clone();
+                            facts.modality_unpriced = settlement.modality_unpriced.clone();
+                            facts.monthly_allowance_unapplied =
+                                settlement.monthly_allowance_unapplied.clone();
+                        }
+                        Box::new(facts)
+                    })
+                })
+                .flatten(),
+            billing,
         }
     }
 
-    fn from_probe_counts(
-        provider: &str,
-        model: &str,
-        input_tokens: i64,
-        output_tokens: i64,
-    ) -> Self {
-        let cost_usd =
-            super::cost::pricing_aware_call_cost(provider, model, input_tokens, output_tokens);
-        Self {
-            input_tokens,
-            output_tokens,
-            reported_total_tokens: None,
-            cost_usd,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            cache_supported: false,
-            cache_accounting_declared: None,
-            cache_hit_ratio: None,
-            cache_savings_usd: 0.0,
-            cache_hit: false,
-            served_fast: false,
-            accounting_status: UsageAccountingStatus::Reported,
-            known_cost_usd: cost_usd.unwrap_or(0.0),
-            provider_call_count: 1,
-            unpriced_calls: i64::from(cost_usd.is_none()),
-            usage_unknown_calls: 0,
-            // A probe reports its own counts, so an unpriced probe is unpriced
-            // because the route has no price table, which has no bound.
-            unpriced: unpriced_facts(
-                unpriced_token_count(cost_usd, input_tokens, output_tokens),
-                cost_usd.is_none().then_some(UnpricedReason::PricingUnknown),
-                None,
-            ),
-        }
-    }
-
-    /// Normalize the accounting carried by a typed parser error. Complete
+    /// Normalize accounting from a provider receipt or saved probe. Complete
     /// token counts earn the same catalog pricing as a completed response;
     /// partial receipts retain their measured fields but remain explicitly
     /// unknown rather than turning absence into a free zero.
-    pub(crate) fn from_provider_error_receipt(
+    pub(crate) fn from_provider_receipt(
         provider: &str,
         model: &str,
         receipt: &ProviderUsageReceipt,
@@ -638,26 +784,59 @@ impl LlmUsage {
         let output_tokens = receipt.output_tokens.unwrap_or(0);
         let complete_counts = receipt.has_complete_token_counts();
         let free_route = crate::llm_config::provider_is_self_hosted(provider);
-        let table_cost = super::cost::pricing_detail_for_tier(
+        let settled_at_ms = receipt
+            .started_at_ms
+            .unwrap_or_else(crate::stdlib::clock::now_wall_ms_unrecorded);
+        let cache_ttl = receipt.prompt_cache_ttl;
+        let at = super::cost::instant_from_wall_ms(settled_at_ms);
+        let detail = super::cost::pricing_detail_for_tier(
             provider,
             model,
             receipt.served_fast,
             input_tokens,
-        )
-        .map(|detail| {
+            at,
+        );
+        let token_cost = detail.as_ref().map(|detail| {
             super::cost::project_call_cost(
-                &detail,
+                detail,
                 input_tokens,
                 output_tokens,
                 receipt.cache_read_tokens,
                 receipt.cache_write_tokens,
+                cache_ttl,
             )
         });
+        let billing = receipt.billing.clone();
+        let settlement = detail.as_ref().zip(token_cost).map(|(detail, cost)| {
+            billing
+                .as_deref()
+                .unwrap_or(&BillingUsage::default())
+                .settle(detail, cost)
+        });
+        let table_cost = settlement.as_ref().map(|settlement| settlement.total_usd);
+        let units_unpriced = receipt.provider_cost_usd.is_none()
+            && !free_route
+            && (settlement
+                .as_ref()
+                .is_some_and(billing::BillingSettlement::has_unpriced_units)
+                || (!complete_counts && billing.is_some())
+                || (receipt.cache_write_tokens > 0
+                    && detail
+                        .as_ref()
+                        .is_some_and(|detail| !detail.cache_write_priced(cache_ttl))));
         let cost_usd = receipt
             .provider_cost_usd
             .or_else(|| free_route.then_some(0.0))
-            .or_else(|| complete_counts.then_some(table_cost).flatten());
-        let (unpriced_reason, projected_cost_usd) = unpriced_projection(cost_usd, table_cost);
+            .or_else(|| {
+                (complete_counts || billing.is_some())
+                    .then_some(table_cost)
+                    .flatten()
+            });
+        let (unpriced_reason, projected_cost_usd) = if units_unpriced {
+            (Some(UnpricedReason::Mixed), None)
+        } else {
+            unpriced_projection(cost_usd, table_cost)
+        };
         let usage_unknown = i64::from(!complete_counts);
         Self {
             input_tokens,
@@ -670,36 +849,50 @@ impl LlmUsage {
             cache_accounting_declared: receipt.cache_accounting_declared,
             cache_hit_ratio: (receipt.cache_accounting_declared == Some(true)
                 && receipt.cache_supported)
-                .then(|| {
-                    super::cost::cache_hit_ratio(
-                        input_tokens,
-                        receipt.cache_read_tokens,
-                        receipt.cache_write_tokens,
-                    )
-                }),
+                .then(|| super::cost::cache_hit_ratio(input_tokens, receipt.cache_read_tokens)),
             cache_savings_usd: super::cost::cache_savings_usd_for_provider(
                 provider,
                 model,
                 input_tokens,
                 receipt.cache_read_tokens,
                 receipt.cache_write_tokens,
+                at,
+                cache_ttl,
             ),
             cache_hit: receipt.cache_read_tokens > 0,
             served_fast: receipt.served_fast,
-            accounting_status: if usage_unknown == 0 {
+            accounting_status: if units_unpriced {
+                UsageAccountingStatus::Partial
+            } else if usage_unknown == 0 {
                 UsageAccountingStatus::Reported
             } else {
                 UsageAccountingStatus::Unknown
             },
             known_cost_usd: cost_usd.unwrap_or(0.0),
-            provider_call_count: 1,
-            unpriced_calls: i64::from(cost_usd.is_none()),
+            provider_call_count: Some(1),
+            unpriced_calls: i64::from(cost_usd.is_none() || units_unpriced),
             usage_unknown_calls: usage_unknown,
             unpriced: unpriced_facts(
                 unpriced_token_count(cost_usd, input_tokens, output_tokens),
                 unpriced_reason,
                 projected_cost_usd,
             ),
+            pricing: (cost_usd.is_some() && receipt.provider_cost_usd.is_none() && !free_route)
+                .then(|| {
+                    detail.as_ref().map(|detail| {
+                        let mut facts = pricing_facts(detail, settled_at_ms, cache_ttl);
+                        if let Some(settlement) = &settlement {
+                            facts.platform_fee_estimate_usd = settlement.platform_fee_estimate_usd;
+                            facts.hosted_tool_unpriced = settlement.hosted_tool_unpriced.clone();
+                            facts.modality_unpriced = settlement.modality_unpriced.clone();
+                            facts.monthly_allowance_unapplied =
+                                settlement.monthly_allowance_unapplied.clone();
+                        }
+                        Box::new(facts)
+                    })
+                })
+                .flatten(),
+            billing,
         }
     }
 
@@ -723,6 +916,15 @@ impl LlmUsage {
     /// by the observed-call boundary and stays nested under this one owner.
     pub(crate) fn to_vm_dict(&self, attempts: &ProviderAttempts) -> crate::value::DictMap {
         let mut usage = crate::value::DictMap::new();
+        if let Some(billing) = &self.billing {
+            if let Value::Object(fields) =
+                serde_json::to_value(billing).expect("billing serializes")
+            {
+                for (key, value) in fields {
+                    usage.insert(key.into(), crate::schema::json_to_vm_value(&value));
+                }
+            }
+        }
         usage.insert(
             crate::value::intern_key("input_tokens"),
             VmValue::Int(self.input_tokens),
@@ -744,10 +946,15 @@ impl LlmUsage {
             crate::value::intern_key("known_cost_usd"),
             VmValue::Float(self.known_cost_usd),
         );
-        usage.insert(
-            crate::value::intern_key("provider_call_count"),
-            VmValue::Int(self.provider_call_count),
-        );
+        // An unmeasured count is absent, never null: a consumer that keys
+        // "stamped" on the field's presence must not read a legacy ledger as
+        // one that measured and found nothing.
+        if let Some(provider_call_count) = self.provider_call_count {
+            usage.insert(
+                crate::value::intern_key("provider_call_count"),
+                VmValue::Int(provider_call_count),
+            );
+        }
         usage.insert(
             crate::value::intern_key("unpriced_calls"),
             VmValue::Int(self.unpriced_calls),
@@ -770,6 +977,65 @@ impl LlmUsage {
             self.projected_cost_usd()
                 .map_or(VmValue::Nil, VmValue::Float),
         );
+        // Present only when the catalog settled this ledger, so a consumer can
+        // tell "no card applied" from "a base card applied".
+        if let Some(pricing) = self.pricing.as_deref() {
+            let mut card = crate::value::DictMap::new();
+            card.insert(
+                "platform_fee_estimate_usd".into(),
+                VmValue::Float(pricing.platform_fee_estimate_usd),
+            );
+            card.insert(
+                "platform_fee_basis".into(),
+                pricing
+                    .platform_fee_basis
+                    .as_deref()
+                    .map_or(VmValue::Nil, VmValue::string),
+            );
+            card.insert(
+                "hosted_tool_unpriced".into(),
+                crate::schema::json_to_vm_value(&serde_json::json!(pricing.hosted_tool_unpriced)),
+            );
+            card.insert(
+                "modality_unpriced".into(),
+                crate::schema::json_to_vm_value(&serde_json::json!(pricing.modality_unpriced)),
+            );
+            card.insert(
+                "monthly_allowance_unapplied".into(),
+                crate::schema::json_to_vm_value(&serde_json::json!(
+                    pricing.monthly_allowance_unapplied
+                )),
+            );
+            card.insert(
+                crate::value::intern_key("rate_card"),
+                VmValue::string(pricing.rate_card.as_str()),
+            );
+            card.insert(
+                crate::value::intern_key("settled_at_ms"),
+                VmValue::Int(pricing.settled_at_ms),
+            );
+            card.insert(
+                crate::value::intern_key("input_band_minimum"),
+                pricing
+                    .input_band_minimum
+                    .map_or(VmValue::Nil, |band| VmValue::Int(band as i64)),
+            );
+            card.insert(
+                crate::value::intern_key("serving_tier"),
+                pricing
+                    .serving_tier
+                    .as_deref()
+                    .map_or(VmValue::Nil, VmValue::string),
+            );
+            card.insert(
+                crate::value::intern_key("cache_ttl_unpriced"),
+                VmValue::Bool(pricing.cache_ttl_unpriced),
+            );
+            usage.insert(
+                crate::value::intern_key("pricing"),
+                VmValue::Dict(std::sync::Arc::new(card)),
+            );
+        }
         usage.insert(
             crate::value::intern_key("cache_read_tokens"),
             VmValue::Int(self.cache_read_tokens),
@@ -835,6 +1101,13 @@ impl LlmUsage {
     /// Receipt producers use this instead of round-tripping through a JSON
     /// object or maintaining a second cost projection.
     pub(crate) fn project_onto_fields(&self, fields: &mut serde_json::Map<String, Value>) {
+        if let Some(billing) = &self.billing {
+            if let Value::Object(billing) =
+                serde_json::to_value(billing).expect("billing serializes")
+            {
+                fields.extend(billing);
+            }
+        }
         fields.insert("input_tokens".to_string(), self.input_tokens.into());
         fields.insert("output_tokens".to_string(), self.output_tokens.into());
         fields.insert(
@@ -847,10 +1120,12 @@ impl LlmUsage {
             self.cost_usd.map_or(Value::Null, serde_json::Value::from),
         );
         fields.insert("known_cost_usd".to_string(), self.known_cost_usd.into());
-        fields.insert(
-            "provider_call_count".to_string(),
-            self.provider_call_count.into(),
-        );
+        if let Some(provider_call_count) = self.provider_call_count {
+            fields.insert(
+                "provider_call_count".to_string(),
+                provider_call_count.into(),
+            );
+        }
         fields.insert("unpriced_calls".to_string(), self.unpriced_calls.into());
         fields.insert(
             "usage_unknown_calls".to_string(),
@@ -867,6 +1142,12 @@ impl LlmUsage {
             self.projected_cost_usd()
                 .map_or(Value::Null, serde_json::Value::from),
         );
+        if let Some(pricing) = self.pricing.as_deref() {
+            fields.insert(
+                "pricing".to_string(),
+                serde_json::to_value(pricing).unwrap_or(Value::Null),
+            );
+        }
         fields.insert(
             "cache_read_tokens".to_string(),
             self.cache_read_tokens.into(),
@@ -898,8 +1179,28 @@ impl LlmUsage {
         );
     }
 
-    pub(crate) fn empty_vm_dict() -> crate::value::DictMap {
-        Self::unknown_attempt().to_vm_dict(&ProviderAttempts::default())
+    /// The usage a terminal carries when no per-attempt ledger was recorded.
+    ///
+    /// `dispatches` is the call-scoped measurement from
+    /// `crate::llm::provider_dispatch`: `Some(0)` is a terminal that never
+    /// reached a provider, `Some(n)` is n requests whose usage never arrived,
+    /// and `None` means nothing measured, which stays conservative by
+    /// assuming one unknown attempt. Collapsing `Some(0)` into `None` is what
+    /// charged a reserve for refusals that cost nothing
+    /// (burin-labs/harn#8529).
+    pub(crate) fn measured_vm_dict(dispatches: Option<i64>) -> crate::value::DictMap {
+        let usage = match dispatches {
+            Some(0) => Self::no_provider_request(),
+            Some(count) if count > 0 => {
+                Self::unknown_attempts(usize::try_from(count).unwrap_or(usize::MAX))
+            }
+            _ => Self::unknown_attempt(),
+        };
+        let attempts = ProviderAttempts {
+            total: u32::try_from(dispatches.unwrap_or(0).max(0)).unwrap_or(u32::MAX),
+            ..ProviderAttempts::default()
+        };
+        usage.to_vm_dict(&attempts)
     }
 
     /// Lower the ledger to canonical tracing metadata while keeping route
@@ -930,6 +1231,40 @@ impl LlmUsage {
         }
         if let Some(total_tokens) = self.reported_total_tokens {
             pairs.push((meta::REPORTED_TOTAL_TOKENS, serde_json::json!(total_tokens)));
+        }
+        // A recorded `cost_usd` is only auditable alongside the card that
+        // produced it: the same route settles at two prices on either side of
+        // an off-peak boundary, and the number alone cannot say which.
+        if let Some(pricing) = self.pricing.as_deref() {
+            pairs.push((meta::RATE_CARD, serde_json::json!(pricing.rate_card)));
+            pairs.push((
+                "platform_fee_estimate_usd",
+                serde_json::json!(pricing.platform_fee_estimate_usd),
+            ));
+            if let Some(basis) = &pricing.platform_fee_basis {
+                pairs.push(("platform_fee_basis", serde_json::json!(basis)));
+            }
+            pairs.push((
+                "hosted_tool_unpriced",
+                serde_json::json!(pricing.hosted_tool_unpriced),
+            ));
+            pairs.push((
+                "modality_unpriced",
+                serde_json::json!(pricing.modality_unpriced),
+            ));
+            pairs.push((
+                "monthly_allowance_unapplied",
+                serde_json::json!(pricing.monthly_allowance_unapplied),
+            ));
+            if let Some(band) = pricing.input_band_minimum {
+                pairs.push((meta::PRICING_BAND, serde_json::json!(band)));
+            }
+            if let Some(tier) = pricing.serving_tier.as_deref() {
+                pairs.push((meta::PRICING_TIER, serde_json::json!(tier)));
+            }
+            if pricing.cache_ttl_unpriced {
+                pairs.push((meta::CACHE_TTL_UNPRICED, serde_json::json!(true)));
+            }
         }
         pairs
     }
@@ -982,18 +1317,26 @@ impl ToolProbeUsage {
         Self::from_usage(LlmUsage::from_result(result))
     }
 
-    fn from_totals(provider: &str, model: &str, totals: UsageTotals) -> Self {
-        if let Some((input_tokens, output_tokens)) = totals.input_tokens.zip(totals.output_tokens) {
-            return Self::from_usage(LlmUsage::from_probe_counts(
-                provider,
-                model,
-                input_tokens,
-                output_tokens,
-            ));
+    fn from_reported(provider: &str, model: &str, reported: ReportedTokenUsage) -> Self {
+        let input_tokens = reported
+            .prompt_counts()
+            .ok()
+            .flatten()
+            .map(|counts| counts.total);
+        let output_tokens = reported.output_tokens.filter(|tokens| *tokens >= 0);
+        if input_tokens.is_some() && output_tokens.is_some() {
+            let receipt = ProviderUsageReceipt::new(input_tokens, output_tokens, None, false)
+                .with_cache(
+                    reported.cache_read_tokens.unwrap_or(0),
+                    reported.cache_write_tokens.unwrap_or(0),
+                    None,
+                    reported.cache_read_tokens.is_some() || reported.cache_write_tokens.is_some(),
+                );
+            return Self::from_usage(LlmUsage::from_provider_receipt(provider, model, &receipt));
         }
         Self {
-            input_tokens: totals.input_tokens,
-            output_tokens: totals.output_tokens,
+            input_tokens,
+            output_tokens,
             reported_total_tokens: None,
             cost_usd: None,
             accounting_status: UsageAccountingStatus::Unknown,
@@ -1011,108 +1354,42 @@ impl ToolProbeUsage {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct UsageTotals {
-    input_tokens: Option<i64>,
-    output_tokens: Option<i64>,
-}
-
-impl UsageTotals {
-    fn has_any(self) -> bool {
-        self.input_tokens.is_some() || self.output_tokens.is_some()
-    }
-
-    fn add_input(&mut self, value: i64) {
-        self.input_tokens = Some(self.input_tokens.unwrap_or(0).saturating_add(value.max(0)));
-    }
-
-    fn add_output(&mut self, value: i64) {
-        self.output_tokens = Some(self.output_tokens.unwrap_or(0).saturating_add(value.max(0)));
-    }
-}
-
 pub(crate) fn extract_probe_usage(
     provider: &str,
     model: &str,
     response: &Value,
 ) -> Option<ToolProbeUsage> {
-    let totals = usage_totals_from_response(response)?;
-    Some(ToolProbeUsage::from_totals(provider, model, totals))
+    let reported = reported_usage_from_response(response)?;
+    Some(ToolProbeUsage::from_reported(provider, model, reported))
 }
 
-fn usage_totals_from_response(response: &Value) -> Option<UsageTotals> {
-    let root_totals = usage_totals_from_envelope(response);
-    if root_totals.has_any() {
-        return Some(root_totals);
-    }
-    let frame_totals = last_stream_frame_usage(response);
-    frame_totals.has_any().then_some(frame_totals)
-}
-
-fn last_stream_frame_usage(response: &Value) -> UsageTotals {
-    let mut final_totals = UsageTotals::default();
-    let Some(frames) = response.get("frames").and_then(Value::as_array) else {
-        return final_totals;
-    };
-    for frame in frames {
-        let frame_totals = usage_totals_from_envelope(frame);
-        if frame_totals.has_any() {
-            final_totals = frame_totals;
+fn reported_usage_from_response(response: &Value) -> Option<ReportedTokenUsage> {
+    let mut reported = ReportedTokenUsage::default();
+    if let Some(frames) = response.get("frames").and_then(Value::as_array) {
+        for frame in frames {
+            reported.merge_reported(reported_usage_from_envelope(frame));
         }
     }
-    final_totals
+    // A saved response can contain both the terminal usage and copied frames.
+    // Its reported root components win without counting any component twice.
+    reported.merge_reported(reported_usage_from_envelope(response));
+    reported.has_any().then_some(reported)
 }
 
-fn usage_totals_from_envelope(envelope: &Value) -> UsageTotals {
-    let mut totals = UsageTotals::default();
-    accumulate_usage_object(envelope.get("usage"), &mut totals);
-    accumulate_usage_object(envelope.pointer("/message/usage"), &mut totals);
-    accumulate_usage_object(envelope.get("usageMetadata"), &mut totals);
-    accumulate_usage_object(envelope.pointer("/message/usageMetadata"), &mut totals);
-    totals
-}
-
-fn accumulate_usage_object(usage: Option<&Value>, totals: &mut UsageTotals) {
-    let Some(usage) = usage else {
-        return;
-    };
-    if let Some(value) = first_i64_field(
-        usage,
-        &[
-            "input_tokens",
-            "prompt_tokens",
-            "promptTokenCount",
-            "prompt_token_count",
-            "inputTokens",
-        ],
-    ) {
-        totals.add_input(value);
+fn reported_usage_from_envelope(envelope: &Value) -> ReportedTokenUsage {
+    let mut reported = ReportedTokenUsage::default();
+    for usage in [
+        envelope.get("usage"),
+        envelope.pointer("/message/usage"),
+        envelope.get("usageMetadata"),
+        envelope.pointer("/message/usageMetadata"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        reported.merge_reported(ReportedTokenUsage::from_value(usage));
     }
-
-    let output_tokens = first_i64_field(
-        usage,
-        &[
-            "output_tokens",
-            "completion_tokens",
-            "candidatesTokenCount",
-            "completion_token_count",
-            "outputTokenCount",
-            "outputTokens",
-        ],
-    );
-    let thoughts_tokens = first_i64_field(usage, &["thoughtsTokenCount", "thought_tokens"]);
-    match (output_tokens, thoughts_tokens) {
-        (Some(output), Some(thoughts)) => totals.add_output(output.saturating_add(thoughts)),
-        (Some(output), None) => totals.add_output(output),
-        (None, Some(thoughts)) => totals.add_output(thoughts),
-        (None, None) => {}
-    }
-}
-
-fn first_i64_field(value: &Value, names: &[&str]) -> Option<i64> {
-    names
-        .iter()
-        .find_map(|name| value.get(*name).and_then(Value::as_i64))
+    reported
 }
 
 #[cfg(test)]

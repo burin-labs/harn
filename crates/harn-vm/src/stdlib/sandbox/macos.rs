@@ -14,6 +14,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+use self::swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
     normalized_process_roots, policy_allows_network, policy_allows_workspace_write,
     process_sandbox_developer_toolchain_read_roots,
@@ -25,6 +26,7 @@ use super::{
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
 
+pub(super) mod swiftpm;
 mod toolchain_roots;
 
 const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
@@ -123,61 +125,6 @@ fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> Strin
         &process_sandbox_package_manager_config_read_roots(policy),
         &super::process_sandbox_developer_toolchain_cache_roots(policy),
     )
-}
-
-fn macos_sandbox_compatible_args(program: &str, args: &[String]) -> Vec<String> {
-    if is_swiftpm_invocation(program, args) {
-        return swiftpm_outer_sandbox_args(args);
-    }
-    args.to_vec()
-}
-
-fn is_swiftpm_invocation(program: &str, args: &[String]) -> bool {
-    Path::new(program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        == Some("swift")
-        && matches!(
-            args.first().map(String::as_str),
-            Some("build" | "test" | "run" | "package")
-        )
-}
-
-fn swiftpm_outer_sandbox_args(args: &[String]) -> Vec<String> {
-    let mut rewritten = Vec::with_capacity(args.len() + 9);
-    rewritten.push(args[0].clone());
-    if !has_swiftpm_option(args, "--disable-sandbox") {
-        rewritten.push("--disable-sandbox".to_string());
-    }
-    if !has_swiftpm_option(args, "--manifest-cache") {
-        rewritten.extend(["--manifest-cache".to_string(), "local".to_string()]);
-    }
-    if !has_swiftpm_option(args, "--cache-path") {
-        rewritten.extend([
-            "--cache-path".to_string(),
-            ".build/harn/swiftpm/cache".to_string(),
-        ]);
-    }
-    if !has_swiftpm_option(args, "--config-path") {
-        rewritten.extend([
-            "--config-path".to_string(),
-            ".build/harn/swiftpm/config".to_string(),
-        ]);
-    }
-    if !has_swiftpm_option(args, "--security-path") {
-        rewritten.extend([
-            "--security-path".to_string(),
-            ".build/harn/swiftpm/security".to_string(),
-        ]);
-    }
-    rewritten.extend(args.iter().skip(1).cloned());
-    rewritten
-}
-
-fn has_swiftpm_option(args: &[String], option: &str) -> bool {
-    let equals_prefix = format!("{option}=");
-    args.iter()
-        .any(|arg| arg == option || arg.starts_with(&equals_prefix))
 }
 
 #[cfg(test)]
@@ -394,13 +341,20 @@ fn render_profile_with_extra_read_roots(
     // writable when UserTemp is on — a socket file is a file — so pairing the
     // write with the bind is the grant, not a widening. A policy that opts
     // out of UserTemp still has to name every socket root itself.
+    //
+    // Binding creates the socket file, which is a file-write the bind rule
+    // does not carry. A root outside every writable root therefore also gets
+    // creation and removal, narrowed to socket vnodes so the root does not
+    // become a place to write ordinary files.
     for root in unix_socket_profile_roots(policy) {
         for path in sandbox_profile_path_aliases(&root.display().to_string()) {
             let escaped = sandbox_profile_escape(&path);
             profile.push_str(&format!(
                 "(allow network-bind (subpath \"{escaped}\"))\n\
                  (allow network-inbound (subpath \"{escaped}\"))\n\
-                 (allow network-outbound (subpath \"{escaped}\"))\n"
+                 (allow network-outbound (subpath \"{escaped}\"))\n\
+                 (allow file-write-create file-write-unlink \
+                 (require-all (subpath \"{escaped}\") (vnode-type SOCKET)))\n"
             ));
         }
     }

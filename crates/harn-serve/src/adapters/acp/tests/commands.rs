@@ -36,7 +36,7 @@ async fn acp_advertises_and_dispatches_slash_commands() {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "session/new",
-                    "params": {"cwd": dir.path()},
+                    "params": {"cwd": dir.path(), "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send session/new");
             let created = recv_json(&mut response_rx).await;
@@ -147,7 +147,7 @@ async fn acp_unknown_slash_invocation_falls_through_to_default_pipeline() {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "session/new",
-                    "params": {"cwd": dir.path()},
+                    "params": {"cwd": dir.path(), "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send session/new");
             let created = recv_json(&mut response_rx).await;
@@ -222,7 +222,7 @@ async fn acp_inline_mode_rejects_slash_invocations_with_friendly_error() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": {"cwd": "."},
+            "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
         }))
         .await;
     let created = recv_json(&mut rx).await;
@@ -297,7 +297,7 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "session/new",
-                    "params": {"cwd": dir.path()},
+                    "params": {"cwd": dir.path(), "environmentPolicy": {"kind": "isolated", "grants": []}},
                 }))
                 .expect("send session/new");
             let created = recv_json(&mut response_rx).await;

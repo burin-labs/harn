@@ -867,7 +867,7 @@ mod tests {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "session/new",
-                "params": {"cwd": "."},
+                "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
             }))
             .expect("send session/new");
 
@@ -934,7 +934,7 @@ mod tests {
                 "jsonrpc": "2.0",
                 "id": 7,
                 "method": "session/new",
-                "params": {"cwd": "."},
+                "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
             }))
             .expect("send session/new");
         let created = block_on(recv_json(&mut responses));
@@ -949,7 +949,7 @@ mod tests {
         let mut client = block_on(EmbeddedAgentClient::spawn(AcpServerConfig::new(None)))
             .expect("spawn embedded client");
 
-        let created = block_on(client.start_run(AcpSessionNewParams::cwd(".")))
+        let created = block_on(client.start_run(AcpSessionNewParams::isolated(".")))
             .expect("session/new through client");
         assert!(!created.session_id.is_empty());
 
@@ -972,7 +972,7 @@ mod tests {
             .expect("spawn embedded client");
 
         let request_id = client
-            .begin_request(ACP_METHOD_SESSION_NEW, AcpSessionNewParams::cwd("."))
+            .begin_request(ACP_METHOD_SESSION_NEW, AcpSessionNewParams::isolated("."))
             .expect("begin session/new");
         let event = block_on(client.next_event()).expect("next event");
         match event {
@@ -997,7 +997,7 @@ mod tests {
             raw: serde_json::json!({"method": "test/notification"}),
         });
 
-        let created = block_on(client.start_run(AcpSessionNewParams::cwd(".")))
+        let created = block_on(client.start_run(AcpSessionNewParams::isolated(".")))
             .expect("session/new through client");
         assert!(!created.session_id.is_empty());
 

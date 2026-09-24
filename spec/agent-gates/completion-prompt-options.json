@@ -9,7 +9,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 595,
         "reader": "__validate_removed_agent_loop_options"
       }
     ],
@@ -27,7 +26,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-        "line": 415,
         "reader": "__agent_text_tool_contract_prompt"
       }
     ],
@@ -44,7 +42,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 684,
         "reader": "__done_contract_primary_prompt"
       }
     ],
@@ -61,7 +58,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 589,
         "reader": "__validate_removed_agent_loop_options"
       }
     ],

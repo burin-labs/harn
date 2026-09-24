@@ -4,7 +4,7 @@
     {
       "id": "TYP",
       "title": "Type checker",
-      "count": 29
+      "count": 36
     },
     {
       "id": "PAR",
@@ -19,7 +19,7 @@
     {
       "id": "CAP",
       "title": "Capabilities",
-      "count": 8
+      "count": 9
     },
     {
       "id": "LLM",
@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 76
+      "count": 78
     },
     {
       "id": "FMT",
@@ -487,6 +487,69 @@
       "apiStability": "stable"
     },
     {
+      "code": "HARN-TYP-030",
+      "category": "TYP",
+      "summary": "probabilistic predicate input must have a closed serializable type",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-031",
+      "category": "TYP",
+      "summary": "probabilistic predicate outcome cannot be used as a boolean",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-032",
+      "category": "TYP",
+      "summary": "probabilistic predicate outcome must be consumed",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-033",
+      "category": "TYP",
+      "summary": "probabilistic predicate site identity must be literal and unique",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-034",
+      "category": "TYP",
+      "summary": "probabilistic predicate variant fields require outcome narrowing",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-035",
+      "category": "TYP",
+      "summary": "probabilistic predicate model must declare the decision operation",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-036",
+      "category": "TYP",
+      "summary": "probabilistic evaluation question set must be a literal with unique ids and labels",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
       "code": "HARN-PAR-001",
       "category": "PAR",
       "summary": "parser found an unexpected token",
@@ -796,6 +859,15 @@
       "related": [
         "HARN-CAP-001"
       ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-202",
+      "category": "CAP",
+      "summary": "confined host process cannot open the loopback listener a child's egress proxy needs",
+      "repairs": [],
+      "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
     },
@@ -2500,6 +2572,24 @@
           "summary": "Replace the field-by-field record copy with `pick`"
         }
       ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-078",
+      "category": "LNT",
+      "summary": "tool descriptor spells its per-parameter map as a JSON Schema document",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-079",
+      "category": "LNT",
+      "summary": "evaluation site hands a native decision route an input whose declared type has no finite size bound",
+      "repairs": [],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"

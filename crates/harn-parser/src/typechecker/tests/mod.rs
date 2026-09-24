@@ -13,6 +13,7 @@ use super::{DiagnosticSeverity, TypeChecker, TypeDiagnostic};
 
 mod acp_ambient_globals;
 mod attributes;
+mod batched_evaluation;
 mod callable_attributes;
 mod calls_and_generics;
 mod coalesce;
@@ -31,6 +32,7 @@ mod nested_generic_alias_inference;
 mod nil_safety;
 mod ownership;
 mod pipeline_typing;
+mod probabilistic_predicates;
 mod reachability;
 mod record_arguments;
 mod record_projection;

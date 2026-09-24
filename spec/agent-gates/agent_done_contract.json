@@ -10,7 +10,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 759,
         "reader": "agent_done_contract"
       }
     ],
@@ -28,12 +27,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 751,
-        "reader": "agent_done_contract"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 750,
         "reader": "agent_done_contract"
       }
     ],
@@ -51,7 +44,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 767,
         "reader": "agent_done_contract"
       }
     ],
@@ -69,7 +61,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 755,
         "reader": "agent_done_contract"
       }
     ],
@@ -87,7 +78,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 763,
         "reader": "agent_done_contract"
       }
     ],
@@ -105,7 +95,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 764,
         "reader": "agent_done_contract"
       }
     ],
@@ -123,12 +112,10 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 696,
         "reader": "__done_contract_judge_system"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 326,
         "reader": "__judge_stable_prefix"
       }
     ],
@@ -146,7 +133,6 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 765,
         "reader": "agent_done_contract"
       }
     ],

@@ -88,7 +88,14 @@ impl Drop for LocalSlot {
 #[derive(Clone)]
 pub(crate) struct InterruptHandler {
     pub(crate) handle: i64,
-    pub(crate) signals: Vec<String>,
+    /// Which signals this handler wants, or `None` for no filter at all.
+    ///
+    /// `None` is not the same as a list that happens to contain everything:
+    /// it means the handler runs on any observed cancellation, including one
+    /// that carries no signal, such as a host stopping the session. A
+    /// filtered handler is skipped when no signal is known, because there is
+    /// nothing to match it against.
+    pub(crate) signals: Option<Vec<String>>,
     pub(crate) once: bool,
     pub(crate) graceful_timeout_ms: Option<u64>,
     pub(crate) handler: VmValue,

@@ -44,7 +44,9 @@ pub import {
 } from "./provider_tool_probe_campaign/plan"
 import { __live_cells } from "./provider_tool_probe_campaign/report"
 pub import {
+  provider_tool_probe_campaign_charged_usd,
   provider_tool_probe_campaign_markdown,
+  provider_tool_probe_campaign_may_execute,
   provider_tool_probe_campaign_observed_spend,
   provider_tool_probe_campaign_report,
 } from "./provider_tool_probe_campaign/report"
@@ -64,12 +66,20 @@ pub import {
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
+/**
+ * Whether the campaign should exit non-zero.
+ *
+ * The accounting gaps are read as counts, not as a budget status. A run that
+ * reaches the cap reports "exhausted", which would otherwise hide an unpriced
+ * or unreported case behind a budget outcome.
+ */
 fn __campaign_failed(report: ProviderToolProbeCampaignReport) -> bool {
   const summary = report.summary
   const tool_scorecard_required = (report.runner_summary?.provider_tool_probe?.total ?? 0) > 0
   return (summary.fail ?? 0) > 0
     || (summary.error ?? 0) > 0
-    || report.spend?.budget_status == "stopped_unpriced"
+    || (report.spend?.unpriced_case_count ?? 0) > 0
+    || (report.spend?.unaccounted_probe_count ?? 0) > 0
     || (tool_scorecard_required && report.artifacts?.scorecard_status != "complete")
     || report.claim_controls.status == "incomplete"
 }

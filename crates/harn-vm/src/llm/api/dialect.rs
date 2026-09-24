@@ -75,10 +75,62 @@ impl DialectContract {
         }
     }
 
+    /// Stable label for this contract's wire dialect, used on observability
+    /// records so a reader names the same dialect the builder selected.
+    pub(crate) fn dialect_label(self) -> &'static str {
+        match self.stream_protocol() {
+            StreamProtocol::AnthropicSse => "anthropic",
+            StreamProtocol::OpenAiSse => "openai_compat",
+            StreamProtocol::OllamaNdjson => "ollama",
+            StreamProtocol::GeminiJson => "gemini_generate_content",
+            StreamProtocol::GeminiInteractionsSse => "gemini_interactions",
+        }
+    }
+
+    /// Every reasoning-bearing field path this dialect can put in a request
+    /// body, in search order. Declared beside the builder selection so the two
+    /// cannot drift: a dialect that gains a reasoning field and does not
+    /// declare it here reports `omitted`, never agreement.
+    ///
+    /// An empty slice means the dialect declares none, which the receipt
+    /// reports as `unreported` rather than as a silent absence.
+    pub(crate) fn reasoning_fields(self) -> &'static [&'static str] {
+        match self.stream_protocol() {
+            // `output_config.effort` carries the rung; `thinking` carries the
+            // mode Anthropic sends when the rung is dropped.
+            StreamProtocol::AnthropicSse => &["output_config.effort", "thinking"],
+            // The four OpenAI-compatible reasoning dialects: OpenRouter's
+            // `reasoning` object, the top-level OpenAI-style field, and the
+            // provider-specific `thinking` objects.
+            StreamProtocol::OpenAiSse => &["reasoning", "reasoning_effort", "thinking"],
+            StreamProtocol::OllamaNdjson => &["think"],
+            StreamProtocol::GeminiJson => &["generationConfig.thinkingConfig"],
+            StreamProtocol::GeminiInteractionsSse => &["generation_config.thinking_level"],
+        }
+    }
+
     /// Lower a neutral request into the exact provider body selected by this
     /// contract. The provider modules retain syntax-heavy JSON mechanics; no
     /// provider or transport call site chooses a builder independently.
+    ///
+    /// The reasoning receipt is recorded here, from the body that was just
+    /// built, because this is the one point every route lowers through.
+    /// Reading the sent value back out of the body keeps it the bytes the
+    /// provider receives instead of a second copy of the dialect table.
     pub(crate) fn build_request_body(self, request: &LlmRequestPayload) -> serde_json::Value {
+        let body = self.lower_request_body(request);
+        crate::llm::reasoning_receipt::record(
+            &request.provider,
+            &request.model,
+            self.dialect_label(),
+            &request.thinking,
+            self.reasoning_fields(),
+            &body,
+        );
+        body
+    }
+
+    fn lower_request_body(self, request: &LlmRequestPayload) -> serde_json::Value {
         match self.stream_protocol() {
             StreamProtocol::AnthropicSse => {
                 crate::llm::providers::AnthropicProvider::build_request_body(request)
@@ -320,6 +372,96 @@ mod tests {
     /// fact the parser treats finish-reason as terminal and drops the usage,
     /// so every streamed agent call prices as `unknown` while non-streamed
     /// structured calls on the same route price correctly.
+    fn effort_request(provider: &str, model: &str) -> LlmRequestPayload {
+        let options = LlmCallOptions {
+            provider: provider.to_string(),
+            model: model.to_string(),
+            max_tokens: 64,
+            thinking: crate::llm::api::ThinkingConfig::Effort {
+                level: crate::llm::api::ReasoningEffort::XHigh,
+            },
+            ..LlmCallOptions::default()
+        };
+        LlmRequestPayload::from(&options)
+    }
+
+    fn one_receipt() -> crate::llm::ReasoningReceipt {
+        let receipts = crate::llm::peek_reasoning_receipts();
+        assert_eq!(
+            receipts.len(),
+            1,
+            "one call must record exactly one receipt"
+        );
+        receipts.into_iter().next().expect("a receipt")
+    }
+
+    /// FALSIFIER. The Interactions ladder collapses `high`, `xhigh` and `max`
+    /// onto one rung, so a call that asked for `xhigh` leaves carrying `high`
+    /// and nothing in the response says which rung was billed. The receipt
+    /// must carry the value that was sent, read out of the body, and report
+    /// the loss.
+    #[test]
+    fn a_rung_the_interactions_ladder_cannot_carry_is_visible_in_the_receipt() {
+        crate::llm::reset_reasoning_receipts();
+        let request = effort_request("gemini", "gemini-3.6-pro");
+        let dialect = DialectContract::new(
+            WireDialect::Gemini,
+            Some(LiveEndpointFamily::GeminiInteractions),
+        );
+
+        let body = dialect.build_request_body(&request);
+
+        let receipt = one_receipt();
+        assert_eq!(receipt.wire_dialect, "gemini_interactions");
+        assert_eq!(receipt.resolved_level.as_deref(), Some("xhigh"));
+        assert_eq!(
+            receipt.sent_status,
+            crate::llm::reasoning_receipt::SENT_CARRIED
+        );
+        assert_eq!(
+            receipt.sent_value,
+            body.pointer("/generation_config/thinking_level").cloned(),
+            "the receipt must carry the value the body carries, not a re-derivation"
+        );
+        assert!(
+            receipt.level_lost_at_the_wire(),
+            "xhigh lowered to another rung must read as a loss, got {:?}",
+            receipt.sent_value
+        );
+    }
+
+    /// CONTROL ONE. The same request on a dialect that does carry the rung
+    /// must agree, so the check is not reporting a loss on every call.
+    #[test]
+    fn a_dialect_that_carries_the_rung_reports_agreement() {
+        crate::llm::reset_reasoning_receipts();
+        let request = effort_request("openrouter", "some-vendor/some-model");
+        let dialect = DialectContract::new(WireDialect::OpenAiCompat, None);
+
+        let body = dialect.build_request_body(&request);
+
+        let receipt = one_receipt();
+        assert_eq!(
+            receipt.sent_status,
+            crate::llm::reasoning_receipt::SENT_CARRIED
+        );
+        assert_eq!(receipt.sent_value, body.get("reasoning").cloned());
+        assert!(
+            !receipt.level_lost_at_the_wire(),
+            "a dialect that states the rung must not read as a loss, got {:?}",
+            receipt.sent_value
+        );
+    }
+
+    /// CONTROL TWO. A run that recorded no receipt is not agreement. The
+    /// collector starts empty, and an empty list must stay distinguishable
+    /// from a call whose rung was carried.
+    #[test]
+    fn no_call_records_no_receipt_rather_than_an_agreeing_one() {
+        crate::llm::reset_reasoning_receipts();
+        assert!(crate::llm::peek_reasoning_receipts().is_empty());
+    }
+
     #[test]
     fn fireworks_streams_a_trailing_usage_frame() {
         assert!(DialectContract::provider_reports_stream_usage("fireworks"));

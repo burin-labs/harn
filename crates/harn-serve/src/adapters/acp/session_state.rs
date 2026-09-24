@@ -153,7 +153,11 @@ impl AcpServer {
             .and_then(|value| value.as_str())
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        self.insert_session(session_id.to_string(), cwd, SessionInfo::default())
+        self.insert_session(session_id.to_string(), cwd, SessionInfo::default())?;
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            session.admission_unavailable = true;
+        }
+        Ok(())
     }
 
     /// Project root to consult for a session this server never saw, resolved

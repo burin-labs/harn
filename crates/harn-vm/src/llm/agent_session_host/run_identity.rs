@@ -67,22 +67,23 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
             super::agent_terminal_class(&final_status, &stop_reason, terminal_error)
                 .map(|class| class.as_str().to_string())
         });
-    let terminal = crate::agent_events::AgentTerminalOutcome::new(
-        crate::agent_events::classify_agent_terminal(
-            &final_status,
-            &stop_reason,
-            terminal_error.is_some(),
-            terminal_class.as_deref(),
-        ),
+    let terminal = crate::agent_events::terminal_outcome_for_finalize(
+        &final_status,
         &stop_reason,
-    )
-    .with_terminal_class(
         terminal_class
             .as_deref()
             .and_then(crate::llm::AgentTerminalClass::from_wire),
+        terminal_error.is_some(),
     )
-    .with_error(terminal_error)
-    .to_json();
+    .with_error(terminal_error);
+    let (status, final_status) = if terminal.has_conflicting_evidence() {
+        ("unknown".to_string(), "unknown".to_string())
+    } else {
+        (status, final_status)
+    };
+    let stop_reason = terminal.reason.clone();
+    let terminal_class = terminal.terminal_class;
+    let terminal = terminal.to_json();
     let transcript = crate::agent_sessions::transcript(session_id)
         .as_ref()
         .map(super::vm_to_json)
@@ -91,22 +92,19 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
     object.insert("run_id".to_string(), serde_json::json!(run_id));
     object.insert("session_id".to_string(), serde_json::json!(session_id));
     object.insert("task".to_string(), serde_json::json!(task));
-    insert_missing(object, "status", serde_json::json!(status));
-    insert_missing(object, "final_status", serde_json::json!(final_status));
-    insert_missing(object, "stop_reason", serde_json::json!(stop_reason));
+    object.insert("status".to_string(), serde_json::json!(status));
+    object.insert("final_status".to_string(), serde_json::json!(final_status));
+    object.insert("stop_reason".to_string(), serde_json::json!(stop_reason));
     insert_missing(
         object,
         "acp_stop_reason",
         serde_json::json!(super::canonical_acp_stop_reason(&final_status, 0, 0, None,)),
     );
-    insert_missing(
-        object,
-        "terminal_class",
-        terminal_class
-            .map(serde_json::Value::String)
-            .unwrap_or(serde_json::Value::Null),
+    object.insert(
+        "terminal_class".to_string(),
+        serde_json::json!(terminal_class),
     );
-    insert_missing(object, "terminal", terminal);
+    object.insert("terminal".to_string(), terminal);
     insert_missing(object, "error", serde_json::Value::Null);
     insert_missing(object, "text", serde_json::json!(""));
     insert_missing(object, "visible_text", serde_json::json!(""));

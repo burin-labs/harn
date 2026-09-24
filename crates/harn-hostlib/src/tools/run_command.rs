@@ -194,10 +194,19 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             // the independent background_after_ms budget. The direct result
             // synchronizer is deliberately separate from the session inbox, so
             // progress can accumulate without waking this wait early.
-            let terminal = super::long_running::wait_for_result(
+            let terminal = match super::long_running::wait_for_result(
                 &info.handle_id,
                 Duration::from_millis(wait_ms),
-            );
+            ) {
+                super::long_running::BackgroundWaitOutcome::Completed(value) => Some(value),
+                super::long_running::BackgroundWaitOutcome::Running => None,
+                super::long_running::BackgroundWaitOutcome::Unknown => {
+                    return Err(HostlibError::Backend {
+                        builtin: NAME,
+                        message: "background command handle is no longer available".to_string(),
+                    });
+                }
+            };
             let feedback = drain_background_feedback(&session_id, &info.handle_id);
             let mut response =
                 initial_background_snapshot(&info, wait_ms, progress_max_inline_bytes);

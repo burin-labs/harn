@@ -29,8 +29,8 @@ pub(super) fn fixture_compaction_receipt(
         instruction_mode: instruction_mode.map(str::to_string),
         instruction_source: instruction_source.map(str::to_string),
         compaction_policy,
-        // ACP does not project the source measurement, so the fixture keeps
-        // that field absent rather than inventing a measured zero.
+        // Projected to ACP as `sourceMeasurement`; `None` stays a null there,
+        // never an invented measured zero.
         source_measurement: None,
         recap: None,
     }

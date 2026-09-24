@@ -1085,7 +1085,10 @@ impl Compiler {
     /// them resolve to the enclosing scope instead of their not-yet-bound param
     /// slots. Returns the removed bindings so [`Self::restore_param_names`] can
     /// reinstate them afterward. See [`Self::emit_default_preamble`].
-    fn mask_param_names(&mut self, params: &[TypedParam]) -> Vec<(String, super::LocalBinding)> {
+    pub(super) fn mask_param_names(
+        &mut self,
+        params: &[TypedParam],
+    ) -> Vec<(String, super::LocalBinding)> {
         let mut removed = Vec::new();
         if let Some(scope) = self.local_scopes.last_mut() {
             for param in params {
@@ -1098,7 +1101,7 @@ impl Compiler {
     }
 
     /// Reinstate parameter names removed by [`Self::mask_param_names`].
-    fn restore_param_names(&mut self, removed: Vec<(String, super::LocalBinding)>) {
+    pub(super) fn restore_param_names(&mut self, removed: Vec<(String, super::LocalBinding)>) {
         if let Some(scope) = self.local_scopes.last_mut() {
             for (name, binding) in removed {
                 scope.insert(name, binding);

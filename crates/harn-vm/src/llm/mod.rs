@@ -39,6 +39,8 @@ pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
 mod agent_tool_governance;
 mod agent_tools;
 pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
+pub(crate) mod admission;
+pub use admission::{AdmissionMode, AdmissionReceipt, ConservativeLlmBudget};
 pub mod api;
 #[cfg(test)]
 mod api_routing_credentials_tests;
@@ -64,10 +66,13 @@ mod cost_budget_tests;
 pub(crate) mod cost_context;
 #[cfg(test)]
 mod cost_context_tests;
+#[cfg(test)]
+mod cost_rate_card_tests;
 pub(crate) mod cost_route;
 #[cfg(test)]
 mod cost_route_pricing_tests;
 pub(crate) mod daemon;
+pub(crate) mod decision;
 pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod first_token;
@@ -85,6 +90,7 @@ mod model_test;
 mod permission_preview;
 pub(crate) mod permissions;
 pub mod plan;
+mod predicate;
 pub mod prompt;
 pub(crate) mod prompt_cache;
 mod protocol_violation;
@@ -134,6 +140,10 @@ pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
     !effort_probe_ungated()
 }
 pub(crate) mod reasoning_modes;
+pub mod reasoning_receipt;
+pub use reasoning_receipt::{
+    dropped_reasoning_receipts, peek_reasoning_receipts, reset_reasoning_receipts, ReasoningReceipt,
+};
 pub(crate) mod reminder_iteration;
 pub(crate) mod reminder_providers;
 mod rerank;
@@ -304,6 +314,7 @@ mod healthcheck;
 pub(crate) mod pairing_receipts;
 pub(crate) mod provider;
 mod provider_auth;
+pub(crate) mod provider_dispatch;
 pub(crate) mod providers;
 pub mod rate_governor;
 pub(crate) mod rate_limit;
@@ -962,6 +973,7 @@ async fn llm_stream_builtin_wrap(
 
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
+    predicate::register(vm);
     agent_config::register_agent_control_primitives(vm);
     register_builtin_defs(vm, LLM_RUNTIME_PRIMITIVE_BUILTINS);
     register_builtin_defs(vm, tools::PARSE_HOST_PRIMITIVE_BUILTINS);

@@ -15,6 +15,27 @@ use crate::orchestration::{
     ToolPermissionResolution,
 };
 
+/// Name the layer that actually decided a refusal the automated reviewer
+/// answered.
+///
+/// The host is still asked and its answer still recorded. But a host that
+/// returns no decision metadata defaults its decider to a person, which in a
+/// run with nobody present credits a decision no human made, on a call the
+/// reviewer had already settled.
+///
+/// Only an actual reviewer verdict moves the attribution. A decline the
+/// reviewer could not answer is left exactly as the host reported it, so a
+/// seam that failed to obtain a verdict never reads as one that refused.
+pub(super) fn attribute_reviewer_refusal(
+    decision: &PolicyEvaluation,
+    mut resolution: ToolPermissionResolution,
+) -> ToolPermissionResolution {
+    if crate::orchestration::reviewer_refused(decision) {
+        resolution.decider = crate::orchestration::ToolPermissionDecider::AutoReviewer;
+    }
+    resolution
+}
+
 pub(super) struct HostPermissionRequest {
     pub session_id: String,
     pub tool_call_id: String,
@@ -564,6 +585,7 @@ mod tests {
             matched_rule: None,
             required_approval: None,
             risk_labels: vec!["network_rule".to_string()],
+            denied_paths: Vec::new(),
             receipt: serde_json::json!({
                 "context": {"command": "secret-value", "to": "private@example.com"}
             }),

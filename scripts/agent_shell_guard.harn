@@ -16,10 +16,18 @@
 //      owning admission command so the remote lease, private ledger, recovery
 //      journal, and filesystem projection cannot diverge.
 //
+//   4. Bare `swift build` / `swift test`, and any other build tool whose setup
+//      a repository's root Makefile owns. Unlike Cargo these are not universal,
+//      so the rule fires only against a target the wrapper measured to exist.
+//
 // Contract: reads a Codex or Claude PreToolUse payload on stdin, prints a
 // permission decision on stdout. Exit status is always 0 — a crashed guard
 // must not look like a denial.
-import { DISPOSABLE_PATH_POLICY, WORKTREE_ADMISSION_POLICY } from "./agent_shell_guard_policy"
+import {
+  DISPOSABLE_PATH_POLICY,
+  MAKE_OWNED_COMMAND_RULES,
+  WORKTREE_ADMISSION_POLICY,
+} from "./agent_shell_guard_policy"
 
 // Commands whose full output is worth keeping. Grepping any of these through a
 // pipe without a redirect is what forces a rerun.
@@ -82,10 +90,19 @@ pub fn segments_of(command: string) -> list<string> {
   return segments
 }
 
+const RAW_CARGO_ESCAPE: string = "HARN_ALLOW_RAW_CARGO=1"
+
 pub fn cargo_violation(command: string) -> string {
   for group in command_groups(command) {
     for stage in group {
       if stage_program(stage) != "cargo" {
+        continue
+      }
+      // Per stage, for the same reason the Make-owned rule reads it per stage:
+      // the escape used to be a substring of the whole command, so
+      // `echo HARN_ALLOW_RAW_CARGO=1; cargo test` released a stage nothing set
+      // the variable for.
+      if stage_declares_assignment(stage, RAW_CARGO_ESCAPE) {
         continue
       }
       const verb_index = if (stage.argv[1] ?? "").starts_with("+") {
@@ -107,6 +124,184 @@ pub fn cargo_violation(command: string) -> string {
         + target
         + "` instead. "
         + "For a genuine one-off, set HARN_ALLOW_RAW_CARGO=1 in the command."
+    }
+  }
+  return ""
+}
+
+/**
+ * The Make targets the wrapper found in the repository's root Makefile.
+ *
+ * `checked` false means nobody looked, which is NOT the same as a repository
+ * that declares no targets. The distinction decides the opposite way from the
+ * worktree rule, and deliberately: refusing `git worktree add` on an unreadable
+ * census is safe because the harm it prevents is real wherever it fires, while
+ * refusing `swift build` on an unreadable census would send the operator to a
+ * Make target that may not exist. An unmeasured repository therefore allows,
+ * and the rule is inert rather than wrong.
+ */
+pub type MakeTargetCensus = {checked: bool, targets: list<string>}
+
+pub const UNMEASURED_MAKE_TARGETS: MakeTargetCensus = {checked: false, targets: []}
+
+pub const MAKE_TARGETS_ENV: string = "HARN_EXT_SHELL_GUARD_MAKE_TARGETS"
+
+pub const MAKE_TARGETS_CHECKED_ENV: string = "HARN_EXT_SHELL_GUARD_MAKE_TARGETS_CHECKED"
+
+/** Parse the whitespace-separated target list the wrapper reports. */
+pub fn make_target_census(checked: string, reported: string) -> MakeTargetCensus {
+  if checked != "1" {
+    return UNMEASURED_MAKE_TARGETS
+  }
+  let targets: list<string> = []
+  for line in reported.split("\n") {
+    for word in line.split(" ") {
+      const name = word.trim()
+      if name != "" && !targets.contains(name) {
+        targets = targets + [name]
+      }
+    }
+  }
+  return {checked: true, targets: targets}
+}
+
+pub fn make_target_census_from_env(env: HarnessEnv) -> MakeTargetCensus {
+  return make_target_census(
+    to_string(env.get(MAKE_TARGETS_CHECKED_ENV) ?? ""),
+    to_string(env.get(MAKE_TARGETS_ENV) ?? ""),
+  )
+}
+
+/**
+ * Options that take a separate value, so the value is not a subcommand.
+ *
+ * Mirrors the flag tables in `is_git_worktree_add` and `git_directory_argument`
+ * on purpose. This one only narrows the over-refusal described below; it is not
+ * what makes the classification safe, so an option missing from it is not a
+ * bypass.
+ */
+const VALUE_TAKING_OPTIONS: list<string> = [
+  "-C",
+  "--package-path",
+  "--scratch-path",
+  "--build-path",
+  "--cache-path",
+  "--destination",
+  "--toolchain",
+  "--configuration",
+  "-c",
+  "--filter",
+  "--jobs",
+  "-j",
+  "--triple",
+  "--sdk",
+]
+
+/**
+ * Whether a stage runs `<program> <verb>`, fail-closed about option values.
+ *
+ * The obvious reading — "the first argument that does not begin with `-`" —
+ * silently skips an option but not the option's value, so
+ * `swift --package-path /tmp test` classifies as the verb `/tmp` and no rule
+ * matches. Any option with a value bypasses the rule that way, whatever the
+ * option is called, so an arity table alone cannot close it: an option the
+ * table has never heard of is skipped as a bare flag and its value becomes the
+ * verb again.
+ *
+ * This asks a different question. The verb is present when it appears as ANY
+ * argument that is neither an option nor a known option's value. An option the
+ * table does not know leaves its value in the candidate set, where a value that
+ * happens to be the verb refuses rather than allows.
+ *
+ * The cost is a narrow over-refusal: a command that passes the literal string
+ * `test` or `build` as the value of an option this table does not list is
+ * refused and told to run the Make target. That direction is deliberate. The
+ * escape hatch exists for the case the rule gets wrong, and there is no escape
+ * from a rule that silently did not fire.
+ */
+fn stage_runs_verb(argv: list<string>, verb: string) -> bool {
+  let consumes_next = false
+  for token in argv.slice(1, len(argv)) {
+    if consumes_next {
+      consumes_next = false
+      continue
+    }
+    if VALUE_TAKING_OPTIONS.contains(token) {
+      consumes_next = true
+      continue
+    }
+    if token.starts_with("-") {
+      continue
+    }
+    if token == verb {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Whether this stage itself sets `assignment` in the environment it runs with.
+ *
+ * The escape used to be honoured with a substring search over the whole command
+ * text, so `echo HARN_ALLOW_RAW_SWIFT=1; swift test` released the `swift` stage
+ * although nothing set the variable for it. An escape is only an escape where
+ * it actually applies, which is the stage that runs the guarded program.
+ *
+ * `command_risk_scan` strips a leading assignment prefix and an `env` wrapper
+ * out of `argv` but keeps both in `text`, so the prefix is read back from the
+ * stage's own text and stops at the first word that is neither an assignment
+ * nor `env`.
+ */
+fn stage_declares_assignment(stage: ShellCommandStage, assignment: string) -> bool {
+  for token in stage.text.split(" ") {
+    if token == "" {
+      continue
+    }
+    if token == assignment {
+      return true
+    }
+    if token == "env" || token.contains("=") {
+      continue
+    }
+    return false
+  }
+  return false
+}
+
+/**
+ * Refuse a build command whose Make target this repository is measured to own.
+ *
+ * Nothing fires without a measurement: an unmeasured census, or one that does
+ * not list the target, allows. That is the whole point of the rule — a
+ * repository that has no `swift-test` target must never be told to run one.
+ */
+pub fn make_owned_command_violation(command: string, census: MakeTargetCensus) -> string {
+  if !census.checked {
+    return ""
+  }
+  for group in command_groups(command) {
+    for stage in group {
+      const argv = launched_argv(stage.argv, 0)
+      const program = argv_program(argv)
+      for rule in MAKE_OWNED_COMMAND_RULES {
+        if program != rule.program || !stage_runs_verb(argv, rule.verb) {
+          continue
+        }
+        if !census.targets.contains(rule.target) {
+          continue
+        }
+        if stage_declares_assignment(stage, rule.escape) {
+          continue
+        }
+        return "`" + rule.program + " " + rule.verb + "` bypasses the repository Make target, "
+          + "including the build limit and environment it sets. Run `make "
+          + rule.target
+          + "` instead, passing a focused selection with ARGS=... . "
+          + "For a genuine one-off, set "
+          + rule.escape
+          + " in the command."
+      }
     }
   }
   return ""
@@ -144,6 +339,50 @@ fn is_git_worktree_add(argv: list<string>) -> bool {
     return subcommand == "worktree" && token == "add"
   }
   return false
+}
+
+/**
+ * The directory a `git -C <path> ...` invocation runs in, or "" when none is given.
+ *
+ * Mirrors the flag table in `is_git_worktree_add` on purpose: the two walk the
+ * same argv and have to agree about which flags consume a value, or this one
+ * would read a flag's argument as a directory. Git accumulates repeated `-C`
+ * relative to each other; the last one is taken here, which is the same answer
+ * whenever it is absolute and the only case this is consulted for.
+ */
+fn git_directory_argument(argv: list<string>) -> string {
+  let consumes_next = false
+  let pending_directory = false
+  let directory = ""
+  for token in argv.slice(1, len(argv)) {
+    if pending_directory {
+      directory = token
+      pending_directory = false
+      continue
+    }
+    if consumes_next {
+      consumes_next = false
+      continue
+    }
+    if token == "-C" {
+      pending_directory = true
+      continue
+    }
+    if [
+      "-c",
+      "--git-dir",
+      "--work-tree",
+      "--namespace",
+      "--super-prefix",
+      "--config-env",
+      "--exec-path",
+    ]
+      .contains(token) {
+      consumes_next = true
+      continue
+    }
+  }
+  return directory
 }
 
 fn argv_program(argv: list<string>) -> string {
@@ -211,32 +450,293 @@ fn nested_shell_payload(argv: list<string>) -> string {
   return ""
 }
 
-fn raw_worktree_add_violation_at(command: string, depth: int) -> string {
-  for group in command_groups(command) {
-    for stage in group {
-      const argv = launched_argv(stage.argv, 0)
-      if argv_program(argv) == "git" && is_git_worktree_add(argv) {
-        return "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
-          + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
-          + "and records the joined ledger and recovery receipts before returning success."
-      }
-      if depth < 4 {
-        const nested = nested_shell_payload(argv)
-        if nested != "" {
-          const violation = raw_worktree_add_violation_at(nested, depth + 1)
-          if violation != "" {
-            return violation
-          }
-        }
-      }
+/**
+ * The worktree-creation attempt in a command, with the directory it targets.
+ *
+ * `reason` is empty when there is no attempt. `target` is the `-C` directory
+ * of the same invocation, so the caller can ask about the repository the
+ * command actually points at rather than the one this guard happens to be
+ * installed in.
+ */
+/**
+ * A raw creation, and every directory it could be running in.
+ *
+ * `targets` is a list because a `cd` the shell may skip leaves the directory
+ * AMBIGUOUS, and the guard must not pick one. `true || cd /elsewhere` never
+ * runs its right side, so the command runs where it started; a guard that
+ * remembered the skipped `cd` answered for a repository the command never
+ * reached, and two words disarmed the rule. Every reachable directory is
+ * carried and the caller denies if any of them denies.
+ */
+type WorktreeAddAttempt = {reason: string, targets: list<string>}
+
+const NO_WORKTREE_ADD: WorktreeAddAttempt = {reason: "", targets: []}
+
+/**
+ * The shell operator joining each stage to the one before it, read off the
+ * raw text.
+ *
+ * `command_risk_scan` groups by PIPELINE, so `&&`, `||` and `;` all produce
+ * separate groups and are indistinguishable in its output. The operators are
+ * exactly what decides whether a `cd` runs, so they are read here from the
+ * command itself, anchored on each stage's own text and scanned forward only.
+ *
+ * The first stage has no operator and answers "". A stage whose text cannot be
+ * located answers "?", which every caller treats as the ambiguous case rather
+ * than as a missing operator.
+ */
+fn stage_operators(command: string, texts: list<string>) -> list<string> {
+  let operators: list<string> = []
+  let rest = command
+  let first = true
+  for text in texts {
+    if text == "" {
+      operators = operators + ["?"]
+      continue
     }
+    const at = rest.index_of(text)
+    if at < 0 {
+      operators = operators + ["?"]
+      continue
+    }
+    const between = rest.slice(0, at)
+    if first {
+      operators = operators + [""]
+      first = false
+    } else if between.contains("&&") {
+      operators = operators + ["&&"]
+    } else if between.contains("||") {
+      operators = operators + ["||"]
+    } else if between.contains(";") || between.contains("\n") {
+      operators = operators + [";"]
+    } else {
+      operators = operators + ["?"]
+    }
+    rest = rest.slice(at + len(text), len(rest))
+  }
+  return operators
+}
+
+/**
+ * The operands a `cd` carries, with its option words removed.
+ *
+ * The count matters as much as the first value: `cd` accepts exactly one
+ * operand, so two is a `cd` that fails rather than a `cd` with a spare word.
+ */
+fn cd_operands(argv: list<string>) -> list<string> {
+  if argv_program(argv) != "cd" {
+    return []
+  }
+  // OPTIONS ARE NOT THE DESTINATION. `cd` takes option words, and reading the
+  // first one as the directory answers "no absolute target", which leaves the
+  // working directory empty and the raw command ALLOWED in a repository that
+  // advertises an admission command. `-P` is what a script writes when it
+  // wants the physical path, so this is an ordinary spelling rather than an
+  // exotic one.
+  //
+  // `--` ends option processing rather than being skipped like an option: a
+  // directory literally named `-P` is reachable as `cd -- -P`, and treating
+  // the token after `--` as another option would lose it.
+  //
+  // A bare `-` is an operand, not an option. It means the previous directory,
+  // which this guard has no way to resolve, so it falls through to the
+  // not-absolute answer below rather than being stepped over in search of a
+  // later token that was never the destination.
+  //
+  // EVERY operand is collected, not only the first. `cd` takes exactly one,
+  // so a second one is not extra information to ignore: it makes the `cd`
+  // FAIL, and a failing `cd` leaves the rest of the list running where it
+  // started. A reader that stops at the first operand reports a move that
+  // never happens.
+  let options_ended = false
+  let operands: list<string> = []
+  for token in argv.slice(1, len(argv)) {
+    if !options_ended && token == "--" {
+      options_ended = true
+      continue
+    }
+    if !options_ended && token != "-" && token.starts_with("-") {
+      continue
+    }
+    operands = operands + [token]
+  }
+  return operands
+}
+
+/**
+ * The directory an absolute `cd` moves the rest of the command into.
+ *
+ * A relative one answers "", for the same reason `git_directory_argument` is
+ * only consulted when absolute: the hook payload carries no working directory
+ * to resolve it against, and inventing one would be the error this rule
+ * exists to prevent.
+ */
+fn cd_target(argv: list<string>) -> string {
+  const target = cd_operands(argv)[0] ?? ""
+  if target.starts_with("/") {
+    return target
   }
   return ""
 }
 
+/**
+ * NO DEFAULT PARAMETER VALUE HERE, and the empty string at the two outer call
+ * sites is the whole reason.
+ *
+ * A default value compiles to an `__assert_schema` call at the call site, and
+ * this guard runs under an allow list naming only its two policy builtins. A
+ * runtime that does not exempt that builtin from the list refuses it, the guard
+ * faults before it reaches a verdict, and every command it is asked about gets
+ * the same generic "policy faulted" refusal instead of the answer. Worse, the
+ * guard's sources are rendered onto consumers pinned to the previous release,
+ * so the floor a construct has to clear is the OLDEST runtime any consumer
+ * pins, not this branch's.
+ */
+fn raw_worktree_add_attempt_at(
+  command: string,
+  depth: int,
+  inherited_directory: string,
+) -> WorktreeAddAttempt {
+  // A `cd` names the repository as plainly as `-C` does, and unlike `-C` it
+  // holds for every stage after it rather than for one invocation. So it is
+  // carried across groups in command order, and `-C` still wins on the
+  // invocation that names one.
+  //
+  // It also holds across a shell launched after it. A nested payload scanned
+  // from a fresh directory is judged against the repository this guard is
+  // installed in, so the directory travels into the recursion as well.
+  // A `cd` is only carried forward when the shell is certain to run it and
+  // certain that its failure is not being swallowed. Otherwise BOTH the
+  // directory before it and its target stay reachable, and the rule is
+  // answered for each.
+  const groups = command_groups(command)
+  let texts: list<string> = []
+  for group in groups {
+    for stage in group {
+      texts = texts + [stage.text]
+    }
+  }
+  const operators = stage_operators(command, texts)
+  // THREE CLAUSES, ALL REQUIRED, and each one closed a hole review found.
+  //
+  // A `cd` narrows the set of directories a later command could be running in
+  // only when all of these hold:
+  //
+  //   (a) the `cd` carries exactly one operand and is not inside a pipeline.
+  //       Two operands make `cd` FAIL, and a pipeline stage is a subshell
+  //       whose directory never reaches what follows.
+  //   (b) the `cd` is itself reached unconditionally: it is at the start of
+  //       the list, or only `&&` stands before it.
+  //   (c) every operator between the `cd` and the command is `&&`. This is
+  //       not a guess about the shell: `&&` runs the next element only when
+  //       every element before it succeeded, so reaching the command through
+  //       an unbroken `&&` chain proves the `cd` succeeded.
+  //
+  // Any `||` or `;` between the `cd` and the command, or before the `cd`,
+  // and the reachable set is the union of the directory before the `cd` and
+  // its target, with the first refusal winning. `cd X; cmd` unions because
+  // `;` runs `cmd` whether or not the `cd` succeeded.
+  let reachable: list<string> = [inherited_directory]
+  // (b): every operator seen so far has been "" or `&&`.
+  let reached_unconditionally = true
+  // (c): a narrowing is live until a non-`&&` operator breaks the chain.
+  let narrowed = false
+  let before_narrow: list<string> = []
+  let narrow_target = ""
+  let index = 0
+  for group in groups {
+    for stage in group {
+      const before = to_string(operators[index] ?? "?")
+      if before != "" && before != "&&" {
+        reached_unconditionally = false
+        if narrowed {
+          // (c) broken: the command after this operator can be reached
+          // without the `cd` having taken effect, so both are live again.
+          reachable = before_narrow
+          if !reachable.contains(narrow_target) {
+            reachable = reachable + [narrow_target]
+          }
+          narrowed = false
+        }
+      }
+      const argv = launched_argv(stage.argv, 0)
+      const moved = cd_target(argv)
+      if moved != "" {
+        // (a)
+        const single_operand = len(cd_operands(argv)) == 1
+        const in_pipeline = len(group) > 1
+        if single_operand && !in_pipeline && reached_unconditionally {
+          before_narrow = reachable
+          narrow_target = moved
+          reachable = [moved]
+          narrowed = true
+        } else {
+          narrowed = false
+          if !reachable.contains(moved) {
+            reachable = reachable + [moved]
+          }
+        }
+      }
+      if argv_program(argv) == "git" && is_git_worktree_add(argv) {
+        const named = git_directory_argument(argv)
+        // `-C` names the directory for this one invocation whatever the shell
+        // did, so it is the single answer rather than one candidate.
+        let targets = reachable
+        if named != "" {
+          targets = [named]
+        }
+        return {
+          reason: "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
+            + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
+            + "and records the joined ledger and recovery receipts before returning success.",
+          targets: targets,
+        }
+      }
+      if depth < 4 {
+        const nested = nested_shell_payload(argv)
+        if nested != "" {
+          // EVERY CANDIDATE, NOT THE FIRST THAT MATCHES. The nested shell
+          // inherits every directory this one could be in, and the scan used
+          // to return as soon as one of them produced a match. The candidate
+          // that ends the loop early is whichever comes first, and a
+          // directory that ALLOWS is exactly the one that then hid every
+          // other reachable directory that would have refused.
+          //
+          // So the candidates are scanned to the end and their targets are
+          // unioned. The caller refuses if any one of them refuses, which is
+          // the same rule the unnested path already followed.
+          let nested_reason = ""
+          let nested_targets: list<string> = []
+          for candidate in reachable {
+            const attempt = raw_worktree_add_attempt_at(nested, depth + 1, candidate)
+            if attempt.reason != "" {
+              nested_reason = attempt.reason
+              for found in attempt.targets {
+                if !nested_targets.contains(found) {
+                  nested_targets = nested_targets + [found]
+                }
+              }
+            }
+          }
+          if nested_reason != "" {
+            return {reason: nested_reason, targets: nested_targets}
+          }
+        }
+      }
+      index = index + 1
+    }
+  }
+  return NO_WORKTREE_ADD
+}
+
 /** Reject only Git's worktree-creation subcommand, including shell wrappers. */
 pub fn raw_worktree_add_violation(command: string) -> string {
-  return raw_worktree_add_violation_at(command, 0)
+  return raw_worktree_add_attempt_at(command, 0, "").reason
+}
+
+/** The same walk, keeping the directory the attempt targets. */
+pub fn raw_worktree_add_attempt(command: string) -> WorktreeAddAttempt {
+  return raw_worktree_add_attempt_at(command, 0, "")
 }
 
 /** True only for a path rooted in an OS-temp or known generated-output tree. */
@@ -385,43 +885,219 @@ pub const ADMISSION_ENV: string = "HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION"
 
 pub const ADMISSION_CHECKED_ENV: string = "HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION_CHECKED"
 
-pub fn worktree_admission_from_env(env: HarnessEnv) -> WorktreeAdmission {
-  return worktree_admission_reported(
+pub type WorktreeAdmissionRow = {root: string, command: string}
+
+/**
+ * Every root the wrapper measured for this one command.
+ *
+ * The guard cannot read the filesystem, and the wrapper cannot read argv, so
+ * neither can answer "does the repository this command targets own an
+ * admission command" alone. The wrapper measures every root the command could
+ * plausibly mean, and the guard, which owns the argv decision, picks the row
+ * for the one it actually means.
+ *
+ * The first row is the wrapper's own repository, which is the answer when the
+ * command names no directory of its own.
+ *
+ * `denial` is non-empty when the census could not be trusted at all. It stays
+ * separate from an empty row set for the reason the whole rule exists: not
+ * measuring must never read as measuring absence.
+ */
+pub type WorktreeAdmissionCensus = {rows: list<WorktreeAdmissionRow>, denial: string}
+
+/**
+ * Whether a row's invocation is one this policy admits.
+ *
+ * Two shapes and no others. A bare program, which is a repository holding the
+ * command itself; or that program followed by the root flag and an absolute
+ * path equal to the row's own root, which is a repository admitted by a
+ * command living elsewhere.
+ *
+ * The second shape is pinned to the row's own root on purpose. Without that,
+ * a wrapper could name any directory and the refusal would send the operator
+ * at a repository nobody asked about, which is the failure this rule exists to
+ * avoid. Anything else, including a renamed program or an argument this policy
+ * has never heard of, is a census refusal rather than an allow: a rule that
+ * cannot read its own input must not answer "nothing here".
+ */
+/**
+ * Whether a row's program is one this policy knows.
+ *
+ * The exact path, which is a repository holding the command itself; or an
+ * absolute path ending in one, which is that same command named from outside
+ * the repository it is admitting.
+ *
+ * The absolute form is what makes the refusal checkable. A relative path is
+ * only meaningful from the repository that holds the command, so a sentence
+ * carrying one tells an operator standing somewhere else nothing they can run
+ * and nothing anyone can verify on disk. The allowlist still pins the tail, so
+ * a renamed program is refused wherever it lives.
+ */
+fn admission_program_known(program: string) -> bool {
+  for known in WORKTREE_ADMISSION_POLICY.admission_command_paths {
+    if program == known {
+      return true
+    }
+    if program.starts_with("/") && program.ends_with("/" + known) {
+      return true
+    }
+  }
+  return false
+}
+
+fn admission_invocation_known(command: string, root: string) -> bool {
+  let tokens: list<string> = []
+  for token in command.split(" ") {
+    const trimmed = token.trim()
+    if trimmed != "" {
+      tokens = tokens + [trimmed]
+    }
+  }
+  if len(tokens) == 0 {
+    return false
+  }
+  if !admission_program_known(to_string(tokens[0] ?? "")) {
+    return false
+  }
+  if len(tokens) == 1 {
+    return true
+  }
+  if len(tokens) != 3 {
+    return false
+  }
+  if to_string(tokens[1] ?? "") != WORKTREE_ADMISSION_POLICY.admission_root_flag {
+    return false
+  }
+  const named = to_string(tokens[2] ?? "")
+  return named.starts_with("/") && named == root
+}
+
+/**
+ * Parse the census the wrapper reports.
+ *
+ * One row per line, root and command separated by a tab, the command empty
+ * when that repository owns none. A row naming an invocation this policy does
+ * not know is a refusal rather than an allow, because a renamed admission
+ * command would otherwise turn the rule off silently.
+ *
+ * The command is an invocation, not only a path, so that a repository admitted
+ * by a command living elsewhere can be expressed at all. What may appear in it
+ * is the policy's to say, not this decoder's; see `admission_invocation_known`.
+ */
+pub fn worktree_admission_census(checked: string, reported: string) -> WorktreeAdmissionCensus {
+  if checked != "1" {
+    return {
+      rows: [],
+      denial: "no wrapper reported which repositories own a Fleet admission command ("
+        + ADMISSION_CHECKED_ENV
+        + " is not set)",
+    }
+  }
+  let rows: list<WorktreeAdmissionRow> = []
+  for line in reported.split("\n") {
+    const trimmed = line.trim()
+    if trimmed == "" {
+      continue
+    }
+    const parts = trimmed.split("\t")
+    const root = to_string(parts[0] ?? "").trim()
+    let command = ""
+    if len(parts) > 1 {
+      command = to_string(parts[1] ?? "").trim()
+    }
+    if root == "" {
+      return {rows: [], denial: "the wrapper reported an admission row with no repository root"}
+    }
+    if command != "" && !admission_invocation_known(command, root) {
+      return {
+        rows: [],
+        denial: "the wrapper reported an admission command this policy does not know: `"
+          + command
+          + "`",
+      }
+    }
+    rows += [{root: root, command: command}]
+  }
+  if len(rows) == 0 {
+    return {rows: [], denial: "the wrapper reported no repository roots at all"}
+  }
+  return {rows: rows, denial: ""}
+}
+
+pub fn worktree_admission_census_from_env(env: HarnessEnv) -> WorktreeAdmissionCensus {
+  return worktree_admission_census(
     to_string(env.get(ADMISSION_CHECKED_ENV) ?? ""),
     to_string(env.get(ADMISSION_ENV) ?? ""),
   )
 }
 
-/** The same answer from the two values the wrapper reports, for direct testing. */
-pub fn worktree_admission_reported(checked: string, reported: string) -> WorktreeAdmission {
-  if checked != "1" {
+/**
+ * The answer for the repository one command targets.
+ *
+ * An absolute target is matched against the measured roots, longest root
+ * first, so a worktree nested inside another repository resolves to the
+ * nearest one. A target no row covers is unmeasured and refuses: absence of a
+ * row is the wrapper not having looked there, never proof that nothing is
+ * there.
+ *
+ * A command with no directory of its own, or a relative one, takes the
+ * wrapper's own repository. A relative path cannot be resolved here because
+ * the host payload carries no working directory, and guessing would be the
+ * same error this change exists to remove, so it keeps the conservative
+ * answer rather than inventing a root.
+ */
+pub fn worktree_admission_for(
+  census: WorktreeAdmissionCensus,
+  target: string,
+) -> WorktreeAdmission {
+  if census.denial != "" {
+    return {available: false, command: "", denial: census.denial}
+  }
+  // Row zero is not an arbitrary row: the wrapper reports its own repository
+  // root first, so a command with no directory of its own is judged against
+  // the repository this guard is installed in, which is where it will run.
+  // That is the target, not a stand-in for one.
+  if target == "" || !target.starts_with("/") {
+    return admission_of(census.rows[0] ?? {root: "", command: ""})
+  }
+  let best = ""
+  let chosen: WorktreeAdmissionRow = {root: "", command: ""}
+  for row in census.rows {
+    if (target == row.root || target.starts_with(row.root + "/")) && len(row.root) > len(best) {
+      best = row.root
+      chosen = row
+    }
+  }
+  if best == "" {
     return {
       available: false,
       command: "",
-      denial: "no wrapper reported whether this repository owns a Fleet admission command ("
-        + ADMISSION_CHECKED_ENV
-        + " is not set)",
+      denial: "no measured repository covers the directory this command targets (`"
+        + target
+        + "`), so whether it owns an admission command was never looked at",
     }
   }
-  if reported == "" {
-    return {available: false, command: "", denial: ""}
-  }
-  // The wrapper has to name the path in shell, so the two spellings can drift.
-  // Catching a divergence here keeps a renamed admission command from silently
-  // turning the rule off, which is the failure this whole change is about.
-  if !WORKTREE_ADMISSION_POLICY.admission_command_paths.contains(reported) {
-    return {
-      available: false,
-      command: reported,
-      denial: "the wrapper reported an admission command this policy does not know: `"
-        + reported
-        + "`",
-    }
-  }
-  return {available: true, command: reported, denial: ""}
+  return admission_of(chosen)
 }
 
-pub fn decision(payload: string, admission: WorktreeAdmission) -> ShellGuardDecision {
+/**
+ * The admission command a measured repository configures for itself.
+ *
+ * A row with no command is a repository that has stated it configures none.
+ * That answer is its own, and it is never filled in from another row.
+ */
+fn admission_of(row: WorktreeAdmissionRow) -> WorktreeAdmission {
+  if row.command == "" {
+    return {available: false, command: "", denial: ""}
+  }
+  return {available: true, command: row.command, denial: ""}
+}
+
+pub fn decision(
+  payload: string,
+  census: WorktreeAdmissionCensus,
+  make_targets: MakeTargetCensus,
+) -> ShellGuardDecision {
   let parsed = nil
   try {
     parsed = json_parse(payload)
@@ -435,32 +1111,76 @@ pub fn decision(payload: string, admission: WorktreeAdmission) -> ShellGuardDeci
   if command == "" {
     return {allow: true, reason: ""}
   }
-  const worktree = raw_worktree_add_violation(command)
-  if worktree != "" {
-    // The rule is pure argv analysis, so it fires in every repository that
-    // wires this guard. Only a repository that actually owns the admission
-    // command can be told to use it.
-    if admission.denial != "" {
-      return {
-        allow: false,
-        reason: "Raw `git worktree add` is refused because this guard could not tell whether "
-          + "this repository owns a Fleet admission command, and an unreadable census must not "
-          + "read as an absent one: "
-          + admission.denial,
+  const attempt = raw_worktree_add_attempt(command)
+  if attempt.reason != "" {
+    // ONE RULE, FOUR ANSWERS. The refusal rests on the admission command of
+    // the repository the command targets, and on no other repository's:
+    //
+    //   the census could not be read      -> deny, saying so
+    //   the target row has a command      -> deny, naming that command
+    //   the target row has none           -> allow, and do not police it
+    //   no target resolves                -> answer for row zero, which the
+    //                                        wrapper reports as its own root
+    //   the directory is ambiguous        -> ask for EVERY reachable
+    //                                        directory and take the first
+    //                                        refusal
+    //
+    // Row zero is not a stand-in for an unresolved target. The wrapper puts
+    // its own repository first, so a command that names no directory will run
+    // there, and that repository is the target.
+    //
+    // The rule is pure argv analysis, so it fires wherever this guard is
+    // wired. The census used to be taken against the guard's own installation
+    // whatever the command targeted, so a command pointing at another
+    // repository was refused and sent to a path that does not exist there.
+    // AMBIGUOUS RESOLVES TO THE MOST RESTRICTIVE ANSWER. `attempt.targets` is
+    // every directory the command could be running in, so the rule is asked
+    // about each and the first refusal wins. Picking one of them would be
+    // modelling the shell, and the guard already lost that argument once: it
+    // believed a `cd` the shell had skipped.
+    for candidate in attempt.targets {
+      const admission = worktree_admission_for(census, candidate)
+      if admission.denial != "" {
+        return {
+          allow: false,
+          reason: "Raw `git worktree add` is refused because this guard could not tell whether "
+            + "the repository it targets owns a Fleet admission command, and an unreadable census "
+            + "must not read as an absent one: "
+            + admission.denial,
+        }
+      }
+      if admission.available {
+        return {
+          allow: false,
+          // WHAT TO RUN, not where it lives. The command may be the target's
+          // own or one pointed at it from elsewhere, and a sentence asserting
+          // the target provides it is false in the second case. Naming a path
+          // the operator is not standing next to is the failure this rule
+          // exists to avoid, so the sentence states the invocation only.
+          reason: attempt.reason + " Run it as `" + admission.command + "`.",
+        }
       }
     }
-    if admission.available {
-      return {
-        allow: false,
-        reason: worktree + " This repository provides it at " + admission.command + ".",
-      }
-    }
+    // THE TARGET'S OWN COMMAND, OR NONE. A measured repository that advertises
+    // no admission command has stated its own contract, and the guard cannot
+    // establish that some other root's command admits it. Reaching into
+    // another row produced a refusal rooted at a repository the operator had
+    // not named, pointed at one the lender may know nothing about: a remedy
+    // that costs the operator an attempt and then fails where this guard
+    // cannot see it.
+    //
+    // So the raw command stays allowed here, which is the behaviour this rule
+    // had before the borrowing was added. That is a real loosening and worth
+    // naming: a repository the fleet measures but gives no admission command
+    // is one the fleet has not asked this rule to police.
   }
-  if !command.contains("HARN_ALLOW_RAW_CARGO=1") {
-    const cargo = cargo_violation(command)
-    if cargo != "" {
-      return {allow: false, reason: cargo}
-    }
+  const cargo = cargo_violation(command)
+  if cargo != "" {
+    return {allow: false, reason: cargo}
+  }
+  const make_owned = make_owned_command_violation(command, make_targets)
+  if make_owned != "" {
+    return {allow: false, reason: make_owned}
   }
   const disposable_trash = disposable_trash_violation(command)
   if disposable_trash != "" {
@@ -478,7 +1198,11 @@ fn main(harness: Harness) {
   // Harness capability since before the oldest release this adapter supports.
   const input = harness.stdio.read_line({trim: false})
   const payload = input.value ?? ""
-  const verdict = decision(payload, worktree_admission_from_env(harness.env))
+  const verdict = decision(
+    payload,
+    worktree_admission_census_from_env(harness.env),
+    make_target_census_from_env(harness.env),
+  )
   if verdict.allow {
     return nil
   }

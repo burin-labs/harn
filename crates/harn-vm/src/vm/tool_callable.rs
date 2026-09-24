@@ -39,7 +39,10 @@ pub(crate) fn single_harn_tool_handler(
         )));
     }
 
-    match entry.get("handler") {
+    // Declared tools retain a positional body for calls in Harn source. Their
+    // public registry handler adapts a named-argument dictionary to that body.
+    // Hand-written registry handlers keep their existing call convention.
+    match entry.get("_call_handler").or_else(|| entry.get("handler")) {
         Some(VmValue::Closure(handler)) => Ok(Some(Arc::clone(handler))),
         _ => Err(VmError::TypeError(format!(
             "Cannot call tool registry entry {name:?}: missing Harn closure handler"

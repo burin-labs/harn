@@ -72,12 +72,13 @@ pub use host_conditions::{
 pub use host_lease::{
     HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseCargoExecutionContext,
     HostLeaseDeferReason, HostLeaseDeferReceipt, HostLeaseError, HostLeaseExecutionContext,
-    HostLeaseHandle, HostLeaseMetadataUpdateReceipt, HostLeaseOperationKind, HostLeasePathIdentity,
-    HostLeasePriorityClass, HostLeaseProcessExit, HostLeaseQueueEvidence, HostLeaseReleaseReceipt,
-    HostLeaseRenewReceipt, HostLeaseRequest, HostLeaseResourceClass, HostLeaseResourceDefinition,
-    HostLeaseResourceKey, HostLeaseRunLaunchFailure, HostLeaseRunReceipt,
-    HostLeaseRunReleaseOutcome, HostLeaseRunStartFailure, HostLeaseRunState, HostLeaseState,
-    HostLeaseStore, DEFAULT_HOST_LEASE_DOMAIN, HOST_LEASE_ROOT_ENV,
+    HostLeaseHandle, HostLeaseMetadataUpdateReceipt, HostLeaseOperationKind, HostLeaseOverview,
+    HostLeasePathIdentity, HostLeasePendingRequest, HostLeasePriorityClass, HostLeaseProcessExit,
+    HostLeaseQueueEvidence, HostLeaseReleaseReceipt, HostLeaseRenewReceipt, HostLeaseRequest,
+    HostLeaseResourceClass, HostLeaseResourceDefinition, HostLeaseResourceKey,
+    HostLeaseRunLaunchFailure, HostLeaseRunReceipt, HostLeaseRunReleaseOutcome,
+    HostLeaseRunStartFailure, HostLeaseRunState, HostLeaseState, HostLeaseStore,
+    DEFAULT_HOST_LEASE_DOMAIN, HOST_LEASE_ROOT_ENV,
 };
 pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, RegisteredBuiltin};
 

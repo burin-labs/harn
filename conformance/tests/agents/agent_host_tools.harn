@@ -112,15 +112,24 @@ pipeline main(harness: Harness) {
     {id: "p1", name: "poll_command", arguments: {handle_id: "missing-handle"}},
     lifecycle_tools,
   )
-  const poll_data = json_parse(poll.rendered_result)
-  harness.stdio.println(poll_data.status)
+  assert(poll.ok == false)
+  assert(contains(poll.error, "unknown command handle"))
+  harness.stdio.println(poll.ok)
   const poll_alias = agent_dispatch_tool_call(
     harness.tools,
     {id: "p2", name: "poll_command", arguments: {handle: "missing-handle-alias"}},
     lifecycle_tools,
   )
-  const poll_alias_data = json_parse(poll_alias.rendered_result)
-  harness.stdio.println(poll_alias_data.status)
+  assert(poll_alias.ok == false)
+  assert(contains(poll_alias.error, "unknown command handle"))
+  harness.stdio.println(poll_alias.ok)
+  const unknown_wait = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "w0", name: "wait_command", arguments: {handle_id: "missing-wait", timeout_ms: 120000}},
+    lifecycle_tools,
+  )
+  assert(unknown_wait.ok == false)
+  assert(contains(unknown_wait.error, "unknown command handle"))
   const background = agent_dispatch_tool_call(
     harness.tools,
     {

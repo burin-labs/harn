@@ -467,8 +467,8 @@ pub struct AcpSessionEnvironmentConfig {
 pub struct AcpSessionNewParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// The session's environment policy. Omitted means `inherited`. See
-    /// [`AcpSessionEnvironmentConfig`].
+    /// The session's environment policy. Required: `session/new` refuses a
+    /// request that omits it (harn#8566). See [`AcpSessionEnvironmentConfig`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "environmentPolicy")]
     pub environment_policy: Option<AcpSessionEnvironmentConfig>,
@@ -477,12 +477,33 @@ pub struct AcpSessionNewParams {
 }
 
 impl AcpSessionNewParams {
-    pub fn cwd(cwd: impl Into<String>) -> Self {
+    /// Build a `session/new` request.
+    ///
+    /// The policy is a parameter rather than a field left for the caller to
+    /// remember, because the field is optional on the wire and a request that
+    /// omits it is refused (harn#8566). Requiring it here means a caller
+    /// cannot express the refused shape and find out at runtime.
+    pub fn new(cwd: impl Into<String>, environment_policy: AcpSessionEnvironmentConfig) -> Self {
         Self {
             cwd: Some(cwd.into()),
-            environment_policy: None,
+            environment_policy: Some(environment_policy),
             extra: BTreeMap::new(),
         }
+    }
+
+    /// A session whose children see only the runtime essentials.
+    ///
+    /// The named shorthand exists so that choosing the most restrictive policy
+    /// is the shortest thing to write, and so a reader of the call site can
+    /// see which policy was chosen without opening this file.
+    pub fn isolated(cwd: impl Into<String>) -> Self {
+        Self::new(
+            cwd,
+            AcpSessionEnvironmentConfig {
+                kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+                grants: Vec::new(),
+            },
+        )
     }
 }
 
@@ -780,6 +801,11 @@ pub struct AcpSessionInjectParams {
     pub session_id: String,
     pub mode: AcpSessionInjectMode,
     pub content: AcpSessionInjectContent,
+    /// Retarget the run: the steer replaces the objective, and every
+    /// acceptance item declared under the previous one is retired. Only a
+    /// `steer` or `interrupt_immediate` may carry it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<harn_session_store::ControlGoal>,
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<AcpMeta>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
@@ -817,9 +843,18 @@ impl AcpSessionInjectParams {
             session_id: session_id.into(),
             mode,
             content: content.into(),
+            goal: None,
             meta: None,
             extra: BTreeMap::new(),
         }
+    }
+
+    /// Replace the run's objective with `objective` as this steer lands.
+    pub fn with_goal(mut self, objective: impl Into<String>) -> Self {
+        self.goal = Some(harn_session_store::ControlGoal {
+            objective: objective.into(),
+        });
+        self
     }
 }
 

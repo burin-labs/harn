@@ -19,6 +19,9 @@
 - [Coming from elsewhere](./concepts/sota-comparison.md)
 - [Why Harn?](./why-harn.md)
 - [How Harn compares](./how-harn-compares.md)
+- [Predicate evaluation contract](./predicates.md)
+- [What a confidence score means](./concepts/confidence.md)
+- [Probabilistic branching proposal](./design/probabilistic-branching.md)
 
 # Tutorials
 
@@ -134,6 +137,7 @@
 
 - [LLM and agents](./llm-and-agents.md)
   - [LLM calls](./llm/llm_call.md)
+  - [Prompt-cache reports](./llm/cache-conformance.md)
   - [Exact token references](./llm/tokenizer.md)
   - [LLM handler helpers](./llm/handlers.md)
   - [LLM reranking](./llm/rerank.md)
@@ -318,6 +322,7 @@
 - [`std/cli/envelope`](./cli-envelope-reference.md)
 - [`std/cli/render`](./cli-render-reference.md)
 - [`std/cli/paths`](./cli-paths-reference.md)
+- [`std/eval/calibration`](./eval-calibration-reference.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
 - [SQLite](./sqlite.md)
@@ -393,6 +398,7 @@
 - [Merge overrides](./dev/merge-overrides.md)
 - [Agent shell guard](./dev/agent-shell-guard.md)
 - [Deterministic test patterns](./dev/testing.md)
+- [Check documentation examples](./dev/check-docs-snippets.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
 - [Windows CI speed experiments](./dev/windows-ci-experiments.md)
 - [Testbench mode](./dev/testbench.md)

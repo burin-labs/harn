@@ -29,6 +29,20 @@ pub struct RunSandboxOptions {
     pub allow_process_network: bool,
     /// Permit child TCP loopback servers without granting remote egress.
     pub allow_process_loopback: bool,
+    /// Let subprocesses enumerate their own process-filesystem entries.
+    pub allow_process_self_introspection: bool,
+    /// Absolute path to the installed helper that builds a private network
+    /// namespace for a confined child. Required by `allow_process_loopback`
+    /// on backends that render loopback that way; the grant is refused rather
+    /// than weakened when it is missing.
+    ///
+    /// Behind a pointer because of where this struct travels. It is held
+    /// across awaits in most of the command futures in this crate, and those
+    /// futures each carry it many times over, so the stack-frame gate reads a
+    /// plain `Option<String>` here as about 3.5 KB of growth in the widest of
+    /// them. A rarely populated host fact does not get to charge that to
+    /// every command, and the pointer keeps the field inline at one word.
+    pub netns_launcher_path: Option<Box<String>>,
     /// Session environment policy for this run. Always present: the default
     /// captures the launcher environment at launch.
     ///
@@ -49,6 +63,8 @@ impl Default for RunSandboxOptions {
             process_unix_socket_roots: Vec::new(),
             allow_process_network: false,
             allow_process_loopback: false,
+            allow_process_self_introspection: false,
+            netns_launcher_path: None,
             environment: EnvironmentPolicyConfig::default(),
         }
     }
@@ -70,6 +86,16 @@ impl RunSandboxOptions {
     /// Permit confined child processes to run TCP loopback servers and clients.
     pub fn with_process_loopback(mut self, enabled: bool) -> Self {
         self.allow_process_loopback = enabled;
+        self
+    }
+
+    /// Name the installed namespace helper this run may launch children
+    /// through. Separate from the loopback grant on purpose: the grant is the
+    /// policy question and the path is a property of the host, and a run that
+    /// asks for one without the other must be refused rather than silently
+    /// downgraded.
+    pub fn with_netns_launcher(mut self, path: Option<String>) -> Self {
+        self.netns_launcher_path = path.map(Box::new);
         self
     }
 
@@ -137,6 +163,12 @@ impl RunSandboxOptions {
         self.process_unix_socket_roots = roots.into_iter().collect();
         self
     }
+
+    /// Let subprocesses enumerate their own process-filesystem entries.
+    pub fn with_process_self_introspection(mut self, allow: bool) -> Self {
+        self.allow_process_self_introspection = allow;
+        self
+    }
 }
 
 /// Build the run's confinement options from the shared sandbox flag block.
@@ -162,6 +194,8 @@ pub(crate) fn sandbox_options_from_args(args: &crate::cli::SandboxArgs) -> RunSa
         .with_process_read_roots(args.sandbox_read_root.iter().cloned())
         .with_process_write_roots(args.sandbox_write_root.iter().cloned())
         .with_process_unix_socket_roots(args.sandbox_unix_socket_root.iter().cloned())
+        .with_process_self_introspection(args.sandbox_allow_process_self_introspection)
+        .with_netns_launcher(args.netns_launcher.clone())
         .with_environment_policy(capability)
 }
 
@@ -225,7 +259,7 @@ pub(super) fn install_run_sandbox_scope(
             .is_none_or(|policy| policy.process_network_proxy.is_none())
     {
         harn_vm::egress::ProcessEgressProxy::start_from_current_policy(true)
-            .unwrap_or_else(|error| crate::command_error(&error))
+            .unwrap_or_else(|error| crate::command_error(&error.to_string()))
     } else {
         None
     };
@@ -248,8 +282,12 @@ pub(super) fn install_run_sandbox_scope(
             &options.process_read_roots,
             &options.process_write_roots,
             &options.process_unix_socket_roots,
-            options.allow_process_network,
-            options.allow_process_loopback,
+            RunProcessGrants {
+                network: options.allow_process_network,
+                loopback: options.allow_process_loopback,
+                self_introspection: options.allow_process_self_introspection,
+                netns_launcher: options.netns_launcher_path.as_deref().cloned(),
+            },
         );
         policy.process_network_proxy = process_proxy.as_ref().map(|proxy| proxy.endpoints());
         harn_vm::orchestration::push_execution_policy(policy);
@@ -385,6 +423,26 @@ fn plural_suffix(count: usize) -> &'static str {
     }
 }
 
+/// The non-path grants a run may add to the default process sandbox. These
+/// travel together because they are decided together by one caller and read
+/// together by the policy; passing them as a run of bare booleans invites a
+/// silent transposition at a call site the type checker cannot catch.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct RunProcessGrants {
+    /// General outbound networking for child processes.
+    pub network: bool,
+    /// TCP to loopback only, for child processes that talk to a local daemon.
+    pub loopback: bool,
+    /// Reading `/proc` entries belonging to the sandboxed task itself.
+    pub self_introspection: bool,
+    /// The installed helper that renders `loopback` where the backend has no
+    /// other way to express it. It travels with the grant rather than beside
+    /// it because the two are read together and are meaningless apart: a
+    /// helper without the grant launches nothing, and the grant without a
+    /// helper is refused.
+    pub netns_launcher: Option<String>,
+}
+
 pub(super) fn default_run_capability_policy(
     workspace_root: &Path,
     write_roots: &[PathBuf],
@@ -392,8 +450,7 @@ pub(super) fn default_run_capability_policy(
     process_read_roots: &[PathBuf],
     process_write_roots: &[PathBuf],
     process_unix_socket_roots: &[PathBuf],
-    allow_process_network: bool,
-    allow_process_loopback: bool,
+    grants: RunProcessGrants,
 ) -> harn_vm::orchestration::CapabilityPolicy {
     let mut workspace_roots = Vec::with_capacity(1 + write_roots.len());
     workspace_roots.push(
@@ -448,15 +505,17 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| path.display().to_string())
                 .collect(),
             read_deny_roots: Vec::new(),
-            allow_tcp_loopback: allow_process_loopback,
+            allow_tcp_loopback: grants.loopback,
             unix_socket_roots: process_unix_socket_roots
                 .iter()
                 .map(|path| normalize_run_workspace_root(path.as_path()))
                 .map(|path| path.display().to_string())
                 .collect(),
+            allow_process_self_introspection: grants.self_introspection,
+            netns_launcher_path: grants.netns_launcher,
         }),
         side_effect_level: Some(
-            if allow_process_network {
+            if grants.network {
                 harn_vm::tool_annotations::SideEffectLevel::Network
             } else {
                 harn_vm::tool_annotations::SideEffectLevel::ProcessExec
@@ -566,6 +625,14 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
             .as_ref()
             .map(|policy| policy.process_sandbox.unix_socket_roots.clone())
             .unwrap_or_default(),
+        // The roots alone do not say what was enforced over them: the same
+        // grant is path-scoped on one backend and serve-only on another, and
+        // on a backend that refuses it the roots are still listed above.
+        // Naming the disposition keeps a reader from inferring a scope from a
+        // platform.
+        "process_unix_socket_enforcement": active_policy
+            .as_ref()
+            .map(harn_vm::unix_socket_enforcement),
         "side_effect_level": side_effect_level,
         "egress": egress,
     })
@@ -693,8 +760,7 @@ mod tests {
             &options.process_read_roots,
             &options.process_write_roots,
             &[],
-            false,
-            false,
+            RunProcessGrants::default(),
         );
 
         assert_eq!(

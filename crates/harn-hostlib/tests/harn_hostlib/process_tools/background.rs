@@ -509,6 +509,48 @@ fn wait_command_reports_running_when_handle_has_not_completed() {
 }
 
 #[test]
+fn wait_command_refuses_mistyped_handle_and_preserves_real_command() {
+    let session_id = unique_session_id("test-wait-mistyped-handle");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id);
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+    let mut request = dict();
+    request.insert("argv".into(), vlist_str(&["echo", "kept"]));
+    request.insert("background".into(), VmValue::Bool(true));
+    let started = require_dict(call("hostlib_tools_run_command", request).unwrap());
+    let handle_id = require_str(&started, "handle_id");
+    let completion = register_completion_notifier(&handle_id).expect("live command");
+
+    for timeout_ms in [0, 120_000] {
+        let mut request = dict();
+        request.insert("handle_id".into(), vstr(&format!("{handle_id}-typo")));
+        request.insert("timeout_ms".into(), VmValue::Int(timeout_ms));
+        let error = call("hostlib_tools_wait_command", request).unwrap_err();
+        assert!(matches!(
+            error,
+            HostlibError::InvalidParameter {
+                param: "handle_id",
+                ..
+            }
+        ));
+    }
+
+    let mut request = dict();
+    request.insert("handle_id".into(), vstr(&handle_id));
+    request.insert("timeout_ms".into(), VmValue::Int(0));
+    let running = require_dict(call("hostlib_tools_wait_command", request.clone()).unwrap());
+    assert_eq!(require_str(&running, "status"), "running");
+    controller.append_stdout(b"kept\n");
+    controller.complete_with(ExitStatus::from_code(0));
+    completion.recv().expect("command completed");
+    for _ in 0..2 {
+        let completed = require_dict(call("hostlib_tools_wait_command", request.clone()).unwrap());
+        assert_eq!(require_str(&completed, "status"), "completed");
+        assert_eq!(require_int(&completed, "exit_code"), 0);
+        assert_eq!(require_str(&completed, "stdout"), "kept\n");
+    }
+}
+
+#[test]
 fn wait_command_requeues_unrelated_feedback() {
     let session_id = unique_session_id("test-wait-command-requeue");
     let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
@@ -518,9 +560,14 @@ fn wait_command_requeues_unrelated_feedback() {
     let mut wait_req = dict();
     wait_req.insert("handle_id".into(), vstr("hto-missing"));
     wait_req.insert("timeout_ms".into(), VmValue::Int(0));
-    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
-
-    assert_eq!(require_str(&waited, "status"), "running");
+    let error = call("hostlib_tools_wait_command", wait_req).unwrap_err();
+    assert!(matches!(
+        error,
+        HostlibError::InvalidParameter {
+            param: "handle_id",
+            ..
+        }
+    ));
     let remaining = harn_vm::orchestration::agent_inbox::drain(&session_id);
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].kind, "notice");

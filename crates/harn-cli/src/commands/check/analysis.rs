@@ -23,9 +23,15 @@ pub(crate) fn analyze_file(
     let source = std::fs::read_to_string(path).map_err(FileAnalysisError::Read)?;
     let id = SourceId::path(path);
     analysis.set_source(id.clone(), source, SourceVersion(1));
-    analysis
+    let mut output = analysis
         .typecheck(&id, typecheck_config(path, config, module_graph))
-        .map_err(FileAnalysisError::Analysis)
+        .map_err(FileAnalysisError::Analysis)?;
+    output
+        .diagnostics
+        .extend(harn_vm::provider_catalog::validate_predicate_models(
+            &output.predicate_sites,
+        ));
+    Ok(output)
 }
 
 pub(crate) fn typecheck_config(

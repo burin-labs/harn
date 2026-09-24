@@ -712,7 +712,7 @@ pub(super) fn dump_empty_generation_response(
     });
     project_call_stage(&mut event, call_stage);
     crate::llm::response_tool_calls::project_onto_response(&mut event, &[], Vec::new());
-    crate::llm::usage::LlmUsage::from_provider_error_receipt(provider, model, response.usage())
+    crate::llm::usage::LlmUsage::from_provider_receipt(provider, model, response.usage())
         .project_onto_event(&mut event);
     append_llm_transcript_entry(&event);
 }

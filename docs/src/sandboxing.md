@@ -87,8 +87,9 @@ Pass `--allow-process-network` to allow network access for the Harn run and its
 child processes under the run's egress policy. Filesystem and process
 confinement remain active. Supported local sandboxes route child HTTP, HTTPS,
 and SOCKS5 traffic through Harn's managed forwarding proxy and restrict the
-child itself to that proxy. Child traffic stays denied until `HARN_EGRESS_*` or
-`harness.net.egress_policy(...)` configures an allow decision.
+child itself to that proxy. Children reach public hosts by default; private and
+loopback addresses stay denied. `HARN_EGRESS_*` or
+`harness.net.egress_policy(...)` narrows that default.
 
 `harness.net.egress_policy(...)` does not grant network access. It restricts
 the destinations available to a run that already has network access, so a
@@ -145,7 +146,8 @@ restrict calls made by Harn, including HTTP, provider, and connector calls.
 The same live policy state also configures a host-side HTTP/SOCKS5 proxy for
 child traffic, whether it came from `HARN_EGRESS_*` at startup or
 `harness.net.egress_policy(...)` during the run. Until either source configures
-a policy, the proxy denies every destination. The OS sandbox grants the child
+a policy, the grant itself is the child's policy: every public host is allowed
+and private, link-local, and loopback addresses are denied. The OS sandbox grants the child
 only the proxy's ephemeral loopback ports, so clearing `HTTP_PROXY` or opening a
 raw socket cannot bypass the host decision. DNS is resolved by the proxy and
 each connection is pinned to the addresses checked by the existing CIDR, deny,
@@ -444,6 +446,26 @@ are read from the process environment, which a sandboxed script cannot
 write, so the grant follows the same principal that configured the
 sandbox. Granting a relocated state root does not grant its parent or
 its siblings.
+
+## Swift package commands on macOS
+
+SwiftPM normally starts its own sandbox for package manifests and plugins.
+macOS refuses that nested sandbox inside a confined Harn process. Harn supplies
+`--disable-sandbox` to SwiftPM while retaining the outer process sandbox, and
+defaults manifest caches, configuration, and security state to the project.
+
+Direct calls and workspace-local `swift` and `xcrun` launchers use the same
+option definitions. Harn prepends the launchers to the child process's `PATH`
+so ordinary project scripts receive those defaults too. SDK and toolchain
+selection, explicit SwiftPM options, and arguments after `--` are preserved.
+The launchers grant no additional file or network access.
+
+A script that replaces `PATH` or invokes an absolute Swift path bypasses the
+launcher. This includes a path previously returned by `xcrun --find swift`;
+lookup-only commands retain their original output. Such a script must supply
+its own `--disable-sandbox` and workspace-local cache/configuration options.
+An absolute Swift command issued directly through Harn's process interface
+still receives the defaults. Unrestricted processes receive no launchers.
 
 ## Selecting a profile
 

@@ -213,6 +213,15 @@ pub struct SessionState {
     /// the route's native thinking shape. Exposed over ACP as
     /// `session/set_config_option(configId="thought_level")`.
     pub pinned_reasoning_policy: Option<String>,
+    /// Why the most recent closing draft was withdrawn after an adjudicator
+    /// veto.
+    ///
+    /// Session state rather than a transcript field on purpose. The
+    /// adjudicator already delivers this reason to the model as a directive,
+    /// so writing it onto the replacement turn as well would put it in the
+    /// context twice and grow with every veto round. Finalization is the only
+    /// reader, and only for a run that ended with no answer at all.
+    pub last_withdrawal_reason: Option<String>,
     /// Session-local workspace defaults. Persona and host policy layers
     /// can update this without rewriting the current anchor.
     pub workspace_policy: WorkspacePolicy,
@@ -264,6 +273,7 @@ impl SessionState {
             system_prompt: None,
             pinned_model: None,
             pinned_reasoning_policy: None,
+            last_withdrawal_reason: None,
             workspace_policy: WorkspacePolicy::default(),
             workspace_anchor: None,
             scratchpad: None,
@@ -322,6 +332,34 @@ pub(crate) fn push_session_taint(id: &str, record: crate::security::TaintRecord)
             state.touch();
         }
     });
+}
+
+/// Record why the closing draft just withdrawn from this session was rejected.
+///
+/// An empty reason clears the field rather than storing a blank one, so a
+/// reader never has to tell "no reason given" apart from "reason was the empty
+/// string".
+pub(crate) fn set_last_withdrawal_reason(id: &str, reason: &str) {
+    SESSIONS.with(|sessions| {
+        if let Some(state) = sessions.borrow_mut().get_mut(id) {
+            state.last_withdrawal_reason = if reason.trim().is_empty() {
+                None
+            } else {
+                Some(reason.to_string())
+            };
+            state.touch();
+        }
+    });
+}
+
+/// Why the most recent closing draft in this session was withdrawn, if one was.
+pub(crate) fn last_withdrawal_reason(id: &str) -> Option<String> {
+    SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(id)
+            .and_then(|state| state.last_withdrawal_reason.clone())
+    })
 }
 
 pub(crate) fn session_taint_snapshot(id: &str) -> Vec<crate::security::TaintRecord> {
