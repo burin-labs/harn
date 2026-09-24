@@ -299,6 +299,10 @@ use clap::{Parser, Subcommand};
     arg_required_else_help = true
 )]
 pub(crate) struct Cli {
+    /// Emit the versioned argument tree used by the native CLI parser.
+    #[arg(long = "argument-schema", global = false)]
+    pub argument_schema: bool,
+
     /// Emit the JSON-schema catalog for every `harn` subcommand that
     /// exposes a structured `--json` envelope. Pair with
     /// `--command <name>` to print just one entry.
