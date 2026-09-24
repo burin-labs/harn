@@ -63,6 +63,25 @@ impl Drop for UndeclaredName {
     }
 }
 
+/// Cases known to fail on this platform, and the issue that owns the fix.
+///
+/// The run must fail exactly these: a new failure is a regression, and a case
+/// that starts holding means the fix landed and its entry must go. Windows
+/// runs the command tool's children outside the AppContainer today (#8738),
+/// so every filesystem refusal escapes and the backend's own socket refusal
+/// never happens.
+const KNOWN_GAPS: &[&str] = if cfg!(windows) {
+    &[
+        "fs.outside_write_refused",
+        "fs.outside_read_refused",
+        "unix_socket.bind_under_root",
+        "unix_socket.bind_under_root_with_network",
+        "unix_socket.bind_outside_root_refused",
+    ]
+} else {
+    &[]
+};
+
 fn enforcement_required() -> bool {
     std::env::var(REQUIRE_ENFORCEMENT_ENV)
         .map(|value| {
@@ -92,14 +111,26 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
     println!("{}", report.summary_line());
 
     assert_eq!(report.cases.len(), ConformanceCase::ALL.len());
-    let failing: Vec<String> = report
+    let unexpected: Vec<String> = report
         .failing()
         .iter()
+        .filter(|case| !KNOWN_GAPS.contains(&case.case))
         .map(|case| format!("{} {:?} {}", case.case, case.verdict, case.detail))
         .collect();
     assert!(
-        failing.is_empty(),
-        "sandbox conformance failed on backend {}: {failing:#?}",
+        unexpected.is_empty(),
+        "sandbox conformance failed on backend {}: {unexpected:#?}",
+        report.backend
+    );
+    let failing: Vec<&str> = report.failing().iter().map(|case| case.case).collect();
+    let fixed: Vec<&str> = KNOWN_GAPS
+        .iter()
+        .copied()
+        .filter(|known| !failing.contains(known))
+        .collect();
+    assert!(
+        fixed.is_empty(),
+        "these known gaps now hold on backend {}; remove them from KNOWN_GAPS: {fixed:?}",
         report.backend
     );
     let not_measured: Vec<&str> = report.not_measured().iter().map(|case| case.case).collect();
