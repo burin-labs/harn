@@ -67,9 +67,12 @@ pub import {
   __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
 import {
+  CompletionObligations,
   agent_completion_obligations,
   completion_obligations_digest,
+  completion_obligations_objective,
   completion_obligations_prompt,
+  completion_obligations_requirements,
 } from "std/agent/obligations"
 import { __normalize_judge_config } from "std/agent/options_formats"
 import { JudgeConfig } from "std/agent/options_types"
@@ -348,7 +351,7 @@ fn __judge_stable_prefix(
   // unsteered run, which keeps that run's prefix byte-identical (and cacheable).
   return system
     + "\n\nStable completion goal:\n"
-    + payload.task
+    + completion_obligations_objective(payload.obligations, payload.task)
     + rubric_block
     + requirement_block
     + completion_obligations_prompt(payload?.obligations)
@@ -1245,6 +1248,56 @@ fn __completion_policy_evaluate(
 }
 
 /**
+ * The judge options as the run's obligations leave them.
+ *
+ * A retarget retires every requirement row declared under the replaced
+ * objective. Applied once, here, so the plan, the ledger, the schema, and the
+ * verdict read all see the same contract. The retired rows are recorded as a
+ * typed checkpoint, so replay can tell a row a steer retired from a row the
+ * run satisfied.
+ */
+fn __judge_opts_under_obligations(
+  agent: HarnessAgent,
+  session_id: string,
+  opts: dict,
+  obligations: CompletionObligations?,
+) -> dict {
+  let amended = opts
+  let retired = []
+  for key in ["verify_completion_judge", "turn_end_condition"] {
+    const judge_cfg = opts[key]
+    if type_of(judge_cfg) != "dict" || judge_cfg?.requirement_contract == nil {
+      continue
+    }
+    const under = completion_obligations_requirements(
+      completion_requirement_contract(judge_cfg.requirement_contract),
+      obligations,
+    )
+    if len(under.retired) > 0 {
+      amended = amended + {[key]: judge_cfg + {requirement_contract: under.contract}}
+      retired = retired + under.retired.map({ row -> row + {adjudicator: key} }).to_list()
+    }
+  }
+  const retarget = obligations?.retarget
+  if len(retired) > 0 && retarget != nil {
+    agent_emit_event(
+      agent,
+      session_id,
+      "typed_checkpoint",
+      {
+        schema: "harn.completion_requirements_retired.v1",
+        kind: "completion_requirements_retired",
+        control_id: retarget.control_id,
+        message_id: retarget.message_id,
+        objective_digest: "sha256:" + sha256(retarget.objective),
+        retired: retired,
+      },
+    )
+  }
+  return amended
+}
+
+/**
  * Evaluate one verification/completion boundary and return one typed directive.
  *
  * `text` is the projected candidate turn — what a reader should be shown.
@@ -1275,18 +1328,24 @@ pub fn agent_evaluate_completion(
     iteration,
     raw_text,
   )
-  const stages = __completion_policy_plan(
+  const judged_opts = __judge_opts_under_obligations(
+    harness.agent,
+    session.session_id,
     opts,
+    payload.obligations,
+  )
+  const stages = __completion_policy_plan(
+    judged_opts,
     stop_reason,
     agent_completion_review(harness.llm, opts),
   )
   const evaluation = __completion_policy_evaluate(
     harness,
-    opts,
+    judged_opts,
     payload,
     iteration,
     stages,
-    __completion_boundary_requirements(opts),
+    __completion_boundary_requirements(judged_opts),
   )
   let verdict = evaluation.verdict
   const prior_history = opts?._feedback_history ?? {}
