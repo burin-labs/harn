@@ -170,11 +170,10 @@ fn named_root(value: &str, workspace: &Path, home: Option<&Path>) -> Option<Path
     (path.is_absolute() && path.parent().is_some_and(|parent| parent != path)).then_some(path)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn config_listing_grants_included_files_and_named_paths_only() {
         let workspace = Path::new("/tmp/harn-git-workspace");
