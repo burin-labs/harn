@@ -1,25 +1,27 @@
 # Probabilistic branching
 
-Status: design approved; frontend contract implemented, 2026-09-19.
+Status: design approved; frontend and budgeted evaluator implemented.
 This explanation asks how a model's judgment can
 control a Harn branch without hiding uncertainty, provider effects, or test
 inputs. The implementation decision uses an ordinary capability call with
-checker obligations and a site manifest. Execution remains explicitly unavailable
-until the budgeted evaluator lands. No model has passed an application quality
-gate for these integrations.
+checker obligations and a site manifest. Execution records budget, refusal,
+and receipt outcomes. No model has passed an application quality gate for these
+integrations.
 
-The authoring surface is `harness.llm.evaluate_predicate(...)`, returning a
-closed outcome. A caller handles that outcome with `match`, then uses an ordinary
-`if` on an accepted verdict. A model answer cannot establish a type refinement,
-grant authority, discharge an existing deterministic requirement, or turn a
-missing observation into a negative answer.
+The authoring surface is `harness.llm.evaluate(...)` for a typed question set
+over shared state, with `evaluate_predicate(...)` as its single-boolean
+projection. Both return closed outcomes. A caller handles the outcome with
+`match`, then uses an ordinary `if` on an accepted boolean verdict. A model
+answer cannot establish a type refinement, grant authority, discharge an
+existing deterministic requirement, or turn a missing observation into a
+negative answer.
 
 The original contextual-expression proposal was dropped during implementation.
 An ordinary registered method supports the same closed input contract, illegal
 boolean-use diagnostic, unused-outcome diagnostic, and typed site manifest.
 Those checks also apply through typed helpers. New grammar would add no guarantee.
-The [current frontend reference](../predicates.md) distinguishes implemented
-checking from the remaining runtime work below.
+The [current reference](../predicates.md) specifies the checked call shape and
+runtime outcome contract.
 
 ## What the recent work changes
 
@@ -328,8 +330,8 @@ artifact and validate its input against that site's closed type before cache
 lookup or dispatch. Gradual typing and computed property access can conceal a
 call from static discovery; neither an empty manifest nor a caller-supplied site
 ID grants permission to evaluate. Missing, forged, or mismatched site metadata
-must refuse with zero provider requests. The frontend-only implementation keeps
-the executor unavailable until this boundary exists.
+must refuse with zero provider requests. The frontend-only stage refused
+execution while this runtime boundary was absent.
 
 The minimum identity is predicate text plus typed input plus resolved model ID.
 That tuple alone is insufficient when effort, the evaluator instruction, or an
@@ -655,7 +657,7 @@ that separation must make the false approval visible.
 | Alternative | Merit | Decision |
 | --- | --- | --- |
 | Ordinary function without checker obligations | Existing checkpoints, typed schemas and cache wrappers can implement much of the behavior. | Insufficient alone: the baseline accepts truthy outcome records, function inputs, and discarded results. |
-| Registered library capability plus checker obligations | Ordinary method syntax can carry the same static identity, closed type, outcome-use checks, and site manifest. | Selected. `harness.llm.evaluate_predicate` is the sole evaluation entry point; typed helpers compose it. |
+| Registered library capability plus checker obligations | Ordinary method syntax can carry the same static identity, closed type, outcome-use checks, and site manifest. | Selected. `harness.llm.evaluate` accepts typed question sets; `evaluate_predicate` projects one boolean question. |
 | Contextual predicate expression | Makes model work visually distinctive. | Dropped: tests establish the required diagnostics and manifest on the library surface, so grammar adds no invariant. |
 | Reuse the completion judge | Already handles structured judgment, budgets and evidence. | Reuse its lower-level transport/checkpoint owners, not completion policy. A standalone classification should not acquire agent-loop termination, gap arbitration, or requirement-ledger semantics. |
 | Do nothing | Avoids language and tooling changes. | Reject because each caller would continue assembling cache identity, failure handling and replay requirements independently. The proposal is justified only if the three integrations share one enforced contract. |
@@ -791,19 +793,11 @@ consumer while keeping unproven classification away from automatic grants.
 
 ## Implementation sequence
 
-This sequence begins only after design approval. Each PR includes a changelog
-fragment, hermetic evidence, a negative control and the current conformance gate.
-Sizes are estimates of changed, hand-maintained lines including tests, not
-targets; generated grammar output is additional. Dependencies are sequential.
-
-- Step 1a status: frontend contract landed.
-- Step 1b status: operation catalog and static model admission implemented;
-  verification in progress.
-- Step 2 status: runtime and receipts not implemented.
-- Step 3 status: predicate cache and tape not implemented.
-- Step 4 status: outcome helpers and worked integrations not implemented.
-- Step 5 status: frontend reference available; runtime reference and skill
-  updates remain after runtime verification.
+This is the approved dependency plan, not a live implementation tracker. Use
+the [current reference](../predicates.md) for the supported call and outcome
+contract. Each implementation PR needs hermetic evidence, a negative control,
+and the relevant conformance gate. Sizes below estimate changed, hand-maintained
+lines including tests; generated output is additional.
 
 | PR | Owning change and estimated size | Falsifier and negative control | Required gate |
 | --- | --- | --- | --- |

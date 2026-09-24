@@ -162,6 +162,12 @@ phases, cache contract, defaults, and machine-readable receipts.
 
 ## Stochastic quality
 
+- For typed decisions, prove complete answers and the missing-answer,
+  undeclared-label, low-confidence, and refusal paths with hermetic fixtures.
+  Recorded-tape replay must fail on a missing or extra request without live
+  fallback; assert the provider call count, not just the outcome text.
+- A fixture proves contract behavior, never model accuracy. Qualify a decision
+  threshold on a separate labeled holdout before it governs a live workflow.
 - Define the population, metric, threshold, and maximum spend before running.
 - Use multiple independent trials.
 - Calibrate the grader on known accepted and rejected examples.
