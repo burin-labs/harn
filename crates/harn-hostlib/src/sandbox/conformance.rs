@@ -329,10 +329,14 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
                     .map(|dir| dir.join(SESSION_TEMP_PROBE))
                     .unwrap_or_default();
             let argv = if cfg!(windows) {
+                // `cmd` expands `%TEMP%` in its own command line; separate
+                // arguments keep the launcher's quoting out of the redirect.
                 owned(&[
                     "cmd",
                     "/c",
-                    &format!("echo probe> \"%TEMP%\\{SESSION_TEMP_PROBE}\""),
+                    "echo",
+                    "probe>",
+                    &format!("%TEMP%\\{SESSION_TEMP_PROBE}"),
                 ])
             } else {
                 owned(&[
