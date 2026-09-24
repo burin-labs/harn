@@ -20,7 +20,7 @@ name = "example"
 version.workspace = true
 EOF
 printf '# initial lock\n' > "$fixture/Cargo.lock"
-git -C "$fixture" init --quiet
+git -C "$fixture" init -b main --quiet
 git -C "$fixture" config user.name "Development Cutover Test"
 git -C "$fixture" config user.email "development-cutover-test@example.com"
 git -C "$fixture" config commit.gpgsign false
@@ -30,13 +30,9 @@ git -C "$fixture" commit --quiet -m initial
 # The opener re-reads origin/main before it opens anything, so the fixture needs
 # a real remote rather than a detached working copy.
 origin="$tmp_root/origin.git"
-git init --quiet --bare "$origin"
+git init -b main --quiet --bare "$origin"
 git -C "$fixture" remote add origin "$origin"
 git -C "$fixture" push --quiet origin HEAD:refs/heads/main
-# The bare repository's HEAD follows whatever init.defaultBranch the host is
-# configured with, so name the branch this fixture actually pushed. Without it a
-# host defaulting to master clones an empty working tree.
-git -C "$origin" symbolic-ref HEAD refs/heads/main
 git -C "$fixture" fetch --quiet origin main
 
 cat > "$bin_dir/harn" <<'EOF'

@@ -9,7 +9,7 @@ tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/repo"
 mkdir -p "$fixture/bin"
-git -C "$fixture" init -q
+git -C "$fixture" init -b main -q
 git -C "$fixture" config user.name "Harn test"
 git -C "$fixture" config user.email "harn-test@example.invalid"
 git -C "$fixture" config commit.gpgSign false

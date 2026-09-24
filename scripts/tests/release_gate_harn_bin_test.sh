@@ -77,7 +77,7 @@ cat > "$release_root/Cargo.toml" <<'EOF'
 version = "1.2.3"
 members = []
 EOF
-git -C "$release_root" init -q
+git -C "$release_root" init -b main -q
 git -C "$release_root" config user.email test@example.com
 git -C "$release_root" config user.name test
 git -C "$release_root" config commit.gpgsign false
@@ -294,7 +294,7 @@ printf '{}\n' > "$audit_root/scripts/release_audit_contract.json"
 cp "$repo_root/scripts/ci/host_bound_rust_test_filter.sh" "$audit_root/scripts/ci/"
 cp "$repo_root/scripts/config/host-bound-rust-tests.txt" "$audit_root/scripts/config/"
 printf 'jobs: {}\n' > "$audit_root/.github/workflows/ci.yml"
-git -C "$audit_root" init -q
+git -C "$audit_root" init -b main -q
 git -C "$audit_root" config user.email test@example.com
 git -C "$audit_root" config user.name test
 git -C "$audit_root" config commit.gpgsign false

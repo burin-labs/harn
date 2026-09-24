@@ -28,7 +28,7 @@ repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$tmp/bin"
 cp "$root/scripts/lib/release_version.sh" "$repo/scripts/lib/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
-git -C "$repo" init --quiet
+git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Promotion Test"
 git -C "$repo" config user.email "release-promotion-test@example.com"
 git -C "$repo" config commit.gpgsign false

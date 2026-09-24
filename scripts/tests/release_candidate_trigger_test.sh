@@ -25,7 +25,7 @@ mkdir -p "$repo/scripts/lib" "$repo/.github"
 cp "$root/scripts/lib/release_version.sh" "$repo/scripts/lib/"
 cp "$root/scripts/release_contract.env" "$root/scripts/release_runner_matrix.sh" "$repo/scripts/"
 cp "$root/.github/release-runner-policy.json" "$repo/.github/"
-git -C "$repo" init --quiet
+git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Trigger Test"
 git -C "$repo" config user.email "release-trigger-test@example.com"
 git -C "$repo" config commit.gpgsign false

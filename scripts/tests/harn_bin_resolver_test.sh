@@ -607,7 +607,7 @@ authority_repo="$tmp_root/windows authority repo"
 authority_bin="$tmp_root/windows-authority-bin"
 authority_list="$tmp_root/windows-authorities"
 mkdir -p "$authority_repo/.cargo" "$authority_bin"
-git -C "$authority_repo" init -q
+git -C "$authority_repo" init -b main -q
 printf '[build]\n' > "$authority_repo/.cargo/config.toml"
 cat > "$authority_bin/cygpath" <<'SH'
 #!/usr/bin/env bash
@@ -785,7 +785,7 @@ export CARGO_HOME="$fixture_cargo_home"
 export RUSTUP_HOME="$fixture_rustup_home"
 unset GIT_CONFIG_GLOBAL
 export GIT_CONFIG_SYSTEM="$fixture_system_config"
-git -C "$cargo_fixture" init -q
+git -C "$cargo_fixture" init -b main -q
 git -C "$cargo_fixture" config user.name 'Harn Resolver Test'
 git -C "$cargo_fixture" config user.email 'harn-resolver-test@example.invalid'
 git -C "$cargo_fixture" config commit.gpgsign false
@@ -884,7 +884,7 @@ cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-source-v1-bin"
 # receipt while the manifest hashed .git/config wholesale.
 fixture_remote="$tmp_root/cargo-fixture-remote.git"
 fixture_sibling="$tmp_root/cargo-fixture-sibling"
-git init --bare -q "$fixture_remote"
+git init -b main --bare -q "$fixture_remote"
 git -C "$cargo_fixture" remote add origin "$fixture_remote"
 git -C "$cargo_fixture" worktree add -qb receipt-churn "$fixture_sibling"
 git -C "$fixture_sibling" push -qu origin receipt-churn
