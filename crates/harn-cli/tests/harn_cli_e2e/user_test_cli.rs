@@ -2,6 +2,71 @@
 
 use std::process::Command;
 
+#[test]
+fn typed_skip_stops_assertions_and_can_fail_a_complete_suite_policy() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let suite = temp.path().join("test_skip.harn");
+    let json_out = temp.path().join("report.json");
+    let junit = temp.path().join("report.xml");
+    std::fs::write(
+        &suite,
+        "pipeline test_a_skipped() { skip(\"external service unavailable\"); assert(false, \"after skip\") }\n\
+         pipeline test_z_passed() { assert(true) }\n",
+    )
+    .expect("write suite");
+
+    for fail_on_skip in [false, true] {
+        let mut command = Command::new(binary_path());
+        command.args([
+            "test",
+            suite.to_str().expect("suite path"),
+            "--json-out",
+            json_out.to_str().expect("report path"),
+            "--junit",
+            junit.to_str().expect("JUnit path"),
+            "--fail-fast",
+        ]);
+        if fail_on_skip {
+            command.arg("--fail-on-skip");
+        }
+        let output = command.output().expect("run Harn user tests");
+        assert_eq!(
+            output.status.code(),
+            Some(if fail_on_skip {
+                harn_cli::exit::PROGRAM_FAILURE
+            } else {
+                0
+            }),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("1 passed, 1 skipped, 2 total"), "{stdout}");
+        assert!(stdout.contains("SKIP") && stdout.contains("external service unavailable"));
+        assert!(!stdout.contains("after skip"), "{stdout}");
+
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&json_out).expect("read report"))
+                .expect("parse report");
+        assert_eq!(report["summary"]["passed"], 1);
+        assert_eq!(report["summary"]["failed"], 0);
+        assert_eq!(report["summary"]["skipped"], 1);
+        assert_eq!(report["summary"]["total"], 2);
+        let skipped = report["cases"]
+            .as_array()
+            .expect("cases")
+            .iter()
+            .find(|case| case["name"] == "test_a_skipped")
+            .expect("skipped case");
+        assert_eq!(skipped["outcome"], "skipped");
+        assert_eq!(skipped["message"], "external service unavailable");
+        let xml = std::fs::read_to_string(&junit).expect("read JUnit report");
+        assert!(xml.contains("skipped=\"1\""), "{xml}");
+        assert!(xml.contains("external service unavailable"), "{xml}");
+    }
+}
+
 #[path = "user_test_cli/operator_grants.rs"]
 mod operator_grants;
 #[path = "user_test_cli/process_egress.rs"]

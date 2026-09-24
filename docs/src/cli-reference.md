@@ -3796,8 +3796,8 @@ the Harn `server_version`, stable `worker_id`, and `process_id`. Then call
 `max_execute_ms`, `parallel`, `fail_fast`, `jobs`, `shard`, `skill_dirs`, or
 `diagnose`. Each response includes the same worker identity, typed test
 summary, cumulative `run_count`, and cache counters before and after that run.
-The advertised `test_run.schema_version` is 2; summaries include the shared
-duration distribution plus per-case and aggregate module attribution.
+The advertised `test_run.schema_version` is 4; summaries include a separate
+skipped count, the shared duration distribution, and per-case and aggregate module attribution.
 `shutdown` returns the final run and cache receipt; closing stdin also stops the
 worker. Every test still receives fresh VM and module state; only reusable
 prepared module artifacts are retained by the worker session.

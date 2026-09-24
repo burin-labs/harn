@@ -68,6 +68,10 @@ pub(crate) struct TestArgs {
     /// running under --parallel finish and remain in the report.
     #[arg(long)]
     pub fail_fast: bool,
+    /// Fail a user-test run if any case reports a typed skip. Useful for CI
+    /// suites that require every discovered case to exercise its assertions.
+    #[arg(long = "fail-on-skip")]
+    pub fail_on_skip: bool,
     /// Accept a run that executes no tests.
     ///
     /// By default a selection that matches nothing exits non-zero, because an

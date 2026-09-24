@@ -92,6 +92,17 @@ pub(crate) async fn run_command(mut args: TestArgs) {
     if args.watch && args.timing_baseline.is_some() {
         command_error("--timing-baseline is not supported with --watch");
     }
+    if args.fail_on_skip
+        && (args.watch
+            || args.determinism
+            || args.evals
+            || matches!(
+                args.target.as_deref(),
+                Some("agents-conformance" | "conformance" | "protocols" | "package")
+            ))
+    {
+        command_error("--fail-on-skip is supported only for one-shot user-test suites");
+    }
     if (args.timing_baseline.is_some() || args.timing_environment.is_some())
         && (args.determinism
             || args.evals
@@ -438,6 +449,7 @@ async fn run_user_test_targets(
         max_execute_ms: args.max_execute_ms,
         parallel: args.parallel,
         fail_fast: args.fail_fast,
+        fail_on_skip: args.fail_on_skip,
         allow_empty,
         jobs: args.jobs,
         shard: resolve_test_shard(args.shard_index, args.shard_total),
@@ -714,6 +726,7 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub max_execute_ms: Option<u64>,
     pub parallel: bool,
     pub fail_fast: bool,
+    pub fail_on_skip: bool,
     /// Whether a one-shot invocation may report success after executing zero
     /// tests. Watch mode consumes the same execution shape but has no terminal
     /// verdict; it remains active so a newly-created test can be observed.
@@ -941,6 +954,7 @@ pub(crate) async fn run_user_tests(
     }
 
     let allow_empty = args.allow_empty;
+    let fail_on_skip = args.fail_on_skip;
     let filter = args.filter;
     let summary = run_user_test_paths_once(&paths, args).await;
 
@@ -972,6 +986,13 @@ pub(crate) async fn run_user_tests(
     }
 
     if summary.failed > 0 {
+        process::exit(crate::exit::PROGRAM_FAILURE);
+    }
+    if fail_on_skip && summary.skipped > 0 {
+        eprintln!(
+            "error: {} user test(s) skipped under --fail-on-skip",
+            summary.skipped
+        );
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
     if summary.total == 0 && !allow_empty {
