@@ -503,7 +503,6 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               stall_totals,
               loop_start_ms,
               current_max,
-              opts,
             )
             if stall_exhaustion.exhausted {
               __agent_loop_emit_budget_exhausted(
@@ -842,7 +841,6 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               step_totals,
               loop_start_ms,
               current_max,
-              opts,
             )
             if step_exhaustion.exhausted {
               __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, step_exhaustion)
@@ -1000,7 +998,6 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           totals,
           loop_start_ms,
           current_max,
-          opts,
         )
         if exhaustion.exhausted {
           __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, exhaustion)
