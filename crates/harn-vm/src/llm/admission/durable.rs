@@ -36,6 +36,7 @@ pub struct MachineSpendQuota {
 struct QuotaConfig {
     path: PathBuf,
     scope: String,
+    clock: Arc<dyn harn_clock::Clock>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -72,6 +73,16 @@ impl MachineSpendQuota {
         scope: impl Into<String>,
         policy: MachineSpendPolicy,
     ) -> Result<Self, VmError> {
+        Self::open_with_clock(path, scope, policy, harn_clock::RealClock::arc())
+    }
+
+    /// Supply the clock used for billing periods and audit timestamps.
+    pub fn open_with_clock(
+        path: impl AsRef<Path>,
+        scope: impl Into<String>,
+        policy: MachineSpendPolicy,
+        clock: Arc<dyn harn_clock::Clock>,
+    ) -> Result<Self, VmError> {
         let scope = scope.into();
         if !path.as_ref().is_absolute()
             || scope.trim().is_empty()
@@ -87,6 +98,7 @@ impl MachineSpendQuota {
         let config = Arc::new(QuotaConfig {
             path: path.as_ref().to_path_buf(),
             scope,
+            clock,
         });
         let connection = connect(&config.path)?;
         connection
@@ -203,7 +215,7 @@ impl MachineSpendQuota {
         .map_err(db_error)?;
         tx.execute(
             "INSERT INTO spend_policy_audit(scope, at_ms, approved_by, old_daily, old_monthly, new_daily, new_monthly) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![self.inner.scope, now_ms(), approved_by, old.daily_limit_microusd, old.monthly_limit_microusd, policy.daily_limit_microusd, policy.monthly_limit_microusd],
+            params![self.inner.scope, harn_clock::now_wall_ms(self.inner.clock.as_ref()), approved_by, old.daily_limit_microusd, old.monthly_limit_microusd, policy.daily_limit_microusd, policy.monthly_limit_microusd],
         )
         .map_err(db_error)?;
         tx.commit().map_err(db_error)
@@ -211,7 +223,7 @@ impl MachineSpendQuota {
 
     pub(super) fn reserve(&self, amount: Decimal) -> Result<DurableReservation, VmError> {
         let amount = micros_ceil(amount)?;
-        let now = OffsetDateTime::now_utc();
+        let now = self.inner.clock.now_utc();
         let (day, month, daily_reset, monthly_reset) = periods(now);
         let mut connection = connect(&self.inner.path)?;
         let tx = connection
@@ -246,7 +258,7 @@ impl MachineSpendQuota {
         let id = Uuid::new_v4().to_string();
         tx.execute(
             "INSERT INTO spend_attempt(id, scope, day, month, reserved, created_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, self.inner.scope, day, month, amount, now_ms()],
+            params![id, self.inner.scope, day, month, amount, harn_clock::now_wall_ms(self.inner.clock.as_ref())],
         )
         .map_err(db_error)?;
         for period in [&day, &month] {
@@ -264,7 +276,7 @@ impl MachineSpendQuota {
     }
 
     pub fn receipt(&self) -> Result<MachineSpendReceipt, VmError> {
-        let now = OffsetDateTime::now_utc();
+        let now = self.inner.clock.now_utc();
         let (day, month, daily_reset_unix_ms, monthly_reset_unix_ms) = periods(now);
         let mut connection = connect(&self.inner.path)?;
         let snapshot = connection
@@ -441,11 +453,6 @@ fn periods(now: OffsetDateTime) -> (String, String, i64, i64) {
         next_day.midnight().assume_utc().unix_timestamp() * 1000,
         first_next_month.midnight().assume_utc().unix_timestamp() * 1000,
     )
-}
-
-fn now_ms() -> i64 {
-    let now = OffsetDateTime::now_utc();
-    now.unix_timestamp() * 1000 + i64::from(now.millisecond())
 }
 
 fn db_error(error_value: impl std::fmt::Display) -> VmError {
