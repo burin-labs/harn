@@ -108,11 +108,16 @@ impl ProcessSpawner for RealSpawner {
             ));
         }
 
+        let prepared = prepare_command(&spec, None)?;
+        #[cfg(target_os = "windows")]
+        if prepared.confined_launch {
+            return super::windows_confined::spawn(&spec, prepared);
+        }
         let PreparedSpawn {
             mut command,
             cleanup_token,
             ..
-        } = prepare_command(&spec, None)?;
+        } = prepared;
         #[cfg(target_os = "windows")]
         let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment
             || spec.configure_process_group
@@ -175,6 +180,10 @@ pub(crate) struct PreparedSpawn {
     /// process tree with a Job Object and never re-creates the command.
     #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) env_cleared: bool,
+    /// Windows: the active policy confines this spawn, so the command is only
+    /// a description and must be launched through the AppContainer.
+    #[cfg(target_os = "windows")]
+    pub(crate) confined_launch: bool,
 }
 
 pub(crate) fn prepare_command(
@@ -187,9 +196,18 @@ pub(crate) fn prepare_command(
         ));
     }
 
-    let (mut command, session_closed) =
+    #[cfg(target_os = "windows")]
+    let confined_launch = process_sandbox::confined_launch_applies();
+    #[cfg(target_os = "windows")]
+    let built = if confined_launch {
+        process_sandbox::std_command_for_confined_launch(&spec.program, &spec.args)
+    } else {
         process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
-            .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+    };
+    #[cfg(not(target_os = "windows"))]
+    let built = process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args);
+    let (mut command, session_closed) =
+        built.map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
     let env_cleared = session_closed || spec.env_mode == EnvMode::Replace;
 
     let mut env: Vec<_> = spec
@@ -331,18 +349,8 @@ pub(crate) fn prepare_command(
             stdout_path,
             stderr_path,
         } => {
-            let stdout = OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(stdout_path)
-                .map_err(|error| ProcessError::Spawn(format!("open stdout capture: {error}")))?;
-            let stderr = OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(stderr_path)
-                .map_err(|error| ProcessError::Spawn(format!("open stderr capture: {error}")))?;
-            command.stdout(Stdio::from(stdout));
-            command.stderr(Stdio::from(stderr));
+            command.stdout(Stdio::from(open_capture(stdout_path, "stdout")?));
+            command.stderr(Stdio::from(open_capture(stderr_path, "stderr")?));
         }
     }
     command.stdin(match (&spec.output_capture, spec.use_stdin) {
@@ -355,7 +363,21 @@ pub(crate) fn prepare_command(
         command,
         cleanup_token,
         env_cleared,
+        #[cfg(target_os = "windows")]
+        confined_launch,
     })
+}
+
+/// Open one pre-created capture file for the child to write.
+pub(crate) fn open_capture(
+    path: &std::path::Path,
+    stream: &str,
+) -> Result<std::fs::File, ProcessError> {
+    OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|error| ProcessError::Spawn(format!("open {stream} capture: {error}")))
 }
 
 /// Record only the non-secret facts needed to diagnose command-resolution
@@ -729,7 +751,7 @@ fn decode_status(status: std::process::ExitStatus) -> ExitStatus {
 }
 
 #[cfg(not(unix))]
-fn decode_status(status: std::process::ExitStatus) -> ExitStatus {
+pub(crate) fn decode_status(status: std::process::ExitStatus) -> ExitStatus {
     ExitStatus::from_code(status.code().unwrap_or(-1))
 }
 

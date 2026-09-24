@@ -67,6 +67,25 @@ pub fn std_command_for_with_env_state(
     Ok((command, env_closed))
 }
 
+/// [`std_command_for_with_env_state`] for a command the caller will launch
+/// through [`crate::process_sandbox::spawn_confined`].
+///
+/// A `Command` cannot carry an AppContainer, so building one through the
+/// backend reports confinement as unavailable. This builds the same program,
+/// arguments and session environment without that report; the confined
+/// launch attaches the container itself and refuses what it cannot render.
+#[cfg(target_os = "windows")]
+pub fn std_command_for_confined_launch(
+    program: &str,
+    args: &[String],
+) -> Result<(Command, bool), VmError> {
+    let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
+    let mut command = Command::new(&resolved_program);
+    command.args(args);
+    let env_closed = close_env_for_session!(command, program);
+    Ok((command, env_closed))
+}
+
 pub fn tokio_command_for(
     program: &str,
     args: &[String],

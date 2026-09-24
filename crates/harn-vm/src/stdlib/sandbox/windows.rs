@@ -2,19 +2,16 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::FromRawHandle;
-use std::os::windows::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::{ExitStatus, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::process::Output;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, LocalFree, SetHandleInformation, GENERIC_READ, HANDLE, HANDLE_FLAG_INHERIT,
-    INVALID_HANDLE_VALUE, WAIT_FAILED,
+    CloseHandle, LocalFree, SetHandleInformation, GENERIC_READ, GENERIC_WRITE, HANDLE,
+    HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows_sys::Win32::Security::Isolation::{
-    CreateAppContainerProfile, DeleteAppContainerProfile,
-    DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
+    CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
 };
 use windows_sys::Win32::Security::{
     CreateWellKnownSid, WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
@@ -26,22 +23,18 @@ use windows_sys::Win32::Storage::FileSystem::{
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicUIRestrictions,
-    JobObjectExtendedLimitInformation, SetInformationJobObject, JOBOBJECT_BASIC_UI_RESTRICTIONS,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
-    JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOB_OBJECT_UILIMIT_DESKTOP,
-    JOB_OBJECT_UILIMIT_DISPLAYSETTINGS, JOB_OBJECT_UILIMIT_EXITWINDOWS,
+    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
+    JOBOBJECT_BASIC_UI_RESTRICTIONS, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+    JOB_OBJECT_UILIMIT_DESKTOP, JOB_OBJECT_UILIMIT_DISPLAYSETTINGS, JOB_OBJECT_UILIMIT_EXITWINDOWS,
     JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES, JOB_OBJECT_UILIMIT_READCLIPBOARD,
     JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS, JOB_OBJECT_UILIMIT_WRITECLIPBOARD,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::SystemServices::SE_GROUP_ENABLED;
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
-    InitializeProcThreadAttributeList, ResumeThread, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
-    EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    DeleteProcThreadAttributeList, InitializeProcThreadAttributeList, UpdateProcThreadAttribute,
 };
 
 use super::{
@@ -63,7 +56,9 @@ mod system_roots;
 #[path = "windows_acl_grants.rs"]
 mod acl_grants;
 
-use acl_grants::WorkspaceAclGrants;
+/// The one place a confined child is created, for every caller.
+#[path = "windows_launch.rs"]
+pub(crate) mod launch;
 
 pub(super) struct Backend;
 
@@ -83,9 +78,10 @@ impl SandboxBackend for Backend {
     /// `std::process::Command` cannot carry an AppContainer
     /// `SECURITY_CAPABILITIES` block — Windows requires
     /// `STARTUPINFOEX` plumbing handled directly by `CreateProcessW`.
-    /// Callers that need an `Output` go through [`Backend::run_to_output`];
-    /// callers that need a `Command` (e.g. `harn-hostlib`'s background
-    /// process spawner) get the warn-or-error fallback below.
+    /// Callers that need an `Output` go through [`Backend::run_to_output`],
+    /// and callers that keep the child (the process tools) through
+    /// [`spawn_confined`]. A caller that still asks for a confined `Command`
+    /// gets the warn-or-error fallback below.
     fn prepare_std_command(
         _program: &str,
         _args: &[String],
@@ -136,7 +132,34 @@ impl SandboxBackend for Backend {
     }
 }
 
-static PROFILE_COUNTER: AtomicU64 = AtomicU64::new(1);
+/// Whether a spawn now runs confined, so a caller that keeps its child must
+/// launch it through [`spawn_confined`] rather than a `Command`.
+pub fn confined_launch_applies() -> bool {
+    super::active_sandbox_policy().is_some()
+}
+
+/// Launch `program` confined by the active policy and return the live child,
+/// for a caller that streams, times out or cancels it. `None` when no policy
+/// confines this spawn, so the caller spawns it the ordinary way.
+///
+/// The child's Job Object has no process or memory cap: an agent's command
+/// runs builds that a script's one-shot cap would kill.
+pub fn spawn_confined(
+    program: &str,
+    args: &[String],
+    config: &ProcessCommandConfig,
+    stdio: launch::ChildStdio,
+) -> Result<Option<launch::ConfinedChild>, VmError> {
+    let Some((policy, _)) = super::active_sandbox_policy() else {
+        return Ok(None);
+    };
+    launch::launch(program, args, config, &policy, stdio, JobLimits::Unbounded)
+        .map(Some)
+        .map_err(|error| {
+            process_spawn_error(&error)
+                .unwrap_or_else(|| sandbox_rejection(format!("process sandbox failed: {error}")))
+        })
+}
 
 pub(super) fn sandboxed_output(
     program: &str,
@@ -144,185 +167,51 @@ pub(super) fn sandboxed_output(
     config: &ProcessCommandConfig,
     policy: &CapabilityPolicy,
 ) -> io::Result<Output> {
-    if policy.process_network_proxy.is_some() {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "managed child-process egress requires a proxy-only Windows network boundary; this build cannot enforce it",
-        ));
-    }
-    if policy.process_sandbox.allow_tcp_loopback {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "TCP loopback-only child networking is not enforceable by AppContainer capabilities",
-        ));
-    }
-    if !policy.process_sandbox.unix_socket_roots.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "path-scoped Unix-domain sockets for child processes are not enforceable by AppContainer capabilities",
-        ));
-    }
-    sandbox_trace(
-        "pending",
-        format!("start program={program:?} argc={}", args.len()),
-    );
-    let mut process_capabilities = ProcessCapabilities::for_policy(policy)?;
-    let profile = AppContainerProfile::create(&mut process_capabilities)?;
-    let trace_label = profile.label().to_string();
-    sandbox_trace(&trace_label, "profile created");
-    let sid_string = profile.sid_string()?;
-    sandbox_trace(&trace_label, "sid resolved");
-    let grants = WorkspaceAclGrants::grant(&trace_label, &sid_string, policy)?;
-    let _grants = grants;
-    sandbox_trace(&trace_label, "workspace ACL grants installed");
-
-    let stdout_pipe = InheritablePipe::new()?;
-    let stderr_pipe = InheritablePipe::new()?;
-    let mut stdin_pipe = match &config.stdin {
-        super::ProcessStdin::Null => None,
-        super::ProcessStdin::Bytes(_) => Some(InheritableStdinPipe::new()?),
+    let stdin = match &config.stdin {
+        super::ProcessStdin::Null => launch::ChildInput::Null,
+        super::ProcessStdin::Bytes(_) => launch::ChildInput::Pipe,
     };
-    let stdin_null = if stdin_pipe.is_none() {
-        Some(OwnedHandle::nul_read()?)
-    } else {
-        None
-    };
-    let stdin_handle = stdin_pipe.as_ref().map_or_else(
-        || stdin_null.as_ref().expect("null stdin exists").raw(),
-        InheritableStdinPipe::child_read_handle,
-    );
-    sandbox_trace(&trace_label, "stdio handles prepared");
-    let inherited_handles = [
-        stdin_handle,
-        stdout_pipe.write.raw(),
-        stderr_pipe.write.raw(),
-    ];
-    let mut security_capabilities = profile.security_capabilities(&mut process_capabilities);
-    let mut attributes = ProcThreadAttributes::new(2)?;
-    sandbox_trace(&trace_label, "process attributes allocated");
-    attributes.update(
-        PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
-        (&mut security_capabilities as *mut SECURITY_CAPABILITIES).cast(),
-        std::mem::size_of::<SECURITY_CAPABILITIES>(),
+    let mut child = launch::launch(
+        program,
+        args,
+        config,
+        policy,
+        launch::ChildStdio {
+            stdin,
+            stdout: launch::ChildOutput::Pipe,
+            stderr: launch::ChildOutput::Pipe,
+        },
+        JobLimits::Bounded,
     )?;
-    attributes.update(
-        PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
-        inherited_handles.as_ptr().cast(),
-        std::mem::size_of_val(&inherited_handles),
-    )?;
-    sandbox_trace(&trace_label, "process attributes configured");
-
-    let mut stdout_reader = stdout_pipe.into_reader();
-    let mut stderr_reader = stderr_pipe.into_reader();
-
-    let mut startup = STARTUPINFOEXW::default();
-    startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
-    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdInput = stdin_handle;
-    startup.StartupInfo.hStdOutput = stdout_reader.child_write_handle();
-    startup.StartupInfo.hStdError = stderr_reader.child_write_handle();
-    startup.lpAttributeList = attributes.as_mut_ptr();
-
-    let mut process_info = PROCESS_INFORMATION::default();
-    let mut command_line = command_line(program, args);
-    let application = resolve_application_name(program);
-    let sandbox_env = profile.environment_overrides(&sid_string)?;
-    sandbox_trace(&trace_label, "AppContainer environment prepared");
-    let mut environment = environment_block(
-        &config.env,
-        &sandbox_env,
-        config.closed_env,
-        &config.env_remove,
-    );
-    let cwd = config.cwd.as_ref().map(|path| path_to_wide(path));
-    let job = JobObject::create()?;
-    sandbox_trace(&trace_label, "job object prepared");
-
-    sandbox_trace(&trace_label, "CreateProcessW begin");
-    let created = unsafe {
-        CreateProcessW(
-            application
-                .as_ref()
-                .map_or(std::ptr::null(), |value| value.as_ptr()),
-            command_line.as_mut_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            1,
-            EXTENDED_STARTUPINFO_PRESENT
-                | CREATE_UNICODE_ENVIRONMENT
-                | CREATE_SUSPENDED
-                | CREATE_NO_WINDOW,
-            if environment.is_empty() {
-                std::ptr::null()
-            } else {
-                environment.as_mut_ptr().cast()
-            },
-            cwd.as_ref()
-                .map_or(std::ptr::null(), |value| value.as_ptr()),
-            std::ptr::addr_of!(startup.StartupInfo),
-            &mut process_info,
-        )
-    };
-    if created == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    sandbox_trace(&trace_label, "CreateProcessW ok");
-
-    let process = OwnedHandle::new(process_info.hProcess);
-    let thread = OwnedHandle::new(process_info.hThread);
-    if let Err(error) = job.assign(process.raw()) {
-        unsafe {
-            TerminateProcess(process.raw(), 1);
+    let stdin_writer = match (&config.stdin, child.take_stdin()) {
+        (super::ProcessStdin::Bytes(input), Some(mut pipe)) => {
+            let input = input.clone();
+            Some(std::thread::spawn(move || pipe.write_all(&input)))
         }
-        return Err(error);
-    }
-    sandbox_trace(&trace_label, "job assigned");
-    stdout_reader.close_child_write();
-    stderr_reader.close_child_write();
-    if let Some(pipe) = stdin_pipe.as_mut() {
-        pipe.close_child_read();
-    }
-    sandbox_trace(&trace_label, "parent child-write handles closed");
-
-    if unsafe { ResumeThread(thread.raw()) } == u32::MAX {
-        return Err(io::Error::last_os_error());
-    }
-    sandbox_trace(&trace_label, "process resumed");
-
-    let stdin_writer = stdin_pipe.map(|pipe| match &config.stdin {
-        super::ProcessStdin::Bytes(input) => pipe.write_async(input.clone()),
-        super::ProcessStdin::Null => unreachable!("null stdin does not create a pipe"),
-    });
-
-    let stdout = stdout_reader.read_async();
-    let stderr = stderr_reader.read_async();
-    sandbox_trace(&trace_label, "waiting for process");
-    let wait = unsafe { WaitForSingleObject(process.raw(), INFINITE) };
-    if wait == WAIT_FAILED {
-        return Err(io::Error::last_os_error());
-    }
-    sandbox_trace(&trace_label, "process signaled");
-
-    let mut code = 1u32;
-    if unsafe { GetExitCodeProcess(process.raw(), &mut code) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    sandbox_trace(&trace_label, format!("exit code {code}"));
-
-    sandbox_trace(&trace_label, "joining stdout reader");
-    let stdout = join_reader(stdout)?;
-    sandbox_trace(&trace_label, "joining stderr reader");
-    let stderr = join_reader(stderr)?;
+        _ => None,
+    };
+    let stdout = child.take_stdout().map(read_to_end_async);
+    let stderr = child.take_stderr().map(read_to_end_async);
+    let status = child.wait()?;
+    let stdout = stdout.map(join_reader).transpose()?.unwrap_or_default();
+    let stderr = stderr.map(join_reader).transpose()?.unwrap_or_default();
     if let Some(stdin_writer) = stdin_writer {
         stdin_writer
             .join()
             .map_err(|_| io::Error::other("stdin writer thread panicked"))??;
     }
-    sandbox_trace(&trace_label, "complete");
     Ok(Output {
-        status: ExitStatus::from_raw(code),
+        status,
         stdout,
         stderr,
+    })
+}
+
+fn read_to_end_async(mut file: std::fs::File) -> std::thread::JoinHandle<io::Result<Vec<u8>>> {
+    std::thread::spawn(move || {
+        let mut output = Vec::new();
+        file.read_to_end(&mut output)?;
+        Ok(output)
     })
 }
 
@@ -333,9 +222,13 @@ struct AppContainerProfile {
 }
 
 impl AppContainerProfile {
-    fn create(process_capabilities: &mut ProcessCapabilities) -> io::Result<Self> {
-        let id = PROFILE_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let name = format!("harn.sandbox.{}.{}", std::process::id(), id);
+    /// The container for `policy`, created on first use and reused after.
+    /// See [`acl_grants::container_identity`] for why it is not per spawn.
+    fn for_policy(
+        policy: &CapabilityPolicy,
+        process_capabilities: &mut ProcessCapabilities,
+    ) -> io::Result<Self> {
+        let name = acl_grants::container_identity(policy, policy_allows_network(policy));
         let wide_name = str_to_wide(&name);
         let display = str_to_wide("Harn Sandbox");
         let description = str_to_wide("Harn per-process capability sandbox");
@@ -482,13 +375,14 @@ impl ProcessCapabilities {
     }
 }
 
+/// Frees the SID only. The profile itself persists with its grants, which is
+/// what lets the next spawn under the same policy skip them.
 impl Drop for AppContainerProfile {
     fn drop(&mut self) {
         unsafe {
             if !self.sid.is_null() {
                 LocalFree(self.sid.cast());
             }
-            DeleteAppContainerProfile(self.name.as_ptr());
         }
     }
 }
@@ -517,21 +411,36 @@ fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
         .collect()
 }
 
+/// How much a confined child's Job Object lets its tree use.
+#[derive(Clone, Copy)]
+pub(crate) enum JobLimits {
+    /// At most 32 processes of 512 MiB each: a script's one-shot command.
+    Bounded,
+    /// No process or memory cap: an agent's command, such as a build, which
+    /// runs today without one and would be killed mid-link under the caps.
+    Unbounded,
+}
+
 struct JobObject {
     handle: OwnedHandle,
 }
 
+// A Job Object handle may be used and closed from any thread.
+unsafe impl Sync for JobObject {}
+
 impl JobObject {
-    fn create() -> io::Result<Self> {
+    fn create(bounds: JobLimits) -> io::Result<Self> {
         let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         let handle = OwnedHandle::new_checked(handle)?;
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION
-            | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
-            | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
-        limits.BasicLimitInformation.ActiveProcessLimit = 32;
-        limits.ProcessMemoryLimit = 512 * 1024 * 1024;
+        limits.BasicLimitInformation.LimitFlags =
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+        if let JobLimits::Bounded = bounds {
+            limits.BasicLimitInformation.LimitFlags |=
+                JOB_OBJECT_LIMIT_ACTIVE_PROCESS | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+            limits.BasicLimitInformation.ActiveProcessLimit = 32;
+            limits.ProcessMemoryLimit = 512 * 1024 * 1024;
+        }
         set_job_info(handle.raw(), JobObjectExtendedLimitInformation, &limits)?;
         let restrictions = JOBOBJECT_BASIC_UI_RESTRICTIONS {
             UIRestrictionsClass: JOB_OBJECT_UILIMIT_HANDLES
@@ -552,6 +461,12 @@ impl JobObject {
             return Err(io::Error::last_os_error());
         }
         Ok(())
+    }
+
+    fn terminate(&self) {
+        unsafe {
+            TerminateJobObject(self.handle.raw(), 1);
+        }
     }
 }
 
@@ -600,11 +515,9 @@ impl InheritablePipe {
         })
     }
 
-    fn into_reader(self) -> PipeReader {
-        PipeReader {
-            read: Some(self.read),
-            child_write: Some(self.write),
-        }
+    /// The parent's read end and the child's inheritable write end.
+    fn into_parts(self) -> (OwnedHandle, OwnedHandle) {
+        (self.read, self.write)
     }
 }
 
@@ -638,49 +551,17 @@ impl InheritableStdinPipe {
         })
     }
 
-    fn child_read_handle(&self) -> HANDLE {
+    /// The child's inheritable read end.
+    fn take_child_read(&mut self) -> OwnedHandle {
         self.child_read
-            .as_ref()
-            .map_or(std::ptr::null_mut(), OwnedHandle::raw)
+            .take()
+            .expect("child read end already taken")
     }
 
-    fn close_child_read(&mut self) {
-        self.child_read.take();
-    }
-
-    fn write_async(mut self, input: Vec<u8>) -> std::thread::JoinHandle<io::Result<()>> {
+    /// The parent's write end. Dropping it closes the child's input.
+    fn into_writer(mut self) -> std::fs::File {
         let handle = self.write.take().expect("stdin writer already consumed");
-        std::thread::spawn(move || {
-            let mut file = unsafe { std::fs::File::from_raw_handle(handle.into_raw().cast()) };
-            file.write_all(&input)
-        })
-    }
-}
-
-struct PipeReader {
-    read: Option<OwnedHandle>,
-    child_write: Option<OwnedHandle>,
-}
-
-impl PipeReader {
-    fn child_write_handle(&self) -> HANDLE {
-        self.child_write
-            .as_ref()
-            .map_or(std::ptr::null_mut(), OwnedHandle::raw)
-    }
-
-    fn close_child_write(&mut self) {
-        self.child_write.take();
-    }
-
-    fn read_async(&mut self) -> std::thread::JoinHandle<io::Result<Vec<u8>>> {
-        let handle = self.read.take().expect("pipe reader already consumed");
-        std::thread::spawn(move || {
-            let mut file = unsafe { std::fs::File::from_raw_handle(handle.into_raw().cast()) };
-            let mut output = Vec::new();
-            file.read_to_end(&mut output)?;
-            Ok(output)
-        })
+        unsafe { std::fs::File::from_raw_handle(handle.into_raw().cast()) }
     }
 }
 
@@ -701,6 +582,14 @@ impl OwnedHandle {
     }
 
     fn nul_read() -> io::Result<Self> {
+        Self::nul(GENERIC_READ)
+    }
+
+    fn nul_write() -> io::Result<Self> {
+        Self::nul(GENERIC_WRITE)
+    }
+
+    fn nul(access: u32) -> io::Result<Self> {
         let mut sa = SECURITY_ATTRIBUTES {
             nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: std::ptr::null_mut(),
@@ -710,7 +599,7 @@ impl OwnedHandle {
         let handle = unsafe {
             CreateFileW(
                 path.as_ptr(),
-                GENERIC_READ,
+                access,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 &mut sa,
                 OPEN_EXISTING,
@@ -958,6 +847,63 @@ fn failed(hr: i32) -> bool {
 mod tests {
     use super::*;
     use crate::orchestration::{ProcessSandboxPolicy, ProcessSandboxPreset};
+
+    fn workspace_policy(root: &Path, write: bool) -> CapabilityPolicy {
+        let mut policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![root.display().to_string()],
+            ..CapabilityPolicy::default()
+        };
+        if !write {
+            policy.capabilities = std::collections::BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["read_text".to_string()],
+            )]);
+        }
+        policy
+    }
+
+    /// One policy names one container, so its grants can be reused; a policy
+    /// that may not write names another, so it never inherits a write grant.
+    #[test]
+    fn a_container_is_named_by_its_grant_plan() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let writable = workspace_policy(workspace.path(), true);
+        let read_only = workspace_policy(workspace.path(), false);
+        assert_eq!(
+            acl_grants::container_identity(&writable, false),
+            acl_grants::container_identity(&writable, false)
+        );
+        assert_ne!(
+            acl_grants::container_identity(&writable, false),
+            acl_grants::container_identity(&read_only, false)
+        );
+        assert_ne!(
+            acl_grants::container_identity(&writable, false),
+            acl_grants::container_identity(&writable, true)
+        );
+    }
+
+    /// The per-run grant is gone: the second spawn under a policy rewrites
+    /// nothing, and it learns that from the disk, as a fresh process would.
+    #[test]
+    fn a_policy_pays_for_its_grants_once() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(workspace.path().join("file.txt"), "x").expect("workspace file");
+        let policy = workspace_policy(workspace.path(), true);
+        let mut capabilities = ProcessCapabilities::for_policy(&policy).expect("capabilities");
+        let profile =
+            AppContainerProfile::for_policy(&policy, &mut capabilities).expect("container");
+        let sid = profile.sid_string().expect("sid");
+        let first = acl_grants::WorkspaceAclGrants::grant("test", &sid, &policy).expect("grant");
+        assert!(first.rewrites > 0, "the first spawn grants the workspace");
+        acl_grants::forget_container_grants();
+        let second = acl_grants::WorkspaceAclGrants::grant("test", &sid, &policy).expect("grant");
+        assert_eq!(
+            second.rewrites, 0,
+            "the second spawn found the grants in place"
+        );
+    }
 
     #[test]
     fn environment_block_forces_appcontainer_temp_roots() {

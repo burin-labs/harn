@@ -32,6 +32,18 @@ pub use crate::stdlib::sandbox::{
     SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
 };
 
+/// Windows: a confined child that the caller keeps, streams and cancels.
+/// `Command` cannot carry an AppContainer, so a caller that owns its child
+/// builds it with [`std_command_for_confined_launch`] and launches it here.
+#[cfg(target_os = "windows")]
+pub use crate::stdlib::sandbox::command_for::std_command_for_confined_launch;
+#[cfg(target_os = "windows")]
+pub use crate::stdlib::sandbox::windows::launch::{
+    ChildInput, ChildOutput, ChildStdio, ConfinedChild, ConfinedTerminator,
+};
+#[cfg(target_os = "windows")]
+pub use crate::stdlib::sandbox::windows::{confined_launch_applies, spawn_confined};
+
 /// The subcommand the namespace helper is invoked as, and the flags that
 /// carry the confinement to it.
 ///

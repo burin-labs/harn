@@ -66,22 +66,8 @@ impl Drop for UndeclaredName {
 /// Cases known to fail on this platform, and the issue that owns the fix.
 ///
 /// The run must fail exactly these: a new failure is a regression, and a case
-/// that starts holding means the fix landed and its entry must go. Windows
-/// runs the command tool's children outside the AppContainer today (#8738),
-/// so every filesystem refusal escapes and the backend's own socket refusal
-/// never happens.
-const KNOWN_GAPS: &[&str] = if cfg!(windows) {
-    &[
-        "fs.outside_write_refused",
-        "fs.outside_read_refused",
-        "fs.sibling_temp_read_refused",
-        "unix_socket.bind_under_root",
-        "unix_socket.bind_under_root_with_network",
-        "unix_socket.bind_outside_root_refused",
-    ]
-} else {
-    &[]
-};
+/// that starts holding means the fix landed and its entry must go.
+const KNOWN_GAPS: &[&str] = &[];
 
 fn enforcement_required() -> bool {
     std::env::var(REQUIRE_ENFORCEMENT_ENV)

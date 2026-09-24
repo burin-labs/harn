@@ -13,6 +13,8 @@ pub mod real;
 
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(target_os = "windows")]
+mod windows_confined;
 
 pub use handle::{
     current_spawner, install_spawner, spawn_process, EnvMode, ExitStatus, OutputCapture,

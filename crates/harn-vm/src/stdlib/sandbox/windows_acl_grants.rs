@@ -17,6 +17,7 @@ use super::system_roots::{
     broad_system_root, cached_tree_entry_count, hosts_an_executable, system_read_roots,
 };
 use super::{process_sandbox_preset_acl_roots, run_icacls, sandbox_trace};
+
 use crate::orchestration::CapabilityPolicy;
 use crate::stdlib::sandbox::{
     policy_allows_workspace_write, process_sandbox_policy_read_roots,
@@ -24,11 +25,10 @@ use crate::stdlib::sandbox::{
 };
 
 pub(super) struct WorkspaceAclGrants {
-    label: String,
-    sid: String,
-    /// Only the grants made to this spawn's own container SID. The persistent
-    /// system read grants are deliberately absent: see [`Grantee`].
-    paths: Vec<PathBuf>,
+    /// How many recursive rewrites this spawn paid for. Zero once a
+    /// container's grants are in place, which is the point of a durable
+    /// identity: see [`container_identity`].
+    pub(super) rewrites: usize,
 }
 
 /// The well-known group every AppContainer token carries. Windows itself puts
@@ -48,9 +48,12 @@ const ALL_APPLICATION_PACKAGES_SID: &str = "S-1-15-2-1";
 /// for every toolchain the agent might use.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Grantee {
-    /// This spawn's own AppContainer SID. No other principal can use the
-    /// grant and the SID dies with the spawn, so the grant is removed on
-    /// drop. Correct for the workspace, whose contents are this run's alone.
+    /// The container SID derived from this policy's grant plan (see
+    /// [`container_identity`]). No other principal can use the grant: only a
+    /// process launched into that container carries the SID, and only a
+    /// policy with the same roots, write permission and network access
+    /// launches into it. The grant is durable, so a workspace pays the
+    /// recursive rewrite once rather than twice per spawn.
     ThisContainer,
     /// [`ALL_APPLICATION_PACKAGES_SID`]. Correct for a host toolchain
     /// directory, and it is what makes the cost bounded: the grant is the
@@ -100,7 +103,7 @@ impl WorkspaceAclGrants {
         } else {
             "(OI)(CI)RX"
         };
-        let mut paths = Vec::new();
+        let mut rewrites = 0;
         let writable = process_sandbox_roots(policy).into_iter().map(|root| {
             (
                 root,
@@ -219,6 +222,16 @@ impl WorkspaceAclGrants {
             // them repeats every rewrite. The read costs milliseconds against
             // the second it saves, and it deliberately bypasses the cache,
             // whose whole job is to remember the answer from before.
+            if grantee == Grantee::ThisContainer && container_holds(&root, sid, permission) {
+                sandbox_trace(
+                    label,
+                    format!(
+                        "icacls grant skipped path={} reason=container-already-granted",
+                        root.display()
+                    ),
+                );
+                continue;
+            }
             if grantee == Grantee::EveryAppContainer && recheck_reads_open(&root) {
                 sandbox_trace(
                     label,
@@ -252,14 +265,9 @@ impl WorkspaceAclGrants {
             match (granted, grant_is) {
                 (Ok(()), _) => {
                     sandbox_trace(label, "icacls grant ok");
-                    // Only a grant named for this spawn's own container SID is
-                    // recorded for removal. A read-execute entry for every
-                    // AppContainer is shared state that outlives this spawn by
-                    // design, and taking it away again would both restore the
-                    // per-spawn cost and race any concurrent spawn relying on
-                    // it.
+                    rewrites += 1;
                     match grantee {
-                        Grantee::ThisContainer => paths.push(root),
+                        Grantee::ThisContainer => remember_container_grant(&root, sid, permission),
                         Grantee::EveryAppContainer => {
                             remember_reads_open(&root);
                             report_durable_host_grant(&root);
@@ -285,27 +293,115 @@ impl WorkspaceAclGrants {
                 ),
             }
         }
-        Ok(Self {
-            label: label.to_string(),
-            sid: sid.to_string(),
-            paths,
-        })
+        Ok(Self { rewrites })
     }
 }
 
-impl Drop for WorkspaceAclGrants {
-    fn drop(&mut self) {
-        for path in &self.paths {
-            sandbox_trace(
-                &self.label,
-                format!("icacls remove begin path={}", path.display()),
-            );
-            match run_icacls(path, ["/remove:g", &format!("*{}", self.sid), "/T", "/C"]) {
-                Ok(()) => sandbox_trace(&self.label, "icacls remove ok"),
-                Err(error) => sandbox_trace(&self.label, format!("icacls remove failed: {error}")),
-            }
-        }
+/// The AppContainer name for a policy: one per grant plan, stable across
+/// spawns and processes.
+///
+/// A per-spawn container made every spawn pay a recursive ACL rewrite of the
+/// whole workspace and the matching removal, which is seconds on a real
+/// workspace and makes a confined command tool unusable. Deriving the name
+/// from what the container is granted makes the grants reusable instead:
+/// the same roots, write permission and network access name the same
+/// container, and a policy that differs in any of them names another, so a
+/// read-only run never inherits a writable run's grant. Only the plan is
+/// hashed, so the name reveals no path.
+pub(super) fn container_identity(policy: &CapabilityPolicy, network: bool) -> String {
+    use sha2::{Digest, Sha256};
+
+    let write = policy_allows_workspace_write(policy);
+    let mut plan: Vec<String> = process_sandbox_roots(policy)
+        .into_iter()
+        .map(|root| format!("workspace:{}", root.display()))
+        .chain(
+            process_sandbox_readonly_roots(policy)
+                .into_iter()
+                .chain(process_sandbox_policy_read_roots(policy))
+                .chain(process_sandbox_preset_acl_roots(policy))
+                .map(|root| format!("read:{}", root.display())),
+        )
+        .chain(
+            process_sandbox_policy_write_roots(policy)
+                .into_iter()
+                .filter(|_| write)
+                .map(|root| format!("write:{}", root.display())),
+        )
+        .collect();
+    plan.sort();
+    plan.dedup();
+    let mut hasher = Sha256::new();
+    hasher.update(format!("write={write};network={network};"));
+    for entry in &plan {
+        hasher.update(entry.as_bytes());
+        hasher.update([0]);
     }
+    let digest = hasher.finalize();
+    let hex: String = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("harn.sandbox.{hex}")
+}
+
+/// `icacls` renders an inheritable grant as `(OI)(CI)(M)`; the grant string
+/// passed to it is `(OI)(CI)M`.
+fn rendered_permission(permission: &str) -> String {
+    match permission.strip_prefix("(OI)(CI)") {
+        Some(rights) => format!("(OI)(CI)({rights})"),
+        None => permission.to_string(),
+    }
+}
+
+fn container_grants() -> &'static std::sync::Mutex<BTreeSet<(PathBuf, String, String)>> {
+    static GRANTS: std::sync::OnceLock<std::sync::Mutex<BTreeSet<(PathBuf, String, String)>>> =
+        std::sync::OnceLock::new();
+    GRANTS.get_or_init(|| std::sync::Mutex::new(BTreeSet::new()))
+}
+
+/// Forget what this process has seen, so a test can prove the on-disk probe
+/// by itself, as a fresh process would.
+#[cfg(test)]
+pub(super) fn forget_container_grants() {
+    if let Ok(mut grants) = container_grants().lock() {
+        grants.clear();
+    }
+}
+
+fn remember_container_grant(root: &Path, sid: &str, permission: &str) {
+    if let Ok(mut grants) = container_grants().lock() {
+        grants.insert((root.to_path_buf(), sid.to_string(), permission.to_string()));
+    }
+}
+
+/// Whether `root` already carries this container's inheritable grant.
+///
+/// A non-recursive read of the root's own entry, milliseconds against the
+/// rewrite it saves. The root's entry stands for the tree: the grant was
+/// applied with `/T`, and files created since inherit it. Checked in this
+/// process first, then on disk, where another process may have made it.
+fn container_holds(root: &Path, sid: &str, permission: &str) -> bool {
+    let key = (root.to_path_buf(), sid.to_string(), permission.to_string());
+    if container_grants()
+        .lock()
+        .is_ok_and(|grants| grants.contains(&key))
+    {
+        return true;
+    }
+    let Ok(dacl) = read_icacls(root) else {
+        return false;
+    };
+    let needle = format!(
+        "{}:{}",
+        sid.to_ascii_uppercase(),
+        rendered_permission(permission).to_ascii_uppercase()
+    );
+    let held = dacl.to_ascii_uppercase().contains(&needle);
+    if held {
+        remember_container_grant(root, sid, permission);
+    }
+    held
 }
 
 /// The largest tree one read root may be before it is not worth opening.

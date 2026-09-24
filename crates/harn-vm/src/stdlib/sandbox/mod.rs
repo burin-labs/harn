@@ -71,7 +71,7 @@ use paths::{
 mod backend;
 mod build_command;
 pub(crate) use build_command::{build_std_command, build_tokio_command};
-mod command_for;
+pub(crate) mod command_for;
 pub use command_for::{std_command_for, std_command_for_with_env_state, tokio_command_for};
 #[cfg(all(test, target_os = "linux"))]
 mod enforcement_report;
@@ -148,7 +148,7 @@ pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod toolchain_cache;
 #[cfg(target_os = "windows")]
-mod windows;
+pub(crate) mod windows;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use toolchain_cache::process_roots as process_sandbox_developer_toolchain_cache_roots;
 pub(crate) mod workspace_env;
