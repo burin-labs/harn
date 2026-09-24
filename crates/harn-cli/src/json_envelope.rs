@@ -133,6 +133,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             description: "Capability matrix: host, per-target buildability, per-provider reachability, per-stdlib-effect availability.",
             schema_json: None,
         },
+        #[cfg(feature = "hostlib")]
+        SchemaEntry {
+            command: "doctor sandbox",
+            schema_version: crate::commands::doctor_sandbox::DOCTOR_SANDBOX_SCHEMA_VERSION,
+            description: "Process-sandbox conformance: every contract case run against the live backend, with its verdict.",
+            schema_json: None,
+        },
         SchemaEntry {
             command: "host lease",
             schema_version: crate::commands::host::HOST_LEASE_CLI_SCHEMA_VERSION,

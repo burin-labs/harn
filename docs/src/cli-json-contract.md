@@ -111,6 +111,7 @@ versions.
 | `harn fix plan --json` / `apply --json` | Repair plan or applied edits, plus skipped invalid files |
 | `harn pack --json`             | `.harnpack` bundle build summary (inline schema)         |
 | `harn doctor --json`           | Capability matrix: host, targets, providers, effects     |
+| `harn doctor sandbox --json`   | Process-sandbox conformance: every contract case run live, with its verdict |
 | `harn explain <CODE> --json`   | Per-diagnostic-code explanation                          |
 | `harn explain --catalog --json` | Full diagnostic-code catalog                            |
 | `harn session export`          | Portable session bundle export. Prints JSON to stdout when `--out` is omitted; there is no `--json` flag |

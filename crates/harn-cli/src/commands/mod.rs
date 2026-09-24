@@ -22,6 +22,8 @@ pub(crate) mod diagnostics_catalog;
 pub(crate) mod dispatch_explain;
 pub(crate) mod doc;
 pub(crate) mod doctor;
+#[cfg(feature = "hostlib")]
+pub(crate) mod doctor_sandbox;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod dump_portable_benchmark_schema;
 pub(crate) mod dump_prompt_grammar;

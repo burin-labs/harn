@@ -215,6 +215,12 @@ pub enum Verdict {
         target: String,
         reason: String,
     },
+    /// The probe ran but its effect could not be read, so nothing was
+    /// measured. A failure, because a probe that cannot see is how a
+    /// boundary stops being tested without anyone noticing.
+    ProbeBroken {
+        reason: String,
+    },
 }
 
 impl Verdict {
@@ -222,7 +228,10 @@ impl Verdict {
     pub fn is_failure(&self) -> bool {
         matches!(
             self,
-            Self::Escaped { .. } | Self::Overrefused { .. } | Self::Contradiction { .. }
+            Self::Escaped { .. }
+                | Self::Overrefused { .. }
+                | Self::Contradiction { .. }
+                | Self::ProbeBroken { .. }
         )
     }
 }

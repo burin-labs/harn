@@ -115,7 +115,7 @@ pub(crate) use dap::DapArgs;
 pub(crate) use demo::DemoArgs;
 pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
-pub(crate) use doctor::DoctorArgs;
+pub(crate) use doctor::{DoctorArgs, DoctorCommand};
 pub(crate) use dump::{
     ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs,
     DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs,
