@@ -24,6 +24,9 @@ logs and progress always go to stderr.
 
 - Discover supported commands and their current schema versions:
   `harn --json-schemas` (filter with `--command <name>`).
+- Discover native CLI flags, nested actions, positional arity, and enum values:
+  `harn --argument-schema` (versioned JSON envelope). Harn still validates
+  custom value parsers and cross-argument rules.
 - Per-command shape reference: `docs/src/cli-json-contract.md`.
 - Decode `harn lint --json` through `std/cli/envelope` (`decode_lint_json`);
   `harn --json-schemas --command lint` publishes the complete `schemaJson`.
