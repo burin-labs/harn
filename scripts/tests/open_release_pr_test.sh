@@ -154,8 +154,9 @@ new_fixture() {
   git -C "$fixture" add -A
   git -C "$fixture" commit --quiet -m initial
   # The opener re-reads origin/main before publishing, so each fixture has a
-  # real remote.
-  git init --quiet --bare "$fixture.origin.git"
+  # real remote. Its HEAD names main explicitly: a bare repository otherwise
+  # follows the host's init.defaultBranch, and a clone of it checks out nothing.
+  git init --quiet --bare -b main "$fixture.origin.git"
   git -C "$fixture" remote add origin "$fixture.origin.git"
   git -C "$fixture" push --quiet origin HEAD:refs/heads/main
   printf '%s\n' "$fixture"

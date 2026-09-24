@@ -61,7 +61,7 @@ targets="$storage/harn-target"
 mkdir -p "$targets" "$repos"
 
 # A live worktree, and a worktree deleted from disk whose git record survives.
-git -C "$repos" init -q live
+git -C "$repos" init -b main -q live
 git -C "$repos/live" config user.email gc@example.invalid
 git -C "$repos/live" config user.name gc
 git -C "$repos/live" commit -q --allow-empty -m seed

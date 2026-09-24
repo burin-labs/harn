@@ -67,7 +67,7 @@ trap 'rm -rf "$tmp_root"' EXIT
 
 init_fixture() {
   local repo="$1"
-  git -C "$repo" init -q
+  git -C "$repo" init -b main -q
   git -C "$repo" config user.email test@example.com
   git -C "$repo" config user.name test
   git -C "$repo" config commit.gpgsign false
