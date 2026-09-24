@@ -53,6 +53,7 @@ mod eval_context_cli;
 mod eval_prompt_dispatch;
 mod eval_skill_gate_cli;
 mod explain_dispatch;
+mod git_config_sandbox_cli;
 mod graph_cli;
 mod harn_script_lint_rules_dispatch;
 mod harn_serve_api_cli;
