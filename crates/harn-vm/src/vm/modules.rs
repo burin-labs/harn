@@ -144,8 +144,8 @@ fn module_import_names(
 ) -> Result<Vec<String>, VmError> {
     if let Some(names) = selected_names {
         for name in names {
-            if !loaded.public_exports.contains_key(name)
-                && !(allow_sibling && loaded.sibling_exports.contains_key(name))
+            if !(loaded.public_exports.contains_key(name)
+                || (allow_sibling && loaded.sibling_exports.contains_key(name)))
             {
                 let message = match name_use {
                     ImportNameUse::Binding => {
