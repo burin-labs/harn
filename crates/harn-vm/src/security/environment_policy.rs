@@ -76,6 +76,8 @@ const BASE_ENV_ALLOWLIST: &[&str] = &[
 /// regress to a denylist. Grouped by ecosystem (not globally sorted) so a
 /// reviewer reads a toolchain's vars as a unit.
 const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
+    // Git: the global config file a user points git at, a path.
+    "GIT_CONFIG_GLOBAL",
     // Rust / Cargo: install roots + target/backtrace controls.
     "CARGO_HOME",
     "CARGO_TARGET_DIR",

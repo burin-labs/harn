@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 
 use super::paths::normalize_for_policy;
 
+/// The paths the user's Git configuration names; see the module.
+#[path = "git_config_roots.rs"]
+pub(crate) mod git_config_roots;
+
 /// Per-user toolchain *cache* roots that JVM/iOS build tools read **and write**
 /// while a sandboxed build runs (Gradle, Maven, CocoaPods, Xcode, Kotlin
 /// Native). Unlike [`developer_toolchain_read_roots_for_home`] these are not
@@ -172,6 +176,7 @@ pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<Pat
     .into_iter()
     .map(|entry| normalize_for_policy(&home.join(entry)))
     .collect();
+    roots.extend(git_config_roots::git_config_read_roots(home));
     roots.sort_unstable();
     roots.dedup();
     roots

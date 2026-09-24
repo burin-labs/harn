@@ -258,7 +258,10 @@ fn workspace_toolchain_env_with_package_cache(
     }
     if let Some(home) = crate::user_dirs::home_dir().filter(|home| home.is_absolute()) {
         for (key, candidate) in [
-            ("GIT_CONFIG_GLOBAL", home.join(".gitconfig")),
+            (
+                "GIT_CONFIG_GLOBAL",
+                super::read_roots::git_config_roots::git_global_config(&home),
+            ),
             ("PIP_CONFIG_FILE", home.join(".config/pip/pip.conf")),
         ] {
             if candidate.is_file() {

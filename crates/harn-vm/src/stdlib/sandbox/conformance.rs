@@ -46,6 +46,14 @@ pub enum ConformanceCase {
     UndeclaredEnvironmentNameWithheld,
     /// The same, for a child re-created by the process-owner guardian.
     GuardianUndeclaredEnvironmentNameWithheld,
+    /// `git commit` succeeds in a workspace repository when the user's global
+    /// config names a hooks directory outside the workspace, and the hook
+    /// runs. `git` is a core agent tool, and a global `core.hooksPath` is an
+    /// ordinary setup.
+    GitCommitWithGlobalHooks,
+    /// The hooks directory that config names stays read-only: the grant that
+    /// lets `git` run a hook must not let the child rewrite it.
+    GitGlobalHooksWriteRefused,
     /// A Unix socket file binds under a named socket root on a policy that
     /// does not permit networking.
     UnixSocketBindUnderRoot,
@@ -68,6 +76,8 @@ impl ConformanceCase {
         Self::GuardianOutsideWriteRefused,
         Self::UndeclaredEnvironmentNameWithheld,
         Self::GuardianUndeclaredEnvironmentNameWithheld,
+        Self::GitCommitWithGlobalHooks,
+        Self::GitGlobalHooksWriteRefused,
         Self::UnixSocketBindUnderRoot,
         Self::UnixSocketBindUnderRootWithNetwork,
         Self::UnixSocketBindOutsideRootRefused,
@@ -83,6 +93,8 @@ impl ConformanceCase {
             Self::GuardianUndeclaredEnvironmentNameWithheld => {
                 "guardian.undeclared_env_name_withheld"
             }
+            Self::GitCommitWithGlobalHooks => "git.commit_with_global_hooks",
+            Self::GitGlobalHooksWriteRefused => "git.global_hooks_write_refused",
             Self::UnixSocketBindUnderRoot => "unix_socket.bind_under_root",
             Self::UnixSocketBindUnderRootWithNetwork => "unix_socket.bind_under_root_with_network",
             Self::UnixSocketBindOutsideRootRefused => "unix_socket.bind_outside_root_refused",
@@ -123,8 +135,11 @@ impl ConformanceCase {
             );
         }
         match self {
-            Self::WorkspaceWriteAdmitted => Expectation::Observe(Observation::Admitted),
-            Self::OutsideWriteRefused
+            Self::WorkspaceWriteAdmitted | Self::GitCommitWithGlobalHooks => {
+                Expectation::Observe(Observation::Admitted)
+            }
+            Self::GitGlobalHooksWriteRefused
+            | Self::OutsideWriteRefused
             | Self::OutsideReadRefused
             | Self::GuardianOutsideWriteRefused
             | Self::UndeclaredEnvironmentNameWithheld

@@ -168,7 +168,22 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         let verdict = judge(case, expectation, enforcing, Observation::Refused, &target);
         return report(None, verdict, String::new());
     }
-    let _scope = CaseScope::enter(policy);
+    let session = if is_git_case(case) {
+        if !program_on_path("git") {
+            let reason = "git is not installed, so no commit could be measured".to_string();
+            return report(None, Verdict::NotMeasured { reason }, String::new());
+        }
+        match write_git_fixture(&layout) {
+            Ok(config) => git_session(&config),
+            Err(error) => {
+                let reason = format!("could not write the git fixture: {error}");
+                return report(None, Verdict::ProbeBroken { reason }, String::new());
+            }
+        }
+    } else {
+        SessionEnvironment::isolated()
+    };
+    let _scope = CaseScope::enter(policy, session);
     let child = match spawn(case, &layout, &argv) {
         Ok(child) => child,
         Err(reason) => return report(None, Verdict::ProbeBroken { reason }, String::new()),
@@ -322,7 +337,90 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
             let target = layout.outside.join("probe.sock");
             (bind_argv(&target), target.display().to_string())
         }
+        ConformanceCase::GitCommitWithGlobalHooks => {
+            // The hook leaves a marker in the repository, so a commit that
+            // skipped it does not read as one that ran it.
+            let script = "git init -q repo && cd repo && git commit -q --allow-empty -m probe";
+            let argv = if cfg!(windows) {
+                owned(&["cmd", "/c", script])
+            } else {
+                owned(&["sh", "-c", script])
+            };
+            let target = layout.workspace.join("repo/.git").join(HOOK_MARKER);
+            (argv, target.display().to_string())
+        }
+        ConformanceCase::GitGlobalHooksWriteRefused => {
+            let target = layout.outside.join("hooks/probe.txt");
+            (write_argv(&target), target.display().to_string())
+        }
     }
+}
+
+/// Written by the fixture's pre-commit hook into `$GIT_DIR`.
+const HOOK_MARKER: &str = "harn-conformance-hook-ran";
+
+fn is_git_case(case: ConformanceCase) -> bool {
+    matches!(
+        case,
+        ConformanceCase::GitCommitWithGlobalHooks | ConformanceCase::GitGlobalHooksWriteRefused
+    )
+}
+
+fn program_on_path(program: &str) -> bool {
+    let names: Vec<String> = if cfg!(windows) {
+        vec![format!("{program}.exe"), format!("{program}.cmd")]
+    } else {
+        vec![program.to_string()]
+    };
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| names.iter().any(|name| dir.join(name).is_file()))
+    })
+}
+
+/// A global git config outside the workspace naming a hooks directory also
+/// outside it, with a pre-commit hook that marks the repository it ran in.
+fn write_git_fixture(layout: &Layout) -> std::io::Result<PathBuf> {
+    let hooks = layout.outside.join("hooks");
+    std::fs::create_dir_all(&hooks)?;
+    let hook = hooks.join("pre-commit");
+    std::fs::write(
+        &hook,
+        format!("#!/bin/sh\n: > \"$(git rev-parse --git-dir)/{HOOK_MARKER}\"\n"),
+    )?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))?;
+    }
+    let config = layout.outside.join("gitconfig");
+    // Forward slashes: git reads backslashes in a config value as escapes.
+    let hooks_value = hooks.display().to_string().replace('\\', "/");
+    std::fs::write(
+        &config,
+        format!(
+            "[core]\n\thooksPath = {hooks_value}\n\
+             [user]\n\tname = Harn Conformance\n\temail = conformance@example.invalid\n"
+        ),
+    )?;
+    Ok(config)
+}
+
+/// An isolated session whose launcher points git at the fixture config, so
+/// the case never reads or depends on the operator's own git configuration.
+fn git_session(config: &Path) -> SessionEnvironment {
+    let mut snapshot: BTreeMap<String, String> = std::env::vars().collect();
+    snapshot.insert(
+        "GIT_CONFIG_GLOBAL".to_string(),
+        config.display().to_string(),
+    );
+    let lookup = snapshot.clone();
+    SessionEnvironment::launch_from_snapshot(
+        harn_vm::security::EnvironmentPolicyKind::Isolated,
+        Vec::new(),
+        snapshot,
+        &move |name| lookup.get(name).cloned(),
+    )
+    .expect("an isolated session takes no grants")
 }
 
 fn write_argv(target: &Path) -> Vec<String> {
@@ -532,10 +630,10 @@ struct CaseScope {
 }
 
 impl CaseScope {
-    fn enter(policy: CapabilityPolicy) -> Self {
+    fn enter(policy: CapabilityPolicy, session: SessionEnvironment) -> Self {
         let previous_environment = harn_vm::stdlib::process::current_session_environment();
         push_execution_policy(policy);
-        harn_vm::stdlib::process::set_session_environment(Some(SessionEnvironment::isolated()));
+        harn_vm::stdlib::process::set_session_environment(Some(session));
         Self {
             previous_environment,
         }
