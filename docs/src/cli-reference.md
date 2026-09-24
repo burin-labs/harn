@@ -7,6 +7,27 @@ To add a new subcommand or port an existing one off Rust, see
 machine-readable side of `--json` modes, see the
 [`harn --json` contract](./cli-json-contract.md).
 
+## harn self
+
+Use a released Harn binary for an exact before-and-after check without
+rebuilding an old tag:
+
+```bash
+harn self install v0.10.116
+harn self run --version v0.10.116 -- version --json
+harn self list
+harn self prune --keep 3
+```
+
+`install` downloads the platform release archive and requires its SHA256SUMS
+entry before caching the binary under `~/.harn/toolchains/<version>/`.
+`run` installs on a cache miss, verifies the cached binary, and prints its
+version and full source revision on stderr before forwarding the command and
+its exit status. A second invocation uses the cache without downloading.
+`prune` retains the newest `N` verified version directories and waits for an
+active invocation of a version before removing it. It does not change the
+installed `harn` on your PATH.
+
 ## harn run
 
 Execute a `.harn` file.
