@@ -92,7 +92,7 @@ mod refusal;
 use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
-    active_backend_filesystem_mechanism, active_backend_name,
+    active_backend_filesystem_mechanism, active_backend_name, conformance,
 };
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
 pub use process_config::apply_active_rustc_wrapper_policy;
