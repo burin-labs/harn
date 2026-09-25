@@ -19,7 +19,7 @@ pub use host_request::ToolApprovalRequest;
 use path_guards::default_guard;
 pub use path_guards::{
     denial_gate_for_source, SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD,
-    SOURCE_DEFAULT_SENSITIVE_PATH,
+    SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
 };
 
 const POLICY_RECEIPT_TYPE: &str = "harn.permission_policy_decision.v1";
@@ -463,6 +463,9 @@ pub struct PolicyEvaluation {
     /// rather than having to parse it back out of the reason prose.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied_paths: Vec<String>,
+    /// Network destinations refused by the deciding policy, as declared URLs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied_network_targets: Vec<String>,
     pub receipt: JsonValue,
 }
 
@@ -1090,6 +1093,7 @@ fn evaluation_from_candidate(candidate: Candidate, ctx: &EvaluationContext) -> P
         required_approval,
         risk_labels,
         denied_paths: candidate.denied_paths,
+        denied_network_targets: Vec::new(),
         receipt,
     }
 }
@@ -1105,6 +1109,7 @@ fn default_allow(ctx: &EvaluationContext) -> PolicyEvaluation {
         required_approval: None,
         risk_labels: Vec::new(),
         denied_paths: Vec::new(),
+        denied_network_targets: Vec::new(),
         receipt,
     }
 }

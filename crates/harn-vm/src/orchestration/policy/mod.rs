@@ -52,6 +52,7 @@ pub use approval_rules::{
     next_approval_unavailable_class_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
     PolicyMatchedRule, PolicyRule, PolicyRuleMatch, ToolApprovalRequest,
     SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH,
+    SOURCE_NET_POLICY,
 };
 pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,

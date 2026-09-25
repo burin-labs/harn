@@ -15,6 +15,8 @@ pub const SOURCE_DEFAULT_SENSITIVE_PATH: &str = "default_sensitive_path";
 pub const SOURCE_DEFAULT_PATH_GUARD: &str = "default_path_guard";
 /// The workspace path boundary refusing a path outside every admitted root.
 pub const SOURCE_DEFAULT_EXTERNAL_PATH: &str = "default_external_path";
+/// The prepared-run network policy, evaluated before endpoint health.
+pub const SOURCE_NET_POLICY: &str = "harn.net_policy";
 
 /// Which refusing mechanism a deciding rule belongs to.
 ///
@@ -33,6 +35,7 @@ pub fn denial_gate_for_source(source: Option<&str>) -> crate::agent_events::Deni
     use crate::agent_events::DenialGate;
     match source {
         Some(SOURCE_DEFAULT_SENSITIVE_PATH) => DenialGate::SensitivePath,
+        Some(SOURCE_NET_POLICY) => DenialGate::NetworkPolicy,
         Some(SOURCE_DEFAULT_PATH_GUARD) | Some(SOURCE_DEFAULT_EXTERNAL_PATH) => {
             DenialGate::WorkspaceBoundary
         }
@@ -136,6 +139,7 @@ impl PolicyEvaluation {
             self.reason.clone(),
         );
         denial.denied_paths = self.denied_paths.clone();
+        denial.denied_network_targets = self.denied_network_targets.clone();
         denial
     }
 }
