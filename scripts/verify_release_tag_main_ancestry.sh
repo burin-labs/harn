@@ -48,15 +48,30 @@ remote_rows="$(
 )"
 tag_object="$(awk -v ref="refs/tags/$tag" '$2 == ref {print $1}' <<<"$remote_rows")"
 tag_target="$(awk -v ref="refs/tags/$tag^{}" '$2 == ref {print $1}' <<<"$remote_rows")"
+# Promotion publishes through the Releases API, which creates a lightweight tag:
+# the ref names the release commit itself and has no peeled row.
+lightweight=false
+if [[ "$tag_object" =~ ^[0-9a-f]{40}$ && -z "$tag_target" ]]; then
+  tag_target="$tag_object"
+  lightweight=true
+fi
 if [[ ! "$tag_object" =~ ^[0-9a-f]{40}$ || ! "$tag_target" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "error: origin/$tag is missing or is not an annotated tag resolving to one exact commit" >&2
+  echo "error: origin/$tag is missing or does not resolve to one exact commit" >&2
   exit 1
 fi
 
 git -C "$repo" fetch --quiet --no-tags origin main "$tag_object"
+if [[ "$lightweight" == true && "$(git -C "$repo" cat-file -t "$tag_target")" != commit ]]; then
+  echo "error: origin/$tag is a lightweight tag that does not name a commit" >&2
+  exit 1
+fi
 main_head="$(git -C "$repo" rev-parse --verify 'origin/main^{commit}')"
 candidate=false
 if ! git -C "$repo" merge-base --is-ancestor "$tag_target" "$main_head"; then
+  if [[ "$lightweight" == true ]]; then
+    echo "error: origin/$tag is not reachable from origin/main, and a lightweight tag carries no candidate signature" >&2
+    exit 1
+  fi
   # Trust policy comes from main, never from the unmerged candidate being judged.
   # Verify the remote tag object itself so an ambient local tag cannot supply
   # a signature for different bytes. The signed marker is durable certification

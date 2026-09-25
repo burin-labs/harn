@@ -38,10 +38,20 @@ if "$verifier" --repo "$tmp_root/work" --tag v9.9.9 >"$tmp_root/missing.out" 2>&
   echo "FAIL: missing release tag was accepted" >&2
   exit 1
 fi
-grep -q 'missing or is not an annotated tag' "$tmp_root/missing.out" || {
+grep -q 'missing or does not resolve to one exact commit' "$tmp_root/missing.out" || {
   echo "FAIL: missing-tag rejection did not name the remote tag invariant" >&2
   exit 1
 }
+
+# Promotion publishes through the Releases API, which tags the release commit
+# with a lightweight ref. The same merged Release commit is accepted that way.
+git -C "$tmp_root/origin.git" update-ref refs/tags/v1.2.3 "$release_commit"
+lw_output="$($verifier --repo "$tmp_root/work" --tag v1.2.3)"
+[[ "$lw_output" == *"$release_commit"*"trusted candidate=false"* ]] || {
+  echo "FAIL: lightweight tag on the merged Release commit was not accepted: $lw_output" >&2
+  exit 1
+}
+git -C "$tmp_root/work" push -q --force origin refs/tags/v1.2.3
 
 if "$verifier" --repo "$tmp_root/work" --tag release-1.2.3 \
   >"$tmp_root/malformed.out" 2>&1; then
@@ -65,6 +75,17 @@ if "$verifier" --repo "$tmp_root/work" --tag v1.2.4 >"$tmp_root/orphan.out" 2>&1
 fi
 grep -q 'not reachable from origin/main' "$tmp_root/orphan.out" || {
   echo "FAIL: orphan rejection did not name the main-ancestry invariant" >&2
+  exit 1
+}
+
+# A lightweight tag carries no signature, so off main it has no way in.
+git -C "$tmp_root/origin.git" update-ref refs/tags/v1.2.4 "$(git -C "$tmp_root/work" rev-parse HEAD)"
+if "$verifier" --repo "$tmp_root/work" --tag v1.2.4 >"$tmp_root/orphan-lw.out" 2>&1; then
+  echo "FAIL: lightweight tag on an off-main commit was accepted" >&2
+  exit 1
+fi
+grep -q 'a lightweight tag carries no candidate signature' "$tmp_root/orphan-lw.out" || {
+  echo "FAIL: off-main lightweight rejection did not say why: $(cat "$tmp_root/orphan-lw.out")" >&2
   exit 1
 }
 
