@@ -21,8 +21,10 @@
 //! - The build fails, and succeeds with every wrapper switched off: the wrapper
 //!   cannot run under this profile, so it is `disabled` with Cargo's words as
 //!   the reason.
-//! - Both fail: the wrapper is not what broke the build, so it is `kept` as
-//!   `unmeasured` rather than switched off on a guess.
+//! - Both fail, or the probe cannot run at all: `unmeasured`, and switched
+//!   off. A wrapper stays on only when a build proved it runs; Cargo that
+//!   cannot build an empty crate here gains nothing from it, and a wrapper
+//!   left on unproven could still start a confined server.
 //!
 //! # The long-lived process rule
 //!
@@ -65,8 +67,9 @@ pub enum RustcWrapperDisposition {
     /// The wrapper cannot run under this profile, or would leave a confined
     /// long-lived process behind, so every wrapper setting is switched off.
     Disabled,
-    /// The build failed with and without the wrapper, so the wrapper is not
-    /// what broke it. Left in place; the reason says what failed.
+    /// The probe could not tell: the build failed with and without the
+    /// wrapper, or could not run. Switched off, since only a proven wrapper
+    /// is kept; the reason says what failed.
     Unmeasured,
 }
 
@@ -82,9 +85,10 @@ pub struct RustcWrapperDecision {
 }
 
 impl RustcWrapperDecision {
-    /// Whether spawns under this decision get every wrapper switched off.
+    /// Whether spawns under this decision get every wrapper switched off:
+    /// all but a proven wrapper.
     pub fn disables(&self) -> bool {
-        self.disposition == RustcWrapperDisposition::Disabled
+        self.disposition != RustcWrapperDisposition::Kept
     }
 }
 
@@ -178,7 +182,9 @@ fn record(decision: &RustcWrapperDecision) {
             "a Cargo rustc wrapper was switched off in the sandbox"
         }
         RustcWrapperDisposition::Kept => "a Cargo rustc wrapper was kept in the sandbox",
-        RustcWrapperDisposition::Unmeasured => "a Cargo rustc wrapper could not be measured",
+        RustcWrapperDisposition::Unmeasured => {
+            "a Cargo rustc wrapper could not be measured and was switched off in the sandbox"
+        }
         RustcWrapperDisposition::NotConfigured => "no Cargo rustc wrapper applies",
     };
     if decision.disables() {
