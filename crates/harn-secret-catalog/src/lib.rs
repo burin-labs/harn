@@ -6,7 +6,8 @@
 //! consumers that must stay off the Harn runtime — such as the Burin TUI's
 //! dependency-light `util` crate — can share the exact same catalog instead of
 //! forking their own parallel list. Consumers compile the [`SecretPatternSpec::regex`]
-//! strings with whatever regex engine they already use.
+//! strings with whatever regex engine they already use. They should call
+//! [`SecretPatternSpec::accepts_match`] before acting on a match.
 //!
 //! Patterns are sourced from public detectors (gitleaks, trufflehog,
 //! detect-secrets) plus provider documentation; see each spec's `source`.
@@ -33,9 +34,55 @@ pub struct SecretPatternSpec {
     /// charset + length, or a delimited key block) — safe to act on
     /// automatically, e.g. a hard-block exfil guard. [`PRECISION_HEURISTIC`] is
     /// a KEYWORD/context match (`Bearer <b64>`, `password = "..."`) with higher
-    /// recall and false positives — right for redaction (over-redaction is
-    /// harmless) but NOT for hard-blocking legitimate edits/commands.
+    /// recall and false positives — usable for redaction after contextual
+    /// checks, but NOT for hard-blocking legitimate edits/commands.
     pub precision: &'static str,
+}
+
+impl SecretPatternSpec {
+    /// Reject expression-shaped matches for the heuristic assignment rule.
+    /// Regex alone cannot distinguish a bare value from source code that
+    /// reads a variable or invokes a function. Harn's scanner and redactor
+    /// both use this check so they agree on the same evidence.
+    pub fn accepts_match(&self, input: &str, start: usize, end: usize) -> bool {
+        if self.redaction_name != "sensitive_assignment" {
+            return true;
+        }
+        let Some(matched) = input.get(start..end) else {
+            return false;
+        };
+        let Some(separator) = matched.find(['=', ':']) else {
+            return false;
+        };
+        let Some(value) = matched.get(separator + 1..) else {
+            return false;
+        };
+        let value = value.trim_start();
+        if value.starts_with('"') || value.starts_with('\'') {
+            return true;
+        }
+        let line_prefix = input
+            .get(..start)
+            .unwrap_or_default()
+            .rsplit('\n')
+            .next()
+            .unwrap_or("")
+            .trim_end();
+        if matches!(
+            line_prefix.split_whitespace().last(),
+            Some("const" | "let" | "var")
+        ) {
+            return false;
+        }
+        let suffix = input
+            .get(end..)
+            .unwrap_or_default()
+            .trim_start_matches([' ', '\t']);
+        if value.contains('.') || matches!(suffix.chars().next(), Some('(' | '[' | '.')) {
+            return false;
+        }
+        true
+    }
 }
 
 /// Self-identifying token shape — safe to hard-block automatically.
@@ -171,7 +218,7 @@ pub const DEFAULT_SECRET_PATTERN_SPECS: &[SecretPatternSpec] = &[
         detector: "sensitive-assignment",
         source: "detect-secrets-keyword-detector",
         title: "Sensitive key/value assignment",
-        regex: r#"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret|token)\s*[:=]\s*(?:"[A-Za-z0-9._\-+/=]{6,}"|'[A-Za-z0-9._\-+/=]{6,}'|[A-Za-z0-9._\-+/=]*[0-9._\-+/=][A-Za-z0-9._\-+/=]*|secret|hidden|hideme|password|passwd|token)"#,
+        regex: r#"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret|token)\s*[:=]\s*(?:"[A-Za-z0-9._\-+/=]{6,}"|'[A-Za-z0-9._\-+/=]{6,}'|[A-Za-z0-9_\-+/=]*[0-9_\-+/=][A-Za-z0-9_\-+/=]*|secret|hidden|hideme|password|passwd|token)"#,
         precision: PRECISION_HEURISTIC,
     },
 ];

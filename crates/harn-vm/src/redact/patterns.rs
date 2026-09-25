@@ -254,13 +254,22 @@ pub fn scan_secret_patterns<'a>(input: &'a str, placeholder: &str) -> Cow<'a, st
     let custom: Vec<NamedPattern> = CUSTOM_PATTERNS.with(|cell| cell.borrow().clone());
     let all_patterns = compiled_default_secret_patterns()
         .iter()
-        .map(|pattern| (pattern.spec.redaction_name, &pattern.regex))
-        .chain(custom.iter().map(|pattern| (pattern.name, &pattern.regex)));
+        .map(|pattern| (pattern.spec.redaction_name, &pattern.regex, Some(pattern)))
+        .chain(
+            custom
+                .iter()
+                .map(|pattern| (pattern.name, &pattern.regex, None)),
+        );
 
-    for (pattern_name, regex) in all_patterns {
+    for (pattern_name, regex, default_pattern) in all_patterns {
         let target: &str = owned.as_deref().unwrap_or(input);
         let matches: Vec<(usize, usize)> = regex
             .find_iter(target)
+            .filter(|matched| {
+                default_pattern.is_none_or(|pattern| {
+                    pattern.accepts_match(target, matched.start(), matched.end())
+                })
+            })
             .map(|m| (m.start(), m.end()))
             .collect();
         if matches.is_empty() {
@@ -367,9 +376,13 @@ fn scan_secret_patterns_windowed<'a>(
 
     let all_patterns = compiled_default_secret_patterns()
         .iter()
-        .map(|pattern| (pattern.spec.redaction_name, &pattern.regex))
-        .chain(custom.iter().map(|pattern| (pattern.name, &pattern.regex)));
-    for (pattern_name, regex) in all_patterns {
+        .map(|pattern| (pattern.spec.redaction_name, &pattern.regex, Some(pattern)))
+        .chain(
+            custom
+                .iter()
+                .map(|pattern| (pattern.name, &pattern.regex, None)),
+        );
+    for (pattern_name, regex, default_pattern) in all_patterns {
         let mut window_start = 0usize;
         loop {
             let ws = floor_char_boundary(input, window_start);
@@ -380,6 +393,9 @@ fn scan_secret_patterns_windowed<'a>(
             for m in regex.find_iter(&input[ws..we]) {
                 let gs = ws + m.start();
                 let ge = ws + m.end();
+                if default_pattern.is_some_and(|pattern| !pattern.accepts_match(input, gs, ge)) {
+                    continue;
+                }
                 // Drop matches touching an artificial window edge; the same
                 // secret is strictly interior to the neighbouring window.
                 if (gs == ws && ws != 0) || (ge == we && we != input.len()) {
@@ -503,6 +519,22 @@ mod tests {
         let input = "pub const Token = struct { kind: u8 };\nconst Secret = enum { a, b };";
         let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
         assert!(matches!(out, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn sensitive_assignment_preserves_source_expressions() {
+        run_clean();
+        let input = "const token = process.env.GITHUB_TOKEN ?? \"\";\nlet apiKey = readKey(path);\nlet accessToken = readKey2(path);\nconst password = credentials.current;";
+        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        assert!(matches!(out, Cow::Borrowed(_)), "{out}");
+    }
+
+    #[test]
+    fn sensitive_assignment_still_redacts_literal_values() {
+        run_clean();
+        let input = "const token = \"abcDEF123456\";\nretry with token=abc123";
+        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        assert_eq!(out.matches("<redacted:sensitive_assignment:").count(), 2);
     }
 
     #[test]
