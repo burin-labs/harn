@@ -52,15 +52,15 @@ impl ModuleGraph {
                     if imported.load_error.is_some() {
                         return None;
                     }
-                    let mut names: Vec<String> = imported.exports.iter().cloned().collect();
-                    names.sort();
+                    let names = self.exports_for_import(&file, import_path);
                     let mut kinds = BTreeMap::new();
                     for name in &names {
-                        if let Some(kind) = self.exported_kind(import_path, name) {
+                        if let Some(kind) = self.exported_kind_for_import(&file, import_path, name)
+                        {
                             kinds.insert(name.clone(), kind);
                         }
                     }
-                    let signatures = self.namespace_member_signatures(import_path, &names);
+                    let signatures = self.namespace_member_signatures(&file, import_path, &names);
                     (names, kinds, signatures)
                 }
                 None => (Vec::new(), BTreeMap::new(), BTreeMap::new()),
@@ -95,7 +95,7 @@ impl ModuleGraph {
             .find(|import| import.namespace_alias.as_deref() == Some(alias))
             .and_then(|import| import.path.as_ref())
             .or_else(|| module.namespace_re_exports.get(alias))?;
-        self.exported_kind(target, member)?;
+        self.exported_kind_for_import(&file, target, member)?;
         self.export_definition_of(target, member)
             .or_else(|| self.definition_of(target, member))
     }

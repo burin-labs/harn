@@ -20,6 +20,8 @@ use super::stdlib_artifact::stdlib_module_artifact;
 use super::{ScopeSpan, Vm};
 
 mod transaction;
+mod visibility;
+pub use visibility::resolve_module_import_path;
 // Reached by `modules_tests` through this module's bindings.
 #[cfg(test)]
 use super::stdlib_artifact::{
@@ -62,6 +64,7 @@ pub(crate) struct LoadedModule {
     /// Shared public declaration contract copied from the artifact and
     /// extended by explicit re-exports.
     pub(crate) public_exports: BTreeMap<String, DefKind>,
+    pub(crate) sibling_exports: BTreeMap<String, DefKind>,
     /// Evaluated values of exported declarations whose runtime binding is
     /// produced by module initialization, including structs and enums.
     pub(crate) public_values: BTreeMap<String, VmValue>,
@@ -137,10 +140,13 @@ fn module_import_names(
     loaded: &LoadedModule,
     selected_names: Option<&[String]>,
     name_use: ImportNameUse,
+    allow_sibling: bool,
 ) -> Result<Vec<String>, VmError> {
     if let Some(names) = selected_names {
         for name in names {
-            if !loaded.public_exports.contains_key(name) {
+            if !(loaded.public_exports.contains_key(name)
+                || (allow_sibling && loaded.sibling_exports.contains_key(name)))
+            {
                 let message = match name_use {
                     ImportNameUse::Binding => {
                         let hint = if loaded.functions.contains_key(name) {
@@ -160,7 +166,13 @@ fn module_import_names(
         return Ok(names.to_vec());
     }
 
-    Ok(loaded.public_exports.keys().cloned().collect())
+    let mut names: Vec<_> = loaded.public_exports.keys().cloned().collect();
+    if allow_sibling {
+        names.extend(loaded.sibling_exports.keys().cloned());
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
 }
 
 /// Build the closed namespace dict for `import * as alias from path`.
@@ -172,18 +184,26 @@ fn build_namespace_dict(
     module_path: &str,
     loaded: &LoadedModule,
     members: Option<&[String]>,
+    allow_sibling: bool,
 ) -> Result<VmValue, VmError> {
     let mut map = BTreeMap::new();
     map.insert(
         "_namespace".to_string(),
         VmValue::String(arcstr::ArcStr::from(module_path)),
     );
-    let names = module_import_names(module_path, loaded, members, ImportNameUse::Namespace)?;
+    let names = module_import_names(
+        module_path,
+        loaded,
+        members,
+        ImportNameUse::Namespace,
+        allow_sibling,
+    )?;
     for name in names {
         let kind = loaded
             .public_exports
             .get(&name)
-            .expect("module_import_names validates the public export contract");
+            .or_else(|| loaded.sibling_exports.get(&name))
+            .expect("module_import_names validates the visible export contract");
         if !kind.has_runtime_value() {
             // Still project schema-capable type aliases when present.
             if let Some(schema) = loaded.public_type_schemas.get(&name) {
@@ -204,21 +224,6 @@ fn build_namespace_dict(
         }
     }
     Ok(VmValue::dict(map))
-}
-
-pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
-    let synthetic_current_file = base.join("__harn_import_base__.harn");
-    if let Some(resolved) = harn_modules::resolve_import_path(&synthetic_current_file, path) {
-        return resolved;
-    }
-
-    let mut file_path = base.join(path);
-
-    if !file_path.exists() && file_path.extension().is_none() {
-        file_path.set_extension("harn");
-    }
-
-    file_path
 }
 
 impl Vm {
@@ -751,7 +756,7 @@ impl Vm {
                 }
                 // A public namespace is observable as a first-class value and
                 // is therefore always complete.
-                let dict = build_namespace_dict(&import.path, &loaded, None)?;
+                let dict = build_namespace_dict(&import.path, &loaded, None, false)?;
                 public_values.insert(alias.clone(), dict);
                 public_exports.insert(alias.clone(), DefKind::Variable);
                 continue;
@@ -766,6 +771,7 @@ impl Vm {
                 &loaded,
                 selected_names,
                 ImportNameUse::Binding,
+                false,
             )?;
             for name in names_to_reexport {
                 let Some(kind) = loaded.public_exports.get(&name).copied() else {
@@ -808,6 +814,7 @@ impl Vm {
         Ok(LoadedModule {
             functions,
             public_exports,
+            sibling_exports: artifact.sibling_exports.clone(),
             public_values,
             public_type_schemas,
             package_execution_guard: module_source_dir
@@ -832,7 +839,8 @@ impl Vm {
                  Use a different namespace alias: import * as <name> from \"...\""
             )));
         }
-        let dict = build_namespace_dict(&module_name, loaded, members)?;
+        let allow_sibling = self.sibling_import_allowed(module_path);
+        let dict = build_namespace_dict(&module_name, loaded, members, allow_sibling)?;
         self.env.define(alias, dict, false)?;
         Ok(())
     }
@@ -844,8 +852,14 @@ impl Vm {
         selected_names: Option<&[String]>,
     ) -> Result<(), VmError> {
         let module_name = module_path.display().to_string();
-        let export_names =
-            module_import_names(&module_name, loaded, selected_names, ImportNameUse::Binding)?;
+        let allow_sibling = self.sibling_import_allowed(module_path);
+        let export_names = module_import_names(
+            &module_name,
+            loaded,
+            selected_names,
+            ImportNameUse::Binding,
+            allow_sibling,
+        )?;
 
         for name in export_names {
             // `pub const` / `pub let` values: bind by value.
@@ -870,6 +884,7 @@ impl Vm {
             if loaded
                 .public_exports
                 .get(&name)
+                .or_else(|| loaded.sibling_exports.get(&name))
                 .is_some_and(|kind| !kind.has_runtime_value())
             {
                 continue;

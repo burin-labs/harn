@@ -61,6 +61,7 @@
 4	modules/require_statement.harn	HARN-LNT-038
 1	modules/selective_import_from_zero_pub_rejected_lib.harn	HARN-LNT-019
 1	modules/selective_import_private_rejected_lib.harn	HARN-LNT-019
+1	modules/sibling/sibling_export_lib.harn	HARN-LNT-019
 1	personas/prelude_bounded_loop.harn	HARN-LNT-018
 1	pool/max_concurrent_caps_in_flight.harn	HARN-LNT-018
 1	pool/pool_task_sees_queued_mock.harn	HARN-LNT-029

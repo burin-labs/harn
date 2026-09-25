@@ -14,6 +14,10 @@ pub struct Parser {
 }
 
 impl Parser {
+    pub(super) fn at_module_scope(&self) -> bool {
+        self.nesting_depth == 0
+    }
+
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens,

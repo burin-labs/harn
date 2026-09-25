@@ -59,11 +59,13 @@ pub fn verification_snapshot_staleness(bound_snapshot: dict, current_hashes: dic
   }
 }
 
-pub fn __verification_opts(options: dict?) {
+@sibling
+fn __verification_opts(options: dict?) {
   return options ?? {}
 }
 
-pub fn __verification_result_ok(result: any) -> bool {
+@sibling
+fn __verification_result_ok(result: any) -> bool {
   if result?.ok != nil {
     return result.ok ? true : false
   }
@@ -75,7 +77,8 @@ pub fn __verification_result_ok(result: any) -> bool {
   return status == "completed" && exit == 0 && !(result?.timed_out ?? false)
 }
 
-pub fn __verification_duration_ms(result: CommandResult, opts: dict) {
+@sibling
+fn __verification_duration_ms(result: CommandResult, opts: dict) {
   if opts?.duration_ms != nil {
     return to_int(opts.duration_ms)
   }

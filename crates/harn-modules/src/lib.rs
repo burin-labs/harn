@@ -26,12 +26,13 @@ mod stdlib;
 mod symbol_reachability;
 mod type_dependencies;
 mod typecheck;
+mod visibility;
 
 use declarations::{
     callable_decl_name, collect_callable_declarations, collect_module_info,
     collect_type_declarations, decl_site, type_decl_name,
 };
-pub use declarations::{public_declarations, DefKind, PublicDeclaration};
+pub use declarations::{public_declarations, sibling_declarations, DefKind, PublicDeclaration};
 pub use namespace_imports::NamespaceImportInfo;
 pub use namespace_signatures::NamespaceMemberSignature;
 pub use package_imports::{
@@ -44,6 +45,7 @@ use standalone::PackageContext;
 pub use symbol_reachability::{
     closed_program_reachability, ExportDemand, ModuleSymbolDemand, SymbolReachability,
 };
+pub use visibility::{sibling_directory_access, sibling_module_access};
 
 /// A resolved definition site within a module.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +98,9 @@ struct ModuleInfo {
     /// Names declared locally and exported by this module — i.e. `pub fn`,
     /// `pub struct`, etc.
     own_exports: HashSet<String>,
+    /// Local declarations explicitly shared with sibling modules. These are
+    /// absent from every public export projection.
+    sibling_exports: HashSet<String>,
     /// Selective re-exports introduced by `pub import { name } from "..."`.
     /// Maps the re-exported name to every canonical source module path it
     /// could originate from. Multiple entries per name indicate a conflict
@@ -607,17 +612,6 @@ impl ModuleGraph {
         imports
     }
 
-    /// Exported symbol names for `file`, sorted alphabetically.
-    pub fn exports_for_module(&self, file: &Path) -> Vec<String> {
-        let file = normalize_path(file);
-        let Some(module) = self.modules.get(&file) else {
-            return Vec::new();
-        };
-        let mut exports: Vec<String> = module.exports.iter().cloned().collect();
-        exports.sort();
-        exports
-    }
-
     /// Resolve wildcard imports for `file`.
     ///
     /// Returns `Unknown` when any wildcard import cannot be resolved, because
@@ -644,10 +638,10 @@ impl ModuleGraph {
                 let normalized = normalize_path(import_path);
                 self.modules.get(&normalized)
             });
-            let Some(imported) = imported else {
+            let Some(_imported) = imported else {
                 return WildcardResolution::Unknown;
             };
-            names.extend(imported.exports.iter().cloned());
+            names.extend(self.exports_for_import(&file, import_path));
         }
         WildcardResolution::Resolved(names)
     }
@@ -734,7 +728,7 @@ impl ModuleGraph {
             }
             match &import.selective_names {
                 None => {
-                    names.extend(imported.exports.iter().cloned());
+                    names.extend(self.exports_for_import(&file, import_path));
                 }
                 Some(selective) => {
                     // A selectively imported name is in scope when it exists in
@@ -785,17 +779,10 @@ impl ModuleGraph {
             let import_path = import.path.as_ref()?;
             let imported_names: Vec<String> = match &import.selective_names {
                 Some(selective) => selective.iter().cloned().collect(),
-                None => self
-                    .modules
-                    .get(import_path)
-                    .or_else(|| self.modules.get(&normalize_path(import_path)))?
-                    .exports
-                    .iter()
-                    .cloned()
-                    .collect(),
+                None => self.exports_for_import(&file, import_path),
             };
             for name in imported_names {
-                if self.exported_kind(import_path, &name) == Some(kind) {
+                if self.exported_kind_for_import(&file, import_path, &name) == Some(kind) {
                     names.insert(name);
                 }
             }
@@ -930,11 +917,15 @@ impl ModuleGraph {
             }
             let selective_import = import.selective_names.is_some();
             let names_to_collect: Vec<String> = match &import.selective_names {
-                None => imported.exports.iter().cloned().collect(),
+                None => self.exports_for_import(&file, import_path),
                 Some(selective) => selective.iter().cloned().collect(),
             };
             for name in &names_to_collect {
-                if selective_import || imported.own_exports.contains(name) {
+                if selective_import
+                    || imported.own_exports.contains(name)
+                    || (sibling_module_access(&file, import_path)
+                        && imported.sibling_exports.contains(name))
+                {
                     if let Some(decl) = imported
                         .callable_declarations
                         .iter()
@@ -1243,8 +1234,14 @@ impl ModuleGraph {
             if target.load_error.is_some() {
                 continue;
             }
+            let visible: HashSet<_> = self
+                .exports_for_import(&file, import_path)
+                .into_iter()
+                .collect();
             for name in selective {
-                let kind = if target.exports.contains(name) {
+                let can_bind = visible.contains(name);
+                let can_publish = !import.is_pub || target.exports.contains(name);
+                let kind = if can_bind && can_publish {
                     continue;
                 } else if target.declarations.contains_key(name) {
                     SelectiveImportIssueKind::Private

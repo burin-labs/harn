@@ -43,7 +43,16 @@ pub struct PublicDeclaration {
 /// preserve the visibility of their wrapped declaration.
 pub fn public_declarations(snode: &SNode) -> Vec<PublicDeclaration> {
     match &snode.node {
-        Node::AttributedDecl { inner, .. } => public_declarations(inner),
+        Node::AttributedDecl { attributes, inner } => {
+            if attributes
+                .iter()
+                .any(|attribute| attribute.name == "sibling")
+            {
+                Vec::new()
+            } else {
+                public_declarations(inner)
+            }
+        }
         Node::FnDecl {
             name, is_pub: true, ..
         } => declaration(name, DefKind::Function),
@@ -87,6 +96,25 @@ pub fn public_declarations(snode: &SNode) -> Vec<PublicDeclaration> {
                 kind: DefKind::Variable,
             })
             .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Names explicitly shared with modules in the declaring file's directory.
+/// This projection stays separate from the public surface used by package
+/// catalogs and external importers.
+pub fn sibling_declarations(snode: &SNode) -> Vec<PublicDeclaration> {
+    let Node::AttributedDecl { attributes, inner } = &snode.node else {
+        return Vec::new();
+    };
+    if !attributes
+        .iter()
+        .any(|attribute| attribute.name == "sibling")
+    {
+        return Vec::new();
+    }
+    match &inner.node {
+        Node::FnDecl { name, .. } => declaration(name, DefKind::Function),
         _ => Vec::new(),
     }
 }
@@ -135,6 +163,9 @@ pub(crate) fn collect_module_info(
     package_snapshots: &[PackageSnapshot],
 ) {
     if let Node::AttributedDecl { inner, .. } = &snode.node {
+        for sibling in sibling_declarations(snode) {
+            module.sibling_exports.insert(sibling.name);
+        }
         collect_module_info(file, inner, module, package_snapshots);
         return;
     }

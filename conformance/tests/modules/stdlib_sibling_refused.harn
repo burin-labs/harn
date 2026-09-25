@@ -1,0 +1,5 @@
+import { __verification_opts } from "std/verification_core"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(__verification_opts(nil))
+}

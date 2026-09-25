@@ -280,6 +280,18 @@ fn has_name(value: unknown) -> implies value is {name: string} {
     }
 
     #[test]
+    fn sibling_visibility_requires_a_plain_module_function() {
+        assert!(parse_source("@sibling\nfn helper() -> int { return 1 }").is_ok());
+        for invalid in [
+            "@sibling\npub fn helper() -> int { return 1 }",
+            "@sibling(scope: \"all\")\nfn helper() -> int { return 1 }",
+            "fn outer() { @sibling fn helper() -> int { return 1 } }",
+        ] {
+            assert!(parse_source(invalid).is_err(), "accepted {invalid}");
+        }
+    }
+
+    #[test]
     fn parses_namespace_import() {
         let nodes = parse_source(r#"import * as artifacts from "std/run_artifacts""#)
             .expect("namespace import parses");
