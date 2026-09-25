@@ -9,6 +9,123 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.143
+
+### Added
+
+- Connector service operations can declare whether they are modeled actions, raw API access, or setup steps.
+  Unclassified operations default to raw API access.
+- **Sibling module helpers.** `@sibling` shares a non-public function with source files in the same directory
+  while keeping it out of the public module surface (#7132).
+- Native Harn hosts can enforce one durable UTC daily and monthly model-spend ceiling across processes.
+  It has atomic pre-call reservations, typed exhaustion receipts, and audited policy updates.
+- Add `harn self install`, `run`, `list`, and `prune` to cache checksum-verified release binaries.
+  Run exact older versions without rebuilding them.
+- `harn doctor sandbox` runs every process-sandbox conformance case against the live backend and reports which
+  confinement this host actually enforces. A case the backend cannot enforce reads `not measured`, never `ok`, and
+  the command exits non-zero unless every applicable case was measured and holds.
+- **Testing.** User tests can call `skip(reason)` to report an unavailable precondition separately from passes and
+  failures. `harn test --fail-on-skip` lets CI require every case to run.
+- Native decision evaluations use the TypeSafe, Vercel, and OpenRouter decision
+  protocols, with one HTTP request, typed refusals, and probability receipts.
+  Omit temperature and effort for native routes; unsupported options refuse
+  before dispatch.
+- **Decision routes through gateways.** Curated GPT-5.4 Nano and Mini routes through OpenRouter, and GPT-5.4 Nano
+  through Vercel AI Gateway, now accept typed decision evaluations.
+- Add `std/eval/selective_risk` to certify conditional accepted-answer error over a prespecified threshold family,
+  using exact binomial upper bounds corrected across every threshold and question/backend group.
+- **Local Agents API sessions can select an ACP mode at creation.** `mode_id` chooses `ask`, `architect`,
+  `code`, or `shadow` for one session. `harn serve api --default-session-mode` sets the default for clients
+  that omit it. The existing read-only `ask` default remains unchanged.
+- **Standalone ACP asset grants (#8717).** `harn serve acp` accepts repeated
+  `--read-only-root <path>` arguments so a host can add exact external asset
+  roots to the session's read policy on stdio and WebSocket transports.
+
+### Changed
+
+- `harn test` now accepts multiple positional files and directories as one suite.
+  The redundant `--test-path` flag is removed.
+- Report provably untyped tool-handler results as errors instead of warnings.
+- **Batched decision evaluation guidance (#8764).** The language and testing
+  guides now show boolean, choice, and score questions over one shared state,
+  with typed answers and explicit refusal handling.
+
+### Fixed
+
+- Remembered user approval rules now take precedence over approval-mode defaults. Authored denials
+  and path guards still win; authored approval requests still outrank remembered allows. Decision
+  receipts name the winning rule source.
+- Prevent false channel deadlock errors when a send or receive becomes ready before its wait is registered.
+- No-build Harn commands restore a missing compiled executable link when a current source receipt proves its exact bytes.
+  Missing or outdated proof now explains why recovery is refused.
+- **Code-index snapshots now retain the symbol graph across runs (#8082).** A
+  restored workspace keeps graph-backed queries and reconciles commits and
+  uncommitted edits instead of rebuilding the entire index after each change
+  to Git HEAD.
+- Agent runs with an accepted, current verifier pass no longer report a policy failure when a later loop limit ends
+  the turn. The result retains the original stop and verifier evidence. Failed, missing, or invalidated verification
+  still stops normally.
+- **Provider capability decisions.** Parallel tool-call suppression and thinking-history wire controls now have
+  separate capability facts, so request options cannot silently override a route's declared wire behavior.
+- Reject registered agent events with unread payload keys, and report the rejected key without logging payload values.
+  Preserve the applied format and steering decision in tool-format override events.
+- `harn connect status` now reports inbound secret readiness separately from
+  outbound usability and evaluates declared secret health checks.
+- **Network-policy refusals identify the deciding gate and destination (#8466).**
+  Typed decisions and run receipts now distinguish a network-policy denial from
+  a configured approval denial and carry the declared URL that was refused.
+- **Provider catalog schema.** The serialized catalog fields are pinned to the schema version, so incompatible additions
+  fail verification until the version and schema are updated together.
+- Local Cargo gates select the installed pinned Rust toolchain when another compiler appears first on PATH.
+  Explicit compiler overrides still receive a mismatch diagnostic; gates never install a toolchain implicitly.
+- Calibration reports refuse nonfinite or out-of-range target errors, candidate thresholds, and row confidence
+  before computing recommendations. Valid report fields and inclusive threshold endpoints remain unchanged.
+- Test commands no longer queue a nextest version probe behind Rust compilation, and exact tests use one build admission
+  while still rejecting missing or ignored tests.
+- Model information resolves hosted context limits and catalog metadata through the selected provider, including wire
+  model names. Local server context discovery continues to take precedence over advertised model limits.
+- The agent gate census indexes classification batches once instead of rescanning and validating each full batch for every
+  source read. Source scans and refusal checks still run on every audit.
+- Ollama context reporting uses the same configured limit as generation and warm-up. Custom Ollama-compatible providers
+  resolve their own catalog settings and warm-up endpoint, including when model names overlap with another provider.
+- Approval resolvers can consult one shared never-grant decision before model evaluation
+  without manufacturing an operator authorization.
+- The pre-push agent gate census requires a fresh worktree runtime or an explicit
+  verified runtime. Missing or incompatible interpreters remain unmeasured and
+  refuse the push; only the completed audit recommends regenerating stale rows.
+- Preserve source expressions while scanning and redacting sensitive assignments.
+- Agent sessions now keep nonempty structured user content on later turns even when the plain message is blank.
+  A deliberate empty continuation records why no new user turn was added.
+- Embedded ACP channel shutdown now interrupts an active prompt waiting on a
+  host or MCP connection, so stalled child processes no longer hold the caller
+  open after a timeout.
+- **Confined Git commands honor external paths in global configuration
+  (#8740).** Git commits can execute hooks named outside the workspace, while
+  those config files and hook directories remain read-only to child processes.
+- **Agent deadlines now seal cleanly.** A loop whose configured deadline expires stops before another model
+  request, reports a deadline terminal, and runs its terminal callback instead of waiting for an external
+  timeout. (#8750)
+- **Linux security CI.** Wait for the archive producer to finish before starting the security artifact barrier.
+  A queued producer no longer causes an artifact timeout, and a completed producer with a missing archive
+  fails by name. (#8751)
+- **Target cache maintenance now follows the current collection policy
+  (#8768).** Daily host maintenance fetches the latest collector, protects
+  live builds, and reports measured bytes and the last successful sweep.
+  Failed setup sweeps are retried instead of being recorded as recent successes.
+- The completion-judge evidence packet now shows the call that resolves a backgrounded verifier's
+  handle as the verification, so the judge no longer refuses a verified change over a result that
+  only said "running".
+- A release candidate build no longer fails when a burst of repository activity
+  exhausts its API budget during attestation. A rate-limited attestation waits
+  for the budget to reset and runs once more; any other failure still fails the
+  build.
+- **Target cache maintenance installs as a user LaunchAgent on macOS
+  (#8778).** Linux retains cron; both schedules are read back, and legacy
+  macOS cron entries are removed after the LaunchAgent loads.
+- Crate publication accepts the lightweight release tag that promotion creates
+  through the Releases API, so a promoted release publishes its crates. The tag
+  must still name the merged `Release vX.Y.Z` commit on main.
+
 ## v0.10.142
 
 ### Breaking
