@@ -50,7 +50,7 @@ pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
     denial_gate_for_source, next_approval_policy_repeat_count,
     next_approval_unavailable_class_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
-    PolicyMatchedRule, PolicyRule, PolicyRuleMatch, ToolApprovalRequest,
+    PolicyMatchedRule, PolicyRule, PolicyRuleMatch, PolicyRuleSource, ToolApprovalRequest,
     SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH,
     SOURCE_NET_POLICY,
 };

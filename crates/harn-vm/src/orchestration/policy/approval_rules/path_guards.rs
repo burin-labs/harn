@@ -56,6 +56,7 @@ pub(super) fn default_guard(
             let path = sensitive_paths::bounded_evidence(&path);
             return Some(Candidate {
                 source: SOURCE_DEFAULT_SENSITIVE_PATH.to_string(),
+                source_rank: PolicyRuleSource::Policy,
                 index: None,
                 id: Some("sensitive_path".to_string()),
                 action: PolicyAction::Deny,
@@ -72,6 +73,7 @@ pub(super) fn default_guard(
             if matches!(entry.kind, WorkspacePathKind::Invalid) {
                 return Some(Candidate {
                     source: SOURCE_DEFAULT_PATH_GUARD.to_string(),
+                    source_rank: PolicyRuleSource::Policy,
                     index: None,
                     id: Some("invalid_path".to_string()),
                     action: PolicyAction::Deny,
@@ -92,6 +94,7 @@ pub(super) fn default_guard(
             {
                 return Some(Candidate {
                     source: SOURCE_DEFAULT_EXTERNAL_PATH.to_string(),
+                    source_rank: PolicyRuleSource::Policy,
                     index: None,
                     id: Some("external_path".to_string()),
                     action: PolicyAction::Deny,
