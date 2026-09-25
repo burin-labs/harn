@@ -273,21 +273,9 @@ fn approval_review_unavailable(request: dict, reason: string, detail: any) -> di
 pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> dict {
   const effective_policy = __approval_review_effective_policy(policy)
   const category = trim(to_string(request?.category ?? ""))
-  if approval_review_is_floor(effective_policy, category) {
-    return {
-      schema: APPROVAL_REVIEW_DECISION_SCHEMA,
-      approved: false,
-      outcome: "denied",
-      risk: "critical",
-      authorization: "unknown",
-      rationale: "category '" + category + "' can never be granted by any reviewer",
-      reviewer_answered: false,
-      unavailable_reason: "floor",
-      detail: "",
-      site: request?.site,
-      category: category,
-      cost_usd: 0.0,
-    }
+  const floor = approval_review_floor_decision(policy, request)
+  if floor != nil {
+    return floor
   }
   const schema = approval_review_verdict_schema(effective_policy)
   const route = __approval_review_route(harness.llm, policy, effective_policy, request)
@@ -582,6 +570,40 @@ pub fn approval_review_is_floor(policy: dict, category: string) -> bool {
 }
 
 /**
+ * Return the canonical never-grant denial, or nil when review remains eligible.
+ *
+ * Eligibility does not authorize the action. Category provenance comes from
+ * the caller, with the existing tool-name fallback; this does not classify
+ * command text or replace the independent process catastrophic floor.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn approval_review_floor_decision(policy: dict, request: dict) -> dict? {
+  const effective_policy = __approval_review_effective_policy(policy)
+  const category = __reviewer_category(request)
+  if !approval_review_is_floor(effective_policy, category) {
+    return nil
+  }
+  return {
+    schema: APPROVAL_REVIEW_DECISION_SCHEMA,
+    approved: false,
+    outcome: "denied",
+    risk: "critical",
+    authorization: "unknown",
+    rationale: "category '" + category + "' can never be granted by any reviewer",
+    reviewer_answered: false,
+    unavailable_reason: "floor",
+    detail: "",
+    site: request?.site,
+    category: category,
+    cost_usd: 0.0,
+    accounting_status: "reported",
+    unpriced_calls: 0,
+  }
+}
+
+/**
  * The `allow_all` resolver, as a reviewer.
  *
  * Yolo is not a separate code path. It is this seam with a reviewer that says
@@ -596,29 +618,11 @@ pub fn approval_review_is_floor(policy: dict, category: string) -> bool {
  * @errors: []
  */
 pub fn approval_allow_all_reviewer(policy: dict) -> any {
-  const effective_policy = __approval_review_effective_policy(policy)
   return { request ->
-    const category = trim(to_string(request?.category ?? request?.tool ?? ""))
-    if approval_review_is_floor(effective_policy, category) {
-      // The floor stands even here. This is the whole reason allow_all routes
-      // through the reviewer seam instead of around it.
-      {
-        schema: APPROVAL_REVIEW_DECISION_SCHEMA,
-        approved: false,
-        outcome: "denied",
-        risk: "critical",
-        authorization: "unknown",
-        rationale: "category '" + category + "' is below the floor; allow_all does not lift it",
-        reviewer_answered: true,
-        unavailable_reason: nil,
-        detail: "",
-        site: request?.site,
-        category: category,
-        // A real zero: no model was called, so nothing was spent.
-        cost_usd: 0.0,
-        accounting_status: "reported",
-        unpriced_calls: 0,
-      }
+    const category = __reviewer_category(request)
+    const floor = approval_review_floor_decision(policy, request)
+    if floor != nil {
+      floor
     } else {
       {
         schema: APPROVAL_REVIEW_DECISION_SCHEMA,
