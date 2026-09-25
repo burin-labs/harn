@@ -42,6 +42,9 @@ mod transport;
 mod types;
 
 use auth::acp_auth_request_for_method;
+pub fn is_supported_session_mode(mode_id: &str) -> bool {
+    modes::is_known(mode_id)
+}
 use bridge::AcpBridge;
 pub use bridge::AcpOutput;
 use live_clients::{

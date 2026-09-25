@@ -3811,6 +3811,9 @@ clients share the same transcript, EventLog, replay, and host-permission paths
 as ACP hosts. Use `--api-key <key>` / `HARN_SERVE_API_KEY`,
 `--hmac-secret <secret>` / `HARN_SERVE_HMAC_SECRET`, and the shared `--tls`
 flags to protect non-discovery routes.
+New sessions default to ACP `ask` mode. Use `--default-session-mode code` to
+select coding mode for sessions that omit `mode_id`; each create request can
+override the default with `mode_id` (`ask`, `architect`, `code`, or `shadow`).
 
 `harn serve mcp` uses the shared `harn-serve` dispatch core and maps each
 exported `pub fn` in the target module to one MCP tool. Tool schemas are
