@@ -49,8 +49,14 @@
 # only a path it built from that root.
 #
 # Usage:
-#   scripts/prune_stale_targets.sh [--dry-run]
+#   scripts/prune_stale_targets.sh [--dry-run] [--measure-bytes]
 #   scripts/prune_stale_targets.sh [--dry-run] --remove-entry NAME [--remove-entry NAME]...
+#
+# `--measure-bytes` makes the summary account for allocated bytes removed and
+# retained. It walks target trees, so periodic host maintenance should use it;
+# ordinary worktree setup leaves it off and explicitly reports unmeasured
+# bytes. The summary names the running policy checksum and the last successful
+# policy from a receipt beside the shared target cache.
 #
 # `--remove-entry` names entries to retire regardless of their rank or age. It
 # exists because rank and age answer "was this touched recently", not "is this
@@ -120,10 +126,12 @@ target_entry_activity_epoch() {
 }
 
 dry_run=0
+measure_bytes=0
 requested_entries=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --dry-run) dry_run=1; shift ;;
+    --measure-bytes) measure_bytes=1; shift ;;
     --remove-entry)
       [ "$#" -ge 2 ] || { echo "--remove-entry needs a NAME" >&2; exit 2; }
       # One path segment only. A name carrying a separator could otherwise
@@ -150,7 +158,20 @@ entry_requested() {
 # end: a removal request that silently matched nothing would read as success.
 matched_entries=()
 
-scanned=0; removed=0; kept=0; summary_printed=0
+gc_policy_version="harn-target-gc/v2-$(cksum "$SCRIPT_DIR/prune_stale_targets.sh" | awk '{print $1 "-" $2}')"
+scanned=0; removed=0; kept=0; pending_candidates=0; summary_printed=0
+reclaimed_bytes=0; retained_bytes=0; unmeasured_entries=0
+completed=0
+receipt_root="${HARN_DEV_SETUP_STORAGE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/harn/dev-setup}"
+receipt_file="${receipt_root}/prune-stale-targets.last-success"
+last_success="never"
+last_success_policy="none"
+if [ -f "$receipt_file" ]; then
+  IFS= read -r last_success < "$receipt_file" || true
+  [ -n "$last_success" ] || last_success="never"
+  last_success_policy="$(sed -n '2p' "$receipt_file" 2>/dev/null || true)"
+  [ -n "$last_success_policy" ] || last_success_policy="unknown"
+fi
 # Paths reported as kept, read back after a destructive pass.
 kept_paths=()
 # Every root actually walked, so the summary cannot claim narrower coverage
@@ -190,9 +211,39 @@ print_summary() {
   else
     roots=""
   fi
+  local status="incomplete" reported_reclaimed="$reclaimed_bytes" reported_retained="$retained_bytes"
+  if [ "$completed" -eq 1 ]; then
+    status="complete"
+    if [ "$dry_run" -eq 1 ]; then
+      status="dry-run"
+    fi
+  fi
+  if [ "$measure_bytes" -eq 0 ]; then
+    reported_reclaimed="unmeasured"
+    reported_retained="unmeasured"
+    unmeasured_entries="$scanned"
+  fi
+  if [ "$dry_run" -eq 1 ]; then
+    pending_candidates=$((pending_candidates + removed))
+  fi
   # scanned is reported alongside the verdict so a zero here is readable as
   # "walked these roots and found nothing" rather than "walked nothing".
-  echo "harn-target GC: scanned=$scanned kept=$kept removed=$removed (roots=$roots)$suffix"
+  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$pending_candidates unmeasured_entries=$unmeasured_entries (roots=$roots)$suffix"
+}
+
+record_success() {
+  [ "$dry_run" -eq 0 ] || return 0
+  [ "$pending_candidates" -eq 0 ] || return 1
+  mkdir -p "$receipt_root"
+  local receipt_tmp="${receipt_file}.$$" new_success
+  new_success="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '%s\n%s\n' "$new_success" "$gc_policy_version" > "$receipt_tmp"
+  if ! mv "$receipt_tmp" "$receipt_file"; then
+    rm -f "$receipt_tmp"
+    return 1
+  fi
+  last_success="$new_success"
+  last_success_policy="$gc_policy_version"
 }
 
 storage_roots() {
@@ -228,6 +279,11 @@ done < <(storage_roots | awk '!seen[$0]++')
 
 if [[ "${#target_roots[@]}" -eq 0 && "${#release_target_roots[@]}" -eq 0 ]]; then
   echo "no harn-target dirs at configured setup storage roots; nothing to prune"
+  if ! record_success; then
+    print_summary
+    exit 1
+  fi
+  completed=1
   print_summary
   exit 0
 fi
@@ -561,6 +617,15 @@ forget_kept_path() {
   return 0
 }
 
+remember_kept_path() {
+  local path="$1" keptp
+  for keptp in "${kept_paths[@]}"; do
+    [ "$keptp" = "$path" ] && return 0
+  done
+  kept=$((kept + 1))
+  kept_paths+=("$path")
+}
+
 # Bytes on disk for one entry, or empty when it cannot be measured.
 entry_kib() {
   local kib
@@ -628,9 +693,15 @@ enforce_size_ceiling() {
 # and cannot drift apart.
 remove_entry() {
   local target_root="$1" d="$2" reason="$3"
-  local name sz
+  local name sz kib=""
   name="$(basename "$d")"
   sz=$(du -sh "$d" 2>/dev/null | cut -f1 || true)
+  if [ "$measure_bytes" -eq 1 ]; then
+    if ! kib="$(entry_kib "$d")"; then
+      unmeasured_entries=$((unmeasured_entries + 1))
+      kib=""
+    fi
+  fi
   if [ "$dry_run" -eq 1 ]; then
     echo "would remove $reason: $name (${sz:-?})"
     removed=$((removed + 1))
@@ -641,7 +712,9 @@ remove_entry() {
   # a pattern, and nothing outside the root is reachable.
   if [ "$(dirname "$d")" != "$target_root" ] || [ "$name" = "." ] || [ "$name" = ".." ]; then
     echo "refusing to remove a path outside the managed root: $d" >&2
-    kept=$((kept + 1)); kept_paths+=("$d"); return 0
+    remember_kept_path "$d"
+    pending_candidates=$((pending_candidates + 1))
+    return 0
   fi
   echo "removing $reason: $name (${sz:-?})"
   rm -rf "$d" || true
@@ -649,10 +722,14 @@ remove_entry() {
   # exit status of an `rm` that is deliberately failure-tolerant.
   if [ -e "$d" ]; then
     echo "warning: $reason survived removal, still present: $d" >&2
-    kept=$((kept + 1))
+    remember_kept_path "$d"
+    pending_candidates=$((pending_candidates + 1))
     return 0
   fi
   removed=$((removed + 1))
+  if [ -n "$kib" ]; then
+    reclaimed_bytes=$((reclaimed_bytes + kib * 1024))
+  fi
 }
 
 # Bash 3.2 treats an empty `"${array[@]}"` expansion as unbound under
@@ -694,4 +771,16 @@ if [ "$dry_run" -eq 0 ] && [ "${#kept_paths[@]}" -gt 0 ]; then
   done
 fi
 
+if [ "$measure_bytes" -eq 1 ] && [ "${#kept_paths[@]}" -gt 0 ]; then
+  for kept_path in "${kept_paths[@]}"; do
+    if kib="$(entry_kib "$kept_path")"; then
+      retained_bytes=$((retained_bytes + kib * 1024))
+    else
+      unmeasured_entries=$((unmeasured_entries + 1))
+    fi
+  done
+fi
+
+record_success
+completed=1
 print_summary

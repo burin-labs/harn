@@ -723,6 +723,8 @@ install_recording_pruner() {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '%s\n' 'printf "%s protect=%s\n" "$PWD" "${HARN_TARGET_GC_PROTECT-__unset__}" \'
     printf '%s\n' '  >> "$DEV_SETUP_TEST_PRUNE_RECORD"'
+    printf '%s\n' '[[ "${DEV_SETUP_TEST_PRUNE_FAIL:-0}" == "1" ]] && exit 1'
+    printf '%s\n' 'exit 0'
   } > "$repo/scripts/prune_stale_targets.sh"
   chmod +x "$repo/scripts/prune_stale_targets.sh"
 }
@@ -805,6 +807,29 @@ if ! grep -Fq 'harn-target GC recently checked.' \
   "$prune_reachability_root/second-output.txt"; then
   echo "second worktree did not report skipping the recent sweep" >&2
   cat "$prune_reachability_root/second-output.txt" >&2
+  exit 1
+fi
+
+# A failed collection must not bank a 24-hour success. The negative control
+# first proves the stub ran and failed; a fresh setup then reaches it again.
+touch -t 202001010000 "$prune_shared_storage/prune-stale-targets.stamp"
+DEV_SETUP_TEST_PRUNE_FAIL=1 run_setup_for_prune "$prune_worktree_a" bootstrap \
+  "$prune_reachability_root/state-a" \
+  "$prune_reachability_root/failed-output.txt"
+if [[ -f "$prune_shared_storage/prune-stale-targets.stamp" ]] \
+  || ! grep -Fq 'harn-target GC failed; the next setup will retry.' \
+    "$prune_reachability_root/failed-output.txt"; then
+  echo "failed GC attempt was treated as a recent successful sweep" >&2
+  cat "$prune_reachability_root/failed-output.txt" >&2
+  exit 1
+fi
+run_setup_for_prune "$prune_worktree_b" bootstrap \
+  "$prune_reachability_root/state-b" \
+  "$prune_reachability_root/retry-output.txt"
+if [[ "$(wc -l < "$prune_invocations")" -ne 3 ]] \
+  || [[ ! -f "$prune_shared_storage/prune-stale-targets.stamp" ]]; then
+  echo "next setup did not retry the failed GC attempt" >&2
+  cat "$prune_invocations" >&2
   exit 1
 fi
 

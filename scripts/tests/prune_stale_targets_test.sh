@@ -250,6 +250,12 @@ touch -t 202001020000 "$size_storage/harn-target/repos-mid"
 
 echo "the ceiling is off by default: an oversized root is left alone"
 run_size_gc > "$tmp_root/size-off.txt" 2>&1
+grep -Eq 'scanned=[1-9][0-9]* .*reclaimed_bytes=unmeasured retained_bytes=unmeasured .*unmeasured_entries=[1-9][0-9]*' \
+  "$tmp_root/size-off.txt" || {
+  echo "ordinary setup hid that its byte count was unmeasured" >&2
+  cat "$tmp_root/size-off.txt" >&2
+  exit 1
+}
 for n in old mid new; do
   [[ -d "$size_storage/harn-target/repos-$n" ]] || {
     echo "default run evicted repos-$n with no ceiling set" >&2
@@ -325,5 +331,48 @@ grep -Fq "HARN_TARGET_GC_MAX_BYTES must be a non-negative integer" "$tmp_root/si
   cat "$tmp_root/size-bad.txt" >&2
   exit 1
 }
+
+echo "measured reports distinguish a real sweep, retained bytes, and pending dry-run work"
+mkdir -p "$size_storage/harn-target/repos-orphan"
+dd if=/dev/zero of="$size_storage/harn-target/repos-orphan/blob" bs=1024 count=8 \
+  >/dev/null 2>&1
+touch -t 202001010000 "$size_storage/harn-target/repos-orphan"
+run_size_gc --measure-bytes > "$tmp_root/measured.txt" 2>&1
+measured_summary="$(tail -n 1 "$tmp_root/measured.txt")"
+if [[ -d "$size_storage/harn-target/repos-orphan" ]] \
+  || ! grep -Eq 'policy=harn-target-gc/[^ ]+ status=complete last_success=[0-9TZ:-]+ last_success_policy=harn-target-gc/[^ ]+ scanned=[1-9][0-9]*' <<< "$measured_summary" \
+  || ! grep -Eq 'reclaimed_bytes=[1-9][0-9]* retained_bytes=[1-9][0-9]* pending_candidates=0 unmeasured_entries=0' <<< "$measured_summary"; then
+  echo "measured report claimed success without proving removed and retained bytes" >&2
+  cat "$tmp_root/measured.txt" >&2
+  exit 1
+fi
+receipt="$size_storage/prune-stale-targets.last-success"
+[[ -s "$receipt" ]] || { echo "successful sweep left no receipt" >&2; exit 1; }
+receipt_before="$(cat "$receipt")"
+
+mkdir -p "$size_storage/harn-target/repos-pending"
+touch -t 202001010000 "$size_storage/harn-target/repos-pending"
+run_size_gc --dry-run --measure-bytes > "$tmp_root/measured-dry.txt" 2>&1
+dry_summary="$(tail -n 1 "$tmp_root/measured-dry.txt")"
+if [[ ! -d "$size_storage/harn-target/repos-pending" ]] \
+  || [[ "$(cat "$receipt")" != "$receipt_before" ]] \
+  || ! grep -Eq 'status=dry-run .*pending_candidates=[1-9][0-9]*' <<< "$dry_summary"; then
+  echo "dry run erased a candidate or banked a false success" >&2
+  cat "$tmp_root/measured-dry.txt" >&2
+  exit 1
+fi
+
+empty_storage="$tmp_root/empty-storage"
+empty_report="$(
+  HARN_DEV_SETUP_STORAGE_ROOT="$empty_storage" \
+    HARN_TARGET_GC_ROOTS="$size_repos" \
+    "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" --measure-bytes
+)"
+if ! grep -Fq 'scanned=0 kept=0 removed=0 reclaimed_bytes=0 retained_bytes=0 pending_candidates=0 unmeasured_entries=0' \
+  <<< "$empty_report"; then
+  echo "empty scan did not expose the absence of entries" >&2
+  printf '%s\n' "$empty_report" >&2
+  exit 1
+fi
 
 echo "prune_stale_targets_test: ok"
