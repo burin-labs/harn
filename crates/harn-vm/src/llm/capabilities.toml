@@ -168,6 +168,9 @@
 #   image_url_input_supported:
 #                     whether image content blocks may reference remote URLs.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
+#   honors_preserve_thinking_kwarg:
+#                     whether this route honors the preserve_thinking request
+#                     knob; model support alone does not imply wire support.
 #   server_parser   : server-side response parser that transforms model output.
 #   honors_chat_template_kwargs:
 #                     whether provider-specific chat-template options are honored.
@@ -297,6 +300,10 @@
 #                     `tool_calls[]` entries; strict OpenAI-compatible servers
 #                     can reject replayed history with more than one tool call
 #                     even when Harn originally parsed text-tool calls.
+#   requires_parallel_tool_calls_false:
+#                     whether the request must explicitly carry
+#                     `parallel_tool_calls: false`; history support alone does
+#                     not decide whether the provider accepts this wire field.
 #   tools_exclude_response_format:
 #                     whether the route rejects `response_format` when native
 #                     `tools` are present. Harn drops response_format for these
@@ -1701,6 +1708,7 @@ structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
+honors_preserve_thinking_kwarg = true
 vision_supported = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1779,6 +1787,7 @@ structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
+honors_preserve_thinking_kwarg = true
 vision_supported = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1803,6 +1812,7 @@ structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
+honors_preserve_thinking_kwarg = true
 vision_supported = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -2716,6 +2726,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -2819,6 +2830,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -2907,6 +2919,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -3000,6 +3013,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -3040,6 +3054,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -3088,6 +3103,7 @@ native_tools = false
 preferred_tool_format = "text"
 text_tool_wire_format_supported = true
 supports_parallel_tool_calls = false
+requires_parallel_tool_calls_false = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
@@ -3193,6 +3209,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -3216,6 +3233,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -3813,6 +3831,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -3916,6 +3935,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"

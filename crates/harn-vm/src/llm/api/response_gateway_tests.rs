@@ -69,6 +69,7 @@ fn openai_parser_preserves_gateway_routing_metadata() {
 
 #[test]
 fn responses_transport_routing_is_provider_capability_driven() {
+    assert!(!should_use_responses_transport("openai", "gpt-4o", false));
     assert!(should_use_responses_transport("openai", "gpt-5.4", true));
     assert!(should_use_responses_transport(
         "vercel_ai_gateway",

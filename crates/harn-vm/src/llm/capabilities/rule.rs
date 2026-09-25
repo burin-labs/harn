@@ -277,6 +277,9 @@ pub struct ProviderRule {
     /// the same role there.
     #[serde(default)]
     pub preserve_thinking: Option<bool>,
+    /// Whether this transport honors `preserve_thinking` in chat-template options.
+    #[serde(default)]
+    pub honors_preserve_thinking_kwarg: Option<bool>,
     /// Provider-visible replay policy for prior assistant reasoning. Typed so
     /// unknown or misspelled policies fail capability loading.
     #[serde(default)]
@@ -420,6 +423,9 @@ pub struct ProviderRule {
     /// one-call assistant turns for those routes.
     #[serde(default)]
     pub supports_parallel_tool_calls: Option<bool>,
+    /// Whether this route requires `parallel_tool_calls: false` on the wire.
+    #[serde(default)]
+    pub requires_parallel_tool_calls_false: Option<bool>,
     /// Whether the route rejects `response_format` when native `tools` are
     /// present. Strict OpenAI-compatible servers such as Cerebras accept each
     /// feature alone but reject the pair together.
@@ -634,6 +640,7 @@ impl ProviderRule {
             vision_supported,
             image_url_input_supported,
             preserve_thinking,
+            honors_preserve_thinking_kwarg,
             reasoning_round_trip,
             reasoning_history_wire_field,
             server_parser,
@@ -663,6 +670,7 @@ impl ProviderRule {
             allowed_tool_choice_modes,
             requires_tool_result_adjacency,
             supports_parallel_tool_calls,
+            requires_parallel_tool_calls_false,
             tools_exclude_response_format,
             recommended_endpoint,
             text_tool_wire_format_supported,
@@ -750,6 +758,10 @@ impl ProviderRule {
             image_url_input_supported,
         );
         fill_opt(&mut self.preserve_thinking, preserve_thinking);
+        fill_opt(
+            &mut self.honors_preserve_thinking_kwarg,
+            honors_preserve_thinking_kwarg,
+        );
         fill_opt(&mut self.reasoning_round_trip, reasoning_round_trip);
         fill_opt(
             &mut self.reasoning_history_wire_field,
@@ -829,6 +841,10 @@ impl ProviderRule {
         fill_opt(
             &mut self.supports_parallel_tool_calls,
             supports_parallel_tool_calls,
+        );
+        fill_opt(
+            &mut self.requires_parallel_tool_calls_false,
+            requires_parallel_tool_calls_false,
         );
         fill_opt(
             &mut self.tools_exclude_response_format,

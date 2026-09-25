@@ -75,6 +75,7 @@ pub(super) fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         vision_supported: None,
         image_url_input_supported: None,
         preserve_thinking: None,
+        honors_preserve_thinking_kwarg: None,
         reasoning_round_trip: None,
         reasoning_history_wire_field: None,
         server_parser: None,
@@ -104,6 +105,7 @@ pub(super) fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         allowed_tool_choice_modes: None,
         requires_tool_result_adjacency: None,
         supports_parallel_tool_calls: None,
+        requires_parallel_tool_calls_false: None,
         tools_exclude_response_format: None,
         recommended_endpoint: None,
         text_tool_wire_format_supported: None,
@@ -279,6 +281,7 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
             .or(defaults.image_url_input_supported)
             .unwrap_or(true),
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
+        honors_preserve_thinking_kwarg: rule.honors_preserve_thinking_kwarg.unwrap_or(false),
         reasoning_round_trip: rule
             .reasoning_round_trip
             .or(defaults.reasoning_round_trip)
@@ -348,6 +351,10 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
             .supports_parallel_tool_calls
             .or(defaults.supports_parallel_tool_calls)
             .unwrap_or(true),
+        requires_parallel_tool_calls_false: rule
+            .requires_parallel_tool_calls_false
+            .or(defaults.requires_parallel_tool_calls_false)
+            .unwrap_or(false),
         tools_exclude_response_format: rule.tools_exclude_response_format.unwrap_or(false),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),

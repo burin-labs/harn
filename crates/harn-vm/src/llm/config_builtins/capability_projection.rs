@@ -287,6 +287,14 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.preserve_thinking),
     );
     dict.insert(
+        crate::value::intern_key("honors_preserve_thinking_kwarg"),
+        VmValue::Bool(caps.honors_preserve_thinking_kwarg),
+    );
+    dict.insert(
+        crate::value::intern_key("requires_parallel_tool_calls_false"),
+        VmValue::Bool(caps.requires_parallel_tool_calls_false),
+    );
+    dict.insert(
         crate::value::intern_key("reasoning_history_wire_field"),
         reasoning_history_wire_field_value(caps),
     );
