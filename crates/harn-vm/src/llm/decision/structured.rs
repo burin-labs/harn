@@ -144,6 +144,7 @@ impl DecisionBackend for StructuredLlmBackend {
         .await?;
         let answers = read_answers(request.questions, &response.data)?;
         Ok(RawDecisionResponse {
+            native_transport: None,
             answers,
             provenance: ConfidenceProvenance::ModelReported,
             served_model: response.served_model,

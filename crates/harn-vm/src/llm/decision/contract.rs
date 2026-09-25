@@ -4,49 +4,9 @@
 //! them, so the evaluator never reads a capability row itself and never
 //! defaults a limit a native route did not declare.
 
-use crate::llm_config::{self, ModelOperation};
+use crate::llm_config;
 
-/// How a route is asked for a decision. A gateway can serve chat and decisions
-/// through different endpoints, so the protocol is a route fact, not a
-/// provider fact.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DecisionProtocol {
-    TypesafeSystemOne,
-    VercelEvaluate,
-    OpenrouterDecisions,
-    /// A chat route answering the batch through one generated JSON schema.
-    StructuredLlm,
-}
-
-impl DecisionProtocol {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::TypesafeSystemOne => "typesafe_system_one",
-            Self::VercelEvaluate => "vercel_evaluate",
-            Self::OpenrouterDecisions => "openrouter_decisions",
-            Self::StructuredLlm => "structured_llm",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DecisionQuestionKind {
-    Boolean,
-    Choice,
-    Score,
-}
-
-impl DecisionQuestionKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Boolean => "boolean",
-            Self::Choice => "choice",
-            Self::Score => "score",
-        }
-    }
-}
+pub use crate::llm::capabilities::{DecisionProtocol, DecisionQuestionKind};
 
 /// Declared bounds. Every field is a number the route states; none is a
 /// default the evaluator invented. `max_questions` is absent when the route
@@ -58,6 +18,7 @@ pub struct DecisionLimits {
     pub score_levels_min: usize,
     pub score_levels_max: usize,
     pub state_window_tokens: usize,
+    pub request_window_tokens: Option<usize>,
 }
 
 /// Everything the evaluator needs about a route before it dispatches.
@@ -92,19 +53,33 @@ const STRUCTURED_LLM_OVERHEAD_TOKENS: usize = 2048;
 /// The decision contract of a route, or `None` when the route declares no
 /// decision operation.
 ///
-/// Native decision rows and their capability-declared protocols, question
-/// kinds, and limits are owned by the catalog work on #8537. Until those rows
-/// exist, this resolves only the `structured_llm` projection of a chat route
-/// that declares both `decision` and `text_generation`; a route that declares
-/// `decision` without `text_generation` has no contract here yet and the
-/// evaluator reports it as unconfigured rather than guessing a protocol.
+/// The catalog owns native protocols and limits. Chat routes receive only
+/// the evaluator's own schema and output bounds here.
 pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<DecisionContract> {
+    let declared = crate::provider_catalog::decision_contract_for_route(provider, model)?;
     let id = llm_config::model_catalog_id_for_route(provider, model)?;
     let entry = llm_config::model_catalog_entry(&id)?;
-    if !entry.supports_operation(ModelOperation::Decision)
-        || !entry.supports_operation(ModelOperation::TextGeneration)
-    {
-        return None;
+    if declared.protocol.is_native() {
+        let limits = declared.limits?;
+        return Some(DecisionContract {
+            protocol: declared.protocol,
+            question_kinds: declared.question_kinds,
+            limits: DecisionLimits {
+                max_questions: limits.max_questions.map(|n| n as usize),
+                max_choice_options: limits.max_choice_options as usize,
+                score_levels_min: limits.score_levels_min as usize,
+                score_levels_max: limits.score_levels_max as usize,
+                state_window_tokens: usize::try_from(limits.state_window_tokens).ok()?,
+                request_window_tokens: limits
+                    .request_window_tokens
+                    .map(usize::try_from)
+                    .transpose()
+                    .ok()?,
+            },
+            input_price_per_mtok: declared.input_price_per_mtok,
+            output_price_per_mtok: declared.output_price_per_mtok,
+            served_model_id: declared.served_model_id,
+        });
     }
     let window = entry.context_window as usize;
     Some(DecisionContract {
@@ -120,6 +95,7 @@ pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<Decisi
             score_levels_min: STRUCTURED_LLM_SCORE_LEVELS_MIN,
             score_levels_max: STRUCTURED_LLM_SCORE_LEVELS_MAX,
             state_window_tokens: window.saturating_sub(STRUCTURED_LLM_OVERHEAD_TOKENS),
+            request_window_tokens: None,
         },
         // An absent rate card is an unknown price, and an unknown price
         // refuses dispatch rather than charging nothing.

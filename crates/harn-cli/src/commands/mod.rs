@@ -51,6 +51,7 @@ pub(crate) mod harness_migration_codegen;
 pub(crate) mod host;
 pub(crate) mod init;
 pub(crate) mod json_schemas;
+pub(crate) mod llm_evaluate;
 pub(crate) mod local;
 pub(crate) mod local_readiness;
 pub(crate) mod mcp;

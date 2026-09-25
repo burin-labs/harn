@@ -78,6 +78,7 @@ pub enum RawAnswer {
 /// projecting a smaller `answered`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawDecisionResponse {
+    pub native_transport: Option<super::receipt::NativeTransportReceipt>,
     pub answers: BTreeMap<String, RawAnswer>,
     pub provenance: ConfidenceProvenance,
     /// The identity the provider served, as returned. Not the requested id.
@@ -93,6 +94,8 @@ pub struct RawDecisionResponse {
 /// arm, so a transport can never collapse a rate limit into a generic failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecisionTransportError {
+    /// Credential admission refused locally, before a physical request.
+    AuthorityDenied,
     /// The provider refused the request or returned an unusable body.
     Refused {
         reason: RefusalReason,

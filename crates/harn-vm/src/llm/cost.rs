@@ -756,7 +756,7 @@ pub(crate) fn cache_savings_usd_for_provider(
     cache_read_savings + cache_write_savings
 }
 
-fn accumulate_llm_usage(
+pub(crate) fn accumulate_llm_usage(
     model: &str,
     input_tokens: i64,
     output_tokens: i64,

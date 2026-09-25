@@ -100,31 +100,40 @@ fn money(value: f64) -> Result<Decimal, VmError> {
 /// Captured by the future before transport. Cancellation and errors leave the
 /// full bound uncertain; only a complete supported usage response can release it.
 pub(crate) struct AttemptReservation {
-    scope: AdmissionScope,
+    money: MonetaryReservation,
     bound: AttemptBound,
+}
+
+/// A monetary hold shared by chat and native operations. Only this owner
+/// moves money between in-flight, settled, and uncertain balances, and it
+/// carries the durable machine-spend hold when a machine quota is active.
+pub(crate) struct MonetaryReservation {
+    scope: AdmissionScope,
+    bound: Decimal,
     durable: Option<DurableReservation>,
     pending: bool,
 }
 
-impl Drop for AttemptReservation {
+impl Drop for MonetaryReservation {
     fn drop(&mut self) {
         if self.pending {
             let mut ledger = self.scope.ledger.lock().unwrap_or_else(|e| e.into_inner());
-            ledger.in_flight -= self.bound.total();
-            ledger.uncertain += self.bound.total();
+            ledger.in_flight -= self.bound;
+            ledger.uncertain += self.bound;
         }
     }
 }
 
 impl AttemptReservation {
-    pub(crate) fn settle(mut self, result: &LlmResult) -> Result<(), VmError> {
+    pub(crate) fn settle(self, result: &LlmResult) -> Result<(), VmError> {
         if result.served_fast {
-            self.scope
+            self.money
+                .scope
                 .ledger
                 .lock()
                 .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?
                 .contract_broken = true;
-            if let Some(durable) = &self.durable {
+            if let Some(durable) = &self.money.durable {
                 durable.invalidate()?;
             }
             return Err(error(
@@ -134,12 +143,13 @@ impl AttemptReservation {
         }
         let Some((upper, token_limit_violated)) = self.bound.observed_upper(result) else {
             if self.bound.known_contract_violation(result) {
-                self.scope
+                self.money
+                    .scope
                     .ledger
                     .lock()
                     .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?
                     .contract_broken = true;
-                if let Some(durable) = &self.durable {
+                if let Some(durable) = &self.money.durable {
                     durable.invalidate()?;
                 }
                 return Err(error(
@@ -151,12 +161,52 @@ impl AttemptReservation {
             // without both usage counters. This is not reported as zero cost.
             return Ok(());
         };
-        if token_limit_violated || upper > self.bound.total() {
+        let actual = result.usage().cost_usd.map(money).transpose()?;
+        self.money.settle_upper(upper, actual, token_limit_violated)
+    }
+}
+
+impl MonetaryReservation {
+    /// Fail closed for this execution and, when a machine quota is active,
+    /// for every later process sharing it.
+    pub(crate) fn retain_contract_violation(self) -> Result<(), VmError> {
+        self.scope
+            .ledger
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contract_broken = true;
+        // Drop keeps the reservation uncertain: downstream retries can cost
+        // more than the final response's reported usage.
+        match &self.durable {
+            Some(durable) => durable.invalidate(),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn settle(self, observed_cost: Option<f64>) -> Result<(), VmError> {
+        match observed_cost {
+            Some(cost) => {
+                let cost = money(cost)?;
+                self.settle_upper(cost, Some(cost), false)
+            }
+            None => Ok(()), // Drop retains unknown usage as uncertain.
+        }
+    }
+
+    fn settle_upper(
+        mut self,
+        upper: Decimal,
+        actual: Option<Decimal>,
+        token_limit_violated: bool,
+    ) -> Result<(), VmError> {
+        if token_limit_violated || upper > self.bound {
+            // A provider/catalog contract violation cannot be undone; account
+            // the evidence, then fail closed on this and all subsequent calls.
             let mut ledger =
                 self.scope.ledger.lock().map_err(|_| {
                     error(DenialKind::ScopeUnavailable, "admission ledger poisoned")
                 })?;
-            ledger.in_flight -= self.bound.total();
+            ledger.in_flight -= self.bound;
             ledger.settled_upper += upper;
             ledger.contract_broken = true;
             self.pending = false;
@@ -168,15 +218,17 @@ impl AttemptReservation {
                 "provider usage exceeded an admitted token or cost bound",
             ));
         }
+        // A failed durable settlement leaves both holds in place: Drop moves
+        // the execution hold to uncertain and the machine hold stays reserved.
         if let Some(durable) = &self.durable {
-            durable.settle(upper, result.usage().cost_usd.map(money).transpose()?)?;
+            durable.settle(upper, actual)?;
         }
         let mut ledger = self
             .scope
             .ledger
             .lock()
             .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
-        ledger.in_flight -= self.bound.total();
+        ledger.in_flight -= self.bound;
         ledger.settled_upper += upper;
         self.pending = false;
         Ok(())
@@ -266,8 +318,35 @@ pub(crate) fn reserve(
             return Err(err);
         }
     };
-    if let Some(max) = opts.budget.as_ref().and_then(|b| b.max_cost_usd) {
-        if bound.total() > money(max)? {
+    let hold = reserve_money(
+        &scope,
+        &mut ledger,
+        bound.total(),
+        opts.budget.as_ref().and_then(|b| b.max_cost_usd),
+    )?;
+    Ok(Some(AttemptReservation { money: hold, bound }))
+}
+
+fn reserve_money(
+    scope: &AdmissionScope,
+    ledger: &mut Ledger,
+    bound: Decimal,
+    per_call: Option<f64>,
+) -> Result<MonetaryReservation, VmError> {
+    if ledger.contract_broken {
+        return Err(error(
+            DenialKind::ProviderContractViolation,
+            "a prior provider response violated the admitted bound",
+        ));
+    }
+    if ledger.ceiling.is_none() && scope.machine.is_none() {
+        return Err(error(
+            DenialKind::ScopeUnavailable,
+            "admission ceiling is missing",
+        ));
+    }
+    if let Some(max) = per_call {
+        if bound > money(max)? {
             ledger.denied += 1;
             return Err(error(
                 DenialKind::InsufficientAllowance,
@@ -276,7 +355,7 @@ pub(crate) fn reserve(
         }
     }
     if let Some(ceiling) = ledger.ceiling {
-        if ledger.settled_upper + ledger.in_flight + ledger.uncertain + bound.total() > ceiling {
+        if ledger.settled_upper + ledger.in_flight + ledger.uncertain + bound > ceiling {
             ledger.denied += 1;
             return Err(error(
                 DenialKind::InsufficientAllowance,
@@ -284,20 +363,43 @@ pub(crate) fn reserve(
             ));
         }
     }
+    // Chat attempts and native operations draw on the same durable machine
+    // allowance; an exhausted or broken quota refuses before transport.
     let durable = scope
         .machine
         .as_ref()
-        .map(|machine| machine.reserve(bound.total()))
+        .map(|machine| machine.reserve(bound))
         .transpose()?;
-    ledger.in_flight += bound.total();
+    ledger.in_flight += bound;
     ledger.attempts_started = ledger.attempts_started.saturating_add(1);
-    drop(ledger);
-    Ok(Some(AttemptReservation {
-        scope,
+    Ok(MonetaryReservation {
+        scope: scope.clone(),
         bound,
         durable,
         pending: true,
-    }))
+    })
+}
+
+/// Reserve a native operation's admitted monetary upper bound in the same
+/// execution-tree ledger chat calls use. Activation and the hold are atomic.
+pub(crate) fn reserve_decision(
+    bound: f64,
+    per_call: f64,
+    total: f64,
+) -> Result<MonetaryReservation, VmError> {
+    let bound = money(bound)?;
+    let scope = SCOPE.with(|slot| slot.borrow().clone());
+    let mut ledger = scope
+        .ledger
+        .lock()
+        .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
+    let budget = super::cost::LlmBudgetEnvelope {
+        admission: Some(AdmissionMode::Conservative),
+        total_budget_usd: Some(total),
+        ..Default::default()
+    };
+    activate(&mut ledger, Some(&budget))?;
+    reserve_money(&scope, &mut ledger, bound, Some(per_call))
 }
 
 /// Upper accounting is deliberately named apart from the actual-usage ledger.

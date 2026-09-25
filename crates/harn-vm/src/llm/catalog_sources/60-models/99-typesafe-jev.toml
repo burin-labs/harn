@@ -31,11 +31,9 @@
 # answers with a probability distribution, and silently re-asking a different
 # serving route would change the distribution without changing the receipt.
 #
-# Availability: only the Vercel gateway route has been reached. The direct
-# TypeSafe API was waitlisted on 2026-09-20 and Harn holds no key for it, and
-# OpenRouter did not list Jev when the route was checked. Those three rows
-# therefore carry `availability = "unknown"` rather than the default
-# `serverless`, which would claim the route works out of the box.
+# Availability: Vercel and OpenRouter answered all three question kinds through
+# the canonical evaluator on 2026-09-22. Direct TypeSafe access remains
+# unverified and its rows retain availability = "unknown".
 
 # Direct TypeSafe, pinned snapshot. Documented, not reached: access is
 # waitlisted. https://docs.typesafe.ai/api
@@ -80,7 +78,7 @@ current_snapshot = "typesafe/jev-1.13.0"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
 
-# Vercel AI Gateway. The only route reached live: on 2026-09-20 the gateway
+# Vercel AI Gateway. On 2026-09-20 the gateway
 # model list carried `typesafe-ai/jev` with `"type": "evaluation"`, and
 # `/v1/chat/completions` refused it with `ModelTypeMismatchError`.
 # https://vercel.com/docs/ai-gateway/modalities/evaluation
@@ -103,9 +101,10 @@ current_snapshot = "typesafe/jev-1.13.0"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
 
-# OpenRouter. Documented, not reached: OpenRouter publishes an alpha decisions
-# endpoint and a TypeSafe provider page, but its model list did not carry Jev
-# when the route was checked on 2026-09-20.
+# OpenRouter /api/alpha/decisions answered boolean, choice and score on
+# 2026-09-22. The provider returned typesafe/jev-1.13-20260917, input356/output61,
+# and $0.000014952. Receipt identity must use the actual response model, not
+# assume the requested route alias is an immutable revision.
 # https://openrouter.ai/typesafe
 [models."openrouter/typesafe/jev-1.13"]
 name = "Jev 1.13 (OpenRouter)"
@@ -121,7 +120,6 @@ pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap"]
-availability = "unknown"
 row_kind = "snapshot"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"

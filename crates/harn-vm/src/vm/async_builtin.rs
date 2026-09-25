@@ -35,6 +35,13 @@ impl AsyncBuiltinCtx {
         Self::new(vm)
     }
 
+    pub(crate) fn record_evaluation_receipt(
+        &self,
+        receipt: crate::llm::decision::receipt::EvaluationReceipt,
+    ) {
+        self.child.lock().evaluation_journal.lock().record(receipt);
+    }
+
     /// Construct a context for host work that the current VM awaits inline.
     ///
     /// The parent is parked until the host future completes, so the context
