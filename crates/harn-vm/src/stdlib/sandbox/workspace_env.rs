@@ -261,6 +261,13 @@ fn workspace_toolchain_env_with_package_cache(
             ("GIT_CONFIG_GLOBAL", home.join(".gitconfig")),
             ("PIP_CONFIG_FILE", home.join(".config/pip/pip.conf")),
         ] {
+            // An explicitly selected Git global config is the source the
+            // sandbox root discovery queried. Replacing it with ~/.gitconfig
+            // here would send the child to a different config after its roots
+            // have already been decided.
+            if key == "GIT_CONFIG_GLOBAL" && std::env::var_os(key).is_some() {
+                continue;
+            }
             if candidate.is_file() {
                 env.push((key.to_string(), candidate.display().to_string()));
             }

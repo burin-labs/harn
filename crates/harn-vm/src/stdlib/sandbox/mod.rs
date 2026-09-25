@@ -75,6 +75,10 @@ mod command_for;
 pub use command_for::{std_command_for, std_command_for_with_env_state, tokio_command_for};
 #[cfg(all(test, target_os = "linux"))]
 mod enforcement_report;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+mod git_config;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) use git_config::process_sandbox_package_manager_config_read_roots;
 mod handler_env;
 mod introspection;
 #[cfg(target_os = "linux")]
@@ -1667,19 +1671,6 @@ pub(crate) fn process_sandbox_developer_toolchain_read_roots(
         return Vec::new();
     };
     developer_toolchain_read_roots_for_home(&home)
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-pub(crate) fn process_sandbox_package_manager_config_read_roots(
-    policy: &CapabilityPolicy,
-) -> Vec<PathBuf> {
-    if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::PackageManagerConfig) {
-        return Vec::new();
-    }
-    let Some(home) = sandbox_user_home_dir() else {
-        return Vec::new();
-    };
-    package_manager_config_read_roots_for_home(&home)
 }
 
 /// Windows-only: every directory on this process's own `PATH`, gated on the

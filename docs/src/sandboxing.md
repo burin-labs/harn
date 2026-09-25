@@ -334,6 +334,14 @@ are process-only: Harn file builtins still need `workspace_roots` or
 `read_only_roots`, and the extra home-dir paths stay unwritable by the OS
 profile.
 
+For Git, the `package_manager_config` preset also asks the host's Git to
+resolve global and system config includes for each workspace. Included config
+files and paths those configs name for hooks, excludes, attributes, and direct
+credential-helper executables are readable by confined children. External
+paths gain no write grant, and repository-local config cannot add process read
+roots. Credential-helper data files are not inferred from helper arguments;
+on macOS and Linux, the credential read denylist still takes precedence.
+
 Windows AppContainer confinement is more conservative for omitted presets:
 granting a home-scoped root requires mutating filesystem ACLs recursively, so
 the Windows backend does not materialize implicit default

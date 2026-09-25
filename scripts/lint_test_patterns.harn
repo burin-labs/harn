@@ -244,6 +244,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // Install and a nested sandboxed run must cross real CLI, package-cache,
   // environment-forwarding, and process-authority boundaries.
   "crates/harn-cli/tests/harn_cli_e2e/package_cache_sandbox_cli.rs",
+  // Global/system Git config and an external hook cross the CLI and OS
+  // confinement boundary; an in-process test cannot prove the write refusal.
+  "crates/harn-cli/tests/harn_cli_e2e/git_config_sandbox_cli.rs",
   // Path-metadata persistence and session import must spawn a real CLI so
   // Nextest identity cannot redirect `.harn` / `.harn-runs` away from the
   // tempfile project.
