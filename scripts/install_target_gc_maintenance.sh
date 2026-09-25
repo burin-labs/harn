@@ -18,7 +18,9 @@ if ! existing="$(crontab -l 2>&1)"; then
   esac
 fi
 without_old="$(printf '%s\n' "$existing" | awk -v marker="$marker" 'index($0, marker) == 0')"
-entry="17 3 * * * $installed >> $log_dir/target-gc-maintenance.log 2>&1 $marker"
+printf -v installed_shell '%q' "$installed"
+printf -v log_shell '%q' "$log_dir/target-gc-maintenance.log"
+entry="17 3 * * * $installed_shell >> $log_shell 2>&1 $marker"
 printf '%s\n%s\n' "$without_old" "$entry" | crontab -
 installed_tab="$(crontab -l)"
 if [ "$(printf '%s\n' "$installed_tab" | grep -Fc "$marker")" -ne 1 ] \
