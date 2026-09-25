@@ -1,9 +1,8 @@
 //! Persistent on-disk snapshot of the workspace index.
 //!
-//! v1 uses a single JSON file at `.burin/index/snapshot.json` for
-//! on-disk compatibility. The shape is intentionally tolerant of missing
-//! sections so we can extend it in place without a version bump (e.g. add
-//! a new sub-index without invalidating earlier snapshots).
+//! v2 uses a single JSON file at `.burin/index/snapshot.json` and includes
+//! the typed symbol graph. A v1 snapshot cannot safely answer graph queries,
+//! so it is rebuilt rather than restored with a measured zero graph.
 //!
 //! The snapshot is the recovery primitive. On daemon startup, the
 //! embedder restores from the snapshot if one exists, then calls
@@ -11,6 +10,7 @@
 //! records and locks before serving any traffic.
 
 use std::collections::HashMap;
+use std::io::{self, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use super::agents::{AgentRegistry, RegistryConfig, SerializedRegistry};
 use super::file_table::{FileId, IndexedFile, IndexedSymbol};
 use super::graph::DepGraph;
+use super::symbol_graph::{GraphSnapshot, SymbolGraph};
 use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
 use super::words::WordIndex;
@@ -25,7 +26,7 @@ use super::IndexState;
 
 /// Current format version. Bumped whenever the snapshot layout changes
 /// in a non-additive way.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 
 /// On-disk metadata header. Small and cheap to read so embedders can
 /// peek at a snapshot without parsing the whole thing.
@@ -135,6 +136,10 @@ pub struct CodeIndexSnapshot {
     pub versions: VersionLog,
     /// Live agents at snapshot time.
     pub agents: SerializedRegistry,
+    /// The typed graph. Missing in v1, which must be rebuilt before graph
+    /// queries can be served.
+    #[serde(default)]
+    pub(super) symbols: Option<GraphSnapshot>,
 }
 
 impl CodeIndexSnapshot {
@@ -146,24 +151,28 @@ impl CodeIndexSnapshot {
             .join("snapshot.json")
     }
 
-    /// Save the snapshot atomically (`tmp` file + rename) so partial
-    /// writes never leave a half-encoded JSON blob on disk.
+    /// Stream to a unique sibling temporary file and atomically replace the
+    /// snapshot. Large symbol graphs must not be buffered as another full
+    /// serialized copy in process memory, and concurrent writers must not
+    /// share one fixed `.tmp` path.
     pub fn save(&self, workspace_root: &Path) -> std::io::Result<()> {
         let path = Self::path_for(workspace_root);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+        let parent = path.parent().expect("snapshot path has a parent");
+        std::fs::create_dir_all(parent)?;
+        let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+        {
+            let mut writer = BufWriter::new(tmp.as_file_mut());
+            serde_json::to_writer(&mut writer, self).map_err(io::Error::other)?;
+            writer.flush()?;
         }
-        let tmp = path.with_extension("json.tmp");
-        let bytes = serde_json::to_vec(self).map_err(std::io::Error::other)?;
-        std::fs::write(&tmp, bytes)?;
-        std::fs::rename(&tmp, &path)?;
+        tmp.persist(&path).map_err(|error| error.error)?;
         Ok(())
     }
 
     /// Try to load the snapshot from `workspace_root/.burin/index/snapshot.json`.
     /// Returns `Ok(None)` when no snapshot exists yet, the format is
     /// unrecognised, or the snapshot does not describe `workspace_root`
-    /// (different checkout or a different `HEAD`). Returns `Err` when one
+    /// (different checkout or missing graph). Returns `Err` when one
     /// exists but couldn't be parsed (caller is expected to fall back
     /// to `build_from_root`).
     pub fn load(workspace_root: &Path) -> std::io::Result<Option<Self>> {
@@ -171,9 +180,8 @@ impl CodeIndexSnapshot {
         if !path.exists() {
             return Ok(None);
         }
-        let bytes = std::fs::read(&path)?;
-        let snap: CodeIndexSnapshot =
-            serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+        let reader = BufReader::new(std::fs::File::open(&path)?);
+        let snap: CodeIndexSnapshot = serde_json::from_reader(reader).map_err(io::Error::other)?;
         if snap.meta.format_version != SNAPSHOT_FORMAT_VERSION {
             tracing::debug!(
                 target: "harn_hostlib::code_index",
@@ -184,7 +192,7 @@ impl CodeIndexSnapshot {
             );
             return Ok(None);
         }
-        if !snapshot_matches_workspace(&snap, workspace_root) {
+        if snap.symbols.is_none() || !snapshot_matches_workspace(&snap, workspace_root) {
             return Ok(None);
         }
         Ok(Some(snap))
@@ -203,21 +211,10 @@ fn snapshot_matches_workspace(snap: &CodeIndexSnapshot, workspace_root: &Path) -
         );
         return false;
     }
-    let live_head = super::git_head::read_git_head(&requested);
-    match (snap.meta.git_head.as_deref(), live_head.as_deref()) {
-        (None, None) => true,
-        (Some(snap_head), Some(live)) if snap_head == live => true,
-        (snap_head, live) => {
-            tracing::info!(
-                target: "harn_hostlib::code_index",
-                requested = %requested.display(),
-                snapshot_git_head = snap_head,
-                live_git_head = live,
-                "code-index snapshot git HEAD mismatch; ignoring",
-            );
-            false
-        }
-    }
+    // A changed HEAD is a reason to verify file contents, not to discard
+    // every unchanged file and rebuild the whole graph. The owning refresh
+    // reconciles the snapshot before it can be served.
+    true
 }
 
 impl IndexState {
@@ -269,6 +266,7 @@ impl IndexState {
             deps,
             versions: self.versions.clone(),
             agents: self.agents.snapshot(),
+            symbols: Some(self.symbols.snapshot()),
         }
     }
 
@@ -276,8 +274,13 @@ impl IndexState {
     /// snapshot for a specific checkout should overwrite [`Self::root`]
     /// with that checkout's canonical path so a stored path string cannot
     /// redirect later persists.
-    pub fn from_snapshot(snap: CodeIndexSnapshot) -> Self {
+    pub fn from_snapshot(snap: CodeIndexSnapshot) -> io::Result<Self> {
         let root = PathBuf::from(snap.meta.workspace_root);
+        let graph =
+            SymbolGraph::from_snapshot(snap.symbols.ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "missing symbol graph")
+            })?)
+            .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
         let mut files: HashMap<FileId, IndexedFile> = HashMap::with_capacity(snap.files.len());
         let mut path_to_id: HashMap<String, FileId> = HashMap::with_capacity(snap.files.len());
         for f in snap.files {
@@ -311,6 +314,13 @@ impl IndexState {
         let deps = DepGraph::from_rows(snap.deps);
         let agents = AgentRegistry::from_snapshot(RegistryConfig::default(), snap.agents);
 
+        if graph.file_ids().iter().any(|id| !files.contains_key(id)) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "symbol graph names an absent file",
+            ));
+        }
+
         let mut state = Self::empty(root);
         state.files = files;
         state.path_to_id = path_to_id;
@@ -319,6 +329,7 @@ impl IndexState {
         state.deps = deps;
         state.versions = snap.versions;
         state.agents = agents;
+        state.symbols = graph;
         state.last_built_unix_ms = snap.meta.indexed_at_ms;
         state.git_head = snap.meta.git_head;
         state.set_next_file_id(snap.next_file_id);
@@ -326,7 +337,7 @@ impl IndexState {
         // a snapshot that predates a resolver would otherwise restore a
         // stale answer that no refresh with an unchanged path set fixes.
         state.rebuild_module_index();
-        state
+        Ok(state)
     }
 
     /// Drop stale agent records and release any locks held by agents
@@ -371,15 +382,49 @@ mod tests {
     }
 
     #[test]
-    fn load_rejects_snapshot_when_git_head_does_not_match() {
+    fn load_reconciles_snapshot_when_git_head_does_not_match() {
         let dir = fixture_tree();
         let mut snap = snapshot_for(dir.path());
         snap.meta.git_head = Some("ffffffffffffffff".to_string());
         snap.save(dir.path()).unwrap();
         assert!(
-            CodeIndexSnapshot::load(dir.path()).unwrap().is_none(),
-            "a snapshot whose recorded HEAD is not the live HEAD must be a miss"
+            CodeIndexSnapshot::load(dir.path()).unwrap().is_some(),
+            "a changed HEAD requires reconciliation, not a cold rebuild"
         );
+    }
+
+    #[test]
+    fn load_rejects_a_graphless_v1_snapshot() {
+        let dir = fixture_tree();
+        let mut snap = snapshot_for(dir.path());
+        snap.meta.format_version = 1;
+        snap.symbols = None;
+        snap.save(dir.path()).unwrap();
+        assert!(
+            CodeIndexSnapshot::load(dir.path()).unwrap().is_none(),
+            "v1 cannot be served with an empty graph"
+        );
+    }
+
+    #[test]
+    fn load_rejects_a_graphless_current_snapshot() {
+        let dir = fixture_tree();
+        let mut snap = snapshot_for(dir.path());
+        snap.symbols = None;
+        snap.save(dir.path()).unwrap();
+        assert!(CodeIndexSnapshot::load(dir.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn restore_refuses_duplicate_graph_node_ids() {
+        let dir = fixture_tree();
+        let mut snap = snapshot_for(dir.path());
+        let graph = snap.symbols.as_mut().unwrap();
+        graph.nodes.push(graph.nodes[0].clone());
+        let error = IndexState::from_snapshot(snap)
+            .err()
+            .expect("invalid graph");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]

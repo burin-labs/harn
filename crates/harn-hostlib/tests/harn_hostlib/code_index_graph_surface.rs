@@ -4,6 +4,8 @@
 //! schemas and error shape are exercised together.
 
 use std::fs;
+use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -100,6 +102,45 @@ fn rebuild(registry: &BuiltinRegistry, root: &std::path::Path) {
     );
 }
 
+fn git(root: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", root.join(".git/empty-global-config"))
+        .env("GIT_AUTHOR_NAME", "Index Probe")
+        .env("GIT_AUTHOR_EMAIL", "index@example.invalid")
+        .env("GIT_COMMITTER_NAME", "Index Probe")
+        .env("GIT_COMMITTER_EMAIL", "index@example.invalid")
+        .output()
+        .expect("run isolated git");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn function_count(registry: &BuiltinRegistry, name: &str) -> usize {
+    let query = format!("MATCH (f:Function {{name: '{name}'}}) RETURN f.path AS path");
+    let result = call(
+        registry,
+        "hostlib_code_index_cypher",
+        dict(&[("query", VmValue::String(query.as_str().into()))]),
+    );
+    list_field(&extract_dict(&result), "rows").len()
+}
+
+fn indexed_content(registry: &BuiltinRegistry, path: &str) -> String {
+    let result = call(
+        registry,
+        "hostlib_code_index_read_range",
+        dict(&[("path", VmValue::String(path.into()))]),
+    );
+    string_field(&extract_dict(&result), "content")
+}
+
 #[test]
 fn cypher_returns_function_by_name() {
     let dir = build_workspace();
@@ -128,6 +169,158 @@ fn cypher_returns_function_by_name() {
         other => panic!("expected string path, got {other:?}"),
     };
     assert_eq!(path, "src/a.rs");
+}
+
+#[test]
+fn restored_index_keeps_the_typed_symbol_graph() {
+    let dir = build_workspace();
+    let (writer_registry, writer) = registry();
+    rebuild(&writer_registry, dir.path());
+    let modules = |registry: &BuiltinRegistry| {
+        let result = call(
+            registry,
+            "hostlib_code_index_cypher",
+            dict(&[(
+                "query",
+                VmValue::String(arcstr::ArcStr::from(
+                    "MATCH (m:Module) RETURN m.path AS path",
+                )),
+            )]),
+        );
+        list_field(&extract_dict(&result), "rows").len()
+    };
+    assert_eq!(
+        modules(&writer_registry),
+        2,
+        "the fresh graph must be populated"
+    );
+    assert!(writer.persist_to_disk().expect("persist index"));
+
+    let (reader_registry, reader) = registry();
+    assert_eq!(
+        reader.warm_session(dir.path()),
+        harn_hostlib::code_index::SessionWarmOutcome::Restored
+    );
+    assert_eq!(
+        modules(&reader_registry),
+        2,
+        "a successful restore must not turn a measured graph into an empty one"
+    );
+}
+
+#[test]
+fn restored_harn_references_use_the_current_host_resolver() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("importer.harn"), "fn helper() { run() }\n").unwrap();
+    fs::write(dir.path().join("first.harn"), "pub fn run() { 1 }\n").unwrap();
+    fs::write(dir.path().join("second.harn"), "pub fn run() { 2 }\n").unwrap();
+
+    let query = |registry: &BuiltinRegistry| {
+        let result = call(
+            registry,
+            "hostlib_code_index_cypher",
+            dict(&[(
+                "query",
+                VmValue::String(
+                    "MATCH (m:Module)-[:REFS]->(f:Function {name: 'run'}) RETURN f.path AS path"
+                        .into(),
+                ),
+            )]),
+        );
+        list_field(&extract_dict(&result), "rows")
+            .iter()
+            .map(|row| string_field(&extract_dict(row), "path"))
+            .collect::<Vec<_>>()
+    };
+    let capability = |target: &'static str| {
+        CodeIndexCapability::new().with_harn_reference_resolver(Arc::new(move |_| {
+            Ok(vec![ResolvedHarnReference {
+                from_path: "importer.harn".into(),
+                to_path: target.into(),
+                to_name: "run".into(),
+            }])
+        }))
+    };
+    let writer = capability("first.harn");
+    let mut writer_registry = BuiltinRegistry::new();
+    writer.register_builtins(&mut writer_registry);
+    rebuild(&writer_registry, dir.path());
+    assert_eq!(query(&writer_registry), vec!["first.harn"]);
+    assert!(writer.persist_to_disk().unwrap());
+
+    let reader = capability("second.harn");
+    let mut reader_registry = BuiltinRegistry::new();
+    reader.register_builtins(&mut reader_registry);
+    assert!(reader.restore_from_disk(dir.path()).unwrap());
+    assert_eq!(query(&reader_registry), vec!["second.harn"]);
+
+    let no_resolver = CodeIndexCapability::new();
+    let mut no_resolver_registry = BuiltinRegistry::new();
+    no_resolver.register_builtins(&mut no_resolver_registry);
+    assert!(no_resolver.restore_from_disk(dir.path()).unwrap());
+    assert!(query(&no_resolver_registry).is_empty());
+}
+
+#[test]
+fn restored_graph_reconciles_a_commit_and_an_uncommitted_edit() {
+    let dir = build_workspace();
+    git(dir.path(), &["init", "-q"]);
+    git(dir.path(), &["add", "src/a.rs", "src/b.rs"]);
+    git(
+        dir.path(),
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "initial",
+        ],
+    );
+    let (baseline_registry, baseline) = registry();
+    rebuild(&baseline_registry, dir.path());
+    assert_eq!(function_count(&baseline_registry, "alpha"), 1);
+    assert!(baseline.persist_to_disk().unwrap());
+
+    // A commit may replace contents without changing a file's size or mtime.
+    // A HEAD mismatch must verify bytes before retaining the old graph.
+    let a = dir.path().join("src/a.rs");
+    let old_mtime = filetime::FileTime::from_last_modification_time(&fs::metadata(&a).unwrap());
+    let before = fs::read_to_string(&a).unwrap();
+    let after = before.replace("alpha", "delta");
+    assert_eq!(before.len(), after.len());
+    fs::write(&a, after).unwrap();
+    filetime::set_file_mtime(&a, old_mtime).unwrap();
+    git(dir.path(), &["add", "src/a.rs"]);
+    git(
+        dir.path(),
+        &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "rename"],
+    );
+
+    let (committed_registry, committed) = registry();
+    assert!(committed.restore_from_disk(dir.path()).unwrap());
+    assert_eq!(function_count(&committed_registry, "alpha"), 0);
+    assert_eq!(function_count(&committed_registry, "delta"), 1);
+    assert!(indexed_content(&committed_registry, "src/a.rs").contains("fn delta"));
+
+    // A second process also sees an ordinary uncommitted edit. Its saved
+    // snapshot already carries the new HEAD, so this exercises file refresh.
+    let b = dir.path().join("src/b.rs");
+    let old_mtime = filetime::FileTime::from_last_modification_time(&fs::metadata(&b).unwrap());
+    let before = fs::read_to_string(&b).unwrap();
+    let after = before.replace("gamma", "theta");
+    assert_eq!(before.len(), after.len());
+    fs::write(&b, after).unwrap();
+    filetime::set_file_mtime(
+        &b,
+        filetime::FileTime::from_unix_time(old_mtime.unix_seconds() + 2, 0),
+    )
+    .unwrap();
+    let (edited_registry, edited) = registry();
+    assert!(edited.restore_from_disk(dir.path()).unwrap());
+    assert_eq!(function_count(&edited_registry, "gamma"), 0);
+    assert_eq!(function_count(&edited_registry, "theta"), 1);
+    assert!(indexed_content(&edited_registry, "src/b.rs").contains("fn theta"));
 }
 
 #[test]
