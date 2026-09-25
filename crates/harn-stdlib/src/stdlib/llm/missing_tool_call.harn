@@ -304,7 +304,7 @@ pub fn missing_tool_call_classifier(
       max_tokens: cfg.max_tokens ?? 192,
       temperature: cfg.temperature ?? 0.0,
       session_id: payload?.session_id ?? "",
-      mock_scope: cfg.mock_scope ?? "agent.missing_tool_call",
+      mock_scope: "agent.missing_tool_call",
     }
     if model != "" {
       llm_opts = llm_opts + {model: model}
