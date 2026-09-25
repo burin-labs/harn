@@ -1,0 +1,82 @@
+pipeline test(harness: Harness, task: unknown) {
+  const bad_uri = try {
+    harness.tools.mcp_resource({uri: 7, name: "README", text: "text"})
+  }
+  assert(is_err(bad_uri), "non-string resource URI must fail")
+  assert(
+    contains(to_string(unwrap_err(bad_uri)), "'uri' must be a string"),
+    "resource failure must name the field",
+  )
+  const bad_name = try {
+    harness.tools.mcp_resource({uri: "docs://name", name: 7, text: "text"})
+  }
+  assert(is_err(bad_name), "non-string resource name must fail")
+  assert(contains(to_string(unwrap_err(bad_name)), "'name' must be a string"), "names field")
+  const bad_title = try {
+    harness.tools.mcp_resource({uri: "docs://title", name: "Title", title: 7, text: "text"})
+  }
+  assert(is_err(bad_title), "non-string resource title must fail")
+  assert(contains(to_string(unwrap_err(bad_title)), "'title' must be a string"), "names title")
+  const bad_mime = try {
+    harness.tools.mcp_resource({uri: "docs://mime", name: "MIME", mime_type: 7, text: "text"})
+  }
+  assert(is_err(bad_mime), "non-string resource MIME type must fail")
+  assert(contains(to_string(unwrap_err(bad_mime)), "'mime_type' must be a string"), "names MIME")
+  const bad_body = try {
+    harness.tools.mcp_resource({uri: "docs://body", name: "Body", text: 7})
+  }
+  assert(is_err(bad_body), "non-string resource content must fail")
+  assert(contains(to_string(unwrap_err(bad_body)), "'text' must be a string"), "names content")
+  const bad_argument = try {
+    harness.tools.mcp_prompt(
+      {name: "review", arguments: [{name: "text"}, 7], handler: { args -> args.text }},
+    )
+  }
+  assert(is_err(bad_argument), "invalid prompt argument must fail the whole prompt")
+  assert(
+    contains(to_string(unwrap_err(bad_argument)), "arguments[1]"),
+    "prompt failure must name the argument",
+  )
+  const bad_completion = try {
+    harness.tools.mcp_resource_template(
+      {
+        uri_template: "file:///{path}",
+        name: "Files",
+        handler: { args -> args.path },
+        completions: {path: ["src", 7]},
+      },
+    )
+  }
+  assert(is_err(bad_completion), "invalid completion must fail the template")
+  assert(
+    contains(to_string(unwrap_err(bad_completion)), "completions.path[1]"),
+    "completion failure must name the value",
+  )
+  const undeclared_completion = try {
+    harness.tools.mcp_resource_template(
+      {
+        uri_template: "file:///{path}",
+        name: "Files",
+        handler: { args -> args.path },
+        completions: {other: ["src"]},
+      },
+    )
+  }
+  assert(is_err(undeclared_completion), "completion variable must occur in the URI template")
+  const malformed_template = try {
+    harness.tools.mcp_resource_template(
+      {uri_template: "file:///{path", name: "Files", handler: { args -> args.path }},
+    )
+  }
+  assert(is_err(malformed_template), "malformed URI template must be rejected")
+  const unknown_field = try {
+    harness.tools.mcp_resource({uri: "docs://readme", name: "README", text: "text", extra: 1})
+  }
+  assert(is_err(unknown_field), "unknown resource field must be rejected")
+  harness.tools.mcp_resource({uri: "docs://readme", name: "README", text: "text"})
+  const duplicate_uri = try {
+    harness.tools.mcp_resource({uri: "docs://readme", name: "copy", text: "text"})
+  }
+  assert(is_err(duplicate_uri), "duplicate resource URI must be rejected")
+  harness.stdio.println("invalid MCP catalog entries refused")
+}
