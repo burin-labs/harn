@@ -64,6 +64,7 @@ pub(crate) mod run_source;
 pub(crate) mod runs;
 mod sandbox;
 mod scan;
+mod self_toolchain;
 mod serve;
 mod session;
 mod skill;
@@ -232,6 +233,7 @@ pub(crate) use runs::{
 };
 pub(crate) use sandbox::SandboxArgs;
 pub(crate) use scan::ScanArgs;
+pub(crate) use self_toolchain::{SelfArgs, SelfCommand};
 pub(crate) use serve::{
     A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeSurface, McpServeTransport,
     ServeAcpArgs, ServeArgs, ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs,
@@ -584,6 +586,9 @@ SCRIPTING
     /// `--version`). Verifies the archive against the release's
     /// `SHA256SUMS` manifest before installing.
     Upgrade(UpgradeArgs),
+    /// Cache and run checksum-verified Harn release binaries by version.
+    #[command(name = "self")]
+    SelfToolchain(SelfArgs),
     /// Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib sets.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

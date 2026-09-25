@@ -79,6 +79,14 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 process::exit(1);
             }
         }
+        Command::SelfToolchain(args) => match commands::upgrade::toolchain::run(args).await {
+            Ok(0) => {}
+            Ok(code) => process::exit(code),
+            Err(error) => {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        },
         Command::Dap(_) => run_dap_adapter(),
         Command::ConformanceHelper(args) => {
             if let Err(error) = commands::conformance_helper::run(args).await {
