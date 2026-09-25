@@ -1270,8 +1270,28 @@ jobs:
 
       # Promotion verifies this attestation (predicate type, signer repository,
       # and source digest) for every file before it publishes anything.
+      # Attestation spends the repository token's API budget, which a burst of
+      # main pushes can exhaust. A rate-limited attempt waits for the reset and
+      # runs once more; any other failure fails the job at the wait step.
       - name: Attest release archive provenance
+        id: attest-archive
         if: needs.setup.outputs.should_package_archives == 'true'
+        continue-on-error: true
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.release-provenance.outputs.archive }}
+          predicate-type: https://harnlang.com/attestations/release-archive/v1
+          predicate-path: ${{ steps.release-provenance.outputs.predicate }}
+
+      - name: Wait for the API rate limit before attesting the archive again
+        if: needs.setup.outputs.should_package_archives == 'true' && steps.attest-archive.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_rate_limit_reset.sh "Attest release archive provenance"
+
+      - name: Attest release archive provenance after the rate limit reset
+        if: needs.setup.outputs.should_package_archives == 'true' && steps.attest-archive.outcome == 'failure'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ steps.release-provenance.outputs.archive }}
@@ -1456,8 +1476,29 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # Promotion verifies an attestation for every file the manifest lists,
-      # including the ones built here.
+      # including the ones built here. A rate-limited attempt waits for the
+      # reset and runs once more, as the archive attestation does.
       - name: Attest release files
+        id: attest-release-files
+        continue-on-error: true
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ steps.manifest.outputs.release_files }}/SHA256SUMS
+            ${{ steps.manifest.outputs.release_files }}/release-assets.json
+            ${{ steps.manifest.outputs.release_files }}/release-notes.md
+          predicate-type: https://harnlang.com/attestations/release-archive/v1
+          predicate-path: ${{ steps.manifest.outputs.predicate }}
+
+      - name: Wait for the API rate limit before attesting the release files again
+        if: steps.attest-release-files.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_rate_limit_reset.sh "Attest release files"
+
+      - name: Attest release files after the rate limit reset
+        if: steps.attest-release-files.outcome == 'failure'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |

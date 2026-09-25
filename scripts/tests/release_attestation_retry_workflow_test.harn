@@ -1,0 +1,118 @@
+import { read_yaml } from "std/fs"
+
+/**
+ * A burst of repository activity can spend the workflow token's API budget
+ * while a release candidate builds. Every attestation in the candidate run
+ * therefore tolerates its first failure, asks the rate-limit gate whether that
+ * failure was the spent budget, and runs once more after the reset. Without
+ * this, one rate-limited attestation fails a build that already finished.
+ */
+fn step_at(steps: list, index: int) -> dict {
+  if index < len(steps) {
+    return steps[index] ?? {}
+  }
+  return {}
+}
+
+@complexity(allow)
+fn attestation_retry_errors(workflow: dict) -> list<string> {
+  let errors: list<string> = []
+  let attest_count = 0
+  for entry in (workflow?.jobs ?? {}).entries() {
+    const job_name = entry.key
+    const steps = entry.value?.steps ?? []
+    let index = 0
+    for step in steps {
+      const uses = to_string(step?.uses ?? "")
+      const is_retry = step?.name != nil
+        && to_string(step.name).ends_with("after the rate limit reset")
+      if uses.starts_with("actions/attest@") && !is_retry {
+        attest_count = attest_count + 1
+        const label = job_name + ": " + to_string(step?.name ?? "<unnamed>")
+        const id = to_string(step?.id ?? "")
+        const failed = "steps." + id + ".outcome == 'failure'"
+        if id == "" || step?.get("continue-on-error") != true {
+          errors = errors
+            + [
+              label
+                + " must have an id and continue-on-error so a rate-limited attempt can run again",
+            ]
+        }
+        const wait = step_at(steps, index + 1)
+        const again = step_at(steps, index + 2)
+        if !to_string(wait?.run ?? "").contains("./scripts/ci/wait_for_rate_limit_reset.sh")
+          || !to_string(wait.get("if") ?? "").contains(failed) {
+          errors = errors
+            + [label + " must be followed by the rate-limit wait, run only after it failed"]
+        }
+        if to_string(again?.uses ?? "") != uses
+          || !to_string(again.get("if") ?? "").contains(failed)
+          || again.get("continue-on-error") == true
+          || json_stringify(again?.with ?? {}) != json_stringify(step?.with ?? {}) {
+          errors = errors
+            + [
+              label
+                + " must run once more with the same inputs after the wait, and fail the job if that fails",
+            ]
+        }
+      }
+      index = index + 1
+    }
+  }
+  if attest_count == 0 {
+    errors = errors + ["build-release-binaries has no attestation steps; the census read nothing"]
+  }
+  return errors
+}
+
+fn load(fs: HarnessFs) -> dict {
+  return read_yaml(
+    fs,
+    path_join(fs.source_dir(), "../../.github/workflows/build-release-binaries.yml"),
+  )
+}
+
+@test
+pipeline test_every_release_attestation_survives_a_rate_limit(harness: Harness, task: unknown) {
+  const workflow = load(harness.fs)
+  assert_eq(attestation_retry_errors(workflow), [])
+  // A bare attestation, as the workflow had before, is refused.
+  const bare = {
+    jobs: {
+      build: {steps: [{name: "Attest", uses: "actions/attest@abc", with: {"subject-path": "a"}}]},
+    },
+  }
+  const bare_errors = join(attestation_retry_errors(bare), "\n")
+  assert(bare_errors.contains("continue-on-error"))
+  assert(bare_errors.contains("rate-limit wait"))
+  // A retry whose inputs drifted from the first attempt is refused.
+  const drifted = {
+    jobs: {
+      build: {
+        steps: [
+          {
+            name: "Attest",
+            id: "a",
+            "continue-on-error": true,
+            uses: "actions/attest@abc",
+            with: {"subject-path": "a"},
+          },
+          {
+            name: "Wait",
+            if: "steps.a.outcome == 'failure'",
+            run: "./scripts/ci/wait_for_rate_limit_reset.sh \"Attest\"",
+          },
+          {
+            name: "Attest after the rate limit reset",
+            if: "steps.a.outcome == 'failure'",
+            uses: "actions/attest@abc",
+            with: {"subject-path": "b"},
+          },
+        ],
+      },
+    },
+  }
+  assert(join(attestation_retry_errors(drifted), "\n").contains("same inputs"))
+  // A workflow with no attestation at all is not a pass.
+  assert(join(attestation_retry_errors({jobs: {}}), "\n").contains("read nothing"))
+}
