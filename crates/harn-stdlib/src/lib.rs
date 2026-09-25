@@ -595,6 +595,7 @@ pub fn builtin_reexports(module: &str) -> &'static [&'static str] {
             "assert_eq",
             "assert_matches",
             "assert_ne",
+            "skip",
             "value_diff",
         ],
         _ => &[],

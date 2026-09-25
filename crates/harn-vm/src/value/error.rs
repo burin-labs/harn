@@ -125,6 +125,9 @@ pub enum VmError {
     /// A host-imposed deadline expired while executing the VM. Unlike a Harn
     /// `deadline` block, this control-plane stop cannot be caught by user code.
     ExecutionDeadlineExceeded,
+    /// A user test deliberately did not run its remaining assertions. The
+    /// test runner alone turns this control signal into a skipped case.
+    TestSkipped(String),
     /// A Harn program requested that its embedding process terminate with this
     /// status code. Like a host deadline, this is control flow rather than a
     /// catchable Harn error; the embedding boundary owns the final cleanup and
@@ -195,7 +198,10 @@ impl VmError {
     pub fn is_uncatchable_control_flow(&self) -> bool {
         matches!(
             self,
-            Self::ExecutionDeadlineExceeded | Self::ProcessExit(_) | Self::McpInputRequired(_)
+            Self::ExecutionDeadlineExceeded
+                | Self::TestSkipped(_)
+                | Self::ProcessExit(_)
+                | Self::McpInputRequired(_)
         )
     }
 
@@ -819,6 +825,7 @@ impl std::fmt::Display for VmError {
             VmError::Runtime(msg) => write!(f, "Runtime error: {msg}"),
             VmError::DivisionByZero => write!(f, "Division by zero"),
             VmError::ExecutionDeadlineExceeded => write!(f, "Execution deadline exceeded"),
+            VmError::TestSkipped(reason) => write!(f, "Test skipped: {reason}"),
             VmError::ProcessExit(code) => write!(f, "Process exit requested: {code}"),
             VmError::AbandonedExecution => write!(
                 f,
