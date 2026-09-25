@@ -277,6 +277,13 @@ case "${1:-}" in
   record-evidence)
     printf 'harn-freshness-check-v4\nrepo-path=%064d\nchecker-build-id=aa\nchecker-content=%064d\nmanifest=%064d\n' 0 0 0
     ;;
+  content-hash)
+    if command -v sha256sum >/dev/null 2>&1; then
+      sha256sum "$2" | cut -d ' ' -f 1
+    else
+      shasum -a 256 "$2" | cut -d ' ' -f 1
+    fi
+    ;;
   verify) exit 0 ;;
   *) exit 2 ;;
 esac
@@ -1134,6 +1141,72 @@ touch -t 200001010000 "$cargo_fixture/embedded tracked.harn"
     > "$tmp_root/cargo-fixture-source-v1-rebuild.out"
 )
 
+# Cargo's deps artifact is an exact hard link to the proven executable. Losing
+# the uplift changes its inode metadata, so recovery must compare receipt-bound
+# content and source, then issue a fresh receipt without invoking Cargo.
+fixture_deps_bin=""
+for candidate in "$cargo_target/debug/deps/harn"-*; do
+  if [[ -f "$candidate" && -x "$candidate" && "$candidate" != *.d ]]; then
+    fixture_deps_bin="$candidate"
+    break
+  fi
+done
+if [[ -z "$fixture_deps_bin" ]]; then
+  echo "Cargo fixture did not leave a compiled deps executable" >&2
+  exit 1
+fi
+mkdir "$tmp_root/held-candidates"
+for candidate in "$cargo_target/debug/deps/harn"-*; do
+  if [[ -f "$candidate" && -x "$candidate" && "$candidate" != *.d ]]; then
+    mv "$candidate" "$tmp_root/held-candidates/"
+  fi
+done
+bad_candidate="$cargo_target/debug/deps/harn-0000000000000000"
+cp "$tmp_root/held-candidates/${fixture_deps_bin##*/}" "$bad_candidate"
+printf '\nchanged-binary-bytes\n' >> "$bad_candidate"
+chmod +x "$bad_candidate"
+rm "$cargo_fixture_bin"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-link-mismatch.out" \
+    2> "$tmp_root/cargo-fixture-link-mismatch.err"
+); then
+  echo "no-build recovered an executable whose bytes differ from the receipt" >&2
+  exit 1
+fi
+if ! grep -Fq "no compiled artifact matches the receipt's bytes and current source" \
+  "$tmp_root/cargo-fixture-link-mismatch.err"; then
+  echo "mismatched compiled artifact was not refused for a proof mismatch" >&2
+  cat "$tmp_root/cargo-fixture-link-mismatch.err" >&2
+  exit 1
+fi
+rm "$bad_candidate"
+for candidate in "$tmp_root/held-candidates/"*; do
+  mv "$candidate" "$cargo_target/debug/deps/"
+done
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-link-recovered.out" \
+    2> "$tmp_root/cargo-fixture-link-recovered.err"
+)
+if ! grep -Fxq "$cargo_fixture_bin" "$tmp_root/cargo-fixture-link-recovered.out" || \
+   ! grep -Fq 'restored the freshness-proven Harn executable' \
+     "$tmp_root/cargo-fixture-link-recovered.err"; then
+  echo "no-build did not restore the exact compiled artifact" >&2
+  cat "$tmp_root/cargo-fixture-link-recovered.err" >&2
+  exit 1
+fi
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-link-reused.out"
+)
+
 # The auto-resolved worktree path binds ordinary filesystem identity as well as
 # semantic provenance. A byte-identical copy remains a valid caller-owned
 # explicit pin, but replacing the canonical artifact with that copy is
@@ -1472,6 +1545,12 @@ fi
 if ! grep -Fq "compiled artifacts for this binary exist under" \
   "$tmp_root/env-no-build-missing-link.err"; then
   echo "missing-link error did not name the deps directory it found" >&2
+  cat "$tmp_root/env-no-build-missing-link.err" >&2
+  exit 1
+fi
+if ! grep -Fq "recovery refused: the build receipt, input manifest, or proof checker is missing" \
+  "$tmp_root/env-no-build-missing-link.err"; then
+  echo "missing-link refusal did not identify the absent proof" >&2
   cat "$tmp_root/env-no-build-missing-link.err" >&2
   exit 1
 fi

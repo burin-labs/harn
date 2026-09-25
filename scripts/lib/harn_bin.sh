@@ -488,6 +488,12 @@ harn_resolve_binary() (
       printf '%s\n' "$bin"
       return 0
     fi
+    if harn_compiled_binary_artifact_exists "$bin"; then
+      if harn_restore_binary_from_receipt "$bin"; then
+        printf '%s\n' "$bin"
+        return 0
+      fi
+    fi
     echo "error: no fresh worktree harn binary found at $bin" >&2
     if harn_compiled_binary_artifact_exists "$bin"; then
       # Cargo compiled the binary but its uplifted copy at the profile root is
