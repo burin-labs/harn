@@ -174,13 +174,28 @@ async fn host_agent_session_init(
             crate::agent_sessions::inject_message(&resolved, history_msg)
                 .map_err(VmError::Runtime)?;
         }
-        if !(has_history && message.trim().is_empty()) {
+        let user_content = initial_user_content(&opts_map, &message);
+        let has_user_content = match &user_content {
+            serde_json::Value::String(text) => !text.trim().is_empty(),
+            serde_json::Value::Array(blocks) => !blocks.is_empty(),
+            _ => false,
+        };
+        if !has_history || !message.trim().is_empty() || has_user_content {
             let user_msg = serde_json::json!({
                 "role": "user",
-                "content": initial_user_content(&opts_map, &message),
+                "content": user_content,
             });
             crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
                 .map_err(VmError::Runtime)?;
+        } else {
+            let omitted = crate::llm::helpers::transcript_event(
+                "agent_user_turn_omitted",
+                "system",
+                "internal",
+                "No user turn was added for an empty continuation",
+                Some(serde_json::json!({"reason": "empty_continuation"})),
+            );
+            crate::agent_sessions::append_event(&resolved, omitted).map_err(VmError::Runtime)?;
         }
 
         // Install the policy only after every fallible synchronous setup step.
