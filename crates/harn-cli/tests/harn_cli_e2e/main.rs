@@ -71,6 +71,7 @@ mod mcp_lazy_registration;
 mod mcp_server_cli;
 mod merge_captain_cli;
 mod merge_captain_mock_cli;
+mod model_context;
 mod models_dispatch;
 mod native_rule_libraries;
 mod orchestrator_cli;

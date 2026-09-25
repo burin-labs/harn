@@ -617,6 +617,11 @@ pub fn model_catalog_id_for_route(provider: &str, model_id: &str) -> Option<Stri
         .map(|(id, _)| id.clone())
 }
 
+/// Catalog metadata for a concrete provider route, including wire-model ids.
+pub fn model_catalog_entry_for_route(provider: &str, model_id: &str) -> Option<ModelDef> {
+    model_catalog_entry(&model_catalog_id_for_route(provider, model_id)?)
+}
+
 pub fn model_rate_limits(model_id: &str) -> Option<RateLimitsDef> {
     model_catalog_entry(model_id).and_then(|model| model.rate_limits)
 }
