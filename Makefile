@@ -659,6 +659,7 @@ test-pr-gate-scripts:
 	./scripts/tests/pr_title_convention_test.sh
 	./scripts/tests/fixture_git_init_branch_test.sh
 	./scripts/tests/sha256_file_hex_test.sh
+	./scripts/tests/wait_for_rate_limit_reset_test.sh
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
