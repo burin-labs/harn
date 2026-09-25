@@ -137,6 +137,8 @@ pipeline default(harness: Harness) {
       const text_at = prompt.index_of("VARIABLE_ASSISTANT_TAIL")
       require rules_at >= 0 && tools_at > rules_at && text_at > tools_at,
         "stable rules and candidate tools must precede assistant text"
+      require harness.llm.mock_calls()[0].mock_scope == "agent.missing_tool_call",
+        "the classifier call must declare its purpose, not borrow the main turn's bucket"
       harness.stdio.println("prefix.action=" + verdict.action)
       harness.stdio.println("prefix.stable_first=true")
     },

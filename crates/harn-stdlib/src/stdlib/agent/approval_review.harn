@@ -304,6 +304,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
       system: approval_review_system_prompt(effective_policy),
       timeout_ms: effective_policy?.reviewer?.timeout_ms,
       output: {schema: schema, strict: true, validation: "error"},
+      mock_scope: "agent.approval_review",
       _call_stage: "verify",
     }
       + route.reasoning,
