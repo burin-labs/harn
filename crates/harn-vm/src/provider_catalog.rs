@@ -61,6 +61,8 @@ mod released_row_kind_tests;
 mod remote;
 mod schema;
 #[cfg(test)]
+mod schema_shape_tests;
+#[cfg(test)]
 mod supersession_tests;
 #[cfg(test)]
 mod tests;
