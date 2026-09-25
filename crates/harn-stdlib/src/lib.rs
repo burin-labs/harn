@@ -104,6 +104,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "eval/remote_fanout" => "stdlib/eval/remote_fanout.harn",
     "eval/sequential" => "stdlib/eval/sequential.harn",
     "eval/calibration" => "stdlib/eval/calibration.harn",
+    "eval/selective_risk" => "stdlib/eval/selective_risk.harn",
     "eval/experiment" => "stdlib/eval/experiment.harn",
     "eval/experiment/contracts" => "stdlib/eval/experiment/contracts.harn",
     "eval/experiment/assignment" => "stdlib/eval/experiment/assignment.harn",
