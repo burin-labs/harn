@@ -51,10 +51,11 @@ pub use errors::{LlmErrorKind, LlmErrorReason};
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;
 pub use ollama::{
-    normalize_ollama_keep_alive, ollama_readiness, ollama_runtime_settings_from_env,
-    warm_ollama_model, warm_ollama_model_with_settings, OllamaReadinessOptions,
-    OllamaReadinessResult, OllamaRuntimeSettings, OllamaWarmupResult, HARN_OLLAMA_KEEP_ALIVE_ENV,
-    HARN_OLLAMA_NUM_CTX_ENV, OLLAMA_DEFAULT_KEEP_ALIVE, OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
+    normalize_ollama_keep_alive, ollama_readiness, ollama_readiness_for_provider,
+    ollama_runtime_settings_from_env, warm_ollama_model, warm_ollama_model_with_settings,
+    OllamaReadinessOptions, OllamaReadinessResult, OllamaRuntimeSettings, OllamaWarmupResult,
+    HARN_OLLAMA_KEEP_ALIVE_ENV, HARN_OLLAMA_NUM_CTX_ENV, OLLAMA_DEFAULT_KEEP_ALIVE,
+    OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
 };
 pub(crate) use openai_normalize::normalize_openai_style_messages;
 pub(crate) use options::{

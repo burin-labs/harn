@@ -289,7 +289,12 @@ async fn vm_call_completion_ollama(
     if let Some(system) = &opts.system {
         body["system"] = serde_json::json!(system);
     }
-    super::apply_ollama_runtime_settings(&mut body, opts.provider_overrides.as_ref());
+    super::apply_ollama_runtime_settings(
+        &mut body,
+        &opts.provider,
+        &opts.model,
+        opts.provider_overrides.as_ref(),
+    );
 
     let req = client
         .post(format!("{base_url}{endpoint}"))
