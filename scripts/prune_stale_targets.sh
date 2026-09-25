@@ -159,7 +159,7 @@ entry_requested() {
 matched_entries=()
 
 gc_policy_version="harn-target-gc/v2-$(cksum "$SCRIPT_DIR/prune_stale_targets.sh" | awk '{print $1 "-" $2}')"
-scanned=0; removed=0; kept=0; pending_candidates=0; summary_printed=0
+scanned=0; removed=0; kept=0; pending_candidates=0; ceiling_unproven_roots=0; summary_printed=0
 reclaimed_bytes=0; retained_bytes=0; unmeasured_entries=0
 completed=0
 receipt_root="${HARN_DEV_SETUP_STORAGE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/harn/dev-setup}"
@@ -216,6 +216,8 @@ print_summary() {
     status="complete"
     if [ "$dry_run" -eq 1 ]; then
       status="dry-run"
+    elif [ "$ceiling_unproven_roots" -gt 0 ]; then
+      status="partial"
     fi
   fi
   if [ "$measure_bytes" -eq 0 ]; then
@@ -228,7 +230,7 @@ print_summary() {
   fi
   # scanned is reported alongside the verdict so a zero here is readable as
   # "walked these roots and found nothing" rather than "walked nothing".
-  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$pending_candidates unmeasured_entries=$unmeasured_entries (roots=$roots)$suffix"
+  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$pending_candidates unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots (roots=$roots)$suffix"
 }
 
 record_success() {
@@ -644,7 +646,6 @@ entry_kib() {
 enforce_size_ceiling() {
   local target_root="$1"
   [ "$max_bytes" -gt 0 ] || return 0
-  [ -s "$evictable_file" ] || return 0
 
   # Measure every entry the run kept, protected ones included: the ceiling is a
   # statement about the root's total size, and ignoring the protected entries
@@ -686,6 +687,10 @@ enforce_size_ceiling() {
     fi
   done < <(sort -n "$evictable_file")
   echo "size ceiling: root now holds ${total_kib}KiB against ceiling ${ceiling_kib}KiB"
+  if [ "$total_kib" -gt "$ceiling_kib" ] || [ "$unmeasured" -gt 0 ]; then
+    ceiling_unproven_roots=$((ceiling_unproven_roots + 1))
+    echo "size ceiling: cannot prove this root fits while protected or unmeasured entries remain" >&2
+  fi
 }
 
 # Remove one entry, or report what would happen under --dry-run. Both passes

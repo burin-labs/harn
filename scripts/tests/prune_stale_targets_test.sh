@@ -319,6 +319,11 @@ HARN_TARGET_GC_MAX_BYTES=1048576 run_size_gc > "$tmp_root/size-live.txt" 2>&1
   cat "$tmp_root/size-live.txt" >&2
   exit 1
 }
+grep -Eq 'status=partial .*ceiling_unproven_roots=1' "$tmp_root/size-live.txt" || {
+  echo "the active entry left the ceiling unproven but the report claimed completion" >&2
+  cat "$tmp_root/size-live.txt" >&2
+  exit 1
+}
 kill "$size_busy_pid" 2>/dev/null || true
 
 echo "a rejected ceiling value fails loudly instead of reading as unlimited"
