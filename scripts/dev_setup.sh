@@ -346,7 +346,7 @@ install_locked_node_dependencies() {
 build_sccache_rustc_wrapper() {
   local source_path="$ROOT_DIR/scripts/sccache_rustc_wrapper.rs"
   local source_hash host_triple executable_suffix wrapper_dir wrapper_path temporary_path
-  source_hash="$(shasum -a 256 "$source_path" | awk '{print $1}')"
+  source_hash="$(shasum -a 256 < "$source_path" | awk '{print $1}')"
   host_triple="$(rustc -vV | sed -n 's/^host: //p')"
   if [[ -z "$host_triple" ]]; then
     echo "error: rustc did not report a host triple for the sccache wrapper" >&2
