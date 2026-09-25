@@ -1,0 +1,5 @@
+policy_rows=5
+positive_live=true
+red_live=true
+later_failure_blocks=true
+custom_stop_preserved=true

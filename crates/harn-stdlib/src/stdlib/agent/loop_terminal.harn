@@ -88,6 +88,76 @@ const __AGENT_LOOP_UNJUDGED_NATURAL_REASONS: list<string> = [
 ]
 
 /**
+ * Keep only an affirmative completion decision backed by the deterministic
+ * verifier. A passing command alone cannot erase a judge's unresolved task
+ * requirement, an unreported tool effect, or a later refusal.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_loop_terminal_verification_from_directive(directive: dict) -> dict? {
+  if directive?.action != "accept" && directive?.action != "stop_verified" {
+    return nil
+  }
+  const receipt = directive?.receipt
+  const verification = receipt?.verification
+  const requirements = receipt?.requirements
+  if verification?.oracle_expected != true
+    || verification?.observed != "passed"
+    || trim(to_string(verification?.command ?? "")) == ""
+    || trim(to_string(receipt?.evidence_id ?? "")) == ""
+    || requirements == nil
+    || requirements.pending_count != 0
+    || receipt?.pending_tool_batch_effect_count != 0
+    || receipt?.gap_count != 0 {
+    return nil
+  }
+  return {evidence_id: receipt.evidence_id, command: verification.command, observed: "passed"}
+}
+
+/**
+ * One terminal decision after all loop arms and callbacks have run.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_loop_resolve_verified_policy_stop(
+  final_status: string,
+  stop_reason: string?,
+  verification: dict?,
+  terminal_error: any,
+  suspend_result: any,
+) -> dict {
+  if verification == nil || terminal_error != nil || suspend_result != nil {
+    return {final_status: final_status, stop_reason: stop_reason, converted: nil, observed: nil}
+  }
+  const policy_status = contains(
+    ["budget_exhausted", "verify_exhausted", "completion_unverified", "stuck"],
+    final_status,
+  )
+  // A custom `done` reason is a host policy decision, not a loop limit. A
+  // passing verifier is recorded for inspection but cannot overrule it.
+  if !policy_status {
+    return {
+      final_status: final_status,
+      stop_reason: stop_reason,
+      converted: nil,
+      observed: verification,
+    }
+  }
+  return {
+    final_status: "done",
+    stop_reason: "verified_policy_stop",
+    observed: verification,
+    converted: {
+      prior_status: final_status,
+      prior_reason: to_string(stop_reason ?? ""),
+      verification: verification,
+    },
+  }
+}
+
+/**
  * Whether this terminal would otherwise be sealed as a natural completion.
  *
  * Scoped narrowly on purpose. A run that already carries a suspension, a
@@ -97,9 +167,10 @@ const __AGENT_LOOP_UNJUDGED_NATURAL_REASONS: list<string> = [
  * happened. The status set mirrors the classifier's `done` arm, which
  * normalizes an empty status to `done`.
  *
- * The stop-reason set is deliberately FIVE of the classifier's nine natural
- * reasons, and the four left out are the point rather than an oversight.
- * `post_edit_reverify`, `repeated_verified_pass` and `stalled_turn_end_judge`
+ * The stop-reason set is deliberately FIVE of the classifier's natural
+ * reasons; the judged reasons left out are the point rather than an oversight.
+ * `explicit_completion_claim`, `post_edit_reverify`,
+ * `repeated_verified_pass` and `stalled_turn_end_judge`
  * are reached only when a completion judge or a reserve verification already
  * ruled on this run, and `done` is the judge-accepted spelling. Something with
  * more evidence than a tool tally has already decided those, and a judge that
@@ -142,6 +213,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
   let verify_completion_judge_invocations = state.verify_completion_judge_invocations
   let verify_completion_judge_vetoes = state.verify_completion_judge_vetoes
   let feedback_history = state?.feedback_history ?? {}
+  let terminal_verification = state?.terminal_verification
   let current_max = state.current_max
   let budget_exhausted_emitted = state.budget_exhausted_emitted
   let budget_decisions = state.budget_decisions
@@ -204,6 +276,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
       state.iteration,
     )
     feedback_history = terminal_verdict?.feedback_history ?? feedback_history
+    terminal_verification = __agent_loop_terminal_verification_from_directive(terminal_verdict)
     verify_completion_judge_invocations += __completion_judge_hit(terminal_verdict)
     if __completion_directive_stops(terminal_verdict) {
       return state
@@ -215,6 +288,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
           stall_state: stall_state,
           verify_completion_judge_invocations: verify_completion_judge_invocations,
           feedback_history: feedback_history,
+          terminal_verification: terminal_verification,
         }
     }
     if terminal_verdict.action == "accept" {
@@ -237,6 +311,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
           stall_state: stall_state,
           verify_completion_judge_invocations: verify_completion_judge_invocations,
           feedback_history: feedback_history,
+          terminal_verification: terminal_verification,
         }
     }
     verify_attempts = verify_attempts + 1
@@ -283,6 +358,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
           current_max: current_max,
           budget_exhausted_emitted: budget_exhausted_emitted,
           feedback_history: feedback_history,
+          terminal_verification: terminal_verification,
         }
     }
     stop_reason = reserve_kind + "_failed"
@@ -304,6 +380,7 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
       budget_decisions: budget_decisions,
       terminal_error: terminal_error,
       feedback_history: feedback_history,
+      terminal_verification: terminal_verification,
     }
 }
 

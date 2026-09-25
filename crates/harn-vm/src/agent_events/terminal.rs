@@ -174,10 +174,11 @@ pub fn status_is_a_verification_verdict(canonical_status: &str) -> bool {
 /// callback `stop`) that must NOT be reported as a natural completion — that
 /// conflation is the Burin #4642 failure mode. Sourced from the loop's own
 /// terminal-`done` assignments and `__agent_loop_sealed_stop_reason`.
-const NATURAL_STOP_REASONS: [&str; 10] = [
+const NATURAL_STOP_REASONS: [&str; 12] = [
     "",
     "completed",
     "natural",
+    "explicit_completion_claim",
     "post_edit_reverify",
     "repeated_verified_pass",
     "required_tools_satisfied",
@@ -187,6 +188,7 @@ const NATURAL_STOP_REASONS: [&str; 10] = [
     // verifier had already passed. The oracle answered, so the run completed;
     // the judge's dissent is on the completion directive receipt.
     "judge_cap_reached_over_verified_pass",
+    "verified_policy_stop",
     "done",
 ];
 
@@ -602,10 +604,12 @@ mod tests {
             "",
             "completed",
             "natural",
+            "explicit_completion_claim",
             "post_edit_reverify",
             "repeated_verified_pass",
             "required_tools_satisfied",
             "sentinel",
+            "verified_policy_stop",
         ] {
             assert_eq!(
                 classify_agent_terminal("done", reason, false, None),
