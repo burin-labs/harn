@@ -102,7 +102,7 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@d5b86ef19b1a5d1d9d45e2fe55b1a82b9adf54ce # promote-release
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@5bf8c07287382b4492ad6d50b06da60c46936ad1 # promote-release
     with:
       sha: ${{ github.event.workflow_run.head_sha }}
       run-id: ${{ github.event.workflow_run.id }}
