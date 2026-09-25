@@ -1004,15 +1004,17 @@ jobs:
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-cli.tar.zst
 
-  # The Linux sandbox proof consumes its own exact-commit archive. Waiting on
-  # that immutable input instead of the producer's terminal state overlaps the
-  # sandbox with the producer's independently required workspace tests.
+  # The Linux sandbox proof consumes its own exact-commit archive. Schedule
+  # its barrier only after the producer finishes, so runner queue time cannot
+  # spend the artifact wait and a missing archive names a completed producer.
   security-tests-ready:
     name: Wait for Linux security tests
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    needs: [changes, rust-check-inputs]
+    if: >-
+      needs.changes.outputs.rust == 'true'
+      && needs.rust-check-inputs.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
@@ -1023,8 +1025,9 @@ jobs:
       - name: Wait for Linux security tests
         env:
           GH_TOKEN: ${{ github.token }}
-          # Six minutes setup + 20 CLI + 24 workspace archive + five dispatch/upload.
-          HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "330"
+          # After producer completion, only unreadable job metadata can spend
+          # this budget. A genuinely missing archive fails on the first read.
+          HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "6"
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
@@ -1132,9 +1135,8 @@ jobs:
 
   rust-security:
     name: Run Linux sandbox tests
-    # Start from exact-commit artifact readiness rather than producer
-    # completion. ci-status still requires the producer and this proof
-    # independently, so the overlap cannot hide a failed workspace test.
+    # The ready barrier verifies the exact-commit artifact after its producer
+    # completed; ci-status still requires both the producer and this proof.
     needs: [changes, security-tests-ready]
     if: >-
       needs.changes.outputs.rust == 'true'

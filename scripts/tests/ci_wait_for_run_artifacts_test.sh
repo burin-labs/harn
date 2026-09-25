@@ -28,14 +28,17 @@ if [[ $kind == artifacts ]]; then
       [{artifacts:[$cli]}, {artifacts:(if $count >= 3 then [{name:"harn-security.tar.zst",expired:false}] else [] end)}]
     elif $scenario == "expired" then [{artifacts:[$cli + {expired:true}]}]
     else [{artifacts:[]}, {artifacts:(
-      if $scenario == "early" or ($scenario == "delayed" and $count >= 3) or ($scenario == "race" and $count >= 2)
+      if $scenario == "early" or ($scenario == "delayed" and $count >= 3)
+        or ($scenario == "race" and $count >= 2) or ($scenario == "queued_late" and $count >= 5)
       then [$cli] else [] end)}] end'
 else
-  jq -cn --arg scenario "$FIXTURE_SCENARIO" '
+  jq -cn --arg scenario "$FIXTURE_SCENARIO" --argjson count "$count" '
     {id:12,name:"Rust workspace tests",status:"completed",
      conclusion:(if $scenario | startswith("terminal_") then $scenario | ltrimstr("terminal_") else "success" end)} |
-    if (["delayed","multiple","expired","malformed_artifact","running"] | index($scenario)) != null
+    if (["delayed","multiple","running"] | index($scenario)) != null
       then . + {status:"in_progress",conclusion:null} else . end |
+    if $scenario == "queued_late" then . + {status:(if $count <= 3 then "queued" else "in_progress" end),conclusion:null} else . end |
+    if $scenario == "running" and $count >= 4 then . + {status:"completed",conclusion:"success"} else . end |
     if $scenario == "unknown_status" then .status = "future_terminal" else . end |
     if $scenario == "unknown_conclusion" then .conclusion = "future_success" else . end |
     if $scenario == "absent" then .name = "unrelated completed job" else . end |
@@ -91,10 +94,14 @@ for scenario in early delayed race; do
   assert_output stdout 'run artifacts ready: harn-cli.tar.zst'
 done
 
+run_case queued_late harn-cli.tar.zst
+assert_result 0 5 4
+assert_output stdout 'run artifacts ready: harn-cli.tar.zst'
+
 run_case multiple harn-cli.tar.zst harn-security.tar.zst
 assert_result 0 3 2
 assert_output stdout 'run artifacts ready: harn-cli.tar.zst harn-security.tar.zst'
-assert_output stdout 'attempt 1/3): harn-security.tar.zst'
+assert_output stdout 'poll 1, producer in_progress): harn-security.tar.zst'
 
 for conclusion in failure cancelled skipped success timed_out; do
   run_case "terminal_$conclusion" harn-cli.tar.zst
@@ -103,9 +110,20 @@ for conclusion in failure cancelled skipped success timed_out; do
   assert_output stderr harn-cli.tar.zst
 done
 
-for scenario in api_error absent duplicate malformed_job empty_pages unknown_status unknown_conclusion malformed_artifact running expired; do
+for scenario in api_error absent duplicate malformed_job empty_pages unknown_status unknown_conclusion; do
   run_case "$scenario" harn-cli.tar.zst
   assert_result 1 3 3
-  assert_output stderr 'timed out waiting for run artifacts after 3 attempts: harn-cli.tar.zst'
+  assert_output stderr "producer 'Rust workspace tests' state unmeasured after 3 polls"
 done
-echo 'ci_wait_for_run_artifacts_test: 19 scenarios passed'
+
+for scenario in malformed_artifact expired; do
+  run_case "$scenario" harn-cli.tar.zst
+  assert_result 1 2 1
+  assert_output stderr "producer 'Rust workspace tests' completed (success)"
+done
+
+run_case running harn-cli.tar.zst
+assert_result 1 5 4
+assert_output stderr "producer 'Rust workspace tests' completed (success)"
+
+echo 'ci_wait_for_run_artifacts_test: 20 scenarios passed'
