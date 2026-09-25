@@ -93,6 +93,10 @@ pub(crate) struct ServeAcpArgs {
     /// WebSocket endpoint path when `--transport websocket` is selected.
     #[arg(long, default_value = "/acp", value_name = "PATH")]
     pub path: String,
+    /// Exact files or directories the ACP session may read outside its workspace.
+    /// This grants no write access or process-level filesystem access.
+    #[arg(long = "read-only-root", value_name = "PATH")]
+    pub read_only_root: Vec<PathBuf>,
     /// Static API keys accepted by the ACP authenticate method.
     #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
     pub api_key: Vec<String>,

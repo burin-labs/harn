@@ -11,6 +11,31 @@ fn serve_acp_accepts_attach_mode_without_a_file() {
         panic!("expected serve acp");
     };
     assert_eq!(serve.file, None);
+    assert!(serve.read_only_root.is_empty());
+}
+
+#[test]
+fn serve_acp_accepts_repeated_explicit_read_only_roots() {
+    let cli = Cli::parse_from([
+        "harn",
+        "serve",
+        "acp",
+        "--read-only-root",
+        "bundle/prompts",
+        "--read-only-root",
+        "bundle/fixtures",
+        "agent.harn",
+    ]);
+    let Command::Serve(args) = cli.command.unwrap() else {
+        panic!("expected serve command");
+    };
+    let crate::cli::ServeCommand::Acp(serve) = args.command else {
+        panic!("expected serve acp");
+    };
+    assert_eq!(
+        serve.read_only_root,
+        ["bundle/prompts", "bundle/fixtures"].map(std::path::PathBuf::from)
+    );
 }
 
 #[test]
