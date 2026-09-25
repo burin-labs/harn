@@ -9,6 +9,11 @@ import {
 } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
+struct ReceiptOutcome {
+  success: bool
+  echoed: string
+}
+
 fn receipt_tools() {
   const registry = tool_registry()
   return tool_define(
@@ -16,7 +21,9 @@ fn receipt_tools() {
     "echo_receipt",
     "Echo a message",
     {
-      handler: { args -> return {echoed: to_string(args?.message ?? "")} },
+      handler: { args ->
+        return ReceiptOutcome {success: true, echoed: to_string(args?.message ?? "")}
+      },
       parameters: {message: {type: "string"}, secret: {type: "string"}},
     },
   )

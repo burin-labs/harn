@@ -5,10 +5,7 @@
 9	agents/agent_loop_escalation_provider_error.harn	HARN-LNT-018
 2	agents/agent_loop_intra_turn_failure_fanout_cap.harn	HARN-LNT-049
 1	agents/agent_loop_native_missing_tool_call_recovery.harn	HARN-LNT-018
-1	agents/agent_loop_native_mock_tool_call_dispatch.harn	HARN-LNT-075
-1	agents/agent_loop_native_unreliable_prompt_wire_parity.harn	HARN-LNT-075
 1	agents/approval_reviewer.harn	HARN-LNT-049
-2	agents/approval_reviewer.harn	HARN-LNT-075
 1	agents/approval_reviewer_loop.harn	HARN-LNT-014
 1	agents/approval_reviewer_loop.harn	HARN-LNT-049
 1	agents/approval_reviewer_side_effect_ceiling.harn	HARN-LNT-049
@@ -23,7 +20,6 @@
 2	agents/suspend_nested.harn	HARN-LNT-014
 5	agents/thrash_hard_stop_recovery.harn	HARN-LNT-018
 2	agents/tool_precheck.harn	HARN-LNT-049
-1	agents/tool_precheck.harn	HARN-LNT-075
 1	agents/worker_retriggerable.harn	HARN-LNT-014
 1	agents/worker_retriggerable.harn	HARN-LNT-018
 3	agents/workflow_executor_agent_loop.harn	HARN-LNT-018
@@ -88,7 +84,6 @@
 1	scenarios/approval_policy_auto_deny.harn	HARN-LNT-016
 1	scenarios/approval_policy_write_path.harn	HARN-LNT-016
 1	scenarios/best_of_n_inside_agent_loop.harn	HARN-LNT-018
-1	scenarios/gemini_native_tool_calls_agent_loop.harn	HARN-LNT-075
 1	scenarios/http_server_stdlib.harn	HARN-LNT-029
 1	scenarios/llm_budget_recommend_max_output.harn	HARN-LNT-014
 1	scenarios/llm_caller_with_retry_recovers_from_transient_error.harn	HARN-LNT-018
@@ -101,10 +96,8 @@
 8	scenarios/mcp_basic.harn	HARN-LNT-018
 4	scenarios/mcp_tool_error.harn	HARN-LNT-018
 5	scenarios/tool_binder_pipeline.harn	HARN-LNT-018
-1	scenarios/tool_call_receipts_local_sink.harn	HARN-LNT-075
 1	scenarios/tool_middleware_primitives.harn	HARN-LNT-018
 1	scenarios/tool_middleware_with_handoff_artifact.harn	HARN-LNT-018
-1	scenarios/tool_search_custom_strategy.harn	HARN-LNT-075
 2	scenarios/tool_surface_validate.harn	HARN-CAP-005
 1	scenarios/tool_surface_validate.harn	__CHECK_FAILED__
 6	stdlib/agent_best_of_n.harn	HARN-LNT-016

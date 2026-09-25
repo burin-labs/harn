@@ -4270,9 +4270,11 @@ fn search_handler(args: dict) -> dict {
 
 #### Severity
 
-This reports as a warning while in-tree handlers migrate. It becomes an error
-once no untyped handler result remains, at which point outcome classification
-stops being a heuristic over key names.
+This is an error for a freeform dict literal returned directly from a tool
+handler or through a same-body immutable binding. The checker
+does not yet follow mutable bindings or helper-function returns; those need
+type analysis before every untyped outcome can be refused. A `handler` in a
+different contract, such as a tool-search strategy, is outside this rule.
 
 ### `HARN-LNT-076`
 

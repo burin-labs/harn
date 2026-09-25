@@ -1,6 +1,12 @@
 import { agent_loop } from "std/agent/loop"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
+struct ChoiceOutcome {
+  success: bool
+  accepted: bool
+  choice: string
+}
+
 /**
  * Regression: a native `tool_format` model whose scripted mock returns a
  * provider-native `tool_calls` response must DISPATCH that call — run the tool
@@ -23,7 +29,9 @@ fn probe_tools() {
     "record_choice",
     "Record the chosen output format exactly once",
     {
-      handler: { args -> return {accepted: true, choice: args?.choice ?? "unknown"} },
+      handler: { args ->
+        return ChoiceOutcome {success: true, accepted: true, choice: args?.choice ?? "unknown"}
+      },
       parameters: {choice: {type: "string", description: "the chosen output format"}},
       returns: {type: "object"},
       annotations: {kind: "record", side_effect_level: "read_only"},

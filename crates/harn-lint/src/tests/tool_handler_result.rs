@@ -21,6 +21,9 @@ fn a_handler_returning_a_freeform_dict_is_reported() {
         has_rule(&diagnostics, RULE),
         "expected an untyped handler-result diagnostic: {diagnostics:?}"
     );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule == RULE && diagnostic.severity == LintSeverity::Error
+    }));
 }
 
 /// The same shape returned by an explicit `return` inside a block body, which
@@ -40,6 +43,45 @@ fn an_explicit_return_of_a_dict_is_reported() {
     );
     let hits = diagnostics.iter().filter(|d| d.rule == RULE).count();
     assert_eq!(hits, 2, "both returns should be reported: {diagnostics:?}");
+}
+
+#[test]
+fn an_immutable_local_dict_return_is_reported() {
+    let diagnostics = lint_source(
+        "pub fn build(tools: any) -> any {\n\
+         \x20 return tool_define(tools, \"apply\", \"applies\", {\n\
+         \x20   handler: { args ->\n\
+         \x20     const result = {failed: true, error_code: 7}\n\
+         \x20     return result\n\
+         \x20   },\n\
+         \x20   parameters: {},\n\
+         \x20 })\n\
+         }\n",
+    );
+    assert!(
+        has_rule(&diagnostics, RULE),
+        "a named immutable dict is still an untyped outcome: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn a_mutable_local_is_not_guessed_from_its_initializer() {
+    let diagnostics = lint_source(
+        "pub fn build(tools: any) -> any {\n\
+         \x20 return tool_define(tools, \"apply\", \"applies\", {\n\
+         \x20   handler: { args ->\n\
+         \x20     let result = {ok: false}\n\
+         \x20     result = ApplyOutcome{ok: true}\n\
+         \x20     return result\n\
+         \x20   },\n\
+         \x20   parameters: {},\n\
+         \x20 })\n\
+         }\n",
+    );
+    assert!(
+        !has_rule(&diagnostics, RULE),
+        "a mutable binding needs type analysis before classification: {diagnostics:?}"
+    );
 }
 
 /// A typed struct declares the outcome by its type, so there is nothing to
@@ -73,6 +115,37 @@ fn an_ordinary_function_returning_a_dict_is_not_reported() {
     assert!(
         !has_rule(&diagnostics, RULE),
         "only tool handlers are in scope: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn a_tool_search_strategy_handler_is_not_a_tool_result() {
+    let diagnostics = lint_source(
+        "pub fn search() -> any {\n\
+         \x20 return with_llm_script(nil, [{\n\
+         \x20   tool_search: {strategy: {handler: { query, _candidates, _state ->\n\
+         \x20     {tool_names: [query], ranked: []}\n\
+         \x20   }}}\n\
+         \x20 }])\n\
+         }\n",
+    );
+    assert!(
+        !has_rule(&diagnostics, RULE),
+        "a search strategy does not return a tool outcome: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn a_tool_configuration_held_in_a_binding_is_still_checked() {
+    let diagnostics = lint_source(
+        "pub fn build(tools: any) -> any {\n\
+         \x20 const config = {handler: { args -> {ok: false} }, parameters: {}}\n\
+         \x20 return tool_define(tools, \"apply\", \"applies\", config)\n\
+         }\n",
+    );
+    assert!(
+        has_rule(&diagnostics, RULE),
+        "indirect registration must not hide a freeform result: {diagnostics:?}"
     );
 }
 
