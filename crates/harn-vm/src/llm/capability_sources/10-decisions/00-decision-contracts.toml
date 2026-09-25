@@ -110,12 +110,12 @@ extends = true
 decision_protocol = "structured_llm"
 decision_question_kinds = ["boolean", "choice", "score"]
 
-# Not declared here: the OpenRouter and Vercel gateway chat routes. The gateway
-# resolves capabilities by WIRE model and inherits OpenRouter's rules
-# (`provider_family`: vercel_ai_gateway -> openrouter -> openai), so an
-# OpenRouter rule on `openai/gpt-5.4-nano` is also matched by the Vercel row
-# whose wire model is the same string. That row's `operations` set lives in
-# `catalog_sources/60-models/99-vercel-ai-gateway.toml`, which this change does
-# not own, and a protocol without the operation that admits it is refused by
-# `no_route_names_a_decision_protocol_without_declaring_the_operation`. Adding
-# the two gateway families is a follow-up that edits both files together.
+# Vercel resolves capabilities by wire model and inherits OpenRouter's rules
+# (`provider_family`: vercel_ai_gateway -> openrouter -> openai). Its curated
+# GPT-5.4 Nano row therefore inherits this contract deliberately; both
+# gateway catalogs declare the decision operation alongside text generation.
+[[provider.openrouter]]
+model_match = ["openai/gpt-5.4-nano", "openai/gpt-5.4-mini"]
+extends = true
+decision_protocol = "structured_llm"
+decision_question_kinds = ["boolean", "choice", "score"]

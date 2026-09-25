@@ -21226,7 +21226,8 @@
       "id": "openai/gpt-5.4-mini",
       "name": "GPT-5.4 Mini (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-5.4 Mini",
       "provider": "openrouter",
@@ -21238,7 +21239,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -21311,7 +21313,8 @@
       "id": "openai/gpt-5.4-nano",
       "name": "GPT-5.4 Nano (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-5.4 Nano",
       "provider": "openrouter",
@@ -21323,7 +21326,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -27453,7 +27457,8 @@
       "id": "vercel/openai/gpt-5.4-nano",
       "name": "GPT-5.4 Nano (Vercel AI Gateway)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-5.4 Nano",
       "provider": "vercel_ai_gateway",
@@ -27472,7 +27477,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
