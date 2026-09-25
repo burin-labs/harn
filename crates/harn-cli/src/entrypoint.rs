@@ -504,6 +504,18 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             }
         },
         Command::Doctor(args) => {
+            if let Some(crate::cli::DoctorCommand::Sandbox(sandbox)) = args.command {
+                #[cfg(feature = "hostlib")]
+                process::exit(commands::doctor_sandbox::run(sandbox.json));
+                #[cfg(not(feature = "hostlib"))]
+                {
+                    let _ = sandbox;
+                    eprintln!(
+                        "error: `harn doctor sandbox` needs a build with the hostlib feature"
+                    );
+                    process::exit(2);
+                }
+            }
             commands::doctor::run_doctor_with_options(commands::doctor::DoctorOptions {
                 json: args.json,
                 check_providers: args.check_providers,

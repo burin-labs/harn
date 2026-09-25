@@ -9,6 +9,10 @@ use super::{
     apply_process_config, build_std_command, process_spawn_error, spawn_error, ProcessCommandConfig,
 };
 
+/// What every backend must render, and how a live observation is judged.
+#[path = "conformance.rs"]
+pub mod conformance;
+
 /// One platform implementation attaches the active capability ceiling to each
 /// child process. Callers use the module-level spawn functions, not this trait.
 pub(crate) trait SandboxBackend {

@@ -1,4 +1,4 @@
-use clap::Args;
+use clap::{Args, Subcommand};
 
 #[derive(Debug, Args)]
 pub(crate) struct DoctorArgs {
@@ -22,4 +22,21 @@ pub(crate) struct DoctorArgs {
     /// by default because each probe spawns Cargo.
     #[arg(long)]
     pub check_targets: bool,
+    #[command(subcommand)]
+    pub command: Option<DoctorCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum DoctorCommand {
+    /// Run every process-sandbox conformance case against this host's live
+    /// backend and report which confinement is actually enforced. Exits
+    /// nonzero unless every case that applies here was measured and holds.
+    Sandbox(DoctorSandboxArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DoctorSandboxArgs {
+    /// Emit a single JSON document instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
 }

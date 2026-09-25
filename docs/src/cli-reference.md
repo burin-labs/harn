@@ -1911,6 +1911,7 @@ consumers (IDE-host preflight, cloud-platform onboarding).
 harn doctor                # local checks; skips remote provider probes by default
 harn doctor --check-providers  # actively probe configured providers
 harn doctor --json         # versioned machine-readable output
+harn doctor sandbox        # measure which process confinement this host enforces
 ```
 
 Each check reports a red/yellow/green status (`fail` / `warn` / `ok`, plus
@@ -1930,6 +1931,30 @@ Local diagnostic subprocesses have a five-second execution deadline and a
 30-second deadline. A timed-out tool is reported as a failed probe; an
 unreadable target inventory is a warning, not an empty successful inventory.
 Process cleanup may add a short grace period after the deadline.
+
+### `harn doctor sandbox`
+
+`harn doctor` reports what the process-sandbox backend believes it can do.
+`harn doctor sandbox` measures it. It runs every case of the sandbox
+conformance contract through the same process tools an agent uses and prints
+one line per case:
+
+| Case | Holds when |
+|------|------------|
+| `fs.workspace_write_admitted` | a write inside the workspace lands |
+| `fs.outside_write_refused` | a write outside every writable root is refused |
+| `fs.outside_read_refused` | a read outside every readable root is refused |
+| `guardian.outside_write_refused` | a background child is confined like a direct one |
+| `env.undeclared_name_withheld` | no launcher variable the session did not declare reaches the child |
+| `guardian.undeclared_env_name_withheld` | the same, for a background child |
+| `unix_socket.bind_under_root` | a socket file binds under a named socket root |
+| `unix_socket.bind_under_root_with_network` | the same, when the policy also permits networking |
+| `unix_socket.bind_outside_root_refused` | a socket file outside every socket root is refused |
+
+A case that the backend cannot enforce on this host reads `not measured`, not
+`ok`. The command exits non-zero unless every case that applies on this
+platform was measured and holds. `--json` emits the same report in the
+standard envelope (`schemaVersion: 1`).
 
 ### What it checks
 
