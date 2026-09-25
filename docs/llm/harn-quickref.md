@@ -1389,6 +1389,17 @@ provider continuation material, including Anthropic signed `thinking` and
 opaque `redacted_thinking` blocks. Keep those blocks private and unmodified;
 the capability matrix decides whether they may be replayed to a route.
 
+### Typed decision evaluation
+
+`harness.llm.evaluate(id, state, questions, policy)` answers a literal set of
+`boolean`, `choice`, or `score` questions from `std/predicate` over one closed
+serializable state. The constant policy must name a catalog route with the
+`decision` operation. The checker derives each answer type from its question;
+match the closed outcome before reading an `answered` value. A partial answer
+set is a refusal, not a smaller success. `evaluate_predicate` projects the same
+capability to one boolean question and still returns a closed outcome. See
+`docs/src/predicates.md` for the builders, result arms, and refusal rules.
+
 ### `harness.llm.call` options
 
 Typed shape: `LlmCallOptions` from `std/llm/options`. Prefer an annotated
