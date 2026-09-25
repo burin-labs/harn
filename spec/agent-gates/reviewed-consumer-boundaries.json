@@ -57,6 +57,13 @@
   },
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "__agent_loop_budget_exhaustion(\n    harness.agent,\n    harness.clock,\n    session.session_id,\n    budget,\n    iteration,\n    nil,\n    loop_start_ms,\n    current_max,\n    opts,\n  )",
+    "owner": "__agent_loop_budget_exhaustion",
+    "evidence": "The loop passes its already resolved internal deadline fields to the pre-request budget guard. AgentSpec.deadline_ms and IterationBudget.wall_clock_ms are read by __agent_loop_apply_deadline at loop start; this boundary introduces no new caller policy."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "agent_stall_observe_tool_calls(\n          harness.agent,\n          session.session_id,\n          tool_calls,\n          iteration_index + 1,\n          turn_opts?.stall_diagnostics,\n          stall_state,\n          stall_judge_due,\n          stall_prev_dispatch,\n          raw_text,\n          had_full_parse_rejection,\n          stall_prev_turn_made_edit,\n          llm_result?.stop_reason ?? \"\",\n          {\n            dispatch: stall_prev_dispatch,\n            iteration: iteration_index + 1,\n            session_id: session.session_id,\n          },\n          stall_checkpoint.consumed_dispatch_position == stall_checkpoint.dispatch_position,\n          stall_checkpoint.verification_dispatch,\n          false,\n        )",
     "owner": "agent_stall_observe_tool_calls",

@@ -1,4 +1,5 @@
 import "std/agent/loop_call_budget"
+import "std/agent/loop_foundation"
 import "std/agent/loop_support"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
@@ -218,6 +219,10 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
   let budget_exhausted_emitted = state.budget_exhausted_emitted
   let budget_decisions = state.budget_decisions
   let terminal_error = state.terminal_error
+  if final_status == "" && __agent_loop_deadline_reached(opts, harness.clock) {
+    final_status = "budget_exhausted"
+    stop_reason = "deadline"
+  }
   if final_status == "" && state.iteration >= current_max && stop_reason == nil {
     final_status = "budget_exhausted"
     stop_reason = stop_reason ?? "max_iterations"
@@ -237,14 +242,15 @@ fn __agent_loop_prepare_terminal(harness: Harness, session: dict, state: dict) -
         "The final model turn contained tool-shaped output that the text-tool parser dropped.",
     }
   }
-  if __agent_loop_should_spend_reserve(
-    state.reserve_cfg,
-    opts,
-    final_status,
-    terminal_write_unverified,
-    state.made_source_write,
-    verify_attempts < state.max_verify_attempts,
-  ) {
+  if stop_reason != "deadline"
+    && __agent_loop_should_spend_reserve(
+      state.reserve_cfg,
+      opts,
+      final_status,
+      terminal_write_unverified,
+      state.made_source_write,
+      verify_attempts < state.max_verify_attempts,
+    ) {
     const reserve_kind = if terminal_write_unverified {
       "reserved_terminal_verify"
     } else {
