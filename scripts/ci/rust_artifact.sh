@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=scripts/ci/cache_policy.sh
 source "${SCRIPT_DIR}/cache_policy.sh"
+# shellcheck source=scripts/lib/sha256.sh
+source "${SCRIPT_DIR}/../lib/sha256.sh"
 
 # Owned by .github/cache-policy.json nextest_version (schema v5).
 NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
@@ -32,11 +34,7 @@ EOF
 }
 
 sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | cut -d ' ' -f 1
-  else
-    shasum -a 256 "$1" | cut -d ' ' -f 1
-  fi
+  sha256_file_hex "$1"
 }
 
 require_nextest_version() {

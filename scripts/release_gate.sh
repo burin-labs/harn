@@ -418,17 +418,7 @@ harn_cmd() {
 }
 
 file_sha256() {
-  local path="$1"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$path" | awk '{print $1}'
-    return 0
-  fi
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$path" | awk '{print $1}'
-    return 0
-  fi
-  echo "error: sha256sum or shasum is required to validate the warmed Harn binary" >&2
-  return 1
+  sha256_file_hex "$1"
 }
 
 run_docs_audit() {
