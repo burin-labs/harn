@@ -4,6 +4,10 @@
 # executes only the collector and its time helper from that fetched revision.
 set -euo pipefail
 
+# Cron provides a sparse PATH. Keep the common user and package-manager bin
+# directories available to Git credential helpers as well as to Git itself.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin}"
+
 source_repo="${HARN_TARGET_GC_SOURCE_REPO:-$HOME/projects/harn}"
 if ! git -C "$source_repo" rev-parse --git-dir >/dev/null 2>&1; then
   echo "harn-target maintenance: source checkout is missing: $source_repo" >&2

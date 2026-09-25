@@ -22,6 +22,7 @@ HARN_DEV_SETUP_STORAGE_ROOT="$test_root/storage" \
 HARN_TARGET_GC_ROOTS="$test_root/no-repos" \
 HARN_TARGET_GC_MAX_BYTES=1048576 \
 TMPDIR="$test_root" \
+PATH=/usr/bin:/bin \
   "$maintenance" --dry-run > "$test_root/current-output.txt" 2>&1
 if grep -Fq stale-checkout-collector "$test_root/current-output.txt" \
   || ! grep -Eq 'policy=harn-target-gc/v2-[^ ]+ status=dry-run .*scanned=0' \
