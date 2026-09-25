@@ -493,12 +493,8 @@ hook_agent_gate_sources_changed() {
   return 1
 }
 
-# Run the agent gate census and, when it disagrees with the sources it records,
-# refuse the push naming the rows that went stale.
-#
-# The census prints one JSON report line and then throws; `failures` is the list
-# of stale rows. Print those, and fall back to the whole report if the shape
-# ever changes, so a parsing miss cannot turn a refusal into silence.
+# The audit owns its structured report and regeneration advice. Interpreter
+# errors, absent modules, and incomplete execution are not stale-row findings.
 hook_run_agent_gate_census() {
   agent_gate_harn=$1
   census_log=$(mktemp)
@@ -506,20 +502,9 @@ hook_run_agent_gate_census() {
     rm -f "$census_log"
     return 0
   fi
-  stale=$(sed -n 's/.*"failures":\[\([^]]*\)\].*/\1/p' "$census_log" |
-    tr ',' '\n' | sed -e 's/^"//' -e 's/"$//' -e '/^$/d')
   echo "" >&2
-  echo "  The agent gate census no longer matches the sources it records:" >&2
-  if [ -n "$stale" ]; then
-    printf '%s\n' "$stale" | sed 's/^/    /' >&2
-  else
-    cat "$census_log" >&2
-  fi
-  echo "" >&2
-  echo "  A read that moved by a line is enough. Regenerate and stage:" >&2
-  echo "    make gen-agent-gates" >&2
-  echo "    git add spec/agent-gates docs/src/dev/agent-gates" >&2
-  echo "    git commit --amend --no-edit    # or a separate commit" >&2
+  cat "$census_log" >&2
+  echo "  Agent gate census did not pass; audit output is shown above." >&2
   echo "" >&2
   rm -f "$census_log"
   return 1

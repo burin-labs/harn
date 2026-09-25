@@ -264,11 +264,16 @@ if ! hook_agent_gate_sources_changed "$changed" "$(git rev-parse --show-toplevel
   echo "=== Pre-push: skipping agent gate census (no recorded reader sources changed) ==="
 else
   echo "=== Pre-push: checking the agent gate census ==="
-  hook_export_registry_harn_bin "$changed"
+  if ! hook_export_registry_harn_bin "$changed"; then
+    echo "    UNMEASURED: no verified runtime for the branch's agent gate census." >&2
+    echo "    Run 'make build' after any existing lane build finishes, or supply a verified HARN_BIN." >&2
+    exit 1
+  fi
   agent_gate_harn=$HARN_BIN
   if [ -z "$agent_gate_harn" ]; then
-    echo "    SKIPPED: no worktree harn binary could be built (see the build output above)." >&2
-    echo "    This is a skip, not a pass; the census still runs on the next push to main." >&2
+    echo "    UNMEASURED: no verified runtime for the branch's agent gate census." >&2
+    echo "    Run 'make build' after any existing lane build finishes, or supply a verified HARN_BIN." >&2
+    exit 1
   elif ! hook_run_agent_gate_census "$agent_gate_harn"; then
     exit 1
   else
