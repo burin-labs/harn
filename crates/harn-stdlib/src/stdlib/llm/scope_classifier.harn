@@ -77,7 +77,11 @@ fn __scope_classifier_schema() {
   return {
     type: "object",
     properties: {
-      label: {type: "string", description: "One of: in_scope, out_of_scope, escalate."},
+      label: {
+        type: "string",
+        enum: ["in_scope", "out_of_scope", "escalate"],
+        description: "One of: in_scope, out_of_scope, escalate.",
+      },
       confidence: {type: "number", description: "Confidence from 0.0 to 1.0."},
       evidence: {type: "string", description: "Concrete reason for the classification."},
     },
