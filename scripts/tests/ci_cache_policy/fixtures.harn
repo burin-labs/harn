@@ -27,39 +27,6 @@ pub fn windows_tier_expression() -> string {
   )
 }
 
-pub fn windows_timeout_expression() -> string {
-  return gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 60 || 90")
-}
-
-pub fn windows_warm_restore_step() {
-  return {
-    name: "Restore Windows workspace warm artifact",
-    id: "windows-warm-restore",
-    "continue-on-error": true,
-    env: {GH_TOKEN: gha_expression("github.token")},
-    run:
-      "./scripts/ci/workspace_warm_artifact.sh windows download-and-restore --repo owner/repo\necho windows_warm_restore=miss >> $GITHUB_OUTPUT",
-  }
-}
-
-pub fn windows_warm_report_step() {
-  return {
-    name: "Report Windows warm restore outcome",
-    if: "always()",
-    env: {
-      RESTORE_RESULT: gha_expression(
-        "steps.windows-warm-restore.outputs.windows_warm_restore || 'miss'",
-      ),
-      RESTORE_PRODUCER_COMMIT: gha_expression(
-        "steps.windows-warm-restore.outputs.windows_warm_restore_producer_commit || 'unavailable'",
-      ),
-      RESTORE_RUN_ID: gha_expression(
-        "steps.windows-warm-restore.outputs.windows_warm_restore_run_id || 'unavailable'",
-      ),
-    },
-  }
-}
-
 pub fn ci_concurrency() {
   return {
     group: gha_expression("github.workflow")
@@ -449,74 +416,6 @@ pub fn workflows() {
             {name: "Clippy all targets (deny warnings)", run: "./scripts/ci/run_rust_lint_lane.sh"},
           ],
         },
-        windows: {
-          "runs-on": windows_runner_expression(),
-          "timeout-minutes": windows_timeout_expression(),
-          permissions: {contents: "read", actions: "read"},
-          env: {HARN_RUNNER_TIER: windows_tier_expression()},
-          steps: [
-            {uses: "actions/checkout@exact-pin"},
-            {
-              name: "Set up Dev Drive",
-              if: gha_expression(
-                "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
-              ),
-              uses: "samypr100/setup-dev-drive@exact-pin",
-              with: {
-                "drive-size": gha_expression(
-                  "github.event_name == 'pull_request' && '25GB' || '50GB'",
-                ),
-              },
-            },
-            {uses: "./.github/actions/rust-toolchain"},
-            {
-              name: "Report Windows storage (initial)",
-              id: "windows-storage-initial",
-              if: "always()",
-              run: "./scripts/ci/windows_storage_budget.sh report initial",
-            },
-            windows_warm_restore_step(),
-            {
-              uses: "./.github/actions/rust-cache",
-              if:
-                "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'",
-              with: windows_cache_inputs(),
-            },
-            windows_warm_report_step(),
-            {
-              name: "Report Windows storage (after restore)",
-              if: "always()",
-              run: "./scripts/ci/windows_storage_budget.sh report after_restore",
-            },
-            {
-              name: "Compile Windows tests and run unit slice",
-              id: "windows-native-tests",
-              env: {RUST_MIN_STACK: "16777216"},
-              run:
-                "cargo nextest run --features internal-freshness-checker\nprintf 'completed_epoch=%s\\n' \"$(date +%s)\" >> \"$GITHUB_OUTPUT\"",
-            },
-            {
-              name: "Produce exact Windows Harn binary",
-              run:
-                "HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env \"$GITHUB_ENV\"",
-            },
-            {
-              name: "Smoke test harn run",
-              env: {
-                WINDOWS_NATIVE_TEST_COMPLETED_EPOCH: gha_expression(
-                  "steps.windows-native-tests.outputs.completed_epoch",
-                ),
-              },
-              run:
-                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n[[ \"$harn_bin\" -ef \"$harn_bin\" ]]\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
-            },
-            {
-              name: "Report Windows storage (terminal)",
-              if: "always()",
-              run: "./scripts/ci/windows_storage_budget.sh report terminal",
-            },
-          ],
-        },
       },
     },
     "cli-cold-start-budget.yml": {
@@ -531,9 +430,25 @@ pub fn workflows() {
       },
     },
     "windows-nightly.yml": {
-      permissions: {contents: "read", actions: "write"},
+      on: {schedule: [{cron: "0 7 * * *"}], workflow_dispatch: nil, pull_request: nil},
+      permissions: {contents: "read"},
       jobs: {
+        route: {
+          outputs: {run: gha_expression("steps.decide.outputs.run")},
+          steps: [
+            {uses: "actions/checkout@exact-pin"},
+            {
+              name: "Decide whether this event runs native Windows",
+              id: "decide",
+              run:
+                "source .github/scripts/release-ref.sh\nrun=\"$(release_pr_only_lane_run \"$EVENT_NAME\" \"$PR_HEAD_REF\")\"\necho \"run=$run\" >> \"$GITHUB_OUTPUT\"",
+            },
+          ],
+        },
         nextest: {
+          needs: "route",
+          if: "needs.route.outputs.run == 'true'",
+          permissions: {contents: "read", actions: "write"},
           "runs-on": windows_nightly_runner_expression(),
           env: {HARN_RUNNER_TIER: windows_tier_expression()},
           steps: [

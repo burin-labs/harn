@@ -2,22 +2,19 @@ name: Windows targeted nextest
 
 # A dispatch-only diagnostic lane for Windows-specific defects.
 #
-# The full per-PR `windows` job in `ci.yml` compiles the affected-crate closure
-# and then runs three separate native test commands; the nightly runs the whole
-# workspace. Both are the right shape for gating, and both are far more work
-# than a person needs when they are iterating on ONE Windows behaviour and want
+# `windows-nightly.yml` runs the whole workspace, which is far more work than a
+# person needs when they are iterating on ONE Windows behaviour and want
 # a verdict. This workflow builds only what the requested nextest filter needs,
 # runs it once, and writes the runner's own output into the job summary so the
 # failure text is readable from the run page without downloading a log archive.
 #
 # Deliberately `workflow_dispatch` only. It has no `pull_request` or
 # `merge_group` trigger, so it can never become a required check and can never
-# be confused with the gating Windows evidence. `ci.yml:windows` and
-# `windows-nightly.yml` remain the only Windows proofs that mean anything for
-# admission.
+# be confused with the native Windows evidence. `windows-nightly.yml` remains
+# the only native Windows proof, and it is advisory.
 #
-# CACHE CONTRACT. This job is a restore-only CONSUMER of the same two warm
-# paths `ci.yml:windows` uses, and a writer of neither:
+# CACHE CONTRACT. This job is a restore-only CONSUMER of the two warm paths
+# `windows-nightly.yml:nextest` writes, and a writer of neither:
 #   * the short-retention `workspace-windows-warm` artifact that
 #     `windows-nightly.yml:nextest` publishes from main, restored first because
 #     it is provider-neutral, and
@@ -25,13 +22,13 @@ name: Windows targeted nextest
 # The `rust-cache` composite action only saves when its `save` input is true
 # AND the ref is `refs/heads/main`; `save` is left at its default of false here,
 # so no dispatch of this workflow can mint a cache generation in the contended
-# 10 GiB namespace. `RUSTFLAGS` is kept byte-identical to the `ci.yml:windows`
-# consumer and the `windows-nightly.yml:nextest` producer (both toggled together
-# by the single `HARN_WINDOWS_LLD` repo variable) because RUSTFLAGS is part of
+# 10 GiB namespace. `RUSTFLAGS` is kept byte-identical to the
+# `windows-nightly.yml:nextest` producer (both toggled by the single
+# `HARN_WINDOWS_LLD` repo variable) because RUSTFLAGS is part of
 # rust-cache's environment hash: a different value here would silently miss the
 # shared cache rather than fail, and every dispatch would compile cold.
 #
-# No Dev Drive step. `ci.yml:windows` creates one only on the GitHub-hosted
+# No Dev Drive step. The nightly creates one only on the GitHub-hosted
 # fallback, because the Blacksmith Windows image does not expose the Hyper-V
 # `New-VHD` command the action needs. A diagnostic lane is not worth paying the
 # VHDX creation time on either tier, so it uses the native filesystem.
@@ -106,8 +103,7 @@ jobs:
       # `self-hosted` in `runner.environment`, so no step may branch on that
       # context.
       HARN_RUNNER_TIER: ${{ inputs.runner == 'windows-latest' && 'github-hosted' || 'blacksmith' }}
-      # Byte-identical to the `ci.yml:windows` consumer and the
-      # `windows-nightly.yml:nextest` producer. A job-level RUSTFLAGS fully
+      # Byte-identical to the `windows-nightly.yml:nextest` producer. A job-level RUSTFLAGS fully
       # replaces the workflow-level value rather than merging with it, so
       # `-D warnings` is restated here.
       RUSTFLAGS: ${{ vars.HARN_WINDOWS_LLD == 'on' && '-D warnings -Clinker=rust-lld.exe' || '-D warnings' }}
