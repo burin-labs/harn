@@ -48,6 +48,7 @@ const messages = defineMessages({
   fileMode: { id: "portal.launch.fileMode", defaultMessage: "Existing file" },
   sourceMode: { id: "portal.launch.sourceMode", defaultMessage: "Script editor" },
   playgroundMode: { id: "portal.launch.playgroundMode", defaultMessage: "Playground" },
+  chooseModel: { id: "portal.launch.chooseModel", defaultMessage: "Choose a model for this provider" },
   target: { id: "portal.launch.target", defaultMessage: "Target file" },
   source: { id: "portal.launch.source", defaultMessage: "Harn source" },
   task: { id: "portal.launch.task", defaultMessage: "Task" },
@@ -95,7 +96,7 @@ const messages = defineMessages({
   selectMode: { id: "portal.launch.selectMode", defaultMessage: "Choose a launch flow" },
   providerHelp: {
     id: "portal.launch.providerHelp",
-    defaultMessage: "Configured providers are read from Harn's runtime config. Local providers attempt live model discovery from localhost endpoints.",
+    defaultMessage: "Configured providers are read from Harn's runtime config. Local providers attempt live model discovery from their configured endpoints.",
   },
   endpointUrl: { id: "portal.launch.endpointUrl", defaultMessage: "Endpoint URL" },
   endpointHelp: {
@@ -104,7 +105,7 @@ const messages = defineMessages({
   },
   providerUnavailable: {
     id: "portal.launch.providerUnavailable",
-    defaultMessage: "{name} (missing auth)",
+    defaultMessage: "{name} (unavailable)",
   },
   customOption: { id: "portal.launch.customOption", defaultMessage: "Custom…" },
   envHelp: {
@@ -156,8 +157,15 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
   const [filePath, setFilePath] = useState("examples/portal-demo.harn")
   const [source, setSource] = useState(HELLO_WORLD_SOURCE)
   const [task, setTask] = useState("Summarize the repository in a few bullets.")
-  const [provider, setProvider] = useState(llmOptions?.preferred_provider ?? "")
-  const [model, setModel] = useState(llmOptions?.preferred_model ?? "")
+  const preferredProvider = llmOptions?.providers.find(
+    (item) => item.name === llmOptions.preferred_provider && item.viable,
+  )
+  const initialProvider = preferredProvider ??
+    llmOptions?.providers.find((item) => item.local && item.viable) ??
+    llmOptions?.providers.find((item) => item.viable)
+  const initialModel = preferredProvider ? llmOptions?.preferred_model || initialProvider?.default_model : initialProvider?.default_model
+  const [provider, setProvider] = useState(initialProvider?.name ?? "")
+  const [model, setModel] = useState(initialModel ?? "")
   const [endpointUrl, setEndpointUrl] = useState("")
   const [envJson, setEnvJson] = useState("")
   const [customProviderMode, setCustomProviderMode] = useState(false)
@@ -165,13 +173,14 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const selectedProvider =
-    llmOptions?.providers.find((item) => item.name === provider) ??
-    llmOptions?.providers.find((item) => item.name === llmOptions.preferred_provider) ??
+  const selectedProvider = customProviderMode ? null : (
+    llmOptions?.providers.find((item) => item.name === provider && item.viable) ??
+    preferredProvider ??
     llmOptions?.providers.find((item) => item.local && item.viable) ??
     llmOptions?.providers.find((item) => item.viable) ??
     null
-  const providerValue = provider || selectedProvider?.name || ""
+  )
+  const providerValue = customProviderMode ? provider : (selectedProvider?.name ?? provider)
   const selectedModels = selectedProvider?.models ?? []
   const modelValue = model || selectedProvider?.default_model || ""
   const needsCustomModel =
@@ -180,22 +189,12 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
   useEffect(() => {
     if (!llmOptions) {return}
     queueMicrotask(() => {
-      if (!provider && llmOptions.preferred_provider) {
-        setProvider(llmOptions.preferred_provider)
-      } else if (!provider) {
-        const fallbackProvider =
-          llmOptions.providers.find((item) => item.local && item.viable) ??
-          llmOptions.providers.find((item) => item.viable) ??
-          null
-        if (fallbackProvider) {
-          setProvider(fallbackProvider.name)
-        }
-      }
-      if (!model && llmOptions.preferred_model) {
-        setModel(llmOptions.preferred_model)
+      if (!provider && !customProviderMode && initialProvider) {
+        setProvider(initialProvider.name)
+        setModel(initialModel ?? "")
       }
     })
-  }, [llmOptions, model, provider])
+  }, [llmOptions, provider, customProviderMode, initialProvider, initialModel])
 
   useEffect(() => {
     if (!selectedProvider) {return}
@@ -213,6 +212,9 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
       const env = parseEnvOverrides(envJson)
       if (selectedProvider?.base_url_env && endpointUrl.trim()) {
         env[selectedProvider.base_url_env] = endpointUrl.trim()
+      }
+      if (mode === "playground" && providerValue && !modelValue) {
+        throw new Error(intl.formatMessage(messages.chooseModel))
       }
       await onLaunch({
         file_path: mode === "file" ? filePath : undefined,
@@ -368,7 +370,7 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
                   setProvider(event.target.value)
                   const nextProvider = llmOptions?.providers.find((item) => item.name === event.target.value)
                   setEndpointUrl(nextProvider?.base_url ?? "")
-                  setModel(nextProvider?.default_model ?? nextProvider?.models[0] ?? "")
+                  setModel(nextProvider?.default_model ?? "")
                   setCustomModelMode(false)
                 }}
               >
@@ -415,11 +417,14 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
                 }}
               >
                 {selectedModels.length ? (
-                  selectedModels.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))
+                  <>
+                    <option value="" disabled>{intl.formatMessage(messages.chooseModel)}</option>
+                    {selectedModels.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </>
                 ) : (
                   <option value="">{selectedProvider ? "No discovered models" : "Select a provider"}</option>
                 )}

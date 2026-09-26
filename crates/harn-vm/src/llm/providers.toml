@@ -30,6 +30,7 @@
 # parallel system this catalog exists to eliminate.
 
 default_provider = "anthropic"
+fallback_model = "claude-sonnet-4-6"
 
 # --- source: 10-providers/all.toml ---
 # ── Providers ────────────────────────────────────────────────────────────────
@@ -2626,6 +2627,39 @@ reasoning_effort = "max"
 [model_defaults."zai/glm-5.3"]
 reasoning_effort = "high"
 
+# --- source: 40-defaults/provider-models.toml ---
+# Provider defaults are selected here, beside the model rows they reference.
+# Runtime is the bare CLI/VM fallback; portal is the model offered by the
+# setup UI. The two may differ deliberately, including in price.
+# Host-supplied local/MLX model environment variables still take precedence.
+
+[provider_defaults.anthropic]
+portal = "claude-sonnet-4-6"
+
+[provider_defaults.local]
+runtime = "gemma-4-26b-a4b-it"
+portal = "gemma-4-26b-a4b-it"
+
+[provider_defaults.mlx]
+runtime = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+portal = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+
+[provider_defaults.openai]
+runtime = "gpt-4o-mini"
+portal = "gpt-4o"
+
+[provider_defaults.ollama]
+runtime = "llama3.2"
+portal = "llama3.2"
+
+[provider_defaults.openrouter]
+runtime = "anthropic/claude-sonnet-4-6"
+portal = "Qwen/Qwen3.5-9B"
+
+# Keep the legacy runtime fallback for providers without a catalog-specific
+# model pin. Its provider is the built-in default_provider (Anthropic).
+# A missing route or later deprecation fails catalog generation.
+
 # --- source: 40-defaults/qc.toml ---
 # ── QC defaults ──────────────────────────────────────────────────────────────
 # Default low-cost model per provider for cheap quality-check / repair
@@ -2636,8 +2670,8 @@ anthropic = "claude-haiku-4-5-20251001"
 openai = "gpt-6-luna"
 openrouter = "google/gemini-2.5-flash"
 ollama = "llama3.2"
-# `local` previously pointed at gpt-4o — a hosted (and now sunset)
-# OpenAI model that no local OpenAI-compat server would serve. Use the
+# `local` previously pointed at gpt-4o, a hosted OpenAI model that the
+# bundled local server does not serve. Use the
 # bundled vLLM Gemma 4 route instead.
 local = "gemma-4-26b-a4b-it"
 mistral = "mistral-small-2603"
@@ -3542,16 +3576,14 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "tool_use", "agentic"]
 
-# GPT-4o retired from ChatGPT 2026-02-13; chatgpt-4o-latest removed
-# from API 2026-02-17 (Enterprise/Edu grace until 2026-04-03).
+# The `chatgpt-4o-latest` API alias was retired
+# on 2026-02-17. The API model `gpt-4o` remains available.
 [models."gpt-4o"]
 name = "GPT-4o"
 provider = "openai"
 context_window = 128000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 2.50, output_per_mtok = 10.00, cache_read_per_mtok = 1.25 }
-deprecated = true
-deprecation_note = "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5.4-mini for cheap routing or gpt-5.5 for frontier."
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "vision", "tool_use"]
@@ -3561,10 +3593,6 @@ provider = "openai"
 context_window = 128000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
-# No individually announced sunset as of 2026-07-02, but the GPT-4-era
-# legacy exits by 2026-10-23 per the 2026-04-22 deprecations
-# announcement. The `mid` tier default moved to gpt-5.4-mini.
-superseded_by = "gpt-5.4-mini"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]

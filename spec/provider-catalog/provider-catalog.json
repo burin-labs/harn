@@ -16498,8 +16498,7 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "deprecated",
-        "note": "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5.4-mini for cheap routing or gpt-5.5 for frontier."
+        "status": "active"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -16598,8 +16597,7 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active",
-        "superseded_by": "gpt-5.4-mini"
+        "status": "active"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -34337,6 +34335,27 @@
       "label": "GPT-4.1 Nano",
       "family": "openai-gpt",
       "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-4o",
+      "family": "openai-gpt",
+      "capabilities": [
+        "audio",
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
