@@ -411,7 +411,10 @@ mod tests {
         const END: &str = "<!-- sandbox-enforcement-table:end -->";
         let docs_path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/src/sandboxing.md");
-        let docs = std::fs::read_to_string(&docs_path).expect("read sandboxing docs");
+        // A Windows checkout may carry CRLF line endings.
+        let docs = std::fs::read_to_string(&docs_path)
+            .expect("read sandboxing docs")
+            .replace("\r\n", "\n");
         let (_, after_begin) = docs.split_once(BEGIN).expect("begin marker");
         let (rendered, _) = after_begin.split_once(END).expect("end marker");
         assert_eq!(
