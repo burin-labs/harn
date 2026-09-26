@@ -746,7 +746,7 @@ fn optional_non_empty_string(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::{intern_key, DictMap};
+    use crate::value::{intern_key, DictMap, VmDictExt};
 
     #[test]
     fn resource_metadata_never_coerces_a_non_string() {
