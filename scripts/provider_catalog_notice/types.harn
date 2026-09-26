@@ -88,11 +88,14 @@ pub type CapabilityChange = {
   evidence: string,
 }
 
+pub type AdditionChange = {kind: "addition", provider: string, model_id: string, evidence: string}
+
 pub type ProviderCatalogCandidate = PriceChange \
   | PromotionChange \
   | RetirementChange \
   | EndpointChange \
-  | CapabilityChange
+  | CapabilityChange \
+  | AdditionChange
 
 pub type NoticeExtraction = {
   classification: "candidate" | "irrelevant",
@@ -115,6 +118,7 @@ pub type NoticeValidationReceipt = {
   disposition: NoticeDisposition,
   reason: string,
   evidence?: string,
+  extraction?: dict,
   source_url?: string,
   source_path?: string,
   unresolved_verification: list<string>,

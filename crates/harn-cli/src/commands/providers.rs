@@ -163,6 +163,9 @@ fn refresh_run_args(args: &ProvidersRefreshArgs) -> Vec<OsString> {
     if args.update {
         command.push(OsString::from("--update"));
     }
+    if args.json {
+        command.push(OsString::from("--json"));
+    }
     command
 }
 
@@ -284,6 +287,7 @@ mod tests {
             live,
             check: false,
             update: false,
+            json: false,
             script: PathBuf::from("scripts/update_provider_catalog.harn"),
             timeout_secs,
         }

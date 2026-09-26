@@ -7,7 +7,10 @@ signals from provider sources, normalizes them, and emits:
 - a markdown **drift report** under
   `.harn-runs/provider_catalog/drift-report.md`;
 - a TOML **candidate patch** under
-  `.harn-runs/provider_catalog/candidate.toml`.
+  `.harn-runs/provider_catalog/candidate.toml`;
+- a JSON **evidence manifest** under
+  `.harn-runs/provider_catalog/refresh.json`, with adapter coverage,
+  observations, provenance, conflicts, and typed drift.
 
 The workflow never mutates the shipped catalog. The patch is a review
 aid: diff it against the TOML fragments under
@@ -62,8 +65,9 @@ harn provider catalog refresh
 
 # Live mode: hit real provider sources. Key-required adapters attach
 # the configured auth header from env vars; missing keys produce a
-# "skipped" diagnostic in the report instead of a failure.
-harn provider catalog refresh --live
+# "skipped" adapter record. --json prints a compact coverage summary;
+# the full machine-readable evidence is in refresh.json.
+harn provider catalog refresh --live --json
 
 # CI gate: same fixture replay, but compare against the committed
 # goldens at scripts/provider_catalog_fixtures/expected_*.
@@ -72,6 +76,11 @@ harn provider catalog refresh --check
 # Refresh the committed goldens after intentional adapter changes.
 harn provider catalog refresh --check --update
 ```
+
+The JSON summary distinguishes complete, partial, and unmeasured runs and
+reports adapter, empty-source, and observed-model counts. A live run with no observed models
+fails even when every adapter returned a nominal response. Chat-model indexes
+do not count decision-only routes as removals.
 
 The command stops a refresh that exceeds 120 seconds and reports a timeout as
 a failed, incomplete refresh rather than an empty catalog. Pass
@@ -106,18 +115,23 @@ shape. `provenance` is `authenticated`, `verified_link`, `unverified`, or
 
 The model is limited to a schema-constrained extraction:
 
-- `price`, `promotion`, `retirement`, `endpoint`, and `capability` are distinct typed
-  variants;
-- provider, model id, effective date, old/new values, and supporting evidence
-  are retained;
+- `addition`, `price`, `promotion`, `retirement`, `endpoint`, and `capability` are
+  distinct typed variants;
+- provider, model id, and supporting evidence are retained, with effective dates
+  and old/new values for changes that require them;
 - the model never receives a file mutation tool and never emits TOML.
 
-Deterministic code then resolves exactly one provider and model row in the
-loaded catalog, verifies the old value, finds exactly one owning source table,
-and applies the constrained edit. Missing or duplicate identities are
-rejected. A model absent from an unsupported provider records a no-op; a new
-model on a supported provider produces an incomplete proposal listing context,
-pricing, capability, and routing verification still required.
+Deterministic code resolves the provider and model identity. For an existing
+model, it verifies the old value, finds exactly one owning source table, and
+applies the constrained edit. Duplicate identities are rejected. An
+unsupported provider records a no-op; a new model on a supported provider
+produces an incomplete proposal listing context, pricing, capability, and
+routing verification still required.
+
+An addition needs no invented launch date and cannot insert a catalog row
+without the listed verification. The receipt retains the structured extraction
+that led to the disposition.
+
 Capability edits target the generated capability matrix's owning fragments,
 not legacy model tags. They require one exact `model_match` rule; a
 wildcard-derived family rule is deliberately rejected as ambiguous rather than

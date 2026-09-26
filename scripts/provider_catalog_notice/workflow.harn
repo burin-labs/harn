@@ -115,8 +115,11 @@ fn __base_receipt(
 }
 
 fn __candidate_common_error(notice: ProviderNotice, candidate: dict) -> string? {
-  if !contains(["price", "promotion", "retirement", "endpoint", "capability"], candidate?.kind) {
-    return "candidate.kind must be price, promotion, retirement, endpoint, or capability"
+  if !contains(
+    ["addition", "price", "promotion", "retirement", "endpoint", "capability"],
+    candidate?.kind,
+  ) {
+    return "candidate.kind must be addition, price, promotion, retirement, endpoint, or capability"
   }
   if !__nonempty(candidate?.provider) || !__nonempty(candidate?.model_id) {
     return "candidate provider and model_id are required"
@@ -124,10 +127,11 @@ fn __candidate_common_error(notice: ProviderNotice, candidate: dict) -> string? 
   if candidate.provider != notice.provider {
     return "candidate provider conflicts with notice provider"
   }
-  if !__nonempty(candidate?.effective_date) {
+  if candidate.kind != "addition" && !__nonempty(candidate?.effective_date) {
     return "candidate effective_date is required"
   }
-  if regex_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", candidate.effective_date) == nil {
+  if candidate.kind != "addition"
+    && regex_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", candidate.effective_date) == nil {
     return "candidate effective_date must be YYYY-MM-DD"
   }
   if !__nonempty(candidate?.evidence) {
@@ -165,6 +169,9 @@ fn __promotion_candidate_error(candidate: dict) -> string? {
 }
 
 fn __candidate_variant_error(candidate: dict) -> string? {
+  if candidate.kind == "addition" {
+    return nil
+  }
   if candidate.kind == "price" {
     if !contains(
       ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"],
@@ -444,6 +451,13 @@ pub fn plan_notice(
   }
   if len(models) != 1 {
     return {receipt: __base_receipt(harness, notice, "rejected", "model identity is ambiguous")}
+  }
+  if candidate.kind == "addition" {
+    return {
+      receipt: __base_receipt(harness, notice, "no_op", "model is already in the catalog")
+        + {model_id: candidate.model_id, change_kind: candidate.kind, evidence: candidate.evidence},
+      candidate: candidate,
+    }
   }
   const current = __current_value(candidate, providers[0], models[0])
   const current_promotion = if candidate.kind == "promotion" {
@@ -829,8 +843,11 @@ pub fn apply_candidate_to_source(
 pub fn extraction_prompt(notice: ProviderNotice) -> string {
   return """
 Extract at most one provider-catalog change from this trusted notice.
-Return classification "irrelevant" when it does not explicitly change a model price,
-temporary promotion, retirement, provider endpoint, or model capability. Never infer missing identifiers
+Return classification "candidate" with kind "addition" when the notice explicitly names a
+new provider model. An addition needs provider, model_id, and evidence only; it becomes a
+reviewable incomplete proposal, never an automatic catalog row. For existing models, extract
+one explicit price, temporary promotion, retirement, endpoint, or capability change.
+Return "irrelevant" only when no catalog change is stated. Never infer missing identifiers
 or values. Preserve a short supporting excerpt or immutable link as evidence.
 
 Neutral notice:

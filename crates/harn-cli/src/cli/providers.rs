@@ -43,6 +43,9 @@ pub(crate) struct ProvidersRefreshArgs {
     /// Refresh committed refresh goldens. Implies --check.
     #[arg(long)]
     pub update: bool,
+    /// Print a structured coverage summary; the full evidence is in refresh.json.
+    #[arg(long)]
+    pub json: bool,
     /// Refresh workflow script path.
     #[arg(long, default_value = "scripts/update_provider_catalog.harn")]
     pub script: PathBuf,

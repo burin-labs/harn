@@ -208,6 +208,30 @@ pipeline test_new_model_on_supported_provider_is_incomplete_add(harness: Harness
 }
 
 @test
+pipeline test_model_addition_notice_is_reviewable_without_a_release_date(
+  harness: Harness,
+  task: unknown,
+) {
+  const notice = fixture(harness.fs, "new-model").notice
+  const candidate = {
+    kind: "addition",
+    provider: "anthropic",
+    model_id: "claude-haiku-next",
+    evidence: "Claude Haiku Next launches.",
+  }
+  const extraction = {classification: "candidate", candidate: candidate}
+  const planned = plan_notice(harness, notice, extraction, BASE_CATALOG)
+  assert_eq(planned.receipt.disposition, "incomplete_add")
+  assert_eq(planned.receipt.model_id, candidate.model_id)
+  assert_eq(planned.receipt.effective_date, nil)
+  const existing = BASE_CATALOG
+    + {models: BASE_CATALOG.models + [{provider: "anthropic", id: candidate.model_id}]}
+  const replay = plan_notice(harness, notice, extraction, existing)
+  assert_eq(replay.receipt.disposition, "no_op")
+  assert_eq(replay.receipt.reason, "model is already in the catalog")
+}
+
+@test
 pipeline test_ambiguous_current_identity_fails_closed(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "ambiguous")
   const catalog = BASE_CATALOG
