@@ -537,7 +537,7 @@ async fn status_reports_missing_auth_for_missing_required_secret_chain() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn status_health_requires_only_outbound_credentials() {
+async fn status_separates_inbound_readiness_from_outbound_usability() {
     let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty().with_secret(
         harn_vm::secrets::SecretId::new("github", "access-token"),
         "token",
@@ -561,8 +561,88 @@ async fn status_health_requires_only_outbound_credentials() {
         ["github/webhook-secret", "github/access-token"]
     );
     assert!(status.missing_secrets.is_empty());
-    assert_eq!(status.health_checks.len(), 1);
+    assert_eq!(status.inbound.status, "missing_auth");
+    assert_eq!(status.inbound.missing_secrets, ["github/webhook-secret"]);
+    assert_eq!(status.health_checks.len(), 2);
     assert_eq!(status.health_checks[0].id, "secret:github/access-token");
+    assert_eq!(status.health_checks[1].id, "secret:github/webhook-secret");
+
+    let no_secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
+    let neither = connector_status("github", Some(&config), &no_secrets, &index, 100, false, None).await;
+    assert!(!neither.usable);
+    assert_eq!(neither.inbound.status, "missing_auth");
+    assert_ne!(serde_json::to_value(&status).unwrap(), serde_json::to_value(&neither).unwrap());
+
+    let inbound_only = harn_vm::connectors::testkit::MemorySecretProvider::empty().with_secret(
+        harn_vm::secrets::SecretId::new("github", "webhook-secret"),
+        "verification-token",
+    );
+    let inbound = connector_status("github", Some(&config), &inbound_only, &index, 100, false, None).await;
+    assert!(!inbound.usable);
+    assert_eq!(inbound.inbound.status, "ready");
+    assert_ne!(serde_json::to_value(&inbound).unwrap(), serde_json::to_value(&neither).unwrap());
+
+    let both = inbound_only.with_secret(
+        harn_vm::secrets::SecretId::new("github", "access-token"),
+        "api-token",
+    );
+    let ready = connector_status("github", Some(&config), &both, &index, 100, false, None).await;
+    assert!(ready.usable);
+    assert_eq!(ready.inbound.status, "ready");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn declared_inbound_secret_health_check_runs() {
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
+    let index = ConnectIndex::default();
+    let mut setup = oauth_setup();
+    setup.auth_type = Some("none".to_string());
+    setup.required_scopes = Vec::new();
+    setup.required_secrets = vec![package::ConnectorRequiredSecretManifest::inbound(
+        "github/webhook-secret",
+    )];
+    setup.health_checks = vec![package::ConnectorHealthCheckManifest {
+        id: "webhook-verification".to_string(),
+        kind: "secret".to_string(),
+        secret: Some("github/webhook-secret".to_string()),
+        ..Default::default()
+    }];
+    let config = status_config(setup);
+
+    let missing = connector_status("github", Some(&config), &secrets, &index, 100, true, None).await;
+    assert!(missing.usable);
+    assert_eq!(missing.inbound.status, "missing_auth");
+    assert_eq!(missing.health_checks[1].id, "webhook-verification");
+    assert_eq!(missing.health_checks[1].status, "fail");
+
+    let present = secrets.with_secret(
+        harn_vm::secrets::SecretId::new("github", "webhook-secret"),
+        "verification-token",
+    );
+    let ready = connector_status("github", Some(&config), &present, &index, 100, true, None).await;
+    assert!(ready.usable);
+    assert_eq!(ready.inbound.status, "ready");
+    assert_eq!(ready.health_checks[1].status, "pass");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn secret_health_check_without_target_is_refused() {
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
+    let index = ConnectIndex::default();
+    let mut setup = oauth_setup();
+    setup.auth_type = Some("none".to_string());
+    setup.required_scopes = Vec::new();
+    setup.health_checks = vec![package::ConnectorHealthCheckManifest {
+        id: "missing-target".to_string(),
+        kind: "secret".to_string(),
+        ..Default::default()
+    }];
+    let config = status_config(setup);
+
+    let report = connector_status("github", Some(&config), &secrets, &index, 100, true, None).await;
+    assert!(!report.usable);
+    assert_eq!(report.status, "invalid_manifest");
+    assert_eq!(report.health_checks[0].status, "invalid_manifest");
 }
 
 #[tokio::test(flavor = "current_thread")]
