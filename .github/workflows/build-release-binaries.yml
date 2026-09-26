@@ -176,6 +176,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
           RELEASE_BUILD_INPUTS_CHANGED: ${{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}
         run: |
           set -euo pipefail
@@ -274,8 +275,21 @@ jobs:
             # The version commit is the release: a push whose workspace version
             # changes to a stable X.Y.Z builds the candidate at exactly this
             # commit. The decision reads the version, never the commit subject.
+            # A merge queue lands several entries in one push, so the push is
+            # judged from the previous main, not from HEAD^: a release commit
+            # buried under a later entry is refused, never built as a warm cache.
             PREVIOUS_VERSION="$(git show HEAD^:Cargo.toml | release_workspace_version)"
-            if release_push_is_stable_version_change "$PREVIOUS_VERSION" "$VERSION"; then
+            PUSH_BASE="$PUSH_BEFORE"
+            if [[ ! "$PUSH_BASE" =~ ^[0-9a-f]{40}$ || "$PUSH_BASE" =~ ^0+$ ]] ||
+               ! git cat-file -e "$PUSH_BASE^{commit}" 2>/dev/null; then
+              PUSH_BASE="$(git rev-parse HEAD^)"
+            fi
+            RELEASE_COMMITS="$(release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA")"
+            if [[ -n "$RELEASE_COMMITS" && "$RELEASE_COMMITS" != "$GITHUB_SHA" ]]; then
+              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. A person must re-land the release as the head of a push."
+              exit 1
+            fi
+            if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
               BUILD_MODE=candidate
               REF="$GITHUB_SHA"
               CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
