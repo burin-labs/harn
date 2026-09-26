@@ -679,6 +679,7 @@ test-pr-gate-scripts:
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
+	./scripts/tests/release_ship_root_harn_bin_test.sh
 	./scripts/tests/release_tag_main_ancestry_test.sh
 	./scripts/tests/candidate_manifest_test.sh
 	./scripts/tests/release_candidate_trigger_test.sh
