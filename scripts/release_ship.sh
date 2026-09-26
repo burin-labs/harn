@@ -204,6 +204,18 @@ current_version() {
   release_metadata current
 }
 
+# Resolve Harn with the release root's own harn_bin.sh. Publication stages
+# these tools from main but builds Harn from the release root, and the build's
+# freshness proof (receipt, checker subcommands) belongs to the tree it was
+# built from. Main's copy asked a tag-built checker for a subcommand added
+# after the tag, which failed a publish recovery. The staged copy remains the
+# fallback for a root that predates harn_bin.sh.
+release_root_harn_bin() {
+  local tool="$ROOT_DIR/scripts/harn_bin.sh"
+  [[ -x "$tool" ]] || tool="$SCRIPT_DIR/harn_bin.sh"
+  "$tool" "$@"
+}
+
 # Run one release-metadata Harn tool against the release root. Both tools
 # resolve the same binary, so the fold and the version bump always run on one
 # runtime.
@@ -215,7 +227,7 @@ release_tool() {
   elif [[ -n "${HARN_BIN:-}" ]]; then
     "$HARN_BIN" run "$SCRIPT_DIR/$script" -- "$@" --root "$ROOT_DIR"
   else
-    "$SCRIPT_DIR/harn_bin.sh" run "$SCRIPT_DIR/$script" -- "$@" --root "$ROOT_DIR"
+    release_root_harn_bin run "$SCRIPT_DIR/$script" -- "$@" --root "$ROOT_DIR"
   fi
 }
 
@@ -255,7 +267,7 @@ export_warmed_harn_bin() {
     return 0
   fi
   local harn_bin
-  if harn_bin="$("$SCRIPT_DIR/harn_bin.sh" --no-build --print 2>/dev/null)" && [[ -x "$harn_bin" ]]; then
+  if harn_bin="$(release_root_harn_bin --no-build --print 2>/dev/null)" && [[ -x "$harn_bin" ]]; then
     export HARN_BIN="$harn_bin"
     printf 'Reusing warmed HARN_BIN: %s\n' "$HARN_BIN"
   fi
@@ -717,6 +729,14 @@ fi
 NEXT_VERSION="$PREVIOUS_VERSION"
 TAG="v$NEXT_VERSION"
 BRANCH="$(git branch --show-current)"
+
+# The staged gate and publish scripts resolve Harn through main's harn_bin.sh.
+# Hand them the binary the release root's own tools resolved, so every step of
+# the publication runs one binary proven under the tree it was built from.
+if [[ -z "${HARN_BIN:-}" && -z "${HARN_RELEASE_METADATA_BIN:-}" ]]; then
+  HARN_BIN="$(release_root_harn_bin --print)"
+  export HARN_BIN
+fi
 
 run_common_gates
 
