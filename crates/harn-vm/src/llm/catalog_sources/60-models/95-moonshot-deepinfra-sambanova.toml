@@ -244,6 +244,9 @@ capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_cac
 # DeepInfra undercuts the first-party $0.95/$4.00 list; verified
 # 2026-07-02 (int4-native weights).
 pricing = { input_per_mtok = 0.68, output_per_mtok = 3.40, cache_read_per_mtok = 0.136 }
+deprecated = true
+deprecation_note = "Absent from DeepInfra's model index (https://api.deepinfra.com/v1/openai/models, read 2026-09-26), which now carries Kimi K3 and Kimi K2.6 only."
+superseded_by = "deepinfra/moonshotai/Kimi-K3"
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]

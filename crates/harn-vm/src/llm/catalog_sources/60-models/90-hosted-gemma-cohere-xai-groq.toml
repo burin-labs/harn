@@ -100,7 +100,9 @@ served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/gpt-oss-120b"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+# Standard serverless tier, https://docs.fireworks.ai/serverless/pricing
+# (read 2026-09-26).
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-19" }
 tier = "mid"
 open_weight = true
@@ -116,10 +118,123 @@ served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/glm-5p2"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+# Cached input is $0.14 on the standard tier; $0.26 is GLM 5.3's cached rate.
+# https://docs.fireworks.ai/serverless/pricing (read 2026-09-26).
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.14 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+# Fireworks routes added 2026-09-26 from the serverless model index
+# (https://api.fireworks.ai/inference/v1/models) and the standard-tier rates at
+# https://docs.fireworks.ai/serverless/pricing. Each returned a native
+# `tool_calls` entry on a one-tool `tool_choice: auto` probe the same day.
+# Fireworks also sells Priority, Fast, and US-only tiers of these at higher
+# rates; the rate cards below are the standard tier only.
+[models."accounts/fireworks/models/glm-5p3"]
+name = "GLM 5.3 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "glm-5.3"
+equivalence_group = "glm-5.3"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/glm-5p3"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."accounts/fireworks/models/glm-5p3-flash"]
+name = "GLM 5.3 Flash (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "glm-5.3-flash"
+equivalence_group = "glm-5.3-flash"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/glm-5p3-flash"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.03 }
+tier = "frontier"
+open_weight = true
+strengths = ["cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision", "speed"]
+
+[models."accounts/fireworks/models/deepseek-v4p1-flash"]
+name = "DeepSeek V4.1 Flash (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/deepseek-v4p1-flash"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.006 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
+
+[models."accounts/fireworks/models/deepseek-v4-flash-0731"]
+name = "DeepSeek V4 Flash 0731 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "deepseek-v4-flash-0731"
+equivalence_group = "deepseek-v4-flash"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/deepseek-v4-flash-0731"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.22, output_per_mtok = 0.66, cache_read_per_mtok = 0.007 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+
+[models."accounts/fireworks/models/deepseek-v4-pro-0813"]
+name = "DeepSeek V4 Pro 0813 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "deepseek-v4-pro-0813"
+equivalence_group = "deepseek-v4-pro-0813"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/deepseek-v4-pro-0813"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.044 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
+
+[models."accounts/fireworks/models/kimi-k3"]
+name = "Kimi K3 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/kimi-k3"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+
+[models."accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"]
+name = "Nemotron 3.5 Lightning 30B A3B (Fireworks)"
+provider = "fireworks"
+context_window = 262144
+logical_model = "nemotron-3.5-lightning-30b-a3b"
+equivalence_group = "nemotron-3.5-lightning-30b-a3b"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.20, cache_read_per_mtok = 0.01 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "reasoning", "tool_use", "long_context"]
 
 [models."accounts/fireworks/models/deepseek-v4-pro"]
 name = "DeepSeek V4 Pro (Fireworks)"
@@ -148,7 +263,9 @@ served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/kimi-k2p6"
 api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 2.50, cache_read_per_mtok = 0.15 }
+# Standard serverless tier, https://docs.fireworks.ai/serverless/pricing
+# (read 2026-09-26).
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.16 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]

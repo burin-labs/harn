@@ -89,6 +89,50 @@ pipeline test_scheduled_pricing_normalizes_peak_and_weekend(harness: Harness, ta
 }
 
 @test
+pipeline test_prompt_size_overrides_become_input_token_bands(harness: Harness, task: unknown) {
+  const pricing = openrouter_scheduled_pricing(
+    {
+      overrides: [
+        {
+          min_prompt_tokens: 272000,
+          prompt: "0.000004",
+          completion: "0.000015",
+          input_cache_read: "0.0000004",
+        },
+      ],
+    },
+    {input_per_mtok: 2.0, output_per_mtok: 10.0},
+  )
+  assert_eq(pricing.input_per_mtok, 2.0)
+  assert_eq(pricing.output_per_mtok, 10.0)
+  assert_eq(pricing?.schedules, nil)
+  assert_eq(
+    pricing.input_token_bands,
+    [{minimum_input_tokens: 272000, input_multiplier: 2.0, output_multiplier: 1.5}],
+  )
+}
+
+@test
+pipeline test_time_window_without_days_applies_every_day(harness: Harness, task: unknown) {
+  const pricing = openrouter_scheduled_pricing(
+    {
+      overrides: [
+        {utc_start: 0, utc_end: 1600, prompt: "0.000002", completion: "0.000006"},
+        {utc_start: 1600, utc_end: 0, prompt: "0.000001", completion: "0.000003"},
+      ],
+    },
+    {input_per_mtok: 2.0, output_per_mtok: 6.0},
+  )
+  assert_eq(pricing.input_per_mtok, 2.0)
+  assert_eq(len(pricing.schedules), 7)
+  for window in pricing.schedules {
+    assert_eq(window.start, "16:00")
+    assert_eq(window.end, "24:00")
+    assert_eq(window.input_multiplier, 0.5)
+  }
+}
+
+@test
 pipeline test_scheduled_pricing_rejects_overlapping_wire_windows(harness: Harness, task: unknown) {
   let rejected = false
   try {

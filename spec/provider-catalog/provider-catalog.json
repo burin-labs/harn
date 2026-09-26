@@ -7451,7 +7451,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Absent from DeepInfra's model index (https://api.deepinfra.com/v1/openai/models, read 2026-09-26), which now carries Kimi K3 and Kimi K2.6 only.",
+        "superseded_by": "deepinfra/moonshotai/Kimi-K3"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -8026,6 +8028,104 @@
       }
     },
     {
+      "id": "accounts/fireworks/models/deepseek-v4-flash-0731",
+      "name": "DeepSeek V4 Flash 0731 (Fireworks)",
+      "operations": [
+        "text_generation"
+      ],
+      "display_name": "DeepSeek V4 Flash 0731",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4-flash-0731",
+      "equivalence_group": "deepseek-v4-flash",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/deepseek-v4-flash-0731",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 0.22,
+        "output_per_mtok": 0.66,
+        "cache_read_per_mtok": 0.007,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
       "id": "accounts/fireworks/models/deepseek-v4-pro",
       "name": "DeepSeek V4 Pro (Fireworks)",
       "operations": [
@@ -8124,6 +8224,203 @@
       ]
     },
     {
+      "id": "accounts/fireworks/models/deepseek-v4-pro-0813",
+      "name": "DeepSeek V4 Pro 0813 (Fireworks)",
+      "operations": [
+        "text_generation"
+      ],
+      "display_name": "DeepSeek V4 Pro 0813",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4-pro-0813",
+      "equivalence_group": "deepseek-v4-pro-0813",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/deepseek-v4-pro-0813",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 1.32,
+        "output_per_mtok": 3.96,
+        "cache_read_per_mtok": 0.044,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "accounts/fireworks/models/deepseek-v4p1-flash",
+      "name": "DeepSeek V4.1 Flash (Fireworks)",
+      "operations": [
+        "text_generation"
+      ],
+      "display_name": "DeepSeek V4.1 Flash",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4.1-flash",
+      "equivalence_group": "deepseek-v4.1-flash",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/deepseek-v4p1-flash",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.006,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
       "id": "accounts/fireworks/models/glm-5p2",
       "name": "GLM 5.2 (Fireworks)",
       "operations": [
@@ -8137,6 +8434,105 @@
       "equivalence_group": "glm-5.2",
       "served_variant": "fireworks",
       "wire_model": "accounts/fireworks/models/glm-5p2",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.14,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "accounts/fireworks/models/glm-5p3",
+      "name": "GLM 5.3 (Fireworks)",
+      "operations": [
+        "text_generation"
+      ],
+      "display_name": "GLM 5.3",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "glm-5.3",
+      "equivalence_group": "glm-5.3",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/glm-5p3",
       "api_dialect": "openai_chat",
       "modalities": {
         "input": [
@@ -8223,6 +8619,108 @@
       ]
     },
     {
+      "id": "accounts/fireworks/models/glm-5p3-flash",
+      "name": "GLM 5.3 Flash (Fireworks)",
+      "operations": [
+        "text_generation"
+      ],
+      "display_name": "GLM 5.3 Flash",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "glm-5.3-flash",
+      "equivalence_group": "glm-5.3-flash",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/glm-5p3-flash",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.5,
+        "cache_read_per_mtok": 0.03,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision",
+        "speed"
+      ]
+    },
+    {
       "id": "accounts/fireworks/models/gpt-oss-120b",
       "name": "GPT-OSS 120B (Fireworks)",
       "operations": [
@@ -8306,7 +8804,7 @@
       "pricing": {
         "input_per_mtok": 0.15,
         "output_per_mtok": 0.6,
-        "cache_read_per_mtok": null,
+        "cache_read_per_mtok": 0.015,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -8401,9 +8899,9 @@
         ]
       },
       "pricing": {
-        "input_per_mtok": 0.6,
-        "output_per_mtok": 2.5,
-        "cache_read_per_mtok": 0.15,
+        "input_per_mtok": 0.95,
+        "output_per_mtok": 4.0,
+        "cache_read_per_mtok": 0.16,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -8535,6 +9033,108 @@
       ]
     },
     {
+      "id": "accounts/fireworks/models/kimi-k3",
+      "name": "Kimi K3 (Fireworks)",
+      "operations": [
+        "text_generation"
+      ],
+      "display_name": "Kimi K3",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "moonshot-kimi-k3",
+      "equivalence_group": "moonshot-kimi-k3",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/kimi-k3",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
       "id": "accounts/fireworks/models/minimax-m3",
       "name": "MiniMax M3 (Fireworks)",
       "operations": [
@@ -8632,6 +9232,105 @@
         "reasoning",
         "long_context",
         "vision"
+      ]
+    },
+    {
+      "id": "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+      "name": "Nemotron 3.5 Lightning 30B A3B (Fireworks)",
+      "operations": [
+        "text_generation"
+      ],
+      "display_name": "Nemotron 3.5 Lightning 30B A3B",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "nemotron-3.5-lightning-30b-a3b",
+      "equivalence_group": "nemotron-3.5-lightning-30b-a3b",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content.",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 0.05,
+        "output_per_mtok": 0.2,
+        "cache_read_per_mtok": 0.01,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "batch"
+      ],
+      "family": "fireworks",
+      "lineage": "fireworks",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "reasoning",
+        "tool_use",
+        "long_context"
       ]
     },
     {
@@ -13694,7 +14393,9 @@
       },
       "prompt_cache": true,
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Absent from NIM's model index (https://integrate.api.nvidia.com/v1/models, read 2026-09-26). NIM serves DeepSeek V4.1 Flash instead.",
+        "superseded_by": "nvidia/deepseek-v4.1-flash"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -13720,6 +14421,82 @@
         "speed",
         "coding",
         "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "nvidia/deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash (NVIDIA NIM)",
+      "operations": [
+        "text_generation"
+      ],
+      "display_name": "DeepSeek V4.1 Flash",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4.1-flash",
+      "equivalence_group": "deepseek-v4.1-flash",
+      "served_variant": "nvidia-nim",
+      "wire_model": "deepseek-ai/deepseek-v4.1-flash",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
         "tool_use",
         "reasoning",
         "long_context"
@@ -19696,6 +20473,88 @@
       ]
     },
     {
+      "id": "deepseek/deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash (via OpenRouter)",
+      "operations": [
+        "text_generation"
+      ],
+      "display_name": "DeepSeek V4.1 Flash",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4.1-flash",
+      "equivalence_group": "deepseek-v4.1-flash",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.14,
+        "output_per_mtok": 0.42,
+        "cache_read_per_mtok": 0.0042,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
       "id": "google/gemini-2.5-flash",
       "name": "Gemini 2.5 Flash (via OpenRouter)",
       "operations": [
@@ -20503,7 +21362,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Removed from OpenRouter's model index by 2026-09-26. Its listed successor, kwaipilot/kat-coder-pro-v2.5, rejected tool-calling requests when probed that day, so no replacement route is recorded."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -23068,6 +23928,79 @@
         "cheap"
       ],
       "row_kind": "snapshot"
+    },
+    {
+      "id": "openrouter/typesafe/jev-latest",
+      "name": "Jev Latest (OpenRouter)",
+      "operations": [
+        "decision"
+      ],
+      "display_name": "Jev Latest",
+      "blurb": "Follows TypeSafe's current Jev release through OpenRouter's alpha decisions endpoint.",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 32000,
+      "logical_model": "typesafe-jev-1.13",
+      "equivalence_group": "typesafe-jev-1.13",
+      "served_variant": "openrouter",
+      "wire_model": "~typesafe/jev-latest",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": false,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.042,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "typesafe-jev",
+      "lineage": "typesafe-jev-1",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap"
+      ],
+      "row_kind": "selector",
+      "current_snapshot": "openrouter/typesafe/jev-1.13"
     },
     {
       "id": "qwen/qwen3-coder",
@@ -31204,27 +32137,6 @@
     },
     {
       "provider": "deepinfra",
-      "model": "moonshotai/Kimi-K2.7-Code",
-      "base_url": "https://api.deepinfra.com/v1/openai",
-      "secret_env": "DEEPINFRA_API_KEY",
-      "label": "Kimi K2.7 Code (DeepInfra)",
-      "family": "kimi",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools",
-        "video",
-        "vision"
-      ]
-    },
-    {
-      "provider": "deepinfra",
       "model": "moonshotai/Kimi-K3",
       "base_url": "https://api.deepinfra.com/v1/openai",
       "secret_env": "DEEPINFRA_API_KEY",
@@ -31344,6 +32256,26 @@
     },
     {
       "provider": "fireworks",
+      "model": "accounts/fireworks/models/deepseek-v4-flash-0731",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "DeepSeek V4 Flash 0731 (Fireworks)",
+      "family": "deepseek",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
       "model": "accounts/fireworks/models/deepseek-v4-pro",
       "base_url": "https://api.fireworks.ai/inference/v1",
       "secret_env": "FIREWORKS_API_KEY",
@@ -31364,10 +32296,90 @@
     },
     {
       "provider": "fireworks",
+      "model": "accounts/fireworks/models/deepseek-v4-pro-0813",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "DeepSeek V4 Pro 0813 (Fireworks)",
+      "family": "deepseek",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/deepseek-v4p1-flash",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "DeepSeek V4.1 Flash (Fireworks)",
+      "family": "deepseek",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
       "model": "accounts/fireworks/models/glm-5p2",
       "base_url": "https://api.fireworks.ai/inference/v1",
       "secret_env": "FIREWORKS_API_KEY",
       "label": "GLM 5.2 (Fireworks)",
+      "family": "glm",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-5p3",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "GLM 5.3 (Fireworks)",
+      "family": "glm",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-5p3-flash",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "GLM 5.3 Flash (Fireworks)",
       "family": "glm",
       "capabilities": [
         "batch",
@@ -31445,6 +32457,27 @@
     },
     {
       "provider": "fireworks",
+      "model": "accounts/fireworks/models/kimi-k3",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "Kimi K3 (Fireworks)",
+      "family": "kimi",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "fireworks",
       "model": "accounts/fireworks/models/minimax-m3",
       "base_url": "https://api.fireworks.ai/inference/v1",
       "secret_env": "FIREWORKS_API_KEY",
@@ -31462,6 +32495,25 @@
         "thinking",
         "tools",
         "vision"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "Nemotron 3.5 Lightning 30B A3B (Fireworks)",
+      "family": "fireworks",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output_mode:none",
+        "text_tools",
+        "thinking",
+        "tools"
       ]
     },
     {
@@ -32395,10 +33447,10 @@
     },
     {
       "provider": "nvidia",
-      "model": "deepseek-ai/deepseek-v4-flash-0731",
+      "model": "deepseek-ai/deepseek-v4.1-flash",
       "base_url": "https://integrate.api.nvidia.com/v1",
       "secret_env": "NVIDIA_API_KEY",
-      "label": "DeepSeek V4 Flash 0731 (NVIDIA NIM)",
+      "label": "DeepSeek V4.1 Flash (NVIDIA NIM)",
       "family": "deepseek",
       "capabilities": [
         "native_tools",
@@ -33455,6 +34507,27 @@
     },
     {
       "provider": "openrouter",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "DeepSeek V4.1 Flash (via OpenRouter)",
+      "family": "deepseek",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
       "model": "google/gemini-2.5-flash",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -33630,24 +34703,6 @@
         "text_tools",
         "tools",
         "vision"
-      ]
-    },
-    {
-      "provider": "openrouter",
-      "model": "kwaipilot/kat-coder-pro-v2",
-      "base_url": "https://openrouter.ai/api/v1",
-      "secret_env": "OPENROUTER_API_KEY",
-      "label": "KAT-Coder-Pro V2",
-      "family": "openrouter",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "tools"
       ]
     },
     {
@@ -34240,6 +35295,19 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "Jev 1.13 (OpenRouter)",
+      "family": "typesafe-jev",
+      "capabilities": [
+        "streaming",
+        "structured_output_mode:none",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "~typesafe/jev-latest",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Jev Latest (OpenRouter)",
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",

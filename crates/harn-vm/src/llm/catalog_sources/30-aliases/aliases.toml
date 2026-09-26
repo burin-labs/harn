@@ -476,9 +476,10 @@ id = "nvidia/nemotron-nano-3-30b-a3b"
 provider = "nvidia"
 tool_format = "native"
 
-# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07. This alias
-# follows NIM to the dated Flash snapshot. There is no NIM DeepSeek V4 Pro
-# build to point at.
+# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07, and by
+# 2026-09-26 the dated Flash snapshot too. This alias names V4, so it stays on
+# the deprecated snapshot row, whose `superseded_by` names the V4.1 route,
+# rather than silently moving callers to a different model.
 [aliases."nvidia-deepseek-v4-flash"]
 id = "nvidia/deepseek-v4-flash-0731"
 provider = "nvidia"
