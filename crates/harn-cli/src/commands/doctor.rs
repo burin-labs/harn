@@ -999,10 +999,7 @@ fn check_platform_capabilities() -> Vec<DoctorCheck> {
             DoctorStatus::Warn
         },
         label: "process-sandbox".to_string(),
-        detail: format!(
-            "backend={} filesystem_mechanism={} active={}",
-            sandbox.backend, sandbox.filesystem_mechanism, sandbox.active
-        ),
+        detail: sandbox.detail(),
         ..Default::default()
     });
 

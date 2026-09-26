@@ -73,6 +73,8 @@ mod build_command;
 pub(crate) use build_command::{build_std_command, build_tokio_command};
 mod command_for;
 pub use command_for::{std_command_for, std_command_for_with_env_state, tokio_command_for};
+pub mod enforcement;
+use enforcement::ensure_spawn_enforceable;
 #[cfg(all(test, target_os = "linux"))]
 mod enforcement_report;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -1215,7 +1217,7 @@ pub fn command_output(
 
     let output = match active_sandbox_policy() {
         Some((policy, profile)) => {
-            ensure_managed_process_egress_supported::<ActiveBackend>(&policy)?;
+            ensure_spawn_enforceable::<ActiveBackend>(&policy)?;
             let config = sandboxed_process_config(config, &policy)?;
             ActiveBackend::run_to_output(program, args, &config, &policy, profile)?
         }
@@ -1268,26 +1270,6 @@ fn sandboxed_process_config(
             .any(|removed| key.eq_ignore_ascii_case(removed))
     });
     Ok(resolved)
-}
-
-fn ensure_managed_process_egress_supported<B: SandboxBackend + ?Sized>(
-    policy: &CapabilityPolicy,
-) -> Result<(), VmError> {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = (std::marker::PhantomData::<B>, policy);
-        Ok(())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if policy.process_network_proxy.is_some() {
-            return Err(sandbox_rejection(format!(
-                "managed child-process egress is not enforceable by the {} process sandbox",
-                B::name()
-            )));
-        }
-        Ok(())
-    }
 }
 
 pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {

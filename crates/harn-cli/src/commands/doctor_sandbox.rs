@@ -19,7 +19,9 @@ pub(crate) const DOCTOR_SANDBOX_SCHEMA_VERSION: u32 = 1;
 /// holds.
 pub(crate) fn run(json: bool) -> i32 {
     let report = run_conformance();
-    let holds = report.failing().is_empty() && report.not_measured().is_empty();
+    let holds = report.failing().is_empty()
+        && report.not_measured().is_empty()
+        && report.not_enforced().is_empty();
     if json {
         println!(
             "{}",
@@ -46,6 +48,7 @@ fn render(report: &ConformanceReport) -> String {
             Verdict::Contradiction { reason, .. } => ("CONTRADICTION", reason.clone()),
             Verdict::ProbeBroken { reason } => ("PROBE BROKEN", reason.clone()),
             Verdict::NotMeasured { reason } => ("not measured", reason.clone()),
+            Verdict::NotEnforced { target } => ("not enforced", target.clone()),
             Verdict::NotApplicable { reason } => ("n/a", reason.clone()),
         };
         out.push_str(&format!("  {status:<14} {}", case.case));
@@ -56,11 +59,19 @@ fn render(report: &ConformanceReport) -> String {
     }
     let failed = report.failing().len();
     let not_measured = report.not_measured().len();
+    let not_enforced = report.not_enforced().len();
     out.push_str(&format!(
-        "\n{} cases: {} hold, {failed} failed, {not_measured} not measured\n",
+        "\n{} cases: {} hold, {failed} failed, {not_measured} not measured, \
+         {not_enforced} not enforced\n",
         report.cases.len(),
         report.conforming(),
     ));
+    if not_enforced > 0 {
+        out.push_str(
+            "This backend does not confine the not-enforced cases, and says so; do not rely on \
+             it for them.\n",
+        );
+    }
     if failed == 0 && not_measured > 0 {
         out.push_str(
             "Confinement is not enforced on this host for the unmeasured cases; do not rely on it.\n",

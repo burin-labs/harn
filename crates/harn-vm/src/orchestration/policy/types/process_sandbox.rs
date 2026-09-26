@@ -68,16 +68,17 @@ pub struct ProcessSandboxPolicy {
     /// `~/.cache`, and `~/.netrc` wholesale, so a denylist that merely competed
     /// with presets would leave credentials readable by default.
     ///
-    /// Enforced on macOS (a trailing `deny file-read*`, last-match-wins) and on
-    /// Linux (Landlock is allow-only, so the denial is expressed by granting
-    /// the siblings that do not lead to it). **Windows and OpenBSD do not apply
-    /// it yet**, and they do NOT refuse the spawn either.
+    /// macOS renders it as a trailing `deny file-read*` (last-match-wins);
+    /// Linux, whose Landlock is allow-only, grants the siblings that do not
+    /// lead to it. Which backends hold it is the `credential_reads` column of
+    /// the enforcement table (`process_sandbox::enforcement`), not this
+    /// comment.
     ///
-    /// Refusing would be the fail-closed reflex, and it is wrong here: the
-    /// default denylist is never empty, so refusing on an unsupporting backend
-    /// would refuse every spawn on that platform. Saying plainly that the term
-    /// is unenforced there is worth more than a comment claiming a protection
-    /// the code does not provide.
+    /// A backend that does not hold it refuses only under `os_hardened`.
+    /// Refusing under every profile would be the fail-closed reflex, and it is
+    /// wrong here: the default denylist is never empty, so it would refuse
+    /// every spawn on that platform. The table's receipt says plainly that the
+    /// term is unenforced there instead.
     pub read_deny_roots: Vec<String>,
     /// Permit a confined child to bind and connect TCP loopback sockets while
     /// retaining the deny on non-loopback destinations. Backends that cannot

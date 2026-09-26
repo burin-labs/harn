@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 
+use super::enforcement::ConfinementDimension;
 use super::{
     effective_fallback, normalize_for_policy, path_is_within, sandbox_denial_error,
     sandbox_signal_status, sandbox_user_home_dir, warn_once, ActiveBackend, PrepareOutcome,
@@ -422,14 +423,24 @@ pub enum SandboxMechanism {
     LinuxLandlock,
     MacosSandboxExec,
     WindowsAppContainer,
+    OpenbsdUnveil,
 }
 
 impl SandboxMechanism {
+    /// Every mechanism, so a table keyed by mechanism can be held complete.
+    pub const ALL: &'static [SandboxMechanism] = &[
+        Self::LinuxLandlock,
+        Self::MacosSandboxExec,
+        Self::WindowsAppContainer,
+        Self::OpenbsdUnveil,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LinuxLandlock => "linux_landlock",
             Self::MacosSandboxExec => "macos_sandbox_exec",
             Self::WindowsAppContainer => "windows_app_container",
+            Self::OpenbsdUnveil => "openbsd_unveil",
         }
     }
 
@@ -440,6 +451,7 @@ impl SandboxMechanism {
             Self::LinuxLandlock => "Linux Landlock",
             Self::MacosSandboxExec => "macOS sandbox-exec",
             Self::WindowsAppContainer => "Windows AppContainer",
+            Self::OpenbsdUnveil => "OpenBSD unveil",
         }
     }
 }
@@ -455,6 +467,9 @@ pub enum SandboxMechanismAvailability {
     /// Windows can only attach an AppContainer through the `Output`-returning
     /// path, which owns the `STARTUPINFOEX` plumbing.
     EntryPointCannotAttach,
+    /// The mechanism is attached, but it does not hold the child to every
+    /// dimension the profile requires; `unconfined` names them.
+    DoesNotConfine,
 }
 
 impl SandboxMechanismAvailability {
@@ -462,6 +477,7 @@ impl SandboxMechanismAvailability {
         match self {
             Self::AbsentOnHost => "absent_on_host",
             Self::EntryPointCannotAttach => "entry_point_cannot_attach",
+            Self::DoesNotConfine => "does_not_confine",
         }
     }
 }
@@ -515,6 +531,10 @@ pub struct SandboxMechanismUnavailable {
     /// this to its own name; it must not be echoed as advice.
     pub profile: SandboxProfile,
     pub requirement: SandboxRequirement,
+    /// For [`SandboxMechanismAvailability::DoesNotConfine`], the dimensions the
+    /// profile requires and the mechanism does not hold. Empty otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unconfined: Vec<ConfinementDimension>,
 }
 
 impl SandboxMechanismUnavailable {
@@ -539,6 +559,7 @@ impl SandboxMechanismUnavailable {
             availability,
             profile,
             requirement,
+            unconfined: Vec::new(),
         }
     }
 
@@ -559,6 +580,17 @@ impl SandboxMechanismUnavailable {
         cause.put_str("availability", self.availability.as_str());
         cause.put_str("profile", self.profile.as_str());
         cause.put_str("requirement", self.requirement.as_str());
+        if !self.unconfined.is_empty() {
+            cause.insert(
+                "unconfined".to_string(),
+                VmValue::List(std::sync::Arc::new(
+                    self.unconfined
+                        .iter()
+                        .map(|dimension| VmValue::String(arcstr::ArcStr::from(dimension.as_str())))
+                        .collect(),
+                )),
+            );
+        }
         cause.insert(
             "selector_honored".to_string(),
             VmValue::Bool(self.requirement.selector_is_honored()),
@@ -588,6 +620,15 @@ impl std::fmt::Display for SandboxMechanismUnavailable {
             SandboxMechanismAvailability::EntryPointCannotAttach => format!(
                 "{} cannot be attached through this spawn entry point",
                 self.mechanism.display_name()
+            ),
+            SandboxMechanismAvailability::DoesNotConfine => format!(
+                "{} does not confine {}",
+                self.mechanism.display_name(),
+                self.unconfined
+                    .iter()
+                    .map(|dimension| dimension.display_name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         };
         let requirement = match self.requirement {
@@ -637,6 +678,9 @@ pub(crate) fn mechanism_skipped_warning(
         SandboxMechanismAvailability::AbsentOnHost => "is not available on this host",
         SandboxMechanismAvailability::EntryPointCannotAttach => {
             "cannot be attached through this spawn entry point"
+        }
+        SandboxMechanismAvailability::DoesNotConfine => {
+            "does not confine every requested dimension"
         }
     };
     format!(
