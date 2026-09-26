@@ -510,6 +510,25 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The merge queue lands a whole group in one push, and a release is built
+      # and promoted only from the head of its push. An entry queued behind a
+      # release commit would bury it, so that entry leaves the queue and is
+      # re-queued after the release merges.
+      - name: Keep a release commit last in its merge group
+        if: github.event_name == 'merge_group'
+        env:
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/lib/release_version.sh
+          source scripts/lib/release_version.sh
+          releases="$(release_range_release_commits "$BASE_SHA" "$HEAD_SHA")"
+          if [[ -n "$releases" && "$releases" != "$HEAD_SHA" ]]; then
+            echo "::error::This entry is queued behind release commit(s) ${releases//$'\n'/, }. A release must be the last entry of its merge group; re-queue this entry after the release merges."
+            exit 1
+          fi
+
       - name: Check out the pinned release orchestrator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

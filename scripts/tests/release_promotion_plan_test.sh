@@ -20,9 +20,12 @@ awk '/        id: plan/{found=1} found && /        run: \|/{body=1;next} body &&
 grep -Fq 'release_push_is_stable_version_change' "$tmp/plan.sh" \
   || fail "could not extract the plan step from $workflow"
 # The plan must make the same decision as the build that made the candidate.
-grep -Fq 'release_push_is_stable_version_change "$PREVIOUS_VERSION" "$VERSION"' \
+# The plan sees only HEAD^; the build judges the whole push and refuses a push
+# whose release commit is not its head, so every push the plan promotes is one
+# where HEAD^ is the previous version.
+grep -Fq 'release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA"' \
   "$root/.github/workflows/build-release-binaries.yml" \
-  || fail "build-release-binaries.yml no longer decides candidates with release_push_is_stable_version_change"
+  || fail "build-release-binaries.yml no longer decides candidates with release_range_release_commits"
 
 repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$tmp/bin"
