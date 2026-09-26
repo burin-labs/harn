@@ -97,3 +97,20 @@ fn neutralize_rustc_wrapper_overrides_caller_supplied_wrapper() {
         "caller removal must not reveal a Cargo-configured wrapper"
     );
 }
+
+/// Only a decision that took away a configured wrapper is a warning. Having no
+/// wrapper to begin with is the ordinary case and must not reach stderr as one.
+#[test]
+fn only_a_dropped_configured_wrapper_is_a_warning() {
+    use rustc_wrapper::{RustcWrapperDecision, RustcWrapperDisposition};
+    let decision = |disposition| RustcWrapperDecision {
+        disposition,
+        wrapper: None,
+        reason: String::new(),
+        cwd: String::new(),
+    };
+    assert!(!decision(RustcWrapperDisposition::NotConfigured).drops_configured_wrapper());
+    assert!(!decision(RustcWrapperDisposition::Kept).drops_configured_wrapper());
+    assert!(decision(RustcWrapperDisposition::Disabled).drops_configured_wrapper());
+    assert!(decision(RustcWrapperDisposition::Unmeasured).drops_configured_wrapper());
+}

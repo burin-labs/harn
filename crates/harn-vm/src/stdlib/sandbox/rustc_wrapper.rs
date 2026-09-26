@@ -96,6 +96,16 @@ impl RustcWrapperDecision {
     pub fn disables(&self) -> bool {
         self.disposition != RustcWrapperDisposition::Kept
     }
+
+    /// Whether the decision took away a wrapper the caller configured. Only
+    /// that is worth a warning; with no wrapper configured, switching the
+    /// settings off changes nothing.
+    pub fn drops_configured_wrapper(&self) -> bool {
+        matches!(
+            self.disposition,
+            RustcWrapperDisposition::Disabled | RustcWrapperDisposition::Unmeasured
+        )
+    }
 }
 
 type DecisionKey = (String, String, Vec<(String, String)>);
@@ -193,7 +203,7 @@ fn record(decision: &RustcWrapperDecision) {
         }
         RustcWrapperDisposition::NotConfigured => "no Cargo rustc wrapper applies",
     };
-    if decision.disables() {
+    if decision.drops_configured_wrapper() {
         crate::events::log_warn_meta("process_sandbox_rustc_wrapper", message, metadata);
     } else {
         crate::events::log_info_meta("process_sandbox_rustc_wrapper", message, metadata);
