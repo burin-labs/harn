@@ -860,7 +860,8 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
   return errors
 }
 
-fn job_needs(job: dict) -> list<string> {
+/** A `needs` entry may name a job the workflow does not define; it has no needs. */
+fn job_needs(job: dict?) -> list<string> {
   const needs = job?.needs ?? []
   if type_of(needs) == "string" {
     return [needs]
@@ -879,9 +880,13 @@ fn job_needs(job: dict) -> list<string> {
  */
 pub fn event_skip_propagation_errors(workflow: dict) -> list<string> {
   const jobs = workflow?.jobs ?? {}
+  // A job whose own condition names a status function is not skipped by a
+  // skipped ancestor, so its event clause cannot be what skips a descendant.
   let event_gated: dict<string, bool> = {}
   for name in jobs.keys() {
-    if contains(to_string(jobs[name]?.if ?? ""), "github.event_name") {
+    const condition = to_string(jobs[name]?.if ?? "")
+    if contains(condition, "github.event_name")
+      && regex_match(r"(always|cancelled|failure|success)\(\)", condition) == nil {
       event_gated[name] = true
     }
   }
