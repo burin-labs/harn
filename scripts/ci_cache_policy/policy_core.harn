@@ -364,6 +364,16 @@ pub const E2E_WORKFLOW_CANCEL_POLICY = "$"
 pub const MAIN_ONLY_RUST_IF =
   "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
 
+/**
+ * The Windows cross-compile check is the one Windows admission lane: every
+ * merge-group candidate, plus Rust-changing main pushes.
+ */
+pub const WINDOWS_CROSS_CHECK_IF =
+  "github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
+
+/** `ci-status` requires the cross-check exactly where the job itself must run. */
+pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"
+
 pub const MAIN_ONLY_POLICY_IF = MAIN_ONLY_RUST_IF
   + " && needs.rust-artifacts-ready.result == 'success'"
 
@@ -1751,8 +1761,17 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       }
     }
   }
-  if trim(jobs["windows-cross-check"]?.if ?? "") != MAIN_ONLY_RUST_IF {
-    errors = errors + ["ci.yml:windows-cross-check must run on Rust-changing main pushes only"]
+  const cross_check = jobs["windows-cross-check"] ?? {}
+  if trim(cross_check?.if ?? "") != WINDOWS_CROSS_CHECK_IF {
+    errors = errors
+      + [
+        "ci.yml:windows-cross-check must run on every merge-group candidate and on Rust-changing main pushes",
+      ]
+  }
+  // Off the critical path: it waits on the cheap `changes` router only.
+  const cross_needs = cross_check?.needs
+  if cross_needs != "changes" && cross_needs != ["changes"] {
+    errors = errors + ["ci.yml:windows-cross-check must need only changes"]
   }
   const status = jobs["ci-status"] ?? {}
   for name in [
@@ -1766,11 +1785,21 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       errors = errors + ["ci.yml:ci-status must retain ${name}"]
     }
   }
-  const status_run = step_by_name(status?.steps ?? [], "Verify required CI jobs")?.run ?? ""
+  const status_step = step_by_name(status?.steps ?? [], "Verify required CI jobs")
+  const status_run = status_step?.run ?? ""
+  // The skip allowance must read the same condition the job runs under, so a
+  // merge-group candidate cannot pass the aggregate with the check skipped.
+  if trim(to_string(status_step?.env?.WINDOWS_CROSS_REQUIRED ?? "")) != WINDOWS_CROSS_REQUIRED_ENV
+    || !contains(status_run, "[ \"$WINDOWS_CROSS_REQUIRED\" != \"true\" ]") {
+    errors = errors
+      + [
+        "ci.yml:ci-status must require the Windows cross-compile check wherever the job itself must run",
+      ]
+  }
   for message in [
     "Repository policy checks failed or skipped on a Rust-changing main push.",
     "Fast repository policy gates failed or skipped while Rust proof was required.",
-    "Windows cross-compile check failed or skipped on a Rust-changing main push.",
+    "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push.",
   ] {
     if !contains(status_run, message) {
       errors = errors + ["ci.yml:ci-status does not enforce '${message}'"]

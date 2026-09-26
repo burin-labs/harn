@@ -79,7 +79,24 @@ pub type ReleaseAuditPlan = {
   lane_runners: list<string>,
   lanes: list<ReleaseAuditLane>,
   errors: list<string>,
+  // Named, non-blocking observations about an accepted receipt, such as the
+  // native Windows nightly's outcome. They are printed to stderr so the shell
+  // plan's closed row grammar stays unchanged.
+  advisories: list<string>,
 }
+
+/**
+ * Native Windows is advisory: Harn builds and runs there without OS sandbox
+ * confinement, so its nightly never decides whether a release certifies. Its
+ * outcome is still reported, by name, on every accepted receipt.
+ */
+pub const WINDOWS_NIGHTLY_ADVISORY = "WINDOWS_NIGHTLY_ADVISORY"
+
+/** Platforms whose exact successful dispatch a hosted receipt must prove. */
+const REQUIRED_PLATFORMS = ["macos"]
+
+/** Platforms a hosted receipt may report without its outcome gating certification. */
+const ADVISORY_PLATFORMS = ["windows"]
 
 fn sha_schema() {
   return schema_string() + {pattern: "^[0-9a-f]{40}$"}
@@ -210,7 +227,10 @@ fn platform_proof_schema() {
           run_attempt: schema_int() + {minimum: 1},
           event: schema_literal("workflow_dispatch"),
           status: schema_literal("completed"),
-          conclusion: schema_literal("success"),
+          // Any terminal conclusion is well-formed. Whether it must be
+          // `success` is the platform's policy, decided by the exact proof for
+          // required platforms and reported as an advisory for Windows.
+          conclusion: schema_string() + {min_len: 1},
           head_sha: sha_schema(),
           url: schema_string() + {pattern: "^https://github[.]com/.+/actions/runs/[0-9]+$"},
         },
@@ -227,7 +247,7 @@ fn platform_proof_schema() {
                 run_id: schema_int() + {minimum: 1},
                 name: schema_string() + {min_len: 1},
                 status: schema_literal("completed"),
-                conclusion: schema_literal("success"),
+                conclusion: schema_string() + {min_len: 1},
                 url: schema_string()
                   + {pattern: "^https://github[.]com/.+/actions/runs/[0-9]+/job/[0-9]+$"},
               },
@@ -404,6 +424,7 @@ fn audit_plan(
   proof_kind: string,
   head_sha: string,
   errors: list<string> = [],
+  advisories: list<string> = [],
 ) -> ReleaseAuditPlan {
   return {
     ok: true,
@@ -415,6 +436,7 @@ fn audit_plan(
     lane_runners: lanes.map({ lane -> lane.runner }).to_list(),
     lanes: lanes,
     errors: errors,
+    advisories: advisories,
   }
 }
 
@@ -505,9 +527,18 @@ pub fn release_audit_receipt_plan(
     return release_audit_full_plan(contract, "local_source_lanes_mismatch", expected)
   }
   const platforms = receipt.platforms.map({ proof -> proof.platform }).to_list()
-  if !exact_rows(platforms, ["windows", "macos"]).ok {
+  const required_platforms = platforms.filter({ name -> REQUIRED_PLATFORMS.contains(name) })
+    .to_list()
+  const advisory_platforms = platforms.filter({ name -> ADVISORY_PLATFORMS.contains(name) })
+    .to_list()
+  if !exact_rows(required_platforms, REQUIRED_PLATFORMS).ok
+    || len(advisory_platforms) > 1
+    || len(required_platforms) + len(advisory_platforms)
+      != len(platforms) {
     return release_audit_full_plan(contract, "platform_proofs_mismatch", expected)
   }
+  // Missing until a Windows proof in the receipt says otherwise.
+  let windows_advisory = WINDOWS_NIGHTLY_ADVISORY + " state=missing run=none"
   const expected_workflows = {
     windows: ".github/workflows/windows-nightly.yml",
     macos: ".github/workflows/macos-nightly.yml",
@@ -539,7 +570,14 @@ pub fn release_audit_receipt_plan(
       [platform.run],
       platform.jobs,
     )
-    if !proof.ok {
+    if platform.platform == "windows" {
+      windows_advisory = if proof.ok {
+        WINDOWS_NIGHTLY_ADVISORY + " state=success run=" + platform.run.url
+      } else {
+        WINDOWS_NIGHTLY_ADVISORY + " state=failure run=" + platform.run.url + " reason="
+          + proof.reason
+      }
+    } else if !proof.ok {
       return release_audit_full_plan(contract, "platform_proof_" + proof.reason, expected)
     }
     if platform.duration_ms > longest {
@@ -562,7 +600,15 @@ pub fn release_audit_receipt_plan(
     return release_audit_full_plan(contract, "join_timing_mismatch", expected)
   }
   const lanes = residual_lanes(contract)
-  return audit_plan(lanes, true, "receipt_accepted", receipt.proof_kind, expected)
+  return audit_plan(
+    lanes,
+    true,
+    "receipt_accepted",
+    receipt.proof_kind,
+    expected,
+    [],
+    [windows_advisory],
+  )
 }
 
 fn ci_job(ci: dict, job_id: string) {
@@ -762,6 +808,9 @@ fn main(harness: Harness) {
     release_audit_receipt_plan(contract, unwrap(loaded), expected_sha, warm_binary_sha256)
   } else {
     release_audit_full_plan(contract, "receipt_unreadable", expected_sha)
+  }
+  for advisory in plan.advisories {
+    harness.stdio.eprintln(advisory)
   }
   print_plan(harness.stdio, plan, shell_plan)
   return nil
