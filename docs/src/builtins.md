@@ -1966,7 +1966,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.catalog_refresh(options?)` | `options?: dict\|nil` | dict | Refresh the process-wide provider/model catalog overlay from the configured hosted catalog, validating the remote document before installing it |
 | `harness.llm.config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
 | `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | decimal | Estimate USD cost (exact `decimal`) from catalog pricing, falling back to embedded pricing |
-| `harness.llm.session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `harness.llm.session_cost()` | — | dict | Session usage: logical `call_count`, physical `provider_call_count`, tokens, nullable measured `total_cost` and `cost_usd`, `known_cost_usd`, `unpriced_calls`, `usage_unknown_calls`; `budget_charged_usd` separately reports the admission charge, including uncertain reservations |
 | `harness.llm.budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls pre-flight and throw if projected cost would exceed it |
 | `harness.llm.budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |

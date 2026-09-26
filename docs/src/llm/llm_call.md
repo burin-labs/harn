@@ -911,7 +911,8 @@ harness.stdio.log("Estimated cost: $${cost}")
 
 // Check cumulative session costs
 const session = harness.llm.session_cost()
-harness.stdio.log("Total: $${session.total_cost}")
+harness.stdio.log("Measured cost (nil if unknown): ${session.total_cost}")
+harness.stdio.log("Budget charged: $${session.budget_charged_usd}")
 harness.stdio.log("Calls: ${session.call_count}")
 harness.stdio.log("Input tokens: ${session.input_tokens}")
 harness.stdio.log("Output tokens: ${session.output_tokens}")
@@ -1090,7 +1091,7 @@ provider charges, not external connector, tool, or platform fees.
 | Function | Description |
 |---|---|
 | `llm_cost(model, input_tokens, output_tokens)` | Estimate USD cost from embedded pricing table |
-| `harness.llm.session_cost()` | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `harness.llm.session_cost()` | Session usage and certainty, independent of diagnostic tracing: logical `call_count`, physical `provider_call_count`, tokens, nullable measured `total_cost` and `cost_usd`, `known_cost_usd`, `unpriced_calls`, `usage_unknown_calls`. `budget_charged_usd` separately reports the admission charge, including uncertain reservations. |
 | `harness.llm.budget(max_cost)` | Set session budget in USD. LLM calls throw if exceeded |
 | `harness.llm.budget_remaining()` | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | Count text with the selected tiktoken encoder for known OpenAI/Claude/Gemini model families |

@@ -12,14 +12,30 @@ use super::question::QuestionSet;
 
 pub const EVALUATION_RECEIPT_SCHEMA: &str = "harn.evaluation.receipt.v1";
 
+/// Execution-owned evaluation state inherited by child VMs.
+#[derive(Clone, Default)]
+pub(crate) struct EvaluationExecutionState {
+    pub journal: std::sync::Arc<parking_lot::Mutex<EvaluationJournal>>,
+    pub replay: Option<super::replay::EvaluationReplayScope>,
+}
+
 /// Bounded execution-owned journal shared by a VM and its children.
 #[derive(Default)]
 pub(crate) struct EvaluationJournal {
     receipts: Vec<EvaluationReceipt>,
     dropped: usize,
+    next_invocation: u64,
 }
 
 impl EvaluationJournal {
+    pub(crate) fn invocation_id(&mut self, execution_id: &str) -> String {
+        let sequence = self.next_invocation;
+        self.next_invocation = sequence
+            .checked_add(1)
+            .expect("evaluation sequence exhausted");
+        format!("{execution_id}/evaluation/{sequence}")
+    }
+
     pub(crate) fn record(&mut self, receipt: EvaluationReceipt) {
         if self.receipts.len() < 1024 {
             self.receipts.push(receipt);
@@ -108,12 +124,20 @@ pub struct EvaluationQuestionReceipt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EvaluationReceipt {
+    /// Execution occurrence, distinct from the stable request evaluation_id.
+    /// Historical receipts did not record an occurrence identifier.
+    #[serde(default)]
+    pub invocation_id: Option<String>,
+    /// Original provider accounting retained as provenance on reuse only.
+    #[serde(default)]
+    pub reused_from: Option<Box<EvaluationReceipt>>,
     /// Present for completed calls. Adaptive estimates can be exceeded by the
     /// actual bill; conservative admission reserves a supported upper bound.
     #[serde(default)]
     pub cost_admission: Option<CostAdmission>,
-    /// Authoritative structured-call settlement. Absence is unavailable
-    /// telemetry, never a measured zero or a native cache claim.
+    /// Canonical observed call usage. Native unknown usage remains unpriced
+    /// even when budget_charge_usd retains an admission reservation. Absent cache
+    /// declarations never imply a measured native cache hit or miss.
     #[serde(default)]
     pub usage: Option<Box<crate::llm::usage::LlmUsage>>,
     pub native_transport: Option<NativeTransportReceipt>,
@@ -123,8 +147,9 @@ pub struct EvaluationReceipt {
     pub identity: EvaluationIdentity,
     pub requested_provider: String,
     pub requested_model: String,
-    /// The identity the provider served, exactly as it returned it. Absent
-    /// when nothing was dispatched or the provider named nothing.
+    /// Provider-reported model that produced the answer. On reuse this is
+    /// answer provenance; reused_from names the original call. Absent when
+    /// the original evaluation never dispatched or the provider named nothing.
     pub served_model: Option<String>,
     pub questions: Vec<EvaluationQuestionReceipt>,
     pub outcome_kind: String,
@@ -134,9 +159,14 @@ pub struct EvaluationReceipt {
     pub physical_attempts: u32,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
-    /// Admitted from the route's declared price. Absent when the price is
-    /// unknown, which refuses dispatch rather than charging nothing.
+    /// Settled measured cost. Absent when provider usage is unknown; retained
+    /// admission reservations are reported separately, never as measured spend.
     pub cost_usd: Option<f64>,
+    /// Amount charged to the native admission budget, including a retained
+    /// upper bound when usage is unknown. Absent for historical receipts and
+    /// paths that do not report this accounting fact.
+    #[serde(default)]
+    pub budget_charge_usd: Option<f64>,
     pub accounting_status: AccountingStatus,
     pub source: EvaluationSource,
     pub elapsed_ms: u64,
@@ -164,6 +194,8 @@ impl EvaluationReceipt {
         elapsed_ms: u64,
     ) -> Self {
         Self {
+            invocation_id: None,
+            reused_from: None,
             cost_admission: None,
             usage: None,
             native_transport: None,
@@ -189,6 +221,7 @@ impl EvaluationReceipt {
             input_tokens: None,
             output_tokens: None,
             cost_usd: None,
+            budget_charge_usd: None,
             accounting_status: AccountingStatus::NotDispatched,
             source: EvaluationSource::Live,
             elapsed_ms,
@@ -225,6 +258,9 @@ impl EvaluationReceipt {
     /// The opaque handle a caller receives. The journal owns the contents; a
     /// caller can correlate but cannot read the evaluation out of the string.
     pub fn reference(&self) -> String {
-        self.evaluation_id.clone()
+        self.invocation_id
+            .as_ref()
+            .unwrap_or(&self.evaluation_id)
+            .clone()
     }
 }

@@ -14,6 +14,10 @@ fn diagnostic(path: string, line: int, bytes: int) -> string {
   )
 }
 
+fn coverage(path: string) -> string {
+  return json_stringify({reason: "harn-source-coverage", floor_bytes: 16384, paths: [path]})
+}
+
 fn budget(
   path: string,
   max_bytes: int,
@@ -135,6 +139,22 @@ pipeline test_a_budgeted_file_missing_from_the_census_is_not_a_pass(
     "absence is named for what it is, not treated as satisfied",
   )
   assert_eq(report.findings[0].observed_bytes, nil, "no measurement is reported as none")
+}
+
+@test
+pipeline test_compiled_source_below_the_measurement_floor_passes_without_inventing_a_zero(
+  harness: Harness,
+  task: unknown,
+) {
+  const census = diagnostic("other.rs", 10, 20000) + "\n" + coverage("a.rs")
+  const worst = worst_frame_by_file(census)
+  const covered = covered_sources(census)
+  assert_eq(covered["a.rs"], true, "current source coverage is decoded")
+  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY, covered)
+  assert_eq(report.violation_count, 0, "current compiler coverage proves the source was measured")
+  assert_eq(report.notes[0].kind, "below_measurement_floor", "the bound is named")
+  assert_eq(report.notes[0].observed_bytes, nil, "no fake exact frame size is reported")
+  assert(contains(render_drift(report), "below measurement floor"), "the pass stays visible")
 }
 
 @test

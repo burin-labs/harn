@@ -765,13 +765,22 @@ pub(crate) fn accumulate_llm_usage(
     // Always attribute usage to the active `@step` (if any), even when
     // the per-call cost is zero — token-only step budgets need the
     // count regardless of pricing.
-    crate::step_runtime::record_step_llm_usage(model, input_tokens, output_tokens, cost)?;
+    let step_result =
+        crate::step_runtime::record_step_llm_usage(model, input_tokens, output_tokens, cost);
     let total_tokens = input_tokens.max(0) as u64 + output_tokens.max(0) as u64;
     if total_tokens > 0 {
         LLM_ACCUMULATED_TOKENS.with(|acc| {
             let mut slot = acc.borrow_mut();
             *slot = slot.saturating_add(total_tokens);
         });
+    }
+    // This response has already completed. Record every charge before any
+    // budget error can return, while preserving step/token/cost error priority.
+    LLM_ACCUMULATED_COST.with(|acc| {
+        *acc.borrow_mut() += cost;
+    });
+    step_result?;
+    if total_tokens > 0 {
         LLM_TOKEN_BUDGET.with(|budget| {
             if let Some(max) = *budget.borrow() {
                 let total = LLM_ACCUMULATED_TOKENS.with(|acc| *acc.borrow());
@@ -788,9 +797,6 @@ pub(crate) fn accumulate_llm_usage(
     if cost == 0.0 {
         return Ok(());
     }
-    LLM_ACCUMULATED_COST.with(|acc| {
-        *acc.borrow_mut() += cost;
-    });
     LLM_BUDGET.with(|budget| {
         if let Some(max) = *budget.borrow() {
             let total = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
@@ -845,8 +851,14 @@ fn llm_cost_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-ledger"], sig = "__llm_session_cost() -> dict", category = "llm.economics")]
 fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let (total_input, total_output, _duration, call_count) = super::trace::peek_trace_summary();
-    let total_cost = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
+    let summary = super::trace::peek_trace_usage_summary();
+    let budget_charged_usd = super::admission::charged_upper_usd()
+        .unwrap_or_else(|| LLM_ACCUMULATED_COST.with(|acc| *acc.borrow()));
+    let measured_cost = summary
+        .cost
+        .cost_usd()
+        .map(VmValue::Float)
+        .unwrap_or(VmValue::Nil);
     let mut result = BTreeMap::new();
     if let Some(admission) = super::admission::receipt() {
         result.insert("admission".to_string(), admission);
@@ -854,10 +866,37 @@ fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
     if let Some(machine_spend) = super::admission::machine_receipt()? {
         result.insert("machine_spend".to_string(), machine_spend);
     }
-    result.insert("total_cost".to_string(), VmValue::Float(total_cost));
-    result.insert("input_tokens".to_string(), VmValue::Int(total_input));
-    result.insert("output_tokens".to_string(), VmValue::Int(total_output));
-    result.insert("call_count".to_string(), VmValue::Int(call_count));
+    result.insert("total_cost".to_string(), measured_cost.clone());
+    result.insert(
+        "budget_charged_usd".to_string(),
+        VmValue::Float(budget_charged_usd),
+    );
+    result.insert(
+        "input_tokens".to_string(),
+        VmValue::Int(summary.input_tokens),
+    );
+    result.insert(
+        "output_tokens".to_string(),
+        VmValue::Int(summary.output_tokens),
+    );
+    result.insert("call_count".to_string(), VmValue::Int(summary.call_count));
+    result.insert(
+        "provider_call_count".to_string(),
+        VmValue::Int(summary.cost.provider_call_count),
+    );
+    result.insert(
+        "known_cost_usd".to_string(),
+        VmValue::Float(summary.cost.known_cost_usd),
+    );
+    result.insert("cost_usd".to_string(), measured_cost);
+    result.insert(
+        "unpriced_calls".to_string(),
+        VmValue::Int(summary.cost.unpriced_calls),
+    );
+    result.insert(
+        "usage_unknown_calls".to_string(),
+        VmValue::Int(summary.cost.usage_unknown_calls),
+    );
     Ok(VmValue::dict(result))
 }
 

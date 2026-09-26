@@ -342,12 +342,6 @@ category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
-path = "src/llm/trace.rs"
-statics = ["LLM_TRACE", "LLM_TRACING_ENABLED"]
-category = "logical_task"
-plan = "task_local_or_explicit"
-
-[[thread_local]]
 path = "src/llm/reasoning_receipt.rs"
 statics = ["RECEIPTS", "DROPPED"]
 category = "logical_task"

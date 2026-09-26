@@ -555,6 +555,7 @@ impl<T> SharedCell<T> {
 pub(crate) struct TracingRuntime {
     collector: SharedCell<SpanCollector>,
     enabled: SharedCell<bool>,
+    pub(crate) llm: crate::llm::LlmTraceRuntime,
 }
 
 impl Default for TracingRuntime {
@@ -562,6 +563,7 @@ impl Default for TracingRuntime {
         Self {
             collector: SharedCell(parking_lot::RwLock::new(SpanCollector::new())),
             enabled: SharedCell(parking_lot::RwLock::new(false)),
+            llm: crate::llm::LlmTraceRuntime::default(),
         }
     }
 }

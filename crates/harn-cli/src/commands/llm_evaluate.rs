@@ -1,17 +1,9 @@
 //! Argument and rendering projection of the VM-owned decision evaluator.
 use crate::cli::LlmEvaluateArgs;
-use serde::Deserialize;
+use harn_vm::llm::decision::identity::{verify_receipt, EvaluationRequest as Request};
+use harn_vm::llm::decision::receipt::EvaluationReceipt;
 use serde_json::{json, Value};
 use std::path::Path;
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Request {
-    site_id: String,
-    state: Value,
-    questions: Value,
-    policy: Value,
-}
 
 fn read(path: &Path) -> Result<String, String> {
     std::fs::read_to_string(path)
@@ -60,14 +52,35 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
             return 2;
         }
     };
+    if let Some(path) = &args.verify_receipt {
+        return verify(&request, path, args.json);
+    }
     let mut vm = harn_vm::Vm::new();
-    let result = harn_vm::orchestration::scope_fresh_run_runtime(vm.evaluate_decision(
+    let tape_session = match (super::evaluation_tape::EvaluationReplayOptions {
+        tape: args.tape.clone(),
+        cache: false,
+    })
+    .install(&mut vm)
+    {
+        Ok(session) => session,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 2;
+        }
+    };
+    let evaluation = harn_vm::orchestration::scope_fresh_run_runtime(vm.evaluate_decision(
         &request.site_id,
         request.state,
         request.questions,
         request.policy,
-    ))
-    .await;
+    ));
+    let result = evaluation.await;
+    if let Some(session) = tape_session {
+        if let Err(error) = session.finish(result.is_ok()) {
+            eprintln!("error: {error}");
+            return 2;
+        }
+    }
     match result {
         Ok(result) => {
             if args.json {
@@ -92,6 +105,38 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
                 );
             }
             0
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            2
+        }
+    }
+}
+
+fn verify(request: &Request, path: &Path, json: bool) -> i32 {
+    let result = read_json(path)
+        .and_then(|value| {
+            serde_json::from_value::<EvaluationReceipt>(value)
+                .map_err(|error| format!("invalid evaluation receipt: {error}"))
+        })
+        .and_then(|receipt| verify_receipt(request, &receipt).map_err(|error| error.to_string()));
+    match result {
+        Ok(report) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&report).expect("verification serializes")
+                );
+            } else if report.verified {
+                println!("Request identity verified.");
+            } else {
+                println!(
+                    "Request identity refused: {}",
+                    serde_json::to_string(&report.refusals)
+                        .expect("verification refusals serialize")
+                );
+            }
+            i32::from(!report.verified)
         }
         Err(error) => {
             eprintln!("error: {error}");
