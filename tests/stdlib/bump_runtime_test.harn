@@ -31,6 +31,8 @@ fn make_fake(config: dict = {}) {
     ready: true,
     readiness_detail: "harn-cli 0.10.30 published; assets present; release finalized",
     current: "v0.10.29",
+    current_revision: "",
+    revision_relation: "untracked",
     apply_ok: true,
     apply_changed: true,
     refreshed: ["harn.lock"],
@@ -66,9 +68,14 @@ fn make_fake(config: dict = {}) {
       attempt_lines: ["attempt 1: ${cfg.readiness_detail}"],
     } },
     read_current_version: fn() { return cfg.current },
+    read_current_revision: fn() { return cfg.current_revision },
+    revision_relation: fn(previous, target, tag) {
+      record("revision_relation", {previous: previous, target: target, tag: tag})
+      return cfg.revision_relation
+    },
     base_sha: fn() { return cfg.base_sha },
-    apply_version: fn(_target) {
-      record("apply_version", _target)
+    apply_version: fn(_target, _revision) {
+      record("apply_version", {tag: _target, revision: _revision})
       return {
         ok: cfg.apply_ok,
         changed: cfg.apply_changed,
@@ -197,6 +204,50 @@ pipeline test_already_current_is_a_clean_noop(harness: Harness, task: unknown) {
   assert_eq(call_names(fake.calls()), [])
 }
 
+/** Equal release tags still advance when their source commit advances. */
+pipeline test_equal_tag_newer_revision_runs_full_bump(harness: Harness, task: unknown) {
+  const old = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  const next = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  const fake = make_fake({current: "v0.10.30", current_revision: old, revision_relation: "behind"})
+  const receipt = run_bump(opts({source_revision: next}), fake.adapter)
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.version_relation, "equal")
+  assert_eq(receipt.revision_relation, "behind")
+  assert_eq(receipt.previous_revision, old)
+  assert_eq(receipt.target_revision, next)
+  assert_eq(call_names(fake.calls())[0], "revision_relation")
+  assert_eq(call_names(fake.calls())[2], "apply_version")
+}
+
+pipeline test_equal_tag_same_revision_does_no_mutation(harness: Harness, task: unknown) {
+  const revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  const fake = make_fake(
+    {current: "v0.10.30", current_revision: revision, revision_relation: "equal"},
+  )
+  const receipt = run_bump(opts({source_revision: revision}), fake.adapter)
+  assert_eq(receipt.outcome, "already_current")
+  assert_eq(call_names(fake.calls()), ["revision_relation"])
+}
+
+pipeline test_stale_or_diverged_revision_refuses_mutation(harness: Harness, task: unknown) {
+  for relation in ["ahead", "diverged"] {
+    const fake = make_fake(
+      {
+        current: "v0.10.30",
+        current_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        revision_relation: relation,
+      },
+    )
+    const receipt = run_bump(
+      opts({source_revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+      fake.adapter,
+    )
+    assert_eq(receipt.outcome, "revision_conflict")
+    assert_eq(receipt.ok, false)
+    assert_eq(call_names(fake.calls()), ["revision_relation"])
+  }
+}
+
 /** A stale target can never roll a consumer back from a newer release. */
 pipeline test_newer_pin_refuses_downgrade_without_mutation(harness: Harness, task: unknown) {
   const fake = make_fake({current: "v0.10.85", target: "v0.10.84"})
@@ -230,6 +281,17 @@ pipeline test_release_not_ready_stops_before_mutation(harness: Harness, task: un
   assert_eq(receipt.ok, true)
   assert_eq(receipt.ready, false)
   assert_eq(receipt.readiness_detail, "missing release assets: SHA256SUMS")
+  assert_eq(call_names(fake.calls()), [])
+}
+
+pipeline test_source_revision_waits_for_release_readiness(harness: Harness, task: unknown) {
+  const fake = make_fake({ready: false})
+  const receipt = run_bump(
+    opts({source_revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+    fake.adapter,
+  )
+  assert_eq(receipt.outcome, "not_ready")
+  assert_eq(receipt.revision_relation, nil)
   assert_eq(call_names(fake.calls()), [])
 }
 
