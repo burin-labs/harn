@@ -83,6 +83,18 @@ pub(super) fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> V
     );
     dict.put_str("provider", model.provider.as_str());
     dict.insert(
+        crate::value::intern_key("operations"),
+        model
+            .operations
+            .as_ref()
+            .map(|operations| {
+                string_list_to_vm_value(
+                    operations.iter().map(|op| op.as_str().to_owned()).collect(),
+                )
+            })
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
         crate::value::intern_key("context_window"),
         VmValue::Int(model.context_window as i64),
     );

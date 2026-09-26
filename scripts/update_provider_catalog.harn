@@ -5,6 +5,7 @@
 //
 //   .harn-runs/provider_catalog/drift-report.md
 //   .harn-runs/provider_catalog/candidate.toml
+//   .harn-runs/provider_catalog/refresh.json
 //
 // Usage:
 //
@@ -780,7 +781,7 @@ pub fn run_adapters(harness: Harness, env: dict, specs: list<dict>) -> dict {
   let raw = []
   for spec in specs {
     const result = spec.run_fn(harness, env)
-    runs = runs + [result.run]
+    runs = runs + [result.run + {observation_count: len(result.observations)}]
     for obs in result.observations {
       raw = raw + [obs]
     }
@@ -798,6 +799,26 @@ fn __build_meta(run_mode: string, observed_at: string) -> dict {
   return {generated_at: observed_at, run_mode: run_mode}
 }
 
+fn __refresh_summary(meta: dict, runs: list<dict>, observations: list<dict>, drift: dict) -> dict {
+  return {
+    schema_version: 1,
+    run_mode: meta.run_mode,
+    generated_at: meta.generated_at,
+    coverage: refresh_coverage(runs, len(observations)),
+    drift: {
+      added: len(drift.added),
+      removed: len(drift.removed),
+      changed: len(drift.changed),
+      unknown_pricing: len(drift.unknown_pricing),
+    },
+    artifacts: {
+      manifest: path_join(RUN_OUTPUT_DIR, "refresh.json"),
+      report: path_join(RUN_OUTPUT_DIR, "drift-report.md"),
+      candidate: path_join(RUN_OUTPUT_DIR, "candidate.toml"),
+    },
+  }
+}
+
 fn __compose_report(
   harness: Harness,
   env: dict,
@@ -809,12 +830,15 @@ fn __compose_report(
   const normalized = normalize_observations(adapter_outcome.observations)
   const drift = build_drift(normalized.observations, catalog)
   const meta = __build_meta(run_mode, env.observed_at)
+  const summary = __refresh_summary(meta, adapter_outcome.runs, normalized.observations, drift)
   return {
     report: render_markdown_report(drift, normalized.conflicts, adapter_outcome.runs, meta),
     candidate: render_candidate_toml(drift, meta),
     drift: drift,
     runs: adapter_outcome.runs,
     observations: normalized.observations,
+    conflicts: normalized.conflicts,
+    summary: summary,
   }
 }
 
@@ -822,6 +846,19 @@ fn __write_outputs(fs: HarnessFs, outcome: dict) {
   __ensure_run_dir(fs)
   fs.write_text(path_join(RUN_OUTPUT_DIR, "drift-report.md"), outcome.report)
   fs.write_text(path_join(RUN_OUTPUT_DIR, "candidate.toml"), outcome.candidate)
+  fs.write_text(
+    path_join(RUN_OUTPUT_DIR, "refresh.json"),
+    json_stringify(
+      {
+        summary: outcome.summary,
+        adapters: outcome.runs,
+        observations: outcome.observations,
+        drift: outcome.drift,
+        conflicts: outcome.conflicts,
+      },
+    )
+      + "\n",
+  )
 }
 
 fn __check_against_golden(fs: HarnessFs, stdio: HarnessStdio, outcome: dict, update: bool) -> int {
@@ -859,6 +896,7 @@ pipeline main(harness: Harness, task: unknown) {
   const live = argv.contains("--live")
   const check = argv.contains("--check")
   const update = argv.contains("--update")
+  const json = argv.contains("--json")
   const specs = if live {
     __adapter_specs(live) + __live_adapter_specs()
   } else {
@@ -898,7 +936,16 @@ pipeline main(harness: Harness, task: unknown) {
     return __check_against_golden(harness.fs, harness.stdio, outcome, update)
   }
   __write_outputs(harness.fs, outcome)
-  harness.stdio.println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
-  harness.stdio.println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
+  if json {
+    harness.stdio.println(json_stringify(outcome.summary))
+  } else {
+    harness.stdio.println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
+    harness.stdio.println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
+    harness.stdio.println("wrote " + path_join(RUN_OUTPUT_DIR, "refresh.json"))
+  }
+  if live && outcome.summary.coverage.models_observed == 0 {
+    harness.stdio.eprintln("provider catalog refresh observed no models; no live catalog evidence")
+    return 1
+  }
   return 0
 }

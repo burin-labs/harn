@@ -16,6 +16,22 @@ fn make_env(secrets: dict?) {
   return FIXTURE_BASE + {secrets: secrets ?? {}}
 }
 
+@test
+pipeline test_refresh_coverage_does_not_accept_an_empty_source_as_complete() {
+  const nonempty = {status: "ok", observation_count: 2}
+  const empty = {status: "ok", observation_count: 0}
+  const complete = refresh_coverage([nonempty], 2)
+  assert_eq(complete.status, "complete")
+  assert_eq(complete.adapters_ok, 1)
+  const partial = refresh_coverage([nonempty, empty], 2)
+  assert_eq(partial.status, "partial")
+  assert_eq(partial.adapters_empty, 1)
+  assert_eq(partial.adapters_ok, 1)
+  assert_eq(partial.adapters_total, 2)
+  const unmeasured = refresh_coverage([empty], 0)
+  assert_eq(unmeasured.status, "unmeasured")
+}
+
 fn provider_obs(model_id: string, pricing: dict?, ctx: int?) {
   return observation(
     "anthropic",
@@ -198,6 +214,33 @@ pipeline test_build_drift_reports_removal_when_provider_observed(harness: Harnes
   const drift = build_drift([only_one], SAMPLE_CATALOG)
   assert_eq(len(drift.removed), 1)
   assert_eq(drift.removed[0].id, "claude-opus-4-7-20260301")
+}
+
+@test
+pipeline test_chat_index_cannot_retire_a_decision_route() {
+  const catalog = {
+    models: [
+      {id: "served-chat", provider: "gateway", operations: ["text_generation"]},
+      {id: "missing-chat", provider: "gateway", operations: ["text_generation"]},
+      {id: "decision", provider: "gateway", operations: ["decision"]},
+    ],
+  }
+  const observed = [
+    observation(
+      "gateway",
+      "served-chat",
+      {},
+      {
+        source_url: "https://gateway.example/v1/models",
+        source_kind: "json",
+        source_owner: "provider",
+        observed_at: "2026-09-26T00:00:00Z",
+      },
+    ),
+  ]
+  const drift = build_drift(observed, catalog)
+  assert_eq(len(drift.removed), 1)
+  assert_eq(drift.removed[0].id, "missing-chat")
 }
 
 @test

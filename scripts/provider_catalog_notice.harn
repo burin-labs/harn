@@ -230,6 +230,10 @@ does not add a model row until the missing facts below are verified.
 ${json_stringify_pretty(candidate)}
 ```
 
+## Notice text
+
+${notice?.text ?? "No notice text supplied; inspect the source URL."}
+
 ## Unresolved verification
 
 ${receipt.unresolved_verification.map({ item -> "- " + item }).join("\n")}
@@ -335,6 +339,7 @@ pipeline main(harness: Harness, task: unknown) {
   )
   let plan = plan_notice(harness, notice_raw, extraction, catalog)
   const output_dir = __ensure_output_dir(harness.fs, root, options.output_dir)
+  plan.receipt = plan.receipt + {extraction: extraction}
   const receipt_path = path_join(output_dir, plan.receipt.notice_id + ".json")
   harness.fs.write_text(receipt_path, json_stringify_pretty(plan.receipt) + "\n")
   harness.stdio.println(

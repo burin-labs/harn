@@ -118,11 +118,49 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 ## Catalog and matrix commands
 
 - Refresh provider observations with fixtures: `harn provider catalog refresh --check`.
-- Refresh provider observations live: `harn provider catalog refresh --live`.
+- Refresh provider observations live: `harn provider catalog refresh --live --json`.
 - Regenerate catalog artifacts: `harn provider catalog generate`.
 - Validate catalog artifacts: `harn provider catalog generate --check`.
 - Regenerate capability matrix docs: `harn provider catalog matrix`.
 - Validate capability matrix docs: `harn provider catalog matrix --check`.
+
+## Maintain the live catalog
+
+1. Run the exact-source Harn CLI with authorized provider keys in its process
+   environment. Never put key values in arguments, source, reports, or a remote
+   file. Read the JSON coverage summary from `refresh --live --json` and the
+   full `.harn-runs/provider_catalog/refresh.json` evidence. A partial run
+   names skipped, empty, and failed adapters; zero observations is unmeasured, not a
+   clean catalog.
+2. Review the typed drift and source provenance. A model-index omission is a
+   retirement lead, not proof of deprecation. Verify identity and successor
+   against first-party release notes or the provider's current rate card.
+   Use provider list prices for the actual route; do not copy an aggregator's
+   floating cheapest-host price into a direct-provider row.
+   For a trusted release or pricing notice, run
+   `harn run scripts/provider_catalog_notice.harn -- --notice <json> --provider <inference-provider> --model <inference-model>`
+   with a configured own-key route. Harn's schema-constrained model extraction
+   produces a reviewable receipt and refuses ambiguous identities. A new model
+   becomes an incomplete proposal, with the original extraction in the receipt.
+   Each run extracts one change; split multi-change announcements into focused
+   notice records and track every residual fact.
+   Keep `--apply` off until the candidate is independently verified.
+3. For each new chat route with available credentials, run
+   `harn provider tool-probe <provider> --model <id> --mode non-streaming --json true`.
+   Require `classification = structured_native_tool_call` before advertising
+   native tool use and record `usage.cost_usd`. Keep an inaccessible route
+   explicitly unverified instead of treating an aggregator mirror as proof of
+   its direct adapter.
+4. Change the owning catalog fragments. Record `deprecated` and
+   `superseded_by`, preserve aliases, and move defaults off deprecated rows.
+   Pin curated support recommendations before generating projections. Check
+   downstream Burin overlays after the next Harn repin; Burin supplies its
+   credentials and product-specific aliases, while Harn owns route semantics.
+5. Regenerate the catalog, matrix, and support projections, run their checks
+   and the repository audit gate, then open a reviewable PR. Put measured
+   coverage, probe costs, skipped adapters, and unverified claims in its
+   summary. Never treat a file's existence or a green inventory count as proof
+   that a route served a tool call.
 
 ## Verify
 

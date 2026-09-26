@@ -213,3 +213,33 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
         Some("2026-10-23")
     );
 }
+
+#[test]
+fn provider_catalog_builtin_preserves_non_chat_operations() {
+    let (id, _) = llm_config::model_catalog_entries()
+        .into_iter()
+        .find(|(_, model)| {
+            model.operations.as_ref().is_some_and(|operations| {
+                operations.contains(&llm_config::ModelOperation::Decision)
+            })
+        })
+        .expect("a bundled decision route");
+    let catalog = provider_catalog_to_vm_value();
+    let models = catalog
+        .as_dict()
+        .and_then(|catalog| catalog.get("models"))
+        .and_then(|models| match models {
+            VmValue::List(models) => Some(models),
+            _ => None,
+        })
+        .expect("projected model rows");
+    let model = models
+        .iter()
+        .filter_map(VmValue::as_dict)
+        .find(|model| model.get("id").map(VmValue::display).as_deref() == Some(id.as_str()))
+        .expect("projected decision route");
+    let operations = model.get("operations").expect("projected operation type");
+    assert!(
+        matches!(operations, VmValue::List(values) if values.iter().any(|value| value.display() == "decision"))
+    );
+}
