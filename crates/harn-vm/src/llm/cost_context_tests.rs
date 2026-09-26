@@ -12,6 +12,39 @@ fn segment_tokens(breakdown: &LlmContextTokenBreakdown, id: &'static str) -> Opt
 }
 
 #[test]
+fn wire_output_schema_is_counted_but_prompt_validation_is_not_counted_twice() {
+    use crate::llm::api::OutputFormat;
+    let mut opts = crate::llm::api::options::base_opts("openai");
+    opts.model = "gpt-5.4-nano".into();
+    opts.output_format = OutputFormat::Text;
+    opts.output_schema = None;
+    let schema = serde_json::json!({
+        "type": "object", "properties": {"safe": {
+            "type": "boolean", "description": "rubric ".repeat(2000)
+        }}, "required": ["safe"], "additionalProperties": false
+    });
+    let plain = project_llm_call_context_breakdown(&opts);
+    opts.output_format = OutputFormat::JsonSchema {
+        schema: schema.clone(),
+        strict: true,
+    };
+    opts.output_schema = Some(schema.clone());
+    let structured = project_llm_call_context_breakdown(&opts);
+    let schema_tokens = segment_tokens(&structured, "output_schema").unwrap();
+    assert!(schema_tokens > 1000);
+    assert_eq!(structured.input_tokens - plain.input_tokens, schema_tokens);
+
+    opts.output_format = OutputFormat::Text;
+    opts.messages = vec![serde_json::json!({"role": "user", "content": schema.to_string()})];
+    let validated = project_llm_call_context_breakdown(&opts);
+    opts.output_schema = None;
+    let prompt_only = project_llm_call_context_breakdown(&opts);
+    assert_eq!(segment_tokens(&validated, "output_schema"), Some(0));
+    assert!(validated.input_tokens > 1000);
+    assert_eq!(validated.input_tokens, prompt_only.input_tokens);
+}
+
+#[test]
 fn context_breakdown_reports_request_segments_and_matches_projection() {
     let mut opts = crate::llm::api::options::base_opts("openai");
     opts.system = Some("System policy".to_string());

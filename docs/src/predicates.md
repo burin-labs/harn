@@ -110,19 +110,25 @@ fn assess(
 | `policy` | Closed, compile-time constant `EvaluationPolicy` record naming a catalog route that declares `decision`. |
 
 The policy requires a `backend` of `"structured_llm"` or `"native_decision"`, string fields `provider`
-and `model`, and floating-point fields `threshold`,
-`evaluation_cost_limit`, and `run_cost_limit`. Checking validates this shape and
-the route's declared `decision` operation. A text-generation capability alone
-does not grant decision support. The checker makes no provider request and does
+and `model`, and a floating-point `threshold`. Optional finite nonnegative
+`evaluation_cost_limit` and `run_cost_limit` tighten inherited authority. Omitting
+them does not create budget authority: native calls require an existing
+conservative ledger ceiling and retain a finite per-call price bound. Install
+that authority before the first model call; earlier unreserved calls cannot be
+retroactively covered.
+Checking validates this shape and the resolved `decision` operation. A route
+with a supported structured transport and text generation derives structured
+decision support at the catalog owner. An explicit unsupported schema override
+prevents that derivation. The checker makes no provider request and does
 not establish credential availability or a resource reservation. Unknown routes
-and policies supplied only at runtime refuse admission.
+and policies supplied only at runtime refuse literal-site admission; use
+`evaluate_request` for typed runtime policy and vocabulary admission.
 Which operations a route needs follows from the `decision_protocol` its
 capability rule names. `structured_llm` dials the ordinary chat endpoint, so a
 route using it needs `text_generation` as well. A route on a native protocol
 (`typesafe_system_one`, `vercel_evaluate`, `openrouter_decisions`) needs
-`decision` alone, and must not inherit a chat transport from its provider. A
-route declaring `decision` whose capability rule names no protocol is refused
-by name: there is no endpoint to dial.
+`decision` alone, and must not inherit a chat transport from its provider. An
+explicit native contract takes precedence over derived structured support.
 
 `effort` and `temperature` are optional chat options. Omit both for
 `native_decision`; supplying either refuses with `unsupported_options` before
@@ -149,6 +155,45 @@ untyped map does not bypass site checking. Dynamically computed property calls
 do not declare admitted sites. Runtime admission owns the route's declared
 limits and question kinds; checking establishes neither.
 
+## Runtime vocabulary and routes
+
+`harness.llm.evaluate_request(id, state, questions, policy)` accepts a typed
+question map and policy computed at runtime, for registries such as tools and
+skills. The site id remains literal and unique, and the state, questions and
+policy require closed serializable types. Its answers use the generic
+`EvaluationAnswer` union: match the outcome and answer kinds before reading
+their values. Runtime vocabulary does not produce a compile-time union of
+choice labels.
+
+The source manifest marks these sites `runtime_admission: true`; their empty
+question census and null question digest mean not yet bound, not no questions.
+The execution receipt binds the actual question set, input, policy and route.
+The same evaluator validates catalog support, authority, limits and budgets
+before sending at most one request. Static `evaluate` retains its literal
+question and route admission and its precisely typed answer labels.
+
+Structured decision eligibility is resolved from the route's text-generation
+operation and typed transport strategy: native schema, tool schema, format
+schema, or prompt validation. Prompt validation is Harn's completed-response
+validation, not provider-native enforcement. Absent transport declarations
+retain prompt compatibility; explicit unsupported or unknown declarations
+refuse. The catalog, static admission, and execution share this owner. Native
+decision protocols retain precedence and their published limits.
+
+Structured calls use ordinary shared monetary admission. Without conservative
+authority, `evaluation_cost_limit` is an adaptive pre-call projection including
+messages, tools, and the provider-projected output schema. It is not a hard
+invoice ceiling. An explicit `run_cost_limit` requests conservative admission;
+that mode reserves a supported upper bound and refuses unsupported billing
+shapes. A completed receipt records `cost_admission` as `adaptive_projection`
+or `conservative_upper_bound`. Native decisions require conservative authority.
+
+Structured receipts carry the authoritative settled `usage`, including reported
+cache fields, on valid and malformed completed responses. Missing telemetry
+stays unavailable, and native receipts do not invent cache measurements. The
+identity's `structured_output_strategy` distinguishes provider schema enforcement
+from Harn prompt validation; native protocols leave it null.
+
 ## Outcome
 
 `EvaluationOutcome` and `PredicateOutcome` are closed tagged unions over the
@@ -173,6 +218,14 @@ distribution (`distribution_shape`); a structured LLM reports its own number
 (`model_rationale`). These are different quantities and one threshold does not
 equalize their error rates. None of them is calibrated until a calibration
 report says otherwise.
+
+Structured answers retain the model's named verdict, choice, or score level
+even at low confidence. Their probability fields are synthesized compatibility
+projections, never evidence for changing the named answer; their receipt's raw
+probabilities are empty because the model measured no distribution. Native
+distributions continue to select their highest-probability label. A native
+response that also names a contradictory label refuses instead of silently
+changing that answer.
 
 ```harn
 import "std/predicate"

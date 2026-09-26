@@ -1,0 +1,12 @@
+{"row_id":"en-permission-shell","language":"en","assistant_text":"Should I run the test command? I'll wait for your approval before starting it.","intended":false,"tool":null}
+{"row_id":"en-conditional-edit","language":"en","assistant_text":"If you later decide to change the timeout, I can edit the configuration. For now this is only a suggestion.","intended":false,"tool":null}
+{"row_id":"en-authorized-shell","language":"en","assistant_text":"You approved running the checks. I am executing the test command next.","intended":true,"tool":"shell"}
+{"row_id":"en-committed-read","language":"en","assistant_text":"To verify the documented default, my next action is to open and read the settings file.","intended":true,"tool":"read"}
+{"row_id":"es-permission-edit","language":"es","assistant_text":"¿Debo modificar el archivo fuente? No haré cambios hasta que me lo confirmes.","intended":false,"tool":null}
+{"row_id":"es-conditional-shell","language":"es","assistant_text":"Si decides continuar mañana, podría ejecutar el comando de pruebas. Ahora solo estoy describiendo esa posibilidad.","intended":false,"tool":null}
+{"row_id":"es-authorized-edit","language":"es","assistant_text":"Ya confirmaste el cambio. Mi siguiente acción es modificar el archivo de configuración.","intended":true,"tool":"edit"}
+{"row_id":"es-committed-read","language":"es","assistant_text":"Para comprobar la documentación, voy a abrir y leer el archivo de instrucciones a continuación.","intended":true,"tool":"read"}
+{"row_id":"fr-permission-read","language":"fr","assistant_text":"Est-ce que je dois ouvrir le fichier ? J'attends votre accord avant de le lire.","intended":false,"tool":null}
+{"row_id":"fr-conditional-edit","language":"fr","assistant_text":"Si vous choisissez cette solution plus tard, je pourrais modifier la configuration. Pour l'instant, je présente seulement une possibilité.","intended":false,"tool":null}
+{"row_id":"fr-authorized-shell","language":"fr","assistant_text":"Vous avez autorisé les vérifications. Je vais maintenant exécuter la commande de test.","intended":true,"tool":"shell"}
+{"row_id":"fr-committed-edit","language":"fr","assistant_text":"L'étape suivante est la correction du fichier source ; je procède à cette modification maintenant.","intended":true,"tool":"edit"}

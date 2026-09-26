@@ -1,0 +1,49 @@
+import { MissingToolCallVerdict, missing_tool_call_classifier } from "std/llm/missing_tool_call"
+
+pipeline test(harness: Harness) {
+  const request = {
+    session_id: "typed-fixture",
+    iteration: 1,
+    text: "Opaque fixture input: no phrase implies a tool verdict.",
+    visible_text: nil,
+    tools: [{name: "edit", description: "Update an existing file"}],
+    tool_names: ["edit"],
+  }
+  for confidence in [0.96, 1.2] {
+    const fixture: MissingToolCallVerdict = {
+      action: "tool_call_intended",
+      tool_name: "edit",
+      confidence: confidence,
+      evidence: "Explicit typed fixture",
+    }
+    const classify = missing_tool_call_classifier(
+      harness,
+      {provider: "mock", classifier: { _request -> fixture }},
+    )
+    const result = classify(request)
+    assert(result != nil, "classifier returned evidence")
+    assert_eq(result.classifier_kind, "custom")
+    assert_eq(
+      result.action,
+      if confidence <= 1.0 {
+        "tool_call_intended"
+      } else {
+        "ambiguous"
+      },
+    )
+    assert_eq(
+      result.confidence,
+      if confidence <= 1.0 {
+        confidence
+      } else {
+        0.0
+      },
+    )
+  }
+  const no_fixture = missing_tool_call_classifier(harness, {provider: "mock"})
+  const fallback = no_fixture(request)
+  assert(fallback != nil, "unconfigured evaluator produces a visible classification failure")
+  assert_eq(fallback.action, "ambiguous")
+  assert(fallback.classifier_kind != "custom", "fallback cannot manufacture fixture evidence")
+  harness.stdio.log("missing tool call typed fixture ok")
+}

@@ -997,27 +997,35 @@ impl LlmCallOptions {
             .map(|(schema, _strict)| schema)
             .or(self.output_schema.as_ref())
     }
+
+    /// Schema actually sent by the structured transport. Validation-only
+    /// prompt contracts are already counted in messages and return None.
+    pub(crate) fn wire_output_schema(&self) -> Option<(serde_json::Value, bool)> {
+        self.structured_output_schema().map(|(schema, strict)| {
+            (
+                project_output_schema_for_provider(
+                    &self.provider,
+                    &self.model,
+                    strict,
+                    schema,
+                    true,
+                ),
+                strict,
+            )
+        })
+    }
 }
 
 impl From<&LlmCallOptions> for LlmRequestPayload {
     fn from(opts: &LlmCallOptions) -> Self {
-        let (output_format, output_schema) = match opts.structured_output_schema() {
-            Some((raw_schema, strict)) => {
-                let schema = project_output_schema_for_provider(
-                    &opts.provider,
-                    &opts.model,
+        let (output_format, output_schema) = match opts.wire_output_schema() {
+            Some((schema, strict)) => (
+                OutputFormat::JsonSchema {
+                    schema: schema.clone(),
                     strict,
-                    raw_schema,
-                    true,
-                );
-                (
-                    OutputFormat::JsonSchema {
-                        schema: schema.clone(),
-                        strict,
-                    },
-                    Some(schema),
-                )
-            }
+                },
+                Some(schema),
+            ),
             None => (opts.output_format.clone(), opts.output_schema.clone()),
         };
         let mut payload = Self {

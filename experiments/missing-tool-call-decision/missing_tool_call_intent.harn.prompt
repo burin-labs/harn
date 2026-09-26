@@ -1,0 +1,5 @@
+The parser found no valid tool calls in this assistant turn. Has the assistant committed to invoking a candidate tool as its next action, without waiting for another user answer or approval?
+
+Answer true only for an affirmative commitment to perform the tool action now or next. Answer false when the assistant asks whether it should act, requests permission, waits for a reply, describes a hypothetical future action, reports a completed action, quotes someone else's intention, or merely explains a tool. Mentioning an action or tool does not itself commit to execution. An explicit condition or wait for approval takes precedence over a possible future intention.
+
+Use the assistant text and candidate descriptions in the shared state. Apply the same distinction across languages and minor typos. Do not infer commitment from the original user task alone. Unclear commitment should have low confidence.

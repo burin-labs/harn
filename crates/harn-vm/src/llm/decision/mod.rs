@@ -48,8 +48,8 @@ pub(crate) struct EvaluationPolicy {
     pub temperature: f64,
     pub native_options_supplied: bool,
     pub threshold: f64,
-    pub evaluation_cost_limit: f64,
-    pub run_cost_limit: f64,
+    pub evaluation_cost_limit: Option<f64>,
+    pub run_cost_limit: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +72,15 @@ impl EvaluationPolicy {
         let fields = value
             .as_dict()
             .ok_or_else(|| "evaluation policy must be a record".to_string())?;
+        let harn_builtin_meta::Ty::Shape(allowed) = harn_builtin_meta::predicate::POLICY else {
+            unreachable!("evaluation policy is a closed record");
+        };
+        if let Some(key) = fields
+            .keys()
+            .find(|key| !allowed.iter().any(|field| field.name == key.as_str()))
+        {
+            return Err(format!("evaluation policy has unknown field `{key}`"));
+        }
         let text = |key: &str| match fields.get(key) {
             Some(VmValue::String(value)) => Ok(value.to_string()),
             _ => Err(format!("evaluation policy has no string `{key}`")),
@@ -103,16 +112,24 @@ impl EvaluationPolicy {
             native_options_supplied: fields.contains_key("effort")
                 || fields.contains_key("temperature"),
             threshold: number("threshold")?,
-            evaluation_cost_limit: number("evaluation_cost_limit")?,
-            run_cost_limit: number("run_cost_limit")?,
+            evaluation_cost_limit: fields
+                .contains_key("evaluation_cost_limit")
+                .then(|| number("evaluation_cost_limit"))
+                .transpose()?,
+            run_cost_limit: fields
+                .contains_key("run_cost_limit")
+                .then(|| number("run_cost_limit"))
+                .transpose()?,
         };
         if !policy.threshold.is_finite()
             || !(0.0..=1.0).contains(&policy.threshold)
             || !policy.temperature.is_finite()
-            || !policy.evaluation_cost_limit.is_finite()
-            || policy.evaluation_cost_limit < 0.0
-            || !policy.run_cost_limit.is_finite()
-            || policy.run_cost_limit < 0.0
+            || policy
+                .evaluation_cost_limit
+                .is_some_and(|limit| !limit.is_finite() || limit < 0.0)
+            || policy
+                .run_cost_limit
+                .is_some_and(|limit| !limit.is_finite() || limit < 0.0)
         {
             return Err(
                 "evaluation policy requires finite nonnegative budgets and a threshold in [0, 1]"
@@ -381,6 +398,11 @@ async fn evaluate_internal(
     let route = resolve_route(&policy.provider, &policy.model);
     let canonical_state = crate::canonical_json::to_vec(&state);
     let identity = EvaluationIdentity {
+        contract_version: receipt::EVALUATION_IDENTITY_CONTRACT.into(),
+        structured_output_strategy: route
+            .as_ref()
+            .and_then(|route| route.structured_output_strategy)
+            .map(|strategy| strategy.as_str().to_string()),
         input_digest: digest_parts(std::iter::once(
             std::str::from_utf8(&canonical_state).unwrap_or(""),
         )),
@@ -391,7 +413,7 @@ async fn evaluate_internal(
             .as_ref()
             .is_some_and(|route| route.protocol.is_native())
         {
-            "harn.evaluator.native.v1".into()
+            "harn.evaluator.native.v2".into()
         } else {
             structured::EVALUATOR_INSTRUCTION_VERSION.into()
         },
@@ -402,15 +424,8 @@ async fn evaluate_internal(
             .map(|route| route.protocol.as_str().to_string())
             .unwrap_or_else(|| "unresolved".into()),
     };
-    let evaluation_id = digest_parts(
-        [
-            id.as_str(),
-            identity.input_digest.as_str(),
-            identity.question_set_digest.as_str(),
-            identity.policy_digest.as_str(),
-        ]
-        .into_iter(),
-    );
+    let identity_json = serde_json::to_string(&identity).expect("evaluation identity serializes");
+    let evaluation_id = digest_parts([id.as_str(), identity_json.as_str()].into_iter());
 
     let mut receipt = EvaluationReceipt::not_dispatched(
         evaluation_id,
@@ -438,15 +453,6 @@ async fn evaluate_internal(
         publish(&receipt);
         return Ok((outcome, Vec::new(), policy, receipt));
     };
-
-    // The checker refuses an empty set (HARN-TYP-036), and the outcome union
-    // has no reason that honestly names one. An unchecked caller gets a type
-    // error rather than a receipt carrying a cause that is not the cause.
-    if questions.is_empty() {
-        return Err(VmError::Runtime(
-            "evaluate requires at least one question".into(),
-        ));
-    }
 
     if let Err(refusal) = questions.admit(&route) {
         let outcome =
@@ -484,6 +490,8 @@ async fn evaluate_internal(
             contract: &route,
             effort: &policy.effort,
             temperature: policy.temperature,
+            evaluation_cost_limit: policy.evaluation_cost_limit,
+            run_cost_limit: policy.run_cost_limit,
         };
         match native::request_body(&request) {
             Ok(body) => {
@@ -536,25 +544,15 @@ async fn evaluate_internal(
         publish(&receipt);
         return Ok((outcome, Vec::new(), policy, receipt));
     };
-    if bound > policy.evaluation_cost_limit {
-        let outcome = outcome::budget_cut(
-            &reference,
-            "evaluation_cost",
-            bound,
-            policy.evaluation_cost_limit,
-        );
+    if let Some(limit) = policy.evaluation_cost_limit.filter(|limit| bound > *limit) {
+        let outcome = outcome::budget_cut(&reference, "evaluation_cost", bound, limit);
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
         return Ok((outcome, Vec::new(), policy, receipt));
     }
     let spent = crate::llm::cost::peek_total_cost();
-    if spent + bound > policy.run_cost_limit {
-        let outcome = outcome::budget_cut(
-            &reference,
-            "run_cost",
-            bound,
-            (policy.run_cost_limit - spent).max(0.0),
-        );
+    if let Some(limit) = policy.run_cost_limit.filter(|limit| spent + bound > *limit) {
+        let outcome = outcome::budget_cut(&reference, "run_cost", bound, (limit - spent).max(0.0));
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
         return Ok((outcome, Vec::new(), policy, receipt));
@@ -589,10 +587,7 @@ async fn evaluate_internal(
         ) {
             Ok(hold) => Some(hold),
             Err(_) => {
-                let outcome = refuse(
-                    &mut receipt,
-                    outcome::budget_cut(&reference, "run_cost", bound, policy.run_cost_limit),
-                );
+                let outcome = refuse(&mut receipt, native_admission_failure(&reference, bound));
                 publish(&receipt);
                 return Ok((outcome, Vec::new(), policy, receipt));
             }
@@ -620,20 +615,10 @@ async fn evaluate_internal(
         {
             // A failed durable invalidation still fails this evaluation closed.
             if hold.retain_contract_violation().is_err() {
-                outcome = outcome::budget_cut(
-                    &reference,
-                    "run_cost",
-                    bound,
-                    evaluation.policy.run_cost_limit,
-                );
+                outcome = native_admission_failure(&reference, bound);
             }
         } else if hold.settle(settled).is_err() {
-            outcome = outcome::budget_cut(
-                &reference,
-                "run_cost",
-                bound,
-                evaluation.policy.run_cost_limit,
-            );
+            outcome = native_admission_failure(&reference, bound);
         }
     }
     if evaluation.policy.backend == BackendKind::NativeDecision && receipt.physical_attempts > 0 {
@@ -648,12 +633,7 @@ async fn evaluate_internal(
         )
         .is_err()
         {
-            outcome = outcome::budget_cut(
-                &reference,
-                "run_cost",
-                charged,
-                evaluation.policy.run_cost_limit,
-            );
+            outcome = native_admission_failure(&reference, charged);
         }
     }
     receipt.outcome_kind = outcome.kind.into();
@@ -661,6 +641,13 @@ async fn evaluate_internal(
     receipt.record_answers(&answers);
     publish(&receipt);
     Ok((outcome, answers, evaluation.policy, receipt))
+}
+
+fn native_admission_failure(reference: &str, requested: f64) -> Outcome {
+    match super::admission::remaining_allowance() {
+        Some(remaining) => outcome::budget_cut(reference, "run_cost", requested, remaining),
+        None => outcome::unavailable(reference, "authority_denied"),
+    }
 }
 
 async fn dispatch(
@@ -698,6 +685,8 @@ async fn dispatch(
         contract: route,
         effort: &evaluation.policy.effort,
         temperature: evaluation.policy.temperature,
+        evaluation_cost_limit: evaluation.policy.evaluation_cost_limit,
+        run_cost_limit: evaluation.policy.run_cost_limit,
     };
     if evaluation.policy.backend == BackendKind::NativeDecision {
         receipt.native_transport = Some(receipt::NativeTransportReceipt {
@@ -736,14 +725,19 @@ async fn dispatch(
             Vec::new(),
         );
     }
-    match (response.input_tokens, response.output_tokens) {
-        // Unknown usage keeps its reservation and says so. It is never
-        // recorded as a free attempt.
-        (Some(input), Some(output)) => {
-            receipt.accounting_status = AccountingStatus::Settled;
-            receipt.cost_usd = settled_cost(route, input, output);
+    if let Some(usage) = response.usage {
+        apply_structured_usage(receipt, usage);
+    } else {
+        receipt.cost_admission = Some(receipt::CostAdmission::ConservativeUpperBound);
+        match (response.input_tokens, response.output_tokens) {
+            // Unknown usage keeps its reservation and says so. It is never
+            // recorded as a free attempt.
+            (Some(input), Some(output)) => {
+                receipt.accounting_status = AccountingStatus::Settled;
+                receipt.cost_usd = settled_cost(route, input, output);
+            }
+            _ => receipt.accounting_status = AccountingStatus::UsageUnknown,
         }
-        _ => receipt.accounting_status = AccountingStatus::UsageUnknown,
     }
 
     if receipt.native_transport.as_ref().is_some_and(|transport| {
@@ -825,7 +819,12 @@ async fn dispatch(
 /// have billed.
 fn physical_attempts_for(error: &DecisionTransportError) -> u32 {
     match error {
+        DecisionTransportError::Accounted { usage, .. } => usage
+            .provider_call_count
+            .and_then(|count| u32::try_from(count).ok())
+            .unwrap_or(1),
         DecisionTransportError::UnsupportedOptions { .. }
+        | DecisionTransportError::LocalAdmissionDenied { .. }
         | DecisionTransportError::AuthorityDenied => 0,
         _ => 1,
     }
@@ -837,7 +836,20 @@ fn transport_outcome(
     reference: &str,
 ) -> Outcome {
     match error {
+        DecisionTransportError::Accounted {
+            error,
+            usage,
+            served_model,
+        } => {
+            receipt.served_model = served_model;
+            apply_structured_usage(receipt, usage);
+            transport_outcome(*error, receipt, reference)
+        }
         DecisionTransportError::AuthorityDenied => {
+            outcome::unavailable(reference, "authority_denied")
+        }
+        DecisionTransportError::LocalAdmissionDenied { diagnostic } => {
+            receipt.provider_reason = Some(diagnostic);
             outcome::unavailable(reference, "authority_denied")
         }
         DecisionTransportError::Refused { reason, diagnostic } => {
@@ -879,6 +891,28 @@ fn transport_outcome(
             )
         }
     }
+}
+
+fn apply_structured_usage(
+    receipt: &mut EvaluationReceipt,
+    usage: Box<crate::llm::usage::LlmUsage>,
+) {
+    receipt.cost_admission = Some(if super::admission::remaining_allowance().is_some() {
+        receipt::CostAdmission::ConservativeUpperBound
+    } else {
+        receipt::CostAdmission::AdaptiveProjection
+    });
+    receipt.cost_usd = usage.cost_usd;
+    receipt.accounting_status = if usage.cost_usd.is_some() && usage.usage_unknown_calls == 0 {
+        AccountingStatus::Settled
+    } else {
+        AccountingStatus::UsageUnknown
+    };
+    if usage.usage_unknown_calls == 0 {
+        receipt.input_tokens = u64::try_from(usage.input_tokens).ok();
+        receipt.output_tokens = u64::try_from(usage.output_tokens).ok();
+    }
+    receipt.usage = Some(usage);
 }
 
 /// The upper bound this evaluation may cost under the route's declared price.

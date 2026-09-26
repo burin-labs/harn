@@ -1,0 +1,15 @@
+pipeline test(harness: Harness) {
+  const omitted = harness.llm.resolved_options({})
+  const empty = harness.llm.resolved_options({model: ""})
+  assert(omitted.provider != "", "default provider is resolved")
+  assert(omitted.model != "", "default model is resolved")
+  assert_eq(empty.provider, omitted.provider)
+  assert_eq(empty.model, omitted.model)
+  const explicit = harness.llm.resolved_options(
+    {provider: omitted.provider, model: omitted.model, temperature: 0.25},
+  )
+  assert_eq(explicit.provider, omitted.provider)
+  assert_eq(explicit.model, omitted.model)
+  assert_eq(explicit.temperature, 0.25)
+  harness.stdio.log("llm_resolved_options_dispatch_defaults passed")
+}

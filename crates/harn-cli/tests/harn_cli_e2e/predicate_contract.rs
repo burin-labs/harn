@@ -31,7 +31,7 @@ fn main(harness: Harness) {
 fn check(root: &Path, cache: &Path) -> (bool, serde_json::Value) {
     let overlay = root.join("providers.toml");
     if !overlay.exists() {
-        write_operations(root, "decision");
+        write_operations(root, "text_generation");
     }
     let output = test_util::process::harn_e2e_command()
         .args(["check", "--json", "main.harn"])
@@ -60,7 +60,7 @@ fn write_operations(root: &Path, operation: &str) {
 name = "Declared fixture"
 provider = "mock"
 context_window = 8192
-operations = ["text_generation", "{operation}"]
+operations = ["{operation}"]
 "#
         ),
     )
@@ -254,7 +254,9 @@ pub(super) fn predicate_operation_admission_invalidates_cached_success() {
             .len(),
         1
     );
-    write_operations(root.path(), "text_generation");
+    // Text routes derive the structured decision operation. An embedding-only
+    // route is a real loss of evaluator capability, not a missing raw label.
+    write_operations(root.path(), "embedding");
     let (passed, refused) = check(root.path(), cache.path());
     assert!(
         !passed,
@@ -275,7 +277,7 @@ pub(super) fn predicate_operation_admission_invalidates_cached_success() {
         "{refused}"
     );
     assert!(refused["data"]["files"][0]["predicate_manifest"].is_null());
-    write_operations(root.path(), "decision");
+    write_operations(root.path(), "text_generation");
     assert!(
         check(root.path(), cache.path()).0,
         "restoring the declaration restores admission"

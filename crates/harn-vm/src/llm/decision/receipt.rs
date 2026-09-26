@@ -65,10 +65,25 @@ pub enum AccountingStatus {
     NotDispatched,
 }
 
+/// Monetary admission is distinct from the provider's eventual settled bill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostAdmission {
+    AdaptiveProjection,
+    ConservativeUpperBound,
+}
+
 /// The complete cache key, named field by field rather than pre-hashed, so a
 /// consumer can see which facts a reuse decision rests on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvaluationIdentity {
+    /// Version of canonical request normalization and stable identity hashing.
+    /// An absent stamp remains readable historical evidence, but is not eligible
+    /// for verification under a later identity contract.
+    #[serde(default)]
+    pub contract_version: String,
+    #[serde(default)]
+    pub structured_output_strategy: Option<String>,
     pub input_digest: String,
     pub canonical_input_type: String,
     pub question_set_digest: String,
@@ -78,6 +93,8 @@ pub struct EvaluationIdentity {
     pub backend_kind: String,
     pub protocol: String,
 }
+
+pub const EVALUATION_IDENTITY_CONTRACT: &str = "harn.evaluation_identity.v1";
 
 /// One question's raw answer as the backend reported it, before conversion.
 /// A calibration study reads these, not the derived confidence.
@@ -91,6 +108,14 @@ pub struct EvaluationQuestionReceipt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EvaluationReceipt {
+    /// Present for completed calls. Adaptive estimates can be exceeded by the
+    /// actual bill; conservative admission reserves a supported upper bound.
+    #[serde(default)]
+    pub cost_admission: Option<CostAdmission>,
+    /// Authoritative structured-call settlement. Absence is unavailable
+    /// telemetry, never a measured zero or a native cache claim.
+    #[serde(default)]
+    pub usage: Option<Box<crate::llm::usage::LlmUsage>>,
     pub native_transport: Option<NativeTransportReceipt>,
     pub schema: String,
     pub evaluation_id: String,
@@ -139,6 +164,8 @@ impl EvaluationReceipt {
         elapsed_ms: u64,
     ) -> Self {
         Self {
+            cost_admission: None,
+            usage: None,
             native_transport: None,
             schema: EVALUATION_RECEIPT_SCHEMA.into(),
             evaluation_id,

@@ -384,8 +384,8 @@ fn reserve_money(
 /// execution-tree ledger chat calls use. Activation and the hold are atomic.
 pub(crate) fn reserve_decision(
     bound: f64,
-    per_call: f64,
-    total: f64,
+    per_call: Option<f64>,
+    total: Option<f64>,
 ) -> Result<MonetaryReservation, VmError> {
     let bound = money(bound)?;
     let scope = SCOPE.with(|slot| slot.borrow().clone());
@@ -393,13 +393,24 @@ pub(crate) fn reserve_decision(
         .ledger
         .lock()
         .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
-    let budget = super::cost::LlmBudgetEnvelope {
+    let budget = total.map(|total| super::cost::LlmBudgetEnvelope {
         admission: Some(AdmissionMode::Conservative),
         total_budget_usd: Some(total),
         ..Default::default()
-    };
-    activate(&mut ledger, Some(&budget))?;
-    reserve_money(&scope, &mut ledger, bound, Some(per_call))
+    });
+    activate(&mut ledger, budget.as_ref())?;
+    reserve_money(&scope, &mut ledger, bound, per_call)
+}
+
+/// A measured allowance only exists after conservative authority was installed.
+pub(crate) fn remaining_allowance() -> Option<f64> {
+    SCOPE.with(|slot| {
+        let scope = slot.borrow();
+        let ledger = scope.ledger.lock().ok()?;
+        let remaining =
+            ledger.ceiling? - ledger.settled_upper - ledger.in_flight - ledger.uncertain;
+        remaining.max(Decimal::ZERO).to_f64()
+    })
 }
 
 /// Upper accounting is deliberately named apart from the actual-usage ledger.

@@ -254,6 +254,7 @@ pub(super) fn read_response(
                     return Err(malformed("choice label is absent from distribution"));
                 }
                 RawAnswer::Choice {
+                    selected: Some(selected.to_string()),
                     probabilities: distribution,
                     reported_confidence: Some(number("confidence")?),
                     evidence: None,
@@ -294,6 +295,7 @@ pub(super) fn read_response(
     let vercel = request.contract.protocol == DecisionProtocol::VercelEvaluate;
     let usage = data.get("usage");
     Ok(RawDecisionResponse {
+        usage: None,
         native_transport: Some(super::receipt::NativeTransportReceipt {
             data_controls: privacy_plan(request).receipt,
             provider_attempts_reported: data

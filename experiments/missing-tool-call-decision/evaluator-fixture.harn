@@ -1,0 +1,77 @@
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness) {
+  const request = {
+    session_id: "evaluator-fixture",
+    iteration: 1,
+    text: "Opaque evidence with no lexical tool trigger.",
+    visible_text: nil,
+    tools: [
+      {name: "edit", description: "Update a file"},
+      {name: "read", description: "Read a file"},
+    ],
+    tool_names: ["edit", "read"],
+  }
+  const classify = missing_tool_call_classifier(
+    harness,
+    {provider: "openai", model: "gpt-5.4-nano", confidence_threshold: 0.8},
+  )
+  for row in [
+    {intended: true, intent_confidence: 0.95, tool_confidence: 0.92, action: "tool_call_intended"},
+    {intended: true, intent_confidence: 0.95, tool_confidence: 0.1, action: "ambiguous"},
+    {
+      intended: false,
+      intent_confidence: 0.95,
+      tool_confidence: 0.1,
+      action: "no_tool_call_intended",
+    },
+  ] {
+    with_llm_script(
+      harness.llm,
+      [
+        llm_text(
+          json_stringify(
+            {
+              answers: {
+                intended: {
+                  verdict: row.intended,
+                  confidence: row.intent_confidence,
+                  evidence: "intent fixture",
+                },
+                tool: {choice: "edit", confidence: row.tool_confidence, evidence: "target fixture"},
+              },
+            },
+          ),
+        ),
+      ],
+      { ->
+        const result = classify(request)
+        assert(result != nil, "classifier produces a verdict")
+        assert_eq(result.action, row.action)
+        assert_eq(
+          result.tool_name,
+          if row.intended {
+            "edit"
+          } else {
+            ""
+          },
+        )
+        assert_eq(result.decision?.kind, "answered")
+        assert_eq(len(harness.llm.mock_calls()), 1)
+      },
+    )
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("malformed")],
+    { ->
+      const result = classify(request)
+      assert(result != nil, "malformed response remains observable")
+      assert_eq(result.action, "ambiguous")
+      assert_eq(result.decision?.kind, "refused")
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+  harness.stdio.log("missing tool call evaluator batched once; confidence and refusal preserved")
+}
