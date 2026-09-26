@@ -233,17 +233,43 @@ for the `worktree` profile. `os_hardened` ignores the env var on
 purpose: a profile that means "the OS sandbox is required" cannot be
 silently downgraded by an environment variable.
 
+### What each backend confines
+
+OS confinement is not one thing. Each backend's mechanism holds a confined child
+to some dimensions of the policy and not others, and this table is the runtime's
+statement of which. `harn doctor` reports the active backend's row, and an
+`os_hardened` spawn is refused when its policy requires a dimension the row marks
+`not enforced`. Other profiles run, and the row is their receipt.
+
+A cell is filled only from what the sandbox conformance suite measures on that
+platform, and the suite judges every case against it, so a cell that claims more
+or less than the backend does fails a named case. `unmeasured` means no
+measurement backs a claim either way. Network confinement is only required below
+the `network` ceiling. No policy term requires process confinement yet.
+
+<!-- sandbox-enforcement-table:begin -->
+| Backend | writes | reads | credential reads | network | process |
+|---|---|---|---|---|---|
+| Linux Landlock | enforced | enforced | enforced | enforced | unmeasured |
+| macOS sandbox-exec | enforced | enforced | enforced | enforced | unmeasured |
+| Windows AppContainer | not enforced | not enforced | not enforced | not enforced | unmeasured |
+| OpenBSD unveil | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured |
+<!-- sandbox-enforcement-table:end -->
+
 ### Reading a mechanism refusal
 
 A spawn refused because the platform mechanism could not be attached carries
 the cause as typed fields rather than as advice prose. The caught value is a
 `tool_rejected` dict whose `source` is `sandbox_mechanism` and whose
 `sandbox_mechanism` member names the `mechanism` (`linux_landlock`,
-`macos_sandbox_exec`, `windows_app_container`), the `availability`
-(`absent_on_host` or `entry_point_cannot_attach`), the requested `profile`, the
-unsatisfied `requirement` (`profile` or `fallback`), and `selector_honored` —
+`macos_sandbox_exec`, `windows_app_container`, `openbsd_unveil`), the
+`availability` (`absent_on_host`, `entry_point_cannot_attach`, or
+`does_not_confine`), the requested `profile`, the unsatisfied `requirement`
+(`profile` or `fallback`), and `selector_honored` —
 false when the requested profile requires the mechanism outright, so no
-`HARN_HANDLER_SANDBOX` value can weaken it.
+`HARN_HANDLER_SANDBOX` value can weaken it. A `does_not_confine` refusal also
+lists the table dimensions the profile required and the backend does not hold,
+as `unconfined` (for example `["reads", "network"]`).
 
 Harn's own message states the mechanism fact and nothing else. Which control an
 operator actually has depends on the embedding product: an embedder that hardens

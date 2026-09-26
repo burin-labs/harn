@@ -82,6 +82,15 @@ impl ConformanceReport {
             .collect()
     }
 
+    /// Cases the enforcement table declares unconfined on this backend, with
+    /// the escape observed. Never a pass.
+    pub fn not_enforced(&self) -> Vec<&CaseReport> {
+        self.cases
+            .iter()
+            .filter(|case| matches!(case.verdict, Verdict::NotEnforced { .. }))
+            .collect()
+    }
+
     /// How many cases were measured and hold.
     pub fn conforming(&self) -> usize {
         self.cases
@@ -94,13 +103,15 @@ impl ConformanceReport {
     pub fn summary_line(&self) -> String {
         let failing: Vec<&str> = self.failing().iter().map(|case| case.case).collect();
         let not_measured = self.not_measured().len();
+        let not_enforced = self.not_enforced().len();
         let conforming = self.conforming();
         format!(
             "harn.sandbox_conformance_summary backend={} cases={} conforms={conforming} \
-             not_measured={not_measured} not_applicable={} failed={} failing={failing:?}",
+             not_measured={not_measured} not_enforced={not_enforced} not_applicable={} failed={} \
+             failing={failing:?}",
             self.backend,
             self.cases.len(),
-            self.cases.len() - conforming - not_measured - failing.len(),
+            self.cases.len() - conforming - not_measured - not_enforced - failing.len(),
             failing.len(),
         )
     }
@@ -152,6 +163,7 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
     let expectation = case.expectation(&policy);
     let expected = match expectation {
         Expectation::Observe(observation) => Some(observation),
+        Expectation::DeclaredNotEnforced => Some(Observation::Admitted),
         Expectation::NotApplicable(_) => None,
     };
     let (argv, target) = probe(case, &layout);
@@ -196,7 +208,7 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         );
         observe_wrapper(case, &child, &target, &decision)
     } else {
-        observe(case, &child, &target)
+        observe(case, &layout, &child, &target)
     };
     let observed = match observed {
         Ok(observed) => observed,
@@ -241,6 +253,12 @@ struct Layout {
     workspace: PathBuf,
     outside: PathBuf,
     socket_root: PathBuf,
+    /// A directory under the workspace that the credential case puts on the
+    /// denylist. The workspace grant covers it, so only the denial can refuse.
+    credentials: PathBuf,
+    /// A loopback listener the network cases connect to. Nonblocking, so a
+    /// connection that never came reads as `WouldBlock` rather than a hang.
+    listener: std::net::TcpListener,
     /// A directory in the host's shared temp dir, holding a file another
     /// process left there. It is the one part of the layout outside `HOME`.
     shared_temp: tempfile::TempDir,
@@ -265,10 +283,14 @@ impl Layout {
         let workspace = base.join("workspace");
         let outside = base.join("outside");
         let socket_root = base.join("sockets");
-        for dir in [&workspace, &outside, &socket_root] {
+        let credentials = workspace.join(".harn-conformance-credentials");
+        for dir in [&workspace, &outside, &socket_root, &credentials] {
             std::fs::create_dir_all(dir)?;
         }
         std::fs::write(outside.join("secret.txt"), OUTSIDE_CONTENT)?;
+        std::fs::write(credentials.join("secret.txt"), OUTSIDE_CONTENT)?;
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+        listener.set_nonblocking(true)?;
         let shared_temp = tempfile::Builder::new()
             .prefix("harn-sandbox-conformance-sibling-")
             .tempdir()?;
@@ -278,14 +300,17 @@ impl Layout {
             workspace,
             outside,
             socket_root,
+            credentials,
+            listener,
             shared_temp,
         })
     }
 }
 
 /// The policy a case runs under. Every case shares the worktree profile and a
-/// process-exec ceiling; the socket cases add their roots, and one adds the
-/// network grant that must not narrow them.
+/// process-exec ceiling; the socket cases add their roots, one adds the
+/// network grant that must not narrow them, the credential case denies its
+/// directory, and the network liveness case raises the ceiling.
 fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
     let mut policy = CapabilityPolicy {
         sandbox_profile: SandboxProfile::Worktree,
@@ -309,6 +334,15 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
                 ..ProcessSandboxPolicy::default()
             });
         }
+        ConformanceCase::DeniedCredentialReadRefused => {
+            policy.process_sandbox = Box::new(ProcessSandboxPolicy {
+                read_deny_roots: vec![layout.credentials.display().to_string()],
+                ..ProcessSandboxPolicy::default()
+            });
+        }
+        ConformanceCase::NetworkConnectAdmitted => {
+            policy.side_effect_level = Some("network".to_string());
+        }
         _ => {}
     }
     policy
@@ -330,6 +364,15 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
         ConformanceCase::OutsideReadRefused => read_probe(&layout.outside.join("secret.txt")),
         ConformanceCase::SiblingTempReadRefused => {
             read_probe(&layout.shared_temp.path().join("secret.txt"))
+        }
+        ConformanceCase::DeniedCredentialReadRefused => {
+            read_probe(&layout.credentials.join("secret.txt"))
+        }
+        ConformanceCase::NetworkConnectRefused | ConformanceCase::NetworkConnectAdmitted => {
+            match layout.listener.local_addr() {
+                Ok(address) => (connect_argv(address), address.to_string()),
+                Err(error) => (Vec::new(), format!("no listener address: {error}")),
+            }
         }
         ConformanceCase::AtomicReplaceAdmitted => {
             // JavaScript for Automation reaches Foundation on every Mac; the
@@ -446,6 +489,30 @@ fn bind_argv(target: &Path) -> Vec<String> {
     ]
 }
 
+fn connect_argv(address: std::net::SocketAddr) -> Vec<String> {
+    if cfg!(windows) {
+        return vec![
+            "powershell".into(),
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            format!(
+                "$c = New-Object Net.Sockets.TcpClient; $c.Connect('{}', {}); $c.Close()",
+                address.ip(),
+                address.port()
+            ),
+        ];
+    }
+    vec![
+        "perl".into(),
+        "-MIO::Socket::INET".into(),
+        "-e".into(),
+        "IO::Socket::INET->new(PeerAddr => $ARGV[0], Proto => 'tcp') or die \"connect: $!\";"
+            .into(),
+        address.to_string(),
+    ]
+}
+
 /// The child's captured result. `stdout` stays in memory: for the
 /// environment cases it holds values, and nothing here prints it.
 struct Child {
@@ -543,7 +610,12 @@ enum Unmeasured {
 
 /// Read what the child did from its effect rather than its exit code where
 /// the effect is observable.
-fn observe(case: ConformanceCase, child: &Child, target: &str) -> Result<Observed, Unmeasured> {
+fn observe(
+    case: ConformanceCase,
+    layout: &Layout,
+    child: &Child,
+    target: &str,
+) -> Result<Observed, Unmeasured> {
     if child.spawn_refused {
         return Ok(Observed::Effect(Observation::SpawnRefused));
     }
@@ -555,8 +627,23 @@ fn observe(case: ConformanceCase, child: &Child, target: &str) -> Result<Observe
         })
     };
     match case {
-        ConformanceCase::OutsideReadRefused | ConformanceCase::SiblingTempReadRefused => {
+        ConformanceCase::OutsideReadRefused
+        | ConformanceCase::SiblingTempReadRefused
+        | ConformanceCase::DeniedCredentialReadRefused => {
             Ok(took_effect(child.stdout.contains(OUTSIDE_CONTENT)))
+        }
+        // The child has exited, so a connection it made is already queued on
+        // the listener; nothing queued means it never connected.
+        ConformanceCase::NetworkConnectRefused | ConformanceCase::NetworkConnectAdmitted => {
+            match layout.listener.accept() {
+                Ok(_) => Ok(took_effect(true)),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    Ok(took_effect(false))
+                }
+                Err(error) => Err(Unmeasured::Broken(format!(
+                    "could not read the loopback listener: {error}"
+                ))),
+            }
         }
         ConformanceCase::UndeclaredEnvironmentNameWithheld
         | ConformanceCase::GuardianUndeclaredEnvironmentNameWithheld => {
