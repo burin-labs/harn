@@ -93,6 +93,8 @@ pub const KNOWN_MOCK_SCOPES: &[&str] = &[
     SHARED_MOCK_SCOPE,
     "agent.main",
     "agent.input_guardrail",
+    "agent.approval_review",
+    "agent.missing_tool_call",
     "agent.scope_classifier",
     "compaction",
     "completion.judge",

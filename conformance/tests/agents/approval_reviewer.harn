@@ -192,6 +192,10 @@ pipeline default(harness: Harness) {
         contains(calls[0].system, "Use the stated goal as the authorization boundary."),
         "host guidance must survive resolution against the bundled policy",
       )
+      assert(
+        calls.all({ call -> call.mock_scope == "agent.approval_review" }),
+        "every reviewer call must declare its purpose, so telemetry and fixtures can tell it from the main turn",
+      )
     },
   )
   const tools = run_tools()
