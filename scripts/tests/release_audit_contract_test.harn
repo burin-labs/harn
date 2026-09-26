@@ -160,17 +160,17 @@ pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task: 
       {
         ...receipt(),
         platforms: [
-          platform("windows", 123, 456, 900),
           {
-            ...platform("macos", 124, 457, 700),
-            run: {...platform("macos", 124, 457, 700).run, conclusion: "failure"},
+            ...platform("windows", 123, 456, 900),
+            run: {...platform("windows", 123, 456, 900).run, conclusion: "failure"},
           },
+          platform("macos", 124, 457, 700),
         ],
       },
       SHA,
       BINARY_SHA,
     ).reason,
-    "platform_proof_run_not_successful",
+    "invalid_receipt",
   )
   assert_eq(
     release_audit_receipt_plan(
@@ -287,35 +287,48 @@ pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task: 
   )
 }
 
-fn failed_windows_platform() {
-  const base = platform("windows", 123, 456, 900)
+fn windows_advisory(state: string, run_url: string?) {
   return {
-    ...base,
-    run: {...base.run, conclusion: "failure"},
-    jobs: {
-      ...base.jobs,
-      jobs: base.jobs.jobs.map({ job -> {...job, conclusion: "failure"} }).to_list(),
-    },
+    platform: "windows",
+    state: state,
+    code: "run_unsuccessful",
+    message: "Workspace nextest (windows-latest) concluded failure",
+    run_url: run_url,
+  }
+}
+
+/** A receipt the certifier emits when Windows produced no successful proof. */
+fn macos_only_receipt(advisories: list) {
+  return {
+    ...receipt(),
+    platforms: [platform("macos", 124, 457, 700)],
+    advisories: advisories,
+    join: {started_at_ms: 100, completed_at_ms: 800, duration_ms: 700, critical_path: "macos"},
   }
 }
 
 /**
- * Native Windows is advisory in release certification. A failed or missing
- * Windows nightly certifies, and the outcome is carried as a named advisory.
+ * Native Windows is advisory in release certification. A receipt proves macOS,
+ * and accounts for Windows with either a successful proof or an advisory entry.
  */
 pipeline test_release_audit_windows_nightly_is_advisory(harness: Harness, task: unknown) {
   const cfg = release_audit_contract_parse(contract())
   assert(cfg != nil)
-  const accepted = release_audit_receipt_plan(cfg, receipt(), SHA, BINARY_SHA)
+  // The old two-platform receipt is still accepted, and reports Windows.
+  const both = release_audit_receipt_plan(cfg, receipt(), SHA, BINARY_SHA)
+  assert_eq(both.reason, "receipt_accepted")
   assert_eq(
-    accepted.advisories,
+    both.advisories,
     [
       "WINDOWS_NIGHTLY_ADVISORY state=success run=https://github.com/burin-labs/harn/actions/runs/123",
     ],
   )
+  // macOS plus a Windows advisory certifies and carries the named line.
   const failed = release_audit_receipt_plan(
     cfg,
-    {...receipt(), platforms: [failed_windows_platform(), platform("macos", 124, 457, 700)]},
+    macos_only_receipt(
+      [windows_advisory("failure", "https://github.com/burin-labs/harn/actions/runs/123")],
+    ),
     SHA,
     BINARY_SHA,
   )
@@ -325,30 +338,74 @@ pipeline test_release_audit_windows_nightly_is_advisory(harness: Harness, task: 
   assert_eq(
     failed.advisories,
     [
-      "WINDOWS_NIGHTLY_ADVISORY state=failure run=https://github.com/burin-labs/harn/actions/runs/123 reason=run_not_successful",
+      "WINDOWS_NIGHTLY_ADVISORY state=failure run=https://github.com/burin-labs/harn/actions/runs/123 code=run_unsuccessful",
     ],
   )
   const missing = release_audit_receipt_plan(
     cfg,
-    {
-      ...receipt(),
-      platforms: [platform("macos", 124, 457, 700)],
-      join: {...receipt().join, duration_ms: 700, completed_at_ms: 800, critical_path: "macos"},
-    },
+    macos_only_receipt([windows_advisory("missing", nil)]),
     SHA,
     BINARY_SHA,
   )
   assert_eq(missing.reason, "receipt_accepted")
-  assert_eq(missing.advisories, ["WINDOWS_NIGHTLY_ADVISORY state=missing run=none"])
-  // macOS stays required: its absence still refuses the receipt.
+  assert_eq(
+    missing.advisories,
+    ["WINDOWS_NIGHTLY_ADVISORY state=missing run=none code=run_unsuccessful"],
+  )
+  // Windows only, macOS missing: refused.
   assert_eq(
     release_audit_receipt_plan(
       cfg,
-      {...receipt(), platforms: [platform("windows", 123, 456, 900)]},
+      {
+        ...receipt(),
+        platforms: [platform("windows", 123, 456, 900)],
+        join: {...receipt().join, critical_path: "windows"},
+      },
       SHA,
       BINARY_SHA,
     ).reason,
     "platform_proofs_mismatch",
+  )
+  // Windows must be accounted for exactly once: not silently absent, and not
+  // both proven and advised.
+  assert_eq(
+    release_audit_receipt_plan(cfg, macos_only_receipt([]), SHA, BINARY_SHA).reason,
+    "advisory_platform_unaccounted",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...receipt(), advisories: [windows_advisory("failure", nil)]},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "advisory_platform_unaccounted",
+  )
+  // A present Windows proof keeps every per-proof check.
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {
+        ...receipt(),
+        platforms: [
+          {...platform("windows", 123, 456, 900), required_job: "Some other job"},
+          platform("macos", 124, 457, 700),
+        ],
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "platform_identity_mismatch",
+  )
+  // Advisory entries are closed: an unknown state or platform is refused.
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      macos_only_receipt([{...windows_advisory("failure", nil), state: "flaky"}]),
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "invalid_receipt",
   )
   // A rejected receipt carries no advisory to print.
   assert_eq(
