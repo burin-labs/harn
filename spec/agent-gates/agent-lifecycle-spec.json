@@ -289,6 +289,23 @@
     "verdict": "KEEP-with-expiry"
   },
   {
+    "default": "absent; no pre-approval precheck",
+    "evidence": "agent_session_host.session_policies pushes the precheck only when an explicit closure parses; tool_precheck_loop conformance proves a precheck passed to agent_loop denies a call.",
+    "expiry": "2026-12-31",
+    "kind": "callback",
+    "layer": "runner",
+    "name": "AgentSpec.tool_precheck",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "reader": "__dispatch_tool_calls"
+      }
+    ],
+    "reason": "The embedder's pre-approval deny seam; forwarded to dispatch so the session policy guard installs it.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "0; timer wake disabled",
     "evidence": "daemon.agent_daemon_step supplies zero; the native daemon parser accepts only positive wake intervals. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
