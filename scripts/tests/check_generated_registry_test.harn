@@ -537,3 +537,53 @@ pipeline test_validate_gen_not_defined(harness: Harness, task: unknown) {
   )
   assert_eq(errs.contains("[a] gen target `gen-a` is not defined in the Makefile"), true)
 }
+
+// --- merge_attribute_errors ------------------------------------------------
+const MERGE_ARTIFACTS = [
+  {id: "catalog", gen: "gen-catalog", outputs: ["spec/catalog.json", "tree/src/"]},
+  {id: "synced", gen: "sync-spec", outputs: ["spec/SPEC.md"]},
+  {id: "payload", gen: "gen-payload", lifecycle: "release-package", outputs: ["out/bin"]},
+]
+
+@test
+pipeline test_merge_attribute_covers_file_and_directory_outputs(harness: Harness, task: unknown) {
+  const attrs = "# generated\nspec/catalog.json -merge\ntree/src/** eol=lf -merge\n"
+  assert_eq(merge_attribute_errors(MERGE_ARTIFACTS, attrs), [])
+}
+
+@test
+pipeline test_merge_attribute_accepts_a_named_driver(harness: Harness, task: unknown) {
+  const attrs = "spec/catalog.json merge=harn-generated eol=lf\ntree/src/** -merge\n"
+  assert_eq(merge_attribute_errors(MERGE_ARTIFACTS, attrs), [])
+}
+
+@test
+pipeline test_merge_attribute_missing_output_is_named(harness: Harness, task: unknown) {
+  const errors = merge_attribute_errors(
+    MERGE_ARTIFACTS,
+    "spec/catalog.json eol=lf\ntree/src/** -merge\n",
+  )
+  assert_eq(errors.count, 1)
+  assert(contains(errors[0], "`spec/catalog.json`"))
+  assert(contains(errors[0], "spec/catalog.json -merge"))
+}
+
+@test
+pipeline test_merge_attribute_ignores_sync_and_release_package_outputs(
+  harness: Harness,
+  task: unknown,
+) {
+  const errors = merge_attribute_errors(MERGE_ARTIFACTS, "")
+  assert_eq(errors.count, 2)
+  assert(!contains(errors.join("\n"), "SPEC.md"))
+  assert(!contains(errors.join("\n"), "out/bin"))
+}
+
+@test
+pipeline test_merge_attribute_commented_line_does_not_count(harness: Harness, task: unknown) {
+  const errors = merge_attribute_errors(
+    MERGE_ARTIFACTS,
+    "# spec/catalog.json -merge\ntree/src/** -merge\n",
+  )
+  assert_eq(errors.count, 1)
+}
