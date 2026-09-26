@@ -168,12 +168,37 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         let verdict = judge(case, expectation, enforcing, Observation::Refused, &target);
         return report(None, verdict, String::new());
     }
-    let _scope = CaseScope::enter(policy);
+    if is_wrapper_case(case) {
+        if !cargo_on_path() {
+            let reason = "cargo is not installed, so no Rust build could be measured".to_string();
+            return report(None, Verdict::NotMeasured { reason }, String::new());
+        }
+        if let Err(error) = write_wrapper_crate(case, &layout) {
+            let reason = format!("could not write the wrapper crate: {error}");
+            return report(None, Verdict::ProbeBroken { reason }, String::new());
+        }
+    }
+    let _scope = CaseScope::enter(policy.clone());
     let child = match spawn(case, &layout, &argv) {
         Ok(child) => child,
         Err(reason) => return report(None, Verdict::ProbeBroken { reason }, String::new()),
     };
-    let observed = match observe(case, &child, &target) {
+    let mut child = child;
+    let observed = if is_wrapper_case(case) {
+        let decision = harn_vm::process_sandbox::rustc_wrapper::rustc_wrapper_decision(
+            &policy,
+            &layout.workspace,
+            &[],
+        );
+        child.detail = format!(
+            "{} decision={:?} wrapper={:?} reason={:?}",
+            child.detail, decision.disposition, decision.wrapper, decision.reason
+        );
+        observe_wrapper(case, &child, &target, &decision)
+    } else {
+        observe(case, &child, &target)
+    };
+    let observed = match observed {
         Ok(observed) => observed,
         Err(Unmeasured::Broken(reason)) => {
             return report(None, Verdict::ProbeBroken { reason }, child.detail)
@@ -365,6 +390,12 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
             let target = layout.outside.join("probe.sock");
             (bind_argv(&target), target.display().to_string())
         }
+        ConformanceCase::RustcWrapperThatRunsIsKept
+        | ConformanceCase::RustcWrapperThatCannotRunIsSwitchedOff
+        | ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff => (
+            owned(&["cargo", "build", "--offline"]),
+            wrapper_log(case, layout).display().to_string(),
+        ),
     }
 }
 
@@ -419,6 +450,7 @@ fn bind_argv(target: &Path) -> Vec<String> {
 /// environment cases it holds values, and nothing here prints it.
 struct Child {
     spawn_refused: bool,
+    exit: Option<i64>,
     stdout: String,
     detail: String,
 }
@@ -451,6 +483,7 @@ fn spawn(case: ConformanceCase, layout: &Layout, argv: &[String]) -> Result<Chil
         Err(error) => {
             return Ok(Child {
                 spawn_refused: true,
+                exit: None,
                 stdout: String::new(),
                 detail: error,
             })
@@ -482,6 +515,7 @@ fn spawn(case: ConformanceCase, layout: &Layout, argv: &[String]) -> Result<Chil
     let stderr_tail = stderr.lines().last().unwrap_or_default();
     Ok(Child {
         spawn_refused: false,
+        exit,
         stdout: field("stdout"),
         detail: format!("exit_code={exit:?} stderr_tail={stderr_tail:?}"),
     })
@@ -578,6 +612,142 @@ fn observe_environment(stdout: &str) -> Result<Observed, Unmeasured> {
         .map(|(name, _)| name)
         .collect();
     Ok(Observed::Env { leaked })
+}
+
+fn is_wrapper_case(case: ConformanceCase) -> bool {
+    matches!(
+        case,
+        ConformanceCase::RustcWrapperThatRunsIsKept
+            | ConformanceCase::RustcWrapperThatCannotRunIsSwitchedOff
+            | ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff
+    )
+}
+
+/// The detached process the daemonizing wrapper leaves, told apart from
+/// anything else on the host by an argument no one else passes.
+const DAEMON_MARKER_SECONDS: &str = "30713";
+
+/// Whether a process the daemonizing wrapper left is still running.
+fn daemon_marker_alive() -> bool {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+    );
+    system.processes().values().any(|process| {
+        let cmd = process.cmd();
+        cmd.first()
+            .is_some_and(|arg| arg.to_string_lossy().ends_with("sleep"))
+            && cmd.iter().any(|arg| arg == DAEMON_MARKER_SECONDS)
+    })
+}
+
+fn cargo_on_path() -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("cargo").is_file()))
+}
+
+/// Where the wrapper logs. Outside every writable root for the wrapper that
+/// cannot run, so the write it needs is the thing the profile denies; inside
+/// the workspace otherwise, so the daemon is the only thing wrong with the
+/// daemonizing one.
+fn wrapper_log(case: ConformanceCase, layout: &Layout) -> PathBuf {
+    match case {
+        ConformanceCase::RustcWrapperThatCannotRunIsSwitchedOff => {
+            layout.outside.join("wrapper.log")
+        }
+        _ => layout.workspace.join("wrapper.log"),
+    }
+}
+
+/// A one-file crate named `seeded` whose own `.cargo/config.toml` names a
+/// wrapper that logs each call and then runs the compiler. It needs no
+/// network and no daemon, so whether it runs is decided by the filesystem
+/// alone.
+fn write_wrapper_crate(case: ConformanceCase, layout: &Layout) -> std::io::Result<()> {
+    let workspace = &layout.workspace;
+    std::fs::create_dir_all(workspace.join("src"))?;
+    std::fs::create_dir_all(workspace.join(".cargo"))?;
+    std::fs::write(
+        workspace.join("Cargo.toml"),
+        "[package]\nname = \"seeded\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\
+         publish = false\n\n[workspace]\n",
+    )?;
+    std::fs::write(workspace.join("src").join("main.rs"), "fn main() {}\n")?;
+    let wrapper = workspace.join("log-wrapper.sh");
+    let log = wrapper_log(case, layout);
+    // The daemonizing wrapper forks a process into the background from a
+    // subshell that exits at once, with its descriptors closed, which is how
+    // a helper detaches. One that kept the build's output pipes open would
+    // hang every build it served, which is a different defect.
+    let detach = if case == ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff {
+        format!("( sleep {DAEMON_MARKER_SECONDS} </dev/null >/dev/null 2>&1 & )\n")
+    } else {
+        String::new()
+    };
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\n{detach}echo \"$*\" >> '{}' || exit 1\nexec \"$@\"\n",
+            log.display()
+        ),
+    )?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::write(
+        workspace.join(".cargo").join("config.toml"),
+        format!("[build]\nrustc-wrapper = \"{}\"\n", wrapper.display()),
+    )
+}
+
+/// Read a wrapper case from what the wrapper logged, whether the build
+/// completed, and the decision Harn recorded, which must agree with the
+/// first two: a receipt that disagrees with the behavior is not a pass.
+fn observe_wrapper(
+    case: ConformanceCase,
+    child: &Child,
+    log: &str,
+    decision: &harn_vm::process_sandbox::rustc_wrapper::RustcWrapperDecision,
+) -> Result<Observed, Unmeasured> {
+    use harn_vm::process_sandbox::rustc_wrapper::RustcWrapperDisposition;
+    if child.spawn_refused {
+        return Ok(Observed::Effect(Observation::SpawnRefused));
+    }
+    let built = child.exit == Some(0);
+    let wrapped_the_crate = std::fs::read_to_string(log)
+        .map(|text| text.contains("--crate-name seeded"))
+        .unwrap_or(false);
+    let (behaved, receipt) = match case {
+        ConformanceCase::RustcWrapperThatRunsIsKept => (
+            built && wrapped_the_crate,
+            decision.disposition == RustcWrapperDisposition::Kept,
+        ),
+        ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff => (
+            built && !wrapped_the_crate && !daemon_marker_alive(),
+            decision.disposition == RustcWrapperDisposition::Disabled,
+        ),
+        _ => (
+            built && !wrapped_the_crate,
+            decision.disposition == RustcWrapperDisposition::Disabled,
+        ),
+    };
+    if behaved != receipt {
+        return Err(Unmeasured::Broken(format!(
+            "the recorded decision ({:?}: {}) disagrees with the build: completed={built} \
+             wrapper_ran_on_the_crate={wrapped_the_crate}",
+            decision.disposition, decision.reason
+        )));
+    }
+    Ok(Observed::Effect(if behaved {
+        Observation::Admitted
+    } else {
+        Observation::Refused
+    }))
 }
 
 /// Pops the case policy and restores the caller's session environment,

@@ -74,16 +74,29 @@ impl SandboxBackend for Backend {
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<Output, VmError> {
+        Self::run_to_output_in_session(program, args, config, policy, profile)
+            .map(|(output, _)| output)
+    }
+
+    fn run_to_output_in_session(
+        program: &str,
+        args: &[String],
+        config: &ProcessCommandConfig,
+        policy: &CapabilityPolicy,
+        profile: SandboxProfile,
+    ) -> Result<(Output, u32), VmError> {
         let mut command = super::build_std_command::<Self>(program, args, policy, profile)?;
         super::apply_process_config(&mut command, config, Some(policy));
-        let output = crate::op_interrupt::capture_output_interruptible(&mut command)
-            .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
+        let (output, session) = crate::op_interrupt::capture_output_interruptible_in_session(
+            &mut command,
+        )
+        .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
         match crate::process_sandbox::macos_wrapped_spawn_io_error(
             output.status.code().unwrap_or(-1),
             &output.stderr,
         ) {
             Some(error) => Err(spawn_error(error)),
-            None => Ok(output),
+            None => Ok((output, session)),
         }
     }
 }
