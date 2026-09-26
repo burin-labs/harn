@@ -120,7 +120,7 @@ make_all = true
 
 [[artifact]]
 id = "release-contract"
-description = "Typed Harn-owned release semantics consumed by the external release orchestrator, including version/fold/tag policy and cross-repository workflow identifiers."
+description = "Typed Harn-owned release semantics consumed by the external release orchestrator: version, changelog fold, and tag policy."
 gen = "gen-release-contract"
 check = "check-release-contract"
 outputs = ["scripts/release_contract.json", "scripts/release_contract.env"]
@@ -129,8 +129,6 @@ sources = [
   "scripts/release_metadata.harn",
   "scripts/release_ship.sh",
   "scripts/lib/release_version.sh",
-  ".github/workflows/publish-release.yml",
-  ".github/workflows/build-release-binaries.yml",
 ]
 ci = true
 make_all = true
