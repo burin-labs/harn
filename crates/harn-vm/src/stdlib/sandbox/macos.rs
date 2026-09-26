@@ -210,7 +210,7 @@ fn render_profile_with_extra_read_roots(
         for root in preset_write_roots(policy) {
             profile.push_str(&format!(
                 "(allow file-read* (subpath \"{}\"))\n",
-                sandbox_profile_escape(root)
+                sandbox_profile_escape(&root.display().to_string())
             ));
         }
         for root in &policy_write_roots {
@@ -221,7 +221,10 @@ fn render_profile_with_extra_read_roots(
         }
         profile.push_str("(allow file-write*");
         for root in preset_write_roots(policy) {
-            profile.push_str(&format!(" (subpath \"{}\")", sandbox_profile_escape(root)));
+            profile.push_str(&format!(
+                " (subpath \"{}\")",
+                sandbox_profile_escape(&root.display().to_string())
+            ));
         }
         for root in policy_write_roots
             .iter()
@@ -335,12 +338,11 @@ fn render_profile_with_extra_read_roots(
     // bare EPERM. Both spellings of a `/tmp`- or `/var`-rooted path are
     // emitted for the same reason the write denies emit them.
     //
-    // A non-empty grant also admits sockets under the UserTemp write roots.
-    // sbt's boot server binds `/tmp/bsbt/<hash>/sock`; MSBuild and Gradle
-    // daemons do the same under `/var/folders`. Those directories are already
-    // writable when UserTemp is on — a socket file is a file — so pairing the
-    // write with the bind is the grant, not a widening. A policy that opts
-    // out of UserTemp still has to name every socket root itself.
+    // A non-empty grant also admits sockets under the session temp dir, which
+    // is already writable when UserTemp is on — a socket file is a file — so
+    // pairing the write with the bind is the grant, not a widening. A daemon
+    // that binds under the host's shared temp dirs instead (sbt's boot server
+    // under `/tmp/bsbt`) needs that root named in the grant.
     //
     // Binding creates the socket file, which is a file-write the bind rule
     // does not carry. A root outside every writable root therefore also gets
@@ -431,32 +433,31 @@ fn granted_write_roots(
 ) -> Vec<std::path::PathBuf> {
     let mut granted = workspace_roots.to_vec();
     granted.extend(policy_write_roots.iter().cloned());
-    granted.extend(
-        preset_write_roots(policy)
-            .into_iter()
-            .map(std::path::PathBuf::from),
-    );
+    granted.extend(preset_write_roots(policy));
     granted.sort();
     granted.dedup();
     granted
 }
 
-fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
-    let mut roots = Vec::new();
+fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
     if process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp) {
-        roots.extend(user_temp_roots());
+        user_temp_roots(policy)
+    } else {
+        Vec::new()
     }
-    roots
 }
 
-fn user_temp_roots() -> &'static [&'static str] {
-    &[
-        "/private/tmp",
-        "/private/var/folders",
-        "/tmp",
-        "/var/folders",
-        "/var/tmp",
-    ]
+/// The session's own temp dir, which the child's `TMPDIR`, `TMP`, and `TEMP`
+/// name, and Foundation's atomic-replacement staging dir. Not the host's
+/// shared temp dirs: `/tmp` and `/var/folders` hold every other process's
+/// files, so granting them lets a confined child read and overwrite its
+/// neighbours'. Caches that default there are moved into the workspace by
+/// the child's environment instead.
+fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
+    super::workspace_local_tmpdir(policy)
+        .into_iter()
+        .chain(toolchain_roots::foundation_replacement_root())
+        .collect()
 }
 
 /// Socket-file roots the profile will admit: the explicit grant, plus the
@@ -466,7 +467,11 @@ fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBu
     if !roots.is_empty()
         && process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp)
     {
-        roots.extend(user_temp_roots().iter().map(|root| (*root).to_string()));
+        roots.extend(
+            user_temp_roots(policy)
+                .iter()
+                .map(|root| root.display().to_string()),
+        );
     }
     normalized_process_roots(&roots)
 }

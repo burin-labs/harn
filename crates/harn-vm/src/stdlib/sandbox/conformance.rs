@@ -37,6 +37,18 @@ pub enum ConformanceCase {
     OutsideWriteRefused,
     /// A read of a file outside every readable root is refused.
     OutsideReadRefused,
+    /// A write to the child's own `TMPDIR` lands, and that directory is the
+    /// session's temp dir. The liveness leg for the sibling-temp refusal: a
+    /// backend that granted no temp dir at all would pass it.
+    SessionTempWriteAdmitted,
+    /// A file another process left in the host's shared temp directory is not
+    /// readable. Build tools need a temp dir, not everyone else's.
+    SiblingTempReadRefused,
+    /// An atomic write into the workspace through the platform's replacement
+    /// API lands. On macOS Foundation stages it outside the workspace, in a
+    /// directory it takes from the OS rather than `TMPDIR`; SwiftPM writes its
+    /// build files this way.
+    AtomicReplaceAdmitted,
     /// A child re-created by the process-owner guardian is confined like a
     /// direct child. The guardian rebuilds the payload from serialized data,
     /// and anything that did not survive the handover is dropped silently.
@@ -65,6 +77,9 @@ impl ConformanceCase {
         Self::WorkspaceWriteAdmitted,
         Self::OutsideWriteRefused,
         Self::OutsideReadRefused,
+        Self::SessionTempWriteAdmitted,
+        Self::SiblingTempReadRefused,
+        Self::AtomicReplaceAdmitted,
         Self::GuardianOutsideWriteRefused,
         Self::UndeclaredEnvironmentNameWithheld,
         Self::GuardianUndeclaredEnvironmentNameWithheld,
@@ -78,6 +93,9 @@ impl ConformanceCase {
             Self::WorkspaceWriteAdmitted => "fs.workspace_write_admitted",
             Self::OutsideWriteRefused => "fs.outside_write_refused",
             Self::OutsideReadRefused => "fs.outside_read_refused",
+            Self::SessionTempWriteAdmitted => "fs.session_temp_write_admitted",
+            Self::SiblingTempReadRefused => "fs.sibling_temp_read_refused",
+            Self::AtomicReplaceAdmitted => "fs.atomic_replace_admitted",
             Self::GuardianOutsideWriteRefused => "guardian.outside_write_refused",
             Self::UndeclaredEnvironmentNameWithheld => "env.undeclared_name_withheld",
             Self::GuardianUndeclaredEnvironmentNameWithheld => {
@@ -122,10 +140,18 @@ impl ConformanceCase {
                  with a Job Object and the command is never re-created",
             );
         }
+        if self == Self::AtomicReplaceAdmitted && !cfg!(target_os = "macos") {
+            return Expectation::NotApplicable(
+                "only macOS stages an atomic replacement outside the destination directory",
+            );
+        }
         match self {
-            Self::WorkspaceWriteAdmitted => Expectation::Observe(Observation::Admitted),
+            Self::WorkspaceWriteAdmitted
+            | Self::SessionTempWriteAdmitted
+            | Self::AtomicReplaceAdmitted => Expectation::Observe(Observation::Admitted),
             Self::OutsideWriteRefused
             | Self::OutsideReadRefused
+            | Self::SiblingTempReadRefused
             | Self::GuardianOutsideWriteRefused
             | Self::UndeclaredEnvironmentNameWithheld
             | Self::GuardianUndeclaredEnvironmentNameWithheld => {

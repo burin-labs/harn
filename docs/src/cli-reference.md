@@ -1944,6 +1944,9 @@ one line per case:
 | `fs.workspace_write_admitted` | a write inside the workspace lands |
 | `fs.outside_write_refused` | a write outside every writable root is refused |
 | `fs.outside_read_refused` | a read outside every readable root is refused |
+| `fs.session_temp_write_admitted` | a write to the child's own `TMPDIR` lands in the session temp dir |
+| `fs.sibling_temp_read_refused` | a file another process left in the host's shared temp dir is not readable |
+| `fs.atomic_replace_admitted` | a Foundation atomic write into the workspace lands (macOS only) |
 | `guardian.outside_write_refused` | a background child is confined like a direct one |
 | `env.undeclared_name_withheld` | no launcher variable the session did not declare reaches the child |
 | `guardian.undeclared_env_name_withheld` | the same, for a background child |

@@ -143,8 +143,13 @@ fn sandbox_exec_profile_allows_go_build_with_default_cache() {
         panic!("macOS backend should wrap with sandbox-exec");
     };
 
+    // The environment a confined child gets on the product path: TMPDIR in
+    // the session temp dir and the toolchain caches in the workspace.
+    let mut env = Vec::new();
+    super::super::inject_workspace_process_env(&mut env, &policy);
     let output = Command::new(wrapper)
         .args(args)
+        .envs(env)
         .current_dir(temp.path())
         .output()
         .expect("run sandboxed go build");
@@ -324,19 +329,38 @@ fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
     );
 
     let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
+    let session_temp =
+        super::super::workspace_local_tmpdir(&macos_policy_with_workspace_ops(&["write_text"]))
+            .expect("a writable workspace has a session temp dir");
     assert!(
-        writable.contains("(allow file-write*") && writable.contains("(subpath \"/tmp\")"),
-        "writable profile should grant temp writes: {writable}"
+        writable.contains(&format!(
+            "(allow file-read* (subpath \"{}\"))",
+            session_temp.display()
+        )),
+        "writable profile should grant the session temp dir: {writable}"
     );
+    let replacement = super::toolchain_roots::foundation_replacement_root()
+        .expect("the per-user temp dir resolves");
     assert!(
-        writable.contains("(allow file-read* (subpath \"/private/var/folders\"))"),
-        "writable profile should let developer tools read per-user temp caches: {writable}"
+        writable.contains(&format!(
+            "(allow file-read* (subpath \"{}\"))",
+            replacement.display()
+        )),
+        "writable profile should grant Foundation's replacement staging dir: {writable}"
     );
-    assert!(
-        writable.contains("(allow file-write*")
-            && writable.contains("(subpath \"/private/var/folders\")"),
-        "writable profile should let developer tools update per-user temp caches: {writable}"
-    );
+    // The host's shared temp dirs hold every other process's files.
+    for shared in [
+        "/tmp",
+        "/private/tmp",
+        "/var/folders",
+        "/private/var/folders",
+        "/var/tmp",
+    ] {
+        assert!(
+            !writable.contains(&format!("(subpath \"{shared}\")")),
+            "writable profile must not grant the shared temp dir {shared}: {writable}"
+        );
+    }
 }
 
 #[test]
@@ -800,7 +824,8 @@ fn sandbox_exec_profile_allows_swiftpm_manifest_evaluation() {
     }
     let temp = tempfile::TempDir::new().expect("temp Swift package");
     write_swift_package_manifest(temp.path());
-    let policy = macos_policy_with_workspace_ops(&["write_text"]);
+    let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+    policy.workspace_roots = vec![temp.path().to_string_lossy().into_owned()];
     // Manifest evaluation exercises SwiftPM's own sandbox and toolchain
     // lookup without paying to compile and link an unrelated test bundle.
     let args = strings(["package", "dump-package"]);
@@ -813,8 +838,11 @@ fn sandbox_exec_profile_allows_swiftpm_manifest_evaluation() {
         panic!("macOS backend should wrap with sandbox-exec");
     };
 
+    let mut env = Vec::new();
+    super::super::inject_workspace_process_env(&mut env, &policy);
     let output = Command::new(wrapper)
         .args(wrapped_args)
+        .envs(env)
         .current_dir(temp.path())
         .output()
         .expect("run sandboxed SwiftPM manifest evaluation");
@@ -1277,10 +1305,14 @@ fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
     assert!(!profile.contains("(allow network*)"), "{profile}");
     assert!(!profile.contains("localhost:*"), "{profile}");
     // Default presets include UserTemp, so a non-empty grant also admits
-    // sockets under the platform temp dirs. sbt binds `/tmp/bsbt/...`.
+    // sockets under the session temp dir, and never the shared temp dirs.
     assert!(
-        profile.contains("(allow network-bind (subpath \"/tmp\"))"),
+        profile.contains(".harn-tmp\"))") && profile.contains("(allow network-bind (subpath \""),
         "UserTemp pairing missing:\n{profile}"
+    );
+    assert!(
+        !profile.contains("(allow network-bind (subpath \"/tmp\"))"),
+        "the shared temp dir must not take sockets:\n{profile}"
     );
 }
 

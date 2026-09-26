@@ -285,9 +285,15 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
 - `package_manager_config`: read-only per-user npm, pip, cargo, git, and CA
   config/cache roots under `$HOME`, such as `.npmrc`, `.gitconfig`, `.netrc`,
   `.config`, `.cache`, and cargo config/registry paths.
-- `user_temp`: scratch/cache roots used by developer tools. These roots are
-  writable only when the active capability policy already allows workspace
-  writes.
+- `user_temp`: the session's own temp dir, `.harn-tmp` in the first
+  workspace root, which the child's `TMPDIR`, `TMP`, and `TEMP` name. On macOS
+  it also covers Foundation's atomic-replacement staging dir
+  (`TemporaryItems` in the per-user temp dir), which SwiftPM's build-file
+  writes need. The host's shared temp dirs (`/tmp`, `/var/folders`) are never
+  granted: they hold every other process's files. Caches that default there,
+  such as clang's module cache and xcrun's lookup cache, are pointed into the
+  workspace by the child's environment instead. Writable only when the active
+  capability policy already allows workspace writes.
 
 An explicit empty `presets: []` disables every named preset. `read_roots` and
 `write_roots` are for subprocesses only; `write_roots` are also gated by the
@@ -598,7 +604,7 @@ falls back to the warn/enforce decision documented above.
 | standard process devices | `(allow file-read* ...)` for `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd`; `(allow file-write* ...)` only for `/dev/null`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd` | common stdio, entropy, and zero devices work without granting broad `/dev` writes |
 | `process_sandbox.presets` | named read/write rules for `system_runtime`, `developer_toolchains`, `package_manager_config`, and `user_temp` | default process reach for system binaries, Xcode/Homebrew/toolchains, read-only package-manager home config, and per-user developer-tool caches without granting Harn file builtin access |
 | `process_sandbox.allow_tcp_loopback` | bind/inbound on local `localhost:*`; outbound to remote `localhost:*` | IPv4 and IPv6 loopback servers and clients work without opening remote egress |
-| `process_sandbox.unix_socket_roots` | `(allow network-bind (subpath "<root>"))`, `(allow network-inbound (subpath "<root>"))`, `(allow network-outbound (subpath "<root>"))` for each granted root, and for the UserTemp write roots (`/tmp`, `/var/folders`, …) when that preset is on | build servers bind and connect Unix-domain sockets whose socket file lives under a granted root or the platform temp dir; `subpath` never matches an IP endpoint, so no egress opens |
+| `process_sandbox.unix_socket_roots` | `(allow network-bind (subpath "<root>"))`, `(allow network-inbound (subpath "<root>"))`, `(allow network-outbound (subpath "<root>"))` for each granted root, and for the session temp dir when the `user_temp` preset is on | build servers bind and connect Unix-domain sockets whose socket file lives under a granted root or the session temp dir; a daemon that binds under the shared temp dirs (sbt under `/tmp/bsbt`) needs that root named; `subpath` never matches an IP endpoint, so no egress opens |
 | `workspace_roots: [...]` / `read_only_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace and read-only roots are readable |
 | `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | writable `user_temp`, `process_sandbox.write_roots`, and `workspace_roots`, followed by `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs, explicit process-write roots, and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |
 | `side_effect_level >= network` | `(allow network*)` | otherwise outbound network is denied |
