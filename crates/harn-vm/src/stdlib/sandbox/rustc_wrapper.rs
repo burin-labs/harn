@@ -617,6 +617,8 @@ fn started_sessions() -> &'static Mutex<BTreeSet<u32>> {
 struct ProbeSession(u32);
 
 impl ProbeSession {
+    /// Only a Unix spawn leads a session, so only Unix starts one.
+    #[cfg(unix)]
     fn started(id: u32) -> Self {
         started_sessions()
             .lock()
