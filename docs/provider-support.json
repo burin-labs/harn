@@ -1096,7 +1096,7 @@
           "effort",
           "reasoning_effort"
         ],
-        "prompt_or_context_cache": false,
+        "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
         "serving_tiers": [],

@@ -261,6 +261,20 @@ local_setup_notes = [
   "Run `harn models install mlx-qwen3.6` for the venv, download, launch, and verification commands.",
 ]
 
+# Fireworks' recommendation is a measured choice, not the cheapest row. Without
+# this entry the support page falls back to the cheapest cataloged route and
+# moves whenever a cheaper model is added.
+[[entry]]
+id = "fireworks"
+catalog_provider = "fireworks"
+recommended_model = "accounts/fireworks/models/gpt-oss-120b"
+recommended_options = [
+  'provider = "fireworks"',
+  'model = "accounts/fireworks/models/gpt-oss-120b"',
+  'tool_format = "text"',
+  'structured_output_mode = "native_json"',
+]
+
 [[entry]]
 id = "typesafe"
 catalog_provider = "typesafe"

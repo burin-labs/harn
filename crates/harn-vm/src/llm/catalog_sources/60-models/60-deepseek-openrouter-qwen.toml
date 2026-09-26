@@ -96,6 +96,21 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
+# OpenRouter's list rate for DeepSeek V4.1 Flash, https://openrouter.ai/api/v1/models
+# (read 2026-09-26). A one-tool `tool_choice: auto` probe the same day returned
+# a native tool call.
+[models."deepseek/deepseek-v4.1-flash"]
+name = "DeepSeek V4.1 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.42, cache_read_per_mtok = 0.0042 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
+
 # Open-router Qwen3.5 9B (kept for the `small` tier alias).
 [models."Qwen/Qwen3.5-9B"]
 name = "Qwen3.5 9B"
