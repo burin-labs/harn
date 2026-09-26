@@ -506,6 +506,9 @@ _unset = ["not_a_generation_default"]
         fs::write(
             catalog_source.join("00-base/private.toml"),
             r#"
+default_provider = "private"
+fallback_model = "private/fast"
+
 [usage_accounting_audit]
 reviewed_on = "2026-08-25"
 expires_on = "2026-10-31"
@@ -524,6 +527,18 @@ provider = "private"
 context_window = 8192
 family = "private"
 lineage = "private"
+
+[aliases."tier/frontier"]
+id = "private/fast"
+provider = "private"
+
+[aliases."tier/mid"]
+id = "private/fast"
+provider = "private"
+
+[aliases."tier/small"]
+id = "private/fast"
+provider = "private"
 "#,
         )
         .expect("write catalog source");
