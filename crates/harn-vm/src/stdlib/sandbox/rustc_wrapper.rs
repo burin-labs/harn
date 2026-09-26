@@ -203,8 +203,12 @@ fn record(decision: &RustcWrapperDecision) {
         }
         RustcWrapperDisposition::NotConfigured => "no Cargo rustc wrapper applies",
     };
+    // stderr shows info by default, and scripts assert on exact stderr, so the
+    // ordinary no-wrapper case stays at debug.
     if decision.drops_configured_wrapper() {
         crate::events::log_warn_meta("process_sandbox_rustc_wrapper", message, metadata);
+    } else if decision.disposition == RustcWrapperDisposition::NotConfigured {
+        crate::events::log_debug_meta("process_sandbox_rustc_wrapper", message, metadata);
     } else {
         crate::events::log_info_meta("process_sandbox_rustc_wrapper", message, metadata);
     }
