@@ -261,6 +261,27 @@ local_setup_notes = [
   "Run `harn models install mlx-qwen3.6` for the venv, download, launch, and verification commands.",
 ]
 
+# Pin the direct recommendation so the deprecated V4 Flash compatibility ID
+# cannot win the generated support page's cheapest-route fallback.
+[[entry]]
+id = "deepseek"
+catalog_provider = "deepseek"
+recommended_model = "deepseek-flash"
+recommended_selector = "deepseek:deepseek-flash"
+recommended_tool_format = "native"
+usage_confidence = "medium"
+recommended_options = [
+  'provider = "deepseek"',
+  'model = "deepseek-flash"',
+  'tool_format = "native"',
+]
+notes = [
+  "DeepSeek V4.1 Flash is the current direct Flash route; the older deepseek-v4-flash ID temporarily serves the same model.",
+]
+caveats = [
+  "Direct tool calling has not been probed in this refresh; the capability row follows DeepSeek's published API documentation.",
+]
+
 # Fireworks' recommendation is a measured choice, not the cheapest row. Without
 # this entry the support page falls back to the cheapest cataloged route and
 # moves whenever a cheaper model is added.

@@ -2307,13 +2307,13 @@ provider = "openrouter"
 id = "z-ai/glm-5.3-flash"
 provider = "openrouter"
 
-# DeepSeek V4 direct API aliases.
+# DeepSeek direct API aliases. The legacy V4 Flash ID now serves V4.1 Flash.
 [aliases.deepseek]
-id = "deepseek-v4-flash"
+id = "deepseek-flash"
 provider = "deepseek"
 
 [aliases."deepseek-flash"]
-id = "deepseek-v4-flash"
+id = "deepseek-flash"
 provider = "deepseek"
 
 [aliases."deepseek-pro"]
@@ -2652,7 +2652,7 @@ groq = "qwen/qwen3.8-27b"
 minimax = "MiniMax-M2.5-highspeed"
 # GLM-4.6 is Z.AI's cheap coding route, confirmed serving at paas/v4.
 zai = "glm-4.6"
-deepseek = "deepseek-v4-flash"
+deepseek = "deepseek-flash"
 gemini = "gemini-3.5-flash-lite"
 
 # --- source: 50-presentation/00-model-selection.toml ---
@@ -4977,31 +4977,64 @@ open_weight = true
 strengths = ["vision", "coding", "agentic"]
 
 # --- source: 60-models/60-deepseek-openrouter-qwen.toml ---
-# DeepSeek V4 family ─ pricing pages: api-docs.deepseek.com/quick_start/pricing.
-# Both V4 models share a 1M-token context window and 384K-token output
-# cap. DeepSeek's 2026-04-24 V4 notice says to keep the base_url and use
-# `deepseek-v4-flash` or `deepseek-v4-pro`; `deepseek-chat` and
-# `deepseek-reasoner` become inaccessible after 2026-07-24 15:59 UTC.
+# DeepSeek direct API: https://api-docs.deepseek.com/quick_start/pricing/.
+# The current rate card names `deepseek-flash` for V4.1 Flash and keeps
+# `deepseek-v4-pro` on V4 Pro 0813. Both have 1M context and 384K output.
+# V4 Flash is retired: its legacy ID temporarily serves V4.1 Flash.
+# Direct prices below are peak rates; the schedules halve all token rates
+# outside 01:00-04:00 and 06:00-10:00 UTC on weekdays.
 #
 # Every OpenRouter, Together and DeepInfra row in this file was re-read
 # against the provider's live models endpoint on 2026-09-20; rates and
 # context windows below are that read.
-[models."deepseek-v4-flash"]
-name = "DeepSeek V4 Flash"
+[models."deepseek-flash"]
+name = "DeepSeek V4.1 Flash"
 provider = "deepseek"
 context_window = 1000000
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.0028 }
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.3, output_per_mtok = 1.2, cache_read_per_mtok = 0.006, schedules = [
+  { id = "deepseek-flash-offpeak-0000", days = ["mon", "tue", "wed", "thu", "fri"], start = "00:00", end = "01:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+  { id = "deepseek-flash-offpeak-0400", days = ["mon", "tue", "wed", "thu", "fri"], start = "04:00", end = "06:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+  { id = "deepseek-flash-offpeak-1000", days = ["mon", "tue", "wed", "thu", "fri"], start = "10:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+  { id = "deepseek-flash-offpeak-weekend", days = ["sat", "sun"], start = "00:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+] }
 tier = "mid"
 open_weight = true
-strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
-benchmarks = { aa_intelligence_index = 58.0 }
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
+
+[models."deepseek-v4-flash"]
+name = "DeepSeek V4 Flash (legacy ID)"
+provider = "deepseek"
+wire_model = "deepseek-v4-flash"
+context_window = 1000000
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.3, output_per_mtok = 1.2, cache_read_per_mtok = 0.006, schedules = [
+  { id = "deepseek-legacy-flash-offpeak-0000", days = ["mon", "tue", "wed", "thu", "fri"], start = "00:00", end = "01:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+  { id = "deepseek-legacy-flash-offpeak-0400", days = ["mon", "tue", "wed", "thu", "fri"], start = "04:00", end = "06:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+  { id = "deepseek-legacy-flash-offpeak-1000", days = ["mon", "tue", "wed", "thu", "fri"], start = "10:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+  { id = "deepseek-legacy-flash-offpeak-weekend", days = ["sat", "sun"], start = "00:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+] }
+deprecated = true
+deprecation_note = "V4 Flash retired 2026-09-10; this temporary compatibility ID serves V4.1 Flash. Use deepseek-flash."
+superseded_by = "deepseek-flash"
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
 [models."deepseek-v4-pro"]
-name = "DeepSeek V4 Pro"
+name = "DeepSeek V4 Pro 0813"
 provider = "deepseek"
 context_window = 1000000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.003625 }
+pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.044, schedules = [
+  { id = "deepseek-pro-offpeak-0000", days = ["mon", "tue", "wed", "thu", "fri"], start = "00:00", end = "01:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+  { id = "deepseek-pro-offpeak-0400", days = ["mon", "tue", "wed", "thu", "fri"], start = "04:00", end = "06:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+  { id = "deepseek-pro-offpeak-1000", days = ["mon", "tue", "wed", "thu", "fri"], start = "10:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+  { id = "deepseek-pro-offpeak-weekend", days = ["sat", "sun"], start = "00:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
+] }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
@@ -7538,7 +7571,7 @@ steps = [
   { provider = "openai", model = "gpt-4o-mini" },
   { provider = "gemini", model = "gemini-3.5-flash-lite" },
   { provider = "openrouter", model = "google/gemini-2.5-flash" },
-  { provider = "deepseek", model = "deepseek-v4-flash" },
+  { provider = "deepseek", model = "deepseek-flash" },
   { provider = "groq", model = "qwen/qwen3.8-27b" },
   { provider = "cerebras", model = "gpt-oss-120b" },
   { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8" },
@@ -7567,7 +7600,7 @@ steps = [
   { provider = "openai", model = "gpt-4o-mini", label = "openai" },
   { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
   { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
-  { provider = "deepseek", model = "deepseek-v4-flash", label = "deepseek" },
+  { provider = "deepseek", model = "deepseek-flash", label = "deepseek" },
   { provider = "groq", model = "qwen/qwen3.8-27b", label = "groq" },
   { provider = "cerebras", model = "gpt-oss-120b", label = "cerebras" },
   { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8", label = "together" },
@@ -7592,7 +7625,7 @@ steps = [
   { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
   { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
   { provider = "fireworks", model = "accounts/fireworks/models/gpt-oss-120b", label = "fireworks" },
-  { provider = "deepseek", model = "deepseek-v4-flash", label = "deepseek" },
+  { provider = "deepseek", model = "deepseek-flash", label = "deepseek" },
   { provider = "groq", model = "qwen/qwen3.8-27b", label = "groq" },
   { provider = "cerebras", model = "gpt-oss-120b", label = "cerebras" },
   { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8", label = "together" },

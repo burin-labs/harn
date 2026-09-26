@@ -7960,23 +7960,25 @@
       ]
     },
     {
-      "id": "deepseek-v4-flash",
-      "name": "DeepSeek V4 Flash",
+      "id": "deepseek-flash",
+      "name": "DeepSeek V4.1 Flash",
       "operations": [
         "text_generation",
         "decision"
       ],
-      "display_name": "DeepSeek V4 Flash",
+      "display_name": "DeepSeek V4.1 Flash",
       "provider": "deepseek",
       "aliases": [
         "deepseek",
-        "deepseek-flash",
-        "deepseek-v4-flash"
+        "deepseek-flash"
       ],
       "context_window": 1000000,
+      "logical_model": "deepseek-v4.1-flash",
+      "equivalence_group": "deepseek-v4.1-flash",
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text",
@@ -8018,10 +8020,77 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.14,
-        "output_per_mtok": 0.28,
-        "cache_read_per_mtok": 0.0028,
-        "cache_write_per_mtok": null
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.006,
+        "cache_write_per_mtok": null,
+        "schedules": [
+          {
+            "id": "deepseek-flash-offpeak-0000",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "00:00",
+            "end": "01:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          },
+          {
+            "id": "deepseek-flash-offpeak-0400",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "04:00",
+            "end": "06:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          },
+          {
+            "id": "deepseek-flash-offpeak-1000",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "10:00",
+            "end": "24:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          },
+          {
+            "id": "deepseek-flash-offpeak-weekend",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "start": "00:00",
+            "end": "24:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -8031,6 +8100,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
         "prompt_caching",
         "thinking",
         "extended_thinking",
@@ -8045,20 +8115,180 @@
         "cheap",
         "tool_use",
         "reasoning",
-        "long_context"
-      ],
-      "benchmarks": {
-        "aa_intelligence_index": 58.0
-      }
+        "long_context",
+        "vision"
+      ]
     },
     {
-      "id": "deepseek-v4-pro",
-      "name": "DeepSeek V4 Pro",
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash (legacy ID)",
       "operations": [
         "text_generation",
         "decision"
       ],
-      "display_name": "DeepSeek V4 Pro",
+      "display_name": "DeepSeek V4 Flash",
+      "provider": "deepseek",
+      "aliases": [
+        "deepseek-v4-flash"
+      ],
+      "context_window": 1000000,
+      "logical_model": "deepseek-v4.1-flash",
+      "equivalence_group": "deepseek-v4.1-flash",
+      "wire_model": "deepseek-v4-flash",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "high",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.006,
+        "cache_write_per_mtok": null,
+        "schedules": [
+          {
+            "id": "deepseek-legacy-flash-offpeak-0000",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "00:00",
+            "end": "01:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          },
+          {
+            "id": "deepseek-legacy-flash-offpeak-0400",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "04:00",
+            "end": "06:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          },
+          {
+            "id": "deepseek-legacy-flash-offpeak-1000",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "10:00",
+            "end": "24:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          },
+          {
+            "id": "deepseek-legacy-flash-offpeak-weekend",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "start": "00:00",
+            "end": "24:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "deprecated",
+        "note": "V4 Flash retired 2026-09-10; this temporary compatibility ID serves V4.1 Flash. Use deepseek-flash.",
+        "superseded_by": "deepseek-flash"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro 0813",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "DeepSeek V4 Pro 0813",
       "provider": "deepseek",
       "aliases": [
         "deepseek-pro",
@@ -8109,10 +8339,77 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.435,
-        "output_per_mtok": 0.87,
-        "cache_read_per_mtok": 0.003625,
-        "cache_write_per_mtok": null
+        "input_per_mtok": 1.32,
+        "output_per_mtok": 3.96,
+        "cache_read_per_mtok": 0.044,
+        "cache_write_per_mtok": null,
+        "schedules": [
+          {
+            "id": "deepseek-pro-offpeak-0000",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "00:00",
+            "end": "01:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          },
+          {
+            "id": "deepseek-pro-offpeak-0400",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "04:00",
+            "end": "06:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          },
+          {
+            "id": "deepseek-pro-offpeak-1000",
+            "days": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ],
+            "start": "10:00",
+            "end": "24:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          },
+          {
+            "id": "deepseek-pro-offpeak-weekend",
+            "days": [
+              "sat",
+              "sun"
+            ],
+            "start": "00:00",
+            "end": "24:00",
+            "utc_offset": "+00:00",
+            "input_multiplier": 0.5,
+            "output_multiplier": 0.5,
+            "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+            "review_after": "2026-12-26"
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -30797,12 +31094,12 @@
     },
     {
       "name": "deepseek",
-      "model_id": "deepseek-v4-flash",
+      "model_id": "deepseek-flash",
       "provider": "deepseek"
     },
     {
       "name": "deepseek-flash",
-      "model_id": "deepseek-v4-flash",
+      "model_id": "deepseek-flash",
       "provider": "deepseek"
     },
     {
@@ -32758,10 +33055,10 @@
     },
     {
       "provider": "deepseek",
-      "model": "deepseek-v4-flash",
+      "model": "deepseek-flash",
       "base_url": "https://api.deepseek.com/v1",
       "secret_env": "DEEPSEEK_API_KEY",
-      "label": "DeepSeek V4 Flash",
+      "label": "DeepSeek V4.1 Flash",
       "family": "deepseek",
       "capabilities": [
         "extended_thinking",
@@ -32774,7 +33071,8 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -32782,7 +33080,7 @@
       "model": "deepseek-v4-pro",
       "base_url": "https://api.deepseek.com/v1",
       "secret_env": "DEEPSEEK_API_KEY",
-      "label": "DeepSeek V4 Pro",
+      "label": "DeepSeek V4 Pro 0813",
       "family": "deepseek",
       "capabilities": [
         "extended_thinking",
@@ -37216,7 +37514,7 @@
   "qc_defaults": {
     "anthropic": "claude-haiku-4-5-20251001",
     "cohere": "command-a-plus-05-2026",
-    "deepseek": "deepseek-v4-flash",
+    "deepseek": "deepseek-flash",
     "gemini": "gemini-3.5-flash-lite",
     "groq": "qwen/qwen3.8-27b",
     "local": "gemma-4-26b-a4b-it",

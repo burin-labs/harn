@@ -33,10 +33,12 @@ thinking_block_style = "inline"
 prompt_caching = true
 
 [[provider.deepseek]]
-model_match = "deepseek-v4-flash*"
+model_match = ["deepseek-flash", "deepseek-v4-flash*"]
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+vision = true
+vision_supported = true
 thinking_modes = ["enabled", "effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "high", "max"]
