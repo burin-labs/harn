@@ -37,6 +37,10 @@ on:
         description: "Optional Harn tag (vX.Y.Z). Defaults to latest release."
         required: false
         type: string
+      source_revision:
+        description: "Optional full Harn commit SHA descended from the selected tag."
+        required: false
+        type: string
   schedule:
     - cron: "43 9 * * *"
 
@@ -52,6 +56,7 @@ jobs:
       # The reusable workflow rejects non-SHA refs before checkout.
       orchestration-sha: <pinned-sha>
       version: ${{ inputs.version }}
+      source-revision: ${{ inputs.source_revision }}
       # Optional repository-owned materialization. The target tag is inherited
       # as HARN_BUMP_TARGET_TAG. The reusable workflow first applies the target
       # runtime's deterministic capability migrations, then runs this refresh,
@@ -113,6 +118,15 @@ arbitrary orchestration ref.
 
 - Already current: the pin already matches the resolved target → clean no-op,
   zero mutation.
+- Commit-targeted bumps: when `source-revision` is supplied, the workflow reads
+  `.harn-revision` as well as `.harn-version`. An equal tag advances when the
+  requested commit descends from the current commit. An equal commit is a no-op;
+  an older or divergent commit fails without mutation. The workflow checks the
+  requested commit against the release tag and Harn main in its full checkout before
+  changing either pin. The caller's refresh command must materialize the
+  requested source commit using `HARN_BUMP_SOURCE_REVISION`. The installed
+  release CLI owns this state machine, so commit-targeted bumps require a
+  release whose embedded `std/bump` supports the input.
 - Old implicit parameters: before caller regeneration or strict validation,
   the target runtime translates each checker-owned omitted annotation to
   explicit `any`. The printed typed census names scanned, changed, pending,

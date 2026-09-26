@@ -40,6 +40,7 @@ pub type GithubBumpRemoteConfig = {
   branch: string,
   base: string,
   repo_dir?: string,
+  source_revision?: string,
   package_test_receipt?: string,
 }
 
@@ -61,14 +62,23 @@ fn __must(result: any, operation: string) {
 }
 
 /** Render the exact pre-mutation package-test receipt into the bump PR. */
-pub fn bump_pull_request_body(package_test_receipt: string? = nil) -> string {
+pub fn bump_pull_request_body(
+  package_test_receipt: string? = nil,
+  source_revision: string? = nil,
+) -> string {
   const base =
     "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
+  const revision = trim(source_revision ?? "")
+  const target = if revision == "" {
+    base
+  } else {
+    base + "\n\nTarget Harn source revision: `${revision}`."
+  }
   const receipt = trim(package_test_receipt ?? "")
   if receipt == "" {
-    return base
+    return target
   }
-  return base
+  return target
     + "\n\n<details><summary>Pre-mutation package test discovery receipt (sha256:"
     + sha256(receipt)
     + ")</summary>\n\n```base64\n"
@@ -301,7 +311,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         head: config.branch,
         base: config.base,
         title: "Bump Harn runtime",
-        body: bump_pull_request_body(config.package_test_receipt),
+        body: bump_pull_request_body(config.package_test_receipt, config.source_revision),
         expected_head_oid: expected_head_oid,
         previous_head_oid: existing?.head_oid,
         options: options,
