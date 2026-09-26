@@ -471,6 +471,22 @@ const SECTIONS: &[SectionSpec] = &[
         baseline_duplicate: no_baseline_duplicate,
     },
     SectionSpec {
+        name: "fallback_model",
+        keys: |overlay| singleton("fallback_model", overlay.fallback_model.is_some()),
+        remove: |overlay, _| overlay.fallback_model = None,
+        dangling_target: no_dangling_target,
+        baseline_duplicate: no_baseline_duplicate,
+    },
+    SectionSpec {
+        name: "provider_defaults",
+        keys: |overlay| map_keys(&overlay.provider_defaults),
+        remove: |overlay, key| {
+            overlay.provider_defaults.remove(key);
+        },
+        dangling_target: no_dangling_target,
+        baseline_duplicate: no_baseline_duplicate,
+    },
+    SectionSpec {
         name: "usage_accounting_audit",
         keys: |overlay| {
             singleton(

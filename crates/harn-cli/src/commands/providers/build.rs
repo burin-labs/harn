@@ -177,10 +177,13 @@ pub(super) fn generated_provider_config(
             "generated provider config contains unknown fields:\n{rendered}"
         ));
     }
-    let default_issues = harn_vm::llm_config::model_default_issues(&parsed.config);
+    let mut default_issues = harn_vm::llm_config::model_default_issues(&parsed.config);
+    default_issues.extend(harn_vm::llm_config::provider_route_default_issues(
+        &parsed.config,
+    ));
     if !default_issues.is_empty() {
         return Err(format!(
-            "generated provider config has invalid model defaults:\n{}",
+            "generated provider config has invalid defaults:\n{}",
             default_issues.join("\n")
         ));
     }
@@ -503,6 +506,9 @@ _unset = ["not_a_generation_default"]
         fs::write(
             catalog_source.join("00-base/private.toml"),
             r#"
+default_provider = "private"
+fallback_model = "private/fast"
+
 [usage_accounting_audit]
 reviewed_on = "2026-08-25"
 expires_on = "2026-10-31"
@@ -521,6 +527,18 @@ provider = "private"
 context_window = 8192
 family = "private"
 lineage = "private"
+
+[aliases."tier/frontier"]
+id = "private/fast"
+provider = "private"
+
+[aliases."tier/mid"]
+id = "private/fast"
+provider = "private"
+
+[aliases."tier/small"]
+id = "private/fast"
+provider = "private"
 "#,
         )
         .expect("write catalog source");

@@ -468,6 +468,14 @@ fragments. Provider capability rules use the same pattern:
 `crates/harn-vm/src/llm/capability_sources/` generates
 `crates/harn-vm/src/llm/capabilities.toml`.
 
+The bare runtime fallback is `fallback_model` in `00-base.toml`.
+`40-defaults/provider-models.toml` records provider-specific `runtime` and
+`portal` choices; they may differ deliberately. Keep those routes in the
+catalog rather than in Rust match tables. Catalog generation rejects unknown,
+provider-mismatched, or deprecated choices there, in `qc_defaults`, the three
+tier aliases, and model ladders. Host environment overrides for local models
+remain runtime input, so the built-in catalog cannot validate their IDs.
+
 ```bash
 # Regenerate providers.toml, capabilities.toml, and all checked-in
 # provider catalog artifacts from source fragments in one hermetic pass.

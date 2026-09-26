@@ -1177,6 +1177,24 @@ async fn api_llm_options_returns_payload() {
             && provider["auth_envs"].is_array()
             && provider["models"].is_array()
     }));
+    for provider in providers {
+        let Some(default) = provider["default_model"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let name = provider["name"].as_str().expect("provider name");
+        assert!(
+            provider["models"]
+                .as_array()
+                .is_some_and(|models| models.iter().any(|model| model.as_str() == Some(default))),
+            "portal must offer its default: {name}:{default}"
+        );
+        let entry = harn_vm::llm_config::model_catalog_entry_for_route(name, default)
+            .expect("portal default must have a catalog route");
+        assert!(!entry.deprecated, "{name}:{default}");
+    }
 }
 
 #[tokio::test]

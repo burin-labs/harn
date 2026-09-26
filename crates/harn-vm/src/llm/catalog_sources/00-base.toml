@@ -26,3 +26,4 @@
 # parallel system this catalog exists to eliminate.
 
 default_provider = "anthropic"
+fallback_model = "claude-sonnet-4-6"
