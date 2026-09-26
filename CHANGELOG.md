@@ -9,6 +9,65 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.144
+
+### Added
+
+- Added `harness.llm.evaluate_request` for typed runtime tool and skill
+  vocabularies, sharing decision admission, budgets, and receipts. Routes with
+  native structured schemas now expose their mechanically derived structured
+  decision capability, including gateways.
+
+  Structured decisions preserve low-confidence named answers instead of
+  inverting them through a synthetic distribution. Classifier fixtures share a
+  closed verdict type, and invalid confidence no longer becomes certainty.
+
+### Changed
+
+- On macOS the `user_temp` process-sandbox preset no longer grants `/tmp`, `/var/tmp`, and `/var/folders`, so a
+  confined child can no longer read or overwrite other processes' temp files. It grants the session's own temp dir
+  and Foundation's atomic-replacement staging dir. Clang's module cache and xcrun's lookup cache move into the
+  workspace through the child's environment. Three cases join the sandbox conformance suite.
+- The catalog adds Fireworks GLM 5.3, GLM 5.3 Flash, DeepSeek V4.1 Flash, DeepSeek V4 Flash 0731,
+  DeepSeek V4 Pro 0813, Kimi K3 and Nemotron 3.5 Lightning, DeepSeek V4.1 Flash on OpenRouter and NVIDIA
+  NIM, and the OpenRouter Jev latest selector. It deprecates three routes their hosts no longer serve
+  and corrects stale Fireworks prices.
+- The approval-review calibration corpus grows from 28 to 73 cases: 37 the goal does not authorize and 29 it plainly
+  does. Most unsafe cases have an authorized twin with the same command, so a reviewer that denies everything still
+  fails. New shapes include destructive workspace and data changes, publishing, persistence, remote execution, test
+  tampering, instructions injected through tool output, and agent tool calls written as the tool's JSON arguments.
+
+### Fixed
+
+- MCP resource, template, and prompt registration now refuses malformed metadata
+  and completion declarations instead of silently coercing or dropping them.
+  Prompt argument titles are included in discovery.
+- The approval reviewer and the LLM missing-tool-call classifier now declare their call purpose, `agent.approval_review`
+  and `agent.missing_tool_call`. Transcripts attribute their calls instead of recording the generic role, and mock
+  fixtures serve them from their own scope. Both scopes join `llm_mock_known_scopes()`.
+- The completion judge is re-asked once when a refusal names the loop's done sentinel, which it
+  cannot observe, instead of vetoing a verified completion on it until the judge cap.
+- A provider stream that fails because the model generated a malformed channel (Fireworks "Invalid
+  channel") is now resampled within the retry budget instead of ending the turn, and the error left
+  after the budget runs out says in plain words that the model produced output the provider could not parse.
+- A confined `harn run` started inside another macOS sandbox, such as a sandboxed agent's command, no longer fails
+  every spawn with `sandbox_apply: Operation not permitted`. macOS refuses a second sandbox, so harn now checks the
+  one it is already in. If the outer sandbox is at least as strict as the run's policy on network access, writes and
+  credential reads, the child runs under it and a one-time `process_sandbox_nested` warning records that. If the outer
+  sandbox allows something the policy denies, the spawn is refused with a reason naming what could not be enforced,
+  instead of silently running with the wider access.
+- The CI artifact waiter no longer reads a GitHub API rate limit as an unmeasured producer. Each failed API read now
+  prints its error. A rate-limit reply waits for the reported reset, within a bounded total, instead of using up the
+  unmeasured-poll budget and failing a job whose producer had already succeeded.
+- `harn provider catalog refresh --live` runs again against OpenRouter's model index: prompt-size
+  price overrides become input token bands, and a time window that names no days applies every day.
+- Publishing a release tag builds and proves Harn with the tag's own tools, so
+  a change to the build-freshness protocol on main after a release commit no
+  longer breaks that release's crate publication.
+- Publishing from a lightweight release tag no longer fails after the tag
+  verifier accepts it: the verifier is the one reader of the commit a tag
+  selects, and publication compares that commit with its checkout.
+
 ## v0.10.143
 
 ### Added
