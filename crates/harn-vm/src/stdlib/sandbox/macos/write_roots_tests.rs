@@ -131,7 +131,7 @@ fn a_live_child_with_no_write_roots_cannot_write_outside_the_workspace() {
         "a write outside every granted root must be refused"
     );
 
-    let mut granted = policy.clone();
+    let mut granted = policy;
     granted.process_sandbox.write_roots = vec![outside_path.display().to_string()];
     let admitted = write(&granted, &outside_marker);
     assert!(
