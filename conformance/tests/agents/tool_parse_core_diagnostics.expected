@@ -94,3 +94,41 @@
   prose=""
   answer=null
   done=null
+# unknown tool name in the brace shape
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'fictitious_tool'. Tool calls must be one of: [edit, ledger, load_skill, run]."
+  prose=""
+  answer=null
+  done=null
+# unknown tool name abutting a sentence
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'fictitious_tool'. Tool calls must be one of: [edit, ledger, load_skill, run]."
+  prose=""
+  answer=null
+  done=null
+# known tool abutting a sentence
+  calls=0 errors=1 violations=0 stray=0
+  err "Saw a call to `run` inside a line of prose. A tool call is read only at the start of a line, so nothing ran; re-emit it on its own line."
+  prose=""
+  answer=null
+  done=null
+# tool name mentioned in prose
+  calls=0 errors=0 violations=0 stray=0
+  prose="I'll use run to list the directory, then edit the file."
+  answer=null
+  done=null
+# code call in a fence
+  calls=0 errors=0 violations=0 stray=0
+  prose="Here is the hook:\n```js\nconst [s, setS] = useState({ a: 1 })\n```\nThat keeps state."
+  answer=null
+  done=null
+# code call in prose
+  calls=0 errors=0 violations=0 stray=0
+  prose="Call it as useState({ a: 1 }) in the component."
+  answer=null
+  done=null
+# struct literal in a fence
+  calls=0 errors=0 violations=0 stray=0
+  prose="```rust\nlet p = Point{ x: 1, y: 2 };\n```"
+  answer=null
+  done=null

@@ -64,6 +64,44 @@ pub(super) fn bare_tool_names(tools_val: Option<&VmValue>) -> BTreeSet<String> {
     known
 }
 
+/// A call shape sitting inside a line of prose, reported and not dispatched.
+///
+/// The recovery ladder reads a call only at the start of a line, so a name
+/// abutting the previous sentence was never examined: the turn produced no
+/// call, no diagnostic, and a payload the person read as chatter. Position is
+/// what the ladder uses to tell a call from narration, so lifting it for
+/// dispatch would make every mention of a tool a call. It can be lifted for
+/// the statement that nothing ran, which is the fact the turn was losing.
+///
+/// Returns the message and the byte just past the literal, so the walk does
+/// not descend into the arguments it has already accounted for.
+fn mid_line_call_shape(
+    text: &str,
+    start: usize,
+    known: &BTreeSet<String>,
+) -> Option<(String, usize)> {
+    let bytes = text.as_bytes();
+    let name_len = ident_length(&bytes[start..])?;
+    let name = &text[start..start + name_len];
+    let after = start + name_len;
+    let end = match bytes.get(after) {
+        Some(b'{') => after + parse_object_literal_from(&text[after..], name).ok()?.1,
+        Some(b'(') if has_object_literal_arg_start(text, after + 1) => {
+            start + parse_ts_call_from(&text[start..], name.to_string()).ok()?.1
+        }
+        _ => return None,
+    };
+    let message = if known.contains(name) {
+        format!(
+            "Saw a call to `{name}` inside a line of prose. A tool call is read only at \
+             the start of a line, so nothing ran; re-emit it on its own line."
+        )
+    } else {
+        unknown_tool_feedback(name, known)
+    };
+    Some((message, end))
+}
+
 pub(super) fn parse_bare_calls_in_body_with_known(
     text: &str,
     known: &BTreeSet<String>,
@@ -344,8 +382,39 @@ pub(super) fn parse_bare_calls_in_body_with_known(
                                 }
                             }
                         }
+                        // An unregistered name abutting an object literal is
+                        // the same mistake the `name({ ... })` branch above
+                        // reports, written in the other shape. Without this
+                        // arm it fell through to prose in silence, so the
+                        // turn carried a dropped call nobody could see.
+                        if let Ok((_, consumed)) =
+                            parse_object_literal_from(&text[k + name_len..], name_str)
+                        {
+                            errors.push(unknown_tool_feedback(name_str, known));
+                            i = k + name_len + consumed;
+                            at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
+                            continue;
+                        }
                     }
                 }
+            }
+        }
+
+        // A call shape where the line-start ladder does not look. Nothing is
+        // dispatched from here: the span stays prose exactly as before, and
+        // the model is told the call did not run. Only an identifier that
+        // starts here counts, so the byte-by-byte walk through a name cannot
+        // report each of its suffixes.
+        if !at_line_start
+            && !in_inline_code
+            && !bytes[i.saturating_sub(1)].is_ascii_alphanumeric()
+            && bytes[i.saturating_sub(1)] != b'_'
+        {
+            if let Some((message, end)) = mid_line_call_shape(text, i, known) {
+                errors.push(message);
+                i = end;
+                at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
+                continue;
             }
         }
 

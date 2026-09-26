@@ -133,4 +133,64 @@ edit({ action: "create", path: "a.go" })""",
     "edit({ action: \"create\", path: \"a.rs\" } and then some stray words",
     sample_registry(),
   )
+  // An unregistered name abutting an object literal, in the brace shape. The
+  // paren shape has always reported this; the brace shape returned the payload
+  // as prose in silence, so the turn carried a dropped call nobody could see.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown tool name in the brace shape",
+    "fictitious_tool{ \"x\": 1 }",
+    sample_registry(),
+  )
+  // The same two shapes written inside a line of prose, which is where a call
+  // is read as narration. Nothing dispatches from either — the diagnostic is
+  // the whole remedy, and the prose keeps the payload verbatim.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown tool name abutting a sentence",
+    "I'll look at the diff.fictitious_tool{ \"x\": 1 }",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "known tool abutting a sentence",
+    "I'll look at the diff.run({ command: \"ls\" })",
+    sample_registry(),
+  )
+  // The guardrail: a tool name mentioned in prose with no argument object is
+  // narration and must stay silent, at any position.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "tool name mentioned in prose",
+    "I'll use run to list the directory, then edit the file.",
+    sample_registry(),
+  )
+  // The guardrail for ordinary code in an answer: a function call or struct
+  // literal that abuts an object literal is code, not a dropped tool call, so
+  // it raises nothing and the answer survives as prose.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "code call in a fence",
+    "Here is the hook:\n```js\nconst [s, setS] = useState({ a: 1 })\n```\nThat keeps state.",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "code call in prose",
+    "Call it as useState({ a: 1 }) in the component.",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "struct literal in a fence",
+    "```rust\nlet p = Point{ x: 1, y: 2 };\n```",
+    sample_registry(),
+  )
 }
