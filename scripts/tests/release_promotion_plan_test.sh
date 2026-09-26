@@ -20,26 +20,36 @@ awk '/        id: plan/{found=1} found && /        run: \|/{body=1;next} body &&
 grep -Fq 'release_push_is_stable_version_change' "$tmp/plan.sh" \
   || fail "could not extract the plan step from $workflow"
 # The plan must make the same decision as the build that made the candidate.
-grep -Fq 'release_push_is_stable_version_change "$PREVIOUS_VERSION" "$VERSION"' \
+# The plan sees only HEAD^; the build judges the whole push and refuses a push
+# whose release commit is not its head, so every push the plan promotes is one
+# where HEAD^ is the previous version.
+grep -Fq 'release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA"' \
   "$root/.github/workflows/build-release-binaries.yml" \
-  || fail "build-release-binaries.yml no longer decides candidates with release_push_is_stable_version_change"
+  || fail "build-release-binaries.yml no longer decides candidates with release_range_release_commits"
 
 repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$tmp/bin"
-cp "$root/scripts/lib/release_version.sh" "$repo/scripts/lib/"
+cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" "$repo/scripts/lib/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
 git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Promotion Test"
 git -C "$repo" config user.email "release-promotion-test@example.com"
 git -C "$repo" config commit.gpgsign false
 
-# gh stub: FAKE_TAG_SHA is the commit the tag points at (unset: no tag), and
-# FAKE_RELEASE=1 means the release exists.
+# gh stub: FAKE_TAG_SHA is the commit the tag points at (unset: no tag),
+# FAKE_RELEASE=1 means the release exists, FAKE_CANDIDATE_RUN is the run that
+# built the candidate (default 9001, this push's own run; empty: none), and
+# FAKE_RUNS_FAIL=1 makes the run listing unreadable.
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
-case "$1" in
-  api) [[ -n "${FAKE_TAG_SHA:-}" ]] || exit 1; printf '%s\n' "$FAKE_TAG_SHA" ;;
-  release) [[ "${FAKE_RELEASE:-0}" == 1 ]] ;;
+case "$1 $2" in
+  "api "*/commits/*) [[ -n "${FAKE_TAG_SHA:-}" ]] || exit 1; printf '%s\n' "$FAKE_TAG_SHA" ;;
+  "api "*/build-release-binaries.yml/runs\?*)
+    [[ "${FAKE_RUNS_FAIL:-0}" != 1 ]] || exit 1
+    run="${FAKE_CANDIDATE_RUN-9001}"
+    [[ -z "$run" ]] || printf '%s\n' "$run" ;;
+  "api "*/artifacts\?name=candidate-manifest-*) printf '1\n' ;;
+  "release "*) [[ "${FAKE_RELEASE:-0}" == 1 ]] ;;
   *) exit 2 ;;
 esac
 EOF
@@ -82,8 +92,23 @@ plan candidate
 [[ "$(cat "$tmp/candidate.status")" == 0 && "$(output candidate promote)" == true ]] \
   || fail "the version commit was not promoted: $(cat "$tmp/candidate.log")"
 [[ "$(output candidate tag)" == v0.10.142 && "$(output candidate version)" == 0.10.142 &&
-   "$(output candidate major_minor)" == 0.10 ]] \
+   "$(output candidate major_minor)" == 0.10 && "$(output candidate run_id)" == 9001 ]] \
   || fail "wrong release identity: $(cat "$tmp/candidate.outputs")"
+
+# The release's merge group built the candidate, so this push's run built
+# nothing: the queue's run is the one promoted.
+plan from_queue FAKE_CANDIDATE_RUN=4242
+[[ "$(output from_queue promote)" == true && "$(output from_queue run_id)" == 4242 ]] \
+  || fail "the merge group's candidate run was not promoted: $(cat "$tmp/from_queue.log")"
+
+# Negative controls: no run holds a candidate, or the runs cannot be read. A
+# release with nothing to publish is a failure, never a green no-op.
+plan no_candidate FAKE_CANDIDATE_RUN=
+[[ "$(cat "$tmp/no_candidate.status")" != 0 ]] || fail "a release with no candidate run was not refused"
+grep -Fq "No successful build run holds a v0.10.142 candidate" "$tmp/no_candidate.log" \
+  || fail "the missing candidate is not named: $(cat "$tmp/no_candidate.log")"
+plan runs_unread FAKE_RUNS_FAIL=1
+[[ "$(cat "$tmp/runs_unread.status")" != 0 ]] || fail "an unreadable run listing was not refused"
 
 # A tag at this commit with no release yet is a promotion that stopped before
 # publishing; it is promoted again.
