@@ -920,14 +920,16 @@ pub fn portal_default_model_for_provider(provider: &str) -> Option<String> {
 }
 
 fn local_model_env_override(provider: &str) -> Option<String> {
-    match provider {
+    (match provider {
         "local" => crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL")
+            .filter(|value| !value.trim().is_empty())
             .or_else(|| crate::stdlib::process::session_env_value("HARN_LLM_MODEL")),
         "mlx" => crate::stdlib::process::session_env_var("MLX_MODEL_ID")
             .ok()
             .flatten(),
         _ => None,
-    }
+    })
+    .filter(|value| !value.trim().is_empty())
 }
 
 pub fn qc_defaults() -> BTreeMap<String, String> {
@@ -1385,7 +1387,7 @@ pub fn provider_route_default_issues(config: &ProvidersConfig) -> Vec<String> {
 
     match (&config.default_provider, &config.fallback_model) {
         (Some(provider), Some(model)) => {
-            issues.extend(check("fallback_model".to_string(), provider, model))
+            issues.extend(check("fallback_model".to_string(), provider, model));
         }
         _ => issues.push("default_provider and fallback_model must both be set".to_string()),
     }

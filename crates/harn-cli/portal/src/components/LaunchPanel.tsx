@@ -182,7 +182,7 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
   )
   const providerValue = customProviderMode ? provider : (selectedProvider?.name ?? provider)
   const selectedModels = selectedProvider?.models ?? []
-  const modelValue = model || selectedProvider?.default_model || ""
+  const modelValue = customModelMode ? model : (model || selectedProvider?.default_model || "")
   const needsCustomModel =
     customModelMode || (modelValue !== "" && selectedModels.length > 0 && !selectedModels.includes(modelValue))
 
@@ -364,6 +364,8 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
                   if (event.target.value === "__custom__") {
                     setCustomProviderMode(true)
                     setProvider("")
+                    setModel("")
+                    setCustomModelMode(true)
                     return
                   }
                   setCustomProviderMode(false)
@@ -409,6 +411,7 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
                 value={needsCustomModel ? "__custom__" : modelValue}
                 onChange={(event) => {
                   if (event.target.value === "__custom__") {
+                    setModel("")
                     setCustomModelMode(true)
                     return
                   }

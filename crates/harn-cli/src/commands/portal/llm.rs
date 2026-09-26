@@ -57,13 +57,18 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
         } else {
             None
         };
-        let viable = auth_configured && discovered.as_ref().is_none_or(|result| result.is_ok());
+        let viable = auth_configured
+            && discovered
+                .as_ref()
+                .is_none_or(|result| result.as_ref().is_ok_and(|models| !models.is_empty()));
         let mut models = discovered.and_then(Result::ok).unwrap_or_default();
         if !local {
-            models.extend(catalog_models.iter().filter_map(|(id, model)| {
-                (model.provider == name && !model.deprecated)
-                    .then(|| model.wire_model.clone().unwrap_or_else(|| id.clone()))
-            }));
+            models.extend(
+                catalog_models
+                    .iter()
+                    .filter(|(_, model)| model.provider == name && !model.deprecated)
+                    .map(|(id, model)| model.wire_model.clone().unwrap_or_else(|| id.clone())),
+            );
         }
         let default_model = llm_config::portal_default_model_for_provider(&name);
         if let Some(default_model) = &default_model {
@@ -161,28 +166,29 @@ async fn discover_provider_models(
             })?
     };
     if !response.status().is_success() {
-        return Ok(Vec::new());
+        return Err(format!(
+            "failed to discover {provider} models: HTTP {}",
+            response.status()
+        ));
     }
     let payload = response
         .json::<serde_json::Value>()
         .await
         .map_err(|error| format!("failed to parse model list: {error}"))?;
-    let mut models = Vec::new();
-    if provider == "ollama" || def.chat_endpoint.contains("/api/chat") {
-        if let Some(entries) = payload.get("models").and_then(|value| value.as_array()) {
-            for entry in entries {
-                if let Some(name) = entry.get("name").and_then(|value| value.as_str()) {
-                    models.push(name.to_string());
-                }
-            }
-        }
-    } else if let Some(entries) = payload.get("data").and_then(|value| value.as_array()) {
-        for entry in entries {
-            if let Some(id) = entry.get("id").and_then(|value| value.as_str()) {
-                models.push(id.to_string());
-            }
-        }
-    }
+    let (entries, field) = if provider == "ollama" || def.chat_endpoint.contains("/api/chat") {
+        (
+            payload.get("models").and_then(|value| value.as_array()),
+            "name",
+        )
+    } else {
+        (payload.get("data").and_then(|value| value.as_array()), "id")
+    };
+    let entries = entries.ok_or_else(|| format!("invalid {provider} model list response"))?;
+    let mut models = entries
+        .iter()
+        .filter_map(|entry| entry.get(field).and_then(|value| value.as_str()))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     models.sort();
     models.dedup();
     Ok(models)
