@@ -714,7 +714,8 @@
               "mode", "strategy", "snapshotAssetId", "reason", "receiptId", "schemaVersion",
               "engineStrategy", "requestedStrategy", "resolvedThresholdTokens", "thresholdSource",
               "hardLimitTokens", "archivedMessages", "estimatedTokensBefore", "estimatedTokensAfter",
-              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement"
+              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement",
+              "classification"
             ],
             "additionalProperties": true,
             "properties": {
@@ -731,7 +732,8 @@
               "resolvedThresholdTokens": { "type": ["integer", "null"], "minimum": 0 },
               "thresholdSource": { "type": ["string", "null"] },
               "hardLimitTokens": { "type": ["integer", "null"], "minimum": 0 },
-              "sourceMeasurement": {}
+              "sourceMeasurement": {},
+              "classification": {}
             }
           } }
         }

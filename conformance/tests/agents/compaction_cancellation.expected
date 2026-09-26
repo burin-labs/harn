@@ -1,0 +1,1 @@
+compaction cancellation preserves source; ordinary errors can fall back

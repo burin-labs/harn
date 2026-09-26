@@ -101,6 +101,17 @@ fn native_decoder_preserves_replay_and_required_nulls_and_rejects_bad_identity()
             "transcript_compacted" => {
                 update["_meta"]["harn"]["snapshotAssetId"] = serde_json::Value::Null;
                 update["_meta"]["harn"]["compactionPolicy"] = serde_json::Value::Null;
+                update["_meta"]["harn"]["classification"] = serde_json::json!({
+                    "status": "applied",
+                    "confidence_floor": 0.8,
+                    "rounds": 1,
+                    "budget_bytes": 512,
+                    "result_bytes": 256,
+                    "budget_met": true,
+                    "summary_applied": false,
+                    "decisions": [],
+                    "fallback_reason": null
+                });
             }
             "reminder_emitted" => {
                 update["_meta"]["harn"]["reminder"]["ttlTurns"] = serde_json::Value::Null;

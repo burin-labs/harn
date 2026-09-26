@@ -1,0 +1,36 @@
+import { with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness) {
+  for category in ["invalid_request", "cancelled"] {
+    const session = harness.agent.open("compaction-control-" + harness.random.uuid())
+    harness.agent.compaction_policy(
+      {session_id: session, strategy: "summarize-then-prune", max_tokens: 1, keep_last: 1},
+    )
+    for text in ["Original task", "Necessary old evidence", "Current task"] {
+      harness.agent.inject(session, {role: "user", content: text})
+    }
+    const before = harness.agent.compaction_check(session)
+    with_llm_script(
+      harness.llm,
+      [{error: {category: category, message: "explicit typed control"}}],
+      { ->
+        const result = try {
+          harness.agent.compaction_run(session, {provider: "mock", model: "mock"})
+        }
+        const after = harness.agent.compaction_check(session)
+        assert_eq(len(harness.llm.mock_calls()), 1, "primary compaction strategy reached")
+        if category == "cancelled" {
+          assert(is_err(result), "stop must propagate before positional fallback")
+          assert_eq(error_category(unwrap_err(result)), "cancelled")
+          assert_eq(after.message_count, before.message_count)
+        } else {
+          assert(is_ok(result), "ordinary failure still has its declared fallback")
+          assert_eq(unwrap(result).engine_strategy, "truncate")
+          assert(after.message_count < before.message_count, "fallback positive control fired")
+        }
+      },
+    )
+    harness.agent.close(session)
+  }
+  harness.stdio.println("compaction cancellation preserves source; ordinary errors can fall back")
+}

@@ -1,0 +1,265 @@
+import { agent_autocompact_if_needed } from "std/agent/autocompact"
+import {
+  CompactionClassifyDecision,
+  CompactionClassifyItem,
+  CompactionFixtureInput,
+} from "std/agent/compaction_classify"
+import { agent_session_finalize, agent_session_init } from "std/agent/state"
+
+fn drop_low(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  let decisions: list<CompactionClassifyDecision> = []
+  for item in input.items {
+    decisions = decisions
+      + [
+        {
+          index: item.index,
+          question_id: "message_" + to_string(item.index),
+          choice: "drop",
+          confidence: 0.2,
+          confidence_kind: "model_rationale",
+          evaluation_receipt: "explicit typed fixture",
+        },
+      ]
+  }
+  return decisions
+}
+
+fn rewrite(items: list<CompactionClassifyItem>) -> list<{index: int, text: string}> {
+  let rewritten: list<{index: int, text: string}> = []
+  for item in items {
+    rewritten = rewritten + [{index: item.index, text: "retained " + to_string(item.index)}]
+  }
+  return rewritten
+}
+
+fn keep_with_latest_anchor(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  assert_eq(input.anchor, "Latest archived user", "anchor is selected before draining the window")
+  let decisions: list<CompactionClassifyDecision> = []
+  for item in input.items {
+    decisions = decisions
+      + [
+        {
+          index: item.index,
+          question_id: "message_" + to_string(item.index),
+          choice: "keep",
+          confidence: 0.9,
+          confidence_kind: "model_rationale",
+          evaluation_receipt: "explicit typed fixture",
+        },
+      ]
+  }
+  return decisions
+}
+
+fn keep_then_drop(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  if input.round == 2 {
+    assert_eq(len(input.items), 1, "only raw keep is eligible for round two")
+    assert_eq(input.items[0]?.index, 0)
+  }
+  let decisions: list<CompactionClassifyDecision> = []
+  for item in input.items {
+    decisions = decisions
+      + [
+        {
+          index: item.index,
+          question_id: "message_" + to_string(item.index),
+          choice: if input.round == 1 && item.index == 0 {
+            "keep"
+          } else {
+            "drop"
+          },
+          confidence: if item.index == 1 {
+            0.2
+          } else {
+            0.9
+          },
+          confidence_kind: "model_rationale",
+          evaluation_receipt: "explicit typed round fixture",
+        },
+      ]
+  }
+  return decisions
+}
+
+fn missing_decision(_input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  return []
+}
+
+pipeline test(harness: Harness) {
+  const policy = {
+    backend: "structured_llm",
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    temperature: 0.0,
+    threshold: 0.8,
+    evaluation_cost_limit: 1.0,
+  }
+  const messages = [
+    {role: "user", content: "Opaque evidence alpha"},
+    {role: "user", content: "Opaque constraint beta"},
+    {role: "user", content: "Current bounded task"},
+  ]
+  const classify = {policy: policy, fixture: drop_low, rewrite_fixture: rewrite}
+  const result = harness.agent.transcript_auto_compact(
+    messages,
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_last: 1,
+      recap_budget_bytes: 1,
+      hard_limit_tokens: 1,
+      provider: "mock",
+      model: "mock",
+      classify: classify,
+    },
+  )
+  assert_eq(result.receipt.engine_strategy, "classify")
+  assert_eq(result.receipt.schema_version, 2)
+  assert_eq(result.receipt.classification.rounds, 1)
+  assert_eq(result.receipt.classification.budget_met, false)
+  assert_eq(len(result.receipt.classification.decisions), 2)
+  for decision in result.receipt.classification.decisions {
+    assert_eq(decision.choice, "drop")
+    assert_eq(decision.applied, "reword")
+    assert_eq(decision.application_reason, "confidence_floor")
+  }
+  assert(result.summary.contains("retained 0"))
+  assert(result.summary.contains("retained 1"))
+  assert_eq(len(harness.llm.mock_calls()), 0, "explicit fixtures make no provider calls")
+  const repeated = harness.agent.transcript_auto_compact(
+    messages,
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_last: 1,
+      recap_budget_bytes: 1,
+      provider: "mock",
+      model: "mock",
+      classify: classify + {fixture: keep_then_drop},
+    },
+  )
+  assert_eq(repeated.receipt.classification.rounds, 2)
+  assert_eq(len(repeated.receipt.classification.decisions), 3)
+  assert(repeated.summary.contains("retained 1"), "downgraded drop cannot be reclassified")
+  assert(!repeated.summary.contains("Opaque evidence alpha"), "raw keep reached round-two drop")
+  const incomplete = try {
+    harness.agent.transcript_auto_compact(
+      messages,
+      {
+        compact_strategy: "classify",
+        token_threshold: 0,
+        keep_last: 1,
+        provider: "mock",
+        model: "mock",
+        classify: classify + {fixture: missing_decision},
+      },
+    )
+  }
+  assert(is_err(incomplete), "missing decisions cannot become a successful partial compaction")
+  // Floor-off reaches removal at the application boundary (Rust control).
+  // The real lifecycle must then refuse the empty replacement and retain the
+  // source session; its nonempty-source guard is part of the product contract.
+  const session = harness.agent.open("classified-floor-off-" + harness.random.uuid())
+  harness.agent.compaction_policy(
+    {
+      session_id: session,
+      strategy: "classify",
+      max_tokens: 1,
+      keep_last: 1,
+      classify: classify + {policy: policy + {threshold: 0.0}},
+    },
+  )
+  for message in messages {
+    harness.agent.inject(session, message)
+  }
+  const before = harness.agent.compaction_check(session)
+  const empty = try {
+    harness.agent.compaction_run(session, {provider: "mock", model: "mock"})
+  }
+  assert(is_err(empty), "all-drop replacement must reach the lifecycle refusal")
+  assert(
+    to_string(unwrap_err(empty)).contains("carried 0"),
+    "refusal must be the source-loss guard",
+  )
+  assert_eq(harness.agent.compaction_check(session).message_count, before.message_count)
+  const oversize = harness.agent.transcript_auto_compact(
+    messages,
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_last: 1,
+      provider: "mock",
+      model: "mock",
+      classify: classify + {window_tokens: 1},
+    },
+  )
+  assert_eq(oversize.receipt.engine_strategy, "observation_mask")
+  assert_eq(oversize.receipt.classification.status, "fallback")
+  assert_eq(oversize.receipt.classification.rounds, 0)
+  assert(oversize.receipt.classification.fallback_reason != nil)
+  assert_eq(len(harness.llm.mock_calls()), 0, "window refusal happens before dispatch")
+  const protected = harness.agent.transcript_auto_compact(
+    [
+      {role: "user", content: "[no-compact] pinned original"},
+      {role: "user", content: result.summary},
+      {role: "user", content: "Eligible source"},
+      {role: "user", content: "Latest task"},
+    ],
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_last: 1,
+      recap_budget_bytes: 1,
+      provider: "mock",
+      model: "mock",
+      classify: classify,
+    },
+  )
+  assert_eq(len(protected.receipt.classification.decisions), 1)
+  assert_eq(protected.receipt.classification.decisions[0].index, 2)
+  assert(protected.summary.contains("[no-compact] pinned original"))
+  assert(protected.summary.contains(result.summary), "prior recap is carried verbatim")
+  const anchored = harness.agent.transcript_auto_compact(
+    [
+      {role: "user", content: "Old pinned head"},
+      {role: "user", content: "Latest archived user"},
+      {role: "assistant", content: "Latest evidence"},
+    ],
+    {
+      compact_strategy: "classify",
+      token_threshold: 0,
+      keep_first: 1,
+      keep_last: 0,
+      provider: "mock",
+      model: "mock",
+      classify: {policy: policy, fixture: keep_with_latest_anchor},
+    },
+  )
+  assert_eq(anchored.receipt.classification.rounds, 1)
+  assert(anchored.summary.contains("Latest evidence"))
+  const loop_session = agent_session_init(harness.agent, "Opaque loop task", nil, {model: "mock"})
+  harness.agent.session_replace_messages(loop_session.session_id, messages, "")
+  agent_autocompact_if_needed(
+    harness.agent,
+    loop_session,
+    {
+      provider: "mock",
+      model: "mock",
+      compaction: {strategy: "classify", classify: classify},
+      auto_compact: {token_threshold: 0, keep_last: 1, recap_budget_bytes: 1},
+    },
+  )
+  const loop_messages = harness.agent.session_messages(loop_session.session_id)
+  assert(loop_messages[0].content.contains("retained 0"), "agent loop reached classification")
+  assert_eq(len(harness.llm.mock_calls()), 0)
+  agent_session_finalize(
+    harness.agent,
+    loop_session.session_id,
+    {final_status: "done", stop_reason: "test", iterations: 0},
+  )
+  harness.agent.close(loop_session.session_id)
+  harness.agent.close(session)
+  harness.stdio.println(
+    "classified compaction preserves low-confidence source and reports window fallback",
+  )
+}
