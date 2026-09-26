@@ -138,10 +138,12 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
    Use provider list prices for the actual route; do not copy an aggregator's
    floating cheapest-host price into a direct-provider row.
    For a trusted release or pricing notice, run
-   `harn run scripts/provider_catalog_notice.harn -- --notice <json> --provider <provider> --model <model>`
+   `harn run scripts/provider_catalog_notice.harn -- --notice <json> --provider <inference-provider> --model <inference-model>`
    with a configured own-key route. Harn's schema-constrained model extraction
    produces a reviewable receipt and refuses ambiguous identities. A new model
    becomes an incomplete proposal, with the original extraction in the receipt.
+   Each run extracts one change; split multi-change announcements into focused
+   notice records and track every residual fact.
    Keep `--apply` off until the candidate is independently verified.
 3. For each new chat route with available credentials, run
    `harn provider tool-probe <provider> --model <id> --mode non-streaming --json true`.

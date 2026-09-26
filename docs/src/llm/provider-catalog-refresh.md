@@ -132,6 +132,9 @@ An addition needs no invented launch date and cannot insert a catalog row
 without the listed verification. The receipt retains the structured extraction
 that led to the disposition.
 
+The extractor emits at most one candidate per run. Split a notice with several
+changes into focused records and account for every remaining fact.
+
 Capability edits target the generated capability matrix's owning fragments,
 not legacy model tags. They require one exact `model_match` rule; a
 wildcard-derived family rule is deliberately rejected as ambiguous rather than
