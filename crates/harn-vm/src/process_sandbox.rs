@@ -4,8 +4,8 @@
 //! `harn-hostlib` deterministic-tool builtins) must funnel every spawn
 //! through these helpers so the active orchestration capability policy is
 //! enforced — Linux seccomp/landlock filters via `pre_exec`, macOS
-//! `sandbox-exec` wrapping, Windows AppContainer + Job Object launches
-//! through `command_output`, plus workspace-root cwd enforcement.
+//! `sandbox-exec` wrapping, no OS confinement on Windows (a warning, or a
+//! refusal under `os_hardened`), plus workspace-root cwd enforcement.
 //!
 //! The same surface also exposes [`check_fs_path_scope`] so embedders that
 //! resolve host *paths* on behalf of Harn scripts (the `harn-hostlib`

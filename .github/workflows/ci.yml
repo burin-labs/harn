@@ -2159,10 +2159,6 @@ jobs:
           # default-stack workers honor RUST_MIN_STACK; see windows-nightly.yml
           # for the full rationale.
           RUST_MIN_STACK: "16777216"
-          # Failure output stays suppressed on success; when a Windows
-          # AppContainer test times out, these milestones show whether it
-          # stalled in CreateProcess, pipe draining, or ACL cleanup.
-          HARN_WINDOWS_SANDBOX_TRACE: "1"
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
         run: |

@@ -184,9 +184,10 @@ pub enum SandboxProfile {
     Wasi,
     /// Workspace-root path enforcement plus required OS confinement.
     /// Spawns fail with `tool_rejected` if the platform's hardening
-    /// mechanism (Linux Landlock+seccomp, macOS sandbox-exec, Windows
-    /// AppContainer) is unavailable, regardless of
-    /// `HARN_HANDLER_SANDBOX`.
+    /// mechanism (Linux Landlock+seccomp, macOS sandbox-exec) is
+    /// unavailable or does not confine what the policy requires, regardless
+    /// of `HARN_HANDLER_SANDBOX`. Windows has no mechanism, so it always
+    /// refuses there.
     OsHardened,
 }
 
@@ -235,8 +236,8 @@ impl SandboxProfile {
     }
 
     /// Whether an OS mechanism (Linux Landlock+seccomp, macOS
-    /// sandbox-exec, Windows AppContainer) is applied to subprocesses
-    /// spawned under this policy.
+    /// sandbox-exec) is applied to subprocesses spawned under this policy,
+    /// where the platform has one.
     ///
     /// This axis is the only one that can deny a child something Harn did
     /// not ask about, so it is also the only one entitled to report a

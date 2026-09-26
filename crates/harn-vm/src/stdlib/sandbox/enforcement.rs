@@ -144,12 +144,16 @@ pub const TABLE: &[BackendEnforcement] = &[
         SandboxMechanism::MacosSandboxExec,
         [Enforced, Enforced, Enforced, Enforced, Unmeasured],
     ),
-    // Windows builds and runs with no OS sandbox confinement until there is
-    // a Windows use case. The conformance suite observes every one of these
-    // escaping, so an `os_hardened` spawn refuses there and every other
-    // profile carries this row as its unconfined receipt.
     BackendEnforcement::row(
-        SandboxMechanism::WindowsAppContainer,
+        SandboxMechanism::OpenbsdUnveil,
+        [Unmeasured, Unmeasured, Unmeasured, Unmeasured, Unmeasured],
+    ),
+    // Windows, and every other platform without a backend, runs children with
+    // no OS sandbox. Windows CI observes every one of these escaping, so an
+    // `os_hardened` spawn refuses there and every other profile carries this
+    // row as its unconfined receipt.
+    BackendEnforcement::row(
+        SandboxMechanism::Unconfined,
         [
             NotEnforced,
             NotEnforced,
@@ -157,10 +161,6 @@ pub const TABLE: &[BackendEnforcement] = &[
             NotEnforced,
             Unmeasured,
         ],
-    ),
-    BackendEnforcement::row(
-        SandboxMechanism::OpenbsdUnveil,
-        [Unmeasured, Unmeasured, Unmeasured, Unmeasured, Unmeasured],
     ),
 ];
 
@@ -222,11 +222,16 @@ impl BackendEnforcement {
     }
 }
 
-/// The row for the backend compiled into this binary, or `None` on a platform
-/// with no process sandbox at all.
+/// The row for the backend compiled into this binary. Every backend has one,
+/// including the unconfined one; a test holds that.
 pub fn active_enforcement() -> Option<&'static BackendEnforcement> {
-    let mechanism = super::active_backend_filesystem_mechanism();
-    TABLE.iter().find(|row| row.mechanism.as_str() == mechanism)
+    enforcement_for(super::active_backend_filesystem_mechanism())
+}
+
+fn enforcement_for(filesystem_mechanism: &str) -> Option<&'static BackendEnforcement> {
+    TABLE
+        .iter()
+        .find(|row| row.mechanism.as_str() == filesystem_mechanism)
 }
 
 /// What every spawn entry point checks before a backend prepares the child:
@@ -236,7 +241,9 @@ pub fn active_enforcement() -> Option<&'static BackendEnforcement> {
 pub(crate) fn ensure_spawn_enforceable<B: SandboxBackend + ?Sized>(
     policy: &CapabilityPolicy,
 ) -> Result<(), VmError> {
-    if let Some(refusal) = active_enforcement().and_then(|row| refusal_for(row, policy)) {
+    if let Some(refusal) =
+        enforcement_for(B::filesystem_mechanism()).and_then(|row| refusal_for(row, policy))
+    {
         return Err(refusal.into_error());
     }
     #[cfg(target_os = "macos")]
@@ -299,6 +306,9 @@ pub fn markdown_table() -> String {
 mod tests {
     use super::*;
     use crate::process_sandbox::conformance::ConformanceCase;
+    use crate::stdlib::sandbox::backend::UnconfinedBackend;
+    use crate::stdlib::sandbox::build_std_command;
+    use crate::stdlib::sandbox::SandboxRequirement;
     use ConfinementDimension as D;
 
     fn policy(profile: SandboxProfile, level: &str) -> CapabilityPolicy {
@@ -310,7 +320,7 @@ mod tests {
     }
 
     const WRITES_ONLY: BackendEnforcement = BackendEnforcement::row(
-        SandboxMechanism::WindowsAppContainer,
+        SandboxMechanism::Unconfined,
         [
             Enforced,
             Enforcement::NotEnforced,
@@ -352,31 +362,108 @@ mod tests {
 
     #[test]
     fn the_active_backend_has_a_row() {
-        let expected = cfg!(any(
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "windows",
-            target_os = "openbsd"
-        ));
-        assert_eq!(active_enforcement().is_some(), expected);
+        assert!(active_enforcement().is_some());
+        assert!(enforcement_for(UnconfinedBackend::filesystem_mechanism()).is_some());
     }
 
-    /// Windows confines nothing, so a hardened spawn there refuses and names
-    /// every dimension its policy requires, never runs as if confined.
+    /// Windows has no OS sandbox. This is the backend it runs, so the
+    /// refusal and the warning below are what a Windows spawn gets.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_runs_the_unconfined_backend() {
+        assert_eq!(crate::process_sandbox::active_backend_name(), "unconfined");
+        assert_eq!(
+            active_enforcement().map(|row| row.mechanism),
+            Some(SandboxMechanism::Unconfined)
+        );
+    }
+
+    /// Windows confines nothing, so a hardened spawn there refuses before it
+    /// is prepared and names every dimension its policy requires, never runs
+    /// as if confined.
     #[test]
     fn os_hardened_is_refused_on_windows_naming_every_required_dimension() {
-        let windows = BackendEnforcement::for_mechanism(SandboxMechanism::WindowsAppContainer)
-            .expect("windows row");
-        let refusal = refusal_for(windows, &policy(SandboxProfile::OsHardened, "process_exec"))
-            .expect("os_hardened must refuse on windows");
+        let policy = policy(SandboxProfile::OsHardened, "process_exec");
+        let error = build_std_command::<UnconfinedBackend>(
+            "probe",
+            &[],
+            &policy,
+            SandboxProfile::OsHardened,
+        )
+        .expect_err("os_hardened must refuse on windows");
+        let refusal = error
+            .sandbox_mechanism_unavailable()
+            .expect("a typed mechanism refusal");
+        assert_eq!(refusal.mechanism, SandboxMechanism::Unconfined);
+        assert_eq!(
+            refusal.availability,
+            SandboxMechanismAvailability::DoesNotConfine
+        );
         assert_eq!(
             refusal.unconfined,
             vec![D::Writes, D::Reads, D::CredentialReads, D::Network]
         );
         assert_eq!(
-            windows.receipt(),
+            refusal.to_string(),
+            "this platform has no OS process sandbox, so nothing confines writes, reads, \
+             credential reads, network; the requested sandbox profile requires it"
+        );
+        let row = BackendEnforcement::for_mechanism(SandboxMechanism::Unconfined).unwrap();
+        assert_eq!(
+            row.receipt(),
             "writes not enforced; reads not enforced; credential reads not enforced; \
              network not enforced; process unmeasured"
+        );
+    }
+
+    /// The default profile runs on Windows, unconfined, and says so: a
+    /// `handler_sandbox` warning, never a silent pass.
+    #[test]
+    fn worktree_runs_unconfined_on_windows_with_a_warning() {
+        let _selector = crate::stdlib::sandbox::handler_sandbox_test_guard();
+        crate::stdlib::sandbox::reset_sandbox_state();
+        let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
+        crate::events::add_event_sink(sink.clone());
+        let built = build_std_command::<UnconfinedBackend>(
+            "probe",
+            &[],
+            &policy(SandboxProfile::Worktree, "process_exec"),
+            SandboxProfile::Worktree,
+        );
+        crate::events::reset_event_sinks();
+        built.expect("worktree runs unconfined");
+        let warnings: Vec<String> = sink
+            .logs
+            .borrow()
+            .iter()
+            .filter(|log| log.category == "handler_sandbox")
+            .map(|log| log.message.clone())
+            .collect();
+        assert_eq!(
+            warnings,
+            vec!["this platform has no OS process sandbox; child processes run unconfined"]
+        );
+    }
+
+    /// Under an `enforce` fallback the default profile refuses instead.
+    #[test]
+    fn worktree_refuses_on_windows_under_an_enforce_fallback() {
+        let selector = crate::stdlib::sandbox::handler_sandbox_test_guard();
+        selector.set("enforce");
+        let error = build_std_command::<UnconfinedBackend>(
+            "probe",
+            &[],
+            &policy(SandboxProfile::Worktree, "process_exec"),
+            SandboxProfile::Worktree,
+        )
+        .expect_err("an enforce fallback refuses an unconfined spawn");
+        let refusal = error
+            .sandbox_mechanism_unavailable()
+            .expect("a typed mechanism refusal");
+        assert_eq!(refusal.requirement, SandboxRequirement::Fallback);
+        assert_eq!(
+            refusal.to_string(),
+            "this platform has no OS process sandbox; the resolved sandbox fallback requires it"
         );
     }
 
