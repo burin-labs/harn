@@ -3769,7 +3769,8 @@
       "id": "claude-opus-5-5",
       "name": "Claude Opus 5.5",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "Claude Opus 5.5",
       "provider": "anthropic",
@@ -3786,7 +3787,8 @@
           "pdf"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -17646,7 +17648,8 @@
       "id": "gpt-6-luna",
       "name": "GPT-6 Luna",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-6 Luna",
       "blurb": "Fastest and lowest-cost GPT-6 option for routine edits, summaries, and extraction.",
@@ -17664,7 +17667,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -17881,7 +17885,8 @@
       "id": "gpt-6-sol",
       "name": "GPT-6 Sol",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-6 Sol",
       "blurb": "Strong GPT-6 reasoning for everyday coding, planning, and review at a moderate cost.",
@@ -17899,7 +17904,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -18772,7 +18778,8 @@
       "id": "anthropic/claude-fable-5.1",
       "name": "Claude Fable 5.1 (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "Claude Fable 5.1",
       "provider": "openrouter",
@@ -18786,7 +18793,8 @@
           "pdf"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -19105,7 +19113,8 @@
       "id": "anthropic/claude-opus-5.5",
       "name": "Claude Opus 5.5 (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "Claude Opus 5.5",
       "provider": "openrouter",
@@ -19119,7 +19128,8 @@
           "pdf"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -22655,7 +22665,8 @@
       "id": "openai/gpt-6-astra",
       "name": "GPT-6 Astra (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-6 Astra",
       "provider": "openrouter",
@@ -22670,7 +22681,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -22745,7 +22757,8 @@
       "id": "openai/gpt-6-astra-pro",
       "name": "GPT-6 Astra Pro (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-6 Astra Pro",
       "provider": "openrouter",
@@ -22760,7 +22773,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -22835,7 +22849,8 @@
       "id": "openai/gpt-6-luna",
       "name": "GPT-6 Luna (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-6 Luna",
       "provider": "openrouter",
@@ -22850,7 +22865,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -22926,7 +22942,8 @@
       "id": "openai/gpt-6-luna-pro",
       "name": "GPT-6 Luna Pro (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-6 Luna Pro",
       "provider": "openrouter",
@@ -22941,7 +22958,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -23017,7 +23035,8 @@
       "id": "openai/gpt-6-sol",
       "name": "GPT-6 Sol (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-6 Sol",
       "provider": "openrouter",
@@ -23032,7 +23051,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -23108,7 +23128,8 @@
       "id": "openai/gpt-6-sol-pro",
       "name": "GPT-6 Sol Pro (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GPT-6 Sol Pro",
       "provider": "openrouter",
@@ -23123,7 +23144,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -24570,7 +24592,8 @@
       "id": "x-ai/grok-4.7",
       "name": "Grok 4.7 (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "Grok 4.7",
       "provider": "openrouter",
@@ -24582,7 +24605,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -28550,7 +28574,8 @@
       "id": "grok-4.7",
       "name": "Grok 4.7",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "Grok 4.7",
       "provider": "xai",
@@ -28566,7 +28591,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
