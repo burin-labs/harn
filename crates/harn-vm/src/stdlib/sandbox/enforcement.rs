@@ -131,7 +131,7 @@ pub struct BackendEnforcement {
     cells: [Enforcement; 5],
 }
 
-use Enforcement::{Enforced, Unmeasured};
+use Enforcement::{Enforced, NotEnforced, Unmeasured};
 
 /// The table. Filled only from what the conformance suite measures on each
 /// platform's CI; see the module docs.
@@ -144,9 +144,19 @@ pub const TABLE: &[BackendEnforcement] = &[
         SandboxMechanism::MacosSandboxExec,
         [Enforced, Enforced, Enforced, Enforced, Unmeasured],
     ),
+    // Windows builds and runs with no OS sandbox confinement until there is
+    // a Windows use case. The conformance suite observes every one of these
+    // escaping, so an `os_hardened` spawn refuses there and every other
+    // profile carries this row as its unconfined receipt.
     BackendEnforcement::row(
         SandboxMechanism::WindowsAppContainer,
-        [Unmeasured, Unmeasured, Unmeasured, Unmeasured, Unmeasured],
+        [
+            NotEnforced,
+            NotEnforced,
+            NotEnforced,
+            NotEnforced,
+            Unmeasured,
+        ],
     ),
     BackendEnforcement::row(
         SandboxMechanism::OpenbsdUnveil,
@@ -349,6 +359,25 @@ mod tests {
             target_os = "openbsd"
         ));
         assert_eq!(active_enforcement().is_some(), expected);
+    }
+
+    /// Windows confines nothing, so a hardened spawn there refuses and names
+    /// every dimension its policy requires, never runs as if confined.
+    #[test]
+    fn os_hardened_is_refused_on_windows_naming_every_required_dimension() {
+        let windows = BackendEnforcement::for_mechanism(SandboxMechanism::WindowsAppContainer)
+            .expect("windows row");
+        let refusal = refusal_for(windows, &policy(SandboxProfile::OsHardened, "process_exec"))
+            .expect("os_hardened must refuse on windows");
+        assert_eq!(
+            refusal.unconfined,
+            vec![D::Writes, D::Reads, D::CredentialReads, D::Network]
+        );
+        assert_eq!(
+            windows.receipt(),
+            "writes not enforced; reads not enforced; credential reads not enforced; \
+             network not enforced; process unmeasured"
+        );
     }
 
     /// Both sides of the refusal on a backend that confines only writes: the

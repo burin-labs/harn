@@ -252,7 +252,7 @@ the `network` ceiling. No policy term requires process confinement yet.
 |---|---|---|---|---|---|
 | Linux Landlock | enforced | enforced | enforced | enforced | unmeasured |
 | macOS sandbox-exec | enforced | enforced | enforced | enforced | unmeasured |
-| Windows AppContainer | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured |
+| Windows AppContainer | not enforced | not enforced | not enforced | not enforced | unmeasured |
 | OpenBSD unveil | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured |
 <!-- sandbox-enforcement-table:end -->
 
