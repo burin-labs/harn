@@ -22,7 +22,7 @@ import {
   rust_cache_refresh_miss_only_errors,
   save_requested,
   sccache_action_cache_size_errors,
-  windows_pr_native_feedback_errors,
+  windows_native_admission_errors,
   windows_release_certify_warm_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
@@ -586,8 +586,8 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(
   const declared = workflows()
   assert_eq(
     ci_cache_policy_errors(policy(), action(), node_action(), declared)
-      + windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"])
-      + windows_pr_native_feedback_errors(
+      + windows_shared_cache_errors(declared["windows-nightly.yml"])
+      + windows_native_admission_errors(
         policy(),
         declared["ci.yml"],
         declared["windows-nightly.yml"],
@@ -604,13 +604,9 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
   task: unknown,
 ) {
   const declared = workflows()
-  assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
+  assert_eq(windows_shared_cache_errors(declared["windows-nightly.yml"]), [])
   assert_eq(
-    windows_pr_native_feedback_errors(
-      policy(),
-      declared["ci.yml"],
-      declared["windows-nightly.yml"],
-    ),
+    windows_native_admission_errors(policy(), declared["ci.yml"], declared["windows-nightly.yml"]),
     [],
   )
   assert_eq(windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"]), [])
@@ -618,437 +614,157 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
   assert_eq(actions_cache_capacity_errors(policy()), [])
 }
 
-pipeline test_windows_native_runner_requires_blacksmith_with_safe_fallback(
-  harness: Harness,
-  task: unknown,
-) {
-  const declared = workflows()
-  const windows = declared["ci.yml"].jobs.windows
-  const hosted_only = {
-    ...declared["ci.yml"],
-    jobs: {...declared["ci.yml"].jobs, windows: {...windows, "runs-on": "windows-latest"}},
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), hosted_only, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must default to windows-latest, with HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-8vcpu-windows-2025",
-      ),
-  )
-  const fixed_timeout = {
-    ...declared["ci.yml"],
-    jobs: {...declared["ci.yml"].jobs, windows: {...windows, "timeout-minutes": 60}},
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), fixed_timeout, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must cap paid Windows runs at 60 minutes and allow the hosted fallback 90 minutes",
-      ),
-  )
-  const wrong_tier = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {...windows, env: {...windows.env, HARN_RUNNER_TIER: "blacksmith"}},
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), wrong_tier, declared["windows-nightly.yml"])
-      .contains("ci.yml:windows must mirror its Blacksmith/hosted runner tier"),
-  )
-  const no_artifact_authority = {
-    ...declared["ci.yml"],
-    jobs: {...declared["ci.yml"].jobs, windows: {...windows, permissions: {contents: "read"}}},
-  }
-  assert(
-    windows_pr_native_feedback_errors(
-      policy(),
-      no_artifact_authority,
-      declared["windows-nightly.yml"],
-    )
-      .contains(
-        "ci.yml:windows must grant only contents: read and actions: read for artifact discovery",
-      ),
-  )
-  const dev_drive_on_blacksmith = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Set up Dev Drive" {
-              return step
-            }
-            return {...step, if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'")}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(
-      policy(),
-      dev_drive_on_blacksmith,
-      declared["windows-nightly.yml"],
-    )
-      .contains(
-        "ci.yml:windows must skip Hyper-V Dev Drive setup on Blacksmith and retain it for the github-hosted fallback",
-      ),
-  )
-}
-
-pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_and_silent_tail(
-  harness: Harness,
-  task: unknown,
-) {
-  const declared = workflows()
-  const windows = declared["ci.yml"].jobs.windows
-  const small_drive = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Set up Dev Drive" {
-              return step
-            }
-            return {...step, with: {...step.with, "drive-size": "25GB"}}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), small_drive, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows Dev Drive must reserve the full-workspace ceiling outside pull requests",
-      ),
-  )
-  const duplicate_profile = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Produce exact Windows Harn binary" {
-              return step
-            }
-            return {...step, run: "cargo build --locked -p harn-cli"}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), duplicate_profile, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must publish its test-profile freshness receipt after native Cargo and before smoke",
-      ),
-  )
-  const early_producer = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.filter(
-          { step -> trim(step?.name ?? "") == "Produce exact Windows Harn binary" },
-        )
-          .to_list()
-          + windows.steps.filter(
-            { step -> trim(step?.name ?? "") != "Produce exact Windows Harn binary" },
-          )
-            .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), early_producer, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must publish its test-profile freshness receipt after native Cargo and before smoke",
-      ),
-  )
-  const rebuilding_tail = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Compile Windows tests and run unit slice" {
-              return step
-            }
-            return {...step, run: step.run + "\nHARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print"}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), rebuilding_tail, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows native tests must keep the producer feature graph aligned without resolving Harn",
-      ),
-  )
-  const feature_drift = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Compile Windows tests and run unit slice" {
-              return step
-            }
-            return {...step, run: "cargo nextest run"}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), feature_drift, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows native tests must keep the producer feature graph aligned without resolving Harn",
-      ),
-  )
-  const ambient_harn_telemetry = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") == "Compile Windows tests and run unit slice" {
-              return {
-                ...step,
-                run: step.run
-                  + "\nprintf 'HARN_NATIVE_TEST_COMPLETED_EPOCH=%s\\n' 0 >> \"$GITHUB_ENV\"",
-              }
-            }
-            if trim(step?.name ?? "") == "Smoke test harn run" {
-              return {...step, env: {...step.env, HARN_NATIVE_TEST_COMPLETED_EPOCH: "0"}}
-            }
-            return step
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  const ambient_harn_errors = windows_pr_native_feedback_errors(
-    policy(),
-    ambient_harn_telemetry,
-    declared["windows-nightly.yml"],
-  )
-  assert(
-    ambient_harn_errors.contains(
-      "ci.yml:windows native completion telemetry must use its typed step output, not Harn's reserved environment namespace",
-    ),
-  )
-  assert(
-    ambient_harn_errors.contains(
-      "ci.yml:windows smoke must consume native completion telemetry through the typed step output without ambient Harn variables",
-    ),
-  )
-  const direct_smoke = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Smoke test harn run" {
-              return step
-            }
-            return {...step, run: "target/debug/harn.exe\" run smoke.harn"}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), direct_smoke, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution and filesystem identity",
-      ),
-  )
-  const textual_path_identity = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Smoke test harn run" {
-              return step
-            }
-            return {...step, run: step.run.replace(" -ef ", " == ")}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(
-      policy(),
-      textual_path_identity,
-      declared["windows-nightly.yml"],
-    )
-      .contains(
-        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution and filesystem identity",
-      ),
-  )
-  const silent_tail = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.filter(
-          { step -> return trim(step?.name ?? "") != "Report Windows storage (terminal)" },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), silent_tail, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must always emit the terminal storage receipt through the shared budget owner",
-      ),
-  )
-}
-
-pipeline test_windows_pr_warm_artifact_is_primary_fail_open_and_provenanced(
-  harness: Harness,
-  task: unknown,
-) {
-  const declared = workflows()
-  const windows = declared["ci.yml"].jobs.windows
-  const cache = windows.steps.filter(
-    { step -> return step?.uses == "./.github/actions/rust-cache" },
-  )
-    .first()
-  // GitHub evaluates this exact guard after the receipt-producing restore:
-  // hit skips the provider cache; miss or absent output runs the fallback.
-  assert_eq(
-    cache.if,
-    "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'",
-  )
-  assert_eq(windows.permissions, {contents: "read", actions: "read"})
-  const reversed = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.slice(0, 4)
-          + [windows.steps[5], windows.steps[4]]
-          + windows.steps.slice(6),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), reversed, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must try the main warm artifact before its provider-local rust-cache fallback",
-      ),
-  )
-  const layered = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if step?.uses == "./.github/actions/rust-cache" {
-              return {...step, if: nil}
-            }
-            return step
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), layered, declared["windows-nightly.yml"]).contains(
-      "ci.yml:windows must use rust-cache only when the provider-neutral warm artifact misses",
-    ),
-  )
-  const restore = windows.steps[4]
-  const closed = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.slice(0, 4)
-          + [{...restore, "continue-on-error": false, run: restore.run.split("\n")[0]}]
-          + windows.steps.slice(5),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), closed, declared["windows-nightly.yml"]).contains(
-      "ci.yml:windows must fail-open through one output-producing workspace-windows-warm restore",
-    ),
-  )
-  const silent = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.filter(
-          { step -> return trim(step?.name ?? "") != "Report Windows warm restore outcome" },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), silent, declared["windows-nightly.yml"]).contains(
-      "ci.yml:windows must always report warm-artifact outcome, producer commit, and source run",
-    ),
-  )
-}
-
-pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(
+/**
+ * Native Windows is advisory. Each rule below is exercised by the regression
+ * it exists to refuse, so none of them can be deleted without a red test.
+ */
+pipeline test_windows_native_admission_refuses_a_native_windows_ci_job(
   harness: Harness,
   task: unknown,
 ) {
   const declared = workflows()
   const nightly = declared["windows-nightly.yml"]
+  const restored = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {"runs-on": windows_runner_expression(), steps: []},
+    },
+  }
+  assert_eq(
+    windows_native_admission_errors(policy(), restored, nightly),
+    [
+      "ci.yml:windows runs on a native Windows runner; native Windows belongs to windows-nightly.yml (nightly, dispatch, and release pull requests), not pull-request or merge-group admission",
+    ],
+  )
+  // An unreadable ci.yml has no jobs, which would otherwise read as "no
+  // Windows job" and pass.
+  assert_eq(
+    windows_native_admission_errors(policy(), {}, nightly),
+    ["ci.yml must declare jobs for the native Windows admission check to read"],
+  )
+}
+
+pipeline test_windows_native_admission_pins_release_pull_request_routing(
+  harness: Harness,
+  task: unknown,
+) {
+  const declared = workflows()
+  const ci = declared["ci.yml"]
+  const nightly = declared["windows-nightly.yml"]
+  const path_gated = {...nightly, on: {...nightly.on, pull_request: {paths: ["crates/**"]}}}
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, path_gated),
+    [
+      "windows-nightly.yml pull_request trigger must carry no path filter; the release route alone decides which pull requests run",
+    ],
+  )
+  const queued = {...nightly, on: {...nightly.on, merge_group: nil}}
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, queued),
+    ["windows-nightly.yml must not run on merge_group"],
+  )
+  const no_release_prs = {...nightly, on: {schedule: nightly.on.schedule, workflow_dispatch: nil}}
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, no_release_prs),
+    ["windows-nightly.yml must run on release pull requests"],
+  )
+  const route = nightly.jobs.route
+  const inline_matcher = {
+    ...nightly,
+    jobs: {
+      ...nightly.jobs,
+      route: {
+        ...route,
+        steps: route.steps.map(
+          { step ->
+            if trim(step?.id ?? "") == "decide" {
+              return {...step, run: "[[ \"$PR_HEAD_REF\" == release/v* ]] && echo run=true"}
+            }
+            return step
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, inline_matcher),
+    [
+      "windows-nightly.yml:route must decide pull-request runs through .github/scripts/release-ref.sh release_pr_only_lane_run and publish it as outputs.run",
+    ],
+  )
+  const unrouted = {
+    ...nightly,
+    jobs: {
+      ...nightly.jobs,
+      nextest: {...nightly.jobs.nextest, needs: nil, if: "github.repository == 'burin-labs/harn'"},
+    },
+  }
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, unrouted),
+    [
+      "windows-nightly.yml:nextest must need route and run only when it says `needs.route.outputs.run == 'true'`",
+    ],
+  )
+}
+
+pipeline test_windows_nightly_producer_keeps_its_runner_tier_contract(
+  harness: Harness,
+  task: unknown,
+) {
+  const declared = workflows()
+  const ci = declared["ci.yml"]
+  const nightly = declared["windows-nightly.yml"]
+  const producer = nightly.jobs.nextest
+  const with_producer = { job -> return {...nightly, jobs: {...nightly.jobs, nextest: job}} }
+  // The 8 vCPU expression keeps the runner family, the tier, and the single
+  // opt-in variable, so it decides whether the size is genuinely pinned.
+  assert_eq(
+    windows_native_admission_errors(
+      policy(),
+      ci,
+      with_producer({...producer, "runs-on": windows_runner_expression()}),
+    ),
+    [
+      "windows-nightly.yml:nextest must default to windows-latest, with HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-16vcpu-windows-2025",
+    ],
+  )
+  const variable_only_drive = {
+    ...producer,
+    steps: producer.steps.map(
+      { step ->
+        if trim(step?.name ?? "") == "Set up Dev Drive" {
+          return {...step, if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'")}
+        }
+        return step
+      },
+    )
+      .to_list(),
+  }
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, with_producer(variable_only_drive)),
+    [
+      "windows-nightly.yml:nextest must skip Hyper-V Dev Drive setup on Blacksmith and retain it for the github-hosted fallback",
+    ],
+  )
+}
+
+pipeline test_windows_test_stack_is_runtime_only_and_exact(harness: Harness, task: unknown) {
+  const declared = workflows()
+  const ci = declared["ci.yml"]
+  const nightly = declared["windows-nightly.yml"]
   const cache_polluted = {...nightly, env: {RUST_MIN_STACK: "16777216"}}
   assert(
-    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], cache_polluted).contains(
-      "Windows RUST_MIN_STACK is test-runtime-only and must not enter producer or consumer cache-action environments",
+    windows_native_admission_errors(policy(), ci, cache_polluted).contains(
+      "Windows RUST_MIN_STACK is test-runtime-only and must not enter the producer's cache-action environment",
     ),
   )
   const producer = nightly.jobs.nextest
   const wrong_stack = {
     ...nightly,
     jobs: {
+      ...nightly.jobs,
       nextest: {
         ...producer,
         steps: producer.steps.map(
@@ -1063,28 +779,9 @@ pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(
       },
     },
   }
-  assert(
-    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], wrong_stack).contains(
-      "Windows test steps must set identical RUST_MIN_STACK=16777216 runtime stacks",
-    ),
-  )
-  // The producer and its pull-request consumer ride the same Blacksmith ladder
-  // through one fallback variable, but they are pinned to different sizes: the
-  // nightly compiles and runs the whole workspace, so it holds the 16 vCPU rung.
-  // A producer wearing the consumer's own 8 vCPU expression keeps every other
-  // property this checker reads -- the runner family, the tier, and the single
-  // HARN_CI_ENABLE_BLACKSMITH_WINDOWS opt-in -- so it is the case that decides
-  // whether the size is genuinely pinned or merely implied by the family.
-  const consumer_sized_writer = {
-    ...nightly,
-    jobs: {nextest: {...producer, "runs-on": windows_runner_expression()}},
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], consumer_sized_writer)
-      .contains(
-        "windows-nightly.yml:nextest must default to windows-latest, with "
-          + "HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-16vcpu-windows-2025",
-      ),
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, wrong_stack),
+    ["windows-nightly.yml:nextest must set RUST_MIN_STACK=16777216 on its test step"],
   )
 }
 
@@ -1112,7 +809,7 @@ pipeline test_windows_shared_cache_requires_release_certification_bypass(
     },
   }
   assert(
-    windows_shared_cache_errors(declared["ci.yml"], invalid).contains(
+    windows_shared_cache_errors(invalid).contains(
       "windows-nightly.yml:nextest must skip the shared target cache for release-certify refs",
     ),
   )
@@ -1212,6 +909,17 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
   const producer = declared["windows-nightly.yml"]
   const declared_policy = policy()
   assert_eq(windows_release_certify_warm_errors(declared_policy, producer), [])
+  // The job's own block replaces the workflow's, so a workflow-level grant
+  // does not reach a job that declares `contents: read` alone.
+  const read_only_job = {
+    ...producer,
+    permissions: {contents: "read", actions: "write"},
+    jobs: {...producer.jobs, nextest: {...producer.jobs.nextest, permissions: {contents: "read"}}},
+  }
+  assert_eq(
+    windows_release_certify_warm_errors(declared_policy, read_only_job),
+    ["windows-nightly.yml:nextest must grant actions: write for warm artifact upload/download"],
+  )
   const without_restore = {
     ...producer,
     jobs: {
@@ -1424,18 +1132,13 @@ pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_targe
       },
     },
   }
-  const errors = windows_shared_cache_errors(declared["ci.yml"], invalid)
-  assert(
-    errors.contains(
-      "workspace-windows producer and consumer must cache CARGO_TARGET_DIR explicitly",
-    ),
+  assert_eq(
+    windows_shared_cache_errors(invalid),
+    [
+      "workspace-windows producer must cache CARGO_TARGET_DIR explicitly",
+      "workspace-windows producer must use one stable native restore namespace",
+    ],
   )
-  assert(
-    errors.contains(
-      "workspace-windows producer and consumer must use one stable native restore namespace",
-    ),
-  )
-  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
 }
 
 pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(

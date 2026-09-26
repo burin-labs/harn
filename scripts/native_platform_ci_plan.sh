@@ -7,13 +7,14 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.github/scripts/release
 
 usage() {
   cat <<'EOF'
-usage: scripts/native_platform_ci_plan.sh --platform windows|macos --event EVENT \
+usage: scripts/native_platform_ci_plan.sh --platform macos --event EVENT \
   --changed-files PATH [--head-ref REF] [--ci-diff PATH] \
   [--policy-diff PATH] [--workflow PATH]
 
 Prints true when the changed-file set should run the requested native platform
 CI lane. The path policy is intentionally centralized here instead of duplicated
-inside ci.yml routing jobs.
+inside ci.yml routing jobs. Native Windows is not a ci.yml lane: it runs in
+windows-nightly.yml on its schedule, on dispatch, and on release pull requests.
 EOF
 }
 
@@ -67,8 +68,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$platform" != "windows" && "$platform" != "macos" ]]; then
-  echo "error: --platform must be windows or macos" >&2
+if [[ "$platform" != "macos" ]]; then
+  echo "error: --platform must be macos" >&2
   exit 2
 fi
 if [[ -z "$event_name" || -z "$changed_files" ]]; then
@@ -190,45 +191,24 @@ release_control_path() {
 release_control_diff_mentions_platform() {
   # Release workflows and smoke scripts are mostly control-plane code. A
   # control-plane-only edit should be covered by action hygiene and release
-  # script tests instead of paying a hosted native Windows/macOS compile. If CI
-  # cannot provide the diff, keep the old conservative behavior and run.
+  # script tests instead of paying a hosted native macOS compile. If CI cannot
+  # provide the diff, keep the old conservative behavior and run.
   if [[ -z "$policy_diff" || ! -r "$policy_diff" || ! -s "$policy_diff" ]]; then
     return 0
   fi
 
-  case "$platform" in
-    windows)
-      grep -Eiq 'windows|Windows_NT|x86_64-pc-windows-msvc|msvc|powershell|pwsh|\.exe' "$policy_diff"
-      ;;
-    macos)
-      grep -Eiq 'macos|Darwin|apple-darwin|x86_64-apple|aarch64-apple|codesign|xcrun|notar' "$policy_diff"
-      ;;
-  esac
+  grep -Eiq 'macos|Darwin|apple-darwin|x86_64-apple|aarch64-apple|codesign|xcrun|notar' "$policy_diff"
 }
 
 path_matches_platform() {
   local path="$1"
   # Keep native source/workflow path policy here, not in ci.yml. The ci.yml file
   # itself is handled separately through hunk/range inspection so unrelated
-  # workflow edits do not pay hosted native Windows/macOS compiles.
-  case "$platform" in
-    windows)
-      [[ "$path" =~ ^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|scripts/ci/affected_crate_args\.sh|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime(/.*|\.rs))|crates/harn-modules/src/(package_execution(/.*|\.rs)|package_imports\.rs|package_snapshot\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|crates/harn-terminal/.*|crates/harn-cli/src/commands/(upgrade(/.*|\.rs)|models/batch/execution\.rs)|\.github/workflows/windows-nightly\.yml)$ ]]
-      ;;
-    macos)
-      [[ "$path" =~ ^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-modules/src/package_execution(/.*|\.rs)|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime(/.*|\.rs))|crates/harn-vm/tests/harn_vm/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/harn_hostlib/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-terminal/.*|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|commands/dump_protocol_artifacts/.*|package/manifest\.rs)|spec/protocol-artifacts/HarnProtocol\.swift|\.github/workflows/macos-nightly\.yml)$ ]]
-      ;;
-  esac
+  # workflow edits do not pay hosted native macOS compiles.
+  [[ "$path" =~ ^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-modules/src/package_execution(/.*|\.rs)|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime(/.*|\.rs))|crates/harn-vm/tests/harn_vm/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/harn_hostlib/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-terminal/.*|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|commands/dump_protocol_artifacts/.*|package/manifest\.rs)|spec/protocol-artifacts/HarnProtocol\.swift|\.github/workflows/macos-nightly\.yml)$ ]]
 }
 
 if [[ "$event_name" != "push" && "$event_name" != "pull_request" && "$event_name" != "merge_group" ]]; then
-  echo false
-  exit 0
-fi
-
-# Native Windows admission belongs to the queued candidate. A PR-head build is
-# nearby evidence, not proof of the rebased/squashed tree that will land.
-if [[ "$platform" == "windows" && "$event_name" == "pull_request" ]]; then
   echo false
   exit 0
 fi
@@ -244,20 +224,10 @@ while IFS= read -r changed_path || [[ -n "$changed_path" ]]; do
   changed_path="${changed_path#./}"
   [[ -z "$changed_path" ]] && continue
   if [[ "$changed_path" == ".github/workflows/ci.yml" ]]; then
-    case "$platform" in
-      windows)
-        if ci_diff_touches_platform "windows"; then
-          echo true
-          exit 0
-        fi
-        ;;
-      macos)
-        if ci_diff_touches_platform "macos"; then
-          echo true
-          exit 0
-        fi
-        ;;
-    esac
+    if ci_diff_touches_platform "macos"; then
+      echo true
+      exit 0
+    fi
   elif release_control_path "$changed_path"; then
     if release_control_diff_mentions_platform; then
       echo true

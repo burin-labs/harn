@@ -629,8 +629,8 @@ jobs:
       # FULLY REPLACES the workflow-level `-D warnings` (env vars clobber, they
       # do not merge — and they also clobber any `.cargo/config.toml` rustflags,
       # of which there are none), so `-D warnings` is re-stated here and the mold
-      # link-arg appended. Linux-only: the windows/macos jobs never see this and
-      # keep the workflow-level `-D warnings`.
+      # link-arg appended. Linux-only: the macOS job never sees this and
+      # keeps the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted' }}
     outputs:
@@ -1845,418 +1845,17 @@ jobs:
         if: always()
         run: make repository-policies
 
-  windows-plan:
-    name: Windows CI routing
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-    outputs:
-      run_windows: ${{ steps.detect.outputs.run_windows }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Full history makes each event's owning diff base reachable: PR base,
-          # merge-group base, or the pushed ref's previous tip.
-          fetch-depth: 0
-      - name: Detect Windows-relevant changes
-        id: detect
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
-          # Previous tip of the pushed ref — the diff base for `push` events.
-          # Routed through env (never inlined into the script) to avoid a
-          # template-injection sink, matching how BASE_SHA is handled.
-          BEFORE_SHA: ${{ github.event.before || '' }}
-          GITHUB_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          COMMIT_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          run_windows=false
-
-          # A successful native job on the exact merge-group candidate is the
-          # admission proof for the identical main SHA. Any missing, skipped,
-          # failed, cancelled, or ambiguous proof falls through to the normal
-          # main-push backstop.
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            if proven="$(
-              ./scripts/ci_merge_group_proof.sh \
-                "$REPOSITORY" ci.yml "$COMMIT_SHA" \
-                --require-job "Rust on Windows (build + smoke test)"
-            )" && [[ "$proven" == "true" ]]; then
-              echo "::notice::windows: exact merge-group candidate already passed native Windows; skipping duplicate main proof."
-              echo "run_windows=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "::notice::windows: exact native merge-group proof unavailable; retaining the main fallback."
-          fi
-
-          # Pick the canonical diff base per event. Internal PR heads do not
-          # run native Windows: the merge-group candidate is the sole pre-merge
-          # admission owner and exercises the queued tree, not a nearby head.
-          diff_base=""
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            diff_base="$BEFORE_SHA"
-          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
-            diff_base="$BASE_SHA"
-          elif [[ "$EVENT_NAME" == "merge_group" ]]; then
-            diff_base="$MERGE_GROUP_BASE_SHA"
-          fi
-
-          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" || "$EVENT_NAME" == "merge_group" ]]; then
-            if [[ -z "$diff_base" || "$diff_base" == "0000000000000000000000000000000000000000" ]]; then
-              # New branch / first push / force-push / missing PR base — the diff
-              # base is invalid, so run the full build defensively.
-              echo "windows: missing or zero diff base ($EVENT_NAME); running Windows smoke defensively."
-              run_windows=true
-            elif ! git diff --name-only "$diff_base" HEAD > "$RUNNER_TEMP/windows-changed-files.txt" 2>/dev/null; then
-              # Diff failed (e.g. base SHA not present) — never silently skip the
-              # backstop; run defensively.
-              echo "windows: git diff against $diff_base failed; running Windows smoke defensively."
-              run_windows=true
-            else
-              ci_diff="$RUNNER_TEMP/windows-ci-workflow.diff"
-              policy_diff="$RUNNER_TEMP/windows-native-policy.diff"
-              : > "$ci_diff"
-              : > "$policy_diff"
-              if grep -Fxq ".github/workflows/ci.yml" "$RUNNER_TEMP/windows-changed-files.txt"; then
-                if ! git diff --unified=0 "$diff_base" HEAD -- .github/workflows/ci.yml > "$ci_diff" 2>/dev/null; then
-                  echo "windows: ci.yml diff against $diff_base failed; running Windows smoke defensively."
-                  run_windows=true
-                fi
-              fi
-              if ! git diff --unified=0 "$diff_base" HEAD -- \
-                .github/release-runner-policy.json \
-                .github/workflows/build-release-binaries.yml \
-                .github/workflows/release-smoke.yml \
-                scripts/release_runner_matrix.sh \
-                scripts/release_smoke.harn \
-                scripts/smoke_installed_binary.sh > "$policy_diff" 2>/dev/null; then
-                echo "windows: native policy diff against $diff_base failed; running Windows smoke defensively."
-                run_windows=true
-              fi
-              cat "$RUNNER_TEMP/windows-changed-files.txt"
-              if [[ "$run_windows" != "true" ]]; then
-                run_windows="$(
-                  ./scripts/native_platform_ci_plan.sh \
-                    --platform windows \
-                    --event "$EVENT_NAME" \
-                    --head-ref "$PR_HEAD_REF" \
-                    --changed-files "$RUNNER_TEMP/windows-changed-files.txt" \
-                    --ci-diff "$ci_diff" \
-                    --policy-diff "$policy_diff"
-                )"
-              fi
-            fi
-          fi
-
-          echo "run_windows=$run_windows" >> "$GITHUB_OUTPUT"
-          echo "windows: run=$run_windows"
-
-  windows:
-    name: Rust on Windows (build + smoke test)
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-8vcpu-windows-2025' || 'windows-latest' }}
-    permissions:
-      contents: read
-      actions: read
-    # Standard hosted Windows runners need more wall time than the explicit
-    # Blacksmith escape hatch. Keep paid runs bounded while giving the free
-    # default enough room to compile and execute its canonical smoke proof.
-    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 60 || 90 }}
-    needs: windows-plan
-    # Windows-sensitive candidates run once at merge-group admission. An exact
-    # successful candidate proof suppresses the identical main-push run; every
-    # uncertain or non-identical case retains the main backstop. Nightly keeps
-    # its independent full Windows surface.
-    if: needs.windows-plan.outputs.run_windows == 'true'
-    env:
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted' }}
-      # EXPERIMENT (toggle via the HARN_WINDOWS_LLD repo variable): drive rustc
-      # at the toolchain-bundled rust-lld instead of MSVC link.exe — the Windows
-      # analog of the `-Clink-arg=-fuse-ld=mold` the Linux rust-checks lane uses.
-      # link.exe is the Windows warm-path long pole once the dep graph is cached;
-      # rust-lld links far faster (community reports ~2x full / ~5x incremental).
-      # This is NOT a no-op: rust-lld became the default only on
-      # x86_64-unknown-linux-gnu in 1.90 — x86_64-pc-windows-msvc still defaults
-      # to link.exe on 1.95, and `-Clinker-features=+lld` is stable on linux-gnu
-      # ONLY, so the linux flag can't express it. rustc self-resolves the bundled
-      # `rust-lld` and injects the `-flavor link` (lld-link) mode for the msvc
-      # target. A job-level RUSTFLAGS FULLY REPLACES the workflow-level
-      # `-D warnings` (env vars clobber, they do not merge — see the rust-checks
-      # gotcha), so `-D warnings` is restated. Kept byte-identical to the
-      # windows-nightly.yml writer so the shared-cache policy's consumer/producer
-      # input comparison still matches (see scripts/check_ci_cache_policy.harn).
-      RUSTFLAGS: ${{ vars.HARN_WINDOWS_LLD == 'on' && '-D warnings -Clinker=rust-lld.exe' || '-D warnings' }}
-    # Drop sccache on the Windows job. PR #2114 documented 0% cache-hit
-    # rate on the harn-vm Windows compile plus periodic `os error 10054`
-    # failures where the GHA backend dropped the rmeta upload mid-rustc.
-    # build-release-binaries.yml and release-smoke.yml already skip
-    # sccache on Windows. Swatinem/rust-cache stays in place.
-    #
-    # Bench on PRs #2127 (E2 line-tables-only), #2128 (E1 this change),
-    # #2129 (E3 both) — compile+test step, warm-cache rerun:
-    #     baseline 8:29 → this PR 6:21 (~25% saved).
-    # Pairing this with `CARGO_PROFILE_DEV_DEBUG=line-tables-only` (E3)
-    # was tested and actually regressed Windows compile time vs E1 alone,
-    # so the dev-debug override is not applied here.
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # PR Windows runs use the same merge-base affected-crate selection as
-          # Linux fast feedback. Merge-queue and main pushes keep the shallow
-          # checkout because they run the full workspace unconditionally.
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
-      # EXPERIMENT (toggle via the HARN_WINDOWS_DEVDRIVE repo variable): move the
-      # Cargo home and target dir onto a ReFS Dev Drive VHDX. Windows filesystem
-      # overhead plus Defender real-time scanning of the thousands of small
-      # object/rmeta writes a cold compile emits is the classic Windows CI tax; a
-      # Dev Drive's performance mode + copy-on-write cut it. The windows-2025
-      # runner image dropped its D: drive (2025-07-14) and ships no pre-created
-      # Dev Drive, so it is created here. Placed before the toolchain and cache
-      # steps so CARGO_HOME / CARGO_TARGET_DIR are already redirected when rustup
-      # and Swatinem/rust-cache run. The cache invocation below passes the
-      # redirected target explicitly; rust-cache otherwise ignores
-      # CARGO_TARGET_DIR. Blacksmith's Windows image does not expose the Hyper-V
-      # New-VHD command required by this action, so the paid lane uses the native
-      # filesystem and only the GitHub-hosted fallback creates the same ReFS Dev
-      # Drive as the windows-nightly.yml writer.
-      - name: Set up Dev Drive
-        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted' }}
-        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
-        with:
-          # A warm target occupies about 15 GB before a changed workspace is
-          # linked. Pull requests use an affected package set; main/push is the
-          # full-workspace backstop and needs the same 50 GB ceiling already
-          # proven by release certification (harn#6485 / harn#6964).
-          drive-size: ${{ github.event_name == 'pull_request' && '25GB' || '50GB' }}
-          drive-format: ReFS
-          env-mapping: |
-            CARGO_HOME,{{ DEV_DRIVE }}/.cargo
-            CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
-      - uses: ./.github/actions/rust-toolchain
-      - name: Report Windows storage (initial)
-        id: windows-storage-initial
-        if: always()
-        shell: bash
-        run: ./scripts/ci/windows_storage_budget.sh report initial
-      # A short-retention artifact produced by the main Windows workspace tests is the
-      # provider-neutral warm path. It is attempted before rust-cache so an
-      # internal Blacksmith run can reuse GitHub-hosted build output without
-      # requiring compatible cache backends. A missing, stale, or incompatible
-      # generation fails this step but not the job; rust-cache remains the cold
-      # hosted/provider-local fallback.
-      - name: Restore Windows workspace warm artifact
-        id: windows-warm-restore
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          receipt="${RUNNER_TEMP}/windows-warm-restore.txt"
-          set +e
-          ./scripts/ci/workspace_warm_artifact.sh windows download-and-restore \
-            --repo "${{ github.repository }}" \
-            --target-dir "${CARGO_TARGET_DIR:-target}" >"${receipt}" 2>&1
-          status=$?
-          set -e
-          cat "${receipt}"
-          grep -E '^windows_warm_restore_(run_id|producer_commit|reason|target_bytes|headroom_bytes|free_bytes|existing_target_bytes|available_after_replace_bytes)=' "${receipt}" >> "$GITHUB_OUTPUT" || true
-          if [[ "${status}" -eq 0 ]]; then
-            grep -E '^windows_warm_restore=hit$' "${receipt}" >> "$GITHUB_OUTPUT"
-          else
-            echo "windows_warm_restore=miss" >> "$GITHUB_OUTPUT"
-            echo "windows_warm_restore_status=${status}" >> "$GITHUB_OUTPUT"
-          fi
-          exit "${status}"
-      - uses: ./.github/actions/rust-cache
-        if: steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'
-        continue-on-error: true
-        with:
-          # Restore the latest full-suite nightly cache. PR refs stay
-          # restore-only; windows-nightly.yml owns the default-branch writer.
-          # Keep one stable Swatinem namespace so its native restore key can
-          # reuse the latest compatible target generation. Cargo remains the
-          # owner of source and include_str! invalidation.
-          shared-key: workspace-windows
-          target-dir: ${{ env.CARGO_TARGET_DIR }}
-          cache-on-failure: true
-          cache-bin: false
-      - name: Report Windows warm restore outcome
-        if: always()
-        shell: bash
-        env:
-          RESTORE_OUTCOME: ${{ steps.windows-warm-restore.outcome }}
-          RESTORE_RESULT: ${{ steps.windows-warm-restore.outputs.windows_warm_restore || 'miss' }}
-          RESTORE_REASON: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_reason || 'unavailable' }}
-          RESTORE_PRODUCER_COMMIT: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_producer_commit || 'unavailable' }}
-          RESTORE_RUN_ID: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_run_id || 'unavailable' }}
-        run: |
-          echo "windows_warm_restore_outcome=${RESTORE_OUTCOME}"
-          echo "windows_warm_restore=${RESTORE_RESULT}"
-          echo "windows_warm_restore_reason=${RESTORE_REASON}"
-          echo "windows_warm_restore_producer_commit=${RESTORE_PRODUCER_COMMIT}"
-          echo "windows_warm_restore_run_id=${RESTORE_RUN_ID}"
-          if [[ "${RESTORE_RESULT}" == "hit" ]]; then
-            echo "Windows PR feedback restored a compatible main warm artifact."
-          elif [[ "${RESTORE_REASON}" == "insufficient_space" ]]; then
-            echo "Windows PR feedback rejected the warm target's capacity budget and will compile cold."
-          else
-            echo "Windows PR feedback is continuing through the provider-local rust-cache/cold fallback."
-          fi
-      - name: Report Windows storage (after restore)
-        if: always()
-        shell: bash
-        run: ./scripts/ci/windows_storage_budget.sh report after_restore
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
-        with:
-          tool: nextest@0.9.132
-      # The `burin-mini` playground fixtures shell out to `node` from inside
-      # the Harn sandbox (harn#7993). This job never installed Node
-      # explicitly — it relied on whatever the runner image happened to
-      # preinstall, an implicit dependency unlike every other pinned
-      # toolchain here. Making it explicit removes that variable from the
-      # ongoing Windows `node`-not-found investigation: if the sandboxed
-      # child still cannot resolve a Node this job just installed and put on
-      # PATH, the defect is in Harn's environment plumbing, not the runner
-      # image's contents.
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-      # Don't gate the whole pipeline on the full Windows test surface yet —
-      # this job exists to catch hard regressions (compile breaks, missing
-      # cfg-gates, hardcoded `/bin/sh`, etc.). PRs compile the changed crates
-      # plus their reverse-dependency closure, matching the Linux affected
-      # test lane. Merge-queue and main pushes still compile the whole
-      # workspace, and windows-nightly.yml remains the full Windows test
-      # safety net.
-      #
-      # Keep the Rust work in one test-profile build. Mixing `cargo check`,
-      # `cargo build`, and nextest made Windows recompile the same local crates
-      # three times in separate artifact sets; nextest package selection keeps
-      # compile coverage focused while the filter limits the tests that
-      # actually execute.
-      - name: Compile Windows tests and run unit slice
-        id: windows-native-tests
-        shell: bash
-        env:
-          # Hosted Windows runners can return transient misses from the live
-          # Credential Manager. The file-backend tests cover deterministic
-          # secret-store behavior; this lane is for compile plus core unit
-          # coverage.
-          HARN_SECRET_STORE_BACKEND: file
-          HARN_LLM_CALLS_DISABLED: "1"
-          # Match the production CLI's 16 MiB runtime stack
-          # (`CLI_RUNTIME_STACK_SIZE`). Windows stack frames are larger than
-          # Unix, so tests that drive the Harn VM's deep-but-bounded recursive
-          # walk overflow libtest's / tokio's default 2 MiB worker stack and
-          # abort the test process (0xc00000fd). std::thread and tokio's
-          # default-stack workers honor RUST_MIN_STACK; see windows-nightly.yml
-          # for the full rationale.
-          RUST_MIN_STACK: "16777216"
-          # Failure output stays suppressed on success; when a Windows
-          # AppContainer test times out, these milestones show whether it
-          # stalled in CreateProcess, pipe draining, or ACL cleanup.
-          HARN_WINDOWS_SANDBOX_TRACE: "1"
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
-        run: |
-          windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-stdlib) or package(harn-vm) or package(harn-hostlib) or package(harn-terminal) or package(harn-fmt) or package(harn-lint) or package(harn-modules) or package(harn-dap)'
-          package_args=(--workspace)
-
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            git fetch --no-tags origin "$BASE_REF"
-            args="$(./scripts/ci/affected_crate_args.sh --base "$AFFECTED_BASE")"
-            if [[ -z "$args" ]]; then
-              echo "windows: no workspace crate selected; falling back to full workspace."
-            elif [[ "$args" == "--workspace" ]]; then
-              echo "windows: global PR change selected the full workspace; focusing Windows smoke packages."
-              package_args=(-p harn-vm -p harn-cli)
-            else
-              read -r -a package_args <<< "$args"
-              # The smoke test below executes the Cargo target's harn.exe.
-              # Keep that binary warm even for PRs that only touch a leaf crate.
-              if [[ " ${package_args[*]} " != *" -p harn-cli "* ]]; then
-                package_args+=(-p harn-cli)
-              fi
-            fi
-          fi
-
-          echo "windows: cargo package args: ${package_args[*]}"
-          # Some affected crate sets compile Windows-only surfaces but have no
-          # tests matching the core unit filter; the compile itself is still
-          # the smoke gate for those PRs.
-          cargo nextest run --locked "${package_args[@]}" \
-            --features internal-freshness-checker \
-            --profile ci -E "$windows_filter" --no-tests=warn
-          # The default Harn CLI profile is the release-critical pre-merge set:
-          # library tests, fast integration tests, and the seven explicitly
-          # registered shipped-binary cases. Keep this native so Windows file
-          # durability and command-rendering defects cannot wait for release
-          # certification to become visible.
-          cargo nextest run --locked -p harn-cli \
-            --features internal-freshness-checker --profile ci
-          # Exercise the native Windows artifact identity binary, including
-          # drive-colon/backslash/space fixtures.
-          cargo test --locked -p harn-cli --bin harn-freshness-check \
-            --features internal-freshness-checker -- --nocapture
-          printf 'completed_epoch=%s\n' "$(date +%s)" >> "$GITHUB_OUTPUT"
-      # Cargo owns every top-level target artifact until the last native test
-      # command returns. Publish the one receipt only after that mutation
-      # boundary; smoke then has no legal path that can relink the artifact.
-      - name: Produce exact Windows Harn binary
-        shell: bash
-        run: HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env "$GITHUB_ENV"
-      - name: Smoke test harn run
-        shell: bash
-        env:
-          WINDOWS_NATIVE_TEST_COMPLETED_EPOCH: ${{ steps.windows-native-tests.outputs.completed_epoch }}
-        run: |
-          smoke_started="$(date +%s)"
-          harn_bin="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)"
-          target_dir="$(cd "${CARGO_TARGET_DIR:-target}" && pwd -P)"
-          hook_resolved="$(
-            CARGO_TARGET_DIR="$target_dir" sh -c \
-              '. .githooks/lib.sh; hook_find_fresh_worktree_harn_bin'
-          )"
-          expected_bin="$target_dir/debug/harn.exe"
-          # Git Bash can spell one Windows file as either E:/target/... or
-          # /e/target/.... Compare filesystem identity, not path text.
-          if [[ ! "$harn_bin" -ef "$expected_bin" \
-            || ! "$hook_resolved" -ef "$harn_bin" ]]; then
-            printf 'Windows proof mismatch: resolved=%q hook=%q expected=%q\n' \
-              "$harn_bin" "$hook_resolved" "$expected_bin" >&2
-            exit 1
-          fi
-          echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
-          "$harn_bin" run smoke.harn
-          cp "$harn_bin" "$target_dir/debug/harn-lsp.exe"
-          cp "$harn_bin" "$target_dir/debug/harn-dap.exe"
-          "$target_dir/debug/harn-lsp.exe" --version | grep '^harn-lsp '
-          "$target_dir/debug/harn-dap.exe" --version | grep '^harn-dap '
-          printf 'windows_native_test_to_smoke_seconds=%s\n' \
-            "$(( $(date +%s) - WINDOWS_NATIVE_TEST_COMPLETED_EPOCH ))"
-          printf 'windows_smoke_seconds=%s\n' "$(( $(date +%s) - smoke_started ))"
-      - name: Report Windows storage (terminal)
-        if: always()
-        shell: bash
-        run: ./scripts/ci/windows_storage_budget.sh report terminal
-
-  # Deterministic Windows compile integration ratchet. The path-gated native
-  # Windows job remains the pre-merge product proof; this pinned cross-rs pass
+  # Deterministic Windows compile integration ratchet, and the only Windows lane
+  # in this workflow. Native Windows is advisory: `windows-nightly.yml` runs the
+  # full workspace nightly, on dispatch, and on release pull requests, and never
+  # gates a pull request or merge-group candidate. This pinned cross-rs pass
   # runs on each Rust-changing main tree and reports through `ci-status`.
   # `cross check` performs no linking, so the windows-gnu target compiles the
   # C-dependency graph in the digest-pinned MinGW image and reaches workspace Rust —
   # `x86_64-pc-windows-msvc` cannot (it needs the Windows SDK headers). The
   # `cfg(windows)` / `cfg(not(unix))` surface is identical across gnu/msvc, so a
-  # missing unix cfg-gate is caught here regardless of the ABI difference. The
-  # full `windows` job stays the source of truth for msvc-specific + runtime
-  # behavior (build + smoke test).
+  # missing unix cfg-gate is caught here regardless of the ABI difference.
+  # msvc-specific and runtime behavior is covered by `windows-nightly.yml`.
   windows-cross-check:
     name: Windows cross-compile check
     needs: changes
@@ -2720,8 +2319,6 @@ jobs:
         source-length-ratchet,
         ci-walltime-report,
         audit-scripts,
-        windows-plan,
-        windows,
         windows-cross-check,
         macos-plan,
         macos,
@@ -2761,7 +2358,6 @@ jobs:
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
-            ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
@@ -2927,14 +2523,6 @@ jobs:
           require_result "$audit_scripts_result" \
             "Repository policy checks failed or skipped on a Rust-changing main push." \
             test "${EVENT_NAME}:${GIT_REF}:${RUST_SELECTED}" != "push:refs/heads/main:true"
-
-          # Native Windows runs once on a Windows-sensitive merge-group
-          # candidate. Its exact successful proof suppresses the identical
-          # main push; missing or unsafe proof retains the main fallback.
-          # Treat a planned skip as passing; only an actual failure fails.
-          windows_result="${{ needs.windows.result }}"
-          echo "Rust on Windows (build + smoke test): $windows_result"
-          require_result "$windows_result" "Windows job failed." true
 
           # Cross-compilation is an integration ratchet. It runs on every
           # Rust-changing main tree and remains visible through this aggregate.

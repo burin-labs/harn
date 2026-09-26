@@ -11,8 +11,8 @@ name: Release smoke
 #   source — scheduled or manual. Builds a native release `harn` binary from
 #   main and smokes it, to catch capability breaks between releases.
 #
-# The post-merge `windows` job in `ci.yml` and the release candidate build
-# cover Windows-specific compile breaks. This job is the explicit
+# The `windows-cross-check` job in `ci.yml`, `windows-nightly.yml`, and the
+# release candidate build cover Windows-specific compile breaks. This job is the explicit
 # *capability* gate — failures point at a specific (platform, capability)
 # pair via `::error::` annotations from the smoke driver. See
 # docs/src/dev/platform-compatibility.md for the support matrix.

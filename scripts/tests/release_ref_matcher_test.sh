@@ -47,7 +47,8 @@ do
 done
 
 # --- 3. the bash call sites must USE the owner, not re-copy the regex --------
-for site in .github/workflows/ci.yml scripts/native_platform_ci_plan.sh; do
+for site in .github/workflows/ci.yml .github/workflows/windows-nightly.yml \
+  scripts/native_platform_ci_plan.sh; do
   grep -q 'release-ref\.sh' "$repo_root/$site" \
     || fail "$site no longer sources .github/scripts/release-ref.sh"
   if grep -qE '\^release/v\[0-9\]' "$repo_root/$site"; then
@@ -74,5 +75,33 @@ policy_if=$(grep -A1 'const CLI_COLD_START_JOB_IF' \
   || fail "workflow if: and check_ci_cache_policy.harn disagree:
   workflow: $cold_start_if
   policy  : $policy_if"
+
+# --- 5. release-PR-only lanes (the native Windows nightly) --------------------
+# The decision `windows-nightly.yml` publishes from its `route` job. A pull
+# request runs the lane only from a release branch; the lane's own schedule and
+# dispatch always run it; an unreadable event or head ref refuses instead of
+# printing `false`, which would skip the lane as if a ref had been rejected.
+assert_lane() {
+  local want="$1" event="$2" ref="${3-}" got
+  got=$(release_pr_only_lane_run "$event" "$ref") \
+    || fail "lane decision refused a readable event: event=$event ref=$ref"
+  [[ "$got" == "$want" ]] || fail "event=$event ref=$ref decided '$got', expected '$want'"
+}
+assert_lane true pull_request release/v0.10.68
+assert_lane true pull_request release-attempt/v0.10.108/3cfcd38bf22ef4586671d403881e293b39e0de1d
+assert_lane false pull_request feature/x
+assert_lane false pull_request release-certify/7d635aa822fcaff74caa0962d3099840efb9f57b
+assert_lane false pull_request release/prepare-v0.7.37
+assert_lane true schedule
+assert_lane true workflow_dispatch
+assert_lane true workflow_dispatch release-certify/7d635aa822fcaff74caa0962d3099840efb9f57b
+for unreadable in "pull_request:" ":feature/x" ":"; do
+  if release_pr_only_lane_run "${unreadable%%:*}" "${unreadable#*:}" >/dev/null 2>&1; then
+    fail "unreadable lane context was decided instead of refused: '$unreadable'"
+  fi
+done
+grep -q 'release_pr_only_lane_run "$EVENT_NAME" "$PR_HEAD_REF"' \
+  "$repo_root/.github/workflows/windows-nightly.yml" \
+  || fail "windows-nightly.yml route no longer decides through release_pr_only_lane_run"
 
 echo "release_ref_matcher_test: ok"

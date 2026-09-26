@@ -1,15 +1,16 @@
 name: Windows workspace tests
 
-# Runs the full workspace nextest surface on Windows once per night, plus
-# on-demand from the Actions tab. Complements the per-PR `windows` job in
-# `ci.yml`, which builds the workspace test graph but only runs a curated
-# subset of unit tests to keep the PR pipeline fast. The nightly fan-out
-# is the cross-platform safety net: every test that is *not* gated to
-# `#![cfg(unix)]` is expected to pass here.
+# Native Windows is advisory. Harn builds and runs on Windows without OS
+# sandbox confinement, so no Windows lane gates a pull request, the merge
+# queue, or a release PR merge. This workflow is the native Windows proof: it
+# runs the full workspace nextest surface once per night, on demand from the
+# Actions tab (release certification dispatches it at an exact commit), and on
+# release pull requests. Every other pull request skips it. The cheap Linux
+# `windows-cross-check` in `ci.yml` is the only Windows lane in `CI status`.
 #
-# Failure is informational, not blocking — the nightly does not gate the
-# `ci-status` job. When something regresses, file an issue and either
-# fix the underlying portability bug or add a per-test `#[cfg(unix)]`
+# Failure is informational, not blocking: this workflow is not part of the
+# required `ci-status` aggregate. When something regresses, file an issue and
+# either fix the underlying portability bug or add a per-test `#[cfg(unix)]`
 # annotation with rationale, then update
 # `docs/src/dev/windows-test-coverage.md` to reflect the disposition.
 #
@@ -28,25 +29,15 @@ on:
     # waiting when contributors start their day.
     - cron: "0 7 * * *"
   workflow_dispatch:
+  # Release pull requests only. A `pull_request` trigger cannot filter on the
+  # head branch, so every pull request starts this workflow and the `route` job
+  # below decides through `.github/scripts/release-ref.sh`, the one owner of
+  # release head-ref recognition. A non-release pull request pays one short
+  # Linux job and skips the Windows runner.
   pull_request:
-    # Only the code these lanes actually exercise. A fragment- or docs-only
-    # pull request cannot change what a workspace test run proves, so it does
-    # not pay for one, and the release's evidence reader treats a lane it never
-    # needed as satisfied rather than missing.
-    paths:
-      - "crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      # The nextest config decides what this lane runs and what budget it runs
-      # it under, so a change to it changes what the run proves. Without this
-      # the lane skips the very pull request that retimes it.
-      - ".config/nextest.toml"
-      - ".github/workflows/windows-nightly.yml"
-      - ".github/workflows/macos-nightly.yml"
 
 permissions:
   contents: read
-  actions: write
 
 # Supersede an in-flight pull-request run when the same pull request pushes
 # again. Only the final head becomes a merge parent, so a superseded run's
@@ -68,6 +59,33 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  route:
+    name: Release pull request routing
+    runs-on: ubuntu-latest
+    # Don't run forks of the repo on a fork's own schedule.
+    if: github.repository == 'burin-labs/harn'
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+      - name: Decide whether this event runs native Windows
+        id: decide
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+        # An unreadable event or head ref fails this step by name. It never
+        # prints `false`, which would skip the lane as if a real ref had been
+        # read and rejected.
+        run: |
+          set -euo pipefail
+          source .github/scripts/release-ref.sh
+          run="$(release_pr_only_lane_run "$EVENT_NAME" "$PR_HEAD_REF")"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "native Windows: event=$EVENT_NAME head_ref=${PR_HEAD_REF:-<none>} run=$run"
+
   nextest:
     # NAME IS AN EVIDENCE KEY, NOT A RUNNER CLAIM. scripts/release_audit_contract.harn
     # looks this lane up by exact job name, so renaming it to match the runner
@@ -76,20 +94,22 @@ jobs:
     # The name stays pinned here and the rename is a separate change that moves
     # the contract table and this string together.
     name: Workspace nextest (windows-latest)
-    # Blacksmith capacity, one size above the pull-request `windows` job in
-    # ci.yml, because this lane compiles and runs the WHOLE workspace rather
-    # than an affected-crate closure — the one native Windows lane where core
-    # count buys real wall time. Both lanes fall back to GitHub-hosted capacity
-    # through the same explicit HARN_CI_ENABLE_BLACKSMITH_WINDOWS opt-in, so
-    # the public repository remains on free GitHub-hosted capacity by default.
+    # Blacksmith capacity is an explicit HARN_CI_ENABLE_BLACKSMITH_WINDOWS
+    # opt-in, because this lane compiles and runs the WHOLE workspace and core
+    # count buys real wall time. By default the public repository stays on free
+    # GitHub-hosted capacity.
     #
-    # This job is the sole writer of the shared `workspace-windows` rust-cache.
-    # The producer and its PR consumer share the same selected tier, while the
-    # provider-neutral warm artifact below remains an ordinary GitHub Actions
-    # artifact that every consumer tries before rust-cache.
+    # This job is the sole writer of the shared `workspace-windows` rust-cache
+    # and of the provider-neutral warm artifact below.
     runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest' }}
-    # Don't run forks of the repo on a fork's own schedule.
-    if: github.repository == 'burin-labs/harn'
+    needs: route
+    # The route job owns both the fork guard and the release-PR decision.
+    if: needs.route.outputs.run == 'true'
+    # Warm-artifact upload and download need the Actions API; the route job
+    # does not, so the grant lives here rather than on the workflow.
+    permissions:
+      contents: read
+      actions: write
     env:
       # Mirror the `runs-on` ladder exactly. Blacksmith runners register as
       # ordinary self-hosted runners, so `runner.environment` reports
@@ -97,19 +117,16 @@ jobs:
       # wrong branch. One job-level tier variable is the single owner every step
       # branches on instead.
       HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted' }}
-      # Cache WRITER half of the rust-lld experiment — MUST stay byte-identical
-      # to ci.yml's `windows` job (the restore-only consumer) or the shared-cache
-      # policy's consumer/producer input comparison fails. Toggled together via
-      # the single HARN_WINDOWS_LLD repo variable. See the ci.yml windows job for
-      # the full rationale. Overrides the workflow-level `-D warnings`.
+      # Cache WRITER half of the rust-lld experiment. RUSTFLAGS is part of
+      # rust-cache's environment hash, so the restore-only consumer in
+      # `windows-targeted.yml` keeps the same expression. Toggled by the single
+      # HARN_WINDOWS_LLD repo variable; see docs/src/dev/windows-ci-experiments.md.
+      # Overrides the workflow-level `-D warnings`.
       RUSTFLAGS: ${{ vars.HARN_WINDOWS_LLD == 'on' && '-D warnings -Clinker=rust-lld.exe' || '-D warnings' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Cache WRITER half of the Dev Drive experiment — MUST stay byte-identical
-      # to ci.yml's `windows` job (same position, action pin, and env-mapping) or
-      # the shared-cache policy's pre-cache step-sequence comparison fails.
-      # Toggled together via the single HARN_WINDOWS_DEVDRIVE repo variable. See
-      # the ci.yml windows job for the full rationale.
+      # Dev Drive experiment, toggled by the single HARN_WINDOWS_DEVDRIVE repo
+      # variable; see docs/src/dev/windows-ci-experiments.md.
       # This job compiles the whole workspace on every ref, so it takes the
       # full-workspace ceiling unconditionally: a restored warm target and the
       # workspace rebuild must coexist on one volume (harn#6027 / harn#6485).
@@ -138,21 +155,18 @@ jobs:
         continue-on-error: true
         with:
           # This scheduled default-branch run is the sole writer for the
-          # native Windows workspace cache. Path-gated PR jobs restore it but
-          # never write, avoiding one immutable cache generation per PR. Keep
-          # this producer on plain rustc like the PR consumer: RUSTC_WRAPPER is
-          # part of rust-cache's environment hash, while runner-local sccache
-          # reported zero hits and made this target cache unreachable to PRs.
+          # native Windows workspace cache. Keep it on plain rustc: RUSTC_WRAPPER
+          # is part of rust-cache's environment hash, and runner-local sccache
+          # reported zero hits here.
           # Keep this key stable across source revisions: rust-cache's native
           # restore key owns compatible fallback, while Cargo owns invalidation.
           shared-key: workspace-windows
           target-dir: ${{ env.CARGO_TARGET_DIR }}
           cache-on-failure: true
           cache-bin: false
-          # This job is the sole writer for `workspace-windows`. A pull request
-          # run is a restore-only consumer: writing here would mint one
-          # immutable cache generation per pull request in a 10 GiB namespace
-          # that is already contended.
+          # A release pull request run restores but never writes: writing
+          # would mint one immutable cache generation per pull request in a
+          # 10 GiB namespace that is already contended.
           save: ${{ github.event_name != 'pull_request' }}
       - name: Restore Windows workspace warm artifact
         id: windows-warm-restore
