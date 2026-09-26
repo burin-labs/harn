@@ -3542,16 +3542,14 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "tool_use", "agentic"]
 
-# GPT-4o retired from ChatGPT 2026-02-13; chatgpt-4o-latest removed
-# from API 2026-02-17 (Enterprise/Edu grace until 2026-04-03).
+# The ChatGPT-only alias `chatgpt-4o-latest` was retired from the API
+# on 2026-02-17. The API model `gpt-4o` remains available.
 [models."gpt-4o"]
 name = "GPT-4o"
 provider = "openai"
 context_window = 128000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 2.50, output_per_mtok = 10.00, cache_read_per_mtok = 1.25 }
-deprecated = true
-deprecation_note = "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5.4-mini for cheap routing or gpt-5.5 for frontier."
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "vision", "tool_use"]
@@ -3561,10 +3559,6 @@ provider = "openai"
 context_window = 128000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
-# No individually announced sunset as of 2026-07-02, but the GPT-4-era
-# legacy exits by 2026-10-23 per the 2026-04-22 deprecations
-# announcement. The `mid` tier default moved to gpt-5.4-mini.
-superseded_by = "gpt-5.4-mini"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
