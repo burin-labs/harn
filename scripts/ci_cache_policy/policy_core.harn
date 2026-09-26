@@ -1862,3 +1862,38 @@ pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
   }
   return errors
 }
+
+pub const CONSUMER_CANARY_JOB = "consumers"
+
+pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github-app-token@"]
+
+/**
+ * Keep the consumer canary from publishing anything its consumer produced.
+ *
+ * The consumer it rehearses may be private, and this repository's logs,
+ * artifacts and step summaries are public. The job may check out this
+ * revision, mint its credential and run the canary script, which prints only
+ * the verdict, the link and the wall time. Any other action is a way for the
+ * consumer's content to leave, an upload most directly, so it is refused by
+ * shape rather than by name. A step summary is refused the same way.
+ */
+pub fn consumer_canary_errors(ci: dict) -> list<string> {
+  const job = ci?.jobs?.[CONSUMER_CANARY_JOB]
+  if job == nil {
+    return ["ci.yml:${CONSUMER_CANARY_JOB} must define the consumer canary"]
+  }
+  let errors: list<string> = []
+  for step in job?.steps ?? [] {
+    const uses = step_uses(step)
+    if uses != "" && !CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) }) {
+      errors = errors
+        + [
+          "ci.yml:${CONSUMER_CANARY_JOB} must not run ${uses}; only checkout and the credential mint may run beside the canary script",
+        ]
+    }
+    if contains(to_string(step?.run ?? ""), "GITHUB_STEP_SUMMARY") {
+      errors = errors + ["ci.yml:${CONSUMER_CANARY_JOB} must not write a step summary"]
+    }
+  }
+  return errors
+}
