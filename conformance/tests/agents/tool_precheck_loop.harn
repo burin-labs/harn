@@ -2,15 +2,17 @@ import { agent_command_tools } from "std/agent/host_tools"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-// The pre-approval precheck through a REAL `agent_loop`, not just dispatch.
-//
-// The loop forwards policy options to dispatch from an explicit allowlist. A
-// precheck the list omits is accepted by `agent_loop` and never consulted, so
-// the embedder's refusal silently becomes a command that runs.
-//
-// The pair is the proof. Same script, same tool: without a precheck the
-// command runs and its output reaches the second turn; with one that denies,
-// the output is absent and the model sees the precheck's cue instead.
+/**
+ * The pre-approval precheck through a REAL `agent_loop`, not just dispatch.
+ *
+ * The loop forwards policy options to dispatch from an explicit allowlist. A
+ * precheck the list omits is accepted by `agent_loop` and never consulted, so
+ * the embedder's refusal silently becomes a command that runs.
+ *
+ * The pair is the proof. Same script, same tool: without a precheck the
+ * command runs and its output reaches the second turn; with one that denies,
+ * the output is absent and the model sees the precheck's cue instead.
+ */
 fn probe_tools(harness: Harness, root: string) {
   return agent_command_tools(
     harness,

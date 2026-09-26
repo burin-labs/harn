@@ -11,7 +11,7 @@ import { approval_reviewer_on_route } from "std/agent/approval_review"
  * never applied. `DISPATCH_READ_KEYS` in the VM pins it against what dispatch
  * reads.
  */
-pub fn __resolve_max_concurrent_tools(turn_opts: any) {
+pub fn __resolve_max_concurrent_tools(turn_opts: any) -> int {
   const raw = turn_opts?.max_concurrent_tools
   if type_of(raw) == "int" && raw > 1 {
     return raw
@@ -40,7 +40,7 @@ pub fn __resolve_max_concurrent_tools(turn_opts: any) {
  * @effects: []
  * @errors: []
  */
-pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts: any) {
+pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts: any) -> int {
   const raw = turn_opts?.intra_turn_failure_fanout_cap
   if type_of(raw) == "int" && raw > 0 {
     return raw
