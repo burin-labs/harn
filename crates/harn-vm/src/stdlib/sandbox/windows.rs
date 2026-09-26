@@ -784,11 +784,12 @@ mod tests {
         );
     }
 
-    /// MSYS programs (Git for Windows' grep and bash) die creating their
-    /// shared-memory section under the restricted token. This asserts the
-    /// documented failure so the test flips when harn#8811 fixes it.
+    /// Git for Windows' MSYS programs start under the restricted token once
+    /// the user's MSYS shared-memory section admits the policy SID (#8811).
+    /// A CI step shell is itself an MSYS bash, so the section exists here and
+    /// the grant path is the one exercised.
     #[test]
-    fn windows_process_sandbox_msys_programs_fail_known_issue_8811() {
+    fn windows_process_sandbox_runs_msys_programs() {
         let usr_bin = Path::new("C:\\Program Files\\Git\\usr\\bin");
         if !usr_bin.join("bash.exe").exists() {
             println!(
@@ -798,28 +799,42 @@ mod tests {
             return;
         }
         let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(workspace.path().join("note.txt"), "hello world\n").expect("note");
         let policy = workspace_policy(workspace.path(), true);
         let _cleanup = ScratchCleanup::for_policy(&policy);
-        for (program, args) in [
-            (usr_bin.join("grep.exe"), vec!["--version"]),
-            (usr_bin.join("bash.exe"), vec!["-c", "echo bash-ok"]),
-        ] {
+        let failures: Vec<String> = [
+            (
+                usr_bin.join("grep.exe"),
+                vec!["-n", "hello world", "note.txt"],
+                "1:hello world",
+            ),
+            (
+                usr_bin.join("bash.exe"),
+                vec!["-c", "echo bash-ok"],
+                "bash-ok",
+            ),
+        ]
+        .iter()
+        .filter_map(|(program, args, expected)| {
             let output = run(
                 &policy,
                 workspace.path(),
                 &program.display().to_string(),
-                &args,
+                args,
             );
-            let stderr = String::from_utf8_lossy(&output.stderr);
             println!("observed {}: {}", program.display(), describe(&output));
-            assert!(
-                !output.status.success() && stderr.contains("CreateFileMapping"),
-                "{} changed behavior; if it now succeeds, harn#8811 is fixed and this test \
-                 should assert success: {}",
-                program.display(),
-                describe(&output)
-            );
-        }
+            let ok = output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains(expected);
+            (!ok).then(|| format!("{}: {}", program.display(), describe(&output)))
+        })
+        .collect();
+        let sid = token::Sid::for_policy_digest(&acl_grants::policy_digest(&policy)).expect("sid");
+        let user = token::current_user_sddl().expect("user sid");
+        println!(
+            "msys user section after the runs: {:?}",
+            acl_grants::grant_msys_user_section(&sid, &user)
+        );
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 
     #[test]

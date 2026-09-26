@@ -160,6 +160,12 @@ pub(super) fn write_restricted_token(policy_sid: &Sid) -> io::Result<OwnedHandle
     Ok(token)
 }
 
+/// This process's user SID, in string form.
+pub(super) fn current_user_sddl() -> io::Result<String> {
+    let base = process_token()?;
+    user_sid(base.raw())?.to_sddl()
+}
+
 fn process_token() -> io::Result<OwnedHandle> {
     let mut token = std::ptr::null_mut();
     if unsafe {

@@ -19,24 +19,25 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use windows_sys::Win32::Foundation::LocalFree;
+use windows_sys::Win32::Foundation::{GetLastError, LocalFree, ERROR_FILE_NOT_FOUND, HANDLE};
 use windows_sys::Win32::Security::Authorization::{
-    GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W,
-    GRANT_ACCESS, NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN,
-    TRUSTEE_W,
+    GetNamedSecurityInfoW, GetSecurityInfo, SetEntriesInAclW, SetNamedSecurityInfoW,
+    SetSecurityInfo, EXPLICIT_ACCESS_W, GRANT_ACCESS, NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT,
+    SE_KERNEL_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
     EqualSid, GetAce, GetSecurityDescriptorControl, ACCESS_ALLOWED_ACE, ACL, CONTAINER_INHERIT_ACE,
-    DACL_SECURITY_INFORMATION, INHERIT_ONLY_ACE, OBJECT_INHERIT_ACE,
+    DACL_SECURITY_INFORMATION, INHERIT_ONLY_ACE, NO_INHERITANCE, OBJECT_INHERIT_ACE,
     PROTECTED_DACL_SECURITY_INFORMATION, SE_DACL_PROTECTED, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+    DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, READ_CONTROL, WRITE_DAC,
 };
+use windows_sys::Win32::System::Memory::{OpenFileMappingW, SECTION_ALL_ACCESS};
 use windows_sys::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
 
 use super::token::Sid;
-use super::{path_to_wide, sandbox_trace};
+use super::{path_to_wide, sandbox_trace, str_to_wide, OwnedHandle};
 
 use crate::orchestration::CapabilityPolicy;
 use crate::stdlib::sandbox::{
@@ -201,6 +202,27 @@ struct SecurityInfo {
 }
 
 impl SecurityInfo {
+    fn read_handle(handle: HANDLE) -> io::Result<Self> {
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let mut descriptor = std::ptr::null_mut();
+        let status = unsafe {
+            GetSecurityInfo(
+                handle,
+                SE_KERNEL_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::from_raw_os_error(status as i32));
+        }
+        Ok(Self { descriptor, dacl })
+    }
+
     fn read(path: &Path) -> io::Result<Self> {
         let wide = path_to_wide(path);
         let mut dacl: *mut ACL = std::ptr::null_mut();
@@ -233,11 +255,17 @@ impl SecurityInfo {
 
     /// Whether an explicit, inheritable allow entry gives `sid` Modify.
     fn grants_modify(&self, sid: &Sid) -> bool {
+        let inherits = (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8;
+        self.allows(sid, MODIFY, inherits)
+    }
+
+    /// Whether an explicit, effective allow entry gives `sid` every right in
+    /// `mask`, carrying at least the `inherits` flags.
+    fn allows(&self, sid: &Sid, mask: u32, inherits: u8) -> bool {
         if self.dacl.is_null() {
             return false;
         }
         let count = unsafe { (*self.dacl).AceCount };
-        let inherits = (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8;
         (0..u32::from(count)).any(|index| {
             let mut ace = std::ptr::null_mut();
             if unsafe { GetAce(self.dacl, index, &mut ace) } == 0 {
@@ -248,7 +276,7 @@ impl SecurityInfo {
             u32::from(header.AceType) == ACCESS_ALLOWED_ACE_TYPE
                 && header.AceFlags & inherits == inherits
                 && header.AceFlags & INHERIT_ONLY_ACE as u8 == 0
-                && unsafe { (*ace).Mask } & MODIFY == MODIFY
+                && unsafe { (*ace).Mask } & mask == mask
                 && unsafe {
                     EqualSid(
                         std::ptr::addr_of_mut!((*ace).SidStart).cast(),
@@ -320,4 +348,76 @@ fn grant_modify(root: &Path, sid: &Sid) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// What [`grant_msys_user_section`] found.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum MsysSection {
+    /// No MSYS program of this user runs in this session; the child creates
+    /// the section itself.
+    Absent,
+    AlreadyGranted,
+    Granted,
+}
+
+/// Let a confined child open the user's MSYS shared-memory section.
+///
+/// Every MSYS program (Git for Windows' `bash`, `grep`, `sh`) opens a
+/// per-user section named `<user SID>.<version>` in the session namespace
+/// with full access, and dies with `CreateFileMapping ..., Win32 error 5`
+/// when it cannot. The first MSYS program of the session creates it with its
+/// token's default DACL, which names only the user and SYSTEM, so under the
+/// write-restricted token the write half of that open fails: none of the
+/// restricting SIDs is in the DACL. The section lives only as long as some
+/// MSYS process holds it, so the entry this adds for the policy SID goes
+/// away with it. Version 1 is the one current MSYS runtimes use.
+pub(super) fn grant_msys_user_section(sid: &Sid, user_sddl: &str) -> io::Result<MsysSection> {
+    let name = str_to_wide(&format!("{user_sddl}.1"));
+    let handle = unsafe { OpenFileMappingW(READ_CONTROL | WRITE_DAC, 0, name.as_ptr()) };
+    if handle.is_null() {
+        if unsafe { GetLastError() } == ERROR_FILE_NOT_FOUND {
+            return Ok(MsysSection::Absent);
+        }
+        return Err(io::Error::last_os_error());
+    }
+    let handle = OwnedHandle::new(handle);
+    let current = SecurityInfo::read_handle(handle.raw())?;
+    if current.allows(sid, SECTION_ALL_ACCESS, 0) {
+        return Ok(MsysSection::AlreadyGranted);
+    }
+    let entry = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: SECTION_ALL_ACCESS,
+        grfAccessMode: GRANT_ACCESS,
+        grfInheritance: NO_INHERITANCE,
+        Trustee: TRUSTEE_W {
+            pMultipleTrustee: std::ptr::null_mut(),
+            MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+            TrusteeForm: TRUSTEE_IS_SID,
+            TrusteeType: TRUSTEE_IS_UNKNOWN,
+            ptstrName: sid.as_psid().cast(),
+        },
+    };
+    let mut widened: *mut ACL = std::ptr::null_mut();
+    let status = unsafe { SetEntriesInAclW(1, &entry, current.dacl, &mut widened) };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+    let status = unsafe {
+        SetSecurityInfo(
+            handle.raw(),
+            SE_KERNEL_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            widened,
+            std::ptr::null(),
+        )
+    };
+    unsafe {
+        LocalFree(widened.cast());
+    }
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+    Ok(MsysSection::Granted)
 }
