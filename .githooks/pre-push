@@ -362,12 +362,12 @@ else
   echo "=== Pre-push: skipping session bundle schema check (no session-bundle schema changes) ==="
 fi
 
-# Generated-mirror drift guard. The `harn-generated` merge driver
-# silently keeps the current side during merge/rebase (see
-# scripts/configure_merge_drivers.sh) and the post-rewrite hook
-# auto-folds the regen into single-commit rebases, but neither covers
-# every case (multi-commit rebases, hooks disabled, etc.). Run the
-# same check CI runs so any drift fails the push instead of the PR.
+# Generated-mirror drift guard. The mirrors are marked `-merge`, so a
+# merge or rebase conflicts on them and whoever resolves it keeps one
+# side; the post-rewrite hook auto-folds the regen into single-commit
+# rebases, but neither covers every case (multi-commit rebases, hooks
+# disabled, etc.). Run the same check CI runs so any drift fails the push
+# instead of the PR.
 if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
   echo "=== Pre-push: checking docs/src/language-spec.md mirror ==="
   if ! make -s check-language-spec >/tmp/harn-prepush-langspec.log 2>&1; then
@@ -375,8 +375,8 @@ if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
     rm -f /tmp/harn-prepush-langspec.log
     echo "" >&2
     echo "  This can happen after rebasing onto a branch that also touched" >&2
-    echo "  the spec — the merge driver intentionally keeps the current" >&2
-    echo "  mirror without regenerating from the merged source." >&2
+    echo "  the spec: resolving the mirror's conflict keeps one side" >&2
+    echo "  without regenerating from the merged source." >&2
     echo "" >&2
     echo "  Fix:" >&2
     echo "    make sync-language-spec" >&2

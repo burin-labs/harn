@@ -59,7 +59,6 @@ make_fixture_repo() {
   cp "$repo_root/scripts/lib/file_time.sh" "$repo/scripts/lib/file_time.sh"
   chmod +x "$repo/scripts/dev_setup.sh" "$repo/scripts/cargo_target_seed.sh"
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/configure_merge_drivers.sh"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
   printf '#!/usr/bin/env bash\nset -euo pipefail\nexec cargo "$@"\n' \
     > "$repo/scripts/cargo_with_worktree_build_dir.sh"
@@ -84,7 +83,7 @@ SH
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '%s\n' 'printf "%s\\n" "$PWD" >> "$DEV_SETUP_TEST_PRUNE_RECORD"'
   } > "$repo/scripts/prune_stale_targets.sh"
-  chmod +x "$repo/scripts/configure_merge_drivers.sh" "$repo/scripts/sign_local_macos.sh" \
+  chmod +x "$repo/scripts/sign_local_macos.sh" \
     "$repo/scripts/prune_stale_targets.sh" "$repo/scripts/cargo_with_worktree_build_dir.sh" \
     "$repo/scripts/harn_bin.sh"
   {

@@ -1,9 +1,9 @@
 CHANGELOG.md merge=union
-docs/theme/harn-keywords.js merge=harn-generated eol=lf
-spec/HARN_SPEC.md merge=harn-generated eol=lf
-docs/src/language-spec.md merge=harn-generated eol=lf
-docs/src/diagnostics.md merge=harn-generated eol=lf
-docs/diagnostics-catalog.json merge=harn-generated eol=lf
+docs/theme/harn-keywords.js -merge eol=lf
+spec/HARN_SPEC.md -merge eol=lf
+docs/src/language-spec.md -merge eol=lf
+docs/src/diagnostics.md -merge eol=lf
+docs/diagnostics-catalog.json -merge eol=lf
 docs/llm/harn-triggers-quickref.md eol=lf
 docs/src/provider-matrix.md eol=lf
 docs/src/connectors/parity-matrix.md eol=lf
