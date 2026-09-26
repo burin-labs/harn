@@ -1,10 +1,14 @@
 # Windows CI lane speed experiments
 
-Two independently-toggleable experiments for the `Rust on Windows (build +
-smoke test)` job in `.github/workflows/ci.yml` and its cache writer,
-`.github/workflows/windows-nightly.yml`. Each is gated by a repo variable and
-defaults **off**, so neither is active until someone sets its variable.
-Attribute wins by flipping one variable at a time.
+Two independently-toggleable experiments for the native Windows lane,
+`.github/workflows/windows-nightly.yml`, and its restore-only diagnostic
+consumer, `.github/workflows/windows-targeted.yml`. Each is gated by a repo
+variable and defaults **off**, so neither is active until someone sets its
+variable. Attribute wins by flipping one variable at a time.
+
+The measurements below were taken on the former `Rust on Windows (build + smoke
+test)` job in `.github/workflows/ci.yml`. That job no longer exists: native
+Windows runs nightly, on dispatch, and on release pull requests only.
 
 ## Baseline
 

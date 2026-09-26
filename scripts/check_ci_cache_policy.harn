@@ -21,7 +21,7 @@ pub import {
   macos_shared_cache_errors,
   macos_warm_errors,
   nextest_version_errors,
-  windows_pr_native_feedback_errors,
+  windows_native_admission_errors,
   windows_release_certify_warm_errors,
   windows_shared_cache_errors,
 } from "./ci_cache_policy/native_checks.harn"

@@ -3,7 +3,7 @@ import {
   ci_cache_policy_parse,
   macos_shared_cache_errors,
   setup_harn_cache_action_errors,
-  windows_pr_native_feedback_errors,
+  windows_native_admission_errors,
 } from "../../check_ci_cache_policy.harn"
 import "./fixtures.harn"
 
@@ -431,12 +431,12 @@ pub pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness
  * exercises is a rule that can be deleted by accident.
  */
 @test
-pub pipeline test_windows_native_feedback_accepts_the_blacksmith_producer_and_consumer(
+pub pipeline test_windows_native_admission_accepts_the_blacksmith_producer(
   harness: Harness,
   task: unknown,
 ) {
   assert_eq(
-    windows_pr_native_feedback_errors(
+    windows_native_admission_errors(
       policy(),
       workflows()["ci.yml"],
       workflows()["windows-nightly.yml"],
@@ -446,7 +446,7 @@ pub pipeline test_windows_native_feedback_accepts_the_blacksmith_producer_and_co
 }
 
 @test
-pub pipeline test_windows_native_feedback_rejects_a_hosted_only_producer(
+pub pipeline test_windows_native_admission_rejects_a_hosted_only_producer(
   harness: Harness,
   task: unknown,
 ) {
@@ -455,7 +455,7 @@ pub pipeline test_windows_native_feedback_rejects_a_hosted_only_producer(
     ...nightly,
     jobs: {nextest: {...nightly.jobs.nextest, "runs-on": "windows-latest"}},
   }
-  const errors = windows_pr_native_feedback_errors(policy(), workflows()["ci.yml"], invalid)
+  const errors = windows_native_admission_errors(policy(), workflows()["ci.yml"], invalid)
   assert(
     errors.contains(
       "windows-nightly.yml:nextest must default to windows-latest, with HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-16vcpu-windows-2025",
@@ -464,7 +464,7 @@ pub pipeline test_windows_native_feedback_rejects_a_hosted_only_producer(
 }
 
 @test
-pub pipeline test_windows_native_feedback_rejects_a_producer_without_a_declared_tier(
+pub pipeline test_windows_native_admission_rejects_a_producer_without_a_declared_tier(
   harness: Harness,
   task: unknown,
 ) {
@@ -474,7 +474,7 @@ pub pipeline test_windows_native_feedback_rejects_a_producer_without_a_declared_
   // sends `runner.environment` branches down the wrong path, and it is also the
   // shape that leaves the Dev Drive guard unable to name a tier.
   const invalid = {...nightly, jobs: {nextest: {...nextest, env: {}}}}
-  const errors = windows_pr_native_feedback_errors(policy(), workflows()["ci.yml"], invalid)
+  const errors = windows_native_admission_errors(policy(), workflows()["ci.yml"], invalid)
   assert(
     errors.contains("windows-nightly.yml:nextest must mirror its Blacksmith/hosted runner tier"),
   )
