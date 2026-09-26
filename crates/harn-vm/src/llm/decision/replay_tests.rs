@@ -171,3 +171,42 @@ fn typed_fixture_receipt_reports_no_dispatch_or_invented_live_source() {
             assert_eq!(backend.request_count(), 0);
         });
 }
+
+#[test]
+fn every_checked_in_evaluation_tape_decodes_with_the_current_decoder() {
+    // A change to how recordings serialize must fail here, where it is made,
+    // rather than in the slow end-to-end suite that replays one example.
+    use crate::testbench::tape::{EventTape, TapeRecordKind};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let listed = std::process::Command::new("git")
+        .current_dir(&root)
+        .args(["ls-files", "-z", "--", "*.tape"])
+        .output()
+        .expect("git lists the checked-in tapes");
+    assert!(listed.status.success(), "git ls-files failed: {listed:?}");
+    let tapes: Vec<_> = listed
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| root.join(String::from_utf8_lossy(path).as_ref()))
+        .collect();
+    let mut evaluation_tapes = 0;
+    for path in &tapes {
+        let tape = EventTape::load(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        if tape
+            .records
+            .iter()
+            .any(|record| matches!(record.kind, TapeRecordKind::DecisionEvaluation { .. }))
+        {
+            EvaluationReplayScope::replay(&tape)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            evaluation_tapes += 1;
+        }
+    }
+    // An empty listing must not read as every tape decoding.
+    assert!(
+        evaluation_tapes > 0,
+        "no checked-in evaluation tape was found among {} tapes",
+        tapes.len()
+    );
+}
