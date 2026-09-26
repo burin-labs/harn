@@ -546,6 +546,27 @@ mod tests {
             .filter(|event| event["type"] == "output_schema")
             .collect();
         assert_eq!(definitions.len(), 2, "{definitions:?}");
+        // Every request's hashes resolve, and the retained text re-hashes to
+        // the hash that names it.
+        let requests: Vec<&serde_json::Value> = events
+            .iter()
+            .filter(|event| event["type"] == "provider_call_request")
+            .collect();
+        assert_eq!(requests.len(), 2, "{requests:?}");
+        for request in &requests {
+            for key in ["requested_schema_content_hash", "sent_schema_content_hash"] {
+                let hash = &request["structured_output"][key];
+                let definition = definitions
+                    .iter()
+                    .find(|definition| &definition["content_hash"] == hash)
+                    .unwrap_or_else(|| panic!("{key} {hash} resolves to no definition"));
+                assert_eq!(
+                    serde_json::json!(stable_redacted_json_hash(&definition["output_schema"])),
+                    *hash,
+                    "the retained schema must re-hash to {hash}"
+                );
+            }
+        }
         for (hash, schema) in [
             (&receipt["requested_schema_content_hash"], &requested_schema),
             (&receipt["sent_schema_content_hash"], &sent_schema),
