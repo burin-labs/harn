@@ -76,7 +76,7 @@ fn content_hash(path: &Path) -> Result<blake3::Hash, String> {
     let mut file = File::open(path)
         .map_err(|error| format!("cannot open executable {}: {error}", path.display()))?;
     let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file
             .read(&mut buffer)
