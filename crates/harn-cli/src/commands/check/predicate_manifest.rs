@@ -77,6 +77,9 @@ pub(super) fn collect(
                     )
                     .is_some_and(|signature| {
                         signature.name == harn_builtin_meta::predicate::EVALUATE.name
+                            || signature.name == harn_builtin_meta::predicate::EVALUATE_REQUEST.name
+                            || signature.name
+                                == harn_builtin_meta::predicate::EVALUATE_PREDICATE.name
                     });
                 },
             );

@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use super::decision::{DecisionLimits, DecisionProtocol, DecisionQuestionKind};
 use super::rule::ProviderRule;
 
 /// Why a self-hosted row chose native vs text tools.
@@ -219,6 +220,8 @@ pub struct ProviderDefaults {
     pub advanced_generation_options: Option<Vec<super::PortableOption>>,
     #[serde(default)]
     pub supports_parallel_tool_calls: Option<bool>,
+    #[serde(default)]
+    pub requires_parallel_tool_calls_false: Option<bool>,
 }
 
 /// Copies `src` into `dst` when `src` is set (last-writer-wins overlay).
@@ -313,6 +316,10 @@ macro_rules! merge_provider_defaults {
             &mut $dst.supports_parallel_tool_calls,
             &$src.supports_parallel_tool_calls,
         );
+        $op(
+            &mut $dst.requires_parallel_tool_calls_false,
+            &$src.requires_parallel_tool_calls_false,
+        );
     }};
 }
 
@@ -360,6 +367,7 @@ impl ProviderDefaults {
             || self.stop_supported.is_some()
             || self.advanced_generation_options.is_some()
             || self.supports_parallel_tool_calls.is_some()
+            || self.requires_parallel_tool_calls_false.is_some()
     }
 }
 
@@ -665,6 +673,40 @@ impl CapabilityProbeStatus {
     }
 }
 
+/// The supported structured transport, distinct from presentation preferences.
+/// Prompt validation is a Harn capability, not a vendor schema guarantee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StructuredOutputStrategy {
+    NativeSchema,
+    ToolSchema,
+    FormatSchema,
+    #[default]
+    PromptValidation,
+    Unsupported,
+}
+
+impl StructuredOutputStrategy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeSchema => "native_schema",
+            Self::ToolSchema => "tool_schema",
+            Self::FormatSchema => "format_schema",
+            Self::PromptValidation => "prompt_validation",
+            Self::Unsupported => "unsupported",
+        }
+    }
+
+    pub(super) fn from_declaration(declaration: Option<&str>) -> Self {
+        match declaration {
+            Some("native") => Self::NativeSchema,
+            Some("tool_use") => Self::ToolSchema,
+            Some("format_kw") => Self::FormatSchema,
+            Some("delimited") | None => Self::PromptValidation,
+            Some(_) => Self::Unsupported,
+        }
+    }
+}
+
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
@@ -711,6 +753,7 @@ pub struct Capabilities {
     pub files_api_supported: bool,
     pub file_upload_wire_format: Option<String>,
     pub structured_output: Option<String>,
+    pub structured_output_strategy: StructuredOutputStrategy,
     /// Legacy mirror for CLI display and older callers.
     pub json_schema: Option<String>,
     pub prefers_xml_scaffolding: bool,
@@ -727,6 +770,17 @@ pub struct Capabilities {
     /// exactly one live endpoint, so there is nothing to select. See
     /// [`LiveEndpointFamily`].
     pub live_endpoint_family: Option<LiveEndpointFamily>,
+    /// Wire protocol this route serves the `decision` operation over, when it
+    /// serves one. `None` means the route answers no decision requests; the
+    /// catalog `operations` set is the admission owner, and this says how a
+    /// route it admits is dialled. See [`DecisionProtocol`].
+    pub decision_protocol: Option<DecisionProtocol>,
+    /// Question kinds the decision route accepts. Empty when the route serves
+    /// no decision operation.
+    pub decision_question_kinds: Vec<DecisionQuestionKind>,
+    /// Declared request ceilings for the decision route. See
+    /// [`DecisionLimits`].
+    pub decision_limits: Option<DecisionLimits>,
     /// Whether this route emits its reasoning INLINE in the text channel as
     /// `<think>...</think>` blocks (local Ollama/llama.cpp reasoning models,
     /// Qwen3 via vLLM, Kimi) rather than in a separate provider reasoning
@@ -743,6 +797,8 @@ pub struct Capabilities {
     pub vision_supported: bool,
     pub image_url_input_supported: bool,
     pub preserve_thinking: bool,
+    /// Whether the route honors the preserve-thinking request knob.
+    pub honors_preserve_thinking_kwarg: bool,
     /// Typed provider-visible reasoning replay policy. Defaults to strip.
     pub reasoning_round_trip: ReasoningRoundTripPolicy,
     /// Provider-specific wire field used to replay Harn's private reasoning
@@ -785,6 +841,8 @@ pub struct Capabilities {
     pub allowed_tool_choice_modes: Vec<String>,
     pub requires_tool_result_adjacency: bool,
     pub supports_parallel_tool_calls: bool,
+    /// Whether the request must explicitly suppress parallel calls on the wire.
+    pub requires_parallel_tool_calls_false: bool,
     pub tools_exclude_response_format: bool,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
@@ -875,6 +933,7 @@ impl Default for Capabilities {
             files_api_supported: false,
             file_upload_wire_format: None,
             structured_output: None,
+            structured_output_strategy: StructuredOutputStrategy::default(),
             json_schema: None,
             prefers_xml_scaffolding: false,
             reserved_tool_call_token: false,
@@ -885,6 +944,9 @@ impl Default for Capabilities {
             prefers_xml_tools: false,
             thinking_block_style: "none".to_string(),
             live_endpoint_family: None,
+            decision_protocol: None,
+            decision_question_kinds: Vec::new(),
+            decision_limits: None,
             emits_inline_reasoning: false,
             thinking_modes: Vec::new(),
             interleaved_thinking_supported: false,
@@ -892,6 +954,7 @@ impl Default for Capabilities {
             vision_supported: false,
             image_url_input_supported: true,
             preserve_thinking: false,
+            honors_preserve_thinking_kwarg: false,
             reasoning_round_trip: ReasoningRoundTripPolicy::Strip,
             reasoning_history_wire_field: None,
             server_parser: "none".to_string(),
@@ -921,6 +984,7 @@ impl Default for Capabilities {
             allowed_tool_choice_modes: Vec::new(),
             requires_tool_result_adjacency: false,
             supports_parallel_tool_calls: true,
+            requires_parallel_tool_calls_false: false,
             tools_exclude_response_format: false,
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
@@ -939,5 +1003,27 @@ impl Default for Capabilities {
             system_message_placement: None,
             runtime_probe: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod structured_strategy_tests {
+    use super::StructuredOutputStrategy as Strategy;
+
+    #[test]
+    fn absence_can_use_prompt_validation_but_explicit_denial_cannot() {
+        assert_eq!(Strategy::from_declaration(None), Strategy::PromptValidation);
+        assert_eq!(
+            Strategy::from_declaration(Some("delimited")),
+            Strategy::PromptValidation
+        );
+        assert_eq!(
+            Strategy::from_declaration(Some("none")),
+            Strategy::Unsupported
+        );
+        assert_eq!(
+            Strategy::from_declaration(Some("misspelled")),
+            Strategy::Unsupported
+        );
     }
 }

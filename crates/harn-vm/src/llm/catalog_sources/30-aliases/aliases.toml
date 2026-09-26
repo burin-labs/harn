@@ -20,20 +20,24 @@ id = "claude-sonnet-4-6"
 provider = "anthropic"
 
 [aliases.opus]
-id = "claude-opus-5"
+id = "claude-opus-5-5"
 provider = "anthropic"
 
+[aliases.opus55]
+id = "claude-opus-5-5"
+provider = "anthropic"
+
+# Previous Opus generations, kept addressable for pinned workflows.
 [aliases.opus5]
 id = "claude-opus-5"
 provider = "anthropic"
 
-# Previous Opus generation, kept addressable for pinned workflows.
 [aliases.opus48]
 id = "claude-opus-4-8"
 provider = "anthropic"
 
 # Fable is the Mythos-class tier above Opus, not an Opus successor — the
-# `opus` alias tracks the current Opus generation (claude-opus-5), not Fable.
+# `opus` alias tracks the current Opus generation (claude-opus-5-5), not Fable.
 [aliases.fable]
 id = "claude-fable-5-1"
 provider = "anthropic"
@@ -74,33 +78,42 @@ provider = "openrouter"
 id = "accounts/fireworks/models/gpt-oss-120b"
 provider = "fireworks"
 
+# GPT-6 tiers: Astra is the frontier, Sol the balanced tier (GPT-6 has no
+# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier.
 [aliases."openai/mid"]
-id = "gpt-5.6-terra"
+id = "gpt-6-sol"
 provider = "openai"
 
 [aliases."openai/frontier"]
-id = "gpt-5.6-sol"
+id = "gpt-6-astra"
 provider = "openai"
 
 [aliases."openai/small"]
-id = "gpt-5.6-luna"
+id = "gpt-6-luna"
 provider = "openai"
 
-# Preserve OpenAI's public family alias while resolving to the explicit tier
-# for stable catalog metadata, receipts, and cost projections.
+# Preserve OpenAI's public GPT-5.6 family alias while resolving to the
+# explicit tier for stable catalog metadata, receipts, and cost projections.
 [aliases."gpt-5.6"]
 id = "gpt-5.6-sol"
 provider = "openai"
 
-# GPT-6 ships a single model, so the family alias and the marketing name both
-# resolve to the one id. Kept as aliases rather than extra catalog rows so
-# receipts and cost projections stay on the canonical `gpt-6-astra`.
+# OpenAI publishes no bare `gpt-6` id; the family alias names the flagship.
+# Tier names resolve to the GPT-6 generation.
 [aliases."gpt-6"]
 id = "gpt-6-astra"
 provider = "openai"
 
 [aliases.astra]
 id = "gpt-6-astra"
+provider = "openai"
+
+[aliases.sol]
+id = "gpt-6-sol"
+provider = "openai"
+
+[aliases.luna]
+id = "gpt-6-luna"
 provider = "openai"
 
 # The small tier default stays on an open-weight host by policy (see
@@ -459,23 +472,22 @@ provider = "nvidia"
 tool_format = "native"
 
 [aliases."nvidia-nemotron-nano"]
-id = "nvidia/nemotron-3-nano-30b-a3b"
+id = "nvidia/nemotron-nano-3-30b-a3b"
 provider = "nvidia"
 tool_format = "native"
 
-# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07. This alias
-# follows NIM to the dated Flash snapshot. There is no NIM DeepSeek V4 Pro
-# build to point at.
+# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07, and by
+# 2026-09-26 the dated Flash snapshot too. This alias names V4, so it stays on
+# the deprecated snapshot row, whose `superseded_by` names the V4.1 route,
+# rather than silently moving callers to a different model.
 [aliases."nvidia-deepseek-v4-flash"]
 id = "nvidia/deepseek-v4-flash-0731"
 provider = "nvidia"
 tool_format = "native"
 
-[aliases."nvidia-minimax-m3"]
-id = "nvidia/minimax-m3"
-provider = "nvidia"
-tool_format = "native"
-
+# Removed 2026-09-20 with the nvidia/minimax-m3 row: NIM no longer serves any
+# MiniMax build. `minimax-m3` and the SambaNova/Fireworks/OpenRouter aliases
+# still reach the model.
 [aliases."nvidia-kimi-k2.6"]
 id = "nvidia/kimi-k2.6"
 provider = "nvidia"
@@ -597,6 +609,11 @@ provider = "zai"
 id = "glm-5.3-flash"
 provider = "zai"
 
+# GLM-5.3-FlashX, Z.AI's higher-throughput Flash build (released 2026-09-18).
+[aliases."glm-5.3-flashx"]
+id = "glm-5.3-flashx"
+provider = "zai"
+
 [aliases."glm-flash"]
 id = "glm-5.3-flash"
 provider = "zai"
@@ -680,6 +697,15 @@ id = "grok-4.5"
 provider = "xai"
 tool_format = "native"
 
+# Grok 4.6 shipped 2026-08-06. The bare `grok` alias deliberately stays on 4.5:
+# xAI still points its own `grok-4.5-latest` and `grok-build-latest` aliases at
+# 4.5 and publishes no `-latest` alias for 4.6 (https://api.x.ai/v1/models,
+# observed 2026-09-20), so moving the default would be our claim, not xAI's.
+[aliases."grok-4.6"]
+id = "grok-4.6"
+provider = "xai"
+tool_format = "native"
+
 [aliases."grok-4.3"]
 id = "grok-4.3"
 provider = "xai"
@@ -755,12 +781,9 @@ tool_format = "native"
 id = "qwen/qwen3.5-397b-a17b"
 provider = "openrouter"
 
-# Groq LPU speed route for Qwen3.6 (native tool calls, ~500 tok/s).
-[aliases."groq-qwen3.6"]
-id = "qwen/qwen3.6-27b"
-provider = "groq"
-tool_format = "native"
-
+# Removed 2026-09-20 with the qwen/qwen3.6-27b row: Groq's live /models index
+# no longer serves it. `groq-qwen3.8` below is the successor alias and already
+# existed, so no alias was re-pointed.
 [aliases."groq-qwen3.8"]
 id = "qwen/qwen3.8-27b"
 provider = "groq"
@@ -801,5 +824,5 @@ id = "vercel/anthropic/claude-haiku-4.5"
 provider = "vercel_ai_gateway"
 
 [aliases."vercel-gemini-3.1-flash-lite"]
-id = "vercel/google/gemini-3.1-flash-lite-preview"
+id = "vercel/google/gemini-3.1-flash-lite"
 provider = "vercel_ai_gateway"

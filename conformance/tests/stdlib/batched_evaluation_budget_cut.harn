@@ -1,0 +1,34 @@
+import { boolean, choice, score } from "std/predicate"
+
+pipeline test_batched_evaluation_budget_cut(harness: Harness) {
+  const policy = {
+    backend: "structured_llm",
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    effort: "low",
+    temperature: 0.0,
+    threshold: 0.8,
+    evaluation_cost_limit: 0.0,
+    run_cost_limit: 0.0,
+  }
+  const result = harness.llm.evaluate(
+    "triage.v1",
+    {text: "window"},
+    {
+      disposition: choice("Keep or drop?", {keep: "still needed", drop: "superseded"}),
+      risk: score("How risky?", ["low", "high"]),
+      safe: boolean("Safe to run?"),
+    },
+    policy,
+  )
+  match result.kind {
+    "answered" -> {
+      match result.value.disposition.choice {
+        "keep" -> { harness.stdio.println("keep") }
+        "drop" -> { harness.stdio.println("drop") }
+      }
+    }
+    "budget_cut" -> { harness.stdio.println(result.limit == "evaluation_cost") }
+    _ -> { harness.stdio.println(false) }
+  }
+}

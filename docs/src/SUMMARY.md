@@ -20,6 +20,7 @@
 - [Why Harn?](./why-harn.md)
 - [How Harn compares](./how-harn-compares.md)
 - [Predicate evaluation contract](./predicates.md)
+- [What a confidence score means](./concepts/confidence.md)
 - [Probabilistic branching proposal](./design/probabilistic-branching.md)
 
 # Tutorials
@@ -34,6 +35,8 @@
 # How-to guides
 
 - [Common tasks](./common-tasks.md)
+- [Ask a decision model a question](./decision-evaluation.md)
+- [Record and replay decision evaluations](./decision-replay.md)
 - [Configure a provider](./provider-setup.md)
 - [Run a workflow bundle from the CLI](./workflow-authoring-quickstart.md)
 - [Cookbook](./cookbook.md)
@@ -321,6 +324,9 @@
 - [`std/cli/envelope`](./cli-envelope-reference.md)
 - [`std/cli/render`](./cli-render-reference.md)
 - [`std/cli/paths`](./cli-paths-reference.md)
+- [`std/eval/calibration`](./eval-calibration-reference.md)
+- [Decision evaluation contract](./decision-evaluation-reference.md)
+- [`std/eval/selective_risk`](./eval-selective-risk-reference.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
 - [SQLite](./sqlite.md)

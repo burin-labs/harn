@@ -170,8 +170,8 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
     let gpt_family = families
         .iter()
         .filter_map(VmValue::as_dict)
-        .find(|family| family.get("id").map(VmValue::display) == Some("openai-gpt-5-6".to_string()))
-        .expect("GPT-5.6 family");
+        .find(|family| family.get("id").map(VmValue::display) == Some("openai-gpt-6".to_string()))
+        .expect("GPT-6 family");
     assert_eq!(
         gpt_family.get("provider").map(VmValue::display).as_deref(),
         Some("openai")
@@ -184,8 +184,8 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
     let sol = models
         .iter()
         .filter_map(VmValue::as_dict)
-        .find(|model| model.get("id").map(VmValue::display) == Some("gpt-5.6-sol".to_string()))
-        .expect("GPT-5.6 Sol model");
+        .find(|model| model.get("id").map(VmValue::display) == Some("gpt-6-sol".to_string()))
+        .expect("GPT-6 Sol model");
     assert!(sol
         .get("blurb")
         .map(VmValue::display)
@@ -194,20 +194,22 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
         Some(VmValue::List(levels)) => levels.iter().map(VmValue::display).collect::<Vec<_>>(),
         other => panic!("expected reasoning_effort_levels list, got {other:?}"),
     };
-    assert_eq!(levels, ["none", "low", "medium", "high", "xhigh", "max"]);
+    assert_eq!(levels, ["none", "low", "medium", "high", "xhigh"]);
 
-    let retired_together_route = models
+    // Together retired the DeepSeek V4 Pro preview this fixture used to read,
+    // and its row is gone. OpenAI's o1 is the bundled route that now carries a
+    // typed retirement date, sourced from the `shutdown_date` on its live
+    // model record.
+    let retired_route = models
         .iter()
         .filter_map(VmValue::as_dict)
-        .find(|model| {
-            model.get("id").map(VmValue::display) == Some("deepseek-ai/DeepSeek-V4-Pro".to_string())
-        })
-        .expect("deprecated Together DeepSeek V4 Pro route");
+        .find(|model| model.get("id").map(VmValue::display) == Some("o1".to_string()))
+        .expect("deprecated OpenAI o1 route");
     assert_eq!(
-        retired_together_route
+        retired_route
             .get("sunset_date")
             .map(VmValue::display)
             .as_deref(),
-        Some("2026-08-27")
+        Some("2026-10-23")
     );
 }

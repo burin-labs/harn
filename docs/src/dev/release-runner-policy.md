@@ -8,16 +8,18 @@ validates that document and resolves the matrix consumed by
 Each target declares five labels:
 
 - `warm`: routine default-branch cache refreshes.
-- `primary`: tag-push release builds on the product critical path.
-- `recovery`: manual tag recovery when no override is requested.
-- `standard`: an explicit standard-capacity recovery or benchmark override.
-- `fast`: an explicit latency-prioritized recovery or benchmark override.
+- `primary`: release candidate builds on the product critical path (the
+  version commit's push to main; candidate mode resolves to these labels).
+- `recovery`: no workflow path selects it since releases are promoted from the
+  candidate run instead of rebuilt; `scripts/release_runner_matrix.sh` still
+  validates it.
+- `standard`: an explicit standard-capacity benchmark override.
+- `fast`: an explicit latency-prioritized benchmark override.
 
-Primary and warm builds always use policy. Recovery accepts `policy`,
-`standard`, or `fast`; the default is `policy`. The non-publishing benchmark
+Candidate and warm builds always use policy. The non-publishing benchmark
 mode requires an explicit target subset and either `standard` or `fast`. It
 compiles and runs the binary-size gate, but cannot sign, notarize, package,
-upload, finalize a release, publish a container, or save a cache.
+upload, or save a cache.
 
 ```bash
 gh workflow run build-release-binaries.yml \

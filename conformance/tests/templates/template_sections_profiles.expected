@@ -22,12 +22,6 @@ Urgent: Build a tree CLI.
   }
 ]
 </tools>
-<thinking>
-Think through the task before answering.
-</thinking>
-<reasoning>
-Reason privately step by step before answering.
-</reasoning>
 --- gpt-markdown ---
 ## System Instructions
 You are a build agent.
@@ -48,10 +42,6 @@ Urgent: Build a tree CLI.
     "name": "print_tree"
   }
 ]
-## Reasoning
-Use internal reasoning and provide a concise answer.
-## Reasoning
-Reason privately step by step before answering.
 ## Task
 Partial task for Alice.
 
@@ -92,9 +82,6 @@ Available tools:
     "name": "print_tree"
   }
 ]
-Reason privately before answering.
-## Reasoning
-Reason privately step by step before answering.
 --- generic-fallback ---
 System Instructions:
 You are a build agent.
@@ -127,5 +114,3 @@ Tools:
     "name": "print_tree"
   }
 ]
-
-Reason privately step by step before answering.

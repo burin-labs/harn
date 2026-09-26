@@ -15,8 +15,10 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &TESTING_CALL_BODY_IMPL_DEF,
+    &TESTING_WITH_EVALUATION_FIXTURES_IMPL_DEF,
     &TESTING_WITH_NESTED_EXECUTION_BUDGET_IMPL_DEF,
     &ASSERT_IMPL_DEF,
+    &SKIP_IMPL_DEF,
     &ASSERT_EQ_IMPL_DEF,
     &ASSERT_NE_IMPL_DEF,
     &ASSERT_APPROX_IMPL_DEF,
@@ -53,32 +55,84 @@ async fn testing_call_body_impl(
         .first()
         .cloned()
         .ok_or_else(|| VmError::Runtime("__testing_call_body: body is required".to_string()))?;
-    if !Vm::is_callable_value(&body) {
-        return Err(VmError::TypeError(format!(
-            "__testing_call_body: body must be callable, got {}",
-            body.type_name()
-        )));
-    }
-
-    let call_args = match &body {
-        VmValue::Closure(closure) => {
-            let required = closure.func.required_param_count();
-            if required == 0 {
-                Vec::new()
-            } else if required == 1 {
-                vec![VmValue::Nil]
-            } else {
-                return Err(VmError::Runtime(format!(
-                    "__testing_call_body: body expects {required} required argument(s); scoped mock helpers pass at most one context value"
-                )));
-            }
-        }
-        _ => Vec::new(),
-    };
+    let call_args = scoped_body_args(&body, "__testing_call_body")?;
 
     let mut vm = ctx.child_vm();
     let result = vm.call_callable_owned(&body, call_args).await;
     ctx.forward_output(&vm.take_output());
+    result
+}
+
+fn scoped_body_args(body: &VmValue, name: &str) -> Result<Vec<VmValue>, VmError> {
+    if !Vm::is_callable_value(body) {
+        return Err(VmError::TypeError(format!(
+            "{name}: body must be callable, got {}",
+            body.type_name()
+        )));
+    }
+
+    match body {
+        VmValue::Closure(closure) => {
+            let required = closure.func.required_param_count();
+            if required == 0 {
+                Ok(Vec::new())
+            } else if required == 1 {
+                Ok(vec![VmValue::Nil])
+            } else {
+                Err(VmError::Runtime(format!(
+                    "{name}: body expects {required} required argument(s); scoped helpers pass at most one context value"
+                )))
+            }
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__testing_with_evaluation_fixtures(harness: Harness, fixtures: list, body: any) -> any",
+    kind = "async",
+    category = "testing"
+)]
+async fn testing_with_evaluation_fixtures_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let supplied_harness = match args.first() {
+        Some(VmValue::Harness(handle)) if handle.type_name() == "Harness" => handle,
+        _ => {
+            return Err(VmError::TypeError(
+                "with_evaluation_fixtures needs this execution's Harness".into(),
+            ))
+        }
+    };
+    let fixtures = args
+        .get(1)
+        .ok_or_else(|| VmError::TypeError("evaluation fixtures are required".into()))?;
+    let body = args
+        .get(2)
+        .cloned()
+        .ok_or_else(|| VmError::TypeError("fixture body is required".into()))?;
+    let call_args = scoped_body_args(&body, "with_evaluation_fixtures")?;
+    let mut vm = ctx.child_vm();
+    let active_harness = vm
+        .harness()
+        .ok_or_else(|| VmError::TypeError("evaluation fixtures require a root Harness".into()))?;
+    if !std::sync::Arc::ptr_eq(supplied_harness.inner(), active_harness.inner()) {
+        return Err(VmError::TypeError(
+            "evaluation fixtures received a different Harness".into(),
+        ));
+    }
+    let fixtures = serde_json::from_value::<Vec<crate::llm::decision::replay::EvaluationFixture>>(
+        crate::llm::helpers::vm_value_to_json(fixtures),
+    )
+    .map_err(|error| VmError::TypeError(format!("invalid evaluation fixture: {error}")))?;
+    let scope = crate::llm::decision::replay::EvaluationReplayScope::fixtures(fixtures)?;
+    vm.set_evaluation_replay(scope.clone());
+    let result = vm.call_callable_owned(&body, call_args).await;
+    ctx.forward_output(&vm.take_output());
+    scope.finish()?;
     result
 }
 
@@ -172,6 +226,27 @@ fn assert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
     }
     Ok(VmValue::Nil)
+}
+
+/// Stop the current user-test case with a reason the runner can count and
+/// report. This is VM control flow, so a test's catch block cannot turn a
+/// skipped case into a pass.
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "skip(reason: string) -> nil",
+    category = "testing"
+)]
+fn skip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let reason = match args.first() {
+        Some(VmValue::String(reason)) if !reason.trim().is_empty() => reason.to_string(),
+        _ => {
+            return Err(VmError::TypeError(
+                "skip: a non-empty reason is required".to_string(),
+            ))
+        }
+    };
+    Err(VmError::TestSkipped(reason))
 }
 
 /// Throws a Harn-level error carrying `text` — the shape every assertion

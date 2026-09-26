@@ -1,0 +1,96 @@
+import { boolean, choice, score } from "std/predicate"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        json_stringify(
+          {
+            answers: {
+              safe: {verdict: true, confidence: 0.1, evidence: "uncertain true"},
+              tool: {choice: "left", confidence: 0.1, evidence: "uncertain left"},
+              risk: {level: "low", confidence: 0.1, evidence: "uncertain low"},
+            },
+          },
+        ),
+      )
+        + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30},
+    ],
+    { ->
+      const result = harness.llm.evaluate(
+        "structured-named-answer.v1",
+        {text: "fixture"},
+        {
+          safe: boolean("Safe?"),
+          tool: choice("Which?", {left: "Left", right: "Right"}),
+          risk: score("Risk?", ["low", "high"]),
+        },
+        {
+          backend: "structured_llm",
+          provider: "openai",
+          model: "gpt-5.4-nano",
+          effort: "none",
+          temperature: 0.0,
+          threshold: 0.0,
+          evaluation_cost_limit: 1.0,
+          run_cost_limit: 1.0,
+        },
+      )
+      match result.kind {
+        "answered" -> {
+          assert_eq(result.value.safe.verdict, true)
+          assert_eq(result.value.tool.choice, "left")
+          assert_eq(result.value.risk.level, "low")
+          assert_eq(result.value.risk.score, 0.0)
+          assert_eq(result.value.safe.confidence, 0.1)
+          assert_eq(result.value.tool.confidence_kind, "model_rationale")
+        }
+        _ -> {
+          throw "valid low-confidence named answers must remain observable"
+        }
+      }
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("malformed response")
+        + {
+          provider: "openai",
+          model: "gpt-5.4-nano",
+          input_tokens: 100,
+          output_tokens: 30,
+          simulated_cost_usd: 0.00017,
+          cache_read_tokens: 80,
+        },
+    ],
+    { ->
+      const result = harness.llm.evaluate(
+        "structured-malformed.v1",
+        {text: "fixture"},
+        {safe: boolean("Safe?")},
+        {
+          backend: "structured_llm",
+          provider: "openai",
+          model: "gpt-5.4-nano",
+          effort: "none",
+          temperature: 0.0,
+          threshold: 0.0,
+          evaluation_cost_limit: 1.0,
+          run_cost_limit: 1.0,
+        },
+      )
+      match result.kind {
+        "refused" -> { assert_eq(result.reason, "schema_invalid") }
+        _ -> {
+          throw "malformed answer must refuse"
+        }
+      }
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+  harness.stdio.log("structured named answers retained; malformed answer refused once")
+}

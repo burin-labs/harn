@@ -62,77 +62,52 @@ log_step() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release_ship.sh --prepare --bump patch [--audit-receipt path] [--skip-dry-run]  # release_harn.harn only
-  ./scripts/release_ship.sh --prepare --materialize-candidate --bump patch                  # release_harn.harn only
-  ./scripts/release_ship.sh --bump patch [--skip-dry-run] [--base main]   # recovery
+  ./scripts/release_ship.sh --prepare --materialize-candidate --bump patch
+  ./scripts/release_ship.sh --prepare --bump patch --audit-receipt path [--skip-dry-run]
   ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--skip-github-release] [--allow-unfolded-fragments] [--base main]
 
-Merge-queue-safe release sequence for a prepared Harn release.
+Merge-queue-safe release sequence for a Harn release.
 
 ==============================================================================
-DEFAULT FLOW (one human PR, then bot finalizes)
+DEFAULT FLOW (release by promotion)
 ==============================================================================
 
-  1. Branch off main at a frozen commit (release_harn.harn does this
-     automatically) and write the release content:
-       git checkout -b release/vX.Y.Z <pin-sha>
-       # author code/docs changes
-       # add `## vX.Y.Z` heading at the top of CHANGELOG.md
+  1. scripts/open_release_pr.sh, run by the "Open release PR" workflow
+     (.github/workflows/bump-release.yml), branches release/vX.Y.Z off main
+     and runs `--prepare --materialize-candidate` to build the release
+     content. It opens the `Release vX.Y.Z` pull request, which merges on
+     green through normal CI.
 
-  2. Stage release-content files but do NOT commit yet.
-
-  3. Run prepare-here, which audits, dry-run-publishes, bumps
-     Cargo.toml/Cargo.lock, regenerates derived files, and stages
-     everything ready for a single commit:
-       cd ~/projects/harn-bump-fleet
-       harn run --no-sandbox release_harn.harn -- \
-         --repo ~/projects/harn --mode ship-pr --agent --yes-live-release
-
-  4. The release_harn.harn harness commits and certifies an immutable
-     candidate, opens its PR, and enables auto-merge:
-       git commit -m "Release vX.Y.Z"
-       gh pr create
-
-  5. After the PR squash-merges, the release watcher signs and pushes
-     vX.Y.Z at that exact main commit. publish-release.yml and
-     build-release-binaries.yml prove the tag's main ancestry and publish
-     crates, binaries, and the GitHub release from the tagged source.
+  2. When that commit reaches main, its push builds and checks the release
+     candidate (build-release-binaries.yml). Promotion tags that commit and
+     publishes those exact files; the tag push runs publish-release.yml,
+     which proves the tag's main ancestry and publishes crates.
 
 ==============================================================================
 PREPARE MODE
 ==============================================================================
 
-  - Implementation detail used by release_harn.harn. Standalone prepare is
-    rejected because only the harness owns candidate certification and the
-    durable post-merge tag handoff.
-  - Runs from a non-main branch with the release content already authored.
-  - Detects bump type via --bump and confirms it matches the CHANGELOG
-    top entry (CHANGELOG must be at the next vX.Y.Z heading already).
-  - Runs the full audit by default. A closed exact-HEAD receipt may authorize
-    only the residual lanes owned by Harn's release-audit contract.
-  - Runs a publish dry-run (skip with --skip-dry-run) so failures surface before
-    push.
-  - Bumps Cargo.toml + crates/*/Cargo.toml + Cargo.lock to vX.Y.Z.
+  - Runs from a non-main branch.
+  - The release version is the workspace's declared X.Y.Z-dev target with
+    `-dev` stripped; --bump patch is the only accepted value.
+  - Folds changelog.d fragments into CHANGELOG.md's `## vX.Y.Z` section and
+    deletes them (scripts/release_changelog_fold.harn), then requires that
+    CHANGELOG.md starts at `## vX.Y.Z` and no fragment remains.
   - Regenerates derived files (`docs/src/language-spec.md`,
     `docs/theme/harn-keywords.js`).
-  - Stages everything; the human commits and pushes.
+  - Bumps Cargo.toml + crates/*/Cargo.toml + Cargo.lock to vX.Y.Z.
+  - Stages everything for one `Release vX.Y.Z` commit.
+  - Every step runs in one transaction: a failure restores the tree it
+    started from.
 
-  --materialize-candidate is the harness-only first half of this transaction.
-  It deterministically bumps and regenerates the candidate tree, stages it, and
-  returns without claiming certification. The release harness must commit and
-  publish that immutable candidate, then certify its exact OID before tagging.
-  It cannot be combined with --audit-receipt and is not a general audit bypass.
+  --materialize-candidate builds and stages that content without running the
+  release audit or a publish dry-run. The release pull request's CI and the
+  version-push candidate run check it. It cannot be combined with
+  --audit-receipt.
 
-==============================================================================
-LEGACY BUMP MODE (recovery only)
-==============================================================================
-
-  Pre-consolidation behavior kept for the recovery workflow_dispatch
-  path on .github/workflows/bump-release.yml. Runs from main, opens a
-  "Bump version to X.Y.Z" PR from a release/vX.Y.Z branch. Use only
-  when a "Prepare vX.Y.Z release"-style commit landed on main without
-  the consolidated bump (the workflow flips itself out of the default
-  push-trigger to make this an explicit recovery action).
+  Without --materialize-candidate, prepare also runs the release audit
+  authorized by a closed exact-HEAD --audit-receipt, and a publish dry-run
+  (skip with --skip-dry-run), before staging.
 
 ==============================================================================
 FINALIZE MODE
@@ -155,8 +130,8 @@ FINALIZE MODE
     b. On main with drift — legacy/recovery path. Fast-forwards local
        main, tags HEAD as vX.Y.Z (must match Cargo.toml's workspace
        version), pushes the tag, and publishes. Used when a release
-       was authored without release_harn.harn or the tag-push trigger
-       failed and we're recovering via push:main drift.
+       was tagged by hand or the tag-push trigger failed and we're
+       recovering via push:main drift.
 
   --allow-unfolded-fragments is recovery for shape (a) only. Finalization
   publishes from the tag's own tree, so unfolded fragments inside that tree
@@ -190,7 +165,7 @@ AUDIT RECEIPT
 ==============================================================================
 
   --audit-receipt path
-    Present the closed Harn release-audit receipt during harness-driven
+    Present the closed Harn release-audit receipt during an audited
     --prepare. Missing, unreadable, stale, skipped, or failed evidence selects
     the full local audit; callers cannot select a profile directly.
 
@@ -211,10 +186,6 @@ ENVIRONMENT VARIABLES
     Force --finalize to re-run the full release-gate audit. Defaults
     off — merge-queue CI already proved the same gates a few minutes
     ago. Use when finalizing locally after edits.
-
-  HARN_RELEASE_HARNESS=1
-    Required for --prepare. Set by harn-bump-fleet/release_harn.harn after
-    it pins the release commit and before it pushes the vX.Y.Z tag.
 EOF
 }
 
@@ -233,14 +204,39 @@ current_version() {
   release_metadata current
 }
 
-release_metadata() {
+# Resolve Harn with the release root's own harn_bin.sh. Publication stages
+# these tools from main but builds Harn from the release root, and the build's
+# freshness proof (receipt, checker subcommands) belongs to the tree it was
+# built from. Main's copy asked a tag-built checker for a subcommand added
+# after the tag, which failed a publish recovery. The staged copy remains the
+# fallback for a root that predates harn_bin.sh.
+release_root_harn_bin() {
+  local tool="$ROOT_DIR/scripts/harn_bin.sh"
+  [[ -x "$tool" ]] || tool="$SCRIPT_DIR/harn_bin.sh"
+  "$tool" "$@"
+}
+
+# Run one release-metadata Harn tool against the release root. Both tools
+# resolve the same binary, so the fold and the version bump always run on one
+# runtime.
+release_tool() {
+  local script="$1"
+  shift
   if [[ -n "${HARN_RELEASE_METADATA_BIN:-}" ]]; then
-    "$HARN_RELEASE_METADATA_BIN" run "$SCRIPT_DIR/release_metadata.harn" -- "$@" --root "$ROOT_DIR"
+    "$HARN_RELEASE_METADATA_BIN" run "$SCRIPT_DIR/$script" -- "$@" --root "$ROOT_DIR"
   elif [[ -n "${HARN_BIN:-}" ]]; then
-    "$HARN_BIN" run "$SCRIPT_DIR/release_metadata.harn" -- "$@" --root "$ROOT_DIR"
+    "$HARN_BIN" run "$SCRIPT_DIR/$script" -- "$@" --root "$ROOT_DIR"
   else
-    "$SCRIPT_DIR/harn_bin.sh" run "$SCRIPT_DIR/release_metadata.harn" -- "$@" --root "$ROOT_DIR"
+    release_root_harn_bin run "$SCRIPT_DIR/$script" -- "$@" --root "$ROOT_DIR"
   fi
+}
+
+release_metadata() {
+  release_tool release_metadata.harn "$@"
+}
+
+fold_release_changelog() {
+  release_tool release_changelog_fold.harn fold --version "$1"
 }
 
 workspace_package_manifests() {
@@ -253,7 +249,7 @@ stage_version_bump_manifests() {
   while IFS= read -r manifest; do
     [[ -n "$manifest" ]] && paths+=("$manifest")
   done < <(workspace_package_manifests)
-  git add "${paths[@]}" "$@"
+  git add "${paths[@]}"
 }
 
 next_version() {
@@ -271,7 +267,7 @@ export_warmed_harn_bin() {
     return 0
   fi
   local harn_bin
-  if harn_bin="$("$SCRIPT_DIR/harn_bin.sh" --no-build --print 2>/dev/null)" && [[ -x "$harn_bin" ]]; then
+  if harn_bin="$(release_root_harn_bin --no-build --print 2>/dev/null)" && [[ -x "$harn_bin" ]]; then
     export HARN_BIN="$harn_bin"
     printf 'Reusing warmed HARN_BIN: %s\n' "$HARN_BIN"
   fi
@@ -282,26 +278,6 @@ disable_prepare_cargo_cache_wrappers() {
   export RUSTC_WRAPPER=
   export CARGO_BUILD_RUSTC_WRAPPER=
   export SCCACHE_DISABLE=1
-}
-
-require_base_branch() {
-  local base="$1"
-  local branch
-  branch="$(git branch --show-current)"
-  if [[ "$branch" != "$base" ]]; then
-    echo "error: release_ship.sh must run from $base; current branch is ${branch:-detached}"
-    echo "hint: wait for release-content/version-bump PRs to land, then sync $base"
-    exit 1
-  fi
-  git fetch origin "$base" --quiet
-  local local_head remote_head
-  local_head="$(git rev-parse HEAD)"
-  remote_head="$(git rev-parse "origin/$base")"
-  if [[ "$local_head" != "$remote_head" ]]; then
-    echo "error: local $base is not up to date with origin/$base"
-    echo "hint: git pull --ff-only origin $base"
-    exit 1
-  fi
 }
 
 # Sync local base branch to origin/base instead of asserting strict equality.
@@ -353,20 +329,8 @@ require_release_branch() {
   fi
 }
 
-require_release_harness_prepare() {
-  if [[ "${HARN_RELEASE_HARNESS:-0}" == "1" ]]; then
-    return 0
-  fi
-  echo "error: release_ship.sh --prepare is only supported through release_harn.harn"
-  echo "hint: run from ~/projects/harn-bump-fleet:"
-  echo "      harn run --no-sandbox release_harn.harn -- \\"
-  echo "        --repo ~/projects/harn --mode ship-pr --agent --yes-live-release"
-  echo "hint: the harness must certify the candidate and persist the post-merge tag handoff"
-  exit 1
-}
-
-# Verify the top CHANGELOG.md heading matches the expected next version.
-# The human is expected to have authored "## vX.Y.Z" before running prepare.
+# Verify the top CHANGELOG.md heading matches the expected next version, after
+# prepare's fold has written it.
 require_changelog_top_matches() {
   local expected="$1"
   release_metadata verify-changelog --version "$expected"
@@ -498,97 +462,6 @@ regenerate_derived_files() {
   make gen-highlight
 }
 
-open_bump_pr() {
-  local base="$1"
-  local previous="$2"
-  local next="$3"
-  local branch="release/v$next"
-  local tag="v$next"
-
-  if git show-ref --verify --quiet "refs/heads/$branch"; then
-    echo "error: local branch already exists: $branch"
-    exit 1
-  fi
-
-  log_step "Create bump branch"
-  git switch -c "$branch"
-
-  export_warmed_harn_bin
-  log_step "Version bump"
-  local prepare_args=(prepare --bump "$BUMP")
-  if [[ -n "$PREID" ]]; then
-    prepare_args+=(--preid "$PREID")
-  fi
-  "$RELEASE_GATE_SCRIPT" "${prepare_args[@]}"
-  local actual_next
-  actual_next="$(current_version)"
-  if [[ "$actual_next" != "$next" ]]; then
-    echo "error: expected version $next, got $actual_next"
-    exit 1
-  fi
-  make gen-grammar-fitness
-
-  log_step "Commit version bump"
-  stage_version_bump_manifests \
-    spec/acp-registry/harn/agent.json \
-    crates/harn-hostlib/data/grammar-fitness/receipt.v1.json
-  git commit -m "Bump version to $next"
-
-  log_step "Push bump branch"
-  git push -u origin "$branch"
-
-  local body_file
-  body_file="$(mktemp)"
-  cat >"$body_file" <<EOF
-Automated version-bump PR for $tag.
-
-Release gates completed before opening this PR:
-
-- ./scripts/release_gate.sh audit
-- ./scripts/release_gate.sh publish --dry-run, unless --skip-dry-run was passed
-
-After this PR lands through the merge queue, finalize from an up-to-date $base:
-
-\`\`\`bash
-./scripts/release_ship.sh --finalize
-\`\`\`
-EOF
-
-  if command -v gh &>/dev/null; then
-    log_step "Open bump PR"
-    local pr_url
-    pr_url="$(gh pr create \
-      --base "$base" \
-      --head "$branch" \
-      --title "[Release] Bump version to $next" \
-      --body-file "$body_file")"
-    echo "$pr_url"
-
-    log_step "Label bump PR"
-    gh pr edit "$pr_url" --add-label "no-changelog-needed"
-
-    log_step "Enable bump PR auto-merge"
-    gh pr merge "$pr_url" --auto --squash
-  else
-    echo "warning: gh CLI not found — skipping PR creation"
-    echo "hint: open a PR from $branch into $base titled 'Bump version to $next'"
-  fi
-  rm -f "$body_file"
-
-  log_step "Bump PR ready"
-  TOTAL_NS=$(( $(_ship_now_ns) - SHIP_START_NS ))
-  echo ""
-  echo "Release bump PR ready:"
-  echo "  Previous version: $previous"
-  echo "  Next version:     $next"
-  echo "  Base branch:      $base"
-  echo "  Bump branch:      $branch"
-  echo "  Tag after merge:  $tag"
-  echo "  Auto-merge:       enabled"
-  echo "  Total wall time:  $(_ship_fmt_ns "$TOTAL_NS")"
-  echo "  Finalize after merge queue lands it: ./scripts/release_ship.sh --finalize"
-}
-
 prepare_here() {
   local previous="$1"
   local next="$2"
@@ -601,7 +474,13 @@ prepare_here() {
   begin_prepare_transaction
 
   # Build the exact candidate tree before auditing it. Any failure before the
-  # final staging step restores the authored release content byte-for-byte.
+  # final staging step restores the authored release content byte-for-byte,
+  # including the fold's CHANGELOG.md write and fragment deletions.
+  log_step "Fold changelog fragments"
+  fold_release_changelog "$next"
+  require_changelog_top_matches "$next"
+  require_no_unfolded_fragments
+
   regenerate_derived_files
 
   log_step "Version bump (in place)"
@@ -640,7 +519,7 @@ prepare_here() {
   TOTAL_NS=$(( $(_ship_now_ns) - SHIP_START_NS ))
   echo ""
   if [[ "$materialize_candidate" -eq 1 ]]; then
-    echo "Uncertified release candidate staged on $branch:"
+    echo "Unaudited release candidate staged on $branch:"
   else
     echo "Release content staged on $branch:"
   fi
@@ -649,30 +528,17 @@ prepare_here() {
   echo "  Total wall time:  $(_ship_fmt_ns "$TOTAL_NS")"
   echo ""
   echo "Next steps:"
-  if [[ "$materialize_candidate" -eq 1 ]]; then
-    echo "  1. Commit and publish this candidate through release_harn.harn"
-    echo "  2. Certify the immutable candidate OID before opening its PR"
-    return 0
-  fi
-  echo "  git status                                # review staged changes"
-  echo "  git commit -m \"Release v$next\""
-  echo "  git push -u origin $branch"
-  echo "  gh pr create --title \"Release v$next\" --body \"...\""
-  echo "  gh pr merge --auto"
-  echo ""
-  echo "After merge, the release watcher tags the exact squash commit on main."
+  echo "  Commit it as \"Release v$next\" and open the Release v$next pull request"
+  echo "  (scripts/open_release_pr.sh does both). Its CI checks the content, and"
+  echo "  the push to main builds and checks the release candidate."
 }
 
+# The verifier is the one reader of the commit a release tag selects; a second
+# read here once treated a lightweight tag as selecting nothing.
 require_trusted_release_tag_at_head() {
   local tag="$1"
-  local head_commit remote_commit
-  head_commit="$(git rev-parse HEAD)"
-  "$SCRIPT_DIR/verify_release_tag_main_ancestry.sh" --repo "$ROOT_DIR" --tag "$tag"
-  remote_commit="$(git ls-remote --tags origin "refs/tags/${tag}^{}" | awk 'NR == 1 { print $1 }')"
-  if [[ "$remote_commit" != "$head_commit" ]]; then
-    echo "error: origin/$tag selects $remote_commit, but finalization checkout is $head_commit"
-    exit 1
-  fi
+  "$SCRIPT_DIR/verify_release_tag_main_ancestry.sh" --repo "$ROOT_DIR" --tag "$tag" \
+    --expect-commit "$(git rev-parse HEAD)"
   echo "Verified trusted release tag at HEAD: $tag"
 }
 
@@ -683,7 +549,7 @@ ALLOW_UNFOLDED_FRAGMENTS=0
 SKIP_AUDIT=0
 AUDIT_RECEIPT=""
 MATERIALIZE_CANDIDATE=0
-MODE="bump-pr"
+MODE=""
 BASE_BRANCH="main"
 NOTES_OUTPUT=""
 SKIP_GITHUB_RELEASE=0
@@ -762,6 +628,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -z "$MODE" ]]; then
+  # The version bump PR mode was removed: scripts/open_release_pr.sh opens the
+  # Release vX.Y.Z pull request, which carries the bump and the folded notes.
+  echo "error: choose --prepare or --finalize" >&2
+  echo "hint: the Release vX.Y.Z pull request is opened by scripts/open_release_pr.sh" >&2
+  exit 1
+fi
+
 if [[ "$BUMP" != "patch" || -n "$PREID" ]]; then
   echo "error: stable releases strip the declared X.Y.Z-dev target; use --bump patch without --preid"
   exit 1
@@ -777,11 +651,11 @@ if [[ "$ALLOW_UNFOLDED_FRAGMENTS" -eq 1 && "$MODE" != "finalize" ]]; then
 fi
 
 if [[ -n "$AUDIT_RECEIPT" && "$MODE" != "prepare-here" ]]; then
-  echo "error: --audit-receipt is only valid with harness-driven --prepare" >&2
+  echo "error: --audit-receipt is only valid with --prepare" >&2
   exit 1
 fi
 if [[ "$MATERIALIZE_CANDIDATE" -eq 1 && "$MODE" != "prepare-here" ]]; then
-  echo "error: --materialize-candidate is only valid with harness-driven --prepare" >&2
+  echo "error: --materialize-candidate is only valid with --prepare" >&2
   exit 1
 fi
 if [[ "$MATERIALIZE_CANDIDATE" -eq 1 && -n "$AUDIT_RECEIPT" ]]; then
@@ -789,7 +663,7 @@ if [[ "$MATERIALIZE_CANDIDATE" -eq 1 && -n "$AUDIT_RECEIPT" ]]; then
   exit 1
 fi
 if [[ "$MODE" == "prepare-here" && "$MATERIALIZE_CANDIDATE" -eq 0 && -z "$AUDIT_RECEIPT" ]]; then
-  echo "error: harness-driven --prepare requires an exact-source hosted audit receipt" >&2
+  echo "error: --prepare requires --materialize-candidate or an exact-source hosted --audit-receipt" >&2
   exit 1
 fi
 if [[ -n "$AUDIT_RECEIPT" && ! -f "$AUDIT_RECEIPT" ]]; then
@@ -798,11 +672,9 @@ if [[ -n "$AUDIT_RECEIPT" && ! -f "$AUDIT_RECEIPT" ]]; then
 fi
 
 # Mode-specific guards. Each mode runs against a different baseline:
-#   prepare-here: feature branch with dirty tree (release content authored)
-#   bump-pr:      clean main, opens recovery release branch
+#   prepare-here: release branch off main (release/vX.Y.Z)
 #   finalize:     clean main with Cargo.toml ahead of latest tag
 if [[ "$MODE" == "prepare-here" ]]; then
-  require_release_harness_prepare
   require_release_branch "$BASE_BRANCH"
 elif [[ "$MODE" == "finalize" ]]; then
   require_clean_tree
@@ -828,9 +700,6 @@ elif [[ "$MODE" == "finalize" ]]; then
   if [[ "${RELEASE_FINALIZE_REAUDIT:-0}" != "1" ]]; then
     SKIP_AUDIT=1
   fi
-else
-  require_clean_tree
-  require_base_branch "$BASE_BRANCH"
 fi
 
 PREVIOUS_VERSION="$(current_version)"
@@ -845,8 +714,6 @@ if [[ "$MODE" == "prepare-here" ]]; then
     echo "error: --bump $BUMP would leave version unchanged at $PREVIOUS_VERSION"
     exit 1
   fi
-  require_changelog_top_matches "$NEXT_VERSION"
-  require_no_unfolded_fragments
   export_warmed_harn_bin
   if [[ "$MATERIALIZE_CANDIDATE" -eq 0 ]]; then
     validate_audit_plan
@@ -855,21 +722,17 @@ if [[ "$MODE" == "prepare-here" ]]; then
   exit 0
 fi
 
-if [[ "$MODE" == "bump-pr" ]]; then
-  NEXT_VERSION="$(next_version "$BUMP" "$PREID")"
-  if [[ "$NEXT_VERSION" == "$PREVIOUS_VERSION" ]]; then
-    echo "error: version did not change"
-    exit 1
-  fi
-  require_no_unfolded_fragments
-  run_common_gates
-  open_bump_pr "$BASE_BRANCH" "$PREVIOUS_VERSION" "$NEXT_VERSION"
-  exit 0
-fi
-
 NEXT_VERSION="$PREVIOUS_VERSION"
 TAG="v$NEXT_VERSION"
 BRANCH="$(git branch --show-current)"
+
+# The staged gate and publish scripts resolve Harn through main's harn_bin.sh.
+# Hand them the binary the release root's own tools resolved, so every step of
+# the publication runs one binary proven under the tree it was built from.
+if [[ -z "${HARN_BIN:-}" && -z "${HARN_RELEASE_METADATA_BIN:-}" ]]; then
+  HARN_BIN="$(release_root_harn_bin --print)"
+  export HARN_BIN
+fi
 
 run_common_gates
 

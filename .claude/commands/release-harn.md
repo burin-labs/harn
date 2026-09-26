@@ -26,6 +26,6 @@ vX.Y.Z` PR, and enables auto-merge. The tag is pushed before the PR merges so
 publishing is tied to the pinned tag commit.
 
 Do not run `scripts/release_ship.sh --prepare` directly for normal releases.
-It is an implementation detail of `release_harn.harn` and refuses standalone
-use. Use `scripts/release_ship.sh --finalize`, `scripts/release_ship.sh --bump`,
-and the release workflows only for recovery after reading their help text.
+`scripts/open_release_pr.sh` (the "Open release PR" workflow) runs it to build
+the `Release vX.Y.Z` pull request. Use `scripts/release_ship.sh --finalize` and
+the release workflows only for recovery after reading their help text.

@@ -33,6 +33,10 @@
 //!   transcript (user task, nudge, assistant reply, tool result, host
 //!   push).
 //! - `served_message` — one deduplicated, redacted message definition.
+//! - `output_schema` `{schema, content_hash, output_schema}` — one
+//!   deduplicated definition per distinct structured-output schema, so the
+//!   hashes on a request's `structured_output` receipt resolve to the exact
+//!   schema requested and the one sent after provider projection.
 //! - `routing_decision` `{call_id, iteration, policy, requested_quality,
 //!   selected_provider, selected_model, fallback_chain, alternatives}` —
 //!   emitted once before `provider_call_request` whenever a routing
@@ -44,7 +48,8 @@
 //!   slim metadata for a single model call.
 //!   No `messages`, `system`, or `tool_schemas` fields; those are reconstructable.
 //!   `structured_output` records mode, strictness, and stable redacted hashes
-//!   for the requested and provider-compatible schemas, never schema contents.
+//!   for the requested and provider-compatible schemas; the contents live in
+//!   `output_schema` definitions.
 //!   `served_context` carries prompt/schema/tool hashes, a context-manifest
 //!   hash, and ordered message lineage joined to call, projection, compaction,
 //!   source index, semantic kind, and retained redacted message definitions.
@@ -119,7 +124,8 @@ pub(crate) use raw_provider_capture::{
 pub(crate) use transcript_ambient::pop_llm_transcript_dir;
 use transcript_ambient::{
     capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
-    record_capability_snapshot_definition, record_served_message_definition,
+    output_schema_needs_definition, record_capability_snapshot_definition,
+    record_output_schema_definition, record_served_message_definition,
     served_message_needs_definition, system_prompt_changed, tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{

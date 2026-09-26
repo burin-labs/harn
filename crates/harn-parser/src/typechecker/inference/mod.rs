@@ -23,6 +23,7 @@ mod flow_aliases;
 mod flow_predicates;
 mod generic_bindings;
 mod literal_union;
+mod llm_returns;
 mod match_patterns;
 mod pipe;
 mod record_arguments;

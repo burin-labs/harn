@@ -1,0 +1,1 @@
+Which candidate tool is the assistant text intending to invoke? Select the exact candidate name using its description and the assistant text in the shared state. When no single candidate is clear, report low confidence. Do not infer the target from the original user task alone.

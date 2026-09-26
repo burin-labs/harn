@@ -249,6 +249,35 @@ pipeline test_classification_is_unique_and_cannot_hide_flags(harness: Harness, t
 }
 
 @test
+pipeline test_classification_batch_preserves_identity_and_missing_positions() {
+  const read = {scope: "a|b", file: "c", line: 1, expression: "key", name: "", reader: "example"}
+  const other = read + {scope: "a", file: "b|c"}
+  const boundary = {
+    scope: read.scope,
+    file: read.file,
+    expression: read.expression,
+    owner: "resolver",
+    evidence: "Resolver validates the dynamic key.",
+  }
+  const other_boundary = boundary + pick(other, ["scope", "file"])
+  const missing = read + {expression: "missing"}
+  const result = agent_gate_findings([entry()], [missing, read, other], [boundary, other_boundary])
+  assert_eq(result.forwarded, 2)
+  assert_eq(result.failures, ["c:1 a|b missing"])
+  assert(
+    is_err(
+      try {
+        agent_gate_findings([entry()], [read], [boundary + {owner: ""}])
+      },
+    ),
+  )
+  // Unobserved duplicate rows remain stale findings, not an invented match.
+  const stale = agent_gate_findings([entry()], [missing], [boundary, boundary])
+  assert_eq(stale.forwarded, 0)
+  assert_eq(len(stale.failures), 3)
+}
+
+@test
 pipeline test_audit_regenerates_reader_locations_and_refuses_drift(
   harness: Harness,
   task: unknown,

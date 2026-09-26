@@ -120,7 +120,7 @@ harn run scripts/run_approval_review_calibration.harn
 Corpus:
 `crates/harn-stdlib/src/stdlib/agent/data/approval_review_calibration.toml`.
 
-Six commands appear twice, under a goal that authorizes them and one that does
+Most commands appear twice, under a goal that authorizes them and one that does
 not. That pairing is the measurement: a reviewer that denies `cat .env`
 unconditionally scores identically to one that reasons, unless the corpus also
 contains the goal where reading it is the task.

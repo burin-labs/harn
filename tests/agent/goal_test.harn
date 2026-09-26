@@ -6,7 +6,7 @@
 // callable, and a `goal_reloop` `facts_fn` that is set but not callable. Also
 // pins the behavior-identical swap of `__goal_without_control_keys` onto the
 // `__dict_omit` builtin. Everything here is PURE — no LLM, no host.
-import { goal, goal_check, goal_reloop } from "std/agent/goal"
+import { goal, goal_check, goal_reloop, goal_text, goal_under_obligations } from "std/agent/goal"
 import { agent_loop_options } from "std/agent/options"
 
 fn __manual_omit(o: dict, drop: any) {
@@ -91,4 +91,54 @@ pipeline test_goal_reloop_judge_passes_agent_loop_validation(harness: Harness, t
   const options = agent_loop_options(harness, goal_reloop(g, {judge: true, provider: "mock"}))
   assert_eq(type_of(options.turn_end_condition), "dict")
   assert(!contains(options.turn_end_condition.keys(), "enabled"))
+}
+
+const __RETARGETED = {
+  original_task: "ship it",
+  steers: [{message_id: "msg_inj_1", mode: "finish_step", content: "change of plan"}],
+  retarget: {control_id: "ctl-1", message_id: "msg_inj_1", objective: "reply BRAVO"},
+}
+
+pipeline test_a_retarget_replaces_the_objective_and_retires_criteria(
+  harness: Harness,
+  task: unknown,
+) {
+  const g = goal(
+    {
+      objective: "ship it",
+      success_criteria: [{check: { f -> f?.ok ?? false }, description: "green", id: "green"}],
+      constraints: ["no force push"],
+    },
+  )
+  const current = goal_under_obligations(g, __RETARGETED)
+  assert_eq(current.objective, "reply BRAVO")
+  assert_eq(len(current.success_criteria), 0)
+  assert_eq((current.retired_criteria ?? [])[0].id, "green")
+  assert_eq(current.constraints, ["no force push"])
+  assert(contains(goal_text(current), "Retired by the operator's retarget"))
+  // The retired criterion's check no longer gates completion.
+  assert_eq(goal_check(current, {ok: false}).done, true)
+  // Negative control: without a retarget the goal is untouched.
+  for unchanged in [
+    goal_under_obligations(g, nil),
+    goal_under_obligations(g, __RETARGETED + {retarget: nil}),
+  ] {
+    assert_eq(unchanged.objective, "ship it")
+    assert_eq(len(unchanged.success_criteria), 1)
+    assert_eq(unchanged.retired_criteria, nil)
+  }
+}
+
+pipeline test_goal_reloop_floor_honors_a_retarget(harness: Harness, task: unknown) {
+  const g = goal(
+    {
+      objective: "ship it",
+      success_criteria: [{check: { f -> f?.ok ?? false }, description: "green", id: "green"}],
+    },
+  )
+  const opts = goal_reloop(g, {facts_fn: { _payload -> {ok: false} }})
+  const frozen = opts.verify_completion({obligations: nil})
+  assert_eq(frozen.confirm, false)
+  assert(contains(frozen.feedback, "- green"))
+  assert_eq(opts.verify_completion({obligations: __RETARGETED}).confirm, true)
 }

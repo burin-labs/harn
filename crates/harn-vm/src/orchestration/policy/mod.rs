@@ -50,8 +50,9 @@ pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
     denial_gate_for_source, next_approval_policy_repeat_count,
     next_approval_unavailable_class_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
-    PolicyMatchedRule, PolicyRule, PolicyRuleMatch, ToolApprovalRequest,
+    PolicyMatchedRule, PolicyRule, PolicyRuleMatch, PolicyRuleSource, ToolApprovalRequest,
     SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH,
+    SOURCE_NET_POLICY,
 };
 pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
@@ -315,6 +316,17 @@ pub fn current_tool_mutation_classification(tool_name: &str) -> String {
 /// Workspace paths declared by this tool call, read from the tool's
 /// annotated `arg_schema.path_params`. Unannotated tools declare no
 /// paths — the VM no longer guesses by common argument names.
+/// The command lines this tool call declared, as the approval rules read them.
+///
+/// Deliberately the SAME extraction the policy layer matches on, rather than a
+/// second reader of the same arguments: a denial that named a command the
+/// policy did not reason about would be worse than naming none, because it
+/// would look authoritative. Empty for a call that declares no command, which
+/// is most of them.
+pub fn current_tool_declared_commands(args: &serde_json::Value) -> Vec<String> {
+    approval_rules::command_candidates(args).0
+}
+
 pub fn current_tool_declared_paths(tool_name: &str, args: &serde_json::Value) -> Vec<String> {
     current_tool_declared_path_entries(tool_name, args)
         .into_iter()

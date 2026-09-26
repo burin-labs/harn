@@ -204,6 +204,7 @@ diagnostic_codes! {
     PredicateSiteInvalid, "HARN-TYP-033", Typ, "probabilistic predicate site identity must be literal and unique";
     PredicateOutcomeUnnarrowed, "HARN-TYP-034", Typ, "probabilistic predicate variant fields require outcome narrowing";
     PredicateModelOperationMissing, "HARN-TYP-035", Typ, "probabilistic predicate model must declare the decision operation";
+    PredicateQuestionSetInvalid, "HARN-TYP-036", Typ, "probabilistic evaluation question set must be a literal with unique ids and labels";
     ParserUnexpectedToken, "HARN-PAR-001", Par, "parser found an unexpected token";
     ParserUnexpectedEof, "HARN-PAR-002", Par, "parser reached end of file while expecting syntax";
     ParserUnexpectedCharacter, "HARN-PAR-003", Par, "lexer found an unexpected character";
@@ -363,6 +364,7 @@ diagnostic_codes! {
     LintToolHandlerHostCall, "HARN-LNT-076", Lnt, "tool handler reaches the privileged host wire";
     LintPreferPick, "HARN-LNT-077", Lnt, "record literal copies fields one by one from a value that `pick` can select";
     LintSchemaShapedToolParameters, "HARN-LNT-078", Lnt, "tool descriptor spells its per-parameter map as a JSON Schema document";
+    LintUnboundedNativeDecisionState, "HARN-LNT-079", Lnt, "evaluation site hands a native decision route an input whose declared type has no finite size bound";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     HostLoopbackBindDenied, "HARN-CAP-202", Cap, "confined host process cannot open the loopback listener a child's egress proxy needs";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";

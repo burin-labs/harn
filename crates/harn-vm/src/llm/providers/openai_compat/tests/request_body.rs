@@ -472,3 +472,71 @@ fn build_request_body_keeps_canonical_for_normal_models() {
     );
     assert!(!serialized.contains("[[CALL]]"));
 }
+
+#[test]
+fn request_builder_uses_supplied_reserved_token_snapshot() {
+    let mut payload = base_request_payload();
+    payload.system = Some("Use <tool_call> blocks.".to_string());
+    let mut caps = crate::llm::managed_supply::capabilities_for(&payload.provider, &payload.model);
+    assert!(!caps.reserved_tool_call_token);
+    let dialect = crate::llm::api::DialectContract::for_request(&payload);
+
+    let ordinary = dialect
+        .build_openai_request_body_with_caps(&payload, &caps)
+        .to_string();
+    assert!(ordinary.contains("<tool_call>"));
+    caps.reserved_tool_call_token = true;
+    let remapped = dialect
+        .build_openai_request_body_with_caps(&payload, &caps)
+        .to_string();
+    assert!(!remapped.contains("<tool_call>"));
+    assert!(remapped.contains("[[CALL]]"));
+}
+
+#[test]
+fn parallel_wire_suppression_is_separate_from_model_parallel_support() {
+    let mut payload = base_request_payload();
+    payload.provider = "fireworks".to_string();
+    payload.model = "accounts/fireworks/models/gpt-oss-120b".to_string();
+    payload.native_tools = Some(vec![json!({
+        "type": "function",
+        "function": {"name": "read", "parameters": {"type": "object"}}
+    })]);
+    payload.parallel_tool_calls = Some(true);
+    let mut caps = crate::llm::managed_supply::capabilities_for(&payload.provider, &payload.model);
+    assert!(!caps.supports_parallel_tool_calls);
+    assert!(caps.requires_parallel_tool_calls_false);
+
+    let suppressed = OpenAiCompatibleProvider::build_request_body_with_caps(&payload, &caps);
+    assert_eq!(suppressed["parallel_tool_calls"], false);
+    caps.requires_parallel_tool_calls_false = false;
+    let omitted = OpenAiCompatibleProvider::build_request_body_with_caps(&payload, &caps);
+    assert!(omitted.get("parallel_tool_calls").is_none());
+    caps.supports_parallel_tool_calls = true;
+    let supported = OpenAiCompatibleProvider::build_request_body_with_caps(&payload, &caps);
+    assert_eq!(supported["parallel_tool_calls"], true);
+}
+
+#[test]
+fn preserve_thinking_wire_support_is_independent_of_generic_template_kwargs() {
+    let payload = {
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "qwen/qwen3.6-plus".to_string();
+        payload
+    };
+    let mut caps = crate::llm::managed_supply::capabilities_for(&payload.provider, &payload.model);
+    assert!(caps.preserve_thinking);
+    assert!(!caps.honors_chat_template_kwargs);
+    assert!(!caps.honors_preserve_thinking_kwarg);
+
+    let absent = OpenAiCompatibleProvider::build_request_body_with_caps(&payload, &caps);
+    assert!(absent.get("chat_template_kwargs").is_none());
+    caps.honors_preserve_thinking_kwarg = true;
+    let mut emitted = OpenAiCompatibleProvider::build_request_body_with_caps(&payload, &caps);
+    OpenAiCompatibleProvider::transform_request_with_caps(&mut emitted, &caps);
+    assert_eq!(emitted["chat_template_kwargs"]["preserve_thinking"], true);
+    assert!(emitted["chat_template_kwargs"]
+        .get("enable_thinking")
+        .is_none());
+}

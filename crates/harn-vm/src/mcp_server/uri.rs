@@ -82,3 +82,45 @@ pub(super) fn uri_template_variables(template: &str) -> Vec<String> {
     }
     variables
 }
+
+/// Validate the Level 1 variable syntax the server matcher implements. An
+/// RFC 6570 operator or malformed expression must fail before publication,
+/// rather than being advertised as a template the server cannot resolve.
+pub(super) fn validated_uri_template_variables(template: &str) -> Result<Vec<String>, String> {
+    let mut variables = Vec::new();
+    let mut sample = String::with_capacity(template.len());
+    let mut chars = template.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '}' => return Err("unmatched closing brace".into()),
+            '{' => {
+                let mut name = String::new();
+                loop {
+                    match chars.next() {
+                        Some('}') => break,
+                        Some('{') | None => return Err("unclosed or nested expression".into()),
+                        Some(ch) => name.push(ch),
+                    }
+                }
+                if name.is_empty()
+                    || name.starts_with('.')
+                    || name.ends_with('.')
+                    || name.contains("..")
+                    || !name
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.')
+                {
+                    return Err(format!("unsupported template variable '{name}'"));
+                }
+                if variables.contains(&name) {
+                    return Err(format!("duplicate template variable '{name}'"));
+                }
+                variables.push(name);
+                sample.push('x');
+            }
+            _ => sample.push(ch),
+        }
+    }
+    url::Url::parse(&sample).map_err(|error| format!("invalid URI: {error}"))?;
+    Ok(variables)
+}

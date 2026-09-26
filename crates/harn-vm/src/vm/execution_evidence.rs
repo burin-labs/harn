@@ -1,6 +1,15 @@
 use super::Vm;
 
 impl Vm {
+    /// Install an explicit decision recording/replay scope. Child VMs inherit
+    /// it, including work scheduled on other threads; misses cannot go live.
+    pub fn set_evaluation_replay(
+        &mut self,
+        scope: crate::llm::decision::replay::EvaluationReplayScope,
+    ) {
+        self.evaluation.replay = Some(scope);
+    }
+
     /// Enable exact, value-free source-path recording for this VM execution
     /// tree. Child VMs inherit the same bounded recorder.
     pub fn enable_flight_recorder(&mut self, max_events: usize) {
@@ -20,6 +29,7 @@ impl Vm {
         // record, so the collector is cleared at the top-level boundary that
         // mints the new execution identity.
         crate::llm::reset_reasoning_receipts();
+        self.evaluation.journal = std::sync::Arc::default();
         self.flight_recorder = self.flight_recorder_max_events.map(|max_events| {
             crate::flight_recorder::FlightRecorder::new(self.execution_id.clone(), max_events)
         });
@@ -46,6 +56,14 @@ impl Vm {
         gaps: Vec<crate::orchestration::RunEvidenceGapRecord>,
     ) -> crate::orchestration::ExecutionEvidenceRecord {
         let mut gaps = gaps;
+        let (evaluation_receipts, evaluation_dropped) = self.evaluation.journal.lock().snapshot();
+        if evaluation_dropped > 0 {
+            gaps.push(crate::orchestration::RunEvidenceGapRecord {
+                component: "evaluation_receipts".into(),
+                code: "receipt_limit_exceeded".into(),
+                message: format!("{evaluation_dropped} evaluation receipts beyond the first 1024 were not retained"),
+            });
+        }
         let dropped = crate::llm::dropped_reasoning_receipts();
         if dropped > 0 {
             // A truncated list must not read as the whole run. The overflow is
@@ -60,6 +78,7 @@ impl Vm {
             });
         }
         crate::orchestration::ExecutionEvidenceRecord {
+            evaluation_receipts: Some(evaluation_receipts),
             reasoning_receipts: Some(crate::llm::peek_reasoning_receipts()),
             schema_version: crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
             execution_id: Some(self.execution_id.to_string()),

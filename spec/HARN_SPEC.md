@@ -1152,15 +1152,23 @@ declared file inside the installed `acme` package.
 
 #### Export visibility
 
-A module's **export surface** — the set of names other modules can import,
+A module's **public export surface** — the set of names any module can import,
 whether by wildcard (`import "m"`) or selectively (`import { x } from "m"`) —
 is exactly the declarations it marks `pub`, plus any `pub import` re-exports.
+An `@sibling` non-public function is a separate visibility level: only modules
+whose resolved source files have the same parent directory may import it.
+Both selective and wildcard imports apply that rule. The function is absent
+from the public export surface, package catalogs, and public-return-type
+ratchets. A `pub import` cannot promote a sibling-only name; an explicit public
+wrapper is required to publish it. Import spellings and symlinks do not widen
+the resolved directory scope. Moving a function between files in the same
+directory leaves the public surface unchanged.
 `pub` may prefix any top-level declaration: `fn`, `tool`, `skill`, `eval_pack`,
 `struct`, `enum`, `type`, `pipeline`, and — for shared configuration and prompt
 constants — top-level `const` and `let` value bindings. Non-`pub` declarations
-are private to the module: usable by the module's own functions, but not
-importable by name or by wildcard. A module that marks nothing `pub` exports
-nothing.
+are private to the module unless annotated `@sibling`: ordinary private names
+are usable by the module's own functions but cannot be imported. A module that
+marks nothing `pub` has no public exports.
 
 A `pub const` / `pub let` is exported **by value**: the binding's value is
 computed once when the module is instantiated, then bound into each importer.
@@ -1173,10 +1181,10 @@ makes adding the first `pub` a silent breaking change, because it would flip
 every *other* function from importable to private. Requiring `pub` up front
 keeps a module's export surface stable as it grows.
 
-The same rule applies to both import forms — a selective import cannot reach a
-private function that a wildcard import would not see. Importing a non-`pub`
-name is an error (`HARN-IMP-002`) at `harn check` time and at load time; the
-message points at the import and suggests marking the symbol `pub`.
+The same visibility rule applies to both import forms: a selective import
+cannot reach a function that a wildcard import would not see. Importing an
+ordinary private name, or a sibling-only name from another directory, is an
+error (`HARN-IMP-002`) at `harn check` time and at load time.
 
 Public struct and enum declarations use this same export contract at runtime.
 Importing a public struct binds its constructor; importing a public enum binds
@@ -1188,7 +1196,7 @@ positions. The module graph and VM must derive these projections from the same
 declaration-kind table so a checker-approved import cannot fail only when the
 module executes.
 
-**Testing private functions.** A non-`pub` function is visible to any
+**Testing private functions.** A non-`pub`, non-`@sibling` function is visible to any
 `pipeline` or `fn` declared in the **same file**, so co-locate unit tests with
 the code under test (the Rust/Go white-box pattern) rather than importing the
 private name into a separate test module.
@@ -2030,8 +2038,17 @@ fields plus `rules`, a compact allow/ask/deny DSL. A rule may be written as
 `tool_kind`, `side_effect`, `path`, `command`, `command_identity`, `url`,
 `domain`, `method`, `mcp_server`, `mcp_tool`, `agent`, `persona`, `mode`,
 `capability`, and `repeat_count_gte`. Dimensions inside a rule are ANDed;
-string fields accept glob patterns. Deny beats ask, ask beats allow, and
-unmatched tools are approved.
+string fields accept glob patterns. Rules may declare `source: "mode"` for a
+mode default or `source: "user"` for an explicit remembered choice; omitted
+`source` means `policy`. Configured denials outrank remembered choices;
+remembered denials outrank configured approval requests; configured approval
+requests outrank remembered allows. Every remembered choice outranks a mode
+default. A configured allow remains permissive and cannot override a remembered
+deny. Within a tier, deny beats ask, ask beats allow, and the first matching
+rule wins an action tie. Legacy `auto_approve`, `auto_deny`, and
+`require_approval` entries retain policy source; a host must label mode rules
+explicitly. Write-path allowlists and repeat limits remain policy constraints.
+Unmatched tools are approved.
 
 When an approval policy is active, sensitive paths such as `.env`, private
 keys, and credential files are denied by default unless
@@ -4244,6 +4261,18 @@ or `impl`. Attaching to anything else (a `let`, a statement) is a parse
 error.
 
 ### Standard attributes
+
+#### `@sibling`
+
+```harn,ignore
+@sibling
+fn normalize_name(name: string) -> string { return name }
+```
+
+Shares a non-public function with modules in the same resolved source
+directory. It takes no arguments and cannot be combined with `pub`. Importers
+elsewhere receive the ordinary private-import error. Sibling functions are
+excluded from public catalogs and cannot be re-exported with `pub import`.
 
 #### `@deprecated`
 

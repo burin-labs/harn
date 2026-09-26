@@ -21,6 +21,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -61,6 +62,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -109,6 +111,7 @@ native_tools = false
 preferred_tool_format = "text"
 text_tool_wire_format_supported = true
 supports_parallel_tool_calls = false
+requires_parallel_tool_calls_false = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
@@ -177,6 +180,40 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/kimi-k3*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content."
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/nemotron-lightning-*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content."
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # MiniMax M3 on Fireworks. Credentialed probe (2026-07-18, harn 0.10.23
 # binary, direct Fireworks /v1, N=2) upgrades the prior un-probed verdict:
 # with the backslash/quote/unicode large-string argument the native channel
@@ -214,6 +251,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -237,6 +275,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -317,6 +356,22 @@ thinking_block_style = "inline"
 # not inherit direct-Anthropic `thinking` controls here: OpenRouter's
 # Anthropic pass-through rejects those wire options even when the direct
 # Anthropic route supports them.
+# OpenRouter passes `tool_choice` through to Anthropic verbatim, so the
+# models that reject forced tool choice (Fable 5.1, Opus 5.5 and later) need
+# the same `auto` / `none` restriction on this route as on the direct one.
+[[provider.openrouter]]
+model_match = ["anthropic/claude-fable-5.1*", "anthropic/claude-fable-5-1*"]
+extends = true
+native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
+[[provider.openrouter]]
+model_match = "anthropic/claude-opus-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.openrouter]]
 model_match = "anthropic/claude-fable-*"
 native_tools = true
@@ -818,6 +873,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -921,6 +977,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"

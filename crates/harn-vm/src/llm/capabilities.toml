@@ -168,6 +168,9 @@
 #   image_url_input_supported:
 #                     whether image content blocks may reference remote URLs.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
+#   honors_preserve_thinking_kwarg:
+#                     whether this route honors the preserve_thinking request
+#                     knob; model support alone does not imply wire support.
 #   server_parser   : server-side response parser that transforms model output.
 #   honors_chat_template_kwargs:
 #                     whether provider-specific chat-template options are honored.
@@ -297,6 +300,10 @@
 #                     `tool_calls[]` entries; strict OpenAI-compatible servers
 #                     can reject replayed history with more than one tool call
 #                     even when Harn originally parsed text-tool calls.
+#   requires_parallel_tool_calls_false:
+#                     whether the request must explicitly carry
+#                     `parallel_tool_calls: false`; history support alone does
+#                     not decide whether the provider accepts this wire field.
 #   tools_exclude_response_format:
 #                     whether the route rejects `response_format` when native
 #                     `tools` are present. Harn drops response_format for these
@@ -325,6 +332,128 @@
 #     requests gave 0 billed-noncommittal); Together was flaky (1/3); the
 #     free OpenRouter lottery fans out across ~17 upstreams. Hence the
 #     openai/gpt-oss-* OpenRouter row is pinned to ["Cerebras","Groq"].
+
+# --- source: 10-decisions/00-decision-contracts.toml ---
+# ---------- Decision request contracts ---------------------------------------
+#
+# One owner for "how is the `decision` operation dialled on this route". The
+# catalog `operations` set on the model row stays the admission owner: it says
+# WHETHER a route answers decision requests. This file says HOW, because the
+# three decision endpoints are not interchangeable chat endpoints and the
+# protocol picks the URL and body shape before transport.
+#
+# Every row here is `extends = true`, and the file lives in its own
+# `10-decisions/` directory so it loads before `20-providers/`. That placement
+# is load-bearing, not tidiness: capability resolution is first-match-wins, and
+# several provider files carry a broad terminating row (`claude-haiku-*` in
+# `20-providers/00-anthropic.toml`, for one). Contributed from a later file,
+# the decision fields were never reached for those routes and
+# `decision_contract_for_route` returned `None` for a row that plainly declared
+# the operation. Nothing here changes a chat capability; a row contributes only
+# the decision fields it sets.
+#
+# `decision_protocol` is a closed enum. An unknown value fails the capability
+# load rather than falling back to the structured-output chat backend, because
+# falling back would send a decision request to a model that cannot answer one.
+#
+# `decision_limits` is declared only for the native decision APIs, which
+# publish request ceilings. A `structured_llm` route has no published decision
+# ceilings — its bound is the ordinary context window already on its catalog
+# row — so inventing numbers there would read as researched.
+
+# ---------- Native decision APIs ---------------------------------------------
+
+# TypeSafe System One, POST /v1/systemone. Documented, not reached: direct
+# access was waitlisted on 2026-09-20 and Harn holds no key.
+# https://docs.typesafe.ai/api
+#
+# Limits provenance:
+#   max_choice_options  255   https://docs.typesafe.ai/primitives/choice
+#   score_levels 2..10        https://docs.typesafe.ai/primitives/score
+#   state_window_tokens 32000 https://docs.typesafe.ai/models ("32k tokens for
+#                             `state` plus the longest question"; the overall
+#                             request ceiling is 64k)
+# `max_questions` is deliberately absent: TypeSafe publishes no question-count
+# ceiling and says adding questions barely moves response time.
+# https://docs.typesafe.ai/patterns
+[[provider.typesafe]]
+model_match = ["jev-*", "typesafe/jev-*"]
+extends = true
+decision_protocol = "typesafe_system_one"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000, request_window_tokens = 64000 }
+
+# Vercel AI Gateway evaluation modality. The gateway serves Jev on two paths:
+# `POST /v1/evaluate` (Vercel-native, documented under the evaluation modality)
+# and `POST /typesafe/v1/systemone` (a TypeSafe-compatible passthrough). Harn
+# names the Vercel-native path, because it is the one Vercel documents for this
+# modality and the one whose response carries gateway cost metadata. The
+# compatibility path is recorded here so a future reader does not rediscover it.
+# https://vercel.com/docs/ai-gateway/modalities/evaluation
+#
+# Observed live on 2026-09-20: the gateway model list carries `typesafe-ai/jev`
+# with `"type": "evaluation"`, and `/v1/chat/completions` refuses it with
+# `ModelTypeMismatchError`.
+[[provider.vercel_ai_gateway]]
+model_match = "typesafe-ai/jev*"
+extends = true
+decision_protocol = "vercel_evaluate"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000, request_window_tokens = 64000 }
+
+# OpenRouter alpha decisions, POST /api/alpha/decisions. All three question
+# kinds answered through the canonical native evaluator on 2026-09-22.
+# https://openrouter.ai/typesafe
+# The match pattern carries the `openrouter/` prefix because OpenRouter does
+# not declare `wire_model_capabilities`: its rules are matched against the
+# CATALOG id, which is `openrouter/typesafe/jev-1.13`, not against the wire
+# model `typesafe/jev-1.13`.
+[[provider.openrouter]]
+model_match = "openrouter/typesafe/jev*"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000, request_window_tokens = 64000 }
+
+# ---------- Chat routes serving decisions through structured output ----------
+#
+# A curated, small set: the cheap auxiliary-classification routes, each of
+# which already declares native structured output with a strict JSON schema in
+# its own capability row. A repository test resolves every route declaring
+# `structured_llm` and fails if its structured-output capability is not native,
+# so this list cannot drift into a route that cannot honour a schema.
+#
+# These rows also need `operations = ["text_generation", "decision"]` on their
+# catalog model row. `structured_llm` is the one protocol that dials the
+# ordinary chat endpoint, so it is the one that needs text generation too.
+
+[[provider.openai]]
+model_match = ["gpt-5.4-nano", "gpt-5.4-mini"]
+extends = true
+decision_protocol = "structured_llm"
+decision_question_kinds = ["boolean", "choice", "score"]
+
+[[provider.anthropic]]
+model_match = "claude-haiku-4-5*"
+extends = true
+decision_protocol = "structured_llm"
+decision_question_kinds = ["boolean", "choice", "score"]
+
+[[provider.gemini]]
+model_match = "gemini-3.1-flash-lite"
+extends = true
+decision_protocol = "structured_llm"
+decision_question_kinds = ["boolean", "choice", "score"]
+
+# Vercel resolves capabilities by wire model and inherits OpenRouter's rules
+# (`provider_family`: vercel_ai_gateway -> openrouter -> openai). Its curated
+# GPT-5.4 Nano row therefore inherits this contract deliberately; both
+# gateway catalogs declare the decision operation alongside text generation.
+[[provider.openrouter]]
+model_match = ["openai/gpt-5.4-nano", "openai/gpt-5.4-mini"]
+extends = true
+decision_protocol = "structured_llm"
+decision_question_kinds = ["boolean", "choice", "score"]
 
 # --- source: 10-defaults/provider-defaults.toml ---
 [provider_defaults.anthropic]
@@ -806,6 +935,13 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Prefixed Fable 5.1 ids carry the direct row's forced-tool-choice removal.
+[[provider.anthropic]]
+model_match = ["anthropic/claude-fable-5-1*", "anthropic/claude-fable-5.1*"]
+extends = true
+native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.anthropic]]
 model_match = "anthropic/claude-fable-*"
 prompt_cache_min_prefix_tokens = 512
@@ -901,6 +1037,23 @@ top_k_supported = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Opus 5.5 (2026-09-21) narrows the Opus 5 surface in two wire-visible ways,
+# both verified against the live API on 2026-09-22:
+#   * thinking cannot be disabled — `{"type":"disabled"}` and
+#     `{"type":"enabled"}` are 400s at every effort, so a thinking-off request
+#     must become "omit the field, lowest effort";
+#   * forced tool choice is gone — `tool_choice` `any` / `tool` are 400s, so
+#     only `auto` and `none` may reach the wire.
+# Everything else (512-token cache floor, native mid-conversation system
+# messages, the 4.7+ sampling and prefill rules) layers on from the rows below.
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+reasoning_disable_supported = false
+allowed_tool_choice_modes = ["auto", "none"]
 
 # Opus 5 halves the minimum cacheable prefix to 512 tokens. Verified against
 # the live API on 2026-07-24: a 691-token prefix produced
@@ -1203,6 +1356,24 @@ top_k_supported = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Prefixed Opus ids mirror the direct Opus 5 / 5.5 layering above. Without the
+# 5.0 row an `anthropic/claude-opus-5*` id kept Opus 4.7's 2048-token cache
+# floor; without the 5.5 row it would send a disabled-thinking config or a
+# forced tool choice the model rejects.
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+reasoning_disable_supported = false
+allowed_tool_choice_modes = ["auto", "none"]
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [5, 0]
+extends = true
+prompt_cache_min_prefix_tokens = 512
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
@@ -1536,6 +1707,7 @@ structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
+honors_preserve_thinking_kwarg = true
 vision_supported = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1614,6 +1786,7 @@ structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
+honors_preserve_thinking_kwarg = true
 vision_supported = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1638,6 +1811,7 @@ structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
+honors_preserve_thinking_kwarg = true
 vision_supported = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1771,7 +1945,8 @@ thinking_block_style = "reasoning_summary"
 # That combination turns a routine effort=none or temperature-bearing preset
 # into a provider 400 at request time, so keep this row ahead of the wildcard.
 [[provider.openai]]
-model_match = "gpt-6*"
+# Bare `gpt-6` is the Astra pointer, so it carries Astra's narrowed ladder.
+model_match = ["gpt-6-astra*", "gpt-6"]
 prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
@@ -1795,6 +1970,54 @@ thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = false
 reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_tools_require_responses = true
+temperature_supported = false
+top_p_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# GPT-6 Sol and Luna share Astra's surface except that they accept effort
+# `none` (Astra does not). Probed 2026-09-22 against gpt-6-sol and gpt-6-luna:
+#   reasoning_effort none/low/medium/high/xhigh -> 200
+#   reasoning_effort minimal / max              -> 400 (model pages list max)
+#   temperature=0.2 at the default effort       -> 400 "Only the default (1)"
+#   temperature=0.2 / top_p=0.5 at effort none  -> 200
+#   function tools on /v1/chat/completions      -> 400 unless effort is none
+# Temperature and top_p stay unsupported rather than reasoning-conditional:
+# the default effort is `medium`, so a call that leaves thinking unset still
+# reasons, and a conditional rule would admit a temperature the API rejects.
+# The Astra row above must stay first; this wildcard backstops the rest of the
+# GPT-6 family.
+[[provider.openai]]
+model_match = "gpt-6*"
+prompt_caching = true
+advanced_generation_options = ["logprobs", "verbosity"]
+native_tools = true
+preferred_tool_format = "native"
+requires_completion_tokens = true
+defer_loading = true
+tool_search = ["hosted", "client"]
+responses_api = true
+hosted_tools = ["web_search", "web_search_preview", "file_search", "code_interpreter", "image_generation", "computer_use", "mcp", "remote_mcp"]
+computer_use_style = "native_openai"
+screenshot_scaling = "original"
+safety_ack_flow = true
+remote_mcp = true
+conversation_state = true
+compaction = true
+background_mode = true
+tool_approval_policy = "provider_or_harn"
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
 reasoning_tools_require_responses = true
 temperature_supported = false
 top_p_supported = false
@@ -2067,7 +2290,7 @@ thinking_block_style = "reasoning_summary"
 # GPT rule so `none`/`max` effort and temperature/top_p are rejected locally
 # rather than costing a round trip.
 [[provider.openai]]
-model_match = "openai/gpt-6*"
+model_match = ["openai/gpt-6-astra*", "openai/gpt-6"]
 prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
@@ -2078,6 +2301,31 @@ thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = false
 reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+temperature_supported = false
+top_p_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# Gateway GPT-6 Sol / Luna slugs (including OpenRouter's `-pro` variants,
+# which sell the pro reasoning mode) accept effort `none` like the direct
+# route. Keep the Astra row above this wildcard.
+[[provider.openai]]
+model_match = "openai/gpt-6*"
+prompt_caching = true
+native_tools = true
+preferred_tool_format = "native"
+requires_completion_tokens = true
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
 temperature_supported = false
 top_p_supported = false
 prefers_xml_scaffolding = false
@@ -2477,6 +2725,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -2580,6 +2829,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -2668,6 +2918,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -2761,6 +3012,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -2801,6 +3053,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -2849,6 +3102,7 @@ native_tools = false
 preferred_tool_format = "text"
 text_tool_wire_format_supported = true
 supports_parallel_tool_calls = false
+requires_parallel_tool_calls_false = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
@@ -2917,6 +3171,40 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/kimi-k3*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content."
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/nemotron-lightning-*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content."
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # MiniMax M3 on Fireworks. Credentialed probe (2026-07-18, harn 0.10.23
 # binary, direct Fireworks /v1, N=2) upgrades the prior un-probed verdict:
 # with the backslash/quote/unicode large-string argument the native channel
@@ -2954,6 +3242,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -2977,6 +3266,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -3057,6 +3347,22 @@ thinking_block_style = "inline"
 # not inherit direct-Anthropic `thinking` controls here: OpenRouter's
 # Anthropic pass-through rejects those wire options even when the direct
 # Anthropic route supports them.
+# OpenRouter passes `tool_choice` through to Anthropic verbatim, so the
+# models that reject forced tool choice (Fable 5.1, Opus 5.5 and later) need
+# the same `auto` / `none` restriction on this route as on the direct one.
+[[provider.openrouter]]
+model_match = ["anthropic/claude-fable-5.1*", "anthropic/claude-fable-5-1*"]
+extends = true
+native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
+[[provider.openrouter]]
+model_match = "anthropic/claude-opus-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.openrouter]]
 model_match = "anthropic/claude-fable-*"
 native_tools = true
@@ -3558,6 +3864,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -3661,6 +3968,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -4324,7 +4632,7 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.nvidia]]
-model_match = "*nemotron-3-nano-30b-a3b*"
+model_match = "*nemotron-nano-3-30b-a3b*"
 native_tools = true
 preferred_tool_format = "native"
 tool_mode_parity = "interchangeable"
@@ -4373,51 +4681,12 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.nvidia]]
-model_match = "*minimax-m3*"
-native_tools = true
-preferred_tool_format = "native"
-structured_output = "delimited"
-thinking_modes = ["adaptive"]
-vision = true
-vision_supported = true
-video = true
-prompt_caching = true
-text_tool_wire_format_supported = true
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "delimited"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-
-[[provider.nvidia]]
 model_match = "*kimi-k2.6*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 prompt_caching = true
-vision = true
-vision_supported = true
-text_tool_wire_format_supported = true
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-
-[[provider.nvidia]]
-model_match = "*step-3.7-flash*"
-native_tools = true
-preferred_tool_format = "native"
-tool_mode_parity = "interchangeable"
-prompt_caching = true
-structured_output = "native"
-thinking_modes = ["enabled"]
-reasoning_disable_supported = false
 vision = true
 vision_supported = true
 text_tool_wire_format_supported = true
@@ -5967,32 +6236,9 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
-# Qwen 3.6 on Groq speaks clean OpenAI-shape native tool calls (Groq
-# parses the Qwen tool format server-side); no reported parity issues.
-# Its `reasoning_effort` field is a two-state mode switch rather than an
-# effort ladder: `none` selects instruct mode and `default` selects thinking
-# mode. Harn projects those provider words from `thinking: false | true` so
-# callers do not mistake `default` for an effort level. Live Groq probes on
-# 2026-08-26 confirmed both modes.
-[[provider.groq]]
-model_match = "qwen/qwen3.6*"
-native_tools = true
-preferred_tool_format = "native"
-tools_exclude_response_format = true
-recommended_endpoint = "/chat/completions"
-text_tool_wire_format_supported = true
-structured_output = "native"
-thinking_modes = ["toggle"]
-reasoning_disable_supported = true
-reasoning_wire_format = "groq_qwen"
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-
+# Removed 2026-09-20 with the qwen/qwen3.6-27b catalog row: Groq's live
+# /models index no longer lists any Qwen 3.6 route. The Qwen 3.8 rule below
+# is the only Groq Qwen rule now.
 # Qwen 3.8's Groq route supports explicit none/low/medium/high reasoning
 # effort. Omitting the field keeps Groq's model-selected default. A 2026-08-26
 # live probe also confirmed native tools, strict JSON Schema, vision metadata,
@@ -6096,16 +6342,28 @@ thinking_block_style = "reasoning_summary"
 # grounds, but the meter must budget for the throughput ceiling.
 serving_precision = "throttled"
 
-# Gemma 4 31B is Cerebras's current multimodal serverless model. The public
-# record reports native tools, JSON schema output, vision, and reasoning;
-# streaming tool and schema controls verified the native OpenAI-compatible
-# paths on 2026-08-25. The chat API documents no reasoning-effort parameter
-# for this model, so Harn exposes enabled thinking without inventing a knob.
+# Qwen 3.8 27B replaced Gemma 4 31B as Cerebras's multimodal serverless model
+# (Cerebras retired the Gemma route; see 60-models/30-cerebras.toml). The
+# public record at https://api.cerebras.ai/public/v1/models, read 2026-09-20,
+# reports native tools with parallel tool calls, JSON-schema structured
+# outputs, vision, and reasoning. The chat API documents no reasoning-effort
+# parameter for this model, so Harn exposes enabled thinking without inventing
+# a knob. The `qwen-*` rule further down would otherwise catch this row and
+# understate it as a non-reasoning, text-only route.
+#
+# Unverified here: the streaming tool and schema paths were confirmed live for
+# the retired Gemma row on 2026-08-25, not for this one.
 [[provider.cerebras]]
-model_match = "gemma-4-31b"
+model_match = "qwen-3.8-27b"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+# The tools-plus-response_format rejection is a Cerebras request-shape fact,
+# stated for the provider at the top of this file, but only the gpt-oss rule
+# carried it; the retired Gemma rule this one replaces did not. Declared here
+# so both live Cerebras routes agree. Source is that provider-level statement,
+# not a per-model probe of this route.
+tools_exclude_response_format = true
 thinking_modes = ["enabled"]
 vision_supported = true
 prefers_xml_scaffolding = false
@@ -6116,32 +6374,10 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Cerebras GLM 4.7 is a public preview model with native tools, native
-# structured output, and top-level `reasoning_effort`; `none` is the documented
-# no-thinking value, while the older `disable_reasoning` knob is deprecated.
-#
-# This row has always pinned native, and the 2026-08-15 cross-host sweep
-# confirmed it: `zai-glm-4.7` returned a single clean `message.tool_calls` under
-# tool_choice=auto and required, sync and streaming. It only ever escaped the
-# (now retired) `glm-5` family gate because `zai-glm-*` does not contain the
-# literal `glm-5` — an accident that happened to land on the correct answer.
-[[provider.cerebras]]
-model_match = "zai-glm-*"
-native_tools = true
-preferred_tool_format = "native"
-structured_output = "native"
-tools_exclude_response_format = true
-thinking_modes = ["effort"]
-reasoning_effort_supported = true
-reasoning_none_supported = true
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-
+# Removed 2026-09-20 with the catalog rows they served: the `zai-glm-*` rule
+# (Cerebras retired its GLM 4.7 preview) and the `llama-*` rule below stays
+# only as the fallback for a provisioned dedicated Llama endpoint. Cerebras
+# public discovery lists exactly gpt-oss-120b and qwen-3.8-27b.
 [[provider.cerebras]]
 model_match = "llama-*"
 native_tools = true

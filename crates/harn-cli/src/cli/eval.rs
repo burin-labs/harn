@@ -49,6 +49,8 @@ pub struct EvalArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum EvalCommand {
+    /// Measure a classifier's confidence against a labeled corpus.
+    Calibrate(EvalCalibrateArgs),
     /// Benchmark coding-agent fixtures across providers and tool formats.
     CodingAgent(EvalCodingAgentArgs),
     /// Run deterministic context-engineering modes over task fixtures.
@@ -63,6 +65,31 @@ pub enum EvalCommand {
     ScopeTriage(EvalScopeTriageArgs),
     /// Run tool-call accuracy, latency, and cost evals over a dataset.
     ToolCalls(EvalToolCallsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct EvalCalibrateArgs {
+    /// Labeled corpus JSONL: one `{id?, question_id, expected, input?}` row per line.
+    #[arg(long)]
+    pub corpus: PathBuf,
+    /// Answers JSONL: one `{id?, question_id, predicted, confidence, abstained?, backend?, cost?, latency_ms?}` row per line.
+    #[arg(long)]
+    pub answers: PathBuf,
+    /// Candidate acceptance thresholds to score.
+    #[arg(long, value_delimiter = ',', default_value = "0.5,0.7,0.9")]
+    pub thresholds: Vec<f64>,
+    /// Target error rate for the conformal abstention threshold.
+    #[arg(long = "target-error", default_value_t = 0.05)]
+    pub target_error: f64,
+    /// Model revision to record in the report contract.
+    #[arg(long = "model-revision")]
+    pub model_revision: Option<String>,
+    /// Served model identity to record in the report contract.
+    #[arg(long = "served-model-id")]
+    pub served_model_id: Option<String>,
+    /// Print the report JSON instead of the plain-language rendering.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

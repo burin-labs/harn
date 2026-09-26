@@ -179,3 +179,99 @@ fn provider_model_completion_candidates_stay_permissive() {
         );
     }
 }
+
+/// Every canonical portable option id is accepted by `--option`.
+///
+/// The vocabulary is declared once and spells these ids with underscores, and
+/// the capability field is built from the same spelling. Deriving `ValueEnum`
+/// gave the flag a second, kebab-case spelling, so the four ids carrying an
+/// underscore were refused before any request could be made. `temperature`,
+/// `seed` and `stop` are single words and never showed the defect, which is why
+/// this asserts over the whole vocabulary rather than the four that broke.
+#[test]
+fn option_probe_accepts_every_canonical_option_id() {
+    for option in ProviderPortableOptionArg::ALL {
+        let canonical = option.name();
+        let cli = Cli::parse_from([
+            "harn",
+            "provider",
+            "option-probe",
+            "openai",
+            "--model",
+            "gpt-4o-mini",
+            "--option",
+            canonical,
+        ]);
+        let Command::Provider(provider) = cli.command.unwrap() else {
+            panic!("expected provider command for {canonical}");
+        };
+        let ProviderCommand::OptionProbe(args) = provider.command else {
+            panic!("expected provider option-probe command for {canonical}");
+        };
+        assert_eq!(
+            args.option, option,
+            "--option {canonical} should parse as the variant it names",
+        );
+    }
+}
+
+/// The kebab-case spelling the derive used to produce keeps working.
+#[test]
+fn option_probe_still_accepts_the_hyphenated_spelling() {
+    for (spelled, expected) in [
+        ("top-p", ProviderPortableOptionArg::TopP),
+        ("top-k", ProviderPortableOptionArg::TopK),
+        (
+            "frequency-penalty",
+            ProviderPortableOptionArg::FrequencyPenalty,
+        ),
+        (
+            "presence-penalty",
+            ProviderPortableOptionArg::PresencePenalty,
+        ),
+    ] {
+        let cli = Cli::parse_from([
+            "harn",
+            "provider",
+            "option-probe",
+            "openai",
+            "--model",
+            "gpt-4o-mini",
+            "--option",
+            spelled,
+        ]);
+        let Command::Provider(provider) = cli.command.unwrap() else {
+            panic!("expected provider command for {spelled}");
+        };
+        let ProviderCommand::OptionProbe(args) = provider.command else {
+            panic!("expected provider option-probe command for {spelled}");
+        };
+        assert_eq!(args.option, expected, "{spelled} should remain an alias");
+    }
+}
+
+/// The control. Widening the accepted spellings must not accept anything else.
+///
+/// Without this, an implementation that took any string would pass both tests
+/// above.
+#[test]
+fn option_probe_still_refuses_an_unknown_option_id() {
+    for unknown in ["presence_penalties", "top_n", "", "penalty"] {
+        let parsed = Cli::try_parse_from([
+            "harn",
+            "provider",
+            "option-probe",
+            "openai",
+            "--model",
+            "gpt-4o-mini",
+            "--option",
+            unknown,
+        ]);
+        let error = parsed.expect_err(&format!("--option {unknown:?} should be refused"));
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::InvalidValue,
+            "--option {unknown:?} should be refused as an invalid value",
+        );
+    }
+}

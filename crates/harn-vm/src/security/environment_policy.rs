@@ -84,6 +84,8 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "RUST_LOG",
     // SwiftPM manifest compiler modules are a relocatable build cache.
     "SWIFTPM_MODULECACHE_OVERRIDE",
+    // clang and swift-frontend's module cache, relocated the same way.
+    "CLANG_MODULE_CACHE_PATH",
     // Node / npm / pnpm: module path + cache/home roots.
     "NODE_PATH",
     "NPM_CONFIG_CACHE",
@@ -150,6 +152,7 @@ const WINDOWS_ENV_ALLOWLIST: &[&str] = &[
 /// there is no second per-language path table to drift from the allowlist.
 pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
     "SWIFTPM_MODULECACHE_OVERRIDE",
+    "CLANG_MODULE_CACHE_PATH",
     // Rust / Cargo
     "CARGO_HOME",
     "CARGO_TARGET_DIR",
@@ -191,6 +194,7 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
 /// jail is a provable environment/config gap, not the workload's code defect.
 pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
     "SWIFTPM_MODULECACHE_OVERRIDE",
+    "CLANG_MODULE_CACHE_PATH",
     "CARGO_HOME",
     "CARGO_TARGET_DIR",
     "CCACHE_DIR",

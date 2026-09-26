@@ -194,6 +194,20 @@ impl ConcurrentSessionControls {
                     return true;
                 }
             };
+        let goal = match session_inject_goal(params, mode) {
+            Ok(goal) => goal,
+            Err(message) => {
+                send_routed_error(output, id, -32602, &message);
+                emit_routed_control_outcome(
+                    &session_id,
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id}),
+                    Some("invalid_goal"),
+                );
+                return true;
+            }
+        };
         // The caller's own word, before `bridge_mode_for_session_inject`
         // normalized it onto a delivery checkpoint.
         let requested_mode = params
@@ -222,6 +236,7 @@ impl ConcurrentSessionControls {
                 message_id.clone(),
                 recorded_text,
             )
+            .with_goal(goal)
             .with_actor(actor.clone()),
         );
         let response = harn_vm::jsonrpc::response(

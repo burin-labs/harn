@@ -11,6 +11,10 @@ pub struct TestResult {
     pub name: String,
     pub file: String,
     pub passed: bool,
+    /// Present only when the case deliberately stopped before its remaining
+    /// assertions. The reason is the runner's typed skip signal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
     pub error: Option<String>,
     /// Everything the case wrote via `log`/`print`/`println`/etc, in
     /// execution order. `None` when nothing was written — keeps quiet,
@@ -58,6 +62,7 @@ pub struct TestSummary {
     pub results: Vec<TestResult>,
     pub passed: usize,
     pub failed: usize,
+    pub skipped: usize,
     pub total: usize,
     pub duration_ms: u64,
     /// Distribution of per-test wall-clock durations.
@@ -207,7 +212,13 @@ impl TestResult {
     /// machine-readable so downstream eval pipelines can grep it.
     #[doc(hidden)]
     pub fn emit_diagnose(&self) {
-        let outcome = if self.passed { "ok" } else { "FAIL" };
+        let outcome = if self.passed {
+            "ok"
+        } else if self.skip_reason.is_some() {
+            "SKIP"
+        } else {
+            "FAIL"
+        };
         let phases = self
             .phases
             .expect("diagnostics are emitted only for executed cases");

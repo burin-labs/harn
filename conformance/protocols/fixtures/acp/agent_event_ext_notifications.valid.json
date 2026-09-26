@@ -573,6 +573,7 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "appliedFormat": "text",
         "catalogParity": "native_unreliable",
         "kind": "tool_format_override",
         "model": "qwen/qwen3-coder",
@@ -580,7 +581,8 @@
         "provider": "openrouter",
         "recommendedFormat": "text",
         "requestedFormat": "native",
-        "sessionId": "session-1"
+        "sessionId": "session-1",
+        "steered": true
       }
     },
     {

@@ -1,4 +1,51 @@
 use super::*;
+
+#[test]
+fn machine_and_session_remaining_project_the_tighter_limit() {
+    reset_cost_state();
+    let temp = tempfile::tempdir().unwrap();
+    let quota = crate::llm::MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        crate::llm::MachineSpendPolicy {
+            daily_limit_microusd: Some(300_000),
+            monthly_limit_microusd: Some(500_000),
+        },
+    )
+    .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            quota
+                .scope(async {
+                    set_llm_cost_budget(Some(0.4));
+                    let result = llm_budget_remaining_impl(&[], &mut String::new()).unwrap();
+                    match result {
+                        VmValue::Float(value) => assert!((value - 0.3).abs() < 1e-9),
+                        other => panic!("expected the effective remaining allowance: {other:?}"),
+                    }
+                    let execution = crate::llm::ConservativeLlmBudget::new(0.2).unwrap();
+                    execution
+                        .scope(async {
+                            let result =
+                                llm_budget_remaining_impl(&[], &mut String::new()).unwrap();
+                            match result {
+                                VmValue::Float(value) => assert!((value - 0.2).abs() < 1e-9),
+                                other => {
+                                    panic!("expected the tighter execution allowance: {other:?}")
+                                }
+                            }
+                        })
+                        .await
+                        .unwrap();
+                })
+                .await
+                .unwrap();
+        });
+    reset_cost_state();
+}
 #[test]
 fn calculate_cost_uses_catalog_model_pricing() {
     let _guard = crate::llm::env_guard();
@@ -30,8 +77,12 @@ fn calculate_cost_uses_catalog_model_pricing() {
                 output_per_mtok: 20.0,
                 cache_read_per_mtok: None,
                 cache_write_per_mtok: None,
+                cache_write_1h_per_mtok: None,
                 input_token_bands: Vec::new(),
                 promotions: Vec::new(),
+                schedules: Vec::new(),
+                hosted_tool_fees: Default::default(),
+                modality_rates: None,
             }),
             deprecated: false,
             deprecation_note: None,
@@ -61,7 +112,7 @@ fn calculate_cost_uses_catalog_model_pricing() {
 
     // 1000*10 + 1000*20 = 30000; /1e6 = 0.03, exactly.
     assert_eq!(
-        calculate_cost_decimal("gpt-4o-mini", 1000, 1000),
+        calculate_cost_decimal("gpt-4o-mini", 1000, 1000, settlement_now()),
         Decimal::from_str("0.03").unwrap()
     );
 
@@ -73,7 +124,7 @@ fn calculate_cost_is_zero_for_unknown_model() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
     assert_eq!(
-        calculate_cost_decimal("definitely-unpriced-model", 1_000, 1_000),
+        calculate_cost_decimal("definitely-unpriced-model", 1_000, 1_000, settlement_now()),
         Decimal::ZERO
     );
 }
@@ -138,8 +189,12 @@ fn calculate_cost_decimal_is_exact_for_inexact_catalog_rates() {
                 output_per_mtok: 0.60,
                 cache_read_per_mtok: None,
                 cache_write_per_mtok: None,
+                cache_write_1h_per_mtok: None,
                 input_token_bands: Vec::new(),
                 promotions: Vec::new(),
+                schedules: Vec::new(),
+                hosted_tool_fees: Default::default(),
+                modality_rates: None,
             }),
             deprecated: false,
             deprecation_note: None,
@@ -169,7 +224,7 @@ fn calculate_cost_decimal_is_exact_for_inexact_catalog_rates() {
 
     // 1000 * 0.15 + 500 * 0.60 = 150 + 300 = 450; /1e6 = 0.00045 exactly.
     assert_eq!(
-        calculate_cost_decimal("gpt-4o-mini", 1000, 500),
+        calculate_cost_decimal("gpt-4o-mini", 1000, 500, settlement_now()),
         Decimal::from_str("0.00045").unwrap()
     );
 
@@ -181,8 +236,8 @@ fn calculate_cost_for_mock_uses_the_modeled_catalog_price() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
 
-    let mocked = calculate_cost_for_provider("mock", "gpt-4o-mini", 3_000, 4_000);
-    let live = calculate_cost_for_provider("openai", "gpt-4o-mini", 3_000, 4_000);
+    let mocked = calculate_cost_for_provider("mock", "gpt-4o-mini", 3_000, 4_000, settlement_now());
+    let live = calculate_cost_for_provider("openai", "gpt-4o-mini", 3_000, 4_000, settlement_now());
     assert!(mocked > 0.001);
     assert!((mocked - live).abs() < 1e-12);
 }
@@ -191,8 +246,13 @@ fn calculate_cost_for_mock_uses_the_modeled_catalog_price() {
 fn calculate_cost_for_provider_falls_back_to_provider_economics() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
-    let cost =
-        calculate_cost_for_provider("openai", "some-bespoke-openai-deployment", 1_000, 1_000);
+    let cost = calculate_cost_for_provider(
+        "openai",
+        "some-bespoke-openai-deployment",
+        1_000,
+        1_000,
+        settlement_now(),
+    );
     let (input_per_1k, output_per_1k, _) = crate::llm_config::provider_economics("openai");
     let expected = (1_000.0 * input_per_1k.unwrap() + 1_000.0 * output_per_1k.unwrap()) / 1_000.0;
     assert!(
@@ -210,7 +270,13 @@ fn self_hosted_routes_are_priced_at_zero_and_paid_routes_stay_unpriced() {
     // would pass without the `local_runtime` fallback below. They pin the
     // catalog's coherence, not the fallback.
     for provider in ["llamacpp", "ollama", "mlx", "vllm"] {
-        let cost = pricing_aware_call_cost(provider, "any-locally-served-model", 1_000, 1_000);
+        let cost = pricing_aware_call_cost(
+            provider,
+            "any-locally-served-model",
+            1_000,
+            1_000,
+            settlement_now(),
+        );
         assert_eq!(
             cost,
             Some(0.0),
@@ -234,7 +300,7 @@ fn self_hosted_routes_are_priced_at_zero_and_paid_routes_stay_unpriced() {
     crate::llm_config::set_user_overrides(Some(overlay));
     assert!(crate::llm_config::provider_is_self_hosted("rateless-local"));
     assert_eq!(
-        pricing_aware_call_cost("rateless-local", "whatever", 1_000, 1_000),
+        pricing_aware_call_cost("rateless-local", "whatever", 1_000, 1_000, settlement_now()),
         Some(0.0),
         "a self-hosted provider that declares no rate is still known-zero"
     );
@@ -243,7 +309,13 @@ fn self_hosted_routes_are_priced_at_zero_and_paid_routes_stay_unpriced() {
     // Negative pin: the fix must not launder unknown pricing into a free
     // ride for a paid provider that simply has no catalog row.
     assert_eq!(
-        pricing_aware_call_cost("some-unlisted-paid-provider", "whatever", 1_000, 1_000),
+        pricing_aware_call_cost(
+            "some-unlisted-paid-provider",
+            "whatever",
+            1_000,
+            1_000,
+            settlement_now()
+        ),
         None,
         "a provider with neither catalog pricing nor a local runtime stays unpriced"
     );
@@ -261,8 +333,13 @@ fn calculate_cost_for_provider_with_cache_applies_cache_read_discount() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
 
-    let without_cache =
-        calculate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 1_000, 1_000);
+    let without_cache = calculate_cost_for_provider(
+        "anthropic",
+        "claude-sonnet-4-20250514",
+        1_000,
+        1_000,
+        settlement_now(),
+    );
     let with_cache = pricing_aware_call_cost_with_cache(
         "anthropic",
         "claude-sonnet-4-20250514",
@@ -270,6 +347,8 @@ fn calculate_cost_for_provider_with_cache_applies_cache_read_discount() {
         1_000,
         500,
         0,
+        settlement_now(),
+        None,
     )
     .expect("catalog-priced model");
 
@@ -284,16 +363,18 @@ fn calculate_cost_for_provider_with_cache_applies_cache_read_discount() {
 fn pricing_detail_reports_source() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
-    let exact = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
+    let exact =
+        pricing_detail_for("anthropic", "claude-sonnet-4-20250514", settlement_now()).unwrap();
     assert_eq!(exact.source, PricingSource::CatalogModel);
     assert!(exact.cache_read_per_1k.is_some());
 
-    let provider_only = pricing_detail_for("openai", "some-bespoke-openai-deployment").unwrap();
+    let provider_only =
+        pricing_detail_for("openai", "some-bespoke-openai-deployment", settlement_now()).unwrap();
     assert_eq!(provider_only.source, PricingSource::ProviderEconomics);
     assert!(provider_only.cache_read_per_1k.is_none());
 
-    assert!(pricing_detail_for("local", "no-such-local-model").is_some()); // local has 0/0
-    assert!(pricing_detail_for("nonexistent_provider", "ghost-model").is_none());
+    assert!(pricing_detail_for("local", "no-such-local-model", settlement_now()).is_some()); // local has 0/0
+    assert!(pricing_detail_for("nonexistent_provider", "ghost-model", settlement_now()).is_none());
 }
 
 #[test]
@@ -302,9 +383,20 @@ fn pricing_aware_call_cost_distinguishes_unpriced_from_zero() {
     crate::llm_config::clear_user_overrides();
 
     // Known catalog model: Some(cost) matching the priced arithmetic.
-    let priced = pricing_aware_call_cost("anthropic", "claude-sonnet-4-20250514", 1_000, 1_000);
-    let expected =
-        calculate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 1_000, 1_000);
+    let priced = pricing_aware_call_cost(
+        "anthropic",
+        "claude-sonnet-4-20250514",
+        1_000,
+        1_000,
+        settlement_now(),
+    );
+    let expected = calculate_cost_for_provider(
+        "anthropic",
+        "claude-sonnet-4-20250514",
+        1_000,
+        1_000,
+        settlement_now(),
+    );
     assert!(priced.is_some());
     assert!((priced.unwrap() - expected).abs() < 1e-9);
 
@@ -313,11 +405,23 @@ fn pricing_aware_call_cost_distinguishes_unpriced_from_zero() {
     // the same case to 0.0, which is exactly the ambiguity this helper
     // exists to remove.
     assert_eq!(
-        pricing_aware_call_cost("nonexistent_provider", "ghost-model", 1_000, 1_000),
+        pricing_aware_call_cost(
+            "nonexistent_provider",
+            "ghost-model",
+            1_000,
+            1_000,
+            settlement_now()
+        ),
         None
     );
     assert_eq!(
-        calculate_cost_for_provider("nonexistent_provider", "ghost-model", 1_000, 1_000),
+        calculate_cost_for_provider(
+            "nonexistent_provider",
+            "ghost-model",
+            1_000,
+            1_000,
+            settlement_now()
+        ),
         0.0
     );
 }
@@ -349,16 +453,25 @@ fn fast_tier_bills_premium_pricing_when_served_fast() {
     crate::llm_config::clear_user_overrides();
 
     // Opus 4.8 fast mode is 2x standard ($5/$25 -> $10/$50 per MTok).
-    let standard = pricing_detail_for_tier("anthropic", "claude-opus-4-8", false, 0).unwrap();
-    let fast = pricing_detail_for_tier("anthropic", "claude-opus-4-8", true, 0).unwrap();
+    let standard =
+        pricing_detail_for_tier("anthropic", "claude-opus-4-8", false, 0, settlement_now())
+            .unwrap();
+    let fast =
+        pricing_detail_for_tier("anthropic", "claude-opus-4-8", true, 0, settlement_now()).unwrap();
     assert_eq!(standard.source, PricingSource::CatalogModel);
     assert_eq!(fast.source, PricingSource::CatalogServingTier);
     assert!((fast.input_per_1k - 2.0 * standard.input_per_1k).abs() < 1e-9);
     assert!((fast.output_per_1k - 2.0 * standard.output_per_1k).abs() < 1e-9);
 
     // A model with no fast tier ignores the flag and bills standard.
-    let no_fast =
-        pricing_detail_for_tier("anthropic", "claude-sonnet-4-20250514", true, 0).unwrap();
+    let no_fast = pricing_detail_for_tier(
+        "anthropic",
+        "claude-sonnet-4-20250514",
+        true,
+        0,
+        settlement_now(),
+    )
+    .unwrap();
     assert_eq!(no_fast.source, PricingSource::CatalogModel);
 }
 
@@ -366,9 +479,10 @@ fn fast_tier_bills_premium_pricing_when_served_fast() {
 fn project_call_cost_excludes_cached_input_from_full_rate() {
     // OpenAI (subset) convention: cache tokens are folded into `input_tokens`,
     // so subtracting them yields fewer full-rate tokens than the no-cache call.
-    let detail = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
-    let with_cache = project_call_cost(&detail, 10_000, 500, 8_000, 0);
-    let no_cache = project_call_cost(&detail, 10_000, 500, 0, 0);
+    let detail =
+        pricing_detail_for("anthropic", "claude-sonnet-4-20250514", settlement_now()).unwrap();
+    let with_cache = project_call_cost(&detail, 10_000, 500, 8_000, 0, None);
+    let no_cache = project_call_cost(&detail, 10_000, 500, 0, 0, None);
     assert!(with_cache < no_cache);
 }
 
@@ -376,9 +490,10 @@ fn project_call_cost_excludes_cached_input_from_full_rate() {
 fn project_call_cost_openai_subset_convention_subtracts_cache() {
     // OpenAI reports cache tokens inside `input_tokens`. Billable input is the
     // remainder after removing the cached subset; cache billed at cache rate.
-    let detail = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
+    let detail =
+        pricing_detail_for("anthropic", "claude-sonnet-4-20250514", settlement_now()).unwrap();
     let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
-    let got = project_call_cost(&detail, 10_000, 500, 8_000, 0);
+    let got = project_call_cost(&detail, 10_000, 500, 8_000, 0, None);
     let expected =
         (2_000.0 * detail.input_per_1k + 500.0 * detail.output_per_1k + 8_000.0 * cache_read_rate)
             / 1000.0;
@@ -387,7 +502,8 @@ fn project_call_cost_openai_subset_convention_subtracts_cache() {
 
 #[test]
 fn project_call_cost_normalized_anthropic_bills_fresh_read_and_write() {
-    let detail = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
+    let detail =
+        pricing_detail_for("anthropic", "claude-sonnet-4-20250514", settlement_now()).unwrap();
     let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
     let cache_write_rate = detail.cache_write_per_1k.unwrap_or(detail.input_per_1k);
     for fresh in [200, 20_000] {
@@ -398,7 +514,7 @@ fn project_call_cost_normalized_anthropic_bills_fresh_read_and_write() {
             crate::llm::usage::InputTokenBasis::Fresh,
         )
         .unwrap();
-        let got = project_call_cost(&detail, counts.total, 500, 10_000, 100);
+        let got = project_call_cost(&detail, counts.total, 500, 10_000, 100, None);
         let expected = (fresh as f64 * detail.input_per_1k
             + 500.0 * detail.output_per_1k
             + 10_000.0 * cache_read_rate
@@ -413,12 +529,26 @@ fn cache_savings_uses_catalog_cache_pricing() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
 
-    let savings =
-        cache_savings_usd_for_provider("anthropic", "claude-sonnet-4-20250514", 1000, 1000, 0);
+    let savings = cache_savings_usd_for_provider(
+        "anthropic",
+        "claude-sonnet-4-20250514",
+        1000,
+        1000,
+        0,
+        settlement_now(),
+        None,
+    );
     assert!((savings - 0.0027).abs() < 0.0000001);
 
-    let write_delta =
-        cache_savings_usd_for_provider("anthropic", "claude-sonnet-4-20250514", 1000, 0, 1000);
+    let write_delta = cache_savings_usd_for_provider(
+        "anthropic",
+        "claude-sonnet-4-20250514",
+        1000,
+        0,
+        1000,
+        settlement_now(),
+        None,
+    );
     assert!((write_delta + 0.00075).abs() < 0.0000001);
 
     crate::llm_config::clear_user_overrides();
@@ -513,11 +643,11 @@ fn token_budget_raises_categorized_error_when_exhausted() {
     let _budget = install_llm_token_budget(10);
 
     // First call within budget — admits.
-    let first = accumulate_llm_usage("claude-sonnet-4-20250514", 5, 0, 0.0);
+    let first = accumulate_llm_usage("claude-sonnet-4-20250514", 5, 0, 0.001);
     assert!(first.is_ok());
 
     // Second call pushes over — raises BudgetExceeded.
-    let second = accumulate_llm_usage("claude-sonnet-4-20250514", 8, 0, 0.0);
+    let second = accumulate_llm_usage("claude-sonnet-4-20250514", 8, 0, 0.002);
     match second {
         Err(VmError::CategorizedError { category, message }) => {
             assert_eq!(category, ErrorCategory::BudgetExceeded);
@@ -525,7 +655,47 @@ fn token_budget_raises_categorized_error_when_exhausted() {
         }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
+    assert_eq!(peek_total_tokens(), 13);
+    assert_eq!(
+        peek_total_cost(),
+        0.003,
+        "the completed response remains charged"
+    );
 
+    reset_cost_state();
+}
+
+#[test]
+fn step_budget_failure_keeps_completed_usage_and_first_error() {
+    let _guard_outer = crate::llm::env_guard();
+    reset_cost_state();
+    crate::step_runtime::reset_thread_local_state();
+    let _tokens = install_llm_token_budget(10);
+    let _cost = install_llm_cost_budget(0.001);
+    crate::step_runtime::register_step(
+        "paid",
+        crate::step_runtime::StepDefinition {
+            name: "paid".into(),
+            function: "paid".into(),
+            max_tokens: Some(5),
+            ..Default::default()
+        },
+    );
+    assert!(crate::step_runtime::maybe_push_active_step("paid", 1, &[]));
+    let error = accumulate_llm_usage("fixture", 100, 20, 0.003).unwrap_err();
+    assert!(
+        crate::step_runtime::is_step_budget_exhausted(&error),
+        "the first failure is preserved: {error:?}"
+    );
+    assert_eq!(peek_total_tokens(), 120);
+    assert_eq!(peek_total_cost(), 0.003);
+    crate::step_runtime::with_active_step(|step| {
+        assert_eq!(step.input_tokens, 100);
+        assert_eq!(step.output_tokens, 20);
+        assert_eq!(step.cost_usd, 0.003);
+    })
+    .expect("step remains active until its owning frame exits");
+    crate::step_runtime::reset_thread_local_state();
     reset_cost_state();
 }
 
@@ -539,14 +709,16 @@ fn a_long_context_call_bills_at_the_input_token_band() {
     let (provider, model) = ("gemini", "gemini-2.5-pro");
 
     // Below the band: the two helpers agree.
-    let below = pricing_aware_call_cost(provider, model, 100_000, 1_000).expect("priced");
+    let below =
+        pricing_aware_call_cost(provider, model, 100_000, 1_000, settlement_now()).expect("priced");
     assert!(
         (below - (100_000.0 * 1.25 + 1_000.0 * 10.0) / 1_000_000.0).abs() < 1e-9,
         "below the band must bill at the base rate, got {below}"
     );
 
     // Above it, the band applies: input x2, output x1.5.
-    let above = pricing_aware_call_cost(provider, model, 300_000, 1_000).expect("priced");
+    let above =
+        pricing_aware_call_cost(provider, model, 300_000, 1_000, settlement_now()).expect("priced");
     assert!(
         (above - (300_000.0 * 2.50 + 1_000.0 * 15.0) / 1_000_000.0).abs() < 1e-9,
         "above the band must bill at the banded rate, got {above}"
@@ -565,11 +737,20 @@ fn a_long_context_call_bills_at_the_input_token_band() {
 #[test]
 fn mock_provider_has_an_authoritative_zero_cost() {
     assert_eq!(
-        pricing_aware_call_cost("mock", "any-fixture", 10, 20),
+        pricing_aware_call_cost("mock", "any-fixture", 10, 20, settlement_now()),
         Some(0.0)
     );
     assert_eq!(
-        pricing_aware_call_cost_with_cache("mock", "any-fixture", 10, 20, 5, 2),
+        pricing_aware_call_cost_with_cache(
+            "mock",
+            "any-fixture",
+            10,
+            20,
+            5,
+            2,
+            settlement_now(),
+            None
+        ),
         Some(0.0)
     );
 }
@@ -605,10 +786,10 @@ fn cached_call_result() -> crate::llm::api::LlmResult {
         served_fast: false,
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: crate::llm::api::ProviderTelemetry {
+        telemetry: Box::new(crate::llm::api::ProviderTelemetry {
             server_prompt_tokens: Some(91),
             ..Default::default()
-        },
+        }),
     }
 }
 
@@ -718,6 +899,7 @@ fn first_call_of_a_session_keeps_the_worst_case_projection() {
             &opts.model,
             projection.projected_input_tokens,
             projection.projected_output_tokens,
+            settlement_now(),
         ),
         "with no evidence the projection must stay uncached and full-output"
     );

@@ -14,13 +14,15 @@ use super::ToolApprovalPolicy;
 
 mod host_request;
 mod path_guards;
+mod rule_source;
 mod sensitive_paths;
 pub use host_request::ToolApprovalRequest;
 use path_guards::default_guard;
 pub use path_guards::{
     denial_gate_for_source, SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD,
-    SOURCE_DEFAULT_SENSITIVE_PATH,
+    SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
 };
+pub use rule_source::PolicyRuleSource;
 
 const POLICY_RECEIPT_TYPE: &str = "harn.permission_policy_decision.v1";
 
@@ -317,6 +319,8 @@ pub struct PolicyRule {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     pub action: PolicyAction,
+    #[serde(default, skip_serializing_if = "PolicyRuleSource::is_policy")]
+    pub source: PolicyRuleSource,
     #[serde(rename = "match")]
     pub matches: PolicyRuleMatch,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -369,6 +373,12 @@ impl<'de> Visitor<'de> for PolicyRuleVisitor {
         let reason = raw
             .remove("reason")
             .and_then(|value| value.as_str().map(ToOwned::to_owned));
+        let source = raw
+            .remove("source")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(M::Error::custom)?
+            .unwrap_or_default();
         let approval = raw
             .remove("approval")
             .map(serde_json::from_value)
@@ -430,6 +440,7 @@ impl<'de> Visitor<'de> for PolicyRuleVisitor {
         Ok(PolicyRule {
             id,
             action,
+            source,
             matches,
             reason,
             approval,
@@ -463,6 +474,9 @@ pub struct PolicyEvaluation {
     /// rather than having to parse it back out of the reason prose.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied_paths: Vec<String>,
+    /// Network destinations refused by the deciding policy, as declared URLs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied_network_targets: Vec<String>,
     pub receipt: JsonValue,
 }
 
@@ -811,6 +825,7 @@ impl EvaluationContext {
 
 struct Candidate {
     source: String,
+    source_rank: PolicyRuleSource,
     index: Option<usize>,
     id: Option<String>,
     action: PolicyAction,
@@ -928,6 +943,7 @@ fn evaluate_context(policy: &ToolApprovalPolicy, ctx: EvaluationContext) -> Poli
             let action = policy.repeat_action.unwrap_or(PolicyAction::Ask);
             candidates.push(Candidate {
                 source: "repeat_limit".to_string(),
+                source_rank: PolicyRuleSource::Policy,
                 index: None,
                 id: Some("repeat_limit".to_string()),
                 action,
@@ -955,6 +971,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
         if super::super::glob_match(pattern, &ctx.tool_name) {
             candidates.push(Candidate {
                 source: "auto_deny".to_string(),
+                source_rank: PolicyRuleSource::Policy,
                 index: Some(index),
                 id: Some(pattern.clone()),
                 action: PolicyAction::Deny,
@@ -978,6 +995,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
             if !allowed {
                 candidates.push(Candidate {
                     source: "write_path_allowlist".to_string(),
+                    source_rank: PolicyRuleSource::Policy,
                     index: None,
                     id: None,
                     action: PolicyAction::Deny,
@@ -998,6 +1016,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
         if super::super::glob_match(pattern, &ctx.tool_name) {
             candidates.push(Candidate {
                 source: "require_approval".to_string(),
+                source_rank: PolicyRuleSource::Policy,
                 index: Some(index),
                 id: Some(pattern.clone()),
                 action: PolicyAction::Ask,
@@ -1016,6 +1035,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
         if super::super::glob_match(pattern, &ctx.tool_name) {
             candidates.push(Candidate {
                 source: "auto_approve".to_string(),
+                source_rank: PolicyRuleSource::Policy,
                 index: Some(index),
                 id: Some(pattern.clone()),
                 action: PolicyAction::Allow,
@@ -1039,7 +1059,8 @@ fn rule_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Vec<
                 && host_request::exact_write_env_allow(rule, ctx)
         })
         .map(|(index, rule)| Candidate {
-            source: "rules".to_string(),
+            source: rule.source.receipt_source().to_string(),
+            source_rank: rule.source,
             index: Some(index),
             id: rule.id.clone(),
             action: rule.action,
@@ -1056,11 +1077,20 @@ fn rule_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Vec<
 }
 
 fn strongest_candidate(candidates: Vec<Candidate>) -> Option<Candidate> {
+    // Source and action jointly express authority. An authored deny wins over
+    // other configured candidates. A remembered choice beats a mode default.
+    // Action strength breaks equal-priority conflicts. Strict comparison keeps the first rule
+    // on a complete tie, so policy composition remains deterministic.
     let mut best: Option<Candidate> = None;
     for candidate in candidates {
         if best
             .as_ref()
-            .map(|best| candidate.action.rank() > best.action.rank())
+            .map(|best| {
+                (
+                    candidate.source_rank.rank(candidate.action),
+                    candidate.action.rank(),
+                ) > (best.source_rank.rank(best.action), best.action.rank())
+            })
             .unwrap_or(true)
         {
             best = Some(candidate);
@@ -1090,6 +1120,7 @@ fn evaluation_from_candidate(candidate: Candidate, ctx: &EvaluationContext) -> P
         required_approval,
         risk_labels,
         denied_paths: candidate.denied_paths,
+        denied_network_targets: Vec::new(),
         receipt,
     }
 }
@@ -1105,6 +1136,7 @@ fn default_allow(ctx: &EvaluationContext) -> PolicyEvaluation {
         required_approval: None,
         risk_labels: Vec::new(),
         denied_paths: Vec::new(),
+        denied_network_targets: Vec::new(),
         receipt,
     }
 }
@@ -1180,7 +1212,7 @@ fn path_entry_json(entry: &WorkspacePathInfo) -> JsonValue {
     })
 }
 
-fn command_candidates(args: &JsonValue) -> (Vec<String>, Vec<String>) {
+pub(crate) fn command_candidates(args: &JsonValue) -> (Vec<String>, Vec<String>) {
     let mut commands = Vec::new();
     let mut identities = Vec::new();
     if let Some(command) = string_field(args, "command").or_else(|| string_field(args, "cmd")) {

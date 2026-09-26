@@ -255,6 +255,9 @@ path = "/models"
 
 [providers.openrouter]
 display_name = "OpenRouter"
+# Credit-purchase fee allocated to usage, excluding the $0.80 minimum.
+# https://openrouter.ai/docs/faq#how-much-does-openrouter-cost
+platform_fee_percent = 5.5
 features = ["model_proxy"]
 cache_usage_accounting = true
 stream_usage_accounting = true
@@ -847,6 +850,34 @@ features = ["responses_api", "native_tools", "reasoning", "prompt_caching", "wir
 method = "GET"
 path = "/models"
 
+# TypeSafe — System One decision models. NOT a chat provider: the published
+# API is `POST /v1/systemone`, which answers typed questions over one shared
+# state and returns probabilities, not prose.
+#
+# `chat_endpoint` names that same `/systemone` path rather than an invented
+# `/chat/completions`. The catalog contract requires a non-empty endpoint on
+# every provider, a requirement that predates decision-only providers, and the
+# choice is between the real path and a path that does not exist. The value is
+# inert either way: no `typesafe` model row declares `text_generation`, so
+# operation admission refuses a chat request before transport. How the decision
+# operation is actually dialled is named by the `decision_protocol` capability
+# rule, which is the authoritative owner.
+#
+# Direct access was waitlisted on 2026-09-20 and Harn holds no TYPESAFE_API_KEY;
+# the `vercel/typesafe-ai/jev` route is the one reachable today.
+# https://docs.typesafe.ai/api
+[providers.typesafe]
+display_name = "TypeSafe"
+base_url = "https://api.typesafe.ai/v1"
+base_url_env = "TYPESAFE_BASE_URL"
+auth_style = "bearer"
+auth_env = "TYPESAFE_API_KEY"
+chat_endpoint = "/systemone"
+
+[providers.typesafe.healthcheck]
+method = "GET"
+path = "/models"
+
 # Cloudflare Workers AI / AI Gateway — OpenAI-compatible path is scoped by
 # account id. Set CLOUDFLARE_AI_BASE_URL to the concrete account/gateway URL.
 [providers.cloudflare_ai_gateway]
@@ -1094,7 +1125,6 @@ unverified = [
   "qianfan",
   "sambanova",
   "siliconflow",
-  "vercel_ai_gateway",
   "volcengine_ark",
   "zai",
 ]
@@ -1141,8 +1171,8 @@ name = "store"
 value = false
 effect = "retention"
 
-# OpenRouter is the only catalog provider with a per-request control over
-# training as well as retention: `provider.data_collection` selects providers
+# OpenRouter has per-request controls over training and retention:
+# `provider.data_collection` selects providers
 # by their data policy, and `provider.zdr` restricts routing to zero-retention
 # endpoints. Both are routing restrictions, so the effective posture still
 # depends on the upstream provider actually serving the call.
@@ -1155,13 +1185,14 @@ sources = [
   "https://openrouter.ai/docs/features/provider-routing",
   "https://openrouter.ai/docs/features/privacy-and-logging",
 ]
-note = "Both controls restrict which upstream providers may serve the call; retention and training behavior is otherwise the routed provider's."
+note = "Both controls restrict which upstream providers may serve the call; retention and training behavior is otherwise the routed provider's. The alpha decisions endpoint has not been verified to honor these chat controls, so native decisions do not apply them."
 
 [[providers.openrouter.data_controls.request_controls]]
 location = "body"
 name = "provider.data_collection"
 value = "deny"
 effect = "training"
+applies_to = ["open_ai_sse"]
 caveat = "Defaults to allow. Restricts routing to providers that do not collect prompts; it does not retroactively bind one that does."
 
 [[providers.openrouter.data_controls.request_controls]]
@@ -1169,6 +1200,37 @@ location = "body"
 name = "provider.zdr"
 value = true
 effect = "retention"
+applies_to = ["open_ai_sse"]
+
+# The evaluation route was reached on 2026-09-22 with both controls. Its
+# routing metadata reported one successful TypeSafe attempt eligible for ZDR
+# and no prompt training. This proves routing admission, not backend storage.
+[providers.vercel_ai_gateway.data_controls]
+control_scope = "per_request"
+retention_default = "unspecified"
+training_default = "unspecified"
+checked_on = "2026-09-22"
+sources = [
+  "https://vercel.com/blog/zdr-on-ai-gateway",
+  "https://vercel.com/docs/ai-gateway/security-and-compliance/disallow-prompt-training",
+  "https://vercel.com/docs/ai-gateway/modalities/evaluation",
+]
+note = "The native evaluation route honors providerOptions.gateway privacy filters. These are routing restrictions, not proof of storage behavior. Chat dialect controls are not declared by this evaluation-route probe; default upstream retention and training remain unspecified."
+
+[[providers.vercel_ai_gateway.data_controls.request_controls]]
+location = "body"
+name = "providerOptions.gateway.zeroDataRetention"
+value = true
+effect = "retention"
+applies_to = ["vercel_evaluate"]
+caveat = "Routes only to providers with gateway ZDR agreements; per-request ZDR availability depends on the gateway account plan."
+
+[[providers.vercel_ai_gateway.data_controls.request_controls]]
+location = "body"
+name = "providerOptions.gateway.disallowPromptTraining"
+value = true
+effect = "training"
+applies_to = ["vercel_evaluate"]
 
 # Gemini's `store` is an Interactions API field. `generateContent` documents no
 # equivalent, so the control is scoped to the Interactions dialect rather than
@@ -1192,6 +1254,17 @@ effect = "retention"
 applies_to = ["gemini_interactions_sse"]
 
 # ── Account- or contract-scoped providers ────────────────────────────────────
+
+[providers.typesafe.data_controls]
+control_scope = "account"
+retention_default = "retained"
+training_default = "does_not_train"
+checked_on = "2026-09-22"
+sources = [
+  "https://docs.typesafe.ai/legal",
+  "https://typesafe.ai/legal/privacy-policy",
+]
+note = "The privacy policy excludes training and fine-tuning on inputs but permits retention for service and business purposes. Zero data retention is offered to enterprise customers by agreement, not as the default or a documented per-request control. This direct-provider posture does not establish gateway decision-route controls."
 
 [providers.anthropic.data_controls]
 control_scope = "account"
@@ -1624,20 +1697,24 @@ id = "claude-sonnet-4-6"
 provider = "anthropic"
 
 [aliases.opus]
-id = "claude-opus-5"
+id = "claude-opus-5-5"
 provider = "anthropic"
 
+[aliases.opus55]
+id = "claude-opus-5-5"
+provider = "anthropic"
+
+# Previous Opus generations, kept addressable for pinned workflows.
 [aliases.opus5]
 id = "claude-opus-5"
 provider = "anthropic"
 
-# Previous Opus generation, kept addressable for pinned workflows.
 [aliases.opus48]
 id = "claude-opus-4-8"
 provider = "anthropic"
 
 # Fable is the Mythos-class tier above Opus, not an Opus successor — the
-# `opus` alias tracks the current Opus generation (claude-opus-5), not Fable.
+# `opus` alias tracks the current Opus generation (claude-opus-5-5), not Fable.
 [aliases.fable]
 id = "claude-fable-5-1"
 provider = "anthropic"
@@ -1678,33 +1755,42 @@ provider = "openrouter"
 id = "accounts/fireworks/models/gpt-oss-120b"
 provider = "fireworks"
 
+# GPT-6 tiers: Astra is the frontier, Sol the balanced tier (GPT-6 has no
+# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier.
 [aliases."openai/mid"]
-id = "gpt-5.6-terra"
+id = "gpt-6-sol"
 provider = "openai"
 
 [aliases."openai/frontier"]
-id = "gpt-5.6-sol"
+id = "gpt-6-astra"
 provider = "openai"
 
 [aliases."openai/small"]
-id = "gpt-5.6-luna"
+id = "gpt-6-luna"
 provider = "openai"
 
-# Preserve OpenAI's public family alias while resolving to the explicit tier
-# for stable catalog metadata, receipts, and cost projections.
+# Preserve OpenAI's public GPT-5.6 family alias while resolving to the
+# explicit tier for stable catalog metadata, receipts, and cost projections.
 [aliases."gpt-5.6"]
 id = "gpt-5.6-sol"
 provider = "openai"
 
-# GPT-6 ships a single model, so the family alias and the marketing name both
-# resolve to the one id. Kept as aliases rather than extra catalog rows so
-# receipts and cost projections stay on the canonical `gpt-6-astra`.
+# OpenAI publishes no bare `gpt-6` id; the family alias names the flagship.
+# Tier names resolve to the GPT-6 generation.
 [aliases."gpt-6"]
 id = "gpt-6-astra"
 provider = "openai"
 
 [aliases.astra]
 id = "gpt-6-astra"
+provider = "openai"
+
+[aliases.sol]
+id = "gpt-6-sol"
+provider = "openai"
+
+[aliases.luna]
+id = "gpt-6-luna"
 provider = "openai"
 
 # The small tier default stays on an open-weight host by policy (see
@@ -2063,23 +2149,22 @@ provider = "nvidia"
 tool_format = "native"
 
 [aliases."nvidia-nemotron-nano"]
-id = "nvidia/nemotron-3-nano-30b-a3b"
+id = "nvidia/nemotron-nano-3-30b-a3b"
 provider = "nvidia"
 tool_format = "native"
 
-# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07. This alias
-# follows NIM to the dated Flash snapshot. There is no NIM DeepSeek V4 Pro
-# build to point at.
+# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07, and by
+# 2026-09-26 the dated Flash snapshot too. This alias names V4, so it stays on
+# the deprecated snapshot row, whose `superseded_by` names the V4.1 route,
+# rather than silently moving callers to a different model.
 [aliases."nvidia-deepseek-v4-flash"]
 id = "nvidia/deepseek-v4-flash-0731"
 provider = "nvidia"
 tool_format = "native"
 
-[aliases."nvidia-minimax-m3"]
-id = "nvidia/minimax-m3"
-provider = "nvidia"
-tool_format = "native"
-
+# Removed 2026-09-20 with the nvidia/minimax-m3 row: NIM no longer serves any
+# MiniMax build. `minimax-m3` and the SambaNova/Fireworks/OpenRouter aliases
+# still reach the model.
 [aliases."nvidia-kimi-k2.6"]
 id = "nvidia/kimi-k2.6"
 provider = "nvidia"
@@ -2201,6 +2286,11 @@ provider = "zai"
 id = "glm-5.3-flash"
 provider = "zai"
 
+# GLM-5.3-FlashX, Z.AI's higher-throughput Flash build (released 2026-09-18).
+[aliases."glm-5.3-flashx"]
+id = "glm-5.3-flashx"
+provider = "zai"
+
 [aliases."glm-flash"]
 id = "glm-5.3-flash"
 provider = "zai"
@@ -2284,6 +2374,15 @@ id = "grok-4.5"
 provider = "xai"
 tool_format = "native"
 
+# Grok 4.6 shipped 2026-08-06. The bare `grok` alias deliberately stays on 4.5:
+# xAI still points its own `grok-4.5-latest` and `grok-build-latest` aliases at
+# 4.5 and publishes no `-latest` alias for 4.6 (https://api.x.ai/v1/models,
+# observed 2026-09-20), so moving the default would be our claim, not xAI's.
+[aliases."grok-4.6"]
+id = "grok-4.6"
+provider = "xai"
+tool_format = "native"
+
 [aliases."grok-4.3"]
 id = "grok-4.3"
 provider = "xai"
@@ -2359,12 +2458,9 @@ tool_format = "native"
 id = "qwen/qwen3.5-397b-a17b"
 provider = "openrouter"
 
-# Groq LPU speed route for Qwen3.6 (native tool calls, ~500 tok/s).
-[aliases."groq-qwen3.6"]
-id = "qwen/qwen3.6-27b"
-provider = "groq"
-tool_format = "native"
-
+# Removed 2026-09-20 with the qwen/qwen3.6-27b row: Groq's live /models index
+# no longer serves it. `groq-qwen3.8` below is the successor alias and already
+# existed, so no alias was re-pointed.
 [aliases."groq-qwen3.8"]
 id = "qwen/qwen3.8-27b"
 provider = "groq"
@@ -2405,7 +2501,7 @@ id = "vercel/anthropic/claude-haiku-4.5"
 provider = "vercel_ai_gateway"
 
 [aliases."vercel-gemini-3.1-flash-lite"]
-id = "vercel/google/gemini-3.1-flash-lite-preview"
+id = "vercel/google/gemini-3.1-flash-lite"
 provider = "vercel_ai_gateway"
 
 # --- source: 30-aliases/tool-calling.toml ---
@@ -2493,10 +2589,6 @@ _unset = ["top_p"]
 [model_defaults."groq/compound*"]
 max_tokens = 8192
 
-# Moonshot's direct Kimi K2.5 route accepts only temperature 1.
-[model_defaults."moonshot/kimi-k2.5"]
-temperature = 1.0
-
 # K3 always reasons and accepts low, high, or maximum effort. Sampling is
 # omitted by the capability row; this default preserves Moonshot's documented
 # maximum-effort default without leaking route-specific logic into callers.
@@ -2541,7 +2633,7 @@ reasoning_effort = "high"
 
 [qc_defaults]
 anthropic = "claude-haiku-4-5-20251001"
-openai = "gpt-5.6-luna"
+openai = "gpt-6-luna"
 openrouter = "google/gemini-2.5-flash"
 ollama = "llama3.2"
 # `local` previously pointed at gpt-4o — a hosted (and now sunset)
@@ -2551,7 +2643,12 @@ local = "gemma-4-26b-a4b-it"
 mistral = "mistral-small-2603"
 cohere = "command-a-plus-05-2026"
 xai = "grok-build-0.1"
-groq = "qwen/qwen3.6-27b"
+# Groq retired qwen/qwen3.6-27b (absent from its live /models index on
+# 2026-09-20). Qwen3.8 27B is Groq's only remaining Qwen route, at a higher
+# rate ($0.80/$4.00 per MTok versus $0.60/$3.00). If the QC rate matters more
+# than staying in the Qwen family, groq/openai/gpt-oss-20b is catalogued at
+# $0.075/$0.30.
+groq = "qwen/qwen3.8-27b"
 minimax = "MiniMax-M2.5-highspeed"
 # GLM-4.6 is Z.AI's cheap coding route, confirmed serving at paas/v4.
 zai = "glm-4.6"
@@ -2628,52 +2725,53 @@ label = "Long context"
 description = "Largest context-window route in this catalog."
 selector = { kind = "largest_context" }
 
-[presentation.families.openai-gpt-5-6]
-label = "GPT-5.6"
+[presentation.families.openai-gpt-6]
+label = "GPT-6"
 plain_description = "Choose a model size and how much time it spends reasoning."
 
-[[presentation.families.openai-gpt-5-6.dimensions]]
+[[presentation.families.openai-gpt-6.dimensions]]
 key = "variant"
 label = "Model size"
 plain_description = "Larger variants trade speed and cost for more capability."
 kind = "model"
 ordered_values = [
-  { value = "luna", label = "Luna", plain_description = "Fastest and lowest cost for routine work.", relative_cost_hint = 1, relative_speed_hint = 5, model_id = "gpt-5.6-luna" },
-  { value = "terra", label = "Terra", plain_description = "Balanced capability, speed, and cost.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "gpt-5.6-terra" },
-  { value = "sol", label = "Sol", plain_description = "Most capable and most expensive for difficult work.", relative_cost_hint = 5, relative_speed_hint = 1, model_id = "gpt-5.6-sol" },
+  { value = "luna", label = "Luna", plain_description = "Fastest and lowest cost for routine work.", relative_cost_hint = 1, relative_speed_hint = 5, model_id = "gpt-6-luna" },
+  { value = "sol", label = "Sol", plain_description = "Strong reasoning for everyday coding and analysis.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "gpt-6-sol" },
+  { value = "astra", label = "Astra", plain_description = "Most capable and most expensive for the hardest work.", relative_cost_hint = 5, relative_speed_hint = 1, model_id = "gpt-6-astra" },
 ]
 
-[[presentation.families.openai-gpt-5-6.dimensions]]
+# Only the levels every GPT-6 model accepts. Sol and Luna also take `none`,
+# but Astra rejects it, and all three reject `max` despite the model pages
+# listing it (live probe 2026-09-22).
+[[presentation.families.openai-gpt-6.dimensions]]
 key = "effort"
 label = "Thinking time"
 plain_description = "More thinking time can improve difficult answers but takes longer and costs more."
 kind = "reasoning_effort"
 ordered_values = [
-  { value = "none", label = "None", plain_description = "Respond directly without extra reasoning.", relative_cost_hint = 1, relative_speed_hint = 5 },
   { value = "low", label = "Low", plain_description = "Brief reasoning for straightforward work.", relative_cost_hint = 1, relative_speed_hint = 5 },
   { value = "medium", label = "Medium", plain_description = "Balanced reasoning for everyday work.", relative_cost_hint = 2, relative_speed_hint = 4 },
   { value = "high", label = "High", plain_description = "More reasoning for difficult tasks.", relative_cost_hint = 3, relative_speed_hint = 3 },
-  { value = "xhigh", label = "Extra high", plain_description = "Deep reasoning for complex tasks.", relative_cost_hint = 4, relative_speed_hint = 2 },
-  { value = "max", label = "Maximum", plain_description = "Most reasoning for the hardest tasks.", relative_cost_hint = 5, relative_speed_hint = 1 },
+  { value = "xhigh", label = "Extra high", plain_description = "Deepest reasoning for the hardest tasks.", relative_cost_hint = 5, relative_speed_hint = 1 },
 ]
 
-[[presentation.families.openai-gpt-5-6.presets]]
+[[presentation.families.openai-gpt-6.presets]]
 id = "fast"
 label = "Fast"
 plain_blurb = "Quick, low-cost responses for routine edits and questions."
 coordinates = { variant = "luna", effort = "low" }
 
-[[presentation.families.openai-gpt-5-6.presets]]
+[[presentation.families.openai-gpt-6.presets]]
 id = "balanced"
 label = "Balanced"
 plain_blurb = "A practical default for everyday coding and analysis."
-coordinates = { variant = "terra", effort = "medium" }
+coordinates = { variant = "sol", effort = "medium" }
 
-[[presentation.families.openai-gpt-5-6.presets]]
+[[presentation.families.openai-gpt-6.presets]]
 id = "deep"
 label = "Deep"
 plain_blurb = "Maximum capability and reasoning for the hardest work."
-coordinates = { variant = "sol", effort = "max" }
+coordinates = { variant = "astra", effort = "xhigh" }
 
 # --- source: 60-models/00-anthropic.toml ---
 # ── Models ───────────────────────────────────────────────────────────────────
@@ -2682,6 +2780,14 @@ coordinates = { variant = "sol", effort = "max" }
 # Pricing reflects public provider pages snapshotted at the comment
 # beside each section; edit the literal here and the change shows up in
 # `git blame`.
+
+# Cache writes have two rates: `cache_write_per_mtok` is the five-minute write
+# at 1.25x input, and `cache_write_1h_per_mtok` is the one-hour write at 2x
+# input (https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching,
+# read 2026-09-20). Harn sends `cache_control.ttl = "1h"` when a request asks
+# for it, so both rates must be here or the longer write settles at the
+# shorter rate. Claude routes served through other providers carry only the
+# five-minute rate until each passthrough card is read at its own source.
 
 # Anthropic ─ pricing pages: https://www.anthropic.com/pricing &
 # https://platform.claude.com/docs/en/about-claude/model-deprecations.
@@ -2697,7 +2803,7 @@ name = "Claude Haiku 3.5"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.08, cache_write_per_mtok = 1.00 }
+pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.08, cache_write_per_mtok = 1.00, cache_write_1h_per_mtok = 1.60 }
 deprecated = true
 deprecation_note = "Retired 2026-02-19 per Anthropic deprecations page. Use claude-haiku-4-5-20251001."
 superseded_by = "claude-haiku-4-5-20251001"
@@ -2705,12 +2811,15 @@ tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
 
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."claude-haiku-4-5-20251001"]
 name = "Claude Haiku 4.5"
 provider = "anthropic"
+operations = ["text_generation", "decision"]
 context_window = 200000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25, cache_write_1h_per_mtok = 2.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
@@ -2720,7 +2829,7 @@ name = "Claude Sonnet 3.5 (2024-06-20)"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00 }
 deprecated = true
 deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6."
 superseded_by = "claude-sonnet-4-6"
@@ -2735,7 +2844,7 @@ name = "Claude Sonnet 3.5 (2024-10-22)"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00 }
 deprecated = true
 deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6."
 superseded_by = "claude-sonnet-4-6"
@@ -2750,7 +2859,7 @@ name = "Claude Sonnet 4"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 deprecated = true
 deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
 tier = "frontier"
@@ -2762,7 +2871,7 @@ name = "Claude Sonnet 4.5"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 deprecated = true
 deprecation_note = "Undated compatibility selector. Anthropic's active API id is claude-sonnet-4-5-20250929; prefer that dated id or claude-sonnet-4-6."
 superseded_by = "claude-sonnet-4-5-20250929"
@@ -2778,7 +2887,7 @@ name = "Claude Sonnet 4.5"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2792,7 +2901,7 @@ provider = "anthropic"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2815,7 +2924,7 @@ provider = "anthropic"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2836,7 +2945,7 @@ provider = "openrouter"
 wire_model = "anthropic/claude-haiku-4.5"
 context_window = 200000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25, cache_write_1h_per_mtok = 2.00 }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
@@ -2845,7 +2954,7 @@ name = "Claude Fable 5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00 }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2857,7 +2966,7 @@ wire_model = "anthropic/claude-sonnet-4.6"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2868,7 +2977,7 @@ provider = "openrouter"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2878,10 +2987,10 @@ name = "Claude Opus 3"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75, cache_write_1h_per_mtok = 30.00 }
 deprecated = true
-deprecation_note = "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5."
-superseded_by = "claude-opus-5"
+deprecation_note = "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5-5."
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "long_context"]
@@ -2890,10 +2999,10 @@ name = "Claude Opus 4"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75, cache_write_1h_per_mtok = 30.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 deprecated = true
-deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5."
-superseded_by = "claude-opus-5"
+deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5-5."
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2903,10 +3012,10 @@ name = "Claude Opus 4.1"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75, cache_write_1h_per_mtok = 30.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 deprecated = true
-deprecation_note = "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5."
-superseded_by = "claude-opus-5"
+deprecation_note = "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5-5."
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2916,8 +3025,8 @@ name = "Claude Opus 4.5"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2926,8 +3035,8 @@ name = "Claude Opus 4.6"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2937,20 +3046,20 @@ name = "Claude Opus 4.7"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 87.6, swe_bench_pro = 64.3 }
 # Fast mode (research preview): 6x standard pricing, ~2.5x output tok/s.
 serving_tiers = [
-  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 6.0, status = "research_preview", pricing = { input_per_mtok = 30.00, output_per_mtok = 150.00, cache_read_per_mtok = 3.00, cache_write_per_mtok = 37.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate." },
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 6.0, status = "research_preview", pricing = { input_per_mtok = 30.00, output_per_mtok = 150.00, cache_read_per_mtok = 3.00, cache_write_per_mtok = 37.50, cache_write_1h_per_mtok = 60.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate." },
 ]
 
 # Claude Opus 4.8 (released 2026-05-28) — Anthropic's most capable model
 # for complex reasoning, long-horizon agentic coding, and high-autonomy
-# work; the current `opus` alias target. Adaptive thinking only (extended
+# work. Adaptive thinking only (extended
 # thinking budgets return 400); the `effort` parameter controls reasoning
 # depth and defaults to `high` on every surface. Sampling params
 # (temperature/top_p/top_k) are rejected — steer via prompting instead.
@@ -2963,8 +3072,8 @@ name = "Claude Opus 4.8"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-5"
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -2972,11 +3081,11 @@ benchmarks = { swe_bench_verified = 88.6, swe_bench_pro = 69.2 }
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
 serving_tiers = [
-  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." },
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." },
 ]
 
-# Claude Opus 5 (released 2026-07-24) — the current Opus generation and the
-# `opus` alias target: a drop-in upgrade from Opus 4.8 at identical $5 / $25
+# Claude Opus 5 (released 2026-07-24) — superseded by Opus 5.5 and pinned by
+# the `opus5` alias: a drop-in upgrade from Opus 4.8 at identical $5 / $25
 # per MTok pricing (cache read 0.1x, 5-min cache write 1.25x). Inherits the
 # Opus 4.7+ request surface (adaptive thinking only, sampling params rejected,
 # no assistant prefill) with two changes verified against the live API on
@@ -2996,14 +3105,15 @@ name = "Claude Opus 5"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+superseded_by = "claude-opus-5-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
 serving_tiers = [
-  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
 ]
 
 [models."anthropic/claude-opus-5"]
@@ -3011,17 +3121,61 @@ name = "Claude Opus 5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00 }
+superseded_by = "anthropic/claude-opus-5.5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
+
+# Claude Opus 5.5 (released 2026-09-21) — the current Opus generation and the
+# `opus` alias target. Cheaper than Opus 5 ($4 / $20 per MTok, cache read
+# $0.20 = 0.05x, 5-min cache write 1.25x) with the same 1M context, 128K
+# output, and tokenizer. Verified against the live API on 2026-09-22:
+#   1. Thinking cannot be disabled. `{"type":"disabled"}` and
+#      `{"type":"enabled","budget_tokens":N}` are both 400s at every effort;
+#      effort is the only control and its API default is `medium` (Opus 5
+#      defaulted to `high`).
+#   2. Forced `tool_choice` (`any` / `tool`) is a 400; `auto` and `none` pass.
+#   3. Minimum cacheable prefix stays at 512 tokens (a 608-token prefix cached
+#      on Opus 5.5 and silently did not on Opus 4.8).
+#   4. Fast mode (`speed: "fast"`) is accepted at 2x standard pricing.
+# Thinking blocks are bound to the model and conversation ("preserved
+# thinking"), so history must stay append-only; only Fable 5.1 / Mythos 5.1
+# read an Opus 5.5 block, other models drop it silently.
+[models."claude-opus-5-5"]
+name = "Claude Opus 5.5"
+provider = "anthropic"
+context_window = 1000000
+released = "2026-09-21"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00, cache_write_1h_per_mtok = 8.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic", "vision"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+# Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00, cache_write_1h_per_mtok = 16.00 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
+]
+
+# OpenRouter serves Opus 5.5 under a dotted slug at Anthropic's list price.
+[models."anthropic/claude-opus-5.5"]
+name = "Claude Opus 5.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+released = "2026-09-22"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic", "vision"]
 
 [models."anthropic/claude-opus-4.8"]
 name = "Claude Opus 4.8 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00 }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -3047,7 +3201,7 @@ name = "Claude Fable 5"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -3083,11 +3237,24 @@ name = "Claude Fable 5.1"
 provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 12.50 }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 12.50, cache_write_1h_per_mtok = 20.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+
+# OpenRouter serves Fable 5.1 under a dotted slug at Anthropic's list price,
+# including Fable 5.1's $0.25 cache-read rate.
+[models."anthropic/claude-fable-5.1"]
+name = "Claude Fable 5.1 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+released = "2026-09-01"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
 
 # --- source: 60-models/10-openai-gemini-mistral.toml ---
 # OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
@@ -3130,7 +3297,7 @@ logical_model = "gpt-6-astra"
 equivalence_group = "gpt-6-astra"
 released = "2026-09-03"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3139,7 +3306,66 @@ serving_tiers = [
   { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
 ]
 
-# GPT-5.6 — current OpenAI family. The bare gpt-5.6 API alias routes to Sol;
+# GPT-6 Sol and Luna (announced 2026-09-22) — the GPT-6 successors to
+# GPT-5.6 Sol and Luna at about half their promotional price. There is no
+# GPT-6 Terra: Sol now covers the balanced tier and is cheaper than GPT-5.6
+# Terra. Unlike Astra, both accept effort `none`. Live probe 2026-09-22 on
+# both models:
+#   reasoning_effort none/low/medium/high/xhigh -> 200; minimal and max -> 400
+#     (the model pages list `max`; the API does not accept it)
+#   temperature=0.2 at effort none -> 200; at the default effort -> 400
+#   function tools on /v1/chat/completions -> 400 unless effort is none
+#   service_tier=fast -> 200, echoes "fast"; reasoning.mode=pro -> 200
+# Long-context band: prompts over 272K input tokens bill input and cache at 2x
+# and output at 1.5x. Default effort is `medium`.
+[models."gpt-6-sol"]
+name = "GPT-6 Sol"
+blurb = "Strong GPT-6 reasoning for everyday coding, planning, and review at a moderate cost."
+provider = "openai"
+context_window = 1050000
+logical_model = "gpt-6-sol"
+equivalence_group = "gpt-6-sol"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+tier = "mid"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.4, cache_write_per_mtok = 5.00 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "GPT-6 responses echo service_tier=fast when the premium tier was served (live probe 2026-09-22)." },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.1, cache_write_per_mtok = 1.25 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-22). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6. OpenRouter's `-pro` slugs sell this knob, not a separate model." },
+]
+
+[models."gpt-6-luna"]
+name = "GPT-6 Luna"
+blurb = "Fastest and lowest-cost GPT-6 option for routine edits, summaries, and extraction."
+provider = "openai"
+context_window = 1050000
+logical_model = "gpt-6-luna"
+equivalence_group = "gpt-6-luna"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 0.2, output_per_mtok = 1.00, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "GPT-6 responses echo service_tier=fast when the premium tier was served (live probe 2026-09-22)." },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 0.05, output_per_mtok = 0.25, cache_read_per_mtok = 0.005, cache_write_per_mtok = 0.0625 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-22). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6. OpenRouter's `-pro` slugs sell this knob, not a separate model." },
+]
+
+# GPT-5.6 — previous OpenAI family, superseded by GPT-6 Sol and Luna. OpenAI
+# has not announced a sunset, so the rows stay routable (not `deprecated`);
+# GPT-5.6 Terra has no GPT-6 counterpart and points at GPT-6 Sol, which is
+# cheaper and stronger. The bare gpt-5.6 API alias routes to Sol;
 # Harn resolves it through the alias catalog so receipts keep the explicit
 # tier. All three models accept none/low/medium/high/xhigh/max effort, support
 # image input, and expose the Responses-first hosted tool surface. Cache writes
@@ -3153,7 +3379,8 @@ context_window = 1050000
 logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }] }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+superseded_by = "gpt-6-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3180,7 +3407,8 @@ context_window = 1050000
 logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+superseded_by = "gpt-6-sol"
 tier = "mid"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3201,7 +3429,8 @@ context_window = 1050000
 logical_model = "gpt-5.6-luna"
 equivalence_group = "gpt-5.6-luna"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+superseded_by = "gpt-6-luna"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3229,7 +3458,7 @@ name = "GPT-5.5"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -3244,7 +3473,7 @@ name = "GPT-5.5 Pro"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -3259,7 +3488,7 @@ name = "GPT-5.4"
 provider = "openai"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -3269,27 +3498,33 @@ name = "GPT-5.4 Pro"
 provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."gpt-5.4-mini"]
 name = "GPT-5.4 Mini"
 provider = "openai"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
+pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."gpt-5.4-nano"]
 name = "GPT-5.4 Nano"
 provider = "openai"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
@@ -3302,7 +3537,7 @@ name = "GPT-5.3-Codex"
 provider = "openai"
 context_window = 400000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.75, output_per_mtok = 14.00, cache_read_per_mtok = 0.175 }
+pricing = { input_per_mtok = 1.75, output_per_mtok = 14.00, cache_read_per_mtok = 0.175, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "tool_use", "agentic"]
@@ -3393,22 +3628,17 @@ capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 60.00, cache_read_per_mtok = 7.50 }
 deprecated = true
 deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.5."
+# The retirement date was prose only. OpenAI publishes it as a typed
+# `shutdown_date` on the model record (GET /v1/models, read 2026-09-20), so it
+# belongs in the typed field consumers read.
+sunset_date = "2026-10-23"
 superseded_by = "gpt-5.5"
 tier = "reasoning"
 open_weight = false
 strengths = ["reasoning"]
-[models."o1-mini"]
-name = "OpenAI o1-mini"
-provider = "openai"
-context_window = 128000
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 1.10, output_per_mtok = 4.40, cache_read_per_mtok = 0.55 }
-deprecated = true
-deprecation_note = "Legacy o-series; the GPT-4/o-series legacy exits by 2026-10-23 per OpenAI deprecations page. Use gpt-5.4-mini."
-superseded_by = "gpt-5.4-mini"
-tier = "reasoning"
-open_weight = false
-strengths = ["reasoning", "cheap"]
+# Removed 2026-09-20: o1-mini. It is gone from GET /v1/models ahead of the
+# announced 2026-10-23 legacy exit, while o1 and o3 are still listed (with
+# `shutdown_date` 2026-10-23 and null respectively), so those rows stay.
 [models.o3]
 name = "OpenAI o3"
 provider = "openai"
@@ -3505,7 +3735,7 @@ name = "Gemini 3.8 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.8-intro", starts_on = "2026-09-02", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.8-intro", starts_on = "2026-09-02", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
@@ -3523,7 +3753,7 @@ name = "Gemini 3.7 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
@@ -3542,7 +3772,7 @@ name = "Gemini 3.6 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
@@ -3559,7 +3789,7 @@ name = "Gemini 3.5 Flash-Lite"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "vision", "tool_use", "agentic"]
@@ -3576,7 +3806,7 @@ name = "Gemini 3.5 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15 }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
@@ -3595,7 +3825,7 @@ name = "Gemini 3.1 Pro (Preview)"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "vision", "agentic"]
@@ -3605,12 +3835,15 @@ serving_tiers = [
   { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
 ]
 
+# Also serves the `decision` operation through strict JSON-schema structured
+# output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
 [models."gemini-3.1-flash-lite"]
 name = "Gemini 3.1 Flash-Lite"
 provider = "gemini"
+operations = ["text_generation", "decision"]
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025 }
+pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "tool_use"]
@@ -3628,7 +3861,10 @@ name = "Gemini 2.5 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
+# Cache write added 2026-09-20: OpenRouter bills $0.0833333333333333 per MTok
+# to write a cache entry on every Gemini Flash route. It was missing here, so
+# cache writes were estimated at zero.
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03, cache_write_per_mtok = 0.0833333333333333 }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
@@ -3638,7 +3874,11 @@ name = "Gemini 3.6 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "openrouter-google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 0.75, output_per_mtok = 3.75 }] }
+# Corrected 2026-09-20: the promotion carried no cache rates, so cached reads
+# billed at the undiscounted $0.15 base. OpenRouter publishes $0.075 cache read
+# and $0.0416666666666667 cache write for this route, the same as the 3.7 and
+# 3.8 rows. Verified against https://openrouter.ai/api/v1/models on 2026-09-20.
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "openrouter-google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075, cache_write_per_mtok = 0.0416666666666667 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
@@ -3661,7 +3901,11 @@ name = "Gemini 3.7 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "openrouter-google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 0.375, output_per_mtok = 1.875, cache_read_per_mtok = 0.0375, cache_write_per_mtok = 0.0208333333333333 }] }
+# Corrected 2026-09-20: the promotion recorded 75% off, but OpenRouter bills
+# this route at $0.75 / $3.75 per MTok with a $0.075 cache read — the same 50%
+# intro rate as the 3.6 and 3.8 rows above. Verified against
+# https://openrouter.ai/api/v1/models on 2026-09-20.
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "openrouter-google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075, cache_write_per_mtok = 0.0416666666666667 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
@@ -3671,7 +3915,8 @@ name = "Gemini 3.5 Flash-Lite (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
+# Cache write added 2026-09-20; see the 2.5 Flash row above.
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03, cache_write_per_mtok = 0.0833333333333333 }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "vision", "tool_use", "agentic"]
@@ -3681,7 +3926,8 @@ name = "Gemini 3.5 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15 }
+# Cache write added 2026-09-20; see the 2.5 Flash row above.
+pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15, cache_write_per_mtok = 0.0833333333333333 }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
@@ -3775,20 +4021,14 @@ architecture = { parameter_count_b = 128.0, moe = false, license = "Modified MIT
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "tool_use", "reasoning", "long_context", "vision", "agentic"]
-[models."mistralai/mistral-large-2512"]
-name = "Mistral Large 3 2512"
-provider = "openrouter"
-context_window = 262144
-logical_model = "mistral-large-3-2512"
-equivalence_group = "mistral-large-3-2512"
-served_variant = "openrouter"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.50, output_per_mtok = 1.50, cache_read_per_mtok = 0.05 }
-architecture = { parameter_count_b = 675.0, active_parameter_count_b = 41.0, moe = true, license = "Apache-2.0", source_url = "https://docs.mistral.ai/models/model-cards/mistral-large-3-25-12", last_verified = "2026-06-05" }
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "tool_use", "long_context"]
+# Removed 2026-09-20: the OpenRouter mistralai/mistral-large-2512 route. The
+# interactive slug is absent from https://openrouter.ai/api/v1/models, and its
+# endpoints API (/api/v1/models/mistralai/mistral-large-2512/endpoints) returns
+# the model record with an empty endpoint list. OpenRouter does still list a
+# `:batch` slug for it; Harn catalogues no `:batch` routes on any provider, so
+# that variant is deliberately not picked up in its place. The direct
+# Mistral `mistral-large-2512` row is unaffected and unverified this pass (no
+# MISTRAL_API_KEY on this host, and api.mistral.ai/v1/models is 401 without one).
 [models."mistralai/mistral-small-2603"]
 name = "Mistral Small 4"
 provider = "openrouter"
@@ -3925,12 +4165,16 @@ note = "Meta documents the standard tier as not used to improve its products."
 # Open-weight executor candidates (<$2/Mtok with function calling). Use
 # these via OpenRouter or Fireworks for fast secondary-model dispatch.
 # Pricing snapshot 2026-05 from OpenRouter / Artificial Analysis.
+#
+# Every OpenRouter, Together and DeepInfra row in this file was re-read
+# against the provider's live models endpoint on 2026-09-20; rates and
+# context windows below are that read.
 [models."qwen/qwen3-coder"]
 name = "Qwen3 Coder 480B A35B"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.22, output_per_mtok = 1.80 }
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.00, cache_read_per_mtok = 0.10 }
 availability = "serverless"
 tier = "frontier"
 open_weight = true
@@ -3943,7 +4187,7 @@ name = "Qwen3 Coder Next"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.11, output_per_mtok = 0.80, cache_read_per_mtok = 0.07 }
+pricing = { input_per_mtok = 0.12, output_per_mtok = 0.80, cache_read_per_mtok = 0.07 }
 availability = "serverless"
 architecture = { parameter_count_b = 80.0, active_parameter_count_b = 3.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3-Coder-Next", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 70.6, swe_bench_pro = 44.3 }
@@ -3958,7 +4202,7 @@ name = "Qwen3.5 397B A17B"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.385, output_per_mtok = 2.45 }
+pricing = { input_per_mtok = 0.55, output_per_mtok = 3.50, cache_read_per_mtok = 0.225 }
 availability = "serverless"
 architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 76.4 }
@@ -3977,7 +4221,7 @@ name = "Qwen3 Coder Next FP8 (Together, dedicated)"
 provider = "together"
 context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.18, output_per_mtok = 0.18 }
+pricing = { input_per_mtok = 0.50, output_per_mtok = 1.20 }
 availability = "dedicated"
 tier = "frontier"
 open_weight = true
@@ -3986,9 +4230,9 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepse
 [models."deepseek/deepseek-v3.2"]
 name = "DeepSeek V3.2"
 provider = "openrouter"
-context_window = 131072
+context_window = 163840
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.2288, output_per_mtok = 0.3432 }
+pricing = { input_per_mtok = 0.269, output_per_mtok = 0.40, cache_read_per_mtok = 0.1345 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
@@ -3998,7 +4242,7 @@ name = "Kimi K2.6"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.68, output_per_mtok = 3.41, cache_read_per_mtok = 0.34 }
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.16 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
@@ -4009,7 +4253,7 @@ name = "Kimi K2.7 Code"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.19 }
+pricing = { input_per_mtok = 0.7062, output_per_mtok = 3.21, cache_read_per_mtok = 0.18 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
@@ -4023,7 +4267,7 @@ equivalence_group = "openai-gpt-oss-120b"
 served_variant = "openrouter"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
 # Explicit metadata keeps this row self-described across fragment boundaries.
 # GPT-OSS 120B is Apache-2.0 (open weight) and text-only; it is Burin's cheap
@@ -4038,6 +4282,10 @@ strengths = ["cheap", "coding", "tool_use", "reasoning"]
 # --- source: 60-models/25-openrouter-frontier-agents.toml ---
 # Current OpenRouter-hosted coding/agent models that are not direct provider
 # defaults. Pricing snapshots are from OpenRouter's live `/api/v1/models`.
+#
+# Every OpenRouter, Together and DeepInfra row in this file was re-read
+# against the provider's live models endpoint on 2026-09-20; rates and
+# context windows below are that read.
 
 [models."qwen/qwen3.7-plus"]
 name = "Qwen3.7 Plus"
@@ -4055,7 +4303,9 @@ name = "Qwen3.7 Max"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.25, output_per_mtok = 3.75, cache_read_per_mtok = 0.25, cache_write_per_mtok = 1.5625 }
+# The cache-write rate moved with the headline rates and was left behind at
+# $1.5625; OpenRouter bills $1.84375 per MTok (read 2026-09-20).
+pricing = { input_per_mtok = 1.475, output_per_mtok = 4.425, cache_read_per_mtok = 0.295, cache_write_per_mtok = 1.84375 }
 
 # OpenRouter describes Max as the flagship Qwen3.7 route; keep it out of the
 # value/mid tier so price-sensitive selectors do not confuse it with Flash.
@@ -4066,10 +4316,15 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 [models."kwaipilot/kat-coder-pro-v2"]
 name = "KAT-Coder-Pro V2"
 provider = "openrouter"
-context_window = 256000
+context_window = 262144
 capabilities = ["tools", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
-
+# OpenRouter's model index no longer lists V2 (read 2026-09-26). It lists
+# `kwaipilot/kat-coder-pro-v2.5` instead, served by one host that answered three
+# one-tool requests with HTTP 400 the same day, so there is no working
+# successor to point at.
+deprecated = true
+deprecation_note = "Removed from OpenRouter's model index by 2026-09-26. Its listed successor, kwaipilot/kat-coder-pro-v2.5, rejected tool-calling requests when probed that day, so no replacement route is recorded."
 tier = "mid"
 open_weight = false
 strengths = ["agentic", "long_context", "tool_use", "reasoning", "speed"]
@@ -4077,7 +4332,7 @@ complementary_with = ["qwen", "deepseek", "kimi", "minimax", "zai-glm"]
 [models."stepfun/step-3.7-flash"]
 name = "Step 3.7 Flash"
 provider = "openrouter"
-context_window = 256000
+context_window = 262144
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.15, cache_read_per_mtok = 0.04 }
 # Inline metadata matches the step-3.7-flash equivalence group and keeps this
@@ -4090,6 +4345,10 @@ strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
 # Current Together serverless frontier/agent routes observed through
 # `GET /v1/models`. Keep rows here when Harn supports the provider but the
 # model is absent from direct-provider catalogs.
+#
+# Every OpenRouter, Together and DeepInfra row in this file was re-read
+# against the provider's live models endpoint on 2026-09-20; rates and
+# context windows below are that read.
 
 [models."moonshotai/Kimi-K3"]
 name = "Kimi K3 (Together)"
@@ -4121,7 +4380,7 @@ context_window = 1010000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 # Together's model library and authenticated inventory agreed on this rate on
 # 2026-08-26. The inventory reports the exact 1,010,000-token window.
-pricing = { input_per_mtok = 2.50, output_per_mtok = 6.25, cache_read_per_mtok = 0.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
@@ -4132,28 +4391,16 @@ name = "Qwen3.7 Max (Together)"
 provider = "together"
 context_window = 1000000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.25, output_per_mtok = 3.75, cache_read_per_mtok = 0.125 }
+pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.50 }
 
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
-[models."deepseek-ai/DeepSeek-V4-Pro"]
-name = "DeepSeek V4 Pro (Together)"
-provider = "together"
-context_window = 512000
-equivalence_group = "frontier-agent-coding"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.20 }
-deprecated = true
-deprecation_note = "Together retires this preview route on 2026-08-27. Use deepseek-ai/DeepSeek-V4-Pro-0813."
-sunset_date = "2026-08-27"
-superseded_by = "deepseek-ai/DeepSeek-V4-Pro-0813"
-
-tier = "frontier"
-open_weight = true
-strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+# Removed 2026-09-20: deepseek-ai/DeepSeek-V4-Pro, the undated preview route.
+# Together retired it on its announced 2026-08-27 sunset date and it is absent
+# from GET /v1/models (observed 2026-09-20). Every alias already pointed at the
+# dated -0813 row below.
 
 # Together's public model page lists this dated successor on serverless and
 # dedicated infrastructure with a 1.05M-token context window. Pricing and
@@ -4166,7 +4413,7 @@ logical_model = "deepseek-v4-pro-0813"
 equivalence_group = "deepseek-v4-pro-0813"
 served_variant = "together"
 api_dialect = "openai_chat"
-context_window = 1050000
+context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.13 }
 architecture = { parameter_count_b = 1600.0, active_parameter_count_b = 49.0, moe = true, license = "MIT", source_url = "https://www.together.ai/models/deepseek-v4-pro-0813", last_verified = "2026-08-26" }
@@ -4272,7 +4519,7 @@ name = "Llama 3.3 70B Instruct Turbo (Together)"
 provider = "together"
 context_window = 131072
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.88, output_per_mtok = 0.88 }
+pricing = { input_per_mtok = 1.04, output_per_mtok = 1.04 }
 logical_model = "llama-3.3-70b-instruct"
 equivalence_group = "llama-3.3-70b-instruct"
 served_variant = "together"
@@ -4286,8 +4533,10 @@ strengths = ["tool_use", "cheap"]
 # https://api.cerebras.ai/public/v1/models; dedicated-endpoint families are
 # intentionally not added as one-click routes unless Cerebras exposes a stable
 # public wire ID for the standard endpoint. The headline binder-substrate
-# candidate is gpt-oss-120b at very high token throughput; GLM 4.7 is the
-# public preview coding/agentic route.
+# candidate is gpt-oss-120b at very high token throughput; qwen-3.8-27b is the
+# vision-capable coding/agentic route.
+#
+# Verified 2026-09-20: public discovery returns exactly these two models.
 #
 # Catalog keys are bare wire IDs (Cerebras's /v1/chat/completions wants
 # the raw model name). Users routing via `model: "cerebras/<name>"` get
@@ -4309,47 +4558,34 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use"]
 
-# Serverless Cerebras route. Its public model record is the source for the
-# context window, capabilities, and per-token rates below.
-[models."gemma-4-31b"]
-name = "Gemma 4 31B (Cerebras)"
+# Serverless Cerebras route, and the only other one Cerebras serves.
+# Verified 2026-09-20 against https://api.cerebras.ai/public/v1/models, whose
+# record carries pricing ($0.99 / $1.49 per MTok), capabilities (vision,
+# tools, parallel tool calls, structured outputs, reasoning) and
+# `deprecated: false`. The public record's `max_context_length` is the
+# free-tier 65,536; https://inference-docs.cerebras.ai/models/overview
+# publishes 128k on the paid tier, which is the tier this catalog rate-limits
+# for, so the row records 131072 like its gpt-oss-120b sibling.
+[models."qwen-3.8-27b"]
+name = "Qwen 3.8 27B (Cerebras)"
 provider = "cerebras"
 context_window = 131072
-logical_model = "gemma-4-31b"
-equivalence_group = "gemma-4-31b"
+logical_model = "qwen3.8-27b"
+equivalence_group = "qwen3.8-27b"
 served_variant = "cerebras-wafer-scale"
 api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "streaming", "thinking", "structured_output"]
 pricing = { input_per_mtok = 0.99, output_per_mtok = 1.49 }
+architecture = { parameter_count_b = 27.0, moe = false, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.8-27B", last_verified = "2026-09-20" }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "vision", "tool_use", "reasoning"]
-[models."zai-glm-4.7"]
-name = "Z.ai GLM 4.7 (Cerebras)"
-provider = "cerebras"
-context_window = 131072
-capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 2.25, output_per_mtok = 2.75 }
-deprecated = true
-deprecation_note = "Absent from Cerebras public model discovery on 2026-08-22. Use glm-5.3 on Z.AI or OpenRouter."
-superseded_by = "glm-5.3"
-tier = "frontier"
-open_weight = true
-strengths = ["speed", "coding", "agentic", "tool_use", "reasoning"]
-[models."llama-3.3-70b"]
-name = "Llama 3.3 70B (Cerebras, dedicated legacy)"
-provider = "cerebras"
-context_window = 131072
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
-availability = "dedicated"
-deprecated = true
-deprecation_note = "Cerebras no longer returns this model from public discovery; use a provisioned dedicated endpoint alias if your organization still serves these weights."
-# Inline metadata keeps this deprecated legacy route independent of
-# fragment-order defaults.
-tier = "mid"
-open_weight = true
-strengths = ["tool_use"]
+
+# Removed 2026-09-20: gemma-4-31b, zai-glm-4.7 and llama-3.3-70b. Cerebras
+# public discovery (https://api.cerebras.ai/public/v1/models) and
+# https://inference-docs.cerebras.ai/models/overview both list exactly two
+# serverless models, gpt-oss-120b and qwen-3.8-27b. Nothing in 20-routing,
+# 30-aliases or 62-ladders referenced the three removed rows.
 
 # --- source: 60-models/40-minimax.toml ---
 # MiniMax family ─ pricing pages:
@@ -4357,6 +4593,10 @@ strengths = ["tool_use"]
 #   https://platform.minimax.io/docs/guides/model-invocation
 #   https://platform.minimax.io/docs/api-reference/text-openai-api
 #   llm-stats.com/models/minimax-m2-7.
+#
+# Every OpenRouter, Together and DeepInfra row in this file was re-read
+# against the provider's live models endpoint on 2026-09-20; rates and
+# context windows below are that read.
 # M3 pricing below is the billed <=512K-input rate verified 2026-07-02:
 # $0.30/M input, $1.20/M output, $0.06/M cache-read. MiniMax labels this
 # a *permanent* 50% discount off the $0.60/$2.40 list rate on the
@@ -4434,23 +4674,14 @@ pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok =
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "agentic"]
-[models."MiniMax-Text-01"]
-name = "MiniMax Text 01"
-provider = "minimax"
-context_window = 1000000
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.10 }
-deprecated = true
-deprecation_note = "Dead on api.minimax.io 2026-06-28 (harn#3645 §4): HTTP 500 'token plan not support model (2061)' and absent from GET /v1/models. Use MiniMax-M2 (or M2.5/M2.7)."
-superseded_by = "MiniMax-M2"
+# Removed 2026-09-20: MiniMax-Text-01, dead on api.minimax.io since 2026-06-28
+# and still absent from GET /v1/models (observed 2026-09-20). No alias, tier
+# default or ladder referenced it.
 
 # MiniMax mirror on OpenRouter — same family, OpenRouter adds margin and
 # bundles native-tools passthrough so the openai_chat_completions wire
 # format Just Works for callers without a direct MiniMax key. The M3 row
 # matches the billed first-party rate (see the M3 comment above).
-tier = "mid"
-open_weight = true
-strengths = ["long_context"]
 [models."minimax/minimax-m3"]
 name = "MiniMax M3 (via OpenRouter)"
 provider = "openrouter"
@@ -4465,16 +4696,16 @@ name = "MiniMax M2.7 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.25, output_per_mtok = 1.00 }
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 [models."minimax/minimax-m2.5"]
 name = "MiniMax M2.5 (via OpenRouter)"
 provider = "openrouter"
-context_window = 205000
+context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.90 }
+pricing = { input_per_mtok = 0.27, output_per_mtok = 1.08, cache_read_per_mtok = 0.027 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "long_context"]
@@ -4483,7 +4714,7 @@ name = "MiniMax M2 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.33, output_per_mtok = 1.20 }
+pricing = { input_per_mtok = 0.255, output_per_mtok = 1.02 }
 # Inline metadata keeps this row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true
@@ -4491,9 +4722,10 @@ strengths = ["coding", "agentic", "tool_use", "reasoning"]
 
 # --- source: 60-models/50-zai.toml ---
 # Z.AI GLM family, served via the OpenAI-compatible `/api/paas/v4` endpoint
-# (the `.../v1` base 404s). The live `/models` listing on 2026-08-22 reports:
+# (the `.../v1` base 404s). The live `/models` listing on 2026-09-20 reports:
 # glm-4.5, glm-4.5-air, glm-4.6, glm-4.7, glm-5, glm-5-turbo, glm-5.1,
-# glm-5.2, glm-5.3, and glm-5.3-flash. The GLM-4.x line stays catalogued as the
+# glm-5.2, glm-5.3, glm-5.3-flash, and glm-5.3-flashx. Nothing was retired
+# since the 2026-08-22 read; FlashX is the one addition. The GLM-4.x line stays catalogued as the
 # cheap independent-bucket coding/judge routes (glm-4.6 is confirmed serving
 # 200 at paas/v4). Pricing per docs.z.ai.
 #
@@ -4638,19 +4870,19 @@ strengths = ["cheap", "coding", "agentic", "tool_use", "reasoning", "long_contex
 [models."z-ai/glm-5"]
 name = "GLM 5 (via OpenRouter)"
 provider = "openrouter"
-context_window = 202752
+context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
+pricing = { input_per_mtok = 0.60, output_per_mtok = 1.92, cache_read_per_mtok = 0.12 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic"]
 [models."z-ai/glm-5.1"]
 name = "GLM 5.1 (via OpenRouter)"
 provider = "openrouter"
-context_window = 202752
+context_window = 204800
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.98, output_per_mtok = 3.08 }
+pricing = { input_per_mtok = 0.966, output_per_mtok = 3.036, cache_read_per_mtok = 0.1794 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -4660,42 +4892,85 @@ provider = "openrouter"
 context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.966, output_per_mtok = 3.036, cache_read_per_mtok = 0.1932 }
+pricing = { input_per_mtok = 0.6496, output_per_mtok = 2.0416, cache_read_per_mtok = 0.12064 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 [models."z-ai/glm-5.3"]
 name = "GLM 5.3 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
+context_window = 1310720
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+pricing = { input_per_mtok = 0.91, output_per_mtok = 2.86, cache_read_per_mtok = 0.169 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 [models."z-ai/glm-5.3-flash"]
 name = "GLM 5.3 Flash (via OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
+context_window = 1310720
 logical_model = "glm-5.3-flash"
 equivalence_group = "glm-5.3-flash"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-# OpenRouter's public model endpoint reports the direct launch rates and the
-# same 1M-token serving window. Preserve Z.AI's list price as the durable base
-# so cost accounting restores it automatically when the promotion expires.
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.03, promotions = [{ id = "zai-glm-5.3-flash-launch", starts_on = "2026-08-26", ends_at = "2026-09-09T16:00:00Z", source_url = "https://docs.z.ai/guides/overview/pricing", input_per_mtok = 0.075, output_per_mtok = 0.25, cache_read_per_mtok = 0.015 }] }
+# Re-read 2026-09-20. Z.AI's launch promotion expired on 2026-09-09, but
+# OpenRouter did not return to Z.AI's list rate: it now bills $0.09 / $0.30
+# with a $0.018 cache read, below the $0.15 / $0.50 list the direct row still
+# carries (docs.z.ai rate card, re-checked the same day). That is OpenRouter's
+# own rate for this route, not a Z.AI promotion, so it is the base here and the
+# expired promotion is gone.
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.30, cache_read_per_mtok = 0.018 }
 architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-08-28" }
 tier = "frontier"
 open_weight = true
 strengths = ["cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision", "speed"]
+
+# GLM-5.3-FlashX, added 2026-09-20. Z.AI's higher-throughput FlashX build of
+# GLM-5.3-Flash, released 2026-09-18 (`created` on the OpenRouter record). Same
+# 320B/18B hybrid sparse-plus-linear-attention architecture and the same
+# 1M-token window as Flash; the trade is roughly 200 output tok/s for a higher
+# rate. Rates agree across two sources read on 2026-09-20: the docs.z.ai rate
+# card ($0.37 in / $0.075 cached / $1.25 out per MTok) and
+# https://openrouter.ai/api/v1/models ($0.37 / $1.25).
+#
+# Capabilities are inherited from the glm-5.3-flash rows, which is a family
+# default, not a verified FlashX fact: Z.AI publishes no separate FlashX model
+# card, so its vision, video and caching support are unverified here.
+[models."glm-5.3-flashx"]
+name = "GLM 5.3 FlashX"
+provider = "zai"
+context_window = 1048576
+logical_model = "glm-5.3-flashx"
+equivalence_group = "glm-5.3-flashx"
+served_variant = "zai-direct"
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.37, output_per_mtok = 1.25, cache_read_per_mtok = 0.075 }
+architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://docs.z.ai/guides/overview/pricing", last_verified = "2026-09-20" }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
+
+[models."z-ai/glm-5.3-flashx"]
+name = "GLM 5.3 FlashX (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+logical_model = "glm-5.3-flashx"
+equivalence_group = "glm-5.3-flashx"
+served_variant = "openrouter"
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.37, output_per_mtok = 1.25, cache_read_per_mtok = 0.075 }
+architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-09-20" }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
+
 [models."z-ai/glm-5v-turbo"]
 name = "GLM 5V Turbo (via OpenRouter)"
 provider = "openrouter"
 context_window = 202752
 capabilities = ["tools", "streaming", "vision"]
-pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
+pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00, cache_read_per_mtok = 0.24 }
 # Inline metadata keeps this row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true
@@ -4707,6 +4982,10 @@ strengths = ["vision", "coding", "agentic"]
 # cap. DeepSeek's 2026-04-24 V4 notice says to keep the base_url and use
 # `deepseek-v4-flash` or `deepseek-v4-pro`; `deepseek-chat` and
 # `deepseek-reasoner` become inaccessible after 2026-07-24 15:59 UTC.
+#
+# Every OpenRouter, Together and DeepInfra row in this file was re-read
+# against the provider's live models endpoint on 2026-09-20; rates and
+# context windows below are that read.
 [models."deepseek-v4-flash"]
 name = "DeepSeek V4 Flash"
 provider = "deepseek"
@@ -4731,7 +5010,7 @@ benchmarks = { aa_intelligence_index = 68.0 }
 # rate card and a binary 1M-token context window for these routes.
 #
 # Prices below are the live OpenRouter rate card read from
-# `GET /api/v1/models` on 2026-08-15. The undated `deepseek/deepseek-v4-*`
+# `GET /api/v1/models` on 2026-09-20. The undated `deepseek/deepseek-v4-*`
 # aliases previously carried DeepSeek's DIRECT rate card, which understated
 # OpenRouter V4 Pro by ~2.7x ($0.435 recorded vs $1.168 charged per MTok in).
 # The dated snapshot rows further below are the ones that actually match the
@@ -4741,7 +5020,7 @@ name = "DeepSeek V4 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.06426, output_per_mtok = 0.12852, cache_read_per_mtok = 0.012852 }
+pricing = { input_per_mtok = 0.089866, output_per_mtok = 0.179732, cache_read_per_mtok = 0.0179732 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
@@ -4750,7 +5029,7 @@ name = "DeepSeek V4 Pro (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 1.168, output_per_mtok = 2.336, cache_read_per_mtok = 0.09855 }
+pricing = { input_per_mtok = 0.9483, output_per_mtok = 1.8966, cache_read_per_mtok = 0.079025 }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
@@ -4759,35 +5038,69 @@ strengths = ["reasoning", "coding", "tool_use", "long_context"]
 # ships; these pin a fixed build, which is what eval baselines need so a
 # silent upstream swap cannot move a measured number. Both verified serving on
 # 2026-08-15 and both returned a single clean native `message.tool_calls`.
-# On OpenRouter these snapshots price at the direct DeepSeek rate card, so
-# `deepseek-v4-pro-0813` is currently ~2.7x CHEAPER than the undated
-# `deepseek/deepseek-v4-pro` alias for identical weights.
+# On OpenRouter these snapshots price on DeepSeek's own peak/off-peak clock
+# rather than the undated alias's flat card, so which of the two is cheaper for
+# identical weights depends on the hour the call starts.
 [models."deepseek/deepseek-v4-pro-0813"]
 name = "DeepSeek V4 Pro 0813 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.003625 }
+# OpenRouter bills this route on a UTC clock. The base card below is the
+# weekday PEAK rate (01:00-04:00 and 06:00-10:00 UTC); every other hour, and
+# all weekend, is exactly half of it. The `overrides` array on the OpenRouter
+# model record is the source, read 2026-09-20. The off-peak hours are declared
+# as `schedules` rather than folded into the base rate, so a call settles at
+# the rate the provider charged for the hour it started in.
+#
+# DeepSeek excludes Chinese public holidays from its peak hours. That calendar
+# is not modeled: a holiday that falls on a weekday still settles at the peak
+# rate, which over-records rather than under-records.
+pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.044, schedules = [
+  { id = "deepseek-offpeak-weekday-0000", days = ["mon", "tue", "wed", "thu", "fri"], start = "00:00", end = "01:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://openrouter.ai/api/v1/models", review_after = "2026-12-20", note = "Chinese public holidays are excluded from DeepSeek's peak hours and are not modeled; a holiday weekday settles at the peak rate." },
+  { id = "deepseek-offpeak-weekday-0400", days = ["mon", "tue", "wed", "thu", "fri"], start = "04:00", end = "06:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://openrouter.ai/api/v1/models", review_after = "2026-12-20", note = "Chinese public holidays are excluded from DeepSeek's peak hours and are not modeled; a holiday weekday settles at the peak rate." },
+  { id = "deepseek-offpeak-weekday-1000", days = ["mon", "tue", "wed", "thu", "fri"], start = "10:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://openrouter.ai/api/v1/models", review_after = "2026-12-20", note = "Chinese public holidays are excluded from DeepSeek's peak hours and are not modeled; a holiday weekday settles at the peak rate." },
+  { id = "deepseek-offpeak-weekend", days = ["sat", "sun"], start = "00:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://openrouter.ai/api/v1/models", review_after = "2026-12-20" },
+] }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
 [models."deepseek/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1048576
+context_window = 1310720
 capabilities = ["tools", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.028 }
+pricing = { input_per_mtok = 0.04, output_per_mtok = 0.16, cache_read_per_mtok = 0.016 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+
+# OpenRouter's list rate for DeepSeek V4.1 Flash, https://openrouter.ai/api/v1/models
+# (read 2026-09-26). A one-tool `tool_choice: auto` probe the same day returned
+# a native tool call.
+[models."deepseek/deepseek-v4.1-flash"]
+name = "DeepSeek V4.1 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.42, cache_read_per_mtok = 0.0042 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
 
 # Open-router Qwen3.5 9B (kept for the `small` tier alias).
 [models."Qwen/Qwen3.5-9B"]
 name = "Qwen3.5 9B"
 provider = "openrouter"
 wire_model = "qwen/qwen3.5-9b"
-context_window = 131072
+context_window = 262144
 capabilities = ["tools", "streaming"]
+# The row carried no rate card at all. OpenRouter publishes $0.10 in /
+# $0.15 out per MTok and no cache rate for it
+# (https://openrouter.ai/api/v1/models, read 2026-09-20).
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.15 }
 # Inline metadata keeps this row independent of fragment-order defaults.
 tier = "small"
 open_weight = true
@@ -4815,7 +5128,9 @@ name = "Qwen3.6 Plus (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.325, output_per_mtok = 1.95 }
+# Cache write added 2026-09-20: OpenRouter publishes $0.40625 per MTok and no
+# cache-read rate for this route.
+pricing = { input_per_mtok = 0.325, output_per_mtok = 1.95, cache_write_per_mtok = 0.40625 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -4828,7 +5143,7 @@ context_window = 262144
 logical_model = "qwen3.6-35b-a3b"
 equivalence_group = "qwen3.6-35b-a3b"
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.14, output_per_mtok = 1.00 }
+pricing = { input_per_mtok = 0.15, output_per_mtok = 1.00, cache_read_per_mtok = 0.05 }
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "coding", "tool_use", "reasoning"]
@@ -5064,7 +5379,7 @@ name = "Gemma 4 31B (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.12, output_per_mtok = 0.37 }
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.34, cache_read_per_mtok = 0.05 }
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "reasoning", "coding", "cheap"]
@@ -5073,7 +5388,7 @@ name = "Gemma 4 26B MoE (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.06, output_per_mtok = 0.33 }
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.30, cache_read_per_mtok = 0.05 }
 tier = "mid"
 open_weight = true
 strengths = ["vision", "cheap", "speed"]
@@ -5098,7 +5413,7 @@ name = "Gemma 4 31B (Together)"
 provider = "together"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 0.50 }
+pricing = { input_per_mtok = 0.39, output_per_mtok = 0.97 }
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "reasoning", "coding"]
@@ -5155,7 +5470,9 @@ served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/gpt-oss-120b"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+# Standard serverless tier, https://docs.fireworks.ai/serverless/pricing
+# (read 2026-09-26).
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-19" }
 tier = "mid"
 open_weight = true
@@ -5171,10 +5488,123 @@ served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/glm-5p2"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+# Cached input is $0.14 on the standard tier; $0.26 is GLM 5.3's cached rate.
+# https://docs.fireworks.ai/serverless/pricing (read 2026-09-26).
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.14 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+# Fireworks routes added 2026-09-26 from the serverless model index
+# (https://api.fireworks.ai/inference/v1/models) and the standard-tier rates at
+# https://docs.fireworks.ai/serverless/pricing. Each returned a native
+# `tool_calls` entry on a one-tool `tool_choice: auto` probe the same day.
+# Fireworks also sells Priority, Fast, and US-only tiers of these at higher
+# rates; the rate cards below are the standard tier only.
+[models."accounts/fireworks/models/glm-5p3"]
+name = "GLM 5.3 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "glm-5.3"
+equivalence_group = "glm-5.3"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/glm-5p3"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."accounts/fireworks/models/glm-5p3-flash"]
+name = "GLM 5.3 Flash (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "glm-5.3-flash"
+equivalence_group = "glm-5.3-flash"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/glm-5p3-flash"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.03 }
+tier = "frontier"
+open_weight = true
+strengths = ["cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision", "speed"]
+
+[models."accounts/fireworks/models/deepseek-v4p1-flash"]
+name = "DeepSeek V4.1 Flash (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/deepseek-v4p1-flash"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.006 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
+
+[models."accounts/fireworks/models/deepseek-v4-flash-0731"]
+name = "DeepSeek V4 Flash 0731 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "deepseek-v4-flash-0731"
+equivalence_group = "deepseek-v4-flash"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/deepseek-v4-flash-0731"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.22, output_per_mtok = 0.66, cache_read_per_mtok = 0.007 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+
+[models."accounts/fireworks/models/deepseek-v4-pro-0813"]
+name = "DeepSeek V4 Pro 0813 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "deepseek-v4-pro-0813"
+equivalence_group = "deepseek-v4-pro-0813"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/deepseek-v4-pro-0813"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.044 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
+
+[models."accounts/fireworks/models/kimi-k3"]
+name = "Kimi K3 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/kimi-k3"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+
+[models."accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"]
+name = "Nemotron 3.5 Lightning 30B A3B (Fireworks)"
+provider = "fireworks"
+context_window = 262144
+logical_model = "nemotron-3.5-lightning-30b-a3b"
+equivalence_group = "nemotron-3.5-lightning-30b-a3b"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.20, cache_read_per_mtok = 0.01 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "reasoning", "tool_use", "long_context"]
 
 [models."accounts/fireworks/models/deepseek-v4-pro"]
 name = "DeepSeek V4 Pro (Fireworks)"
@@ -5203,7 +5633,9 @@ served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/kimi-k2p6"
 api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 2.50, cache_read_per_mtok = 0.15 }
+# Standard serverless tier, https://docs.fireworks.ai/serverless/pricing
+# (read 2026-09-26).
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.16 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
@@ -5238,26 +5670,11 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
 
-[models."qwen/qwen3.6-27b"]
-name = "Qwen3.6 27B (Groq)"
-provider = "groq"
-context_window = 131072
-logical_model = "qwen3.6-27b"
-equivalence_group = "qwen3.6-27b"
-served_variant = "groq-lpu"
-wire_model = "qwen/qwen3.6-27b"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking"]
-# ~500 output tok/s on Groq LPUs; rate verified 2026-07-02 on
-# groq.com/pricing. Dense 27B, hybrid Gated DeltaNet+Attention; SWE-bench
-# Verified 77.2 per the Qwen3.6-27B model card.
-pricing = { input_per_mtok = 0.60, output_per_mtok = 3.00, cache_read_per_mtok = 0.30 }
-architecture = { parameter_count_b = 27.0, moe = false, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.6-27B", last_verified = "2026-07-02" }
-benchmarks = { swe_bench_verified = 77.2 }
-tier = "mid"
-open_weight = true
-strengths = ["speed", "coding", "tool_use", "agentic"]
-
+# Removed 2026-09-20: qwen/qwen3.6-27b. Groq's live /models index
+# (https://api.groq.com/openai/v1/models, observed 2026-09-20) no longer
+# lists it; qwen/qwen3.8-27b below is Groq's only Qwen route. The
+# `groq-qwen3.6` alias, the `groq` QC default, and both escalation ladder
+# rungs were re-pointed at qwen/qwen3.8-27b.
 [models."qwen/qwen3.8-27b"]
 name = "Qwen3.8 27B (Groq)"
 provider = "groq"
@@ -5271,7 +5688,9 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 # Groq's public preview model page supplied the route, context limit, feature
 # list, and rates. Native tools, strict JSON Schema, reasoning effort, and the
 # tools-plus-JSON rejection were verified against the live route on 2026-08-26.
-pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00 }
+# The cache-read rate was missing; Groq's live /models record publishes
+# $0.40 per MTok for it (https://api.groq.com/openai/v1/models, 2026-09-20).
+pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.40 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "tool_use", "reasoning", "vision"]
@@ -5497,11 +5916,11 @@ logical_model = "deepseek-v4-pro"
 equivalence_group = "deepseek-v4-pro"
 served_variant = "deepinfra"
 api_dialect = "openai_chat"
-context_window = 163840
+context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 # DeepInfra catalog rate verified 2026-07-02 (fp4 serving): $1.30/$2.60.
 # The prior 0.50/1.50 figures matched no published DeepInfra tariff.
-pricing = { input_per_mtok = 1.30, output_per_mtok = 2.60 }
+pricing = { input_per_mtok = 1.30, output_per_mtok = 2.60, cache_read_per_mtok = 0.10 }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
@@ -5518,9 +5937,9 @@ logical_model = "deepseek-v4-flash"
 equivalence_group = "deepseek-v4-flash"
 served_variant = "deepinfra"
 api_dialect = "openai_chat"
-context_window = 1000000
+context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.18 }
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.18, cache_read_per_mtok = 0.018 }
 architecture = { parameter_count_b = 284.0, active_parameter_count_b = 13.0, moe = true, quantization = "fp4", license = "MIT", source_url = "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash", last_verified = "2026-07-02" }
 # tier matches the deepseek-v4-flash equivalence group (mid across hosts).
 tier = "mid"
@@ -5538,7 +5957,7 @@ served_variant = "deepinfra"
 api_dialect = "openai_chat"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.30 }
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.95 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "long_context", "cheap", "vision"]
@@ -5554,7 +5973,7 @@ served_variant = "deepinfra"
 api_dialect = "openai_chat"
 context_window = 163840
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.50, output_per_mtok = 1.50 }
+pricing = { input_per_mtok = 0.26, output_per_mtok = 0.38, cache_read_per_mtok = 0.13 }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
@@ -5576,7 +5995,7 @@ capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 # live chat-completion `estimated_cost` (175 in + 36 out billed $0.00027425,
 # exact). OpenRouter's z-ai/glm-5.2 listing agrees ($0.95/$3.00/$0.18). The prior
 # 1.40/4.40/0.26 was the together/baseten placeholder, not DeepInfra's rate.
-pricing = { input_per_mtok = 0.95, output_per_mtok = 3.00, cache_read_per_mtok = 0.18 }
+pricing = { input_per_mtok = 0.75, output_per_mtok = 2.40, cache_read_per_mtok = 0.14 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -5590,9 +6009,9 @@ logical_model = "qwen3.7-max"
 equivalence_group = "qwen3.7-max"
 served_variant = "deepinfra"
 api_dialect = "openai_chat"
-context_window = 1000000
+context_window = 256000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.25, output_per_mtok = 3.75, cache_read_per_mtok = 0.125 }
+pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.50 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "long_context", "cheap"]
@@ -5610,7 +6029,10 @@ context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
 # DeepInfra undercuts the first-party $0.95/$4.00 list; verified
 # 2026-07-02 (int4-native weights).
-pricing = { input_per_mtok = 0.74, output_per_mtok = 3.50 }
+pricing = { input_per_mtok = 0.68, output_per_mtok = 3.40, cache_read_per_mtok = 0.136 }
+deprecated = true
+deprecation_note = "Absent from DeepInfra's model index (https://api.deepinfra.com/v1/openai/models, read 2026-09-26), which now carries Kimi K3 and Kimi K2.6 only."
+superseded_by = "deepinfra/moonshotai/Kimi-K3"
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
@@ -5626,32 +6048,17 @@ served_variant = "deepinfra"
 api_dialect = "openai_chat"
 context_window = 131072
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+pricing = { input_per_mtok = 0.037, output_per_mtok = 0.17 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
 # ---------- SambaNova Cloud — fast RDU inference ------------------------------
-[models."sambanova/DeepSeek-V4-Pro"]
-name = "DeepSeek V4 Pro (SambaNova)"
-provider = "sambanova"
-wire_model = "DeepSeek-V4-Pro"
-logical_model = "deepseek-v4-pro"
-equivalence_group = "deepseek-v4-pro"
-served_variant = "sambanova-rdu"
-api_dialect = "openai_chat"
-context_window = 163840
-capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 1.20 }
-deprecated = true
-deprecation_note = "Not returned from SambaNova /v1/models on 2026-06-20. Use sambanova/DeepSeek-V3.2 or another DeepSeek V4 Pro host."
-superseded_by = "sambanova/DeepSeek-V3.2"
-tier = "frontier"
-open_weight = true
-strengths = ["speed", "reasoning", "coding", "tool_use", "long_context"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
-
+# Removed 2026-09-20: sambanova/DeepSeek-V4-Pro and sambanova/Llama-4-Maverick.
+# Both had carried `deprecated = true` since 2026-06-20 and both are still
+# absent from https://api.sambanova.ai/v1/models (observed 2026-09-20). Nothing
+# in 20-routing, 30-aliases, 40-defaults or 62-ladders referenced either row.
 [models."sambanova/DeepSeek-V3.2"]
 name = "DeepSeek V3.2 (SambaNova)"
 provider = "sambanova"
@@ -5731,25 +6138,6 @@ tier = "frontier"
 open_weight = true
 strengths = ["speed", "vision", "reasoning", "coding", "cheap"]
 
-[models."sambanova/Llama-4-Maverick"]
-name = "Llama 4 Maverick (SambaNova)"
-provider = "sambanova"
-wire_model = "Llama-4-Maverick-17B-128E-Instruct"
-logical_model = "llama-4-maverick"
-equivalence_group = "llama-4-maverick"
-served_variant = "sambanova-rdu"
-api_dialect = "openai_chat"
-context_window = 131072
-capabilities = ["tools", "vision", "streaming"]
-pricing = { input_per_mtok = 0.63, output_per_mtok = 1.80 }
-deprecated = true
-deprecation_note = "Not returned from SambaNova /v1/models on 2026-06-20. Use sambanova/Meta-Llama-3.3-70B-Instruct for the live Llama route."
-superseded_by = "sambanova/Meta-Llama-3.3-70B-Instruct"
-tier = "mid"
-open_weight = true
-strengths = ["speed", "vision", "tool_use", "long_context", "cheap"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
-
 [models."sambanova/Meta-Llama-3.3-70B-Instruct"]
 name = "Llama 3.3 70B Instruct (SambaNova)"
 provider = "sambanova"
@@ -5801,16 +6189,21 @@ open_weight = true
 strengths = ["agentic", "reasoning", "coding", "tool_use", "long_context", "speed"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 
-[models."nvidia/nemotron-3-nano-30b-a3b"]
-name = "Nemotron 3 Nano 30B A3B (NVIDIA NIM)"
+# Renamed 2026-09-20: NIM now serves this as `nvidia/nemotron-nano-3-30b-a3b`.
+# The old `nvidia/nemotron-3-nano-30b-a3b` id is absent from
+# https://integrate.api.nvidia.com/v1/models (observed 2026-09-20); the
+# `nvidia-nemotron-nano` alias follows the new id. The sibling
+# `nemotron-3-nano-omni-30b-a3b-reasoning` route kept its old-style id.
+[models."nvidia/nemotron-nano-3-30b-a3b"]
+name = "Nemotron Nano 3 30B A3B (NVIDIA NIM)"
 provider = "nvidia"
 context_window = 262144
-logical_model = "nemotron-3-nano-30b-a3b"
-equivalence_group = "nemotron-3-nano-30b-a3b"
+logical_model = "nemotron-nano-3-30b-a3b"
+equivalence_group = "nemotron-nano-3-30b-a3b"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
-architecture = { parameter_count_b = 30.0, active_parameter_count_b = 3.0, moe = true, source_url = "https://build.nvidia.com/nvidia/nemotron-3-nano-30b-a3b/modelcard", last_verified = "2026-06-20" }
+architecture = { parameter_count_b = 30.0, active_parameter_count_b = 3.0, moe = true, source_url = "https://build.nvidia.com/nvidia/nemotron-nano-3-30b-a3b/modelcard", last_verified = "2026-09-20" }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context"]
@@ -5844,10 +6237,27 @@ open_weight = true
 strengths = ["vision", "reasoning", "tool_use", "summarization", "long_context"]
 
 # 2026-08-15 reachability sweep: NIM retired both undated DeepSeek V4 builds
-# (HTTP 410, end of life 2026-08-07). It still serves the dated Flash snapshot,
-# so that row survives below. There is no DeepSeek V4 Pro build on NIM any more,
-# so the Pro row is gone rather than left pointing at a 410 — a catalog entry
-# that cannot be called is worse than an absent one, because it is selectable.
+# (HTTP 410, end of life 2026-08-07). There is no DeepSeek V4 Pro build on NIM
+# any more, so the Pro row is gone rather than left pointing at a 410 — a
+# catalog entry that cannot be called is worse than an absent one, because it is
+# selectable. By 2026-09-26 NIM had dropped the dated V4 Flash snapshot too and
+# serves DeepSeek V4.1 Flash in its place.
+
+[models."nvidia/deepseek-v4.1-flash"]
+name = "DeepSeek V4.1 Flash (NVIDIA NIM)"
+provider = "nvidia"
+wire_model = "deepseek-ai/deepseek-v4.1-flash"
+context_window = 1048576
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+served_variant = "nvidia-nim"
+api_dialect = "openai_chat"
+# A one-tool `tool_choice: auto` probe on 2026-09-26 returned a native tool call
+# and reported cached prompt tokens.
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
 [models."nvidia/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (NVIDIA NIM)"
@@ -5859,26 +6269,19 @@ equivalence_group = "deepseek-v4-flash"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+deprecated = true
+deprecation_note = "Absent from NIM's model index (https://integrate.api.nvidia.com/v1/models, read 2026-09-26). NIM serves DeepSeek V4.1 Flash instead."
+superseded_by = "nvidia/deepseek-v4.1-flash"
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
 
-[models."nvidia/minimax-m3"]
-name = "MiniMax M3 (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "minimaxai/minimax-m3"
-context_window = 1048576
-logical_model = "minimax-m3"
-equivalence_group = "minimax-m3"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.12 }
-tier = "frontier"
-open_weight = false
-strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
-
+# Removed 2026-09-20: nvidia/minimax-m3. NIM no longer serves any MiniMax
+# build — `minimaxai/minimax-m3` is absent from
+# https://integrate.api.nvidia.com/v1/models (observed 2026-09-20). The
+# `nvidia-minimax-m3` alias went with it; MiniMax M3 stays reachable through
+# the direct MiniMax, SambaNova, Fireworks and OpenRouter rows.
 [models."nvidia/kimi-k2.6"]
 name = "Kimi K2.6 (NVIDIA NIM)"
 provider = "nvidia"
@@ -5895,21 +6298,10 @@ open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
-[models."nvidia/openai/gpt-oss-120b"]
-name = "GPT-OSS 120B (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "openai/gpt-oss-120b"
-context_window = 131072
-logical_model = "openai-gpt-oss-120b"
-equivalence_group = "openai-gpt-oss-120b"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking"]
-architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
-tier = "mid"
-open_weight = true
-strengths = ["cheap", "tool_use", "reasoning"]
-
+# Removed 2026-09-20: nvidia/openai/gpt-oss-120b. NIM's index now carries only
+# the 20B sibling below (https://integrate.api.nvidia.com/v1/models, observed
+# 2026-09-20). GPT-OSS 120B remains catalogued on Cerebras, Groq, Fireworks,
+# DeepInfra, SambaNova and Baseten.
 [models."nvidia/openai/gpt-oss-20b"]
 name = "GPT-OSS 20B (NVIDIA NIM)"
 provider = "nvidia"
@@ -5925,19 +6317,61 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
-[models."nvidia/step-3.7-flash"]
-name = "Step 3.7 Flash (NVIDIA NIM)"
+# Removed 2026-09-20: nvidia/step-3.7-flash. `stepfun-ai/step-3.7-flash` is
+# absent from https://integrate.api.nvidia.com/v1/models (observed 2026-09-20).
+# The stepfun/step-3.7-flash route on OpenRouter is unaffected.
+
+# Added 2026-09-20, observed on https://integrate.api.nvidia.com/v1/models the
+# same day: NIM now serves Kimi K3 and both Z.ai GLM 5.3 builds. Per-token
+# rates are not published on the NIM index, so these rows carry no `pricing`,
+# like their Nemotron siblings above. Context windows and capabilities are
+# inherited from the first-party rows (Moonshot's /v1/models reports 1,048,576
+# for kimi-k3; the GLM rows follow the direct Z.AI rows): NIM publishes neither
+# per-route limits nor a tool matrix, so treat both as unverified for NIM.
+[models."nvidia/kimi-k3"]
+name = "Kimi K3 (NVIDIA NIM)"
 provider = "nvidia"
-wire_model = "stepfun-ai/step-3.7-flash"
-context_window = 131072
-logical_model = "step-3.7-flash"
-equivalence_group = "step-3.7-flash"
+wire_model = "moonshotai/kimi-k3"
+context_window = 1048576
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
-capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+capabilities = ["tools", "vision", "streaming", "thinking"]
 tier = "frontier"
-open_weight = false
+open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."nvidia/glm-5.3"]
+name = "GLM 5.3 (NVIDIA NIM)"
+provider = "nvidia"
+wire_model = "z-ai/glm-5.3"
+context_window = 1048576
+logical_model = "glm-5.3"
+equivalence_group = "glm-5.3"
+served_variant = "nvidia-nim"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking"]
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."nvidia/glm-5.3-flash"]
+name = "GLM 5.3 Flash (NVIDIA NIM)"
+provider = "nvidia"
+wire_model = "z-ai/glm-5.3-flash"
+context_window = 1048576
+logical_model = "glm-5.3-flash"
+equivalence_group = "glm-5.3-flash"
+served_variant = "nvidia-nim"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking"]
+# `frontier` matches the direct Z.AI and OpenRouter rows: tier is a property of
+# the logical model, and every row in an equivalence group must agree.
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "cheap", "coding", "tool_use", "reasoning"]
 
 # --- source: 60-models/97-baseten.toml ---
 # Baseten Model APIs. Live /v1/models re-verified 2026-08-15 with
@@ -6237,6 +6671,10 @@ strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
 # or live catalog rows observed with provider API keys. Keep route-specific ids
 # collision-free and use `wire_model` for the exact provider payload where
 # needed.
+#
+# Every OpenRouter, Together and DeepInfra row in this file was re-read
+# against the provider's live models endpoint on 2026-09-20; rates and
+# context windows below are that read.
 
 # Inception Labs Mercury routes.
 [models."mercury-2"]
@@ -6259,12 +6697,19 @@ open_weight = false
 strengths = ["speed", "coding", "tool_use"]
 
 # xAI direct and OpenRouter mirrors.
+#
+# Verified 2026-09-20 against https://api.x.ai/v1/models, whose per-model
+# record carries context_length, per-token rates, and the long-context band.
+# Both 4.5 and 4.6 bill double above a 200,000-token prompt
+# (`long_context_threshold` / `*_long_context` in the record), which the rows
+# below now record as `input_token_bands`; that band was missing from the 4.5
+# row and understated the cost of its long prompts by 2x.
 [models."grok-4.5"]
 name = "Grok 4.5"
 provider = "xai"
 context_window = 500000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.30, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-07-09" }
 tier = "frontier"
 open_weight = false
@@ -6275,7 +6720,62 @@ name = "Grok 4.5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 500000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.30, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+
+# Grok 4.6, xAI's release of 2026-08-06 (`created` on the /v1/models record).
+# Same context window, headline rates and long-context band as 4.5; the cache
+# read rate is higher ($0.50 versus $0.30 per MTok). Reasoning effort accepts
+# low, medium, high and xhigh and defaults to high, unchanged from 4.5, so the
+# xai capability rules need no edit.
+# Grok 4.7 (xAI index created 2026-09-01; OpenRouter listed 2026-09-21).
+# xAI's /v1/language-models prices it identically to Grok 4.6 ($2 / $6, cached
+# $0.50); OpenRouter lists it at $1.60 / $4.80, cached $0.40. Same 500K
+# context and image input as Grok 4.6. The `grok-*` capability rules cover it.
+[models."grok-4.7"]
+name = "Grok 4.7"
+provider = "xai"
+context_window = 500000
+released = "2026-09-01"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
+rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-09-22" }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."x-ai/grok-4.7"]
+name = "Grok 4.7 (via OpenRouter)"
+provider = "openrouter"
+context_window = 500000
+released = "2026-09-21"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.60, output_per_mtok = 4.80, cache_read_per_mtok = 0.40 }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."grok-4.6"]
+name = "Grok 4.6"
+provider = "xai"
+context_window = 500000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
+rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-09-20" }
+superseded_by = "grok-4.7"
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."x-ai/grok-4.6"]
+name = "Grok 4.6 (via OpenRouter)"
+provider = "openrouter"
+context_window = 500000
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
+superseded_by = "x-ai/grok-4.7"
 tier = "frontier"
 open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
@@ -6294,6 +6794,93 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_conte
 # slugs for each tier; Pro is a serving behavior, not an independent model
 # lineage, so both routes share the same equivalence group. Base rates remain
 # durable while the API's current discount is represented as a promotion.
+# GPT-6 on OpenRouter (listed 2026-09-04 for Astra, 2026-09-22 for Sol and
+# Luna) at OpenAI's list prices. The `-pro` slugs are OpenRouter's packaging
+# of the pro reasoning mode on the same model, so they share the logical model.
+[models."openai/gpt-6-astra"]
+name = "GPT-6 Astra (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-astra"
+equivalence_group = "gpt-6-astra"
+served_variant = "openrouter"
+released = "2026-09-04"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-astra-pro"]
+name = "GPT-6 Astra Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-astra"
+equivalence_group = "gpt-6-astra"
+served_variant = "openrouter_pro"
+released = "2026-09-04"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-sol"]
+name = "GPT-6 Sol (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-sol"
+equivalence_group = "gpt-6-sol"
+served_variant = "openrouter"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-sol-pro"]
+name = "GPT-6 Sol Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-sol"
+equivalence_group = "gpt-6-sol"
+served_variant = "openrouter_pro"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-luna"]
+name = "GPT-6 Luna (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-luna"
+equivalence_group = "gpt-6-luna"
+served_variant = "openrouter"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125 }
+tier = "small"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6-luna-pro"]
+name = "GPT-6 Luna Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6-luna"
+equivalence_group = "gpt-6-luna"
+served_variant = "openrouter_pro"
+released = "2026-09-22"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125 }
+tier = "small"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
 [models."openai/gpt-5.6-sol"]
 name = "GPT-5.6 Sol (via OpenRouter)"
 provider = "openrouter"
@@ -6303,6 +6890,7 @@ equivalence_group = "gpt-5.6-sol"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }] }
+superseded_by = "openai/gpt-6-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6316,6 +6904,7 @@ equivalence_group = "gpt-5.6-sol"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-pro-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }] }
+superseded_by = "openai/gpt-6-sol-pro"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6329,6 +6918,7 @@ equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+superseded_by = "openai/gpt-6-sol"
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6342,6 +6932,7 @@ equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+superseded_by = "openai/gpt-6-sol-pro"
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6355,6 +6946,7 @@ equivalence_group = "gpt-5.6-luna"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25 }
+superseded_by = "openai/gpt-6-luna"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6368,6 +6960,7 @@ equivalence_group = "gpt-5.6-luna"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25 }
+superseded_by = "openai/gpt-6-luna-pro"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6395,6 +6988,7 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_conte
 [models."openai/gpt-5.4-mini"]
 name = "GPT-5.4 Mini (via OpenRouter)"
 provider = "openrouter"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
@@ -6405,6 +6999,7 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "cheap"]
 [models."openai/gpt-5.4-nano"]
 name = "GPT-5.4 Nano (via OpenRouter)"
 provider = "openrouter"
+operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
@@ -6412,16 +7007,10 @@ tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
-[models."anthropic/claude-opus-4.8-fast"]
-name = "Claude Opus 4.8 Fast (via OpenRouter)"
-provider = "openrouter"
-context_window = 1000000
-capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
-tier = "frontier"
-open_weight = false
-strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
-
+# Removed 2026-09-20: anthropic/claude-opus-4.8-fast. OpenRouter's index lists
+# anthropic/claude-opus-4.8 and its `:batch` variant but no `-fast` slug
+# (observed 2026-09-20). Fast mode stays catalogued as a `serving_tiers` entry
+# on the direct Anthropic Opus rows, which is where it is actually sold.
 [models."openrouter/free"]
 name = "OpenRouter Free Router"
 provider = "openrouter"
@@ -6480,7 +7069,7 @@ name = "Qwen3.6 Max Preview (via OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.04, output_per_mtok = 6.24, cache_write_per_mtok = 1.30 }
+pricing = { input_per_mtok = 1.027, output_per_mtok = 6.162, cache_write_per_mtok = 1.28375 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6519,22 +7108,11 @@ tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "agentic"]
 
-[models."moonshot/kimi-k2.5"]
-name = "Kimi K2.5 (Moonshot direct)"
-provider = "moonshot"
-wire_model = "kimi-k2.5"
-logical_model = "moonshot-kimi-k2.5"
-equivalence_group = "moonshot-kimi-k2.5"
-served_variant = "moonshot-direct"
-api_dialect = "openai_chat"
-context_window = 262144
-capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-deprecated = true
-deprecation_note = "Moonshot /v1/models still lists kimi-k2.5, but Kimi K2.6 and K2.7 Code are the active agent routes."
-superseded_by = "moonshot/kimi-k2.6"
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+# Removed 2026-09-20: moonshot/kimi-k2.5. Its deprecation note recorded that
+# Moonshot still listed the route; https://api.moonshot.ai/v1/models no longer
+# does (observed 2026-09-20 — the index is exactly kimi-k2.6, kimi-k2.7-code,
+# kimi-k2.7-code-highspeed and kimi-k3). Its `temperature = 1.0` entry in
+# 40-defaults/generation.toml went with it.
 
 # Together serverless rows observed from GET /v1/models.
 [models."moonshotai/Kimi-K2.6"]
@@ -6636,7 +7214,7 @@ served_variant = "deepinfra"
 api_dialect = "openai_chat"
 context_window = 262144
 capabilities = ["tools", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.10 }
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.55 }
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "tool_use", "long_context"]
@@ -6666,7 +7244,7 @@ served_variant = "deepinfra-turbo"
 api_dialect = "openai_chat"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.40, output_per_mtok = 2.00 }
+pricing = { input_per_mtok = 0.38, output_per_mtok = 1.70, cache_read_per_mtok = 0.07 }
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -6681,7 +7259,7 @@ served_variant = "deepinfra"
 api_dialect = "openai_chat"
 context_window = 202752
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.43, output_per_mtok = 1.74, cache_read_per_mtok = 0.08 }
+pricing = { input_per_mtok = 0.50, output_per_mtok = 2.00, cache_read_per_mtok = 0.10 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "cheap", "long_context"]
@@ -6705,16 +7283,171 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 # (HTTP 404 `Model not found, inaccessible, and/or not deployed`); its model
 # listing carries only `glm-5p2`, which stays catalogued above.
 
+# --- source: 60-models/99-typesafe-jev.toml ---
+# ── TypeSafe Jev — decision-only routes ──────────────────────────────────────
+#
+# Jev is a System One decision model: it answers typed questions over a shared
+# state with probabilities, and it cannot hold a conversation. Every row here
+# declares `operations = ["decision"]` and nothing else, so the checker and the
+# runtime refuse it as a chat driver before any request is made. A chat call to
+# `typesafe-ai/jev` on the Vercel gateway is refused upstream too, with
+# `ModelTypeMismatchError` on `/v1/chat/completions` (observed 2026-09-20).
+#
+# How the operation is dialled per route lives in the capability rules, not
+# here: see `capability_sources/10-decisions/00-decision-contracts.toml`. These
+# three endpoints are not interchangeable chat endpoints, so the protocol is a
+# typed capability rather than something inferred from the provider id.
+#
+# Shared facts, all from TypeSafe's own documentation:
+#   * `jev-latest` is an alias currently pointing at `jev-1.13.0`, alongside a
+#     `jev-preview` alias. https://docs.typesafe.ai/models
+#   * Pricing is input-only, $0.042 per million tokens; output tokens are free.
+#     https://typesafe.ai/blog/introducing-system-one-models-and-jev
+#   * The documented request ceiling is 64k tokens overall, of which at most
+#     32k may be `state` plus the longest question. `context_window` records the
+#     32k state ceiling, because that is the bound a caller has to plan against
+#     and the one OpenRouter publishes for the route.
+#     https://docs.typesafe.ai/models, https://openrouter.ai/typesafe
+#   * Text and structured JSON only; no image, audio, or video input.
+#     https://docs.typesafe.ai/concepts/system-one
+#
+# `logical_model` and `equivalence_group` are shared so that cross-route
+# equivalence is visible to a human reading the catalog. They are NOT a
+# licence to fail a predicate over from one route to another: a decision model
+# answers with a probability distribution, and silently re-asking a different
+# serving route would change the distribution without changing the receipt.
+#
+# Availability: Vercel and OpenRouter answered all three question kinds through
+# the canonical evaluator on 2026-09-22. Direct TypeSafe access remains
+# unverified and its rows retain availability = "unknown".
+
+# Direct TypeSafe, pinned snapshot. Documented, not reached: access is
+# waitlisted. https://docs.typesafe.ai/api
+[models."typesafe/jev-1.13.0"]
+name = "Jev 1.13.0 (TypeSafe)"
+blurb = "Answers yes/no, multiple-choice, and rating questions about a shared state in well under a second, and cannot write prose."
+provider = "typesafe"
+wire_model = "jev-1.13.0"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "direct"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+availability = "unknown"
+row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Direct TypeSafe, moving selector. `jev-latest` resolves to `jev-1.13.0`
+# today. https://docs.typesafe.ai/models
+[models."typesafe/jev-latest"]
+name = "Jev Latest (TypeSafe)"
+blurb = "Follows TypeSafe's current flagship decision model instead of pinning a version."
+provider = "typesafe"
+wire_model = "jev-latest"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "direct"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+availability = "unknown"
+row_kind = "selector"
+current_snapshot = "typesafe/jev-1.13.0"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Vercel AI Gateway. On 2026-09-20 the gateway
+# model list carried `typesafe-ai/jev` with `"type": "evaluation"`, and
+# `/v1/chat/completions` refused it with `ModelTypeMismatchError`.
+# https://vercel.com/docs/ai-gateway/modalities/evaluation
+[models."vercel/typesafe-ai/jev"]
+name = "Jev (Vercel AI Gateway)"
+blurb = "Jev's decision answers over the gateway key Harn already holds, with no separate TypeSafe account."
+provider = "vercel_ai_gateway"
+wire_model = "typesafe-ai/jev"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "vercel-ai-gateway"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+row_kind = "selector"
+current_snapshot = "typesafe/jev-1.13.0"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# OpenRouter /api/alpha/decisions answered boolean, choice and score on
+# 2026-09-22. The provider returned typesafe/jev-1.13-20260917, input356/output61,
+# and $0.000014952. Receipt identity must use the actual response model, not
+# assume the requested route alias is an immutable revision.
+# https://openrouter.ai/typesafe
+[models."openrouter/typesafe/jev-1.13"]
+name = "Jev 1.13 (OpenRouter)"
+blurb = "Jev's decision answers through OpenRouter's alpha decisions endpoint."
+provider = "openrouter"
+wire_model = "typesafe/jev-1.13"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "openrouter"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# OpenRouter moving selector. On 2026-09-26 a boolean question sent to
+# `~typesafe/jev-latest` on /api/alpha/decisions came back from
+# typesafe/jev-1.13-20260917. https://openrouter.ai/api/v1/models/~typesafe/jev-latest/endpoints
+[models."openrouter/typesafe/jev-latest"]
+name = "Jev Latest (OpenRouter)"
+blurb = "Follows TypeSafe's current Jev release through OpenRouter's alpha decisions endpoint."
+provider = "openrouter"
+wire_model = "~typesafe/jev-latest"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "openrouter"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+row_kind = "selector"
+current_snapshot = "openrouter/typesafe/jev-1.13"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
 # --- source: 60-models/99-vercel-ai-gateway.toml ---
 # Curated Vercel AI Gateway routes used by Harn's provider probes and Burin's
 # model picker. Catalog keys are provider-qualified to avoid colliding with
 # direct and OpenRouter routes; `wire_model` is the creator/model slug Vercel
-# expects. Prices and context windows come from the Gateway model catalog and
-# were verified on 2026-07-17.
+# expects. Prices and context windows come from the Gateway model catalog
+# (GET https://ai-gateway.vercel.sh/v1/models) and were re-verified against a
+# live read on 2026-09-20: the GPT-5.4 Nano and Claude Haiku 4.5 rows matched
+# exactly, and the Gemini Flash Lite route graduated out of preview.
+#
+# The gateway served 376 models on that read. This file stays a deliberate
+# curation of the routes Harn probes, not a mirror of the gateway index.
 
 [models."vercel/openai/gpt-5.4-nano"]
 name = "GPT-5.4 Nano (Vercel AI Gateway)"
 provider = "vercel_ai_gateway"
+operations = ["text_generation", "decision"]
 wire_model = "openai/gpt-5.4-nano"
 logical_model = "openai-gpt-5.4-nano"
 equivalence_group = "openai-gpt-5.4-nano"
@@ -6742,17 +7475,21 @@ tier = "mid"
 open_weight = false
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "vision"]
 
-[models."vercel/google/gemini-3.1-flash-lite-preview"]
-name = "Gemini 3.1 Flash Lite Preview (Vercel AI Gateway)"
+# Graduated out of preview: the gateway now serves this as
+# `google/gemini-3.1-flash-lite` and no longer lists the `-preview` slug. Rates
+# and context are unchanged; the record also publishes a cache-read rate the
+# preview row did not carry.
+[models."vercel/google/gemini-3.1-flash-lite"]
+name = "Gemini 3.1 Flash Lite (Vercel AI Gateway)"
 provider = "vercel_ai_gateway"
-wire_model = "google/gemini-3.1-flash-lite-preview"
-logical_model = "google-gemini-3.1-flash-lite-preview"
-equivalence_group = "google-gemini-3.1-flash-lite-preview"
+wire_model = "google/gemini-3.1-flash-lite"
+logical_model = "google-gemini-3.1-flash-lite"
+equivalence_group = "google-gemini-3.1-flash-lite"
 served_variant = "vercel-ai-gateway"
 api_dialect = "openai_chat"
 context_window = 1000000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50 }
+pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.03 }
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "tool_use", "reasoning", "vision"]
@@ -6782,7 +7519,7 @@ steps = [
 [model_ladders.agent_frontier]
 label = "agent frontier route with transport fallback"
 steps = [
-  { model = "claude-opus-5", provider = "anthropic", label = "frontier" },
+  { model = "claude-opus-5-5", provider = "anthropic", label = "frontier" },
   { model = "claude-sonnet-5", provider = "anthropic", label = "fallback" },
 ]
 
@@ -6802,7 +7539,7 @@ steps = [
   { provider = "gemini", model = "gemini-3.5-flash-lite" },
   { provider = "openrouter", model = "google/gemini-2.5-flash" },
   { provider = "deepseek", model = "deepseek-v4-flash" },
-  { provider = "groq", model = "qwen/qwen3.6-27b" },
+  { provider = "groq", model = "qwen/qwen3.8-27b" },
   { provider = "cerebras", model = "gpt-oss-120b" },
   { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8" },
   { provider = "ollama", model = "llama3.2" },
@@ -6831,8 +7568,33 @@ steps = [
   { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
   { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
   { provider = "deepseek", model = "deepseek-v4-flash", label = "deepseek" },
-  { provider = "groq", model = "qwen/qwen3.6-27b", label = "groq" },
+  { provider = "groq", model = "qwen/qwen3.8-27b", label = "groq" },
   { provider = "cerebras", model = "gpt-oss-120b", label = "cerebras" },
   { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8", label = "together" },
   { provider = "mock", model = "mock-judge-default", label = "mock" },
+]
+
+# The approval reviewer's cheap tier. `std/agent/approval_review` resolves an
+# approval reviewer here when the caller's policy names no reviewer model and
+# the reviewer runs inside a loop. It keeps the loop's PROVIDER, whose
+# credential the run already holds, and trades the loop's model for this row:
+# a decision is one short structured verdict, and a frontier loop otherwise
+# pays frontier prices for every one of them.
+#
+# Like `judge`, this is a per-family table, not a fallback chain. A provider
+# with no row keeps the loop's own route; the reviewer never moves to a
+# provider the run holds no credential for.
+[model_ladders.approval_reviewer]
+label = "cheap approval reviewer model per provider family"
+steps = [
+  { provider = "anthropic", model = "claude-haiku-4-5-20251001", label = "anthropic" },
+  { provider = "openai", model = "gpt-4o-mini", label = "openai" },
+  { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
+  { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
+  { provider = "fireworks", model = "accounts/fireworks/models/gpt-oss-120b", label = "fireworks" },
+  { provider = "deepseek", model = "deepseek-v4-flash", label = "deepseek" },
+  { provider = "groq", model = "qwen/qwen3.8-27b", label = "groq" },
+  { provider = "cerebras", model = "gpt-oss-120b", label = "cerebras" },
+  { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8", label = "together" },
+  { provider = "mock", model = "mock-approval-reviewer", label = "mock" },
 ]

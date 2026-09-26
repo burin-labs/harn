@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 # shellcheck source=scripts/lib/package_verify_bootstrap.sh
 source "$ROOT_DIR/scripts/lib/package_verify_bootstrap.sh"
+# shellcheck source=scripts/lib/sha256.sh
+source "$ROOT_DIR/scripts/lib/sha256.sh"
 
 VERIFY_CLI=0
 while [[ $# -gt 0 ]]; do
@@ -114,16 +116,7 @@ package_version() {
 }
 
 sha256_file() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-    return
-  fi
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}'
-    return
-  fi
-  echo "error: sha256sum or shasum is required for packaged-crate receipts" >&2
-  return 1
+  sha256_file_hex "$1"
 }
 
 resolved_dependency_version() {
@@ -189,37 +182,6 @@ select_dependency_minimums() {
     fi
   done
   printf '%s\n' "${selected[@]}"
-}
-
-# `check_packaged_workspace`'s resolver-latest phase deliberately carries no
-# lock: it resolves against whatever is newest on crates.io today, so it
-# always builds the exact set a fresh downstream `cargo add` would get right
-# now. That is also its whole exposure — any transitive dependency that
-# ships a compile-broken release fails this workspace with no relation to a
-# Harn code change, and `--locked`/`--frozen` cannot help (there is no lock
-# for that synthetic workspace to honor). Each row below is one such known
-# release excluded by pinning it to the last good version, so the next
-# external break is one row to add and the fix is one row to delete once the
-# crate publishes a working release. `crate` / `precise_version` feed
-# `cargo update --manifest-path ... -p <crate> --precise <precise_version>`;
-# `reason` and `date_added` are for humans grepping this table, not read by
-# any script.
-#
-# crate    precise_version  reason                                                date_added
-external_publish_pins_table='
-tinyvec  1.12.0           tinyvec 1.13.0 (published 2026-09-02) does not compile: `vec!` is unreachable in tinyvec.rs, an upstream defect  2026-09-03
-'
-
-apply_external_publish_pins() {
-  local manifest="$1"
-  local line crate precise_version rest
-  while IFS= read -r line; do
-    [[ -n "${line// /}" ]] || continue
-    read -r crate precise_version rest <<<"$line"
-    [[ -n "$crate" ]] || continue
-    echo "=== Pinning $crate to $precise_version in the resolver-latest workspace (external_publish_pins_table: $rest) ==="
-    cargo update --manifest-path "$manifest" -p "$crate" --precise "$precise_version"
-  done <<<"$external_publish_pins_table"
 }
 
 stdlib_version="$(package_version harn-stdlib)"

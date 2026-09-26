@@ -56,6 +56,11 @@ pub enum ProviderWireProtocol {
     AzureOpenAiChatCompletions,
     OllamaNative,
     OpenAiChatCompletions,
+    /// TypeSafe System One decisions, `POST /v1/systemone`. Not a chat
+    /// transport at all: it answers typed questions over a shared state and
+    /// streams nothing, so it carries no SSE usage frames for the
+    /// usage-accounting audit to cover.
+    TypesafeSystemOne,
 }
 
 impl ProviderWireProtocol {
@@ -68,6 +73,7 @@ impl ProviderWireProtocol {
             Self::AzureOpenAiChatCompletions => "azure_openai_chat_completions",
             Self::OllamaNative => "ollama_native",
             Self::OpenAiChatCompletions => "openai_chat_completions",
+            Self::TypesafeSystemOne => "typesafe_system_one",
         }
     }
 
@@ -86,6 +92,7 @@ pub fn provider_wire_protocol(id: &str, provider: &ProviderDef) -> ProviderWireP
         "vertex" => ProviderWireProtocol::VertexGenerateContent,
         "bedrock" => ProviderWireProtocol::BedrockConverse,
         "azure_openai" => ProviderWireProtocol::AzureOpenAiChatCompletions,
+        "typesafe" => ProviderWireProtocol::TypesafeSystemOne,
         "ollama" if provider.chat_endpoint.starts_with("/api/") => {
             ProviderWireProtocol::OllamaNative
         }

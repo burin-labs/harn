@@ -8,7 +8,8 @@ fn main(harness: Harness) {
   let all_valid = true
   for entry in entries {
     const s = entry.credential_status
-    if s != "ok" && s != "missing" && s != "not_required" && s != "deferred" {
+    if s != "ok" && s != "missing" && s != "not_required" && s != "deferred"
+      && s != "needs_user_approval" {
       all_valid = false
     }
   }

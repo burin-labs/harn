@@ -1,0 +1,15 @@
+import { redact } from "std/oauth/redaction"
+
+pipeline test(harness: Harness) {
+  const source =
+    "const token = process.env.GITHUB_TOKEN ?? \"\";\nlet apiKey = readKey(path);\nlet accessToken = readKey2(path);\nconst password = credentials.current;"
+  assert_eq(redact(source), source)
+  assert_eq(len(secret_scan(source)), 0)
+  const literal = "const token = \"abcDEF123456\";\nretry with token=abc123"
+  const scrubbed = redact(literal)
+  assert(contains(scrubbed, "<redacted:sensitive_assignment:"))
+  assert(!contains(scrubbed, "abcDEF123456"))
+  assert(!contains(scrubbed, "abc123"))
+  assert(len(secret_scan(literal)) > 0)
+  harness.stdio.log("token_redaction source expressions ok")
+}

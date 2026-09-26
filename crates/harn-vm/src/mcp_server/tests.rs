@@ -628,6 +628,7 @@ async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
             description: None,
             arguments: Some(vec![McpPromptArgDef {
                 name: "language".to_string(),
+                title: Some("Language".to_string()),
                 description: None,
                 required: false,
                 completion: Some(McpCompletionSource {
@@ -656,6 +657,22 @@ async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
         .await
         .expect("response");
     assert!(discover["result"]["capabilities"]["completions"].is_object());
+
+    let prompts = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                4,
+                "prompts/list",
+                stable_metadata_params(serde_json::json!({})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        prompts["result"]["prompts"][0]["arguments"][0]["title"],
+        "Language"
+    );
 
     let prompt = server
         .handle_json_rpc(

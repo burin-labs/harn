@@ -1956,7 +1956,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to a `harness.llm.call` option dict, preserving caller-supplied `thinking` or `effort` |
 | `harness.llm.rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool/dict | Set (`{rpm: N, tpm: N, input_tpm: N, output_tpm: N, concurrency: N}`), query legacy RPM, query rich details with `{details: true}`, or clear (`{rpm: 0}`) per-provider rate limits |
 | `harness.llm.providers()` | — | list | List all configured provider names |
-| `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"` |
+| `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"`, `"needs_user_approval"` (a stored credential that only a system dialog this process does not show could release) |
 | `harness.llm.available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
 | `harness.llm.known_models()` | — | list | List configured model alias names |
 | `harness.llm.qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
@@ -1966,7 +1966,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.catalog_refresh(options?)` | `options?: dict\|nil` | dict | Refresh the process-wide provider/model catalog overlay from the configured hosted catalog, validating the remote document before installing it |
 | `harness.llm.config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
 | `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | decimal | Estimate USD cost (exact `decimal`) from catalog pricing, falling back to embedded pricing |
-| `harness.llm.session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `harness.llm.session_cost()` | — | dict | Session usage: logical `call_count`, physical `provider_call_count`, tokens, nullable measured `total_cost` and `cost_usd`, `known_cost_usd`, `unpriced_calls`, `usage_unknown_calls`; `budget_charged_usd` separately reports the admission charge, including uncertain reservations |
 | `harness.llm.budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls pre-flight and throw if projected cost would exceed it |
 | `harness.llm.budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |
@@ -2631,10 +2631,17 @@ tool registry dict.
 | `composition_typescript_declarations(manifest)` | manifest: dict | string | Emit declaration-only TypeScript bindings from the manifest |
 | `composition_crystallization_trace(report, options?)` | report: dict, options?: dict | dict | Convert a composition report into crystallization trace input |
 | `harness.tools.mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
-| `harness.tools.mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
-| `harness.tools.mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?, completions?}`); `completions` maps URI variable names to static suggestion lists or completion closures |
-| `harness.tools.mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`); prompt arguments may include `suggestions`/`completions` or a `complete` closure for MCP `completion/complete` |
+| `harness.tools.mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, title?, description?, mime_type?, meta?}`) |
+| `harness.tools.mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, title?, description?, mime_type?, completions?}`); `completions` maps declared URI variables to static suggestion lists or completion closures |
+| `harness.tools.mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, title?, description?, arguments?}`); prompt arguments accept `name`, optional `title`, `description`, `required`, and `suggestions`/`completions` or a `complete` closure |
 | `harness.tools.mcp_report_progress(progress, opts?)` | progress: number, opts?: dict | bool | Emit a `notifications/progress` update for the in-flight MCP tool call (no-op when the client did not opt in via `_meta.progressToken`). `opts`: `{total?: number, message?: string, token?: string\|number}` |
+
+Resource, template, and prompt declarations reject unknown fields, mistyped string fields,
+duplicate resource URIs or prompt names, and malformed arguments or completion
+sources. Resource URIs must parse as absolute URIs; resource templates support
+simple `{name}` variables and may only offer completions for declared variables.
+`harn serve mcp` refuses the whole candidate if a declaration fails, even when
+the script catches the individual error. Static resource `text` must be a string.
 
 The `composition_*` builtins back [Governed Code Mode](./code-mode.md). The
 executor is read-only: it rejects imports, writes, process execution, network

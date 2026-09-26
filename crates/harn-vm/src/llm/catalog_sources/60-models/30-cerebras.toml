@@ -2,8 +2,10 @@
 # https://api.cerebras.ai/public/v1/models; dedicated-endpoint families are
 # intentionally not added as one-click routes unless Cerebras exposes a stable
 # public wire ID for the standard endpoint. The headline binder-substrate
-# candidate is gpt-oss-120b at very high token throughput; GLM 4.7 is the
-# public preview coding/agentic route.
+# candidate is gpt-oss-120b at very high token throughput; qwen-3.8-27b is the
+# vision-capable coding/agentic route.
+#
+# Verified 2026-09-20: public discovery returns exactly these two models.
 #
 # Catalog keys are bare wire IDs (Cerebras's /v1/chat/completions wants
 # the raw model name). Users routing via `model: "cerebras/<name>"` get
@@ -25,44 +27,31 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use"]
 
-# Serverless Cerebras route. Its public model record is the source for the
-# context window, capabilities, and per-token rates below.
-[models."gemma-4-31b"]
-name = "Gemma 4 31B (Cerebras)"
+# Serverless Cerebras route, and the only other one Cerebras serves.
+# Verified 2026-09-20 against https://api.cerebras.ai/public/v1/models, whose
+# record carries pricing ($0.99 / $1.49 per MTok), capabilities (vision,
+# tools, parallel tool calls, structured outputs, reasoning) and
+# `deprecated: false`. The public record's `max_context_length` is the
+# free-tier 65,536; https://inference-docs.cerebras.ai/models/overview
+# publishes 128k on the paid tier, which is the tier this catalog rate-limits
+# for, so the row records 131072 like its gpt-oss-120b sibling.
+[models."qwen-3.8-27b"]
+name = "Qwen 3.8 27B (Cerebras)"
 provider = "cerebras"
 context_window = 131072
-logical_model = "gemma-4-31b"
-equivalence_group = "gemma-4-31b"
+logical_model = "qwen3.8-27b"
+equivalence_group = "qwen3.8-27b"
 served_variant = "cerebras-wafer-scale"
 api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "streaming", "thinking", "structured_output"]
 pricing = { input_per_mtok = 0.99, output_per_mtok = 1.49 }
+architecture = { parameter_count_b = 27.0, moe = false, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.8-27B", last_verified = "2026-09-20" }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "vision", "tool_use", "reasoning"]
-[models."zai-glm-4.7"]
-name = "Z.ai GLM 4.7 (Cerebras)"
-provider = "cerebras"
-context_window = 131072
-capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 2.25, output_per_mtok = 2.75 }
-deprecated = true
-deprecation_note = "Absent from Cerebras public model discovery on 2026-08-22. Use glm-5.3 on Z.AI or OpenRouter."
-superseded_by = "glm-5.3"
-tier = "frontier"
-open_weight = true
-strengths = ["speed", "coding", "agentic", "tool_use", "reasoning"]
-[models."llama-3.3-70b"]
-name = "Llama 3.3 70B (Cerebras, dedicated legacy)"
-provider = "cerebras"
-context_window = 131072
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
-availability = "dedicated"
-deprecated = true
-deprecation_note = "Cerebras no longer returns this model from public discovery; use a provisioned dedicated endpoint alias if your organization still serves these weights."
-# Inline metadata keeps this deprecated legacy route independent of
-# fragment-order defaults.
-tier = "mid"
-open_weight = true
-strengths = ["tool_use"]
+
+# Removed 2026-09-20: gemma-4-31b, zai-glm-4.7 and llama-3.3-70b. Cerebras
+# public discovery (https://api.cerebras.ai/public/v1/models) and
+# https://inference-docs.cerebras.ai/models/overview both list exactly two
+# serverless models, gpt-oss-120b and qwen-3.8-27b. Nothing in 20-routing,
+# 30-aliases or 62-ladders referenced the three removed rows.

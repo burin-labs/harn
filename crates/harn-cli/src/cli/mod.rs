@@ -38,6 +38,7 @@ mod guard;
 mod host;
 mod init;
 mod lint_fmt;
+mod llm;
 mod local;
 mod mcp;
 mod merge_captain;
@@ -64,6 +65,7 @@ pub(crate) mod run_source;
 pub(crate) mod runs;
 mod sandbox;
 mod scan;
+mod self_toolchain;
 mod serve;
 mod session;
 mod skill;
@@ -115,15 +117,15 @@ pub(crate) use dap::DapArgs;
 pub(crate) use demo::DemoArgs;
 pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
-pub(crate) use doctor::DoctorArgs;
+pub(crate) use doctor::{DoctorArgs, DoctorCommand};
 pub(crate) use dump::{
     ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs,
     DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs,
     DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
-    EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs, EvalPromptMode,
-    EvalPromptOutput, EvalScopeTriageArgs, EvalSkillGateArgs, EvalToolCallsArgs,
+    EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
+    EvalPromptMode, EvalPromptOutput, EvalScopeTriageArgs, EvalSkillGateArgs, EvalToolCallsArgs,
     EvalToolCallsCommand, EvalToolCallsRegressionArgs,
 };
 pub(crate) use explain::{CatalogFormat, ExplainArgs};
@@ -144,6 +146,7 @@ pub(crate) use host::{
 };
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
+pub(crate) use llm::{LlmArgs, LlmCommand, LlmEvaluateArgs};
 pub(crate) use local::{
     LocalArgs, LocalCommand, LocalLaunchArgs, LocalListArgs, LocalProfileArgs, LocalStatusArgs,
     LocalStopArgs, LocalSwitchArgs,
@@ -168,7 +171,7 @@ pub(crate) use models::{
     ModelsCommand, ModelsInstallArgs, ModelsListArgs, ModelsListSort, ModelsLoraArgs,
     ModelsLoraBehaviorStrataPolicy, ModelsLoraCommand, ModelsLoraExportArgs, ModelsLoraInspectArgs,
     ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs, ModelsLoraPromoteArgs,
-    ModelsLoraTrainArgs, ModelsTestArgs,
+    ModelsLoraTrainArgs, ModelsTestArgs, RecommendOperation,
 };
 pub(crate) use netns_launch::{NetnsLaunchArgs, NetnsLaunchInvocation};
 pub(crate) use orchestrator::{
@@ -232,6 +235,7 @@ pub(crate) use runs::{
 };
 pub(crate) use sandbox::SandboxArgs;
 pub(crate) use scan::ScanArgs;
+pub(crate) use self_toolchain::{SelfArgs, SelfCommand};
 pub(crate) use serve::{
     A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeSurface, McpServeTransport,
     ServeAcpArgs, ServeArgs, ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs,
@@ -299,6 +303,10 @@ use clap::{Parser, Subcommand};
     arg_required_else_help = true
 )]
 pub(crate) struct Cli {
+    /// Emit the versioned argument tree used by the native CLI parser.
+    #[arg(long = "argument-schema", global = false)]
+    pub argument_schema: bool,
+
     /// Emit the JSON-schema catalog for every `harn` subcommand that
     /// exposes a structured `--json` envelope. Pair with
     /// `--command <name>` to print just one entry.
@@ -488,6 +496,8 @@ SCRIPTING
     Replay(ReplayArgs),
     /// Evaluate a run record, run directory, or eval manifest.
     Eval(EvalArgs),
+    /// Evaluate typed model questions and inspect the resulting receipt.
+    Llm(LlmArgs),
     /// Start the interactive REPL.
     Repl,
     /// Benchmark Harn execution, portable-kernel paths, or deterministic replay.
@@ -580,6 +590,9 @@ SCRIPTING
     /// `--version`). Verifies the archive against the release's
     /// `SHA256SUMS` manifest before installing.
     Upgrade(UpgradeArgs),
+    /// Cache and run checksum-verified Harn release binaries by version.
+    #[command(name = "self")]
+    SelfToolchain(SelfArgs),
     /// Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib sets.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

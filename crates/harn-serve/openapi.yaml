@@ -2507,6 +2507,10 @@ components:
               enum: [session]
             workspace_id:
               type: string
+            mode_id:
+              type: string
+              enum: [ask, architect, code, shadow]
+              description: Effective ACP session mode for subsequent tasks.
             state:
               type: string
               enum: [ACTIVE, IDLE, PAUSED, CLOSED, FAILED]
@@ -2575,6 +2579,10 @@ components:
       properties:
         workspace_id:
           type: string
+        mode_id:
+          type: [string, "null"]
+          enum: [ask, architect, code, shadow, null]
+          description: ACP session mode. Omission uses the server default (ask unless explicitly configured).
         persona_id:
           type: [string, "null"]
         model_policy:

@@ -80,6 +80,7 @@ pub mod harness_net;
 pub mod harness_system;
 pub mod harness_tenant;
 pub mod host_attachments;
+pub mod host_stdio;
 
 /// Placement policy for child-interpreter subtasks.
 ///
@@ -340,7 +341,8 @@ pub use llm::trigger_predicate::TriggerPredicateBudget;
 pub use llm::{
     current_agent_session_id, install_llm_cost_budget, install_llm_token_budget,
     peek_llm_cost_budget, peek_llm_token_budget, register_session_end_hook, set_llm_cost_budget,
-    set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard, SessionEndHookRegistration,
+    set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard, MachineSpendPolicy,
+    MachineSpendQuota, MachineSpendReceipt, SessionEndHookRegistration,
 };
 pub use mcp::{connect_mcp_server_from_json, connect_mcp_server_from_spec, register_mcp_builtins};
 pub use mcp_allowlist::{
@@ -364,10 +366,10 @@ pub use mcp_registry::{
     sweep_expired as mcp_sweep_expired, McpServerPreparation, RegisteredMcpServer, RegistryStatus,
 };
 pub use mcp_server::{
-    take_mcp_serve_metadata, take_mcp_serve_prompts, take_mcp_serve_registry,
-    take_mcp_serve_resource_templates, take_mcp_serve_resources, tool_registry_to_mcp_tools,
-    McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServer, McpServerMetadata,
-    McpServerReload, McpToolSet,
+    reset_mcp_serve_publication, take_mcp_serve_metadata, take_mcp_serve_prompts,
+    take_mcp_serve_registry, take_mcp_serve_rejection, take_mcp_serve_resource_templates,
+    take_mcp_serve_resources, tool_registry_to_mcp_tools, McpPromptDef, McpResourceDef,
+    McpResourceTemplateDef, McpServer, McpServerMetadata, McpServerReload, McpToolSet,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};

@@ -9,8 +9,29 @@ capability_method!(
     llm_evaluate_predicate,
     "harness.llm.evaluate_predicate",
     ["llm.write@arg3.provider", "llm.write@arg3.model"],
-    harn_builtin_meta::predicate::EVALUATE,
+    harn_builtin_meta::predicate::EVALUATE_PREDICATE,
     "Evaluate a declared probabilistic predicate and require an explicit outcome disposition."
+);
+capability_method!(
+    llm_evaluate,
+    "harness.llm.evaluate",
+    ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    harn_builtin_meta::predicate::EVALUATE,
+    "Evaluate a declared question set over one shared state and require an explicit outcome disposition."
+);
+capability_method!(
+    llm_evaluate_request,
+    "harness.llm.evaluate_request",
+    ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    harn_builtin_meta::predicate::EVALUATE_REQUEST,
+    "Evaluate a typed runtime question set through shared decision admission."
+);
+capability_method!(
+    llm_estimate_state_tokens,
+    "harness.llm.estimate_state_tokens",
+    [],
+    harn_builtin_meta::predicate::ESTIMATE_STATE_TOKENS,
+    "Measure a state with the evaluator's own token estimator, the one its state ceiling compares against."
 );
 capability_method!(
     llm_catalog_refresh,

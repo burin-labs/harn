@@ -124,7 +124,7 @@ jobs:
           MISTRAL_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.MISTRAL_API_KEY || '' }}
           COHERE_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.COHERE_API_KEY || '' }}
           XAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.XAI_API_KEY || '' }}
-          TOGETHER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.TOGETHER_API_KEY || '' }}
+          TOGETHER_AI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.TOGETHER_AI_API_KEY || '' }}
           GROQ_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GROQ_API_KEY || '' }}
           CEREBRAS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.CEREBRAS_API_KEY || '' }}
           DEEPSEEK_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.DEEPSEEK_API_KEY || '' }}

@@ -1,0 +1,35 @@
+import { EvaluationOutcome, EvaluationPolicy, choice } from "std/predicate"
+
+fn decide(
+  llm: HarnessLlm,
+  names: dict<string, string>,
+  policy: EvaluationPolicy,
+) -> EvaluationOutcome {
+  return llm.evaluate_request(
+    "runtime-vocabulary.fixture.v1",
+    {text: "An opaque fixture"},
+    {tool: choice("Which tool fits the text?", names)},
+    policy,
+  )
+}
+
+pipeline test(harness: Harness) {
+  const policy: EvaluationPolicy = {
+    backend: "structured_llm",
+    provider: "mock",
+    model: "unserved-runtime-vocabulary-fixture",
+    effort: "low",
+    temperature: 0.0,
+    threshold: 0.0,
+    evaluation_cost_limit: 0.01,
+    run_cost_limit: 0.01,
+  }
+  const result = decide(harness.llm, {edit: "Change a file", read: "Read a file"}, policy)
+  match result.kind {
+    "unavailable" -> { assert_eq(result.reason, "model_unconfigured") }
+    _ -> {
+      throw "unserved dynamic route must refuse before dispatch"
+    }
+  }
+  harness.stdio.log("runtime evaluation vocabulary admitted and unserved route refused")
+}

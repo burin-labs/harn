@@ -9,6 +9,10 @@ use super::{
     apply_process_config, build_std_command, process_spawn_error, spawn_error, ProcessCommandConfig,
 };
 
+/// What every backend must render, and how a live observation is judged.
+#[path = "conformance.rs"]
+pub mod conformance;
+
 /// One platform implementation attaches the active capability ceiling to each
 /// child process. Callers use the module-level spawn functions, not this trait.
 pub(crate) trait SandboxBackend {
@@ -48,6 +52,22 @@ pub(crate) trait SandboxBackend {
         let mut command = build_std_command::<Self>(program, args, policy, profile)?;
         apply_process_config(&mut command, config, Some(policy));
         crate::op_interrupt::capture_output_interruptible(&mut command)
+            .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
+    }
+
+    /// [`Self::run_to_output`], also returning the session the child led:
+    /// every descendant that does not call `setsid` itself stays in it.
+    #[cfg(unix)]
+    fn run_to_output_in_session(
+        program: &str,
+        args: &[String],
+        config: &ProcessCommandConfig,
+        policy: &CapabilityPolicy,
+        profile: SandboxProfile,
+    ) -> Result<(Output, u32), VmError> {
+        let mut command = build_std_command::<Self>(program, args, policy, profile)?;
+        apply_process_config(&mut command, config, Some(policy));
+        crate::op_interrupt::capture_output_interruptible_in_session(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
     }
 }

@@ -205,7 +205,9 @@ async fn review_run_report_with_clock(
                 .map_err(|error| lifecycle.invalid(format!("parse run report: {error}")))?
         }
         RunReviewInput::RunRecord(report_request) => {
-            let report = build_run_report(report_request)
+            // The report carries the complete run evidence. Keep its builder's
+            // future off the review frame as that evidence grows.
+            let report = Box::pin(build_run_report(report_request))
                 .await
                 .map_err(|error| lifecycle.invalid(format!("build run report: {error}")))?;
             lifecycle.advance(RunReviewState::Located);
@@ -266,9 +268,15 @@ async fn review_run_report_with_clock(
 
     lifecycle.advance(RunReviewState::Reviewing);
     let started_ms = clock.monotonic_ms();
-    let response = execute_llm_call(None, extracted, Some(options_dict), None, None)
-        .await
-        .map_err(|error| lifecycle.failed(vm_error_message(error)))?;
+    let response = Box::pin(execute_llm_call(
+        None,
+        extracted,
+        Some(options_dict),
+        None,
+        None,
+    ))
+    .await
+    .map_err(|error| lifecycle.failed(vm_error_message(error)))?;
     let response_dict = response.as_dict().ok_or_else(|| {
         lifecycle.failed("run review model response was not an object".to_string())
     })?;

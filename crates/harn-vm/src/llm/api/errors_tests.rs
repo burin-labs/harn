@@ -64,7 +64,9 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
 fn network_failure_classifies_into_the_exported_vocabulary() {
     let classified = classify_llm_error(
         ErrorCategory::TransientNetwork,
-        "error sending request: connection reset by peer",
+        // The shape `reqwest_send_error` produces for a dropped connection:
+        // reqwest's text names no cause, so the category must carry it.
+        "openai Responses error (send): error sending request for url (https://api.openai.com/v1/responses)",
     );
     assert_eq!(classified.reason.as_str(), "network_error");
     assert_eq!(classified.kind.as_str(), "transient");
@@ -724,5 +726,75 @@ fn invalid_request_http_envelope_keeps_its_category_with_quota_metadata() {
     assert_eq!(
         classify_llm_error(crate::value::error_to_category(&error), &error.to_string()).reason,
         LlmErrorReason::InvalidRequest,
+    );
+}
+
+/// Fireworks rejects a gpt-oss sample that opens an unknown harmony channel
+/// with an in-band `invalid_request_error`. That is a sampling failure, not a
+/// request fault, so it is resampled rather than ending the turn.
+#[test]
+fn malformed_generated_channel_stream_error_is_transient() {
+    let error = classify_provider_stream_error(
+        "fireworks",
+        r#"{"error":{"message":"Invalid channel: tool_call","type":"invalid_request_error","code":"invalid_request_error"}}"#,
+        false,
+    );
+
+    assert_eq!(thrown_field(&error, "kind").as_deref(), Some("transient"));
+    assert_eq!(
+        thrown_field(&error, "reason").as_deref(),
+        Some("invalid_response")
+    );
+    let message = thrown_field(&error, "message").unwrap_or_default();
+    assert!(
+        message.contains("the model produced output the provider could not parse"),
+        "the exhausted-budget text must say what happened in plain words: {message}"
+    );
+    assert!(
+        message.contains("Invalid channel: tool_call"),
+        "and keep the provider's wording for the trace: {message}"
+    );
+}
+
+/// Negative control: a genuine request fault on the same route stays terminal.
+#[test]
+fn request_shape_invalid_request_stream_error_stays_terminal() {
+    let error = classify_provider_stream_error(
+        "fireworks",
+        r#"{"error":{"message":"Unknown parameter: foo","type":"invalid_request_error","code":"invalid_request_error"}}"#,
+        false,
+    );
+
+    assert_eq!(thrown_field(&error, "kind").as_deref(), Some("terminal"));
+    assert_eq!(
+        thrown_field(&error, "reason").as_deref(),
+        Some("invalid_request")
+    );
+}
+
+/// The json-mode variant, in the frame shape Fireworks actually sends: the
+/// channel is named after the taught syntax, and `raw_output` rides along.
+/// The fingerprint reads the error message only, so text in `raw_output`
+/// cannot flip a request fault to retryable.
+#[test]
+fn malformed_channel_keys_on_the_error_message_not_the_frame() {
+    let tool_variant = classify_provider_stream_error(
+        "fireworks",
+        r#"{"error":{"object":"error","type":"invalid_request_error","code":"invalid_request_error","message":"Invalid channel: tool"},"raw_output":{"completion":"<|channel|>tool"}}"#,
+        false,
+    );
+    assert_eq!(
+        thrown_field(&tool_variant, "kind").as_deref(),
+        Some("transient")
+    );
+
+    let fault_quoting_a_channel = classify_provider_stream_error(
+        "fireworks",
+        r#"{"error":{"object":"error","type":"invalid_request_error","code":"invalid_request_error","message":"Unknown parameter: foo"},"raw_output":{"completion":"Invalid channel: tool"}}"#,
+        false,
+    );
+    assert_eq!(
+        thrown_field(&fault_quoting_a_channel, "kind").as_deref(),
+        Some("terminal")
     );
 }

@@ -175,9 +175,48 @@ interrupt.
 So the delivery guarantee is: a steer lands before the next prompt the model
 sees, and never in the middle of a tool batch.
 
-**Steer does not change the objective.** The session's goal is what it was asked
-for at `session/prompt`. A steer adjusts how the agent pursues that goal. A
-control client that wants a different objective starts a new turn.
+**A plain steer does not change the objective.** The session's goal is what it
+was asked for at `session/prompt`, and every acceptance item frozen under it
+still stands. A steer adjusts how the agent pursues that goal. To change the
+goal itself, send the steer with a `goal`, described next.
+
+### Retarget
+
+A steer or interrupt may carry a `goal`. It replaces the run's objective as the
+steer lands:
+
+```json
+{"jsonrpc":"2.0","id":8,"method":"session/inject",
+ "params":{"sessionId":"…","mode":"steer",
+           "content":"Change of plan: skip the listing and reply BRAVO.",
+           "goal":{"objective":"Reply with exactly the single word BRAVO."}}}
+```
+
+What changes when it is accepted:
+
+- The completion judge and the completion gate hold the run to the new
+  objective. The judge's stable goal names it, and the original task is shown
+  only as retired context.
+- Every requirement row declared under the previous objective is **retired**:
+  no longer owed, and not satisfied either. The judge is not asked to assess
+  it, and the ledger does not count it as pending.
+- The model receives the new objective as a standing `contract` directive
+  that says the old acceptance items are retired, so a later corrective cannot
+  restate them.
+- `goal_reloop` goals move their success criteria to `retired_criteria` and
+  stop gating completion on them.
+
+The retarget is recorded on the typed control row, and the live
+`control_outcome` carries it as `metadata.goal`. Each completion decision that
+retired rows also emits a `harn.completion_requirements_retired.v1` typed
+checkpoint that names the control, the message, and every retired
+`requirement_id`, so a replay can tell a row a steer retired from a row the run
+satisfied. The latest retarget wins.
+
+`goal` is `{"objective": string}` with a non-blank objective and no other
+fields. A `queue` note may not carry one, because it lands after the last model
+call: the server answers `-32602` and publishes a rejected outcome with
+`reason: "invalid_goal"`.
 
 ### Authority
 
@@ -204,11 +243,12 @@ corrective directive outranks a plain user message, and the agent reverts to the
 original wording one turn later.
 
 The contract is therefore: a delivered steer registers a directive at
-`contract` authority, so no completion judge can undo it. Registering steer at
-contract authority is tracked in
-[harn#7580](https://github.com/burin-labs/harn/issues/7580); until it lands, a
-control client must treat a steer as advisory in practice and verify the final
-answer against the steer rather than assuming it held.
+`contract` authority, so no completion judge can undo it. The judge also reads
+every accepted steer as part of what the run owes, with later steering
+superseding the original request where the two conflict. A plain steer still
+leaves the original acceptance items in the judge's ledger; a steer that
+abandons them should carry a `goal` so they are retired rather than argued
+with.
 
 ## Queue
 
@@ -331,7 +371,9 @@ arbitration, not the effect. A stop naming an unregistered session is
 An accepted steer is `method: "session/inject"`, `outcome: "accepted"`, with the
 assigned `messageId` in `target`. A steer with a mode the server does not know is
 rejected with `reason: "invalid_mode"`; one with empty content is rejected with
-`reason: "invalid_content"`.
+`reason: "invalid_content"`; one with a malformed `goal`, or a `goal` on a
+`queue` note, is rejected with `reason: "invalid_goal"`. An accepted retarget
+carries its goal as `metadata.goal`.
 
 The turn's own ending is separate. It is sealed on the prompt result as ACP
 `stopReason` plus the typed terminal in `_meta.harn.terminal`, which names both a

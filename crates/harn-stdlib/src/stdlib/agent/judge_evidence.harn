@@ -265,6 +265,70 @@ fn __judge_lifecycle_action(
   return completion_evidence_action_authorship(action, len(lifecycle.results), len(dispatched))
 }
 
+/**
+ * The background handle a call's last dispatched result minted, or "". A
+ * command result carries it at `handle_id`, or under `run_outcome` when the
+ * host wraps the command outcome (the shape `__verification_command_fact`
+ * reads).
+ */
+fn __judge_minted_handle(lifecycle: AgentTranscriptToolLifecycle) -> string {
+  let handle = ""
+  for matched in lifecycle.results {
+    if matched.origin == "harness_repair" {
+      continue
+    }
+    const data = matched.data ?? {}
+    const minted = trim(to_string((data?.run_outcome ?? data)?.handle_id ?? ""))
+    if minted != "" {
+      handle = minted
+    }
+  }
+  return handle
+}
+
+/** The background handle a handle-scoped call (poll, wait) names, or "". */
+fn __judge_named_handle(lifecycle: AgentTranscriptToolLifecycle) -> string {
+  return trim(to_string(lifecycle.args?.handle_id ?? lifecycle.args?.handle ?? ""))
+}
+
+/**
+ * Handles minted by a verifier. A verifier that outlives its foreground budget
+ * returns `running` and a handle; the call that later resolves that handle
+ * carries the verifier's terminal result, so it is the verification. Without
+ * this the verification slot holds only the `running` banner, and the judge
+ * refuses verified work for a result that is sitting in the transcript.
+ */
+fn __judge_verifier_handles(calls: list<AgentTranscriptToolLifecycle>, opts: dict) -> list<string> {
+  let handles = []
+  for call in calls {
+    if !__judge_descriptor_is_verifier(__judge_tool_descriptor(opts, call.name)) {
+      continue
+    }
+    const handle = __judge_minted_handle(call)
+    if handle != "" && !handles.contains(handle) {
+      handles = handles + [handle]
+    }
+  }
+  return handles
+}
+
+/**
+ * Promote a call that resolves a verifier's handle to the verification role.
+ * Only promotes: a wait on some other command's handle keeps its declared role.
+ */
+fn __judge_inherit_handle_role(
+  action: CompletionEvidenceAction,
+  call: AgentTranscriptToolLifecycle,
+  verifier_handles: list<string>,
+) -> CompletionEvidenceAction {
+  const handle = __judge_named_handle(call)
+  if handle == "" || !verifier_handles.contains(handle)
+    || __judge_descriptor_is_verifier(action.semantics) {
+    return action
+  }
+  return action + {semantics: action.semantics + {evidence_role: "verification", read_only: false}}
+}
+
 fn __judge_latest(
   current: CompletionEvidenceAction?,
   candidate: CompletionEvidenceAction?,
@@ -399,8 +463,15 @@ pub fn __judge_evidence_projection_from_lifecycle(
   let latest_observation = nil
   let claimed_actions: list<CompletionEvidenceAction> = []
   let omitted_harness_authored_result_count = 0
+  // Read from the whole lifecycle: a claim may cite the resolving wait and not
+  // the verifier that minted its handle.
+  const verifier_handles = __judge_verifier_handles(lifecycle.calls, opts)
   for call in evidence_lifecycle.calls {
-    const action = __judge_lifecycle_action(call, opts)
+    const action = __judge_inherit_handle_role(
+      __judge_lifecycle_action(call, opts),
+      call,
+      verifier_handles,
+    )
     omitted_harness_authored_result_count = omitted_harness_authored_result_count
       + (action.omitted_harness_authored_result_count ?? 0)
     if action.harness_authored_only ?? false {

@@ -13,6 +13,11 @@ pub fn typescript_declarations() -> String {
 }
 
 fn typescript_type_block(language: &str) -> String {
+    let dialects = llm_config::DataControlDialect::ALL
+        .iter()
+        .map(|dialect| serde_json::to_string(dialect).expect("dialect is serializable"))
+        .collect::<Vec<_>>()
+        .join(" | ");
     let operations = llm_config::ModelOperation::ALL
         .iter()
         .map(|operation| format!("\"{}\"", operation.as_str()))
@@ -21,7 +26,9 @@ fn typescript_type_block(language: &str) -> String {
     format!(
         "{}{}",
         generated_header("//", language),
-        TYPESCRIPT_TYPES.replace("__HARN_MODEL_OPERATIONS__", &operations)
+        TYPESCRIPT_TYPES
+            .replace("__HARN_MODEL_OPERATIONS__", &operations)
+            .replace("__HARN_DATA_CONTROL_DIALECTS__", &dialects)
     )
 }
 

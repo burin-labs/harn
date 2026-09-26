@@ -162,15 +162,29 @@ jobs:
           go-version: "1.26.6"
           cache: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: nextest@0.9.132
       - name: Run workspace nextest
         shell: bash
-        # No package filter — the whole workspace runs. Tests gated to
-        # `#![cfg(unix)]` still run here (macOS is Unix); the macOS-specific
-        # surface is exactly what this nightly exists to exercise.
-        run: scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci
+        # The whole workspace runs, less one member that contributes nothing to
+        # it. `harn-wasm` carries no `#[test]` and produces no test binary here;
+        # its declared test framework is `wasm-bindgen-test`, which a native
+        # lane cannot run. It was built only because the invocation names the
+        # workspace, and it has no workspace dependents, so excluding it removes
+        # the compile rather than deferring it. It keeps its own
+        # `wasm32-unknown-unknown` workflow, and the Linux workspace lane still
+        # compiles it for a native target, so no build coverage is lost.
+        #
+        # This is not a cosmetic saving. The lane is build-bound: the warm
+        # artifact strips every workspace member by design, so each run compiles
+        # the workspace from scratch, and this crate had grown to the single
+        # largest item in that compile.
+        #
+        # Tests gated to `#![cfg(unix)]` still run here (macOS is Unix); the
+        # macOS-specific surface is exactly what this nightly exists to
+        # exercise.
+        run: scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --exclude harn-wasm --profile ci
       - name: Smoke test harn run
         shell: bash
         run: |

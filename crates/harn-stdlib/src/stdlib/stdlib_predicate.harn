@@ -1,23 +1,92 @@
 /**
- * Types for explicit probabilistic evaluation.
+ * std/predicate — types and question builders for explicit probabilistic
+ * evaluation.
+ *
+ * Import: import {boolean, choice, score} from "std/predicate"
+ *
+ * `harness.llm.evaluate(id, state, questions, policy)` answers a whole
+ * question set over one shared state in one request and one receipt.
+ * `harness.llm.evaluate_predicate(id, question, input, policy)` is its
+ * single-boolean projection.
  *
  * The registered capability contract owns these shapes. Runtime parity tests
  * check this source projection in both directions.
+ *
+ * Example:
+ *   import {boolean, choice, score} from "std/predicate"
+ *
+ *   const answers = harness.llm.evaluate("triage.v1", window, {
+ *     keep: choice("Keep, reword, or drop?", {
+ *       keep: "Still load-bearing",
+ *       reword: "Useful but verbose",
+ *       drop: "Superseded",
+ *     }),
+ *     risk: score("How much blast radius?", ["none", "low", "high"]),
+ *     safe: boolean("Safe to run without asking?"),
+ *   }, policy)
+ *
+ * A model answer never outranks a deterministic rule, and `confidence` is
+ * uncalibrated until a calibration report says otherwise.
  */
-type PredicateVerdict = {verdict: bool, confidence: float, evidence: string}
+pub type BooleanQuestion = {kind: "boolean", instructions: string}
 
-type PredicatePolicy = {
-  backend: "structured_llm",
-  provider: string,
-  model: string,
-  effort: string,
-  temperature: float,
-  threshold: float,
-  evaluation_cost_limit: float,
-  run_cost_limit: float,
+pub type ChoiceQuestion = {kind: "choice", instructions: string, criteria: dict<string, string>}
+
+pub type ScoreQuestion = {kind: "score", instructions: string, levels: list<string>}
+
+pub type EvaluationQuestion = BooleanQuestion | ChoiceQuestion | ScoreQuestion
+
+pub type ConfidenceKind = "binary_probability" | "distribution_shape" | "model_rationale"
+
+pub type EvidenceKind = "input_reference" | "model_rationale"
+
+pub type BooleanAnswer = {
+  kind: "boolean",
+  verdict: bool,
+  probability: float,
+  confidence: float,
+  confidence_kind: ConfidenceKind,
+  evidence: string,
+  evidence_kind: EvidenceKind,
 }
 
-type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: string} \
+pub type ChoiceAnswer = {
+  kind: "choice",
+  choice: string,
+  probabilities: dict<string, float>,
+  confidence: float,
+  confidence_kind: ConfidenceKind,
+  evidence: string,
+  evidence_kind: EvidenceKind,
+}
+
+pub type ScoreAnswer = {
+  kind: "score",
+  level: string,
+  score: float,
+  probabilities: dict<string, float>,
+  confidence: float,
+  confidence_kind: ConfidenceKind,
+  evidence: string,
+  evidence_kind: EvidenceKind,
+}
+
+pub type EvaluationAnswer = BooleanAnswer | ChoiceAnswer | ScoreAnswer
+
+pub type PredicateVerdict = {verdict: bool, confidence: float, evidence: string}
+
+pub type EvaluationPolicy = {
+  backend: "structured_llm" | "native_decision",
+  provider: string,
+  model: string,
+  effort?: string,
+  temperature?: float,
+  threshold: float,
+  evaluation_cost_limit?: float,
+  run_cost_limit?: float,
+}
+
+pub type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: string} \
   | {kind: "low_confidence", candidate: PredicateVerdict, threshold: float, receipt: string} \
   | {
   kind: "refused",
@@ -56,4 +125,261 @@ type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: stri
   occurrence: int,
   receipt: string,
 } \
-  | {kind: "cancelled", control_event: string, receipt: string}
+  | {kind: "cancelled", control_event: string, receipt: string} \
+  | {kind: "state_too_large", limit_tokens: int, estimated_tokens: int, receipt: string} \
+  | {
+  kind: "question_invalid",
+  question: string,
+  reason: "too_many_options" \
+    | "empty_questions" \
+    | "empty_options" \
+    | "empty_identifier" \
+    | "duplicate_labels" \
+    | "too_few_levels" \
+    | "too_many_levels" \
+    | "empty_instructions" \
+    | "too_many_questions" \
+    | "unsupported_question_kind",
+  receipt: string,
+} \
+  | {kind: "rate_limited", retry_after_ms?: int, receipt: string} \
+  | {kind: "overloaded", receipt: string}
+
+pub type EvaluationOutcome = {
+  kind: "answered",
+  value: dict<string, EvaluationAnswer>,
+  receipt: string,
+} \
+  | {
+  kind: "low_confidence",
+  candidates: dict<string, EvaluationAnswer>,
+  threshold: float,
+  question_ids: list<string>,
+  receipt: string,
+} \
+  | {
+  kind: "refused",
+  reason: "provider_refusal" | "schema_invalid" | "output_truncated",
+  diagnostic: string,
+  receipt: string,
+} \
+  | {
+  kind: "budget_cut",
+  limit: "requests" \
+    | "evaluations" \
+    | "input_tokens" \
+    | "output_tokens" \
+    | "deadline" \
+    | "evaluation_cost" \
+    | "run_cost" \
+    | "parent_budget",
+  requested: float,
+  remaining: float,
+  receipt: string,
+} \
+  | {
+  kind: "unavailable",
+  reason: "model_unconfigured" \
+    | "unsupported_options" \
+    | "transport_failed" \
+    | "authority_denied" \
+    | "producer_cancelled" \
+    | "cache_miss",
+  receipt: string,
+} \
+  | {
+  kind: "replay_mismatch",
+  expected_identity: string,
+  actual_identity: string,
+  occurrence: int,
+  receipt: string,
+} \
+  | {kind: "cancelled", control_event: string, receipt: string} \
+  | {kind: "state_too_large", limit_tokens: int, estimated_tokens: int, receipt: string} \
+  | {
+  kind: "question_invalid",
+  question: string,
+  reason: "too_many_options" \
+    | "empty_questions" \
+    | "empty_options" \
+    | "empty_identifier" \
+    | "duplicate_labels" \
+    | "too_few_levels" \
+    | "too_many_levels" \
+    | "empty_instructions" \
+    | "too_many_questions" \
+    | "unsupported_question_kind",
+  receipt: string,
+} \
+  | {kind: "rate_limited", retry_after_ms?: int, receipt: string} \
+  | {kind: "overloaded", receipt: string}
+
+/**
+ * A yes-or-no question. The answer carries the yes-probability and a
+ * confidence derived as `max(p, 1 - p)` in its selected verdict.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn boolean(instructions: string) -> BooleanQuestion {
+  return {kind: "boolean", instructions: instructions}
+}
+
+/**
+ * A labelled choice. `criteria` maps each label to the description the model
+ * judges against; the answer's `choice` is typed as the literal union of those
+ * labels, so a `match` on it is exhaustive.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn choice(instructions: string, criteria: dict<string, string>) -> ChoiceQuestion {
+  return {kind: "choice", instructions: instructions, criteria: criteria}
+}
+
+/**
+ * An ordered scale. `levels` runs from lowest to highest; the answer's `level`
+ * is typed as the literal union of those levels and `score` is the fractional
+ * position on the scale.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn score(instructions: string, levels: list<string>) -> ScoreQuestion {
+  return {kind: "score", instructions: instructions, levels: levels}
+}
+
+pub type EvaluationWindow = {
+  first_index: int,
+  last_index: int,
+  primary_first_index: int,
+  item_count: int,
+  estimated_tokens: int,
+}
+
+pub type EvaluationWindowing = {
+  windows: list<EvaluationWindow>,
+  budget_tokens: int,
+  anchor_tokens: int,
+  overlap_items: int,
+  receipt: string,
+}
+
+pub type EvaluationWindowOptions = {budget_tokens: int, overlap_items?: int, anchor?: string}
+
+/**
+ * The state a window becomes, and the only shape these windows are measured as.
+ *
+ * A window's size is whatever the evaluator will be handed, so the helper
+ * measures exactly the record the caller is expected to send. Sending a
+ * different shape and expecting the window to still fit is the same mistake
+ * as measuring with a different estimator.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn evaluation_window_state(
+  items: list<any>,
+  anchor: string,
+) -> {anchor: string, items: list<any>} {
+  return {anchor: anchor, items: items}
+}
+
+/**
+ * Split `items` into windows that each fit `budget_tokens`, measured with the
+ * evaluator's own estimator.
+ *
+ * This exists so a caller handles the state ceiling by construction rather
+ * than by retrying after a `state_too_large` refusal. That only works if the
+ * helper and the ceiling agree on what a state costs, so the size of every
+ * window here comes from `llm.estimate_state_tokens`, which is the same call
+ * the ceiling compares against its route's window. A chars-per-token
+ * approximation would produce windows that measure fine here and are refused
+ * there, which is the failure this is meant to remove.
+ *
+ * `anchor` is repeated in every window and counted against every window's
+ * budget. `overlap_items` repeats that many trailing items at the front of
+ * the next window, so a question that needs local context does not lose it at
+ * a seam. Windows carry index ranges into the original list, so per-item
+ * answers join back by index. `primary_first_index` is where a window's own
+ * items start, after the repeated ones: the primary ranges partition the list,
+ * so a caller joining per-item answers keeps exactly one answer per item
+ * without re-deriving the overlap arithmetic at every call site.
+ *
+ * Throws when one item cannot fit the budget on its own. There is no window
+ * that would hold it, and returning a window the ceiling will refuse would
+ * hand the caller exactly the failure this prevents.
+ *
+ * @effects: []
+ * @errors: ["an item does not fit the budget on its own", "budget_tokens is not positive", "overlap_items is negative or does not shrink the remainder"]
+ */
+pub fn evaluation_windows(
+  llm: HarnessLlm,
+  items: list<any>,
+  options: EvaluationWindowOptions,
+) -> EvaluationWindowing {
+  const budget = options.budget_tokens
+  if budget <= 0 {
+    throw "evaluation_windows needs a positive budget_tokens, got ${budget}"
+  }
+  const overlap = options?.overlap_items ?? 0
+  if overlap < 0 {
+    throw "evaluation_windows needs a non-negative overlap_items, got ${overlap}"
+  }
+  const anchor = options?.anchor ?? ""
+  const anchor_tokens = llm.estimate_state_tokens(evaluation_window_state([], anchor))
+  let windows: list<EvaluationWindow> = []
+  let start = 0
+  // The first window repeats nothing; every later one repeats `overlap` items.
+  let repeated = 0
+  while start < len(items) {
+    let taken = 0
+    let measured = 0
+    // Grow one item at a time and measure the whole window each time. The
+    // encoded size of a record is not the sum of its parts, so summing
+    // per-item estimates would drift from what the ceiling reads.
+    while start + taken < len(items) {
+      const candidate = items.slice(start, start + taken + 1)
+      const size = llm.estimate_state_tokens(evaluation_window_state(candidate, anchor))
+      if size > budget && taken > 0 {
+        break
+      }
+      if size > budget && taken == 0 {
+        throw "evaluation_windows: item ${to_string(start)} needs ${to_string(size)} tokens, over the ${to_string(budget)} budget on its own"
+      }
+      taken = taken + 1
+      measured = size
+    }
+    const last = start + taken - 1
+    windows = windows
+      + [
+        {
+          first_index: start,
+          last_index: last,
+          primary_first_index: start + repeated,
+          item_count: taken,
+          estimated_tokens: measured,
+        },
+      ]
+    if last >= len(items) - 1 {
+      break
+    }
+    const next = last + 1 - overlap
+    // An overlap that does not advance would repeat the same window forever.
+    if next <= start {
+      throw "evaluation_windows: overlap_items ${to_string(overlap)} does not advance past window at item ${to_string(start)}"
+    }
+    repeated = overlap
+    start = next
+  }
+  const anchor_note =
+    anchor == "" ? "no anchor" : "anchor of ${to_string(anchor_tokens)} token(s) repeated in every window"
+  return {
+    windows: windows,
+    budget_tokens: budget,
+    anchor_tokens: anchor_tokens,
+    overlap_items: overlap,
+    receipt:
+      "${to_string(len(windows))} window(s) over ${to_string(len(items))} item(s), budget ${to_string(budget)} token(s), ${anchor_note}, ${to_string(overlap)} item(s) of overlap",
+  }
+}

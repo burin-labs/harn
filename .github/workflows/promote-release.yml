@@ -1,0 +1,308 @@
+name: Promote release
+
+# Publishes a release from the files the version commit's candidate run built
+# and checked. Nothing here builds a release file.
+#
+#   1. build-release-binaries.yml runs on every push to main. When the push
+#      changes the workspace version to a stable X.Y.Z it builds, signs,
+#      attests, and checks the release candidate at exactly that commit, and
+#      concludes success only when every release check passed on those files.
+#   2. This workflow starts when that run completes. `plan` repeats the
+#      build's own version decision at the run's head commit, so only a
+#      successful candidate run is promoted and a warm-cache run is a no-op.
+#   3. `promote` calls the organization's promote-release.yml, which proves
+#      the run passed at that commit, checks every file's sha256 and
+#      attestation against the candidate manifest, then creates the tag and the
+#      GitHub release from those same files. The tag push starts
+#      publish-release.yml, which publishes the crates from the tag.
+#   4. `repin` asks every registered consumer to repin onto the release,
+#      `container` packages the published Linux archives into the image, and
+#      `open-development-bump` moves main to the next development version.
+on:
+  # Privileged `workflow_run` is intentional here: `plan` checks out only the
+  # completed run's head commit on main, after requiring that the run came from
+  # a push to this repository's main branch.
+  workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main push runs of this repository
+    workflows: [Build release binaries]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-release-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan promotion
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      promote: ${{ steps.plan.outputs.promote }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      major_minor: ${{ steps.plan.outputs.major_minor }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Decide from the version
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/lib/release_version.sh
+          source scripts/lib/release_version.sh
+          version="$(release_workspace_version < Cargo.toml)"
+          previous="$(git show HEAD^:Cargo.toml | release_workspace_version)"
+          if ! release_push_is_stable_version_change "$previous" "$version"; then
+            echo "::notice::$HEAD_SHA keeps the workspace version at $version (was $previous); its run built no candidate, so there is nothing to promote."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag="v$version"
+          # A rerun of this workflow after the release exists is a no-op; a tag
+          # at any other commit is a conflict a person must resolve.
+          if tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha 2>/dev/null)"; then
+            if [[ "$tag_sha" != "$HEAD_SHA" ]]; then
+              echo "::error::$tag already points at $tag_sha, not the candidate commit $HEAD_SHA."
+              exit 1
+            fi
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::notice::$tag is already released from $HEAD_SHA; nothing to promote."
+              echo "promote=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "::notice::Promoting $tag from build run $BUILD_RUN_ID at $HEAD_SHA."
+          {
+            echo "promote=true"
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "major_minor=${version%.*}"
+          } >> "$GITHUB_OUTPUT"
+
+  promote:
+    name: Promote
+    needs: plan
+    if: needs.plan.outputs.promote == 'true'
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@5bf8c07287382b4492ad6d50b06da60c46936ad1 # promote-release
+    with:
+      sha: ${{ github.event.workflow_run.head_sha }}
+      run-id: ${{ github.event.workflow_run.id }}
+      tag: ${{ needs.plan.outputs.tag }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+  # Each registered consumer's own repin workflow opens its pull request, and
+  # that repository's CI and review rules decide whether it merges.
+  repin:
+    name: Repin consumers
+    needs: [plan, promote]
+    permissions:
+      contents: read
+    uses: burin-labs/.github/.github/workflows/repin.yml@d33db398eec4f00e2fee4164afeb7157005bd4ba # repin
+    with:
+      released-repository: ${{ github.repository }}
+      tag: ${{ needs.promote.outputs.tag }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+  container:
+    name: Publish container
+    needs: [plan, promote]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Download Linux release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          assets_dir="${RUNNER_TEMP}/harn-release-assets"
+          rm -rf "$assets_dir" release-container
+          mkdir -p "$assets_dir" release-container/amd64 release-container/arm64
+
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern harn-x86_64-unknown-linux-gnu.tar.gz \
+            --pattern harn-aarch64-unknown-linux-gnu.tar.gz \
+            --dir "$assets_dir"
+
+          cp "$assets_dir/harn-x86_64-unknown-linux-gnu.tar.gz" release-container/amd64/harn.tar.gz
+          cp "$assets_dir/harn-aarch64-unknown-linux-gnu.tar.gz" release-container/arm64/harn.tar.gz
+
+          for arch in amd64 arm64; do
+            archive="release-container/${arch}/harn.tar.gz"
+            archive_list="${assets_dir}/${arch}.lst"
+            tar tzf "$archive" > "$archive_list"
+            for binary in harn harn-container-probe; do
+              if ! grep -Fxq "$binary" "$archive_list"; then
+                echo "::error::${archive} is missing ${binary}; container image must be assembled from release artifacts, not a Docker source rebuild."
+                exit 1
+              fi
+            done
+          done
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/burin-labs/harn
+          # Promotion publishes only stable versions, so each one is latest.
+          tags: |
+            type=raw,value=${{ needs.plan.outputs.version }}
+            type=raw,value=${{ needs.plan.outputs.major_minor }}
+            type=raw,value=latest
+
+      - name: Build and push container image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Verify public container tags
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          MAJOR_MINOR: ${{ needs.plan.outputs.major_minor }}
+        run: |
+          set -euo pipefail
+
+          anonymous_config="${RUNNER_TEMP}/anonymous-docker-config"
+          rm -rf "$anonymous_config"
+          mkdir -p "$anonymous_config"
+
+          for tag in "$VERSION" "$MAJOR_MINOR" latest; do
+            image="ghcr.io/burin-labs/harn:${tag}"
+            if ! docker --config "$anonymous_config" manifest inspect "$image" >/dev/null; then
+              {
+                printf '::error title=Container image is not publicly pullable::'
+                printf 'Anonymous manifest lookup failed for %s. ' "$image"
+                printf 'GHCR packages default to private on first publish; '
+                printf 'set the burin-labs/harn package visibility to public, '
+                printf 'then rerun this workflow.\n'
+              }
+              exit 1
+            fi
+            echo "Verified anonymous pull metadata for ${image}"
+          done
+
+  open-development-bump:
+    name: Open post-publication development bump
+    needs: [plan, promote]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          persist-credentials: false
+
+      - name: Plan development identity after published release
+        id: development
+        env:
+          PUBLISHED_TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          source scripts/lib/release_version.sh
+          version="$(release_workspace_version < Cargo.toml)"
+          release_development_bump_plan "$version" "$PUBLISHED_TAG" true
+          {
+            echo "required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED"
+            echo "version=$RELEASE_DEVELOPMENT_BUMP_VERSION"
+            echo "reason=$RELEASE_DEVELOPMENT_BUMP_REASON"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Post-publication development bump: required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED reason=$RELEASE_DEVELOPMENT_BUMP_REASON version=${RELEASE_DEVELOPMENT_BUMP_VERSION:-<none>}"
+
+      - name: Mint GitHub App installation token
+        if: steps.development.outputs.required == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.development.outputs.required == 'true'
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Configure isolated Harn build
+        if: steps.development.outputs.required == 'true'
+        run: make setup-rust
+
+      - name: Prepare and open development bump
+        if: steps.development.outputs.required == 'true'
+        id: development-bump
+        env:
+          EXPECTED_DEVELOPMENT_VERSION: ${{ steps.development.outputs.version }}
+          # The tag this run just published, so the next development identity is
+          # derived from what shipped rather than from whatever main carries.
+          RELEASE_PUBLISHED_VERSION: ${{ needs.plan.outputs.tag }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
+          HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh
+
+      # A skipped open is a correct no-op: another promotion may have already
+      # advanced main while this run was queued.
+      - name: Validate grammar receipt and arm development bump
+        if: >-
+          steps.development.outputs.required == 'true' &&
+          steps.development-bump.outputs.skipped != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DEVELOPMENT_BUMP_PR_URL: ${{ steps.development-bump.outputs.pr_url }}
+        run: |
+          set -euo pipefail
+          ./scripts/validate_development_bump.sh

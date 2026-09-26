@@ -40,6 +40,16 @@ harn --json-schemas | jq '.data[] | {command, schemaVersion}'
 harn --json-schemas --command lint   # filter to one entry
 ```
 
+The native command-line argument tree is available separately through
+`harn --argument-schema`. It is projected from the same Clap parser that
+executes Harn CLI commands, including nested subcommands, aliases, positional
+and option arity, required arguments, and enumerated values. Its envelope
+has `schemaVersion: 1`; a host should pin the Harn release and reject an
+unknown schema version. `possibleValues: []` means the parser did not expose
+an enum, not that any value is valid: custom parsers and cross-argument rules
+remain Harn's final authority. This describes native `harn` commands, not
+another product's commands that happen to invoke Harn workflows.
+
 ### Error shape
 
 `error.code` is a stable lowercase identifier (e.g. `"lint_failed"`,
@@ -101,6 +111,7 @@ versions.
 | `harn fix plan --json` / `apply --json` | Repair plan or applied edits, plus skipped invalid files |
 | `harn pack --json`             | `.harnpack` bundle build summary (inline schema)         |
 | `harn doctor --json`           | Capability matrix: host, targets, providers, effects     |
+| `harn doctor sandbox --json`   | Process-sandbox conformance: every contract case run live, with its verdict |
 | `harn explain <CODE> --json`   | Per-diagnostic-code explanation                          |
 | `harn explain --catalog --json` | Full diagnostic-code catalog                            |
 | `harn session export`          | Portable session bundle export. Prints JSON to stdout when `--out` is omitted; there is no `--json` flag |
@@ -509,10 +520,10 @@ parallel paths, unless `--allow-empty` is passed.
 ### `harn serve test`
 
 The JSON-RPC `initialize` result advertises
-`capabilities.test_run.schema_version: 2`. Each `test/run` result uses
-snake-case `schema_version: 2` and contains worker identity, run/cache counters,
+`capabilities.test_run.schema_version: 4`. Each `test/run` result uses
+snake-case `schema_version: 4` and contains worker identity, run/cache counters,
 and `summary`. The summary is the user-runner shape above: `results`, verdict
-counts, wall duration, `timing`, and cumulative `aggregate`. Each executed result
+counts including `skipped`, wall duration, `timing`, and cumulative `aggregate`. Each executed result
 carries optional typed `timeout` and measured `phases` with nested module
 attribution; discovery and worker-start errors omit unavailable phases.
 

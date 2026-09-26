@@ -29,8 +29,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:8a835b84021f72b5b414711685d900a6cd3d88b78b94c51ede767aefb63cc0fa",
-    "projection_id": "session_view:session_root_transcript:8a835b84021f"
+    "projection_hash": "sha256:c741efa0675adee55a58720fe132e70b735dce3acc3bb27039e6c08463a959c3",
+    "projection_id": "session_view:session_root_transcript:c741efa0675a"
   },
   "runs": [
     {
@@ -59,6 +59,7 @@
         }
       ],
       "evidence": {
+        "evaluation_receipts": null,
         "execution_id": "hxe-019c13e0-8080-7000-8000-000000000001",
         "flight_recording": {
           "byte_length": 4096,
@@ -142,8 +143,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:c601c0de0b0a595294a6a0148b31c06d7550ab9164af15ec161928b4cb24cdb4",
-        "projection_id": "run_view:run_root_transcript:c601c0de0b0a"
+        "projection_hash": "sha256:a32aafcafd9b5bda2e5dd6954c80d0da95c6b67a3625176629853f5d21d7a245",
+        "projection_id": "run_view:run_root_transcript:a32aafcafd9b"
       },
       "providers": [
         {

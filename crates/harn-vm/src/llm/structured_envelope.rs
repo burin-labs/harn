@@ -226,7 +226,7 @@ fn is_unsupported_structured_transport_error(err: &VmError) -> bool {
         || message.contains("unsupported structured_output strategy")
 }
 
-fn apply_prompt_mode_structured_transport(args: &mut [VmValue], schema: &VmValue) {
+pub(crate) fn apply_prompt_mode_structured_transport(args: &mut [VmValue], schema: &VmValue) {
     if let Some(prompt) = args.get_mut(0).and_then(|value| match value {
         VmValue::String(text) => Some(text.to_string()),
         _ => None,
@@ -242,7 +242,7 @@ fn apply_prompt_mode_structured_transport(args: &mut [VmValue], schema: &VmValue
     }
 }
 
-fn install_prompt_mode_validation(
+pub(crate) fn install_prompt_mode_validation(
     mut opts: crate::llm::api::LlmCallOptions,
     schema: &VmValue,
 ) -> crate::llm::api::LlmCallOptions {
@@ -893,7 +893,7 @@ mod tests {
             served_fast: false,
             blocks: Vec::new(),
             logprobs: Vec::new(),
-            telemetry: crate::llm::api::ProviderTelemetry::default(),
+            telemetry: Box::default(),
         };
         let usage = result.usage();
         SchemaLoopOutcome {
@@ -930,6 +930,7 @@ mod tests {
             "claude-sonnet-4-20250514",
             1_000,
             1_000,
+            crate::llm::cost::settlement_now(),
         )
         .expect("catalog-priced result");
 

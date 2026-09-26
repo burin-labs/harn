@@ -28,8 +28,8 @@ pub use stdlib_metadata::{
 pub use typechecker::{
     block_definitely_exits, canonical_predicate_type, format_type, stmt_definitely_exits,
     substitute_type_expr, BindingTypeInfo, DiagnosticDetails, DiagnosticSeverity, InlayHintInfo,
-    NamespaceImportBinding, PredicateModelRoute, PredicateSite, TypeCheckFacts, TypeChecker,
-    TypeDiagnostic,
+    NamespaceImportBinding, PredicateModelRoute, PredicateQuestionKind, PredicateQuestionSpec,
+    PredicateSite, PredicateSiteKind, TypeCheckFacts, TypeChecker, TypeDiagnostic,
 };
 
 pub use builtin_signatures::install_builtin_manifest;

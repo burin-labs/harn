@@ -118,6 +118,12 @@ pub struct ControlEvent {
     /// The steer text itself. Absent for a stop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// The objective this steer replaced the run's goal with, when the
+    /// caller retargeted the run rather than amending it. Absent for a
+    /// plain steer, which adds an instruction and leaves the objective and
+    /// its acceptance items standing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<ControlGoal>,
     /// Who acted, as reported by the surface.
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub actor: Value,
@@ -126,6 +132,40 @@ pub struct ControlEvent {
     /// store written before this schema existed must set `heuristic`,
     /// so a guess can never be mistaken for a record.
     pub provenance: ControlProvenance,
+}
+
+/// A retarget carried by an accepted steer.
+///
+/// A plain steer is an amendment: the run keeps its objective and every
+/// acceptance item frozen under it, and the steer is one more obligation
+/// on top. A steer carrying a `ControlGoal` replaces the objective, and
+/// every success criterion or acceptance item declared under the previous
+/// objective is retired: no longer owed, and not satisfied either. The
+/// row that carries it is the replay record of that transition.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlGoal {
+    /// The run's objective from this steer on.
+    pub objective: String,
+}
+
+impl ControlGoal {
+    /// Validate a wire value once, at the surface that accepts it.
+    ///
+    /// The objective must be non-blank: an empty objective would retire
+    /// every acceptance item and leave the run with nothing to converge
+    /// on, which reads as a completed run rather than a malformed control.
+    pub fn parse(value: &Value) -> Result<Self, String> {
+        let goal: Self = serde_json::from_value(value.clone())
+            .map_err(|error| format!("goal must be {{\"objective\": string}}: {error}"))?;
+        let objective = goal.objective.trim();
+        if objective.is_empty() {
+            return Err("goal.objective must be a non-empty string".to_string());
+        }
+        Ok(Self {
+            objective: objective.to_string(),
+        })
+    }
 }
 
 /// Whether a control fact was read from a written record or guessed.
@@ -158,6 +198,7 @@ impl ControlEvent {
             delivery_mode: None,
             message_id: None,
             text: None,
+            goal: None,
             actor: Value::Null,
             provenance: ControlProvenance::Recorded,
         }
@@ -186,9 +227,16 @@ impl ControlEvent {
             delivery_mode: Some(delivery_mode),
             message_id: Some(message_id.into()),
             text: Some(text.into()),
+            goal: None,
             actor: Value::Null,
             provenance: ControlProvenance::Recorded,
         }
+    }
+
+    /// Attach the retarget an accepted steer carried.
+    pub fn with_goal(mut self, goal: Option<ControlGoal>) -> Self {
+        self.goal = goal;
+        self
     }
 
     pub fn with_actor(mut self, actor: Value) -> Self {
@@ -251,6 +299,38 @@ mod tests {
         assert_eq!(read.delivery_mode.as_deref(), Some("finish_step"));
         assert_eq!(read.provenance, ControlProvenance::Recorded);
         assert!(read.action.is_delivered_to_model());
+    }
+
+    #[test]
+    fn a_retargeting_steer_round_trips_its_goal() {
+        let goal = ControlGoal::parse(&serde_json::json!({"objective": "  reply BRAVO  "}))
+            .expect("valid goal");
+        let event = ControlEvent::injection(
+            "session/inject",
+            "ctl-3",
+            "accepted",
+            "steer",
+            "finish_step",
+            "msg_inj_ghi",
+            "change of plan",
+        )
+        .with_goal(Some(goal));
+        let read = ControlEvent::from_payload(&event.to_payload()).expect("typed read");
+        assert_eq!(
+            read.goal.map(|goal| goal.objective).as_deref(),
+            Some("reply BRAVO")
+        );
+    }
+
+    #[test]
+    fn a_goal_without_an_objective_is_refused() {
+        assert!(ControlGoal::parse(&serde_json::json!({"objective": "   "})).is_err());
+        assert!(ControlGoal::parse(&serde_json::json!({})).is_err());
+        assert!(ControlGoal::parse(&serde_json::json!("reply BRAVO")).is_err());
+        assert!(
+            ControlGoal::parse(&serde_json::json!({"objective": "x", "retire": []})).is_err(),
+            "an unknown goal field must be refused, not silently dropped"
+        );
     }
 
     #[test]

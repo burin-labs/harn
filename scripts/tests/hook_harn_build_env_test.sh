@@ -96,10 +96,11 @@ cp "$repo_root/scripts/lib/cargo_env.sh" "$hook_repo/scripts/lib/cargo_env.sh"
 cp "$repo_root/scripts/lib/harn_bin.sh" "$hook_repo/scripts/lib/harn_bin.sh"
 cp "$repo_root/scripts/lib/harn_bin_freshness.sh" \
   "$hook_repo/scripts/lib/harn_bin_freshness.sh"
+cp "$repo_root/scripts/lib/sha256.sh" "$hook_repo/scripts/lib/sha256.sh"
 cp "$repo_root/scripts/harn_bin.sh" "$hook_repo/scripts/harn_bin.sh"
 cp "$repo_root/scripts/cargo_with_worktree_build_dir.sh" \
   "$hook_repo/scripts/cargo_with_worktree_build_dir.sh"
-git -C "$hook_repo" init --quiet
+git -C "$hook_repo" init -b main --quiet
 git -C "$hook_repo" config user.name 'Harn Hook Test'
 git -C "$hook_repo" config user.email 'harn-hook-test@example.invalid'
 git -C "$hook_repo" config commit.gpgsign false

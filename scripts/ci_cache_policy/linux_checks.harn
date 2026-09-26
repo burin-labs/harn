@@ -83,16 +83,6 @@ pub fn producer_security_timeout_expression() -> string {
     + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_SECURITY_MINUTES} || 16 }}"
 }
 
-/**
- * Cover setup and both sequential builds, plus five minutes for dispatch and
- * upload. The job has another five minutes for checkout and terminal cleanup.
- */
-pub fn security_wait_minutes() -> int {
-  return PRODUCER_SETUP_OVERHEAD_MINUTES + PRODUCER_OWNED_CLI_MINUTES
-    + PRODUCER_OWNED_SECURITY_MINUTES
-    + 5
-}
-
 pub fn producer_cli_timeout_expression() -> string {
   return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 10 }}"
 }
@@ -774,10 +764,11 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
   const ready_command = trim(ready_step?.run ?? "")
   if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
-      != to_string(security_wait_minutes() + 5)
+      != "15"
     || trim(ready_step?.env?.HARN_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
-      != to_string(security_wait_minutes() * 6)
-    || ready_needs != ["changes"]
+      != "6"
+    || ready_needs != ["changes", "rust-check-inputs"]
+    || !contains(trim(ready_job?.if ?? ""), "needs.rust-check-inputs.result == 'success'")
     || trim(ready_job?.permissions?.actions ?? "") != "read"
     || trim(ready_job?.permissions?.contents ?? "")
       != "read"
@@ -787,7 +778,7 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
     || len(matching_steps(ready_job, PERSISTENT_SCCACHE_ACTION))
       > 0
     || len(matching_steps(ready_job, RUST_CACHE_ACTION)) > 0 {
-    return ["ci.yml:security-tests-ready must be the bounded free-hosted security artifact barrier"]
+    return ["ci.yml:security-tests-ready must wait for the security archive producer to finish"]
   }
   return []
 }
@@ -837,7 +828,7 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
     || !contains(rust_security_if, "needs.security-tests-ready.result == 'success'") {
     errors = errors
       + [
-        "ci.yml:rust-security must consume the live exact-commit security archive without waiting for producer completion",
+        "ci.yml:rust-security must consume the exact-commit security archive through its ready barrier",
       ]
   }
   for consumer_name in LIVE_ARTIFACT_CONSUMERS {
@@ -869,12 +860,81 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
   return errors
 }
 
+/** A `needs` entry may name a job the workflow does not define; it has no needs. */
+fn job_needs(job: dict?) -> list<string> {
+  const needs = job?.needs ?? []
+  if type_of(needs) == "string" {
+    return [needs]
+  }
+  return needs.map({ need -> to_string(need) }).to_list()
+}
+
+/**
+ * A job whose `if` names no status function implicitly requires `success()`
+ * of every job it depends on, directly or through another job. A job gated on
+ * the triggering event is skipped on the other events, so every such job
+ * downstream of it is skipped too, even when its direct needs succeeded. That
+ * skipped the Linux security proof on every push to main. Only a job that is
+ * itself event-gated may omit the status function, since it already decides
+ * its own events.
+ */
+pub fn event_skip_propagation_errors(workflow: dict) -> list<string> {
+  const jobs = workflow?.jobs ?? {}
+  // A job whose own condition names a status function is not skipped by a
+  // skipped ancestor, so its event clause cannot be what skips a descendant.
+  let event_gated: dict<string, bool> = {}
+  for name in jobs.keys() {
+    const condition = to_string(jobs[name]?.if ?? "")
+    if contains(condition, "github.event_name")
+      && regex_match(r"(always|cancelled|failure|success)\(\)", condition) == nil {
+      event_gated[name] = true
+    }
+  }
+  let errors: list<string> = []
+  for name in jobs.keys().sorted() {
+    if event_gated[name] ?? false {
+      continue
+    }
+    if regex_match(r"(always|cancelled|failure|success)\(\)", to_string(jobs[name]?.if ?? ""))
+      != nil {
+      continue
+    }
+    let seen: dict<string, bool> = {}
+    let pending = job_needs(jobs[name])
+    let gated_ancestors: list<string> = []
+    while len(pending) > 0 {
+      const need = to_string(pending[0])
+      pending = pending.slice(1)
+      if seen[need] ?? false {
+        continue
+      }
+      seen[need] = true
+      if event_gated[need] ?? false {
+        gated_ancestors = gated_ancestors.appending(need)
+      }
+      pending = pending + job_needs(jobs[need])
+    }
+    if len(gated_ancestors) > 0 {
+      errors = errors
+        + [
+          "ci.yml:"
+            + name
+            + " is skipped whenever "
+            + join(gated_ancestors.sorted(), ", ")
+            + " is skipped for the event; start its if with !cancelled()",
+        ]
+    }
+  }
+  return errors
+}
+
 fn live_artifact_handoff_errors(workflow: dict) -> list<string> {
   return producer_artifact_order_errors(workflow)
     + artifact_ready_barrier_errors(workflow)
     + security_ready_barrier_errors(workflow)
     + harn_audit_overlap_errors(workflow)
     + artifact_consumer_handoff_errors(workflow)
+    + event_skip_propagation_errors(workflow)
 }
 
 fn walltime_report_errors(workflow: dict) -> list<string> {

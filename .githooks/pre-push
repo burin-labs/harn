@@ -253,14 +253,27 @@ fi
 # before merge; this one has no such lane, so a version that skipped by default
 # would prove nothing. It costs about three minutes, and only on a push that
 # touches one of the files the registry records a read in.
+#
+# The census imports `std/dev/agent_gates` from the binary that runs it, so only
+# this worktree's own build can check this worktree's registry. A release on
+# PATH or a stale build fails on its own stdlib (a missing module, a registry
+# schema error), which is not a census verdict. The registry selector reuses a
+# proven-fresh worktree binary and builds one when the push changed a binary
+# input, which a moved stdlib reader always is.
 if ! hook_agent_gate_sources_changed "$changed" "$(git rev-parse --show-toplevel)"; then
   echo "=== Pre-push: skipping agent gate census (no recorded reader sources changed) ==="
 else
   echo "=== Pre-push: checking the agent gate census ==="
-  agent_gate_harn=$(hook_find_existing_harn_bin || true)
+  if ! hook_export_registry_harn_bin "$changed"; then
+    echo "    UNMEASURED: no verified runtime for the branch's agent gate census." >&2
+    echo "    Run 'make build' after any existing lane build finishes, or supply a verified HARN_BIN." >&2
+    exit 1
+  fi
+  agent_gate_harn=$HARN_BIN
   if [ -z "$agent_gate_harn" ]; then
-    echo "    SKIPPED: no harn binary on this machine (run 'make build' or install a release)." >&2
-    echo "    This is a skip, not a pass; the census still runs on the next push to main." >&2
+    echo "    UNMEASURED: no verified runtime for the branch's agent gate census." >&2
+    echo "    Run 'make build' after any existing lane build finishes, or supply a verified HARN_BIN." >&2
+    exit 1
   elif ! hook_run_agent_gate_census "$agent_gate_harn"; then
     exit 1
   else

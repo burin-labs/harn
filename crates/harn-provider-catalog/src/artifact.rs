@@ -27,6 +27,8 @@ pub struct ProviderCatalogArtifact {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogProvider {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform_fee_percent: Option<f64>,
     pub id: String,
     pub display_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]

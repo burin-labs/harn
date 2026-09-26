@@ -69,6 +69,102 @@ fn spawn_acp(temp: &TempDir, fixture: &str) -> StdioJsonRpcClient {
     StdioJsonRpcClient::spawn("harn serve acp", command)
 }
 
+fn prompt_once(client: &mut StdioJsonRpcClient, workspace: &Path) -> (Vec<JsonValue>, JsonValue) {
+    let (_, init) = send_request(
+        client,
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+    );
+    assert!(init["error"].is_null(), "ACP initialize: {init:#}");
+    let (_, created) = send_request(
+        client,
+        json!({
+            "jsonrpc":"2.0", "id":2, "method":"session/new",
+            "params":{"cwd":workspace,"environmentPolicy":{"kind":"isolated","grants":[]}}
+        }),
+    );
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("ACP session ID");
+    select_code_mode(client, session_id);
+    send_request(
+        client,
+        json!({
+            "jsonrpc":"2.0", "id":3, "method":"session/prompt",
+            "params":{"sessionId":session_id,"prompt":[{"type":"text","text":"read"}]}
+        }),
+    )
+}
+
+#[test]
+fn acp_cli_read_only_root_grants_exact_external_asset_reads() {
+    let _guard = lock_acp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    let workspace = temp.path().join("workspace");
+    let assets = temp.path().join("assets");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&assets).unwrap();
+    let asset = assets.join("prompt.txt");
+    fs::write(&asset, "external-asset-reached").unwrap();
+    write_file(
+        &workspace,
+        "agent.harn",
+        &format!(
+            "pub pipeline main(harness: Harness) {{ harness.stdio.println(json_stringify({{policy: harness.runtime.current_policy(), content: harness.fs.read_text(\"{}\")}})) }}\n",
+            asset.display()
+        ),
+    );
+    let spawn = |grant: bool| {
+        let mut command = harn_e2e_command();
+        command.current_dir(&workspace).args(["serve", "acp"]);
+        if grant {
+            command.arg("--read-only-root").arg(&assets);
+        }
+        command.arg("agent.harn");
+        StdioJsonRpcClient::spawn("harn serve acp", command)
+    };
+
+    let mut baseline = spawn(false);
+    let (baseline_updates, baseline_response) = prompt_once(&mut baseline, &workspace);
+    assert_eq!(
+        baseline_response["result"]["stopReason"], "end_turn",
+        "{baseline_response:#}"
+    );
+    let baseline_message = baseline_updates
+        .iter()
+        .find_map(|update| {
+            (update["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
+                .then(|| update["params"]["update"]["content"]["text"].as_str())
+                .flatten()
+        })
+        .expect("baseline policy receipt");
+    let baseline_receipt: JsonValue = serde_json::from_str(baseline_message.trim()).unwrap();
+    assert_eq!(baseline_receipt["content"], "external-asset-reached");
+    assert!(baseline_receipt["policy"].is_null(), "{baseline_receipt:#}");
+    baseline.shutdown_expect_success();
+
+    let mut granted = spawn(true);
+    let (granted_updates, granted_response) = prompt_once(&mut granted, &workspace);
+    assert_eq!(
+        granted_response["result"]["stopReason"], "end_turn",
+        "{granted_response:#}"
+    );
+    let granted_message = granted_updates
+        .iter()
+        .find_map(|update| {
+            (update["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
+                .then(|| update["params"]["update"]["content"]["text"].as_str())
+                .flatten()
+        })
+        .expect("granted policy receipt");
+    let granted_receipt: JsonValue = serde_json::from_str(granted_message.trim()).unwrap();
+    assert_eq!(granted_receipt["content"], "external-asset-reached");
+    assert_eq!(
+        granted_receipt["policy"]["read_only_roots"],
+        json!([fs::canonicalize(&assets).unwrap()])
+    );
+    granted.shutdown_expect_success();
+}
+
 /// Send one client→agent request and read until its response, answering the
 /// agent's `host/capabilities` request inline and collecting `session/update`
 /// notifications along the way. Returns `(notifications, response)`.
@@ -170,7 +266,7 @@ require_declared_operations_served = {fail_closed}
             "jsonrpc":"2.0",
             "id":2,
             "method":"session/new",
-            "params":{"cwd":temp.path()}
+            "params":{"cwd":temp.path(), "environmentPolicy": {"kind": "isolated", "grants": []}}
         }),
     );
     let session_id = created["result"]["sessionId"].as_str().unwrap();

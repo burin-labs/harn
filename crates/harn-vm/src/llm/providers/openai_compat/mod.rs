@@ -99,6 +99,25 @@ impl OpenAiCompatibleProvider {
             provider_name: name,
         }
     }
+
+    fn transform_request_with_caps(
+        body: &mut serde_json::Value,
+        caps: &crate::llm::capabilities::Capabilities,
+    ) {
+        if let Some(object) = body.as_object_mut() {
+            let allowed_field =
+                if caps.honors_chat_template_kwargs || caps.honors_preserve_thinking_kwarg {
+                    Some(chat_template_options_field(caps))
+                } else {
+                    None
+                };
+            for field in ["chat_template_kwargs", "chat_template_args"] {
+                if allowed_field != Some(field) {
+                    object.remove(field);
+                }
+            }
+        }
+    }
 }
 
 impl LlmProvider for OpenAiCompatibleProvider {
@@ -112,19 +131,8 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .get("model")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        let caps = crate::llm::capabilities::lookup(&self.provider_name, model);
-        if let Some(object) = body.as_object_mut() {
-            let allowed_field = if caps.honors_chat_template_kwargs {
-                Some(chat_template_options_field(&caps))
-            } else {
-                None
-            };
-            for field in ["chat_template_kwargs", "chat_template_args"] {
-                if allowed_field != Some(field) {
-                    object.remove(field);
-                }
-            }
-        }
+        let caps = crate::llm::managed_supply::capabilities_for(&self.provider_name, model);
+        Self::transform_request_with_caps(body, &caps);
     }
 
     // `supports_defer_loading` and `native_tool_search_variants` are
@@ -148,6 +156,13 @@ impl OpenAiCompatibleProvider {
     /// Build the OpenAI-compatible request body.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
         let caps = crate::llm::managed_supply::capabilities_for(&opts.provider, &opts.model);
+        Self::build_request_body_with_caps(opts, &caps)
+    }
+
+    pub(crate) fn build_request_body_with_caps(
+        opts: &LlmRequestPayload,
+        caps: &crate::llm::capabilities::Capabilities,
+    ) -> serde_json::Value {
         // Models that reserve `<tool_call>` as a special token collapse when
         // they meet it as instructional/wrapper text. Remap the colliding
         // delimiters to a non-special wire form on every outgoing message
@@ -283,14 +298,14 @@ impl OpenAiCompatibleProvider {
                     // That skip is a catalog claim, so the probe stands it down.
                     let skip_disable = may_shape
                         && is_openrouter_reasoning_disable(&reasoning)
-                        && (!model_declares_reasoning(&caps) || !caps.reasoning_disable_supported);
+                        && (!model_declares_reasoning(caps) || !caps.reasoning_disable_supported);
                     if !skip_disable {
                         body["reasoning"] = reasoning;
                     }
                 }
             }
             Some("enabled") => {
-                if let Some(reasoning) = enabled_reasoning_config(&opts.thinking, &caps) {
+                if let Some(reasoning) = enabled_reasoning_config(&opts.thinking, caps) {
                     body["reasoning"] = reasoning;
                 }
             }
@@ -402,48 +417,54 @@ impl OpenAiCompatibleProvider {
                 body["tools"] = serde_json::Value::Array(provider_request_tools(opts, tools));
             }
         }
-        if has_native_tools && !caps.supports_parallel_tool_calls {
-            body["parallel_tool_calls"] = serde_json::json!(false);
-        }
         if has_native_tools {
             if let Some(parallel) = opts.parallel_tool_calls {
-                body["parallel_tool_calls"] = serde_json::json!(parallel);
+                if caps.supports_parallel_tool_calls {
+                    body["parallel_tool_calls"] = serde_json::json!(parallel);
+                }
+            }
+            if caps.requires_parallel_tool_calls_false {
+                body["parallel_tool_calls"] = serde_json::json!(false);
             }
         }
         if let Some(ref tc) = opts.tool_choice {
             if let Some(tool_choice) =
-                normalize_tool_choice_for_capabilities(tc, &caps, has_native_tools)
+                normalize_tool_choice_for_capabilities(tc, caps, has_native_tools)
             {
                 body["tool_choice"] = tool_choice;
             }
         }
-        if caps.honors_chat_template_kwargs {
+        let mut chat_template_kwargs = if caps.honors_chat_template_kwargs {
             // Always set explicitly for compatible Qwen/DeepSeek
             // templates: some default thinking on when absent, making
             // fast tool-call turns waste budget on reasoning.
             // When prefill is present, continue the final assistant
             // message instead of starting a fresh assistant turn.
-            let mut chat_template_kwargs = serde_json::json!({
+            let mut kwargs = serde_json::json!({
                 "enable_thinking": opts.thinking.is_enabled(),
             });
             if opts.prefill.is_some() {
-                chat_template_kwargs["add_generation_prompt"] = serde_json::json!(false);
-                chat_template_kwargs["continue_final_message"] = serde_json::json!(true);
+                kwargs["add_generation_prompt"] = serde_json::json!(false);
+                kwargs["continue_final_message"] = serde_json::json!(true);
             }
-            // Qwen3.6 introduced `preserve_thinking`. When the capability
-            // matrix says the current (provider, model) pair honours it,
-            // emit the flag so the chat template carries `<think>` blocks
-            // across turns.
-            if caps.preserve_thinking {
-                chat_template_kwargs["preserve_thinking"] = serde_json::json!(true);
-            }
-            let field = chat_template_options_field(&caps);
+            Some(kwargs)
+        } else {
+            None
+        };
+        // Model support and wire support are separate facts. A route may
+        // preserve thinking in its model while rejecting template kwargs.
+        if caps.preserve_thinking && caps.honors_preserve_thinking_kwarg {
+            chat_template_kwargs.get_or_insert_with(|| serde_json::json!({}))
+                ["preserve_thinking"] = serde_json::json!(true);
+        }
+        if let Some(chat_template_kwargs) = chat_template_kwargs {
+            let field = chat_template_options_field(caps);
             body[field] = chat_template_kwargs;
         }
         crate::llm::prompt_cache::apply_prompt_cache_breakpoint(
             &mut body,
             opts.cache,
-            &caps,
+            caps,
             serde_json::json!({"type": "ephemeral"}),
         );
         crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);
@@ -456,22 +477,10 @@ impl OpenAiCompatibleProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        // Responses-API routing (explicit `api_mode: "responses"` and the
-        // `*-codex` responses-only auto-route) is owned by the shared
-        // `vm_call_llm_api` transport funnel, which every OpenAI path passes
-        // through (built-in `openai` is not `provider_register`-ed, so it takes
-        // the unregistered fallback and never reaches here). This guard stays
-        // as defense-in-depth for any registered OpenAI-family provider.
-        if request.api_mode == crate::llm::api::LlmApiMode::Responses
-            || crate::llm::managed_supply::capabilities_for(&request.provider, &request.model)
-                .chat_completions_unsupported
-        {
-            return crate::llm::providers::OpenAiResponsesProvider::call(request, delta_tx).await;
-        }
-
         let dialect = crate::llm::api::DialectContract::for_request(request);
-        let mut body = dialect.build_request_body(request);
-        self.transform_request(&mut body);
+        let caps = crate::llm::managed_supply::capabilities_for(&request.provider, &request.model);
+        let mut body = dialect.build_openai_request_body_with_caps(request, &caps);
+        Self::transform_request_with_caps(&mut body, &caps);
 
         // For reserved-tool-call-token models the prompt was sent with the
         // delimiters remapped (see `build_request_body`). The streamed live
@@ -480,9 +489,7 @@ impl OpenAiCompatibleProvider {
         // mapped back to canonical in the shared transport funnel
         // (`vm_call_llm_api_with_body`), which is the single boundary covering
         // every route — registered and unregistered, streaming and not.
-        let remap_tool_call =
-            crate::llm::managed_supply::capabilities_for(&request.provider, &request.model)
-                .reserved_tool_call_token;
+        let remap_tool_call = caps.reserved_tool_call_token;
         let delta_tx = if remap_tool_call {
             delta_tx.map(canonicalizing_delta_tx)
         } else {

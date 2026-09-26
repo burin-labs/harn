@@ -153,12 +153,7 @@ impl VertexProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|error| {
-                vm_err(format!(
-                    "vertex API error: {}",
-                    crate::egress::redact_reqwest_error(&error)
-                ))
-            })?;
+            .map_err(|error| crate::llm::api::reqwest_send_error("vertex", "API", error))?;
         if !response.status().is_success() {
             return Err(crate::llm::api::err_for_non_success_with_dialect(
                 dialect, "vertex", response,
@@ -267,10 +262,7 @@ async fn exchange_service_account_token(path: &str) -> Result<String, VmError> {
         .send()
         .await
         .map_err(|error| {
-            vm_err(format!(
-                "service account token exchange failed: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))
+            crate::llm::api::reqwest_send_error("vertex", "service account token exchange", error)
         })?;
     if !response.status().is_success() {
         let status = response.status();

@@ -1,0 +1,8 @@
+import { calibration_report } from "std/eval/calibration"
+
+fn main(harness: Harness) {
+  const rows = json_parse(harness.fs.read_text(argv[0]))
+  const report = calibration_report(rows, {thresholds: [0.0, 0.65, 0.9], seed: 8543})
+  require report.kind == "report", json_stringify(report)
+  harness.stdio.print(json_stringify(report))
+}

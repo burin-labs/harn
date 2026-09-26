@@ -455,6 +455,17 @@ pub(super) fn dump_llm_request(
             record_served_message_definition(message_id);
         }
     }
+    for definition in served_context_receipts::output_schema_definitions(opts, &payload) {
+        let Some(schema_id) = definition
+            .get("content_hash")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        if output_schema_needs_definition(schema_id) && append_llm_transcript_entry(&definition) {
+            record_output_schema_definition(schema_id);
+        }
+    }
 
     let structural_experiment = opts
         .applied_structural_experiment

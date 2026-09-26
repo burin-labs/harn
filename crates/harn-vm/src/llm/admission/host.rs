@@ -16,7 +16,10 @@ impl ConservativeLlmBudget {
     /// allowance when called from an existing execution.
     pub fn new(ceiling_usd: f64) -> Result<Self, VmError> {
         let active = SCOPE.with(|slot| slot.borrow().clone());
-        let mut scope = if active.host_owned || crate::current_execution_scope().is_some() {
+        let mut scope = if active.host_owned
+            || active.machine.is_some()
+            || crate::current_execution_scope().is_some()
+        {
             active
         } else {
             AdmissionScope::default()
@@ -79,6 +82,17 @@ impl ConservativeLlmBudget {
 
     fn validate_parent(&self) -> Result<(), VmError> {
         let active = SCOPE.with(|slot| slot.borrow().clone());
+        if active.machine.as_ref().is_some_and(|machine| {
+            self.scope
+                .machine
+                .as_ref()
+                .is_none_or(|owned| !owned.same_scope(machine))
+        }) {
+            return Err(error(
+                DenialKind::ScopeUnavailable,
+                "a host allowance cannot discard the active machine spend budget",
+            ));
+        }
         if (active.host_owned || crate::current_execution_scope().is_some())
             && !Arc::ptr_eq(&active.ledger, &self.scope.ledger)
         {

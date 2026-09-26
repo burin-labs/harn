@@ -2,13 +2,12 @@ name: Publish release
 
 # Fires on two triggers:
 #
-#   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path. The
-#      bump-fleet watcher creates the tag only after the exact Release PR
-#      squash-merges, at that merged commit on main. This trigger ships
-#      crates.io from the immutable tag while the binary workflow creates
-#      the GitHub release from the same merged source.
-#      The tag push (under the harn-release-bot App identity) also
-#      cascades to build-release-binaries.yml for tarballs + container.
+#   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path.
+#      promote-release.yml creates the tag, at the version commit on main,
+#      when it publishes the GitHub release from the files that commit's
+#      build-release-binaries.yml run built and checked. This trigger ships
+#      crates.io from that immutable tag. Release binaries are not built
+#      here or on the tag.
 #
 #   2. workflow_dispatch — manual recovery for the partial-failure case
 #      (tag pushed but crates.io publish was incomplete). With no
@@ -18,10 +17,10 @@ name: Publish release
 #      crates so manual re-fire is idempotent.
 #
 # Runs ./scripts/release_ship.sh --finalize, which dry-run publishes,
-# tags (no-op if already at HEAD), and publishes to crates.io. The
-# build-release-binaries.yml cascade creates/updates the GitHub release
-# only after the binary assets are ready, so a failed binary build cannot
-# leave a visible release page with zero artifacts.
+# tags (no-op if already at HEAD), and publishes to crates.io. Promotion
+# creates the GitHub release only from a candidate run whose files passed
+# every release check, so a failed binary build cannot leave a visible
+# release page with zero artifacts.
 #
 # Audit is skipped by default (RELEASE_FINALIZE_REAUDIT=0): the
 # merge-queue CI of the just-landed Release PR ran the same gates a
@@ -286,17 +285,13 @@ jobs:
           else
             DRIFT=false
             # No version drift on push-to-main: tag was already published
-            # by the tag-push trigger of this workflow (or by the
-            # build-release-binaries.yml tag trigger for the binaries).
-            # Observe release assets for operator diagnostics, but do
-            # not treat missing binary assets as Cargo publish drift.
-            # The tag-triggered build-release-binaries workflow owns
-            # archives, checksum sidecars, GitHub release finalization,
-            # and container publication. During a healthy main-anchored
-            # release, main can advance while that binary workflow is
-            # still uploading assets; re-running release_ship.sh from a
-            # main-push publish-release job cannot build those assets and
-            # only creates redundant release retries.
+            # by the tag-push trigger of this workflow. Observe release
+            # assets for operator diagnostics, but do not treat missing
+            # binary assets as Cargo publish drift. Promotion owns the
+            # archives, checksum sidecars, and the GitHub release;
+            # re-running release_ship.sh from a main-push publish-release
+            # job cannot produce those assets and only creates redundant
+            # release retries.
             if [[ "$EVENT_NAME" == "push" ]]; then
               # Distinguish a genuine incomplete asset set (warn) from a
               # transient or eventually-consistent query failure. The old
@@ -306,7 +301,7 @@ jobs:
               # a spurious red X on a routine main push right after the tag
               # publish (harn#2964: a `gh release view` raced the release becoming
               # visible). Retry briefly; if assets are still missing, leave DRIFT
-              # false and let build-release-binaries or the release harness recover.
+              # false and let promotion recover.
               RELEASE_ASSETS="__query_failed__"
               for _ in 1 2 3; do
                 if RELEASE_ASSETS="$(gh release view "$LATEST_TAG" --json assets --jq '.assets[].name' 2>/dev/null)"; then
@@ -337,7 +332,7 @@ jobs:
                 if (( ${#MISSING_ASSETS[@]} == 0 )); then
                   echo "::notice::$LATEST_TAG already published with all expected assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended main-anchored behavior."
                 else
-                  printf '::warning::%s is missing release assets: %s. Publish job will skip because build-release-binaries owns binary asset recovery; if this is not an active tag build, dispatch build-release-binaries.yml for %s.\n' "$LATEST_TAG" "${MISSING_ASSETS[*]}" "$LATEST_TAG"
+                  printf '::warning::%s is missing release assets: %s. Publish job will skip because promotion owns release assets; re-run promotion for %s from its candidate run.\n' "$LATEST_TAG" "${MISSING_ASSETS[*]}" "$LATEST_TAG"
                 fi
               fi
             else
@@ -420,7 +415,7 @@ jobs:
           cache-bin: false
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         continue-on-error: true
         with:
           tool: nextest@0.9.132

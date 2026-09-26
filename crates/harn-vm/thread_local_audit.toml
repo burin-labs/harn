@@ -217,7 +217,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/llm/agent_observe/transcript_ambient.rs"
-statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_CONTEXT_MANIFEST_HASH", "LAST_TOOL_SCHEMAS_HASH", "EMITTED_CAPABILITY_SNAPSHOT_IDS", "EMITTED_SERVED_MESSAGE_IDS", "TRANSCRIPT_DIR_STACK"]
+statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_CONTEXT_MANIFEST_HASH", "LAST_TOOL_SCHEMAS_HASH", "EMITTED_CAPABILITY_SNAPSHOT_IDS", "EMITTED_SERVED_MESSAGE_IDS", "EMITTED_OUTPUT_SCHEMA_IDS", "TRANSCRIPT_DIR_STACK"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -306,6 +306,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/llm/helpers/options/tool_choice.rs"
+statics = ["FORCED_TOOL_CHOICE_WARN_ONCE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/llm/provider.rs"
 statics = ["PROVIDER_NAMES", "DEFAULTS_REGISTERED"]
 category = "logical_task"
@@ -334,12 +340,6 @@ path = "src/llm/test_env.rs"
 statics = ["DEPTH"]
 category = "thread_private"
 plan = "thread_private_test"
-
-[[thread_local]]
-path = "src/llm/trace.rs"
-statics = ["LLM_TRACE", "LLM_TRACING_ENABLED"]
-category = "logical_task"
-plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/reasoning_receipt.rs"
@@ -376,7 +376,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/mcp_server/register.rs"
-statics = ["MCP_SERVE_REGISTRY", "MCP_SERVE_RESOURCES", "MCP_SERVE_RESOURCE_TEMPLATES", "MCP_SERVE_PROMPTS", "MCP_SERVE_METADATA"]
+statics = ["MCP_SERVE_REGISTRY", "MCP_SERVE_RESOURCES", "MCP_SERVE_RESOURCE_TEMPLATES", "MCP_SERVE_PROMPTS", "MCP_SERVE_METADATA", "MCP_SERVE_REJECTION"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 
@@ -717,6 +717,14 @@ plan = "thread_private_test"
 [[thread_local]]
 path = "src/stdlib/sandbox/mod.rs"
 statics = ["WARNED_KEYS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+# A re-entrancy guard set and cleared around the wrapper probe's own
+# synchronous `cargo` spawn on the same thread; nothing else reads it.
+[[thread_local]]
+path = "src/stdlib/sandbox/rustc_wrapper.rs"
+statics = ["PROBING"]
 category = "thread_private"
 plan = "thread_private_cache"
 

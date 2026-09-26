@@ -4,7 +4,42 @@ import "./plan"
 import "./support"
 import "./types"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v10"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v11"
+
+/**
+ * What one live case is charged against the cap when the runtime priced none
+ * of its usage.
+ *
+ * A live case that produced no runtime price is an accounting gap, not a
+ * spend of zero and not a reason to abandon the campaign. Charging a declared
+ * figure keeps the cap a true upper bound while the remaining units still get
+ * measured. The figure is deliberately far above what a probe of this shape
+ * can cost: these cases cap the response at a handful of tokens, and the most
+ * expensive catalogued route is orders of magnitude below this per call. It
+ * is an upper bound on purpose, so an unpriced run reaches the cap early
+ * rather than overrunning it.
+ */
+const UNPRICED_LIVE_CASE_FALLBACK_USD = 0.05
+
+/**
+ * Spend charged against the cap: what the runtime priced, plus the declared
+ * figure for every case it did not.
+ */
+pub fn provider_tool_probe_campaign_charged_usd(spend: dict) -> float {
+  return to_float(spend?.actual_usd ?? 0.0)
+    + to_float(spend?.unpriced_case_count ?? 0) * UNPRICED_LIVE_CASE_FALLBACK_USD
+}
+
+/**
+ * Whether the campaign may execute another live probe.
+ *
+ * The cap is the only thing that can say no. This is the loop's own
+ * decision, named so it can be stated directly rather than inferred from a
+ * campaign that did or did not keep going.
+ */
+pub fn provider_tool_probe_campaign_may_execute(spend: dict, max_cost_usd: float) -> bool {
+  return provider_tool_probe_campaign_charged_usd(spend) < max_cost_usd
+}
 
 pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbeCell>) -> dict {
   let actual_usd = 0.0
@@ -100,7 +135,11 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
         for trial in range(1, repeat + 1) {
           for format in behavior.tool_formats {
             const spend = provider_tool_probe_campaign_observed_spend(cells)
-            if budget_stopped || spend.unpriced_case_count > 0 || spend.actual_usd >= max_cost_usd {
+            // The cap is the only reason to stop. A case the runtime did not
+            // price is charged the declared figure and counted here, so an
+            // unpriced run still bounds its own spend instead of abandoning
+            // every remaining unit on the first one.
+            if budget_stopped || !provider_tool_probe_campaign_may_execute(spend, max_cost_usd) {
               budget_stopped = true
               probe_executions_excluded_by_budget = probe_executions_excluded_by_budget + 1
               continue
@@ -300,20 +339,32 @@ pub fn __estimated_spend(
     const observed = provider_tool_probe_campaign_observed_spend(cells)
     const unaccounted_probe_count = executable_probe_count - observed.request_attempt_count
     const accounting_complete = observed.unpriced_case_count == 0 && unaccounted_probe_count == 0
+    const charged_usd = provider_tool_probe_campaign_charged_usd(observed)
     return base
       + observed
       + {
         unaccounted_probe_count: unaccounted_probe_count,
         actual_usd_known: accounting_complete,
+        // What the cap was actually measured against, and the declared figure
+        // it was built from, so a charged estimate is never read back as a
+        // priced measurement.
+        charged_usd: charged_usd,
+        unpriced_case_fallback_usd: UNPRICED_LIVE_CASE_FALLBACK_USD,
+        unpriced_charged_usd: charged_usd - observed.actual_usd,
         accounting: if accounting_complete {
           "summed from runtime-priced per-case usage receipts"
         } else {
-          "stopped after a live case without runtime-priced usage; no further provider calls were made"
+          "runtime-priced receipts plus a declared figure for ${to_string(observed.unpriced_case_count)} case(s) the runtime did not price; the campaign continued"
         },
-        budget_status: if !accounting_complete {
-          "stopped_unpriced"
-        } else if observed.actual_usd >= max_cost_usd {
+        // Two different gaps reach this branch: a case the runtime did not
+        // price, and an executable probe that reported no attempt at all.
+        // Neither stops the campaign any more, so the status says the
+        // accounting is incomplete rather than claiming a stop that did not
+        // happen.
+        budget_status: if charged_usd >= max_cost_usd {
           "exhausted"
+        } else if !accounting_complete {
+          "accounting_incomplete"
         } else {
           "within_cap"
         },

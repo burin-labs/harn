@@ -1247,7 +1247,7 @@ the next model call:
   "projectionBasis": "observed",
   "headroomUsd": 0.56,
   "provider": "openai",
-  "model": "gpt-5.6-sol"
+  "model": "gpt-6-sol"
 }
 ```
 

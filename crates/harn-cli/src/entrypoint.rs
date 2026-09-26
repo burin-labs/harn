@@ -53,6 +53,11 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         return;
     }
 
+    if cli.argument_schema {
+        commands::argument_schema::run();
+        return;
+    }
+
     let Some(subcommand) = cli.command else {
         // `arg_required_else_help` already shows help when no args are
         // supplied. We only land here if a top-level flag (e.g. a
@@ -74,6 +79,14 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 process::exit(1);
             }
         }
+        Command::SelfToolchain(args) => match commands::upgrade::toolchain::run(args).await {
+            Ok(0) => {}
+            Ok(code) => process::exit(code),
+            Err(error) => {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        },
         Command::Dap(_) => run_dap_adapter(),
         Command::ConformanceHelper(args) => {
             if let Err(error) = commands::conformance_helper::run(args).await {
@@ -491,6 +504,18 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             }
         },
         Command::Doctor(args) => {
+            if let Some(crate::cli::DoctorCommand::Sandbox(sandbox)) = args.command {
+                #[cfg(feature = "hostlib")]
+                process::exit(commands::doctor_sandbox::run(sandbox.json));
+                #[cfg(not(feature = "hostlib"))]
+                {
+                    let _ = sandbox;
+                    eprintln!(
+                        "error: `harn doctor sandbox` needs a build with the hostlib feature"
+                    );
+                    process::exit(2);
+                }
+            }
             commands::doctor::run_doctor_with_options(commands::doctor::DoctorOptions {
                 json: args.json,
                 check_providers: args.check_providers,
@@ -505,6 +530,13 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             }
         }
         Command::Models(args) => commands::models::run(args).await,
+        Command::Llm(args) => {
+            let crate::cli::LlmCommand::Evaluate(args) = args.command;
+            let exit = commands::llm_evaluate::run(args).await;
+            if exit != 0 {
+                process::exit(exit);
+            }
+        }
         Command::Local(args) => commands::local::run(args).await,
         Command::Provider(args) => match args.command {
             ProviderCommand::Capabilities(capabilities) => {
@@ -745,6 +777,9 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 if code != 0 {
                     process::exit(code);
                 }
+            }
+            Some(EvalCommand::Calibrate(calibrate_args)) => {
+                process::exit(commands::eval_calibrate::run(calibrate_args).await)
             }
             Some(EvalCommand::ScopeTriage(scope_args)) => {
                 process::exit(commands::eval_scope_triage::run(scope_args).await)

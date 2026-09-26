@@ -7,6 +7,27 @@ To add a new subcommand or port an existing one off Rust, see
 machine-readable side of `--json` modes, see the
 [`harn --json` contract](./cli-json-contract.md).
 
+## harn self
+
+Use a released Harn binary for an exact before-and-after check without
+rebuilding an old tag:
+
+```bash
+harn self install v0.10.116
+harn self run --version v0.10.116 -- version --json
+harn self list
+harn self prune --keep 3
+```
+
+`install` downloads the platform release archive and requires its SHA256SUMS
+entry before caching the binary under `~/.harn/toolchains/<version>/`.
+`run` installs on a cache miss, verifies the cached binary, and prints its
+version and full source revision on stderr before forwarding the command and
+its exit status. A second invocation uses the cache without downloading.
+`prune` retains the newest `N` verified version directories and waits for an
+active invocation of a version before removing it. It does not change the
+installed `harn` on your PATH.
+
 ## harn run
 
 Execute a `.harn` file.
@@ -58,7 +79,7 @@ harn run --resume .harn/workers/worker_...json
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
 | `--allow-process-loopback` | Allow confined child processes to serve and connect over IPv4 or IPv6 loopback without opening remote egress. Supported on macOS; other local sandbox backends fail closed. |
-| `--allow-process-network` | Allow child network while retaining filesystem/process confinement. On macOS, child traffic stays denied until `HARN_EGRESS_*` or `harness.net.egress_policy(...)` configures an allow decision through the managed proxy. On other local platforms Harn does not attach that proxy; the grant raises the capability ceiling and children have unrestricted sockets. See [Managed child-process egress](./sandboxing.md#managed-child-process-egress). |
+| `--allow-process-network` | Allow child network while retaining filesystem/process confinement. On macOS, children reach public hosts through the managed proxy while private and loopback addresses stay denied; `HARN_EGRESS_*` or `harness.net.egress_policy(...)` narrows that default. On other local platforms Harn does not attach that proxy; the grant raises the capability ceiling and children have unrestricted sockets. See [Managed child-process egress](./sandboxing.md#managed-child-process-egress). |
 | `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--sandbox-write-root <path>` | Let spawned subprocesses write an extra root without granting Harn filesystem builtins access |
@@ -646,7 +667,7 @@ harn test tests/ --parallel --timing   # show progress and slowest tests/files
 harn test tests/ --parallel -j 4       # pin worker count (also via HARN_TEST_JOBS)
 harn test tests/ --affected-from origin/main --parallel # run changed modules' importer tests
 harn test tests/ --affected-from origin/main --plan # print the selection or full-suite fallback as JSON
-harn test tests/fast.harn --test-path tests/contracts.harn --parallel # one curated suite
+harn test tests/fast.harn tests/contracts.harn --parallel # one curated suite
 harn test tests/ --watch               # re-run on file changes
 harn test conformance --verbose        # show per-test timing
 harn test conformance --timing         # show timing summary without verbose failures
@@ -662,7 +683,7 @@ harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 Watch mode keeps immutable prepared module artifacts warm between reruns. Each
 test still receives a fresh VM, module state, and persistence root.
 
-| Flag | Description |
+| Argument or flag | Description |
 |---|---|
 | `--filter <pattern>` | Only run tests matching pattern |
 | `--target <url>` | Harness base URL for `harn test agents-conformance` |
@@ -673,7 +694,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
 | `--parallel` | Run a bounded worker pool. User tests run in-process; conformance tests run in isolated processes because each worker owns process-wide runtime state. |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). The default follows available CPU and memory, capped at 8. |
-| `--test-path <PATH>` | Add a user-test file or directory to the same compile-once suite. Repeatable; overlapping paths are deduplicated. |
+| `[PATH]...` | User-test files or directories in one compile-once suite. Overlapping paths are deduplicated. Special suite names such as `conformance` and `protocols` select their own optional fixture grammar. |
 | `--affected-from <GIT_REF>` | Run only user-test files affected since a Git ref. Uses Harn's resolved module graph and falls back to the complete suite for any unmodelled change. One-shot user suites only. |
 | `--plan` | With `--affected-from`, print a versioned JSON plan and exit without running tests. The plan reports `selected` or `full`, the reason, and the exact test files, so CI can size its execution matrix without weakening Harn's fallback policy. |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
@@ -1890,6 +1911,7 @@ consumers (IDE-host preflight, cloud-platform onboarding).
 harn doctor                # local checks; skips remote provider probes by default
 harn doctor --check-providers  # actively probe configured providers
 harn doctor --json         # versioned machine-readable output
+harn doctor sandbox        # measure which process confinement this host enforces
 ```
 
 Each check reports a red/yellow/green status (`fail` / `warn` / `ok`, plus
@@ -1909,6 +1931,33 @@ Local diagnostic subprocesses have a five-second execution deadline and a
 30-second deadline. A timed-out tool is reported as a failed probe; an
 unreadable target inventory is a warning, not an empty successful inventory.
 Process cleanup may add a short grace period after the deadline.
+
+### `harn doctor sandbox`
+
+`harn doctor` reports what the process-sandbox backend believes it can do.
+`harn doctor sandbox` measures it. It runs every case of the sandbox
+conformance contract through the same process tools an agent uses and prints
+one line per case:
+
+| Case | Holds when |
+|------|------------|
+| `fs.workspace_write_admitted` | a write inside the workspace lands |
+| `fs.outside_write_refused` | a write outside every writable root is refused |
+| `fs.outside_read_refused` | a read outside every readable root is refused |
+| `fs.session_temp_write_admitted` | a write to the child's own `TMPDIR` lands in the session temp dir |
+| `fs.sibling_temp_read_refused` | a file another process left in the host's shared temp dir is not readable |
+| `fs.atomic_replace_admitted` | a Foundation atomic write into the workspace lands (macOS only) |
+| `guardian.outside_write_refused` | a background child is confined like a direct one |
+| `env.undeclared_name_withheld` | no launcher variable the session did not declare reaches the child |
+| `guardian.undeclared_env_name_withheld` | the same, for a background child |
+| `unix_socket.bind_under_root` | a socket file binds under a named socket root |
+| `unix_socket.bind_under_root_with_network` | the same, when the policy also permits networking |
+| `unix_socket.bind_outside_root_refused` | a socket file outside every socket root is refused |
+
+A case that the backend cannot enforce on this host reads `not measured`, not
+`ok`. The command exits non-zero unless every case that applies on this
+platform was measured and holds. `--json` emits the same report in the
+standard envelope (`schemaVersion: 1`).
 
 ### What it checks
 
@@ -2313,6 +2362,19 @@ credentials, base URL overrides, and `HARN_LLM_CALLS_DISABLED`.
 Print resolved model metadata as JSON. For Ollama models, `--verify` probes
 `/api/tags` and checks the selected tag. `--warm` implies `--verify` and sends
 an empty `/api/generate` request to preload the matched tag.
+
+Hosted `context_window` and `catalog` metadata come from the selected provider's
+catalog entry, including aliases and wire model names. Local server discovery
+takes precedence over catalog limits; when discovery is unavailable, only an
+explicit catalog `runtime_context_window` is used for local routes. Unknown
+limits are reported as `null`.
+
+For Ollama-compatible providers, `context_window` is the `num_ctx` Harn configures
+for requests, using environment overrides and the selected provider's catalog
+defaults. It is not the architecture limit from `/api/show`. With `--verify`,
+`readiness.loaded_runner.context_length` separately reports the loaded runner's
+observed context; `readiness.context_drift` identifies a mismatch with the
+configured request limit.
 
 ```bash
 harn models info llama3.2:latest
@@ -2841,7 +2903,10 @@ default port, no query string, no fragment, and no trailing slash.
 `harn connect <provider>` reads authentication metadata for providers in the
 nearest `harn.toml` `[[providers]]` table. OAuth metadata starts the browser
 flow; flags such as `--client-id`, `--scope`, `--auth-url`, and `--token-url`
-override that metadata for one run.
+override that metadata for one run. An old OAuth credential that did not record
+its registered callback prompts for the exact URI. A missing authorization URL
+can be supplied at the next prompt or discovered from the resource. Unattended
+setup supplies the callback with `--redirect-uri <uri>`.
 
 For `auth_type = "api-key"` with one outbound `required_secrets` entry, the
 same command prompts without echoing the key. Inbound verification secrets do
@@ -3793,8 +3858,8 @@ the Harn `server_version`, stable `worker_id`, and `process_id`. Then call
 `max_execute_ms`, `parallel`, `fail_fast`, `jobs`, `shard`, `skill_dirs`, or
 `diagnose`. Each response includes the same worker identity, typed test
 summary, cumulative `run_count`, and cache counters before and after that run.
-The advertised `test_run.schema_version` is 2; summaries include the shared
-duration distribution plus per-case and aggregate module attribution.
+The advertised `test_run.schema_version` is 4; summaries include a separate
+skipped count, the shared duration distribution, and per-case and aggregate module attribution.
 `shutdown` returns the final run and cache receipt; closing stdin also stops the
 worker. Every test still receives fresh VM and module state; only reusable
 prepared module artifacts are retained by the worker session.
@@ -3808,6 +3873,9 @@ clients share the same transcript, EventLog, replay, and host-permission paths
 as ACP hosts. Use `--api-key <key>` / `HARN_SERVE_API_KEY`,
 `--hmac-secret <secret>` / `HARN_SERVE_HMAC_SECRET`, and the shared `--tls`
 flags to protect non-discovery routes.
+New sessions default to ACP `ask` mode. Use `--default-session-mode code` to
+select coding mode for sessions that omit `mode_id`; each create request can
+override the default with `mode_id` (`ask`, `architect`, `code`, or `shadow`).
 
 `harn serve mcp` uses the shared `harn-serve` dispatch core and maps each
 exported `pub fn` in the target module to one MCP tool. Tool schemas are
@@ -3859,6 +3927,11 @@ through `session/request_permission`. Use `--api-key <key>` /
 `authenticate` before protected session methods. WebSocket clients can also
 pre-authenticate the upgrade with `Authorization: Bearer <key>` or
 `X-API-Key`.
+Pass `--read-only-root <path>` once per host-owned asset directory that a
+session must read outside its project workspace. Harn canonicalizes each path
+and adds it to the per-turn file-read policy for stdio and WebSocket ACP.
+This is additive to the existing policy; it does not enable confinement or
+change child-process permissions. Unconfined `code` mode remains unconfined.
 Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
 executed `session/prompt`; use `--profile-json <path>` /
 `HARN_PROFILE_JSON=<path>` to append per-turn NDJSON records with

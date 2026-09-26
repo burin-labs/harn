@@ -12,12 +12,13 @@ use freshness_manifest::{
 use std::{
     env,
     ffi::OsString,
-    fs,
+    fs::{self, File},
+    io::Read,
     path::{Path, PathBuf},
     process::ExitCode,
 };
 
-const RECEIPT_FORMAT: &str = "harn-bin-freshness-v6";
+const RECEIPT_FORMAT: &str = "harn-bin-freshness-v7";
 const EVIDENCE_FORMAT: &str = "harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4";
 const CHECKER_FORMAT: &str = "harn-freshness-check-v4";
 
@@ -39,11 +40,22 @@ fn main() -> ExitCode {
             Path::new(manifest),
             Path::new(binary),
             Path::new(repo_root),
+            false,
         ),
+        [_, command, receipt, manifest, binary, repo_root] if command == "verify-recovery" => verify(
+            Path::new(receipt),
+            Path::new(manifest),
+            Path::new(binary),
+            Path::new(repo_root),
+            true,
+        ),
+        [_, command, binary] if command == "content-hash" => {
+            content_hash(Path::new(binary)).map(|hash| println!("{hash}"))
+        }
         [_, command, binary, repo_root] if command == "verify-worktree" => {
             verify_worktree(Path::new(binary), Path::new(repo_root))
         }
-        _ => Err("usage: harn-freshness-check {record-evidence <binary> <manifest> <repo-root>|verify <receipt> <manifest> <binary> <repo-root>|verify-worktree <binary> <repo-root>}".into()),
+        _ => Err("usage: harn-freshness-check {record-evidence <binary> <manifest> <repo-root>|content-hash <binary>|verify <receipt> <manifest> <binary> <repo-root>|verify-recovery <receipt> <manifest> <binary> <repo-root>|verify-worktree <binary> <repo-root>}".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -57,7 +69,24 @@ fn main() -> ExitCode {
 fn verify_worktree(binary: &Path, repo_root: &Path) -> Result<(), String> {
     let receipt = path_with_suffix(binary, ".freshness");
     let manifest = path_with_suffix(binary, ".freshness.manifest");
-    verify(&receipt, &manifest, binary, repo_root)
+    verify(&receipt, &manifest, binary, repo_root, false)
+}
+
+fn content_hash(path: &Path) -> Result<blake3::Hash, String> {
+    let mut file = File::open(path)
+        .map_err(|error| format!("cannot open executable {}: {error}", path.display()))?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|error| format!("cannot hash executable {}: {error}", path.display()))?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hasher.finalize())
 }
 
 fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -90,7 +119,13 @@ fn record_evidence(binary: &Path, manifest: &Path, repo_root: &Path) -> Result<S
     ))
 }
 
-fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> Result<(), String> {
+fn verify(
+    receipt: &Path,
+    manifest: &Path,
+    binary: &Path,
+    repo_root: &Path,
+    recovery: bool,
+) -> Result<(), String> {
     let receipt_text = fs::read_to_string(receipt).map_err(|error| {
         format!(
             "cannot read freshness receipt {}: {error}",
@@ -106,7 +141,7 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
     }
 
     let current_evidence = record_evidence(binary, manifest, repo_root)?;
-    let recorded_evidence = format!("{}\n", lines[8..].join("\n"));
+    let recorded_evidence = format!("{}\n", lines[8..13].join("\n"));
     if current_evidence != recorded_evidence {
         let mismatch = evidence_mismatch_detail(&recorded_evidence, &current_evidence)
             .unwrap_or_else(|| "evidence-shape changed".into());
@@ -114,17 +149,28 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
             "freshness checker or manifest changed after the build receipt: {mismatch}"
         ));
     }
-    let recorded_binary_stat = lines[5]
-        .strip_prefix("artifact-stat=")
-        .expect("receipt shape was validated");
-    if artifact_stat_id(binary)?.to_hex().to_string() != recorded_binary_stat {
-        return Err("worktree Harn executable changed after the build receipt".into());
+    if recovery {
+        let recorded_content = lines[13]
+            .strip_prefix("binary-content=")
+            .expect("receipt shape was validated");
+        if content_hash(binary)?.to_hex().to_string() != recorded_content {
+            return Err(
+                "compiled Harn executable does not match the build receipt's content".into(),
+            );
+        }
+    } else {
+        let recorded_binary_stat = lines[5]
+            .strip_prefix("artifact-stat=")
+            .expect("receipt shape was validated");
+        if artifact_stat_id(binary)?.to_hex().to_string() != recorded_binary_stat {
+            return Err("worktree Harn executable changed after the build receipt".into());
+        }
     }
     Ok(())
 }
 
 fn receipt_shape_is_valid(lines: &[&str]) -> bool {
-    lines.len() == 13
+    lines.len() == 14
         && lines[0] == RECEIPT_FORMAT
         && valid_keyed_hash(lines[1], "worktree", &[40, 64])
         && lines[2] == EVIDENCE_FORMAT
@@ -138,6 +184,7 @@ fn receipt_shape_is_valid(lines: &[&str]) -> bool {
         && valid_keyed_hex_range(lines[10], "checker-build-id", 2, 128)
         && valid_keyed_hash(lines[11], "checker-content", &[64])
         && valid_keyed_hash(lines[12], "manifest", &[64])
+        && valid_keyed_hash(lines[13], "binary-content", &[64])
 }
 
 fn evidence_mismatch_detail(recorded: &str, current: &str) -> Option<String> {
@@ -230,6 +277,7 @@ mod tests {
             "checker-build-id=00".to_owned(),
             format!("checker-content={hash64}"),
             format!("manifest={hash64}"),
+            format!("binary-content={hash64}"),
         ];
         assert!(receipt_shape_is_valid(
             &receipt.iter().map(String::as_str).collect::<Vec<_>>()

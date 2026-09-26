@@ -143,8 +143,13 @@ fn sandbox_exec_profile_allows_go_build_with_default_cache() {
         panic!("macOS backend should wrap with sandbox-exec");
     };
 
+    // The environment a confined child gets on the product path: TMPDIR in
+    // the session temp dir and the toolchain caches in the workspace.
+    let mut env = Vec::new();
+    super::super::inject_workspace_process_env(&mut env, &policy);
     let output = Command::new(wrapper)
         .args(args)
+        .envs(env)
         .current_dir(temp.path())
         .output()
         .expect("run sandboxed go build");
@@ -324,19 +329,38 @@ fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
     );
 
     let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
+    let session_temp =
+        super::super::workspace_local_tmpdir(&macos_policy_with_workspace_ops(&["write_text"]))
+            .expect("a writable workspace has a session temp dir");
     assert!(
-        writable.contains("(allow file-write*") && writable.contains("(subpath \"/tmp\")"),
-        "writable profile should grant temp writes: {writable}"
+        writable.contains(&format!(
+            "(allow file-read* (subpath \"{}\"))",
+            session_temp.display()
+        )),
+        "writable profile should grant the session temp dir: {writable}"
     );
+    let replacement = super::toolchain_roots::foundation_replacement_root()
+        .expect("the per-user temp dir resolves");
     assert!(
-        writable.contains("(allow file-read* (subpath \"/private/var/folders\"))"),
-        "writable profile should let developer tools read per-user temp caches: {writable}"
+        writable.contains(&format!(
+            "(allow file-read* (subpath \"{}\"))",
+            replacement.display()
+        )),
+        "writable profile should grant Foundation's replacement staging dir: {writable}"
     );
-    assert!(
-        writable.contains("(allow file-write*")
-            && writable.contains("(subpath \"/private/var/folders\")"),
-        "writable profile should let developer tools update per-user temp caches: {writable}"
-    );
+    // The host's shared temp dirs hold every other process's files.
+    for shared in [
+        "/tmp",
+        "/private/tmp",
+        "/var/folders",
+        "/private/var/folders",
+        "/var/tmp",
+    ] {
+        assert!(
+            !writable.contains(&format!("(subpath \"{shared}\")")),
+            "writable profile must not grant the shared temp dir {shared}: {writable}"
+        );
+    }
 }
 
 #[test]
@@ -800,7 +824,8 @@ fn sandbox_exec_profile_allows_swiftpm_manifest_evaluation() {
     }
     let temp = tempfile::TempDir::new().expect("temp Swift package");
     write_swift_package_manifest(temp.path());
-    let policy = macos_policy_with_workspace_ops(&["write_text"]);
+    let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+    policy.workspace_roots = vec![temp.path().to_string_lossy().into_owned()];
     // Manifest evaluation exercises SwiftPM's own sandbox and toolchain
     // lookup without paying to compile and link an unrelated test bundle.
     let args = strings(["package", "dump-package"]);
@@ -813,8 +838,11 @@ fn sandbox_exec_profile_allows_swiftpm_manifest_evaluation() {
         panic!("macOS backend should wrap with sandbox-exec");
     };
 
+    let mut env = Vec::new();
+    super::super::inject_workspace_process_env(&mut env, &policy);
     let output = Command::new(wrapper)
         .args(wrapped_args)
+        .envs(env)
         .current_dir(temp.path())
         .output()
         .expect("run sandboxed SwiftPM manifest evaluation");
@@ -1277,10 +1305,14 @@ fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
     assert!(!profile.contains("(allow network*)"), "{profile}");
     assert!(!profile.contains("localhost:*"), "{profile}");
     // Default presets include UserTemp, so a non-empty grant also admits
-    // sockets under the platform temp dirs. sbt binds `/tmp/bsbt/...`.
+    // sockets under the session temp dir, and never the shared temp dirs.
     assert!(
-        profile.contains("(allow network-bind (subpath \"/tmp\"))"),
+        profile.contains(".harn-tmp\"))") && profile.contains("(allow network-bind (subpath \""),
         "UserTemp pairing missing:\n{profile}"
+    );
+    assert!(
+        !profile.contains("(allow network-bind (subpath \"/tmp\"))"),
+        "the shared temp dir must not take sockets:\n{profile}"
     );
 }
 
@@ -1364,4 +1396,71 @@ fn a_workspace_socket_bind_succeeds_under_the_grant_and_fails_outside_it() {
     );
     let stderr = String::from_utf8_lossy(&outside.stderr);
     assert!(stderr.contains("bind: Operation not permitted"), "{stderr}");
+}
+
+/// A socket root outside every writable root takes a socket file and nothing
+/// else.
+///
+/// Binding creates the socket file, a file write the bind rule does not
+/// carry, so a root that was only a socket root refused every bind with a bare
+/// EPERM. The regular-file leg keeps the fix from turning the root into a
+/// writable directory.
+#[test]
+fn a_socket_root_outside_every_writable_root_takes_a_socket_and_no_regular_file() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    // Under the home directory: the default presets grant the shared temp
+    // tree, and a root there would bind through that grant instead.
+    let home = std::env::var_os("HOME").expect("HOME");
+    let root = tempfile::Builder::new()
+        .prefix(".harn-socket-root-")
+        .tempdir_in(home)
+        .expect("socket root");
+    let sockets = root.path().canonicalize().expect("canonical socket root");
+    let workspace = tempfile::tempdir().expect("workspace");
+    let workspace_path = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
+
+    let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text"]);
+    policy.workspace_roots = vec![workspace_path.display().to_string()];
+    policy.process_sandbox.unix_socket_roots = vec![sockets.display().to_string()];
+    let profile_file = workspace_path.join("profile.sb");
+    std::fs::write(&profile_file, render_profile(&policy)).expect("write profile");
+    let run = |program: &str, args: &[&str]| -> std::process::Output {
+        std::process::Command::new(SANDBOX_EXEC_PATH)
+            .arg("-f")
+            .arg(&profile_file)
+            .arg(program)
+            .args(args)
+            .current_dir(&workspace_path)
+            .output()
+            .expect("spawn sandbox-exec")
+    };
+
+    let socket = sockets.join("build.sock");
+    let bound = run(
+        "/usr/bin/perl",
+        &[
+            "-MSocket",
+            "-e",
+            "socket(S, PF_UNIX, SOCK_STREAM, 0) or die \"socket: $!\"; \
+             bind(S, sockaddr_un($ARGV[0])) or die \"bind: $!\";",
+            &socket.display().to_string(),
+        ],
+    );
+    assert!(
+        bound.status.success() && socket.exists(),
+        "a socket under a socket root outside every writable root must bind: stderr={}",
+        String::from_utf8_lossy(&bound.stderr)
+    );
+
+    let regular = sockets.join("regular.txt");
+    let touched = run("/usr/bin/touch", &[&regular.display().to_string()]);
+    assert!(
+        !touched.status.success() && !regular.exists(),
+        "a socket root must not admit a regular file"
+    );
 }

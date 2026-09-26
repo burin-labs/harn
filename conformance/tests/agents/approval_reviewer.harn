@@ -1,10 +1,23 @@
 import {
   approval_allow_all_reviewer,
+  approval_review_floor_decision,
   approval_review_system_prompt,
   approval_reviewer_for,
 } from "std/agent/approval_review"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 import { llm_text, with_llm_script } from "std/testing"
+
+struct RunOutcome {
+  success: bool
+  status: string
+  stdout: string
+  exit_code: int
+}
+
+struct ExfiltrationOutcome {
+  success: bool
+  status: string
+}
 
 // The `AutoReview` seam: an approval nobody is present to give.
 //
@@ -24,7 +37,9 @@ fn run_tools() {
     "run",
     "Run a shell command",
     {
-      handler: { _ -> {status: "completed", stdout: "ran", exit_code: 0} },
+      handler: { _ ->
+        RunOutcome {success: true, status: "completed", stdout: "ran", exit_code: 0}
+      },
       parameters: {command: {type: "string", description: "The command to run"}},
       returns: {type: "object"},
     },
@@ -57,12 +72,37 @@ fn raising_reviewer() {
 }
 
 pipeline default(harness: Harness) {
+  const floor_guard = approval_review_floor_decision({}, {category: " credential_exfiltration "})
+  assert(floor_guard != nil, "the public guard must resolve the bundled floor")
+  assert(floor_guard.approved == false, "a floor decision cannot authorize the action")
+  assert(floor_guard.authorization == "unknown", "eligibility cannot claim operator authorization")
+  assert(
+    approval_review_floor_decision({}, {category: " ", tool: "destructive_root_delete"}) != nil,
+    "a blank category must retain the existing tool fallback",
+  )
+  assert(
+    approval_review_floor_decision({}, {category: "secret_material_read", action: "deny"}) == nil,
+    "a presumptive denial remains eligible for review",
+  )
+  assert(
+    approval_review_floor_decision({}, {tool: "read_file", action: "ask"}) == nil,
+    "ordinary ask remains eligible without manufacturing an approval",
+  )
   // The caller supplies only a host overlay. Harn must project its bundled
   // policy before the first decision so an omitted floor cannot read as an
   // empty floor and an omitted threshold table cannot deny every valid review.
   with_llm_script(
     harness.llm,
     [
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
+      ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
+      ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
+      ),
       llm_text(
         "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
       ),
@@ -96,14 +136,65 @@ pipeline default(harness: Harness) {
         empty_policy_reviewer({tool: "read_file", category: "read_a_source_file"}).approved == true,
         "an empty caller policy must inherit the bundled verdict thresholds",
       )
+      // A policy that names no reviewer model keeps the loop's provider, whose
+      // credential the run holds, but not the loop's model: it runs on that
+      // provider's cheap catalog row at the lowest reasoning the route takes.
+      const routed = empty_policy_reviewer(
+        {
+          tool: "read_file",
+          category: "read_a_source_file",
+          route: {provider: "mock", model: "loop-route-model"},
+        },
+      )
+      assert(
+        routed.reviewer_model == "mock-approval-reviewer",
+        "an unrouted reviewer must run on its provider's catalog reviewer row, not the loop's model",
+      )
+      assert(
+        routed.reviewer_route_source == "catalog_role",
+        "the decision must name its route source",
+      )
+      // A provider with no catalog row keeps the loop's own route rather than
+      // moving to a provider the run may hold no credential for.
+      const unlisted = empty_policy_reviewer(
+        {
+          tool: "read_file",
+          category: "read_a_source_file",
+          route: {provider: "unlisted-provider", model: "loop-route-model"},
+        },
+      )
+      assert(
+        unlisted.reviewer_model == "loop-route-model",
+        "a provider with no catalog reviewer row must keep the loop's route",
+      )
+      assert(unlisted.reviewer_route_source == "loop_route", "the fallback must name itself")
+      // A caller that names a reviewer model decides, whatever the loop runs on.
+      const named_reviewer = approval_reviewer_for(
+        harness,
+        {reviewer: {provider: "mock", model: "caller-reviewer"}},
+        "Read the requested source file.",
+      )
+      const named = named_reviewer(
+        {
+          tool: "read_file",
+          category: "read_a_source_file",
+          route: {provider: "mock", model: "loop-route-model"},
+        },
+      )
+      assert(named.reviewer_model == "caller-reviewer", "a named reviewer model must win")
+      assert(named.reviewer_route_source == "caller", "a named model must say the caller chose it")
       const calls = harness.llm.mock_calls()
       assert(
-        len(calls) == 2,
-        "the floor case must not call the model; both ordinary cases must call it exactly once",
+        len(calls) == 5,
+        "the floor case must not call the model; each ordinary case must call it exactly once",
       )
       assert(
         contains(calls[0].system, "Use the stated goal as the authorization boundary."),
         "host guidance must survive resolution against the bundled policy",
+      )
+      assert(
+        calls.all({ call -> call.mock_scope == "agent.approval_review" }),
+        "every reviewer call must declare its purpose, so telemetry and fixtures can tell it from the main turn",
       )
     },
   )
@@ -214,7 +305,9 @@ pipeline default(harness: Harness) {
     "exfiltrate",
     "Send a file somewhere",
     {
-      handler: { _ -> {status: "completed"} },
+      handler: { _ ->
+        ExfiltrationOutcome {success: true, status: "completed"}
+      },
       parameters: {target: {type: "string", description: "Where to send it"}},
       returns: {type: "object"},
     },

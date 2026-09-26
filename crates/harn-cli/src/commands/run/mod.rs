@@ -1,10 +1,9 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use crate::commands::time::{self, RunTiming};
@@ -25,6 +24,7 @@ mod interrupts;
 pub mod json_events;
 mod lifecycle;
 mod llm_mock;
+pub use crate::commands::evaluation_tape::EvaluationReplayOptions;
 mod manifest_runtime;
 mod mcp_serve;
 mod outcome;
@@ -47,6 +47,7 @@ pub(crate) use self::eval_source::prepare_eval_temp_file;
 #[cfg(test)]
 use self::eval_source::{eval_source_for_code, split_eval_header};
 use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
+pub use self::interrupts::RunInterruptTokens;
 use self::interrupts::{
     install_signal_shutdown_handler, start_run_deadline_watchdog, RunDeadlineGuard,
 };
@@ -68,9 +69,10 @@ pub(crate) use self::reporting::{
     render_trace_summary, run_aux_options_from_args, run_control_options_from_args,
 };
 pub use self::reporting::{
-    FlightRecorderOptions, RunAuxOptions, RunControlOptions, RunJsonOptions, RunJsonSink,
-    RunJsonSinkTarget, RunPhaseOptions, RunRusageOptions, RunSummaryOptions,
-    RUN_PHASE_SCHEMA_VERSION, RUN_RUSAGE_SCHEMA_VERSION, RUN_SUMMARY_SCHEMA_VERSION,
+    FlightRecorderOptions, RunAttestationOptions, RunAuxOptions, RunControlOptions,
+    RunExecutionOptions, RunJsonOptions, RunJsonSink, RunJsonSinkTarget, RunPhaseOptions,
+    RunRusageOptions, RunSummaryOptions, RUN_PHASE_SCHEMA_VERSION, RUN_RUSAGE_SCHEMA_VERSION,
+    RUN_SUMMARY_SCHEMA_VERSION,
 };
 pub use self::sandbox::RunSandboxOptions;
 #[cfg(test)]
@@ -141,18 +143,6 @@ pub(crate) fn build_denied_builtins(
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RunAttestationOptions {
-    pub receipt_out: Option<PathBuf>,
-    pub agent_id: Option<String>,
-}
-
-#[derive(Clone)]
-pub struct RunInterruptTokens {
-    pub cancel_token: Arc<AtomicBool>,
-    pub signal_token: Arc<Mutex<Option<String>>>,
-}
-
 /// Whether a run inherits configuration discovered from the entry file's
 /// surrounding project. This is deliberately a mode rather than a collection
 /// of booleans so every ambient project surface follows one decision.
@@ -201,6 +191,7 @@ impl ProjectRuntimeMode {
 }
 
 struct ExecuteRunInputs<'a> {
+    evaluation: EvaluationReplayOptions,
     path: &'a str,
     trace: bool,
     denied_builtins: HashSet<String>,
@@ -297,6 +288,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         JsonRunSession::new(options, Box::new(io::stdout()) as Box<dyn io::Write + Send>)
     });
     let outcome = execute_run_inner(ExecuteRunInputs {
+        evaluation: control.evaluation,
         path,
         trace,
         denied_builtins,
@@ -595,17 +587,6 @@ pub async fn execute_run_with_harnpack_options(
     .await
 }
 
-/// Complete in-process execution configuration. Existing convenience wrappers
-/// use its default; embedded and headless hosts use this seam when they need a
-/// non-default project runtime without forking CLI behavior.
-#[derive(Clone, Debug, Default)]
-pub struct RunExecutionOptions {
-    pub sandbox: RunSandboxOptions,
-    pub harnpack: HarnpackRunOptions,
-    pub project_runtime: ProjectRuntimeMode,
-    pub flight_recorder: FlightRecorderOptions,
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_run_with_options(
     path: &str,
@@ -620,12 +601,14 @@ pub async fn execute_run_with_options(
 ) -> RunOutcome {
     crate::ensure_builtin_signatures_installed();
     let RunExecutionOptions {
+        evaluation,
         sandbox,
         harnpack,
         project_runtime,
         flight_recorder,
     } = options;
     execute_run_inner(ExecuteRunInputs {
+        evaluation,
         path,
         trace,
         denied_builtins,
@@ -696,12 +679,14 @@ pub async fn execute_run_json_with_options(
     execution_options: RunExecutionOptions,
 ) -> RunOutcome {
     let RunExecutionOptions {
+        evaluation,
         sandbox,
         harnpack,
         project_runtime,
         flight_recorder,
     } = execution_options;
     execute_run_inner(ExecuteRunInputs {
+        evaluation,
         path,
         trace,
         denied_builtins,
@@ -733,6 +718,7 @@ pub(crate) async fn execute_run_with_timing(
     project_runtime: ProjectRuntimeMode,
 ) -> RunOutcome {
     execute_run_inner(ExecuteRunInputs {
+        evaluation: EvaluationReplayOptions::default(),
         path,
         trace: false,
         denied_builtins: HashSet::new(),
@@ -795,6 +781,7 @@ async fn execute_run_inner_scoped(
     json_session: Option<JsonRunSession>,
 ) -> RunOutcome {
     let ExecuteRunInputs {
+        evaluation,
         path,
         trace,
         denied_builtins,
@@ -973,28 +960,40 @@ async fn execute_run_inner_scoped(
     // lives for the rest of this function, so recording ends with the run on
     // every exit path below.
     let _builtin_profile_guard = profile.is_enabled().then(harn_vm::builtin_profile::enable);
-    if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
-        stderr.push_str(&format!("error: {error}\n"));
-        time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
-        return finalize_run_error(
-            stdout,
-            stderr,
-            json_session,
-            summary.as_ref(),
-            phase.as_ref(),
-            rusage.as_ref(),
-            run_started,
-            None,
-            timing.as_deref(),
-            0,
-            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-            crate::exit::RunFailure::Setup,
-            "llm_mock_install",
-            error,
-        );
-    }
-
-    let mut vm = harn_vm::Vm::new();
+    // The VM snapshots CLI mock mode during construction. Install it first so
+    // offline replay and existing mock-backed runs share the same boundary.
+    let setup_result = install_cli_llm_mock_mode(&llm_mock_mode)
+        .map_err(|error| ("llm_mock_install", error))
+        .and_then(|()| {
+            let mut vm = harn_vm::Vm::new();
+            evaluation
+                .install(&mut vm)
+                .map(|session| (vm, session))
+                .map_err(|error| ("evaluation_tape_install", error))
+        });
+    let (mut vm, evaluation_session) = match setup_result {
+        Ok(result) => result,
+        Err((code, error)) => {
+            stderr.push_str(&format!("error: {error}\n"));
+            time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
+            return finalize_run_error(
+                stdout,
+                stderr,
+                json_session,
+                summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
+                run_started,
+                None,
+                timing.as_deref(),
+                0,
+                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                crate::exit::RunFailure::Setup,
+                code,
+                error,
+            );
+        }
+    };
     vm.set_graph_link_table(link_table);
     if let Some(runtime) = &linked_runtime {
         vm.set_linked_program_runtime(runtime);
@@ -1228,7 +1227,7 @@ async fn execute_run_inner_scoped(
     // `render("@alias/...")` resolving against the dependency's `harn.toml`.
     vm.set_source_dir(&entry_source_dir(path));
     let execution_started_at = harn_vm::clock::system_now_rfc3339();
-    let execution = local
+    let mut execution = local
         .run_until(async {
             match vm.execute(&chunk).await {
                 Ok(value) => RunExecution::Terminal(TerminalRun::Returned(value)),
@@ -1240,6 +1239,13 @@ async fn execute_run_inner_scoped(
         })
         .await;
     let execution_finished_at = harn_vm::clock::system_now_rfc3339();
+    if let Some(session) = evaluation_session {
+        let succeeded =
+            matches!(&execution, RunExecution::Terminal(terminal) if terminal.exit_code() == 0);
+        if let Err(error) = session.finish(succeeded) {
+            execution = RunExecution::Failed(error);
+        }
+    }
     let evidence_status = match &execution {
         RunExecution::Terminal(terminal) if terminal.exit_code() == 0 => {
             harn_vm::orchestration::ExecutionRecordStatus::Completed

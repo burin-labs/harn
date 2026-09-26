@@ -46,6 +46,7 @@ fn denial_gate_serializes_as_snake_case() {
         (DenialGate::DynamicPermission, "dynamic_permission"),
         (DenialGate::WorkspaceBoundary, "workspace_boundary"),
         (DenialGate::SensitivePath, "sensitive_path"),
+        (DenialGate::NetworkPolicy, "network_policy"),
         (DenialGate::ApprovalPolicy, "approval_policy"),
         (DenialGate::ApprovalUnavailable, "approval_unavailable"),
         (DenialGate::HostRejected, "host_rejected"),

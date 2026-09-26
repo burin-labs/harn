@@ -1,0 +1,147 @@
+# ── TypeSafe Jev — decision-only routes ──────────────────────────────────────
+#
+# Jev is a System One decision model: it answers typed questions over a shared
+# state with probabilities, and it cannot hold a conversation. Every row here
+# declares `operations = ["decision"]` and nothing else, so the checker and the
+# runtime refuse it as a chat driver before any request is made. A chat call to
+# `typesafe-ai/jev` on the Vercel gateway is refused upstream too, with
+# `ModelTypeMismatchError` on `/v1/chat/completions` (observed 2026-09-20).
+#
+# How the operation is dialled per route lives in the capability rules, not
+# here: see `capability_sources/10-decisions/00-decision-contracts.toml`. These
+# three endpoints are not interchangeable chat endpoints, so the protocol is a
+# typed capability rather than something inferred from the provider id.
+#
+# Shared facts, all from TypeSafe's own documentation:
+#   * `jev-latest` is an alias currently pointing at `jev-1.13.0`, alongside a
+#     `jev-preview` alias. https://docs.typesafe.ai/models
+#   * Pricing is input-only, $0.042 per million tokens; output tokens are free.
+#     https://typesafe.ai/blog/introducing-system-one-models-and-jev
+#   * The documented request ceiling is 64k tokens overall, of which at most
+#     32k may be `state` plus the longest question. `context_window` records the
+#     32k state ceiling, because that is the bound a caller has to plan against
+#     and the one OpenRouter publishes for the route.
+#     https://docs.typesafe.ai/models, https://openrouter.ai/typesafe
+#   * Text and structured JSON only; no image, audio, or video input.
+#     https://docs.typesafe.ai/concepts/system-one
+#
+# `logical_model` and `equivalence_group` are shared so that cross-route
+# equivalence is visible to a human reading the catalog. They are NOT a
+# licence to fail a predicate over from one route to another: a decision model
+# answers with a probability distribution, and silently re-asking a different
+# serving route would change the distribution without changing the receipt.
+#
+# Availability: Vercel and OpenRouter answered all three question kinds through
+# the canonical evaluator on 2026-09-22. Direct TypeSafe access remains
+# unverified and its rows retain availability = "unknown".
+
+# Direct TypeSafe, pinned snapshot. Documented, not reached: access is
+# waitlisted. https://docs.typesafe.ai/api
+[models."typesafe/jev-1.13.0"]
+name = "Jev 1.13.0 (TypeSafe)"
+blurb = "Answers yes/no, multiple-choice, and rating questions about a shared state in well under a second, and cannot write prose."
+provider = "typesafe"
+wire_model = "jev-1.13.0"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "direct"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+availability = "unknown"
+row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Direct TypeSafe, moving selector. `jev-latest` resolves to `jev-1.13.0`
+# today. https://docs.typesafe.ai/models
+[models."typesafe/jev-latest"]
+name = "Jev Latest (TypeSafe)"
+blurb = "Follows TypeSafe's current flagship decision model instead of pinning a version."
+provider = "typesafe"
+wire_model = "jev-latest"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "direct"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+availability = "unknown"
+row_kind = "selector"
+current_snapshot = "typesafe/jev-1.13.0"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Vercel AI Gateway. On 2026-09-20 the gateway
+# model list carried `typesafe-ai/jev` with `"type": "evaluation"`, and
+# `/v1/chat/completions` refused it with `ModelTypeMismatchError`.
+# https://vercel.com/docs/ai-gateway/modalities/evaluation
+[models."vercel/typesafe-ai/jev"]
+name = "Jev (Vercel AI Gateway)"
+blurb = "Jev's decision answers over the gateway key Harn already holds, with no separate TypeSafe account."
+provider = "vercel_ai_gateway"
+wire_model = "typesafe-ai/jev"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "vercel-ai-gateway"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+row_kind = "selector"
+current_snapshot = "typesafe/jev-1.13.0"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# OpenRouter /api/alpha/decisions answered boolean, choice and score on
+# 2026-09-22. The provider returned typesafe/jev-1.13-20260917, input356/output61,
+# and $0.000014952. Receipt identity must use the actual response model, not
+# assume the requested route alias is an immutable revision.
+# https://openrouter.ai/typesafe
+[models."openrouter/typesafe/jev-1.13"]
+name = "Jev 1.13 (OpenRouter)"
+blurb = "Jev's decision answers through OpenRouter's alpha decisions endpoint."
+provider = "openrouter"
+wire_model = "typesafe/jev-1.13"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "openrouter"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# OpenRouter moving selector. On 2026-09-26 a boolean question sent to
+# `~typesafe/jev-latest` on /api/alpha/decisions came back from
+# typesafe/jev-1.13-20260917. https://openrouter.ai/api/v1/models/~typesafe/jev-latest/endpoints
+[models."openrouter/typesafe/jev-latest"]
+name = "Jev Latest (OpenRouter)"
+blurb = "Follows TypeSafe's current Jev release through OpenRouter's alpha decisions endpoint."
+provider = "openrouter"
+wire_model = "~typesafe/jev-latest"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "openrouter"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+row_kind = "selector"
+current_snapshot = "openrouter/typesafe/jev-1.13"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"

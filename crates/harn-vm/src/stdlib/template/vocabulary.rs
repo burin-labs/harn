@@ -196,8 +196,6 @@ pub const SECTIONS: &[&str] = &[
     "examples",
     "output_format",
     "tools",
-    "thinking_scaffold",
-    "chain_of_thought",
     "system_framing",
 ];
 

@@ -586,6 +586,7 @@ mod tests {
             required_approval: None,
             risk_labels: vec!["network_rule".to_string()],
             denied_paths: Vec::new(),
+            denied_network_targets: Vec::new(),
             receipt: serde_json::json!({
                 "context": {"command": "secret-value", "to": "private@example.com"}
             }),

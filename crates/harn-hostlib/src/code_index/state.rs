@@ -107,12 +107,18 @@ pub struct RefreshOutcome {
     pub files_touched_only: u64,
     /// Files the walk offered but `ingest` refused (unreadable, oversize).
     pub files_skipped: u64,
+    /// Snapshot HEAD differed from the live checkout. Every retained file was
+    /// content-checked even if its size and mtime matched.
+    pub git_head_changed: bool,
 }
 
 impl RefreshOutcome {
     /// True when the refresh changed nothing about the index contents.
     pub fn is_noop(&self) -> bool {
-        self.files_reindexed == 0 && self.files_added == 0 && self.files_removed == 0
+        self.files_reindexed == 0
+            && self.files_added == 0
+            && self.files_removed == 0
+            && !self.git_head_changed
     }
 }
 
@@ -213,6 +219,9 @@ impl IndexState {
     ) -> RefreshOutcome {
         let root = self.root.clone();
         let mut outcome = RefreshOutcome::default();
+        let live_head = super::git_head::read_git_head(&root);
+        outcome.git_head_changed = self.git_head != live_head;
+        self.git_head = live_head;
         let mut seen: HashSet<String> = HashSet::with_capacity(self.files.len());
         let mut reparse: Vec<(FileId, String)> = Vec::new();
         let mut harn_touched = false;
@@ -226,7 +235,10 @@ impl IndexState {
             let known = self.path_to_id.get(&rel).copied();
             if let Some(id) = known {
                 if let Some(file) = self.files.get(&id) {
-                    if file.size_bytes == meta.len() && file.mtime_ms == mtime_ms_of(meta) {
+                    if !outcome.git_head_changed
+                        && file.size_bytes == meta.len()
+                        && file.mtime_ms == mtime_ms_of(meta)
+                    {
                         outcome.files_unchanged += 1;
                         seen.insert(rel);
                         return;
@@ -278,7 +290,7 @@ impl IndexState {
             path_set_changed = true;
         }
 
-        if outcome.is_noop() {
+        if outcome.files_reindexed == 0 && outcome.files_added == 0 && outcome.files_removed == 0 {
             return outcome;
         }
 

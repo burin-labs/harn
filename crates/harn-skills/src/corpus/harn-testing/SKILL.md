@@ -76,8 +76,8 @@ launch behavior.
   from tests in the same process. Use a subprocess only when the CLI adapter,
   installed artifact, process isolation, or operating-system exit status is
   the behavior under test.
-- Select related files in one invocation with repeatable `--test-path`
-  arguments. Harn compiles the selected import graph once and schedules the
+- Select related files as positional paths in one invocation. Harn compiles
+  the selected import graph once and schedules the
   combined cases from one queue.
 - Use `--parallel` without `--jobs` by default. The runner sizes the worker
   pool from available CPU and memory. Reserve `--jobs` or `HARN_TEST_JOBS` for
@@ -162,6 +162,12 @@ phases, cache contract, defaults, and machine-readable receipts.
 
 ## Stochastic quality
 
+- For typed decisions, prove complete answers and the missing-answer,
+  undeclared-label, low-confidence, and refusal paths with hermetic fixtures.
+  Recorded-tape replay must fail on a missing or extra request without live
+  fallback; assert the provider call count, not just the outcome text.
+- A fixture proves contract behavior, never model accuracy. Qualify a decision
+  threshold on a separate labeled holdout before it governs a live workflow.
 - Define the population, metric, threshold, and maximum spend before running.
 - Use multiple independent trials.
 - Calibrate the grader on known accepted and rejected examples.

@@ -576,16 +576,18 @@ mod tests {
     }
 
     #[test]
-    fn markdown_projects_cerebras_gemma_4_capability_and_catalog_rows() {
+    fn markdown_projects_cerebras_qwen_38_capability_and_catalog_rows() {
+        // Cerebras retired Gemma 4; Qwen 3.8 27B is its multimodal serverless
+        // route and the one this projection now has to carry.
         let rows = harn_vm::llm::capabilities::matrix_rows();
         let catalog = harn_vm::provider_catalog::artifact();
         let markdown = generate_markdown(&rows, &catalog);
 
         assert!(markdown.contains(
-            "| `cerebras` | `gemma-4-31b` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native`"
+            "| `cerebras` | `qwen-3.8-27b` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native`"
         ));
         assert!(markdown.contains(
-            "| `cerebras` | `gemma-4-31b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected`"
+            "| `cerebras` | `qwen-3.8-27b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected`"
         ));
     }
 

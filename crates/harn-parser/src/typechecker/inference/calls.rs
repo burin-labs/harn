@@ -756,8 +756,14 @@ impl TypeChecker {
             definition_span: None,
         };
         self.check_call_signature_arguments(check_sig, type_args, args, has_spread, scope, span);
-        if sig.name == harn_builtin_meta::predicate::EVALUATE.name {
+        if sig.name == harn_builtin_meta::predicate::EVALUATE_PREDICATE.name {
             self.check_predicate_call(args, scope, span);
+        }
+        if sig.name == harn_builtin_meta::predicate::EVALUATE.name {
+            self.check_evaluation_call(args, scope, span);
+        }
+        if sig.name == harn_builtin_meta::predicate::EVALUATE_REQUEST.name {
+            self.check_evaluation_request_call(args, scope, span);
         }
         if !has_spread {
             if let Some(projection) = sig.projection {

@@ -346,7 +346,7 @@ install_locked_node_dependencies() {
 build_sccache_rustc_wrapper() {
   local source_path="$ROOT_DIR/scripts/sccache_rustc_wrapper.rs"
   local source_hash host_triple executable_suffix wrapper_dir wrapper_path temporary_path
-  source_hash="$(shasum -a 256 "$source_path" | awk '{print $1}')"
+  source_hash="$(shasum -a 256 < "$source_path" | awk '{print $1}')"
   host_triple="$(rustc -vV | sed -n 's/^host: //p')"
   if [[ -z "$host_triple" ]]; then
     echo "error: rustc did not report a host triple for the sccache wrapper" >&2
@@ -505,8 +505,9 @@ mkdir -p "${SETUP_STATE_DIR}"
 # machine-wide work, so exactly one worktree per interval pays it (~24s measured
 # over 27 entries) instead of every worktree paying it once. The stamp is
 # claimed before the sweep rather than after, so several worktrees configuring
-# themselves at once do not all sweep the same root; housekeeping that loses its
-# turn simply waits for the next interval.
+# themselves at once do not all sweep the same root. A failed sweep releases
+# only its own claim, allowing the next setup to retry instead of treating a
+# failed attempt as a successful 24-hour collection.
 if [[ -x ./scripts/prune_stale_targets.sh ]]; then
   prune_stamp="${HARN_DEV_SETUP_STORAGE_ROOT}/prune-stale-targets.stamp"
   prune_interval="${HARN_DEV_SETUP_PRUNE_SECONDS:-86400}"
@@ -522,11 +523,17 @@ if [[ -x ./scripts/prune_stale_targets.sh ]]; then
 
   if [[ "${should_prune}" -eq 1 ]]; then
     mkdir -p "$(dirname "${prune_stamp}")" 2>/dev/null || true
-    touch "${prune_stamp}" 2>/dev/null || true
+    prune_claim="$(date +%s)-$$"
+    printf '%s\n' "${prune_claim}" > "${prune_stamp}" 2>/dev/null || true
     # This worktree's own target dir is named so the sweep cannot collect it.
     # Setup restores a Cargo target seed above, and a restored seed carries the
     # seed's timestamps, so the tree this run just installed reads as idle.
-    HARN_TARGET_GC_PROTECT="${target_dir:-}" ./scripts/prune_stale_targets.sh || true
+    if ! HARN_TARGET_GC_PROTECT="${target_dir:-}" ./scripts/prune_stale_targets.sh; then
+      echo "harn-target GC failed; the next setup will retry." >&2
+      if [[ -f "${prune_stamp}" && "$(cat "${prune_stamp}" 2>/dev/null)" == "${prune_claim}" ]]; then
+        rm -f "${prune_stamp}"
+      fi
+    fi
   else
     echo "harn-target GC recently checked."
   fi

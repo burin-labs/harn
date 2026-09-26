@@ -14,6 +14,6 @@ harn run --no-sandbox release_harn.harn -- \
 ```
 
 Do not run `scripts/release_ship.sh --prepare` directly for normal releases.
-It is an implementation detail of `release_harn.harn` and refuses standalone
-use. Recovery helpers are listed in the skill and in
-`scripts/release_ship.sh --help`.
+`scripts/open_release_pr.sh` (the "Open release PR" workflow) runs it to build
+the `Release vX.Y.Z` pull request. Recovery helpers are listed in the skill and
+in `scripts/release_ship.sh --help`.

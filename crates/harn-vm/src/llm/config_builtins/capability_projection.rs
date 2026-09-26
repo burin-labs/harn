@@ -43,6 +43,30 @@ pub(crate) fn capabilities_to_vm_value(
             .map(|family| VmValue::String(arcstr::ArcStr::from(family.as_str())))
             .unwrap_or(VmValue::Nil),
     );
+    // Decision request contract. Absent on every route that answers no
+    // decision request, so a script can tell "this route cannot decide" from
+    // "this route decides over some other protocol" without a name match.
+    dict.insert(
+        crate::value::intern_key("decision_protocol"),
+        caps.decision_protocol
+            .map(|protocol| VmValue::String(arcstr::ArcStr::from(protocol.as_str())))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        crate::value::intern_key("decision_question_kinds"),
+        VmValue::List(std::sync::Arc::new(
+            caps.decision_question_kinds
+                .iter()
+                .map(|kind| VmValue::String(arcstr::ArcStr::from(kind.as_str())))
+                .collect(),
+        )),
+    );
+    dict.insert(
+        crate::value::intern_key("decision_limits"),
+        caps.decision_limits
+            .map(decision_limits_to_vm_value)
+            .unwrap_or(VmValue::Nil),
+    );
     dict.put_str(
         "native_tool_wire_format",
         caps.native_tool_wire_format.clone(),
@@ -227,6 +251,10 @@ pub(crate) fn capabilities_to_vm_value(
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
+        crate::value::intern_key("structured_output_strategy"),
+        VmValue::string(caps.structured_output_strategy.as_str()),
+    );
+    dict.insert(
         crate::value::intern_key("json_schema"),
         caps.json_schema
             .as_deref()
@@ -261,6 +289,14 @@ pub(crate) fn capabilities_to_vm_value(
     dict.insert(
         crate::value::intern_key("preserve_thinking"),
         VmValue::Bool(caps.preserve_thinking),
+    );
+    dict.insert(
+        crate::value::intern_key("honors_preserve_thinking_kwarg"),
+        VmValue::Bool(caps.honors_preserve_thinking_kwarg),
+    );
+    dict.insert(
+        crate::value::intern_key("requires_parallel_tool_calls_false"),
+        VmValue::Bool(caps.requires_parallel_tool_calls_false),
     );
     dict.insert(
         crate::value::intern_key("reasoning_history_wire_field"),
@@ -558,4 +594,11 @@ pub(super) fn insert_batch_support_fields(
 
 fn serving_tier_to_vm_value(tier: &llm_config::ServingTierDef) -> VmValue {
     json_to_vm_value(&serde_json::to_value(tier).unwrap_or_else(|_| serde_json::json!({})))
+}
+
+/// Declared decision ceilings as a nested dict. `max_questions` stays absent
+/// when the provider publishes no question-count ceiling, so a script can tell
+/// "no published limit" from a number someone invented.
+fn decision_limits_to_vm_value(limits: crate::llm::capabilities::DecisionLimits) -> VmValue {
+    json_to_vm_value(&serde_json::to_value(limits).unwrap_or_else(|_| serde_json::json!({})))
 }

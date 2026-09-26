@@ -35,7 +35,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 | Category | Title | Codes |
 |---|---|---:|
-| [`TYP`](#typ--type-checker) | Type checker | 35 |
+| [`TYP`](#typ--type-checker) | Type checker | 36 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 77 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 78 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -98,6 +98,7 @@ Harn's static type checker rejects programs whose types do not unify. Type error
 | [`HARN-TYP-033`](#harn-typ-033) | probabilistic predicate site identity must be literal and unique | — | — |
 | [`HARN-TYP-034`](#harn-typ-034) | probabilistic predicate variant fields require outcome narrowing | — | — |
 | [`HARN-TYP-035`](#harn-typ-035) | probabilistic predicate model must declare the decision operation | — | — |
+| [`HARN-TYP-036`](#harn-typ-036) | probabilistic evaluation question set must be a literal with unique ids and labels | — | — |
 
 ## PAR — Parser / lexer
 
@@ -335,6 +336,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-076`](#harn-lnt-076) | tool handler reaches the privileged host wire | — | — |
 | [`HARN-LNT-077`](#harn-lnt-077) | record literal copies fields one by one from a value that `pick` can select | `records/pick-fields` | `behavior-preserving` |
 | [`HARN-LNT-078`](#harn-lnt-078) | tool descriptor spells its per-parameter map as a JSON Schema document | — | — |
+| [`HARN-LNT-079`](#harn-lnt-079) | evaluation site hands a native decision route an input whose declared type has no finite size bound | — | — |
 
 ## FMT — Formatter
 
@@ -919,6 +921,43 @@ evidence that the route supports it.
 This check makes no provider request and establishes neither credential
 availability nor model quality. Runtime admission still owns provider options,
 authority, resource reservations, and the evaluation outcome.
+
+### `HARN-TYP-036`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+probabilistic evaluation question set must be a literal with unique ids and labels
+
+`harness.llm.evaluate` reads its question set at check time. Two obligations
+depend on it. The site manifest records which questions a site asks, so tooling
+can identify hidden model work through a helper. The checker types each answer
+from its own question, so a choice answer's `choice` is the literal union of
+that question's criteria keys and a `match` on it is exhaustive.
+
+Declare the questions as a dict literal at the call, with each value built by
+`boolean`, `choice`, or `score` from `std/predicate` and each label list
+written out:
+
+```harn,ignore
+const answers = harness.llm.evaluate("triage.v1", window, {
+  disposition: choice("Keep, reword, or drop?", {
+    keep: "Still load-bearing",
+    drop: "Superseded",
+  }),
+  risk: score("How much blast radius?", ["none", "low", "high"]),
+  safe: boolean("Safe to run without asking?"),
+}, policy)
+```
+
+Question ids must be unique within a site and each question's labels unique
+within that question, because answers are keyed by id and probabilities by
+label. A question built elsewhere, assembled in a loop, or passed in as a
+parameter cannot be read here; move the literal to the call and pass the parts
+that vary as state instead.
+
+This check makes no provider request. It establishes neither that a question is
+suitable for machine judgment nor that the route supports the question kinds it
+declares; runtime admission owns the route's declared limits and kinds.
 
 ### `HARN-PAR-001`
 
@@ -4231,9 +4270,11 @@ fn search_handler(args: dict) -> dict {
 
 #### Severity
 
-This reports as a warning while in-tree handlers migrate. It becomes an error
-once no untyped handler result remains, at which point outcome classification
-stops being a heuristic over key names.
+This is an error for a freeform dict literal returned directly from a tool
+handler or through a same-body immutable binding. The checker
+does not yet follow mutable bindings or helper-function returns; those need
+type analysis before every untyped outcome can be refused. A `handler` in a
+different contract, such as a tool-search strategy, is outside this rule.
 
 ### `HARN-LNT-076`
 
@@ -4345,6 +4386,66 @@ tools = tool_define(tools, "read_file", "Read one file", {
 This reports as an error. The runtime refuses the same shape when a registry is
 built, so a descriptor this rule accepts and a registry the runtime accepts
 agree by construction.
+
+### `HARN-LNT-079`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+evaluation site hands a native decision route an input whose declared type has no finite size bound
+
+An evaluation site hands a route the state it will encode. A structured-LLM
+route has an escape when that state is too big: the ceiling measures it against
+the route's window and returns `state_too_large` before dispatching anything,
+so an oversized input costs nothing and the caller can react.
+
+A native decision route does not have that escape. Its admission bounds encoded
+input and question count as a condition of being usable at all, so a route
+whose input carries no bound cannot establish one.
+
+The declared type is where the bound either exists or does not. `int`, `bool`,
+`float` and string-literal enums encode to a bounded number of tokens no matter
+what value arrives. `string`, `list<T>`, `dict<K, V>`, `any` and an open record
+admit arbitrarily many, so no window is large enough by construction, and
+whether the site works depends on data its author never sees.
+
+This rule reports an evaluation site whose policy names the `native_decision`
+backend and whose input has a declared type containing one of those unbounded
+constructs.
+
+#### How to fix
+
+Narrow the declared type so its encoded size is bounded:
+
+```harn
+type Triage = {severity: "low" | "high", reopened: bool, age_days: int}
+
+const verdict = harness.llm.evaluate(
+  "triage.v1", triage, questions, policy,
+)
+```
+
+Or keep the wide input and split it into windows that each fit, using the
+evaluator's own estimator rather than a character approximation:
+
+```harn
+import { evaluation_windows } from "std/predicate"
+
+const windowing = evaluation_windows(harness.llm, items, {
+  anchor: latest_user_message,
+  budget_tokens: 28000,
+  overlap_items: 2,
+})
+```
+
+Each window measures under the ceiling with the same call the ceiling makes, so
+the fit is by construction rather than by retrying after a refusal.
+
+#### Severity
+
+This reports as a warning. A bound the rule cannot see may still exist: it reads
+declared types in one file, so a type that arrives through an import, or a
+binding with no annotation, is not reported. Silence here means the rule found
+no unbounded construct it could read, not that the input is proven bounded.
 
 ### `HARN-FMT-001`
 

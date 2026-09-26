@@ -371,17 +371,43 @@ pub(crate) fn classify_provider_http_error(
 /// valid terminal provider error does not fall through to premature EOF.
 pub(crate) fn classify_provider_stream_error(provider: &str, body: &str, partial: bool) -> VmError {
     let json = serde_json::from_str::<serde_json::Value>(body).ok();
-    let (kind, reason) = match explicit_stream_error_taxonomy(json.as_ref()) {
+    let explicit = explicit_stream_error_taxonomy(json.as_ref());
+    // Read the provider's own error message, not the whole frame: Fireworks
+    // attaches `raw_output` with the prompt and completion text, and a prompt
+    // that merely mentions a channel must not make a request fault retryable.
+    let error_message = json
+        .as_ref()
+        .and_then(|value| {
+            value
+                .pointer("/error/message")
+                .or_else(|| value.get("message"))
+        })
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(body);
+    let malformed = explicit.is_none() && is_malformed_generation(&error_message.to_lowercase());
+    let (kind, reason) = match explicit {
         Some(taxonomy) => taxonomy,
+        None if malformed => (LlmErrorKind::Transient, LlmErrorReason::InvalidResponse),
         // No HTTP status on an in-band SSE error frame; classify from body
         // fingerprints only (neutral status avoids status-forced reasons).
         None => classify_http_status_and_body(reqwest::StatusCode::OK, body),
     };
     let body_summary = sanitize_provider_error_body(body);
-    let mut message = format!(
-        "{provider} stream error [{}]: {body_summary}",
-        reason.legacy_tag()
-    );
+    let mut message = if malformed {
+        // Plain words first: this is the text a person reads when the retry
+        // budget runs out. The provider's own wording stays for the trace.
+        format!(
+            "{provider} stream error [{}]: the model produced output the provider could not \
+             parse. This is resampled, and ends the turn only once the retry budget is \
+             spent; provider said: {body_summary}",
+            reason.legacy_tag()
+        )
+    } else {
+        format!(
+            "{provider} stream error [{}]: {body_summary}",
+            reason.legacy_tag()
+        )
+    };
     if reason == LlmErrorReason::ContextOverflow {
         if let Some(tokens) = extract_token_count_hint(body) {
             message.push_str(&format!(" (offending_tokens: {tokens})"));
@@ -823,6 +849,21 @@ fn classify_error_message_taxonomy(msg: &str) -> Option<(LlmErrorKind, LlmErrorR
         return Some((LlmErrorKind::Terminal, LlmErrorReason::InvalidRequest));
     }
     None
+}
+
+/// In-band stream errors in which the provider rejected what the MODEL
+/// generated, not what the caller sent. Fireworks tags a gpt-oss sample that
+/// opens an unknown harmony channel (`Invalid channel: tool_call`, or `tool`,
+/// after whichever tool syntax the model was taught) as `invalid_request_error`, which the body
+/// taxonomy reads as a terminal request fault. It is a sampling outcome: the
+/// same request resampled normally succeeds, so these are resampled within the
+/// retry budget instead of ending the turn. Each entry is a conjunction.
+const MALFORMED_GENERATION_FINGERPRINTS: &[&[&str]] = &[&["invalid channel"]];
+
+fn is_malformed_generation(body_lower: &str) -> bool {
+    MALFORMED_GENERATION_FINGERPRINTS
+        .iter()
+        .any(|fingerprint| fingerprint.iter().all(|marker| body_lower.contains(marker)))
 }
 
 fn is_invalid_response(status: reqwest::StatusCode, body_lower: &str) -> bool {

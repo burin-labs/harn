@@ -32,16 +32,21 @@ open_weight = true
 strengths = ["agentic", "reasoning", "coding", "tool_use", "long_context", "speed"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 
-[models."nvidia/nemotron-3-nano-30b-a3b"]
-name = "Nemotron 3 Nano 30B A3B (NVIDIA NIM)"
+# Renamed 2026-09-20: NIM now serves this as `nvidia/nemotron-nano-3-30b-a3b`.
+# The old `nvidia/nemotron-3-nano-30b-a3b` id is absent from
+# https://integrate.api.nvidia.com/v1/models (observed 2026-09-20); the
+# `nvidia-nemotron-nano` alias follows the new id. The sibling
+# `nemotron-3-nano-omni-30b-a3b-reasoning` route kept its old-style id.
+[models."nvidia/nemotron-nano-3-30b-a3b"]
+name = "Nemotron Nano 3 30B A3B (NVIDIA NIM)"
 provider = "nvidia"
 context_window = 262144
-logical_model = "nemotron-3-nano-30b-a3b"
-equivalence_group = "nemotron-3-nano-30b-a3b"
+logical_model = "nemotron-nano-3-30b-a3b"
+equivalence_group = "nemotron-nano-3-30b-a3b"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
-architecture = { parameter_count_b = 30.0, active_parameter_count_b = 3.0, moe = true, source_url = "https://build.nvidia.com/nvidia/nemotron-3-nano-30b-a3b/modelcard", last_verified = "2026-06-20" }
+architecture = { parameter_count_b = 30.0, active_parameter_count_b = 3.0, moe = true, source_url = "https://build.nvidia.com/nvidia/nemotron-nano-3-30b-a3b/modelcard", last_verified = "2026-09-20" }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context"]
@@ -75,10 +80,27 @@ open_weight = true
 strengths = ["vision", "reasoning", "tool_use", "summarization", "long_context"]
 
 # 2026-08-15 reachability sweep: NIM retired both undated DeepSeek V4 builds
-# (HTTP 410, end of life 2026-08-07). It still serves the dated Flash snapshot,
-# so that row survives below. There is no DeepSeek V4 Pro build on NIM any more,
-# so the Pro row is gone rather than left pointing at a 410 — a catalog entry
-# that cannot be called is worse than an absent one, because it is selectable.
+# (HTTP 410, end of life 2026-08-07). There is no DeepSeek V4 Pro build on NIM
+# any more, so the Pro row is gone rather than left pointing at a 410 — a
+# catalog entry that cannot be called is worse than an absent one, because it is
+# selectable. By 2026-09-26 NIM had dropped the dated V4 Flash snapshot too and
+# serves DeepSeek V4.1 Flash in its place.
+
+[models."nvidia/deepseek-v4.1-flash"]
+name = "DeepSeek V4.1 Flash (NVIDIA NIM)"
+provider = "nvidia"
+wire_model = "deepseek-ai/deepseek-v4.1-flash"
+context_window = 1048576
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+served_variant = "nvidia-nim"
+api_dialect = "openai_chat"
+# A one-tool `tool_choice: auto` probe on 2026-09-26 returned a native tool call
+# and reported cached prompt tokens.
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
 [models."nvidia/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (NVIDIA NIM)"
@@ -90,26 +112,19 @@ equivalence_group = "deepseek-v4-flash"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+deprecated = true
+deprecation_note = "Absent from NIM's model index (https://integrate.api.nvidia.com/v1/models, read 2026-09-26). NIM serves DeepSeek V4.1 Flash instead."
+superseded_by = "nvidia/deepseek-v4.1-flash"
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
 
-[models."nvidia/minimax-m3"]
-name = "MiniMax M3 (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "minimaxai/minimax-m3"
-context_window = 1048576
-logical_model = "minimax-m3"
-equivalence_group = "minimax-m3"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.12 }
-tier = "frontier"
-open_weight = false
-strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
-
+# Removed 2026-09-20: nvidia/minimax-m3. NIM no longer serves any MiniMax
+# build — `minimaxai/minimax-m3` is absent from
+# https://integrate.api.nvidia.com/v1/models (observed 2026-09-20). The
+# `nvidia-minimax-m3` alias went with it; MiniMax M3 stays reachable through
+# the direct MiniMax, SambaNova, Fireworks and OpenRouter rows.
 [models."nvidia/kimi-k2.6"]
 name = "Kimi K2.6 (NVIDIA NIM)"
 provider = "nvidia"
@@ -126,21 +141,10 @@ open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
-[models."nvidia/openai/gpt-oss-120b"]
-name = "GPT-OSS 120B (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "openai/gpt-oss-120b"
-context_window = 131072
-logical_model = "openai-gpt-oss-120b"
-equivalence_group = "openai-gpt-oss-120b"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking"]
-architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
-tier = "mid"
-open_weight = true
-strengths = ["cheap", "tool_use", "reasoning"]
-
+# Removed 2026-09-20: nvidia/openai/gpt-oss-120b. NIM's index now carries only
+# the 20B sibling below (https://integrate.api.nvidia.com/v1/models, observed
+# 2026-09-20). GPT-OSS 120B remains catalogued on Cerebras, Groq, Fireworks,
+# DeepInfra, SambaNova and Baseten.
 [models."nvidia/openai/gpt-oss-20b"]
 name = "GPT-OSS 20B (NVIDIA NIM)"
 provider = "nvidia"
@@ -156,16 +160,58 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
-[models."nvidia/step-3.7-flash"]
-name = "Step 3.7 Flash (NVIDIA NIM)"
+# Removed 2026-09-20: nvidia/step-3.7-flash. `stepfun-ai/step-3.7-flash` is
+# absent from https://integrate.api.nvidia.com/v1/models (observed 2026-09-20).
+# The stepfun/step-3.7-flash route on OpenRouter is unaffected.
+
+# Added 2026-09-20, observed on https://integrate.api.nvidia.com/v1/models the
+# same day: NIM now serves Kimi K3 and both Z.ai GLM 5.3 builds. Per-token
+# rates are not published on the NIM index, so these rows carry no `pricing`,
+# like their Nemotron siblings above. Context windows and capabilities are
+# inherited from the first-party rows (Moonshot's /v1/models reports 1,048,576
+# for kimi-k3; the GLM rows follow the direct Z.AI rows): NIM publishes neither
+# per-route limits nor a tool matrix, so treat both as unverified for NIM.
+[models."nvidia/kimi-k3"]
+name = "Kimi K3 (NVIDIA NIM)"
 provider = "nvidia"
-wire_model = "stepfun-ai/step-3.7-flash"
-context_window = 131072
-logical_model = "step-3.7-flash"
-equivalence_group = "step-3.7-flash"
+wire_model = "moonshotai/kimi-k3"
+context_window = 1048576
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
-capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+capabilities = ["tools", "vision", "streaming", "thinking"]
 tier = "frontier"
-open_weight = false
+open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."nvidia/glm-5.3"]
+name = "GLM 5.3 (NVIDIA NIM)"
+provider = "nvidia"
+wire_model = "z-ai/glm-5.3"
+context_window = 1048576
+logical_model = "glm-5.3"
+equivalence_group = "glm-5.3"
+served_variant = "nvidia-nim"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking"]
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."nvidia/glm-5.3-flash"]
+name = "GLM 5.3 Flash (NVIDIA NIM)"
+provider = "nvidia"
+wire_model = "z-ai/glm-5.3-flash"
+context_window = 1048576
+logical_model = "glm-5.3-flash"
+equivalence_group = "glm-5.3-flash"
+served_variant = "nvidia-nim"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking"]
+# `frontier` matches the direct Z.AI and OpenRouter rows: tier is a property of
+# the logical model, and every row in an equivalence group must agree.
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "cheap", "coding", "tool_use", "reasoning"]

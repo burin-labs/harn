@@ -41,6 +41,7 @@ pub const PROVIDER_NAMES: list<string> = [
   "siliconflow",
   "tgi",
   "together",
+  "typesafe",
   "vercel_ai_gateway",
   "vertex",
   "vllm",

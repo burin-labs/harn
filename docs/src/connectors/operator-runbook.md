@@ -337,6 +337,16 @@ Recovery is package-driven:
 
 Stable `harn connect status --json` states:
 
+`usable` and the top-level `status` describe outbound operations. The separate
+`inbound` object reports whether declared callback verification secrets are
+ready, missing, or could not be checked. A missing inbound secret does not
+make an outbound operation unusable. Each required secret has a presence result
+in `health_checks`; declared secret health checks also report their own result
+when health checks are requested.
+The inbound `status` is `not_required`, `ready`, `missing_auth`, or
+`transient_provider_outage`; `missing_secrets` names only secrets confirmed
+missing.
+
 | Status | Meaning | Recovery |
 |---|---|---|
 | `healthy` | Required secrets, expiry, scopes, and health checks passed. | Continue with the package and canonical ingress gates. |
