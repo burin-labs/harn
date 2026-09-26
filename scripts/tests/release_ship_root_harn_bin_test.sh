@@ -3,6 +3,11 @@
 # root. The Harn binary must be resolved by the release root's own harn_bin.sh,
 # whose freshness proof matches the tree it builds; main's staged copy is only
 # the fallback for a root that has none.
+#
+# The negative control is the observed failure: main's harn_bin.sh speaks a
+# newer freshness protocol than the tag's checker, which answers with its usage
+# line. The staged stub gives that answer, so a release that resolves Harn
+# through main's copy fails here the way publication failed.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -21,16 +26,19 @@ record="$tmp/record"
 # Both resolvers record who was asked and refuse, so the run stops at the first
 # Harn resolution and the record names its owner.
 write_stub() {
-  local path="$1" owner="$2"
+  local path="$1" owner="$2" answer=""
+  [[ -n "${3:-}" ]] && answer="echo $(printf '%q' "$3") >&2"
   mkdir -p "$(dirname "$path")"
   cat > "$path" <<EOF
 #!/usr/bin/env bash
 printf '%s %s\n' "$owner" "\$*" >> "$record"
+$answer
 exit 3
 EOF
   chmod +x "$path"
 }
-write_stub "$tools/harn_bin.sh" staged
+usage_error='error: usage: harn-freshness-check {record-evidence <binary> <manifest> <repo-root>|verify <receipt> <manifest> <binary> <repo-root>|verify-worktree <binary> <repo-root>}'
+write_stub "$tools/harn_bin.sh" staged "$usage_error"
 
 root="$tmp/release-root"
 git init -q -b main "$root"
@@ -53,7 +61,7 @@ run_finalize
 first="$(head -1 "$record" || true)"
 [[ "$first" == root\ * ]] \
   || fail "the first Harn resolution was not the release root's harn_bin.sh: '${first:-<none>}' ($(cat "$tmp/out"))"
-if grep -q '^staged ' "$record"; then
+if grep -q '^staged ' "$record" || grep -qF 'usage: harn-freshness-check' "$tmp/out"; then
   fail "main's staged harn_bin.sh resolved Harn for a release root that has its own: $(cat "$record")"
 fi
 
