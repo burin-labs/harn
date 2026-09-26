@@ -51,6 +51,7 @@ pub struct McpCompletionSource {
 /// A prompt argument definition.
 pub struct McpPromptArgDef {
     pub name: String,
+    pub title: Option<String>,
     pub description: Option<String>,
     pub required: bool,
     pub completion: Option<McpCompletionSource>,

@@ -2631,10 +2631,17 @@ tool registry dict.
 | `composition_typescript_declarations(manifest)` | manifest: dict | string | Emit declaration-only TypeScript bindings from the manifest |
 | `composition_crystallization_trace(report, options?)` | report: dict, options?: dict | dict | Convert a composition report into crystallization trace input |
 | `harness.tools.mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
-| `harness.tools.mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
-| `harness.tools.mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?, completions?}`); `completions` maps URI variable names to static suggestion lists or completion closures |
-| `harness.tools.mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`); prompt arguments may include `suggestions`/`completions` or a `complete` closure for MCP `completion/complete` |
+| `harness.tools.mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, title?, description?, mime_type?, meta?}`) |
+| `harness.tools.mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, title?, description?, mime_type?, completions?}`); `completions` maps declared URI variables to static suggestion lists or completion closures |
+| `harness.tools.mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, title?, description?, arguments?}`); prompt arguments accept `name`, optional `title`, `description`, `required`, and `suggestions`/`completions` or a `complete` closure |
 | `harness.tools.mcp_report_progress(progress, opts?)` | progress: number, opts?: dict | bool | Emit a `notifications/progress` update for the in-flight MCP tool call (no-op when the client did not opt in via `_meta.progressToken`). `opts`: `{total?: number, message?: string, token?: string\|number}` |
+
+Resource, template, and prompt declarations reject unknown fields, mistyped string fields,
+duplicate resource URIs or prompt names, and malformed arguments or completion
+sources. Resource URIs must parse as absolute URIs; resource templates support
+simple `{name}` variables and may only offer completions for declared variables.
+`harn serve mcp` refuses the whole candidate if a declaration fails, even when
+the script catches the individual error. Static resource `text` must be a string.
 
 The `composition_*` builtins back [Governed Code Mode](./code-mode.md). The
 executor is read-only: it rejects imports, writes, process execution, network
