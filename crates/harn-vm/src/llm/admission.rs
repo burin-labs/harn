@@ -7,7 +7,7 @@ use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
 use super::api::{LlmCallOptions, LlmRequestPayload, LlmResult};
-use crate::value::{VmError, VmValue};
+use crate::value::{ErrorCategory, VmError, VmValue};
 
 mod bound;
 mod durable;
@@ -72,10 +72,20 @@ struct AdmissionDenial<'a> {
 }
 
 fn error(admission_reason: DenialKind, message: &str) -> VmError {
+    denial(ErrorCategory::BudgetExceeded, admission_reason, message)
+}
+
+/// The spend ledger could not be read or written. Admission still fails
+/// closed, but under the category of what went wrong, not as a spent budget.
+fn unavailable(category: ErrorCategory, message: &str) -> VmError {
+    denial(category, DenialKind::ScopeUnavailable, message)
+}
+
+fn denial(category: ErrorCategory, admission_reason: DenialKind, message: &str) -> VmError {
     let denial = AdmissionDenial {
-        category: "budget_exceeded",
+        category: category.as_str(),
         kind: "terminal",
-        reason: "budget_exceeded",
+        reason: category.as_str(),
         admission_reason,
         message,
     };

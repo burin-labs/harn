@@ -13,9 +13,9 @@ use rust_decimal::Decimal;
 use time::{Date, OffsetDateTime};
 use uuid::Uuid;
 
-use super::{error, DenialKind};
+use super::{error, unavailable, DenialKind};
 use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteSchema};
-use crate::value::VmError;
+use crate::value::{ErrorCategory, VmError};
 
 const SCALE: i64 = 1_000_000;
 const SQLITE_SCHEMA: RuntimeSqliteSchema = RuntimeSqliteSchema::new(
@@ -390,9 +390,10 @@ fn connect(path: &Path) -> Result<Connection, VmError> {
     connection
         .busy_timeout(Duration::from_secs(5))
         .map_err(db_error)?;
-    connection
-        .pragma_update(None, "journal_mode", "WAL")
-        .map_err(db_error)?;
+    // WAL promotion belongs to `initialize_runtime_sqlite`, which does it under
+    // a cross-process lock. Switching a fresh file here first raced every other
+    // process opening it and failed about one round in twenty with
+    // "database is locked" (harn#8818).
     initialize_runtime_sqlite(&connection, Duration::from_secs(5), &SQLITE_SCHEMA)
         .map_err(db_error)?;
     Ok(connection)
@@ -455,9 +456,37 @@ fn periods(now: OffsetDateTime) -> (String, String, i64, i64) {
     )
 }
 
-fn db_error(error_value: impl std::fmt::Display) -> VmError {
-    error(
-        DenialKind::ScopeUnavailable,
+/// A ledger failure that can say whether another connection held the lock.
+trait LedgerFailure: std::fmt::Display {
+    fn contended(&self) -> bool {
+        false
+    }
+}
+
+impl LedgerFailure for rusqlite::Error {
+    fn contended(&self) -> bool {
+        harn_sqlite::sqlite_contention(self).is_some()
+    }
+}
+
+impl LedgerFailure for crate::runtime_sqlite::RuntimeSqliteError {
+    fn contended(&self) -> bool {
+        self.is_busy_or_locked()
+    }
+}
+
+impl LedgerFailure for std::io::Error {}
+
+/// An unreadable ledger is not an exhausted budget: a contended one is
+/// `resource_busy`, anything else an `environment` failure (harn#8818).
+fn db_error(error_value: impl LedgerFailure) -> VmError {
+    let category = if error_value.contended() {
+        ErrorCategory::ResourceBusy
+    } else {
+        ErrorCategory::Environment
+    };
+    unavailable(
+        category,
         &format!("machine spend ledger unavailable: {error_value}"),
     )
 }
@@ -622,6 +651,62 @@ mod tests {
                 .unwrap()
                 .reserved_microusd,
             600_000
+        );
+    }
+
+    /// Before harn#8818 about one round in twenty of four processes opening a
+    /// fresh ledger failed with "database is locked" at the WAL switch.
+    #[test]
+    fn concurrent_first_opens_of_a_fresh_ledger_all_succeed() {
+        const TEST: &str =
+            "llm::admission::durable::tests::concurrent_first_opens_of_a_fresh_ledger_all_succeed";
+        if let Some(path) = std::env::var_os("HARN_MACHINE_SPEND_FIRST_OPEN_PATH") {
+            match MachineSpendQuota::open(path, "person", policy(1_000_000)) {
+                Ok(_) => println!("MACHINE_SPEND_OPENED=true"),
+                Err(error) => println!("MACHINE_SPEND_OPENED=false {error}"),
+            }
+            return;
+        }
+        let binary = std::env::current_exe().unwrap();
+        for round in 0..100 {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("spend.sqlite");
+            let children: Vec<_> = (0..4)
+                .map(|_| {
+                    std::process::Command::new(&binary)
+                        .args(["--exact", TEST, "--nocapture"])
+                        .env("HARN_MACHINE_SPEND_FIRST_OPEN_PATH", &path)
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .unwrap()
+                })
+                .collect();
+            for child in children {
+                let stdout =
+                    String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).to_string();
+                assert!(
+                    stdout.contains("MACHINE_SPEND_OPENED=true"),
+                    "round {round}: {stdout}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_unreadable_ledger_is_not_reported_as_a_spent_budget() {
+        let busy = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("database is locked".to_string()),
+        );
+        assert_eq!(
+            crate::value::error_to_category(&db_error(busy)),
+            ErrorCategory::ResourceBusy
+        );
+        let missing = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            crate::value::error_to_category(&db_error(missing)),
+            ErrorCategory::Environment
         );
     }
 
