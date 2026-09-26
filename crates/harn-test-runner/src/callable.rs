@@ -131,6 +131,7 @@ fn compile_failure(case: &TestCase, error: harn_vm::CompileError) -> TestResult 
         name: case.name.clone(),
         file: case.file.display().to_string(),
         passed: false,
+        skip_reason: None,
         error: Some(format!("Compile error: {error}")),
         captured_output: None,
         timeout: None,

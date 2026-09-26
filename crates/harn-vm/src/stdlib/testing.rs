@@ -17,6 +17,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &TESTING_CALL_BODY_IMPL_DEF,
     &TESTING_WITH_NESTED_EXECUTION_BUDGET_IMPL_DEF,
     &ASSERT_IMPL_DEF,
+    &SKIP_IMPL_DEF,
     &ASSERT_EQ_IMPL_DEF,
     &ASSERT_NE_IMPL_DEF,
     &ASSERT_APPROX_IMPL_DEF,
@@ -172,6 +173,23 @@ fn assert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
     }
     Ok(VmValue::Nil)
+}
+
+/// Stop the current user-test case with a reason the runner can count and
+/// report. This is VM control flow, so a test's catch block cannot turn a
+/// skipped case into a pass.
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "skip(reason: string) -> nil",
+    category = "testing"
+)]
+fn skip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let reason = match args.first() {
+        Some(VmValue::String(reason)) if !reason.trim().is_empty() => reason.to_string(),
+        _ => return Err(VmError::TypeError("skip: a non-empty reason is required".to_string())),
+    };
+    Err(VmError::TestSkipped(reason))
 }
 
 /// Throws a Harn-level error carrying `text` — the shape every assertion

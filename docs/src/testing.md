@@ -756,6 +756,24 @@ assert_approx(total, 0.3)
 assert_matches(receipt.id, "^rcpt-\\d+$")
 ```
 
+### Skipping a case
+
+Call `skip(reason)` when a test cannot run because a required service or
+platform feature is unavailable. It stops the case immediately. The runner
+prints `SKIP` with the reason and counts the case separately from passes and
+failures. JSON and JUnit reports retain the reason. A suite that requires every
+case to run can use `harn test tests/ --fail-on-skip` to exit with a failure if
+any case skips; the default command treats skips as information.
+
+```harn
+pipeline test_external_service() {
+  if !service_available() {
+    skip("external service unavailable")
+  }
+  assert(service_works())
+}
+```
+
 ### Argument order
 
 Every assertion that weighs a subject against an expectation takes **the

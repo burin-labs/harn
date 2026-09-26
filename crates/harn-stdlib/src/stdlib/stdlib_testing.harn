@@ -761,8 +761,8 @@ pub fn assert_no_throw<T>(body: fn() -> T, message: string? = nil) -> T {
 
 // Value assertions
 //
-// `assert`, `assert_eq`, `assert_ne`, `assert_approx`, `assert_matches`, and
-// `value_diff` are implemented in Rust (`crates/harn-vm/src/stdlib/
+// `assert`, `assert_eq`, `assert_ne`, `assert_approx`, `assert_matches`,
+// `skip`, and `value_diff` are implemented in Rust (`crates/harn-vm/src/stdlib/
 // testing.rs`) because they walk the runtime representation of a value, which
 // Harn source cannot reach. They are callable with no import at all, and this
 // module re-exports them so `import { assert_eq } from "std/testing"` resolves
