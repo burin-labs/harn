@@ -117,11 +117,10 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-  # Say where this suite is about to land, and refuse when that cannot be
-  # measured. The routing expression below can only choose; it cannot report,
-  # and it reads an unreadable census exactly like a census that reported no
-  # capacity. Both would fall through to a hosted runner and silently downgrade
-  # the tier, leaving nothing to attribute the downgrade to.
+  # Say where this suite is about to land, and name a hosted fallback when the
+  # census cannot be read. The routing expression below reads this job's route
+  # output instead of the census, so a census outage sends the suite hosted by
+  # name instead of failing the expression or reading as an empty pool.
   e2e-capacity:
     name: Name the E2E runner capacity decision
     needs: [changes, runner-availability]
@@ -137,9 +136,13 @@ jobs:
       (github.event_name == 'pull_request' && needs.changes.outputs.should_run != 'false'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      route: ${{ steps.decision.outputs.route }}
+      fallback: ${{ steps.decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Decide where the slow E2E suite lands
+        id: decision
         run: bash scripts/ci/runner_capacity.sh
         env:
           CAPACITY_LABEL: E2E_RUNNER_CAPACITY
@@ -173,10 +176,7 @@ jobs:
     runs-on: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && 'blacksmith-8vcpu-ubuntu-2404')
-        || (github.event_name == 'push'
-        && needs.runner-availability.outputs.selfhosted_disabled == ''
-        && needs.runner-availability.outputs.capacity != ''
-        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        || (needs.e2e-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || 'ubuntu-latest' }}
     # Read `!= 'false'` rather than `== 'true'`. A detector that failed, or

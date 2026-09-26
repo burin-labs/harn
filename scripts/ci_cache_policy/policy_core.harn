@@ -1669,12 +1669,14 @@ pub fn e2e_workflow_concurrency_errors(workflow: dict) -> list<string> {
   )
 }
 
+/**
+ * The owned rung reads the capacity job's named route, not the census. The
+ * script is the one owner of that decision, and a census the routing
+ * expression parsed itself would fail the whole job on malformed JSON instead
+ * of falling back hosted by name.
+ */
 pub fn owned_producer_condition() -> string {
-  return "(github.event_name == 'pull_request'"
-    + "\n  && github.event.pull_request.head.repo.full_name == github.repository"
-    + "\n  && needs.runner-availability.outputs.selfhosted_disabled == ''"
-    + "\n  && needs.runner-availability.outputs.capacity != ''"
-    + "\n  && fromJSON(needs.runner-availability.outputs.capacity).${SELFHOSTED_LINUX_BIG_POOL}.online > 0"
+  return "(needs.rust-producer-capacity.outputs.route == 'owned'"
 }
 
 pub fn paid_producer_condition() -> string {
