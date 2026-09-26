@@ -696,6 +696,7 @@ mod tests {
         let sid = token::Sid::for_policy_digest(&acl_grants::policy_digest(&policy)).expect("sid");
         let first =
             acl_grants::PolicyWriteGrants::grant("test", &sid, &policy, None).expect("grant");
+        println!("first grant rewrote {:?}", first.rewritten);
         assert!(first.rewrites > 0, "the first spawn grants the workspace");
         acl_grants::forget_grants();
         let second =
@@ -735,6 +736,7 @@ mod tests {
             .iter()
             .filter_map(|(program, args, expected)| {
                 let output = run(&policy, workspace.path(), program, args);
+                println!("observed {program} {args:?}: {}", describe(&output));
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let ok = output.status.success()
                     && expected.is_none_or(|expected| stdout.contains(expected));
@@ -760,6 +762,7 @@ mod tests {
             "cmd",
             &["/c", "echo", &format!("x>{}", inside_target.display())],
         );
+        println!("observed inside write: {}", describe(&inside));
         assert!(
             inside.status.success() && inside_target.exists(),
             "a write inside the workspace must succeed: {}",
@@ -773,6 +776,7 @@ mod tests {
             "cmd",
             &["/c", "echo", &format!("x>{}", outside_target.display())],
         );
+        println!("observed outside write: {}", describe(&refused));
         assert!(
             !refused.status.success() && !outside_target.exists(),
             "a write outside the granted roots must be refused: {}",
@@ -787,6 +791,10 @@ mod tests {
     fn windows_process_sandbox_msys_programs_fail_known_issue_8811() {
         let usr_bin = Path::new("C:\\Program Files\\Git\\usr\\bin");
         if !usr_bin.join("bash.exe").exists() {
+            println!(
+                "skipped: no Git for Windows MSYS tools at {}",
+                usr_bin.display()
+            );
             return;
         }
         let workspace = tempfile::tempdir().expect("workspace");
@@ -803,6 +811,7 @@ mod tests {
                 &args,
             );
             let stderr = String::from_utf8_lossy(&output.stderr);
+            println!("observed {}: {}", program.display(), describe(&output));
             assert!(
                 !output.status.success() && stderr.contains("CreateFileMapping"),
                 "{} changed behavior; if it now succeeds, harn#8811 is fixed and this test \
