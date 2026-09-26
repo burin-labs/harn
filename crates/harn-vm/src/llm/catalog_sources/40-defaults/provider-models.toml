@@ -1,0 +1,31 @@
+# Provider defaults are selected here, beside the model rows they reference.
+# Runtime is the bare CLI/VM fallback; portal is the model offered by the
+# setup UI. The two may differ deliberately, including in price.
+# Host-supplied local/MLX model environment variables still take precedence.
+
+[provider_defaults.anthropic]
+portal = "claude-sonnet-4-6"
+
+[provider_defaults.local]
+runtime = "gemma-4-26b-a4b-it"
+portal = "gemma-4-26b-a4b-it"
+
+[provider_defaults.mlx]
+runtime = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+portal = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+
+[provider_defaults.openai]
+runtime = "gpt-4o-mini"
+portal = "gpt-4o"
+
+[provider_defaults.ollama]
+runtime = "llama3.2"
+portal = "llama3.2"
+
+[provider_defaults.openrouter]
+runtime = "anthropic/claude-sonnet-4-6"
+portal = "Qwen/Qwen3.5-9B"
+
+# Keep the legacy runtime fallback for providers without a catalog-specific
+# model pin. Its provider is the built-in default_provider (Anthropic).
+# A missing route or later deprecation fails catalog generation.

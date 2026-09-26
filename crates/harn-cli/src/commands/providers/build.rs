@@ -177,10 +177,13 @@ pub(super) fn generated_provider_config(
             "generated provider config contains unknown fields:\n{rendered}"
         ));
     }
-    let default_issues = harn_vm::llm_config::model_default_issues(&parsed.config);
+    let mut default_issues = harn_vm::llm_config::model_default_issues(&parsed.config);
+    default_issues.extend(harn_vm::llm_config::provider_route_default_issues(
+        &parsed.config,
+    ));
     if !default_issues.is_empty() {
         return Err(format!(
-            "generated provider config has invalid model defaults:\n{}",
+            "generated provider config has invalid defaults:\n{}",
             default_issues.join("\n")
         ));
     }

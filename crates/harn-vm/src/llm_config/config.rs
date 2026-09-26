@@ -13,6 +13,10 @@ pub struct ProvidersConfig {
     #[serde(default)]
     pub default_provider: Option<String>,
     #[serde(default)]
+    pub fallback_model: Option<String>,
+    #[serde(default)]
+    pub provider_defaults: BTreeMap<String, ProviderDefaultModels>,
+    #[serde(default)]
     pub providers: BTreeMap<String, ProviderDef>,
     #[serde(default)]
     pub aliases: BTreeMap<String, AliasDef>,
@@ -61,6 +65,16 @@ pub struct ProvidersConfig {
     /// strictest available posture everywhere flips this one key in config.
     #[serde(default)]
     pub data_controls_policy: DataControlsPolicy,
+}
+
+/// Product entry points may deliberately choose different defaults, but both
+/// choices live beside the model rows they reference.
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub struct ProviderDefaultModels {
+    #[serde(default)]
+    pub runtime: Option<String>,
+    #[serde(default)]
+    pub portal: Option<String>,
 }
 
 /// Field-wise catalog patches applied on top of merged model rows.
@@ -130,6 +144,8 @@ pub struct SuppressDef {
 impl ProvidersConfig {
     pub fn is_empty(&self) -> bool {
         self.default_provider.is_none()
+            && self.fallback_model.is_none()
+            && self.provider_defaults.is_empty()
             && self.providers.is_empty()
             && self.aliases.is_empty()
             && self.alias_tool_calling.is_empty()
@@ -206,6 +222,18 @@ impl ProvidersConfig {
 
         if overlay.default_provider.is_some() {
             self.default_provider = overlay.default_provider.clone();
+        }
+        if overlay.fallback_model.is_some() {
+            self.fallback_model = overlay.fallback_model.clone();
+        }
+        for (provider, defaults) in &overlay.provider_defaults {
+            let current = self.provider_defaults.entry(provider.clone()).or_default();
+            if defaults.runtime.is_some() {
+                current.runtime = defaults.runtime.clone();
+            }
+            if defaults.portal.is_some() {
+                current.portal = defaults.portal.clone();
+            }
         }
 
         if overlay.data_controls_audit.is_some() {

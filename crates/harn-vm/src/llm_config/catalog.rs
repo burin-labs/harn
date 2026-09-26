@@ -901,18 +901,32 @@ pub fn default_model_for_provider(provider: &str) -> String {
     if provider_uses_acp(provider) {
         return "default".to_string();
     }
+    let config = effective_config();
+    local_model_env_override(provider)
+        .or_else(|| config.provider_defaults.get(provider)?.runtime.clone())
+        .or_else(|| config.fallback_model.clone())
+        .expect("embedded catalog must declare fallback_model")
+}
+
+/// The portal's configured choice uses the same catalog contract as the VM.
+pub fn portal_default_model_for_provider(provider: &str) -> Option<String> {
+    local_model_env_override(provider).or_else(|| {
+        effective_config()
+            .provider_defaults
+            .get(provider)?
+            .portal
+            .clone()
+    })
+}
+
+fn local_model_env_override(provider: &str) -> Option<String> {
     match provider {
         "local" => crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL")
-            .or_else(|| crate::stdlib::process::session_env_value("HARN_LLM_MODEL"))
-            .unwrap_or_else(|| "gemma-4-26b-a4b-it".to_string()),
+            .or_else(|| crate::stdlib::process::session_env_value("HARN_LLM_MODEL")),
         "mlx" => crate::stdlib::process::session_env_var("MLX_MODEL_ID")
             .ok()
-            .flatten()
-            .unwrap_or_else(|| "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()),
-        "openai" => "gpt-4o-mini".to_string(),
-        "ollama" => "llama3.2".to_string(),
-        "openrouter" => "anthropic/claude-sonnet-4.6".to_string(),
-        _ => "claude-sonnet-4-6".to_string(),
+            .flatten(),
+        _ => None,
     }
 }
 
@@ -1349,4 +1363,92 @@ pub fn all_model_candidates() -> Vec<(String, String)> {
             .then_with(|| model_a.cmp(model_b))
     });
     candidates
+}
+
+/// Validate every built-in route chosen without an explicit model selector.
+/// Legacy aliases may name deprecated models, but defaults cannot.
+pub fn provider_route_default_issues(config: &ProvidersConfig) -> Vec<String> {
+    let mut issues = Vec::new();
+    let check = |source: String, provider: &str, model_id: &str| -> Option<String> {
+        match config.models.get(model_id) {
+            None => Some(format!("{source} references unknown model {model_id}")),
+            Some(model) if model.provider != provider => Some(format!(
+                "{source} targets {provider}:{model_id}, but the model belongs to {}",
+                model.provider
+            )),
+            Some(model) if model.deprecated => Some(format!(
+                "{source} targets deprecated model {provider}:{model_id}"
+            )),
+            Some(_) => None,
+        }
+    };
+
+    match (&config.default_provider, &config.fallback_model) {
+        (Some(provider), Some(model)) => {
+            issues.extend(check("fallback_model".to_string(), provider, model))
+        }
+        _ => issues.push("default_provider and fallback_model must both be set".to_string()),
+    }
+    for (provider, defaults) in &config.provider_defaults {
+        if !config.providers.contains_key(provider) {
+            issues.push(format!(
+                "provider_defaults.{provider} names an unknown provider"
+            ));
+        }
+        for (surface, model) in [
+            ("runtime", defaults.runtime.as_deref()),
+            ("portal", defaults.portal.as_deref()),
+        ] {
+            if let Some(model) = model {
+                issues.extend(check(
+                    format!("provider_defaults.{provider}.{surface}"),
+                    provider,
+                    model,
+                ));
+            }
+        }
+    }
+    for (provider, model) in &config.qc_defaults {
+        issues.extend(check(format!("qc_defaults.{provider}"), provider, model));
+    }
+    for alias_name in ["frontier", "mid", "small"] {
+        let alias = config
+            .aliases
+            .get(&format!("tier/{alias_name}"))
+            .or_else(|| config.aliases.get(alias_name));
+        match alias {
+            Some(alias) => issues.extend(check(
+                format!("tier/{alias_name}"),
+                &alias.provider,
+                &alias.id,
+            )),
+            None => issues.push(format!("tier/{alias_name} has no alias")),
+        }
+    }
+    for (ladder_name, ladder) in &config.model_ladders {
+        for step in &ladder.steps {
+            if step.provider.as_deref() == Some("mock") {
+                continue;
+            }
+            let (model_id, provider) = config
+                .aliases
+                .get(&step.model)
+                .map(|alias| (alias.id.as_str(), alias.provider.as_str()))
+                .unwrap_or((step.model.as_str(), step.provider.as_deref().unwrap_or("")));
+            let provider = if provider.is_empty() {
+                config
+                    .models
+                    .get(model_id)
+                    .map_or("", |model| model.provider.as_str())
+            } else {
+                provider
+            };
+            issues.extend(check(
+                format!("model_ladders.{ladder_name}"),
+                provider,
+                model_id,
+            ));
+        }
+    }
+    issues
 }

@@ -63,6 +63,99 @@ describe("LaunchPanel", () => {
       })
     })
   })
+  it("uses a viable provider's default when the configured preference is unavailable", async () => {
+    const onLaunch = vi.fn(async () => {})
+    render(
+      <IntlProvider locale="en">
+        <LaunchPanel
+          meta={{ workspace_root: "/workspace/harn", run_dir: ".harn-runs/portal-demo" }}
+          llmOptions={{
+            preferred_provider: "openai",
+            preferred_model: "gpt-4o",
+            providers: [
+              {
+                name: "openai",
+                base_url: "https://api.openai.com/v1",
+                base_url_env: null,
+                auth_style: "bearer",
+                auth_envs: ["OPENAI_API_KEY"],
+                auth_configured: false,
+                viable: false,
+                local: false,
+                models: ["gpt-4o"],
+                aliases: [],
+                default_model: "gpt-4o",
+              },
+              {
+                name: "anthropic",
+                base_url: "https://api.anthropic.com",
+                base_url_env: null,
+                auth_style: "header",
+                auth_envs: ["ANTHROPIC_API_KEY"],
+                auth_configured: true,
+                viable: true,
+                local: false,
+                models: ["claude-sonnet-4-6"],
+                aliases: [],
+                default_model: "claude-sonnet-4-6",
+              },
+            ],
+          }}
+          targets={[]}
+          jobs={[]}
+          onLaunch={onLaunch}
+          onOpenRun={() => {}}
+        />
+      </IntlProvider>,
+    )
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Run now" }).at(-1)!)
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+    }))
+  })
+
+
+  it("requires a model when the provider has no authored default", async () => {
+    const onLaunch = vi.fn(async () => {})
+    render(
+      <IntlProvider locale="en">
+        <LaunchPanel
+          meta={{ workspace_root: "/workspace/harn", run_dir: ".harn-runs/portal-demo" }}
+          llmOptions={{
+            preferred_provider: "mistral",
+            preferred_model: null,
+            providers: [{
+              name: "mistral",
+              base_url: "https://api.mistral.ai/v1",
+              base_url_env: null,
+              auth_style: "bearer",
+              auth_envs: ["MISTRAL_API_KEY"],
+              auth_configured: true,
+              viable: true,
+              local: false,
+              models: ["mistral-small"],
+              aliases: [],
+              default_model: "",
+            }],
+          }}
+          targets={[]}
+          jobs={[]}
+          onLaunch={onLaunch}
+          onOpenRun={() => {}}
+        />
+      </IntlProvider>,
+    )
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Run now" }).at(-1)!)
+    expect(await screen.findByText("Choose a model for this provider", { selector: "div.muted" })).toBeInTheDocument()
+    expect(onLaunch).not.toHaveBeenCalled()
+
+    await userEvent.selectOptions(screen.getAllByLabelText("Model").at(-1)!, "mistral-small")
+    await userEvent.click(screen.getAllByRole("button", { name: "Run now" }).at(-1)!)
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ provider: "mistral", model: "mistral-small" }))
+  })
 
   it("renders launch workspace details and open-run actions", async () => {
     const onOpenRun = vi.fn()
