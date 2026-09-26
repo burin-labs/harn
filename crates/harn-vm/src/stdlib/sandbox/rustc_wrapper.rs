@@ -649,9 +649,16 @@ impl ProbeSession {
             .collect()
     }
 
-    /// Whether `pid` is in this session now. The leader, the probe's `cargo`,
-    /// has exited, so a process leading a session with this id is an
-    /// unrelated one that reused the pid and is not a member.
+    /// Whether `pid` is in this session now, excluding the id's own holder:
+    /// the leader, the probe's `cargo`, has exited.
+    ///
+    /// What keeps the session from being impersonated is the kernel, not that
+    /// exclusion: Linux and XNU never reallocate a pid while it is still in
+    /// use as a session or process-group id, so while any member survives, no
+    /// new process can take this id. Once the last member exits the id can be
+    /// reused. The residual race is a new session created under a reused id
+    /// between [`Self::members`] reading the table and the re-check before a
+    /// signal, which needs the id to be freed and reallocated in that window.
     #[cfg(unix)]
     fn holds(&self, pid: u32) -> bool {
         pid != self.0
