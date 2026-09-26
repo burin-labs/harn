@@ -24,7 +24,7 @@ chmod +x "$scratch/bin/gh"
 canary() {
   PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/consumer \
     CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
-    TARGET_VERSION=1.2.3-dev CANARY_POLL_SECONDS=0 PAIRING_TEXT="${1:-}" \
+    TARGET_VERSION=v1.2.3-dev CANARY_POLL_SECONDS=0 PAIRING_TEXT="${1:-}" \
     bash "$root/scripts/ci/consumer_canary.sh" > "$scratch/out" 2>&1
 }
 

@@ -2744,7 +2744,7 @@ jobs:
             pairing_text=$(git log --format=%B "$MERGE_GROUP_BASE..HEAD")
           fi
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
-            TARGET_VERSION=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml) \
+            TARGET_VERSION=v$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml) \
             PAIRING_TEXT=$pairing_text \
             bash scripts/ci/consumer_canary.sh
 

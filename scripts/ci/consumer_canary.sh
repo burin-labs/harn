@@ -28,7 +28,7 @@
 #   CANARY_REPOSITORY  owner/name of the consumer.
 #   CANARY_WORKFLOW    the consumer's rehearsal workflow file.
 #   SOURCE_REVISION    the commit under test.
-#   TARGET_VERSION     the workspace version at that commit.
+#   TARGET_VERSION     the workspace version at that commit, as vX.Y.Z[-pre].
 #   PAIRING_TEXT       description and commit messages to read trailers from.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
@@ -66,7 +66,9 @@ canary_main() {
   [[ -n "$repo" ]] || canary_fail consumer_repository_unset
   [[ -n "$workflow" ]] || canary_fail consumer_workflow_unset
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || canary_fail source_revision_invalid
-  [[ -n "$version" ]] || canary_fail target_version_unset
+  # The consumer reads the target as a tag name, so a bare workspace version
+  # is refused there; refuse it here first, by name.
+  [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]] || canary_fail target_version_invalid "target=$version"
 
   local paired ref label=default
   canary_read_pairing "${repo#*/}" "${PAIRING_TEXT:-}"
