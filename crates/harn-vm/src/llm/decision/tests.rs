@@ -901,3 +901,43 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
         "the backend is handed the caller's state, not a summary of it"
     );
 }
+
+#[test]
+fn saved_answers_use_the_public_label_vocabulary() {
+    // Evaluation tapes serialize answers with serde while receipts and the
+    // stdlib types spell the same labels in snake case. A tape must not carry
+    // a second spelling of one label.
+    let label = |value: serde_json::Value| value.as_str().map(str::to_string);
+    assert_eq!(
+        label(serde_json::to_value(ConfidenceKind::BinaryProbability).unwrap()).as_deref(),
+        Some("binary_probability")
+    );
+    assert_eq!(
+        label(serde_json::to_value(ConfidenceKind::DistributionShape).unwrap()).as_deref(),
+        Some("distribution_shape")
+    );
+    assert_eq!(
+        label(serde_json::to_value(ConfidenceKind::ModelRationale).unwrap()).as_deref(),
+        Some("model_rationale")
+    );
+    assert_eq!(
+        label(serde_json::to_value(EvidenceKind::InputReference).unwrap()).as_deref(),
+        Some("input_reference")
+    );
+    assert_eq!(
+        label(serde_json::to_value(EvidenceKind::ModelRationale).unwrap()).as_deref(),
+        Some("model_rationale")
+    );
+    let body = serde_json::to_value(AnswerBody::Boolean {
+        verdict: true,
+        probability: 0.9,
+    })
+    .unwrap();
+    assert!(body.get("boolean").is_some(), "answer body tag: {body}");
+    let choice = serde_json::to_value(AnswerBody::Choice {
+        choice: "keep".into(),
+        probabilities: BTreeMap::new(),
+    })
+    .unwrap();
+    assert!(choice.get("choice").is_some(), "answer body tag: {choice}");
+}
