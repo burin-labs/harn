@@ -1015,16 +1015,15 @@
         "DEEPSEEK_API_KEY"
       ],
       "recommended": {
-        "selector": "deepseek:deepseek-v4-flash",
+        "selector": "deepseek:deepseek-flash",
         "provider": "deepseek",
-        "model": "deepseek-v4-flash",
-        "display_name": "DeepSeek V4 Flash",
+        "model": "deepseek-flash",
+        "display_name": "DeepSeek V4.1 Flash",
         "tool_format": "native",
         "harn_options": [
           "provider = \"deepseek\"",
-          "model = \"deepseek-v4-flash\"",
-          "tool_format = \"native\"",
-          "structured_output_mode = \"native_json\""
+          "model = \"deepseek-flash\"",
+          "tool_format = \"native\""
         ]
       },
       "capabilities": {
@@ -1044,7 +1043,7 @@
         "batch_api": false,
         "batch_discount_percent": null,
         "serving_tiers": [],
-        "usage_accounting_confidence": "high"
+        "usage_accounting_confidence": "medium"
       },
       "empirical": {
         "status": "not_recorded",
@@ -1057,8 +1056,13 @@
         "native_text_parity": null,
         "evidence": []
       },
-      "notes": [],
-      "caveats": [],
+      "notes": [
+        "DeepSeek V4.1 Flash is the current direct Flash route; the older deepseek-v4-flash ID temporarily serves the same model."
+      ],
+      "caveats": [
+        "Direct tool calling has not been probed in this refresh; the capability row follows DeepSeek's published API documentation.",
+        "Chinese public holidays receive off-peak rates but are not modeled; cost estimates on those weekdays may be high."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     },
