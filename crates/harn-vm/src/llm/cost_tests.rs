@@ -1,4 +1,49 @@
 use super::*;
+
+#[test]
+fn machine_and_session_remaining_project_the_tighter_limit() {
+    reset_cost_state();
+    let temp = tempfile::tempdir().unwrap();
+    let quota = crate::llm::MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        crate::llm::MachineSpendPolicy {
+            daily_limit_microusd: Some(300_000),
+            monthly_limit_microusd: Some(500_000),
+        },
+    )
+    .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            quota
+                .scope(async {
+                    set_llm_cost_budget(Some(0.4));
+                    let result = llm_budget_remaining_impl(&[], &mut String::new()).unwrap();
+                    match result {
+                        VmValue::Float(value) => assert!((value - 0.3).abs() < 1e-9),
+                        other => panic!("expected the effective remaining allowance: {other:?}"),
+                    }
+                    let execution = crate::llm::ConservativeLlmBudget::new(0.2).unwrap();
+                    execution
+                        .scope(async {
+                            let result =
+                                llm_budget_remaining_impl(&[], &mut String::new()).unwrap();
+                            match result {
+                                VmValue::Float(value) => assert!((value - 0.2).abs() < 1e-9),
+                                other => panic!("expected the tighter execution allowance: {other:?}"),
+                            }
+                        })
+                        .await
+                        .unwrap();
+                })
+                .await
+                .unwrap();
+        });
+    reset_cost_state();
+}
 #[test]
 fn calculate_cost_uses_catalog_model_pricing() {
     let _guard = crate::llm::env_guard();

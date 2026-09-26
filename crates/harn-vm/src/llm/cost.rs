@@ -851,6 +851,9 @@ fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
     if let Some(admission) = super::admission::receipt() {
         result.insert("admission".to_string(), admission);
     }
+    if let Some(machine_spend) = super::admission::machine_receipt()? {
+        result.insert("machine_spend".to_string(), machine_spend);
+    }
     result.insert("total_cost".to_string(), VmValue::Float(total_cost));
     result.insert("input_tokens".to_string(), VmValue::Int(total_input));
     result.insert("output_tokens".to_string(), VmValue::Int(total_output));
@@ -875,12 +878,18 @@ fn llm_budget_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-budget"], sig = "__llm_budget_remaining() -> float?", category = "llm.economics")]
 fn llm_budget_remaining_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let remaining = LLM_BUDGET.with(|budget| {
+    let session_remaining = LLM_BUDGET.with(|budget| {
         budget.borrow().map(|max| {
             let spent = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
             max - spent
         })
     });
+    let execution_remaining = super::admission::execution_remaining_usd()?;
+    let machine_remaining = super::admission::machine_remaining_usd()?;
+    let remaining = [session_remaining, execution_remaining, machine_remaining]
+        .into_iter()
+        .flatten()
+        .reduce(f64::min);
     Ok(remaining.map(VmValue::Float).unwrap_or(VmValue::Nil))
 }
 

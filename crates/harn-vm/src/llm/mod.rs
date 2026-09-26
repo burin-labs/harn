@@ -40,7 +40,10 @@ mod agent_tool_governance;
 mod agent_tools;
 pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 pub(crate) mod admission;
-pub use admission::{AdmissionMode, AdmissionReceipt, ConservativeLlmBudget};
+pub use admission::{
+    AdmissionMode, AdmissionReceipt, ConservativeLlmBudget, MachineSpendPolicy, MachineSpendQuota,
+    MachineSpendReceipt,
+};
 pub mod api;
 #[cfg(test)]
 mod api_routing_credentials_tests;
