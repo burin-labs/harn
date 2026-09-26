@@ -2,6 +2,7 @@ import {
   cache_refresh_trigger_errors,
   cache_refresh_workflow_errors,
   ci_linux_lane_policy_errors,
+  consumer_canary_errors,
   e2e_elastic_capacity_errors,
   producer_admission_expression,
   producer_cache_save_reserve_minutes,
@@ -103,6 +104,41 @@ pipeline test_e2e_paid_override_accepts_the_switch_on_both_seams(harness: Harnes
     gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'"),
   )
   assert_eq(e2e_elastic_capacity_errors(valid), [])
+}
+
+fn consumer_canary_workflow(extra: list) -> dict {
+  return {
+    jobs: {
+      consumers: {
+        steps: [
+          {uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"},
+          {uses: "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"},
+          {name: "Rehearse the consumer update at this revision", run: "bash scripts/ci/consumer_canary.sh"},
+        ]
+          + extra,
+      },
+    },
+  }
+}
+
+@test
+pipeline test_consumer_canary_refuses_an_upload(harness: Harness, task: unknown) {
+  // The consumer may be private; an upload is the direct way its content
+  // would reach this public repository.
+  const invalid = consumer_canary_workflow([{uses: "actions/upload-artifact@v4"}])
+  const errors = consumer_canary_errors(invalid)
+  assert(errors.any(fn(error) { contains(error, "actions/upload-artifact@v4") }))
+}
+
+@test
+pipeline test_consumer_canary_refuses_a_step_summary(harness: Harness, task: unknown) {
+  const invalid = consumer_canary_workflow([{run: "cat report.md >> \"$GITHUB_STEP_SUMMARY\""}])
+  assert_eq(consumer_canary_errors(invalid), ["ci.yml:consumers must not write a step summary"])
+}
+
+@test
+pipeline test_consumer_canary_accepts_checkout_mint_and_script(harness: Harness, task: unknown) {
+  assert_eq(consumer_canary_errors(consumer_canary_workflow([])), [])
 }
 
 fn persistent_lane(

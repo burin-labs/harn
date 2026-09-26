@@ -2686,6 +2686,68 @@ jobs:
     with:
       os: ${{ matrix.os }}
 
+  # Rehearse the downstream consumer's update at this exact revision, so a
+  # change that breaks the consumer goes red here instead of days later in the
+  # consumer's own update. `scripts/ci/consumer_canary.sh` owns the procedure.
+  #
+  # Required in the merge queue. On a pull request it runs only when asked for:
+  # the `consumer-canary` label, or a `Pairs-with:` trailer naming the
+  # consumer pull request that carries the matching change, whose branch is
+  # then rehearsed. Fork pull requests cannot mint the credential and never run
+  # it.
+  #
+  # The consumer may be private and this job's output is public, so it prints
+  # the verdict, the consumer run's link and the wall time, and nothing else.
+  # It uploads no artifact and writes no step summary; the CI cache policy
+  # refuses any step here beyond checkout, the credential mint and the script.
+  consumers:
+    name: Consumer canary
+    if: >-
+      ${{ github.event_name == 'merge_group'
+        || (github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && (contains(github.event.pull_request.labels.*.name, 'consumer-canary')
+        || contains(github.event.pull_request.body, 'Pairs-with:'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A merge group is at most a few squashed pull requests on its base,
+          # and their messages carry the `Pairs-with:` trailers.
+          fetch-depth: 8
+          persist-credentials: false
+      - name: Mint the consumer dispatch credential
+        id: consumer-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ vars.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: write
+          permission-pull-requests: read
+      - name: Rehearse the consumer update at this revision
+        env:
+          GH_TOKEN: ${{ steps.consumer-token.outputs.token }}
+          CANARY_OWNER: ${{ github.repository_owner }}
+          CANARY_NAME: ${{ vars.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          PULL_REQUEST_BODY: ${{ github.event.pull_request.body }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          pairing_text=$PULL_REQUEST_BODY
+          if [ -n "$MERGE_GROUP_BASE" ]; then
+            pairing_text=$(git log --format=%B "$MERGE_GROUP_BASE..HEAD")
+          fi
+          CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
+            TARGET_VERSION=v$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml) \
+            PAIRING_TEXT=$pairing_text \
+            bash scripts/ci/consumer_canary.sh
+
   # The Slow E2E suite lives in its own workflow (`.github/workflows/e2e.yml`),
   # which owns the main-push trigger, the nightly schedule, the `e2e`-label PR
   # trigger, and manual dispatch. It is a slow subprocess-spawning tier, not a per-PR gate, so it
@@ -2731,6 +2793,7 @@ jobs:
         docs-checks,
         actions,
         setup-harn-action,
+        consumers,
       ]
     steps:
       - name: Verify required CI jobs
@@ -2865,6 +2928,14 @@ jobs:
           echo "Rust artifacts ready: $rust_artifacts_ready_result"
           require_result "$rust_artifacts_ready_result" \
             "Rust artifact handoff failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          # The consumer canary is required in the merge queue. On a pull
+          # request it runs only when asked for, and a run that was asked for
+          # must pass.
+          consumers_result="${{ needs.consumers.result }}"
+          echo "Consumer canary: $consumers_result"
+          require_result "$consumers_result" \
+            "The consumer canary failed, or did not run in the merge queue." [ "$EVENT_NAME" != "merge_group" ]
 
           security_tests_ready_result="${{ needs['security-tests-ready'].result }}"
           echo "Linux security test inputs: $security_tests_ready_result"
