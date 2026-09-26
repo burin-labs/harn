@@ -283,7 +283,7 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "tool_use", "agentic"]
 
-# The ChatGPT-only alias `chatgpt-4o-latest` was retired from the API
+# The `chatgpt-4o-latest` API alias was retired
 # on 2026-02-17. The API model `gpt-4o` remains available.
 [models."gpt-4o"]
 name = "GPT-4o"
