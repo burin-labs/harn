@@ -24,6 +24,7 @@
 use super::reminders::DirectiveSpeaker;
 use super::reminders::RenderedReminder;
 use super::reminders::DIRECTIVE_IDS_KEY;
+use crate::llm::helpers::transcript::{DirectiveAuthority, ReminderSource, SystemReminder};
 use std::collections::HashSet;
 
 /// Concatenate every text fragment a message's `content` carries, whether it
@@ -85,6 +86,72 @@ pub(crate) fn uncommitted_directives(
         })
         .cloned()
         .collect()
+}
+
+/// Fixed text restated after a withdrawn turn whose rejection carried no
+/// reason of its own. Fixed, so it is not a per-run prose decision.
+pub(crate) const WITHDRAWN_TURN_FALLBACK_DIRECTIVE: &str =
+    "The closing report above was withdrawn because it was not accepted. \
+     Continue the task before you close again.";
+
+fn is_bookkeeping_turn(message: &serde_json::Value) -> bool {
+    message
+        .get(crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn normalized_body(body: &str) -> String {
+    body.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The directives a turn boundary commits after `messages`.
+///
+/// Ordinarily these are the uncommitted ones. The exception is a transcript
+/// that ends on a bookkeeping turn: the placeholder a withdrawn closing draft
+/// is reduced to, which tells the model to read the directive that follows.
+/// Something must follow it. A request that ends on an assistant message is a
+/// prefill to OpenAI-compatible servers, and two in a row are refused. And the
+/// rejection is exactly what "do not re-issue" can swallow: when a standing
+/// reminder already committed the same text, or the feedback composer
+/// suppressed an unchanged next step, nothing is pending.
+///
+/// So after a bookkeeping turn the rejection directive is always among the
+/// directives committed, restated when it is already in history. It is the
+/// carried reminder whose body matches `withdrawal_reason` when one exists,
+/// so the model reads the same bytes and authority it read before, and a
+/// corrective directive carrying that reason otherwise.
+pub(crate) fn turn_boundary_directives(
+    messages: &[serde_json::Value],
+    reminders: &[SystemReminder],
+    withdrawal_reason: Option<&str>,
+) -> Vec<RenderedReminder> {
+    let capabilities = crate::llm::capabilities::Capabilities::default();
+    let rendered = super::reminders::render_pending_reminders(&capabilities, reminders);
+    let mut pending = uncommitted_directives(messages, &rendered);
+    if !messages.last().is_some_and(is_bookkeeping_turn) {
+        return pending;
+    }
+    let body = withdrawal_reason
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or(WITHDRAWN_TURN_FALLBACK_DIRECTIVE);
+    let wanted = normalized_body(body);
+    let carried = reminders
+        .iter()
+        .zip(rendered.iter())
+        .find(|(reminder, _)| normalized_body(&reminder.body) == wanted)
+        .map(|(_, rendered)| rendered.clone());
+    let restated = carried.unwrap_or_else(|| {
+        let mut reminder = SystemReminder::new(body, ReminderSource::InPipeline, 0);
+        reminder.tags = vec!["withdrawn_turn".to_string()];
+        reminder.authority = DirectiveAuthority::Corrective;
+        super::reminders::render_pending_reminders(&capabilities, &[reminder]).remove(0)
+    });
+    if !pending.contains(&restated) {
+        pending.push(restated);
+    }
+    pending
 }
 
 #[cfg(test)]
@@ -183,6 +250,63 @@ mod tests {
             directive_text(&already)
         ))];
         assert!(uncommitted_directives(&history, &[already]).is_empty());
+    }
+
+    fn withdrawn_marker() -> serde_json::Value {
+        let mut marker = serde_json::json!({"role": "assistant", "content": "[withdrawn]"});
+        marker[crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY] = serde_json::json!(true);
+        marker
+    }
+
+    fn committed_history(reminder: &SystemReminder) -> Vec<serde_json::Value> {
+        let capabilities = crate::llm::capabilities::Capabilities::default();
+        let rendered =
+            super::super::reminders::render_pending_reminders(&capabilities, &[reminder.clone()]);
+        let envelope = super::super::reminders::directive_envelope_message(&rendered)
+            .expect("one directive renders an envelope");
+        vec![user("task"), envelope]
+    }
+
+    /// A standing reminder already committed the rejection text, so "do not
+    /// re-issue" leaves nothing pending. After a withdrawn turn the rejection
+    /// is restated anyway, carrying the committed reminder's own bytes.
+    #[test]
+    fn a_withdrawn_turn_restates_an_already_committed_rejection() {
+        let standing = SystemReminder::new("run the tests", ReminderSource::InPipeline, 0);
+        let mut history = committed_history(&standing);
+        let reminders = vec![standing.clone()];
+        assert!(turn_boundary_directives(&history, &reminders, Some("run the tests")).is_empty());
+
+        history.push(withdrawn_marker());
+        let out = turn_boundary_directives(&history, &reminders, Some(" run  the tests "));
+        assert_eq!(out.len(), 1, "{out:#?}");
+        assert_eq!(out[0].reminder_id(), Some(standing.id.as_str()));
+    }
+
+    /// No carried reminder holds the rejection (the composer suppressed it, or
+    /// it expired): a corrective directive carrying the reason is committed.
+    #[test]
+    fn a_withdrawn_turn_with_no_carried_rejection_commits_the_reason() {
+        let other = SystemReminder::new("keep it short", ReminderSource::InPipeline, 0);
+        let mut history = committed_history(&other);
+        history.push(withdrawn_marker());
+        let out = turn_boundary_directives(&history, &[other], Some("run the tests"));
+        assert_eq!(out.len(), 1, "{out:#?}");
+        assert!(out[0].text().contains("run the tests"), "{out:#?}");
+        assert!(out[0].text().contains("corrective"), "{out:#?}");
+
+        let silent = turn_boundary_directives(&history, &[], None);
+        assert_eq!(silent.len(), 1);
+        assert!(silent[0].text().contains(WITHDRAWN_TURN_FALLBACK_DIRECTIVE));
+    }
+
+    /// A rejection that is already pending is not committed twice.
+    #[test]
+    fn a_pending_rejection_after_a_withdrawn_turn_is_committed_once() {
+        let rejection = SystemReminder::new("run the tests", ReminderSource::InPipeline, 0);
+        let history = vec![user("task"), withdrawn_marker()];
+        let out = turn_boundary_directives(&history, &[rejection], Some("run the tests"));
+        assert_eq!(out.len(), 1, "{out:#?}");
     }
 
     #[test]

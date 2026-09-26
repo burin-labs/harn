@@ -124,7 +124,9 @@ fn text_in_block(block: &VmValue) -> Option<&str> {
 /// the transcript and reach the provider, which is exactly why it cannot be
 /// distinguished by its content: it is an ordinary text block, and every
 /// alternative encoding would drop it from the provider request. Writers set
-/// this key; the answer projection below is the only reader.
+/// this key. Two readers: the answer projection below, and the turn boundary
+/// (`turn_boundary_directives`), which guarantees a directive follows the
+/// placeholder before the next request.
 pub(crate) const BOOKKEEPING_TURN_KEY: &str = "harn_bookkeeping_turn";
 
 /// True when the loop wrote this turn for its own bookkeeping.

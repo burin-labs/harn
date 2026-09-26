@@ -1304,7 +1304,9 @@ pub const AGENT_LOOP_REJECTED_TURN_MARKER: string =
  * boundary the pending directive is anchored to and delays that directive by a
  * full round — the model would be asked to try again without being told why.
  * Passing a replacement keeps the turn count stable, so the directive still
- * lands on the next round. Drop only where no directive is owed.
+ * lands on the next round. Drop only where no directive is owed. The next turn
+ * boundary always commits the rejection right after the replacement, restating
+ * it when the same text is already in history, so no request ends on it.
  *
  * The replacement is a bookkeeping turn, not an answer. The runtime flags it
  * as such when it writes it, so the run's final text reports the last draft
