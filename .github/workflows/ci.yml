@@ -699,22 +699,29 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-  # Say where the producer is about to land, and refuse when that cannot be
-  # measured. The routing expression below can only choose; it cannot report,
-  # and it reads an unreadable census exactly like a census that reported no
-  # capacity. Both fall through to a hosted runner and silently downgrade the
-  # tier, leaving nothing to attribute the downgrade to.
+  # Say where the producer is about to land, and name a hosted fallback when
+  # the census cannot be read. The routing expression below reads this job's
+  # route output instead of the census, so a census outage routes the producer
+  # hosted by name rather than skipping it or failing the expression.
+  # `!cancelled()` because a failed census probe must still reach a decision:
+  # skipping here would skip the required producer behind it.
   rust-producer-capacity:
     name: Name the Rust producer runner capacity decision
     needs: runner-availability
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      route: ${{ steps.decision.outputs.route }}
+      fallback: ${{ steps.decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
       - name: Decide where the Rust workspace producer lands
+        id: decision
         run: bash scripts/ci/runner_capacity.sh
         env:
           CAPACITY_LABEL: RUST_PRODUCER_CAPACITY
@@ -764,22 +771,14 @@ jobs:
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 'blacksmith-8vcpu-ubuntu-2404')
-        || (github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository
-        && needs.runner-availability.outputs.selfhosted_disabled == ''
-        && needs.runner-availability.outputs.capacity != ''
-        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        || (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || 'ubuntu-8core' }}
     timeout-minutes: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 20)
-        || (github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository
-        && needs.runner-availability.outputs.selfhosted_disabled == ''
-        && needs.runner-availability.outputs.capacity != ''
-        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        || (needs.rust-producer-capacity.outputs.route == 'owned'
         && 76)
         || 70 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
@@ -807,11 +806,7 @@ jobs:
         ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
           && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
           && 'blacksmith')
-          || (github.event_name == 'pull_request'
-          && github.event.pull_request.head.repo.full_name == github.repository
-          && needs.runner-availability.outputs.selfhosted_disabled == ''
-          && needs.runner-availability.outputs.capacity != ''
-          && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+          || (needs.rust-producer-capacity.outputs.route == 'owned'
           && 'self-hosted')
           || 'github-hosted' }}
     steps:
@@ -2842,11 +2837,10 @@ jobs:
           fi
 
           # The capacity decision is fail-closed on the runs that can make it.
-          # It refuses by name when the fleet census cannot be read, and a
-          # refusal that only warned would let the producer fall through to a
-          # hosted runner with nothing to attribute the downgrade to. It is
-          # skipped on fork pull requests and on every non-pull-request event,
-          # which is not a failure.
+          # A census it cannot read is a named hosted fallback, not a failure,
+          # so only a decision that did not complete is red. It is skipped on
+          # fork pull requests and on every non-pull-request event, which is
+          # not a failure.
           rust_producer_capacity_result="${{ needs['rust-producer-capacity'].result }}"
           echo "Rust producer capacity decision: $rust_producer_capacity_result"
           if [ "$rust_producer_capacity_result" != "success" ] \

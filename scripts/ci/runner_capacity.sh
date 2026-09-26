@@ -5,9 +5,17 @@
 # treats an unreadable capacity census exactly like a census that reported no
 # capacity. Both fall through to a hosted runner, so a broken or retired
 # census silently downgrades the tier the job exists to use and leaves nothing
-# in the log to attribute it to. This runs first and refuses by name when the
-# census cannot be read, so the choice is only ever made over counts that were
-# actually observed.
+# in the log to attribute it to. This runs first and names the decision, so a
+# route is only ever chosen over counts that were actually observed, or over
+# a census failure that is said out loud.
+#
+# A census that cannot be read routes hosted as a named fallback, never as a
+# skip. The job the decision serves is required proof, and a fleet-census
+# outage must not take that proof away or turn main red. What the fallback
+# must not do is pass for a measurement: its decision line carries
+# `fallback=true` and the reason, and it emits a `<LABEL>_FALLBACK` warning
+# annotation, so a broken census reads as a count of fallbacks, not as an
+# empty pool.
 #
 # It reads the same fleet-evacuation switch the routing expression reads, for
 # the same reason: a script that reported the owned census while the switch
@@ -28,11 +36,11 @@ CAPACITY_POOL=${CAPACITY_POOL:-linux_big}
 CAPACITY_ROUTED_EVENT=${CAPACITY_ROUTED_EVENT:-push}
 CAPACITY_LABEL=${CAPACITY_LABEL:-RUNNER_CAPACITY_DECISION}
 
-runner_capacity_refuse() {
-  local reason=$1
-  shift
-  echo "::error::${CAPACITY_LABEL}_UNMEASURED reason=$reason $*" >&2
-  return 1
+runner_capacity_fallback() {
+  local reason=$1 event=$2
+  shift 2
+  echo "::warning::${CAPACITY_LABEL}_FALLBACK reason=$reason $*" >&2
+  echo "${CAPACITY_LABEL} event=$event route=hosted reason=$reason fallback=true $*"
 }
 
 runner_capacity_decision() {
@@ -54,25 +62,26 @@ runner_capacity_decision() {
     echo "${CAPACITY_LABEL} event=$event route=hosted reason=owned_routing_retired pool=$pool carriers=not_consulted"
     return 0
   fi
-  # An absent census is not an empty pool. Refuse rather than let it read as
-  # one, and carry what was observed so the refusal is attributable.
+  # An absent census is not an empty pool. Fall back by name rather than let
+  # it read as one, and carry what was observed so the fallback is
+  # attributable.
   if [[ -z "${capacity//[[:space:]]/}" ]]; then
-    runner_capacity_refuse capacity_census_missing \
-      "event=$event pool=$pool carriers=unmeasured capacity_bytes=${#capacity}"
-    return 1
+    runner_capacity_fallback capacity_census_missing "$event" \
+      "pool=$pool carriers=unmeasured capacity_bytes=${#capacity}"
+    return 0
   fi
   if ! jq -e . <<< "$capacity" >/dev/null 2>&1; then
-    runner_capacity_refuse capacity_census_unreadable \
-      "event=$event pool=$pool carriers=unmeasured capacity_bytes=${#capacity}"
-    return 1
+    runner_capacity_fallback capacity_census_unreadable "$event" \
+      "pool=$pool carriers=unmeasured capacity_bytes=${#capacity}"
+    return 0
   fi
   # A census that does not mention the pool has not measured it. That is a
   # different fact from a pool it measured and found empty.
   if ! jq -e --arg pool "$pool" \
     'has($pool) and (.[$pool].online | type == "number")' <<< "$capacity" >/dev/null; then
-    runner_capacity_refuse capacity_pool_absent \
-      "event=$event pool=$pool carriers=unmeasured pools=$(jq -r 'keys | join(",")' <<< "$capacity")"
-    return 1
+    runner_capacity_fallback capacity_pool_absent "$event" \
+      "pool=$pool carriers=unmeasured pools=$(jq -r 'keys | join(",")' <<< "$capacity")"
+    return 0
   fi
   online=$(jq -r --arg pool "$pool" '.[$pool].online' <<< "$capacity")
   idle=$(jq -r --arg pool "$pool" '.[$pool].idle // "unreported"' <<< "$capacity")
@@ -86,14 +95,16 @@ runner_capacity_decision() {
 }
 
 runner_capacity_main() {
-  local line route
+  local line route fallback
   line=$(runner_capacity_decision \
     "${EVENT_NAME:-}" "${SELFHOSTED_DISABLED:-}" "${RUNNER_CAPACITY:-}" \
     "${FLEET_EVACUATION:-}") || return 1
   echo "$line" >&2
   route=${line##*route=}
   route=${route%% *}
-  printf 'route=%s\n' "$route" >> "${GITHUB_OUTPUT:?}"
+  fallback=false
+  [[ "$line" == *" fallback=true"* ]] && fallback=true
+  printf 'route=%s\nfallback=%s\n' "$route" "$fallback" >> "${GITHUB_OUTPUT:?}"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
