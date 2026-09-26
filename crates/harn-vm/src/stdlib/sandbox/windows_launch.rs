@@ -29,7 +29,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::acl_grants::{
-    grant_msys_user_section, policy_digest, writable_roots, PolicyWriteGrants,
+    grant_msys_user_sections, policy_digest, writable_roots, PolicyWriteGrants,
 };
 use super::token::{current_user_sddl, write_restricted_token, Sid};
 use super::{
@@ -193,7 +193,7 @@ pub(super) fn launch(
     let token = write_restricted_token(&policy_sid)?;
     sandbox_trace(&trace_label, "restricted token ready");
     // Best effort: without it only MSYS programs fail to start.
-    let msys = current_user_sddl().and_then(|user| grant_msys_user_section(&policy_sid, &user));
+    let msys = current_user_sddl().and_then(|user| grant_msys_user_sections(&policy_sid, &user));
     sandbox_trace(&trace_label, format!("msys user section {msys:?}"));
 
     // Parent ends are kept; child ends are inherited and closed after create.

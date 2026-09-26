@@ -828,34 +828,11 @@ mod tests {
             (!ok).then(|| format!("{}: {}", program.display(), describe(&output)))
         })
         .collect();
-        // TEMPORARY probe: can a confined child create a named section at all?
-        for name in [
-            "harn-probe-section",
-            "Local\\harn-probe-section",
-            "Global\\harn-probe-section",
-        ] {
-            let script = format!(
-                "try {{ $m = [System.IO.MemoryMappedFiles.MemoryMappedFile]::CreateNew('{name}', 65536); 'created'; $m.Dispose() }} catch {{ 'failed: ' + $_.Exception.InnerException.Message + ' | ' + $_.Exception.Message; exit 3 }}"
-            );
-            let output = run(
-                &policy,
-                workspace.path(),
-                "powershell",
-                &["-NoProfile", "-Command", &script],
-            );
-            println!("probe section {name}: {}", describe(&output));
-        }
-        let unconfined = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", "$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; foreach ($n in @(\"$sid.1\", \"Local\\$sid.1\", \"Global\\$sid.1\")) { try { $m = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($n); \"exists $n\"; $m.Dispose() } catch { \"absent $n : \" + $_.Exception.InnerException.Message } }; 'session ' + [System.Diagnostics.Process]::GetCurrentProcess().SessionId; Get-Process bash,sh,cargo-nextest -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + ' pid=' + $_.Id + ' session=' + $_.SessionId + ' path=' + $_.Path }"])
-            .output();
-        if let Ok(output) = unconfined {
-            println!("probe unconfined identity: {}", describe(&output));
-        }
         let sid = token::Sid::for_policy_digest(&acl_grants::policy_digest(&policy)).expect("sid");
         let user = token::current_user_sddl().expect("user sid");
         println!(
             "msys user section after the runs: {:?}",
-            acl_grants::grant_msys_user_section(&sid, &user)
+            acl_grants::grant_msys_user_sections(&sid, &user)
         );
         assert!(failures.is_empty(), "{failures:#?}");
     }
