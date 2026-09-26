@@ -62,7 +62,21 @@ describe("LaunchPanel", () => {
         task: "Draft a release note",
       })
     })
+
+    await userEvent.selectOptions(screen.getAllByLabelText("Model").at(-1)!, "__custom__")
+    expect(screen.getByLabelText("Custom model")).toHaveValue("")
+    fireEvent.change(screen.getByLabelText("Custom model"), { target: { value: "temporary-model" } })
+    await userEvent.selectOptions(screen.getAllByLabelText("Provider").at(-1)!, "__custom__")
+    expect(screen.getByLabelText("Custom model")).toHaveValue("")
+    fireEvent.change(screen.getByLabelText("Custom provider"), { target: { value: "custom" } })
+    fireEvent.change(screen.getByLabelText("Custom model"), { target: { value: "custom-model" } })
+    await userEvent.click(screen.getAllByRole("button", { name: "Run now" }).at(-1)!)
+    expect(onLaunch).toHaveBeenLastCalledWith(expect.objectContaining({
+      provider: "custom",
+      model: "custom-model",
+    }))
   })
+
   it("uses a viable provider's default when the configured preference is unavailable", async () => {
     const onLaunch = vi.fn(async () => {})
     render(
