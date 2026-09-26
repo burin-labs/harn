@@ -660,7 +660,7 @@ mod tests {
     fn concurrent_first_opens_of_a_fresh_ledger_all_succeed() {
         const TEST: &str =
             "llm::admission::durable::tests::concurrent_first_opens_of_a_fresh_ledger_all_succeed";
-        if let Some(path) = std::env::var_os("HARN_MACHINE_SPEND_FIRST_OPEN_PATH") {
+        if let Some(path) = std::env::var_os("HARN_MACHINE_SPEND_TEST_CHILD_PATH") {
             match MachineSpendQuota::open(path, "person", policy(1_000_000)) {
                 Ok(_) => println!("MACHINE_SPEND_OPENED=true"),
                 Err(error) => println!("MACHINE_SPEND_OPENED=false {error}"),
@@ -675,7 +675,7 @@ mod tests {
                 .map(|_| {
                     std::process::Command::new(&binary)
                         .args(["--exact", TEST, "--nocapture"])
-                        .env("HARN_MACHINE_SPEND_FIRST_OPEN_PATH", &path)
+                        .env("HARN_MACHINE_SPEND_TEST_CHILD_PATH", &path)
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::null())
                         .spawn()
