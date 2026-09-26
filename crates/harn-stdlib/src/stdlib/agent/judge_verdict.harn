@@ -566,6 +566,38 @@ pub fn __judge_ungrounded_gap_quotes(
   return bad
 }
 
+/**
+ * Criteria of the gaps that name the loop's done sentinel.
+ *
+ * The sentinel is stripped from the response before the judge sees it, and the
+ * runtime enforces it, so a refusal naming it asks for something the judge can
+ * never observe. The system prompt says so; a weaker judge model ignores that
+ * and refuses on it every round. Measured with gpt-oss-120b judging: about ten
+ * refusals of a verified pass, each quoting the task's "emit ##DONE##" clause,
+ * until the judge cap ended the run.
+ *
+ * Presence of the literal sentinel in a gap's criterion or detail is the whole
+ * test. No sentinel configured means nothing to name.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_sentinel_gaps([], "##DONE##")
+ */
+pub fn __judge_sentinel_gaps(gaps: list<CompletionJudgeGapItem>, sentinel: string) -> list<string> {
+  const marker = trim(sentinel)
+  guard marker != "" else {
+    return []
+  }
+  let named: list<string> = []
+  for gap in gaps {
+    if gap.criterion.contains(marker) || gap.detail.contains(marker) {
+      named = named + [gap.criterion]
+    }
+  }
+  return named
+}
+
 /** Whitespace-normalize so a reflowed or re-indented copy of a real line still matches. */
 fn __judge_collapse_spaces(value: string) -> string {
   let out = ""
