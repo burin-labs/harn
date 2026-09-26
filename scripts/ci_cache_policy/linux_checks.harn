@@ -877,7 +877,7 @@ fn job_needs(job: dict) -> list<string> {
  * itself event-gated may omit the status function, since it already decides
  * its own events.
  */
-fn event_skip_propagation_errors(workflow: dict) -> list<string> {
+pub fn event_skip_propagation_errors(workflow: dict) -> list<string> {
   const jobs = workflow?.jobs ?? {}
   let event_gated: dict<string, bool> = {}
   for name in jobs.keys() {
