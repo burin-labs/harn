@@ -8145,7 +8145,8 @@
       "id": "accounts/fireworks/models/deepseek-v4-flash-0731",
       "name": "DeepSeek V4 Flash 0731 (Fireworks)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "DeepSeek V4 Flash 0731",
       "provider": "fireworks",
@@ -8161,7 +8162,8 @@
           "text"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -8343,7 +8345,8 @@
       "id": "accounts/fireworks/models/deepseek-v4-pro-0813",
       "name": "DeepSeek V4 Pro 0813 (Fireworks)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "DeepSeek V4 Pro 0813",
       "provider": "fireworks",
@@ -8359,7 +8362,8 @@
           "text"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -8441,7 +8445,8 @@
       "id": "accounts/fireworks/models/deepseek-v4p1-flash",
       "name": "DeepSeek V4.1 Flash (Fireworks)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "DeepSeek V4.1 Flash",
       "provider": "fireworks",
@@ -8457,7 +8462,8 @@
           "text"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -8641,7 +8647,8 @@
       "id": "accounts/fireworks/models/glm-5p3",
       "name": "GLM 5.3 (Fireworks)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GLM 5.3",
       "provider": "fireworks",
@@ -8657,7 +8664,8 @@
           "text"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -8740,7 +8748,8 @@
       "id": "accounts/fireworks/models/glm-5p3-flash",
       "name": "GLM 5.3 Flash (Fireworks)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "GLM 5.3 Flash",
       "provider": "fireworks",
@@ -8756,7 +8765,8 @@
           "text"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -9160,7 +9170,8 @@
       "id": "accounts/fireworks/models/kimi-k3",
       "name": "Kimi K3 (Fireworks)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "Kimi K3",
       "provider": "fireworks",
@@ -9177,7 +9188,8 @@
           "image"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -9364,7 +9376,8 @@
       "id": "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
       "name": "Nemotron 3.5 Lightning 30B A3B (Fireworks)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "Nemotron 3.5 Lightning 30B A3B",
       "provider": "fireworks",
@@ -9380,7 +9393,8 @@
           "text"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -14650,7 +14664,8 @@
       "id": "nvidia/deepseek-v4.1-flash",
       "name": "DeepSeek V4.1 Flash (NVIDIA NIM)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "DeepSeek V4.1 Flash",
       "provider": "nvidia",
@@ -14666,7 +14681,8 @@
           "text"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
@@ -20802,7 +20818,8 @@
       "id": "deepseek/deepseek-v4.1-flash",
       "name": "DeepSeek V4.1 Flash (via OpenRouter)",
       "operations": [
-        "text_generation"
+        "text_generation",
+        "decision"
       ],
       "display_name": "DeepSeek V4.1 Flash",
       "provider": "openrouter",
@@ -20815,7 +20832,8 @@
           "text"
         ],
         "output": [
-          "text"
+          "text",
+          "decision"
         ]
       },
       "tool_support": {
