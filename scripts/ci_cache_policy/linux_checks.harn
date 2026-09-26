@@ -860,12 +860,81 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
   return errors
 }
 
+/** A `needs` entry may name a job the workflow does not define; it has no needs. */
+fn job_needs(job: dict?) -> list<string> {
+  const needs = job?.needs ?? []
+  if type_of(needs) == "string" {
+    return [needs]
+  }
+  return needs.map({ need -> to_string(need) }).to_list()
+}
+
+/**
+ * A job whose `if` names no status function implicitly requires `success()`
+ * of every job it depends on, directly or through another job. A job gated on
+ * the triggering event is skipped on the other events, so every such job
+ * downstream of it is skipped too, even when its direct needs succeeded. That
+ * skipped the Linux security proof on every push to main. Only a job that is
+ * itself event-gated may omit the status function, since it already decides
+ * its own events.
+ */
+pub fn event_skip_propagation_errors(workflow: dict) -> list<string> {
+  const jobs = workflow?.jobs ?? {}
+  // A job whose own condition names a status function is not skipped by a
+  // skipped ancestor, so its event clause cannot be what skips a descendant.
+  let event_gated: dict<string, bool> = {}
+  for name in jobs.keys() {
+    const condition = to_string(jobs[name]?.if ?? "")
+    if contains(condition, "github.event_name")
+      && regex_match(r"(always|cancelled|failure|success)\(\)", condition) == nil {
+      event_gated[name] = true
+    }
+  }
+  let errors: list<string> = []
+  for name in jobs.keys().sorted() {
+    if event_gated[name] ?? false {
+      continue
+    }
+    if regex_match(r"(always|cancelled|failure|success)\(\)", to_string(jobs[name]?.if ?? ""))
+      != nil {
+      continue
+    }
+    let seen: dict<string, bool> = {}
+    let pending = job_needs(jobs[name])
+    let gated_ancestors: list<string> = []
+    while len(pending) > 0 {
+      const need = to_string(pending[0])
+      pending = pending.slice(1)
+      if seen[need] ?? false {
+        continue
+      }
+      seen[need] = true
+      if event_gated[need] ?? false {
+        gated_ancestors = gated_ancestors.appending(need)
+      }
+      pending = pending + job_needs(jobs[need])
+    }
+    if len(gated_ancestors) > 0 {
+      errors = errors
+        + [
+          "ci.yml:"
+            + name
+            + " is skipped whenever "
+            + join(gated_ancestors.sorted(), ", ")
+            + " is skipped for the event; start its if with !cancelled()",
+        ]
+    }
+  }
+  return errors
+}
+
 fn live_artifact_handoff_errors(workflow: dict) -> list<string> {
   return producer_artifact_order_errors(workflow)
     + artifact_ready_barrier_errors(workflow)
     + security_ready_barrier_errors(workflow)
     + harn_audit_overlap_errors(workflow)
     + artifact_consumer_handoff_errors(workflow)
+    + event_skip_propagation_errors(workflow)
 }
 
 fn walltime_report_errors(workflow: dict) -> list<string> {

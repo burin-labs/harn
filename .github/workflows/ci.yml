@@ -1010,8 +1010,12 @@ jobs:
   security-tests-ready:
     name: Wait for Linux security tests
     needs: [changes, rust-check-inputs]
+    # `!cancelled()` because a plain `if` implies `success()` over every
+    # transitive need, and `rust-producer-capacity` is skipped outside pull
+    # requests, which silently skipped this barrier on every push to main.
     if: >-
-      needs.changes.outputs.rust == 'true'
+      !cancelled()
+      && needs.changes.outputs.rust == 'true'
       && needs.rust-check-inputs.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1138,8 +1142,10 @@ jobs:
     # The ready barrier verifies the exact-commit artifact after its producer
     # completed; ci-status still requires both the producer and this proof.
     needs: [changes, security-tests-ready]
+    # `!cancelled()` for the same transitive skip as `security-tests-ready`.
     if: >-
-      needs.changes.outputs.rust == 'true'
+      !cancelled()
+      && needs.changes.outputs.rust == 'true'
       && needs.security-tests-ready.result == 'success'
     runs-on: ubuntu-latest
     # Hang backstop, not a performance gate. The Landlock proof runs in ~2m,

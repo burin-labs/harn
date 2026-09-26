@@ -9,6 +9,7 @@ import {
   ci_cache_policy_parse,
   ci_workflow_concurrency_errors,
   e2e_workflow_concurrency_errors,
+  event_skip_propagation_errors,
   macos_warm_errors,
   minimal_pr_capacity_errors,
   nextest_version_errors,
@@ -1525,4 +1526,38 @@ pipeline test_cache_save_guard_must_be_recognised(task: any) {
   // declared, which the old string test would have accepted as a writer.
   const undeclared = "$" + "{{ github.event_name == 'schedule' }}"
   assert_eq(save_requested({with: {save: undeclared}}), false)
+}
+
+/**
+ * A push-shaped chain: the capacity job runs only on pull requests, so on a
+ * push it is skipped while the producer that needs it still runs. A barrier
+ * with a plain `if` then inherits the skip and never runs.
+ */
+fn push_shaped_chain(barrier_if: string) -> dict {
+  return {
+    jobs: {
+      capacity: {if: "github.event_name == 'pull_request'"},
+      producer: {
+        needs: ["capacity"],
+        if:
+          "!cancelled() && (needs.capacity.result == 'success' || github.event_name != 'pull_request')",
+      },
+      barrier: {needs: ["producer"], if: barrier_if},
+    },
+  }
+}
+
+@test
+pipeline test_a_skipped_capacity_job_must_not_skip_the_barrier(harness: Harness, task: unknown) {
+  const plain = event_skip_propagation_errors(
+    push_shaped_chain("needs.producer.result == 'success'"),
+  )
+  assert_eq(len(plain), 1)
+  assert(contains(plain[0] ?? "", "ci.yml:barrier is skipped whenever capacity"))
+  assert_eq(
+    event_skip_propagation_errors(
+      push_shaped_chain("!cancelled() && needs.producer.result == 'success'"),
+    ),
+    [],
+  )
 }

@@ -12,6 +12,12 @@ fi
 
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
+# The stderr assertions below are exact, so the host's Cargo config must not
+# reach the sandbox: a rustc wrapper configured in the user's CARGO_HOME (for
+# example sccache) is switched off in the sandbox, and harn says so on stderr.
+export CARGO_HOME="$tmp_root/cargo-home"
+unset RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER
+mkdir -p "$CARGO_HOME"
 fixture_repo="$tmp_root/repo"
 mkdir -p \
   "$fixture_repo/.github" \
