@@ -1192,13 +1192,8 @@ async fn api_llm_options_returns_payload() {
             "portal must offer its default: {name}:{default}"
         );
         let entry = harn_vm::llm_config::model_catalog_entry_for_route(name, default)
-            .unwrap_or_else(|| {
-                panic!("portal default must have a catalog route: {name}:{default}")
-            });
-        assert!(
-            !entry.deprecated,
-            "portal offered deprecated default: {name}:{default}"
-        );
+            .expect("portal default must have a catalog route");
+        assert!(!entry.deprecated, "{name}:{default}");
     }
 }
 
