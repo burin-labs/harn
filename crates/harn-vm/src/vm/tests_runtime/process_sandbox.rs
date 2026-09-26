@@ -1,11 +1,8 @@
 //! Per-OS process sandboxing.
 //!
 //! macOS surfaces a denial as a typed result, Linux blocks a battery of process
-//! escapes, and Windows permits in-workspace exec (including argv0) while
-//! rejecting writes outside it.
-
-#[cfg(target_os = "windows")]
-use crate::VmError;
+//! escapes, and Windows, which has no OS sandbox, runs the child unconfined and
+//! refuses `os_hardened`.
 
 use super::harness::*;
 #[cfg(target_os = "macos")]
@@ -162,96 +159,52 @@ fn test_linux_process_sandbox_catches_ten_process_escapes() {
     assert!(!outside_dir.exists());
 }
 
+/// The canonical `harness.process.shell` path on Windows, which has no OS
+/// sandbox: the default profile runs the child unconfined (it writes outside
+/// the workspace), and `os_hardened` refuses the spawn by name.
 #[cfg(target_os = "windows")]
 #[test]
-fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
-    let allowed = tempfile::tempdir().unwrap();
-    let allowed_file = allowed.path().join("allowed.txt");
-    let sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
-    sandbox_env.set("enforce");
-
-    let policy = crate::orchestration::CapabilityPolicy {
-        capabilities: std::collections::BTreeMap::from([
-            ("process".to_string(), vec!["run".to_string()]),
-            ("workspace".to_string(), vec!["write_text".to_string()]),
-        ]),
-        workspace_roots: vec![allowed.path().display().to_string()],
-        side_effect_level: Some("process_exec".to_string()),
-        ..Default::default()
-    };
-    let command = format!("echo allowed>{}", allowed_file.display());
-    let source = format!(
-        r#"pipeline t(harness: Harness, task: unknown) {{ harness.process.shell("{}") }}"#,
-        harn_string_escape(&command)
-    );
-    let result = run_harn_with_policy(&source, policy);
-
-    result.unwrap();
-    assert!(allowed_file.exists());
-}
-
-#[cfg(target_os = "windows")]
-#[test]
-fn test_windows_process_sandbox_allows_exec_argv0() {
-    let allowed = tempfile::tempdir().unwrap();
-    let sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
-    sandbox_env.set("enforce");
-
-    let policy = crate::orchestration::CapabilityPolicy {
-        capabilities: std::collections::BTreeMap::from([(
-            "process".to_string(),
-            vec!["run".to_string()],
-        )]),
-        workspace_roots: vec![allowed.path().display().to_string()],
-        side_effect_level: Some("process_exec".to_string()),
-        ..Default::default()
-    };
-    let result = run_harn_with_policy(
-        r#"pipeline t(harness: Harness, task: unknown) { harness.process.exec("cmd", "/C", "exit 0") }"#,
-        policy,
-    );
-
-    result.unwrap();
-}
-
-#[cfg(target_os = "windows")]
-#[test]
-fn test_windows_process_sandbox_denies_write_outside_workspace() {
+fn test_windows_process_sandbox_runs_unconfined_and_refuses_os_hardened() {
     let allowed = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    let outside_file = outside.path().join("blocked.txt");
-    let sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
-    sandbox_env.set("enforce");
+    let outside_file = outside.path().join("unconfined.txt");
+    let _sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
 
-    let policy = crate::orchestration::CapabilityPolicy {
+    let policy = |profile| crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([
             ("process".to_string(), vec!["run".to_string()]),
             ("workspace".to_string(), vec!["write_text".to_string()]),
         ]),
         workspace_roots: vec![allowed.path().display().to_string()],
         side_effect_level: Some("process_exec".to_string()),
+        sandbox_profile: profile,
         ..Default::default()
     };
-    let command = format!("echo denied>{}", outside_file.display());
+    let command = format!("echo unconfined>{}", outside_file.display());
     let source = format!(
         r#"pipeline t(harness: Harness, task: unknown) {{ harness.process.shell("{}") }}"#,
         harn_string_escape(&command)
     );
-    let err = run_harn_with_policy(&source, policy).unwrap_err();
 
-    assert!(matches!(
-        err,
-        VmError::CategorizedError {
-            category: crate::value::ErrorCategory::ToolRejected,
-            ..
-        }
-    ));
+    run_harn_with_policy(
+        &source,
+        policy(crate::orchestration::SandboxProfile::Worktree),
+    )
+    .expect("the default profile runs unconfined on Windows");
+    assert!(outside_file.exists(), "the unconfined child wrote outside");
+    std::fs::remove_file(&outside_file).unwrap();
+
+    let err = run_harn_with_policy(
+        &source,
+        policy(crate::orchestration::SandboxProfile::OsHardened),
+    )
+    .unwrap_err();
     assert!(
-        err.to_string().contains("sandbox violation")
-            || err.to_string().contains("process sandbox failed"),
-        "expected sandbox denial, got {err}"
+        err.to_string()
+            .contains("this platform has no OS process sandbox"),
+        "expected the named os_hardened refusal, got {err}"
     );
-    assert!(!outside_file.exists());
+    assert!(!outside_file.exists(), "a refused spawn never ran");
 }
 
 #[cfg(target_os = "linux")]

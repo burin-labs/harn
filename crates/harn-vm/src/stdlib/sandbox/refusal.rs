@@ -422,8 +422,11 @@ pub(crate) fn path_is_denied(candidate: &Path, denied: &[PathBuf]) -> bool {
 pub enum SandboxMechanism {
     LinuxLandlock,
     MacosSandboxExec,
-    WindowsAppContainer,
     OpenbsdUnveil,
+    /// No OS sandbox: Windows, and any platform without a backend. Serialized
+    /// as `none`, the filesystem mechanism the capability report names.
+    #[serde(rename = "none")]
+    Unconfined,
 }
 
 impl SandboxMechanism {
@@ -431,16 +434,16 @@ impl SandboxMechanism {
     pub const ALL: &'static [SandboxMechanism] = &[
         Self::LinuxLandlock,
         Self::MacosSandboxExec,
-        Self::WindowsAppContainer,
         Self::OpenbsdUnveil,
+        Self::Unconfined,
     ];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LinuxLandlock => "linux_landlock",
             Self::MacosSandboxExec => "macos_sandbox_exec",
-            Self::WindowsAppContainer => "windows_app_container",
             Self::OpenbsdUnveil => "openbsd_unveil",
+            Self::Unconfined => "none",
         }
     }
 
@@ -450,8 +453,8 @@ impl SandboxMechanism {
         match self {
             Self::LinuxLandlock => "Linux Landlock",
             Self::MacosSandboxExec => "macOS sandbox-exec",
-            Self::WindowsAppContainer => "Windows AppContainer",
             Self::OpenbsdUnveil => "OpenBSD unveil",
+            Self::Unconfined => "No OS sandbox",
         }
     }
 }
@@ -463,10 +466,6 @@ impl SandboxMechanism {
 pub enum SandboxMechanismAvailability {
     /// The host does not provide it (no Landlock ABI, no `sandbox-exec`).
     AbsentOnHost,
-    /// The host provides it, but this spawn entry point cannot carry it:
-    /// Windows can only attach an AppContainer through the `Output`-returning
-    /// path, which owns the `STARTUPINFOEX` plumbing.
-    EntryPointCannotAttach,
     /// The mechanism is attached, but it does not hold the child to every
     /// dimension the profile requires; `unconfined` names them.
     DoesNotConfine,
@@ -476,7 +475,6 @@ impl SandboxMechanismAvailability {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AbsentOnHost => "absent_on_host",
-            Self::EntryPointCannotAttach => "entry_point_cannot_attach",
             Self::DoesNotConfine => "does_not_confine",
         }
     }
@@ -610,25 +608,29 @@ impl std::fmt::Display for SandboxMechanismUnavailable {
     /// structured fields above, and both are things an embedder may have
     /// remapped or made inert.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let dimensions = self
+            .unconfined
+            .iter()
+            .map(|dimension| dimension.display_name())
+            .collect::<Vec<_>>()
+            .join(", ");
         let fact = match self.availability {
+            _ if self.mechanism == SandboxMechanism::Unconfined => {
+                if dimensions.is_empty() {
+                    NO_OS_SANDBOX.to_string()
+                } else {
+                    format!("{NO_OS_SANDBOX}, so nothing confines {dimensions}")
+                }
+            }
             SandboxMechanismAvailability::AbsentOnHost => {
                 format!(
                     "{} is not available on this host",
                     self.mechanism.display_name()
                 )
             }
-            SandboxMechanismAvailability::EntryPointCannotAttach => format!(
-                "{} cannot be attached through this spawn entry point",
-                self.mechanism.display_name()
-            ),
             SandboxMechanismAvailability::DoesNotConfine => format!(
-                "{} does not confine {}",
+                "{} does not confine {dimensions}",
                 self.mechanism.display_name(),
-                self.unconfined
-                    .iter()
-                    .map(|dimension| dimension.display_name())
-                    .collect::<Vec<_>>()
-                    .join(", ")
             ),
         };
         let requirement = match self.requirement {
@@ -639,16 +641,17 @@ impl std::fmt::Display for SandboxMechanismUnavailable {
     }
 }
 
+/// The fact every refusal and warning from the unconfined backend states.
+const NO_OS_SANDBOX: &str = "this platform has no OS process sandbox";
+
 /// Helper for backends that can't attach confinement at all (macOS
-/// without `/usr/bin/sandbox-exec`, Windows when called through the
-/// `Command`-returning entry points): either fail loudly under
+/// without `/usr/bin/sandbox-exec`, and the unconfined backend on Windows
+/// and every other platform without one): either fail loudly under
 /// `OsHardened` / `enforce`, or warn once and proceed direct.
 ///
 /// Linux and OpenBSD don't reach this path — they install confinement
 /// in `pre_exec` and surface unavailability through `landlock_profile`
-/// directly. The dead-code lint allow keeps the helper compilable on
-/// targets where no backend uses it.
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+/// directly.
 pub(crate) fn unavailable(
     mechanism: SandboxMechanism,
     availability: SandboxMechanismAvailability,
@@ -674,11 +677,11 @@ pub(crate) fn mechanism_skipped_warning(
     mechanism: SandboxMechanism,
     availability: SandboxMechanismAvailability,
 ) -> String {
+    if mechanism == SandboxMechanism::Unconfined {
+        return format!("{NO_OS_SANDBOX}; child processes run unconfined");
+    }
     let fact = match availability {
         SandboxMechanismAvailability::AbsentOnHost => "is not available on this host",
-        SandboxMechanismAvailability::EntryPointCannotAttach => {
-            "cannot be attached through this spawn entry point"
-        }
         SandboxMechanismAvailability::DoesNotConfine => {
             "does not confine every requested dimension"
         }

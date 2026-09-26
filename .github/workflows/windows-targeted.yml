@@ -163,15 +163,14 @@ jobs:
           NEXTEST_FILTER: ${{ inputs.filter }}
           NEXTEST_SCOPE: ${{ inputs.scope }}
           NEXTEST_SUCCESS_OUTPUT: ${{ inputs.success_output }}
-          # Same deterministic secret store, offline posture, sandbox tracing,
-          # and 16 MiB runtime stack the gating Windows job uses. The stack size
+          # Same deterministic secret store, offline posture, and 16 MiB
+          # runtime stack the gating Windows job uses. The stack size
           # is required by scripts/check_rust_test_lane_policy.harn: Rust's
           # default 2 MiB spawned-thread stack overflows on tests that drive the
           # Harn VM, and the abort is indistinguishable from the defect under
           # investigation.
           HARN_SECRET_STORE_BACKEND: file
           HARN_LLM_CALLS_DISABLED: "1"
-          HARN_WINDOWS_SANDBOX_TRACE: "1"
           RUST_MIN_STACK: "16777216"
         run: |
           set -o pipefail

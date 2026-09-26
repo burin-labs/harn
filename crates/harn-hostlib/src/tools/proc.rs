@@ -896,8 +896,6 @@ pub(crate) fn sandbox_kind() -> &'static str {
         "landlock"
     } else if cfg!(target_os = "macos") {
         "sandbox-exec"
-    } else if cfg!(target_os = "windows") {
-        "appcontainer"
     } else {
         "none"
     }

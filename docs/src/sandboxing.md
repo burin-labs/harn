@@ -32,8 +32,9 @@ Three terms show up throughout, so it helps to pin them down first:
 Confinement then comes in two layers. Harn checks every path itself, against
 the roots in the active policy. Separately, when a script spawns a
 subprocess, the operating system confines that child using whatever mechanism
-the platform provides: Landlock on Linux, `sandbox-exec` on macOS,
-AppContainer on Windows.
+the platform provides: Landlock on Linux, `sandbox-exec` on macOS. Windows has
+no OS sandbox, so a child there runs unconfined; see
+[Windows](#windows-and-other-platforms-without-a-backend).
 
 Both layers stay in force alongside approval policy, the separate rule set
 that decides which risky operations have to ask a human first. None of the
@@ -194,10 +195,9 @@ A profile decides two independent questions:
   and `read_only_roots`, plus the launch-cwd check for subprocesses. It
   is portable and deterministic, because Harn performs it itself.
 - **OS confinement** — is a platform mechanism (Linux Landlock+seccomp,
-  macOS sandbox-exec, Windows AppContainer) applied to spawned
-  subprocesses? This depends on a mechanism that may be unavailable, and
-  it is the only axis that can deny a child something Harn never asked
-  about.
+  macOS sandbox-exec) applied to spawned subprocesses? Windows has
+  none. This depends on a mechanism that may be unavailable, and it is
+  the only axis that can deny a child something Harn never asked about.
 
 | Profile | Path enforcement | OS confinement | When the spawn fails |
 |---|---|---|---|
@@ -217,9 +217,10 @@ so path scoping alone is not containment.
 
 Top-level `agent_loop` sessions install an empty-ceiling `os_hardened`
 carrier by default, so agent subprocess tools require the OS sandbox
-even when the caller did not pass an explicit capability policy. Direct
-scripts and process calls keep the `worktree` default unless their
-caller selects a stricter profile.
+even when the caller did not pass an explicit capability policy. On
+Windows, which has none, those tools are refused. Direct scripts and
+process calls keep the `worktree` default unless their caller selects a
+stricter profile.
 
 The strictness ladder is `unrestricted < workspace_paths < worktree <
 wasi < os_hardened`. `CapabilityPolicy::intersect` always picks the
@@ -252,8 +253,8 @@ the `network` ceiling. No policy term requires process confinement yet.
 |---|---|---|---|---|---|
 | Linux Landlock | enforced | enforced | enforced | enforced | unmeasured |
 | macOS sandbox-exec | enforced | enforced | enforced | enforced | unmeasured |
-| Windows AppContainer | not enforced | not enforced | not enforced | not enforced | unmeasured |
 | OpenBSD unveil | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured |
+| No OS sandbox | not enforced | not enforced | not enforced | not enforced | unmeasured |
 <!-- sandbox-enforcement-table:end -->
 
 ### Reading a mechanism refusal
@@ -262,9 +263,8 @@ A spawn refused because the platform mechanism could not be attached carries
 the cause as typed fields rather than as advice prose. The caught value is a
 `tool_rejected` dict whose `source` is `sandbox_mechanism` and whose
 `sandbox_mechanism` member names the `mechanism` (`linux_landlock`,
-`macos_sandbox_exec`, `windows_app_container`, `openbsd_unveil`), the
-`availability` (`absent_on_host`, `entry_point_cannot_attach`, or
-`does_not_confine`), the requested `profile`, the unsatisfied `requirement`
+`macos_sandbox_exec`, `openbsd_unveil`, or `none` on a platform with no OS
+sandbox), the `availability` (`absent_on_host` or `does_not_confine`), the requested `profile`, the unsatisfied `requirement`
 (`profile` or `fallback`), and `selector_honored` —
 false when the requested profile requires the mechanism outright, so no
 `HARN_HANDLER_SANDBOX` value can weaken it. A `does_not_confine` refusal also
@@ -373,15 +373,6 @@ credential-helper executables are readable by confined children. External
 paths gain no write grant, and repository-local config cannot add process read
 roots. Credential-helper data files are not inferred from helper arguments;
 on macOS and Linux, the credential read denylist still takes precedence.
-
-Windows AppContainer confinement is more conservative for omitted presets:
-granting a home-scoped root requires mutating filesystem ACLs recursively, so
-the Windows backend does not materialize implicit default
-`developer_toolchains` or `package_manager_config` roots on every spawn. A
-policy that explicitly sets `process_sandbox.presets` still asks Windows to
-grant those preset roots, and `process_sandbox.read_roots` / `.write_roots`
-remain the preferred way to add the specific SDK, cache, or config directory a
-subprocess needs.
 
 Other admitted child variables still come from the parent environment. That
 includes corporate proxy and CA variables such as `HTTP_PROXY`,
@@ -648,27 +639,6 @@ mechanism Apple ships for non-App-Store binaries. We track that
 status in the file-level docstring and will switch to a supported
 successor when one exists.
 
-### Windows (`crates/harn-vm/src/stdlib/sandbox/windows.rs`)
-
-| Capability / policy | Win32 mechanism | Effect |
-|---|---|---|
-| always | `CreateAppContainerProfile` + `STARTUPINFOEX` + `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` | the process runs inside a per-spawn AppContainer with no capability SIDs |
-| always | `GetAppContainerFolderPath` plus child `LOCALAPPDATA` / `TEMP` / `TMP` overrides | child processes use AppContainer-owned profile and scratch directories instead of inheriting host-user temp paths that the AppContainer cannot access |
-| `workspace.write_text` / `workspace.delete` | `icacls /grant *<sid>:(OI)(CI)M /T /C` on each `workspace_roots` entry | the AppContainer SID gets Modify access on the roots; revoked on `Drop` |
-| read-only (denied workspace write, or any `read_only_roots` entry) | `icacls /grant *<sid>:(OI)(CI)RX /T /C` | the AppContainer SID gets ReadAndExecute; `read_only_roots` always use this grant even when workspace writes are allowed |
-| explicit `process_sandbox.presets` includes `developer_toolchains` / `package_manager_config` | `icacls /grant *<sid>:(OI)(CI)RX /T /C` on existing home-scoped preset roots | explicit preset requests get read-only access; omitted presets are not materialized as recursive ACL grants on Windows |
-| `process_sandbox.read_roots` / `.write_roots` | `icacls /grant *<sid>:(OI)(CI)RX` or Modify | process-only roots, with writes gated by workspace-write capability |
-| always | `CreateJobObjectW` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `_DIE_ON_UNHANDLED_EXCEPTION`, `_ACTIVE_PROCESS` (cap 32), `_PROCESS_MEMORY` (cap 512 MiB) | resource caps and lifecycle binding |
-| `side_effect_level >= network` | AppContainer `internetClient` and `privateNetworkClientServer` capability SIDs | public-network client access plus private-network client and server (inbound) access; otherwise the AppContainer receives no network capability |
-| always | direct `CreateProcessW` with `CREATE_NO_WINDOW`, explicit handle list, `STARTF_USESTDHANDLES`, and Job Object UI restrictions | stdin/stdout/stderr inheritance is restricted to the three pipes the runtime created, console commands do not bind to an interactive desktop, and child UI escape surfaces stay disabled |
-
-`std::process::Command` cannot carry an AppContainer
-`SECURITY_CAPABILITIES` block, so Windows callers must use
-`process_sandbox::command_output(...)` (which goes through
-`SandboxBackend::run_to_output`). The `std_command_for` /
-`tokio_command_for` helpers warn-or-error per the active fallback
-policy.
-
 ### OpenBSD (`crates/harn-vm/src/stdlib/sandbox/openbsd.rs`)
 
 | Capability / policy | OpenBSD mechanism | Effect |
@@ -680,6 +650,22 @@ policy.
 | always | `pledge("stdio rpath proc exec", NULL)` | minimum process-exec promise set |
 | `workspace.write_text` / `workspace.delete` | adds `wpath cpath dpath` to pledge | filesystem mutation promises |
 | `side_effect_level >= network` | adds `inet dns` to pledge | network promises |
+
+### Windows and other platforms without a backend
+
+Windows has no OS sandbox. A child process runs with the parent's full
+filesystem and network access, and Harn says so instead of passing silently:
+
+| Profile | On Windows |
+|---|---|
+| `os_hardened` | the spawn is refused before it starts, as a typed `does_not_confine` refusal naming mechanism `none` and every dimension the policy required |
+| `worktree` | the child runs unconfined after a one-time `handler_sandbox` warning, `this platform has no OS process sandbox; child processes run unconfined`; `HARN_HANDLER_SANDBOX=enforce` refuses instead |
+| `unrestricted`, `workspace_paths` | the child runs unconfined, as on every platform |
+
+`harn doctor` reports `backend=unconfined filesystem_mechanism=none
+active=false` and the `No OS sandbox` row of the table above. Harn's own path
+checks, the process environment it builds, and the launch-cwd check still
+apply. Any other platform without a backend behaves the same way.
 
 ## How spawns route
 
@@ -697,7 +683,7 @@ process_sandbox::{command_output, std_command_for, tokio_command_for}
         ├── linux::Backend       (pre_exec → seccomp + Landlock)
         ├── macos::Backend       (wrap with sandbox-exec)
         ├── openbsd::Backend     (pre_exec → unveil + pledge)
-        └── windows::Backend     (CreateProcessW with AppContainer + Job Object)
+        └── UnconfinedBackend    (Windows and others: no OS sandbox; warn, or refuse)
 ```
 
 The backend trait is defined in
@@ -735,7 +721,7 @@ scripts and conformance fixtures:
 
 | Builtin | Returns | Use |
 |---|---|---|
-| `harness.system.sandbox_active_backend()` | `string` | name of the compiled-in backend (`linux`, `macos`, `windows`, `openbsd`, `noop`) |
+| `harness.system.sandbox_active_backend()` | `string` | name of the compiled-in backend (`linux`, `macos`, `openbsd`, `unconfined`) |
 | `harness.system.sandbox_backend_available()` | `bool` | whether the platform mechanism behind the backend is reachable on the running host |
 | `harness.system.sandbox_active_profile()` | `string` | profile carried by the current execution policy (`worktree` under default `harn run`, `unrestricted` if no policy is active) |
 
