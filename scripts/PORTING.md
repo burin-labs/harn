@@ -91,7 +91,7 @@ risks release/build reliability:
 `verify_crate_packages.sh`, `dev_setup.sh`, `sign_local_macos.sh`,
 `generate_sdk_clients.sh`, `prune_stale_targets.sh`, `bench_*.sh`,
 `smoke_installed_binary.sh`, `stress_subprocess_tests.sh`,
-`measure_lean_embedding.sh`, `build_docs_site.sh`, `configure_merge_drivers.sh`,
+`measure_lean_embedding.sh`, `build_docs_site.sh`,
 `ensure_portal_deps.sh`, `portal_demo.sh`, `demo_local_a2a_dispatch.sh`, `install.sh`,
 `.githooks/*`, `.github/scripts/*.sh`.
 

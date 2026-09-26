@@ -33,5 +33,9 @@ check false crates/harn-vm/src/lib.rs
 check false scripts/release_ship.sh
 check false .github/workflows/ci.yml
 check false Cargo.toml
+# Generated outputs marked `-merge` live under docs/ but must keep the
+# generated-file check running in a merge-queue tail.
+check false docs/src/language-spec.md
+check false README.md docs/diagnostics-catalog.json
 
 echo "ci_docs_only_test: ok"

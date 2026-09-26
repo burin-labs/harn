@@ -401,7 +401,6 @@ echo "Setup storage root -> ${HARN_DEV_SETUP_STORAGE_ROOT}"
 
 git config core.hooksPath .githooks
 echo "Configured git hooks path -> .githooks"
-./scripts/configure_merge_drivers.sh
 
 explicit_target_dir="${HARN_DEV_TARGET_DIR:-}"
 target_dir="${explicit_target_dir}"
