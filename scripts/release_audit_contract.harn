@@ -10,6 +10,7 @@ import {
   schema_int,
   schema_list,
   schema_literal,
+  schema_nullable,
   schema_string,
   schema_union,
   schema_validator,
@@ -87,8 +88,9 @@ pub type ReleaseAuditPlan = {
 
 /**
  * Native Windows is advisory: Harn builds and runs there without OS sandbox
- * confinement, so its nightly never decides whether a release certifies. Its
- * outcome is still reported, by name, on every accepted receipt.
+ * confinement, so its nightly never decides whether a release certifies. The
+ * receipt accounts for it with a successful proof or one `advisories` entry,
+ * and every accepted receipt reports the outcome by name.
  */
 pub const WINDOWS_NIGHTLY_ADVISORY = "WINDOWS_NIGHTLY_ADVISORY"
 
@@ -227,10 +229,7 @@ fn platform_proof_schema() {
           run_attempt: schema_int() + {minimum: 1},
           event: schema_literal("workflow_dispatch"),
           status: schema_literal("completed"),
-          // Any terminal conclusion is well-formed. Whether it must be
-          // `success` is the platform's policy, decided by the exact proof for
-          // required platforms and reported as an advisory for Windows.
-          conclusion: schema_string() + {min_len: 1},
+          conclusion: schema_literal("success"),
           head_sha: sha_schema(),
           url: schema_string() + {pattern: "^https://github[.]com/.+/actions/runs/[0-9]+$"},
         },
@@ -247,7 +246,7 @@ fn platform_proof_schema() {
                 run_id: schema_int() + {minimum: 1},
                 name: schema_string() + {min_len: 1},
                 status: schema_literal("completed"),
-                conclusion: schema_string() + {min_len: 1},
+                conclusion: schema_literal("success"),
                 url: schema_string()
                   + {pattern: "^https://github[.]com/.+/actions/runs/[0-9]+/job/[0-9]+$"},
               },
@@ -260,6 +259,24 @@ fn platform_proof_schema() {
       started_at_ms: schema_int() + {minimum: 0},
       completed_at_ms: schema_int() + {minimum: 0},
       duration_ms: schema_int() + {minimum: 0},
+    },
+  )
+}
+
+/**
+ * An advisory platform that produced no successful proof. The certifier
+ * records one in place of the proof, so the receipt still accounts for it.
+ */
+fn platform_advisory_schema() {
+  return schema_closed_object(
+    {
+      platform: schema_enum(ADVISORY_PLATFORMS),
+      state: schema_enum(["failure", "missing", "abandoned"]),
+      code: schema_string() + {min_len: 1},
+      message: schema_string(),
+      run_url: schema_nullable(
+        schema_string() + {pattern: "^https://github[.]com/.+/actions/runs/[0-9]+$"},
+      ),
     },
   )
 }
@@ -278,6 +295,7 @@ fn hosted_platform_receipt_schema() {
         },
       ),
       platforms: schema_list(platform_proof_schema()),
+      advisories: schema_field(schema_list(platform_advisory_schema()), false),
       local_source: schema_closed_object(
         {
           head_sha: sha_schema(),
@@ -537,8 +555,24 @@ pub fn release_audit_receipt_plan(
       != len(platforms) {
     return release_audit_full_plan(contract, "platform_proofs_mismatch", expected)
   }
-  // Missing until a Windows proof in the receipt says otherwise.
-  let windows_advisory = WINDOWS_NIGHTLY_ADVISORY + " state=missing run=none"
+  // Every advisory platform is accounted for exactly once: by a successful
+  // proof in `platforms` or by an advisory entry, never both and never neither.
+  const advisories = receipt?.advisories ?? []
+  const advised = advisories.map({ entry -> entry.platform }).to_list()
+  for name in ADVISORY_PLATFORMS {
+    const proofs = advisory_platforms.filter({ platform -> platform == name }).to_list()
+    const entries = advised.filter({ platform -> platform == name }).to_list()
+    if len(proofs) + len(entries) != 1 {
+      return release_audit_full_plan(contract, "advisory_platform_unaccounted", expected)
+    }
+  }
+  let windows_advisory = ""
+  for entry in advisories {
+    windows_advisory = WINDOWS_NIGHTLY_ADVISORY + " state=" + entry.state + " run="
+      + (entry.run_url ?? "none")
+      + " code="
+      + entry.code
+  }
   const expected_workflows = {
     windows: ".github/workflows/windows-nightly.yml",
     macos: ".github/workflows/macos-nightly.yml",
@@ -570,15 +604,11 @@ pub fn release_audit_receipt_plan(
       [platform.run],
       platform.jobs,
     )
-    if platform.platform == "windows" {
-      windows_advisory = if proof.ok {
-        WINDOWS_NIGHTLY_ADVISORY + " state=success run=" + platform.run.url
-      } else {
-        WINDOWS_NIGHTLY_ADVISORY + " state=failure run=" + platform.run.url + " reason="
-          + proof.reason
-      }
-    } else if !proof.ok {
+    if !proof.ok {
       return release_audit_full_plan(contract, "platform_proof_" + proof.reason, expected)
+    }
+    if platform.platform == "windows" {
+      windows_advisory = WINDOWS_NIGHTLY_ADVISORY + " state=success run=" + platform.run.url
     }
     if platform.duration_ms > longest {
       longest = platform.duration_ms

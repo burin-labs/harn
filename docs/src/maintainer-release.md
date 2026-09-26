@@ -81,8 +81,16 @@ version/changelog commit is created, the release harness dispatches
 `.github/workflows/windows-nightly.yml` and
 `.github/workflows/macos-nightly.yml` for the frozen source branch while the
 local source audit runs. GitHub must return an exact run ID for each dispatch.
-Both runs and their full-workspace jobs must complete successfully with the
+The macOS run and its full-workspace job must complete successfully with the
 expected workflow path, event, SHA, URL, and unique job identity.
+
+Windows is advisory. Harn builds and runs on Windows without OS sandbox
+confinement, so the Windows nightly never decides whether a release certifies.
+The receipt carries the Windows proof when it succeeded and otherwise one
+`advisories` entry (`failure`, `missing`, or `abandoned`, with its run URL when
+one exists). Every accepted receipt prints a
+`WINDOWS_NIGHTLY_ADVISORY state=... run=...` line. A receipt that accounts for
+Windows neither way is refused.
 
 Windows certification stays off the contended Actions cache namespace.
 Successful `main` `windows-nightly` runs publish a short-retention
