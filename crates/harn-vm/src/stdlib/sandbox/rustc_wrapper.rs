@@ -620,7 +620,9 @@ struct ProbeMark {
     nonce: String,
     /// An existing file the build's profile denies reading.
     marker: PathBuf,
-    /// Its sibling, which the build's profile still allows reading.
+    /// Its sibling, which the build's profile still allows reading. Only
+    /// macOS reads the mark from the profile.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     control: PathBuf,
 }
 
