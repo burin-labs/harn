@@ -90,6 +90,9 @@ pub type BumpPrState = {
   state: string,
 }
 
+/** Verdict from carrying human or agent repair commits across a bot refresh. */
+pub type BumpRepairCarryForward = {ok: bool, carried: int, detail: string}
+
 /** Inputs to one atomic provider-owned branch + signed-commit publication. */
 pub type BumpCommitRequest = {branch: string, base_sha: string, headline: string}
 
@@ -120,6 +123,7 @@ pub type BumpAdapter = {
   revision_relation: fn(string, string, string) -> BumpRevisionRelation,
   base_sha: fn() -> string,
   apply_version: fn(string, string) -> BumpApplyOutcome,
+  carry_forward_repairs: fn(BumpPrState?, string) -> BumpRepairCarryForward,
   run_validation: fn() -> BumpValidation,
   working_changes: fn() -> BumpChangeSet,
   remote_base_head: fn() -> BumpBaseHead,
@@ -145,6 +149,7 @@ pub type BumpOutcome = "not_ready" \
   | "validation_failed" \
   | "base_advanced" \
   | "base_conflict" \
+  | "repair_conflict" \
   | "closed_noop" \
   | "committed"
 
@@ -178,6 +183,7 @@ pub type BumpReceipt = {
   base_check_phase: "before_refresh" | "before_publication" | "before_arming" | nil,
   recovery: BumpRecovery,
   base_adoptions: int,
+  repair_commits_carried: int,
   lease_recovered: bool,
   commit_oid: string?,
   pr_action: BumpPrAction,
@@ -295,6 +301,7 @@ fn __bump_receipt_base(
     base_check_phase: nil,
     recovery: {kind: "none", base_oid: nil},
     base_adoptions: 0,
+    repair_commits_carried: 0,
     lease_recovered: false,
     commit_oid: nil,
     pr_action: "none",
@@ -576,6 +583,27 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
           outcome: "already_current",
           ok: true,
           notes: receipt.notes + ["writing ${target} produced no change"],
+        }
+    }
+    // A refresh is derived from main and would otherwise erase every repair
+    // committed after the bot's original bump commit. Carry that exact delta
+    // onto the regenerated tree before validation. Any overlap is a new repair
+    // problem and must leave the old PR head intact rather than overwrite it.
+    const carried = adapter.carry_forward_repairs(existing, options.branch)
+    if !carried.ok {
+      return receipt
+        + {
+          outcome: "repair_conflict",
+          ok: false,
+          notes: receipt.notes + ["could not carry forward bump repairs: ${carried.detail}"],
+        }
+    }
+    if carried.carried > 0 {
+      receipt = receipt
+        + {
+          repair_commits_carried: carried.carried,
+          notes: receipt.notes
+            + ["carried ${carried.carried} repair commit(s) across the refreshed bump"],
         }
     }
     // Phase 4 — the caller's single declared validation entrypoint. By default,

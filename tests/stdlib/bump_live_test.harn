@@ -1,6 +1,6 @@
 import { LiveBumpRemote, live_bump_adapter } from "std/bump/live"
 import { command_run } from "std/command"
-import { assert_eq, assert_throws } from "std/testing"
+import { assert, assert_eq, assert_throws } from "std/testing"
 
 fn unreachable_remote() -> LiveBumpRemote {
   const unreachable = fn() {
@@ -10,7 +10,7 @@ fn unreachable_remote() -> LiveBumpRemote {
     latest_release_tag: unreachable,
     release_view: fn(_tag) { return unreachable() },
     base_head: unreachable,
-    fetch_base: fn(_oid) { return unreachable() },
+    fetch_ref: fn(_ref, _oid) { return unreachable() },
     find_bump_pr: unreachable,
     disable_auto_merge: fn(_pr, _base_sha) { return unreachable() },
     publish_commit: fn(_request) { return unreachable() },
@@ -23,7 +23,7 @@ fn unreachable_remote() -> LiveBumpRemote {
 
 fn adoption_remote() -> LiveBumpRemote {
   const remote = unreachable_remote()
-  return remote + {fetch_base: fn(_oid) { return {ok: true, detail: ""} }}
+  return remote + {fetch_ref: fn(_ref, _oid) { return {ok: true, detail: ""} }}
 }
 
 fn git_ok(tools: HarnessTools, root: string, args: list<string>) {
@@ -73,6 +73,95 @@ pipeline test_apply_version_writes_bare_semver(harness: Harness) {
   assert(outcome.ok)
   assert(harness.fs.read_text(version_file) == "1.2.3\n")
   harness.fs.delete(root)
+}
+
+pipeline test_refresh_carries_a_planted_repair_commit(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("harn-bump-repair-")
+  git_ok(harness.tools, root, ["init", "--quiet"])
+  git_ok(harness.tools, root, ["config", "user.email", "harn-test@example.invalid"])
+  git_ok(harness.tools, root, ["config", "user.name", "Harn Test"])
+  harness.fs.write_text(path_join(root, "base.txt"), "base\n")
+  git_ok(harness.tools, root, ["add", "base.txt"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "base"])
+  const base_oid = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
+  git_ok(harness.tools, root, ["checkout", "--quiet", "-b", "automation/bump-harn-runtime"])
+  harness.fs.write_text(path_join(root, ".harn-version"), "0.10.1\n")
+  git_ok(harness.tools, root, ["add", ".harn-version"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "chore: bump Harn runtime to v0.10.1"])
+  harness.fs.write_text(path_join(root, "repair.txt"), "preserved\n")
+  git_ok(harness.tools, root, ["add", "repair.txt"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "repair consumer"])
+  const repair_head = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
+  git_ok(harness.tools, root, ["checkout", "--quiet", "--detach", base_oid])
+  harness.fs.write_text(path_join(root, "generated.txt"), "new pin output\n")
+  const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    adoption_remote(),
+    {repo_dir: root},
+    harness.fs,
+  )
+  const carried = adapter.carry_forward_repairs(
+    {
+      number: 1,
+      head_oid: repair_head,
+      base_ref: "main",
+      base_oid: base_oid,
+      auto_merge_enabled: false,
+      auto_merge_method: nil,
+      url: "https://example.test/pull/1",
+      state: "open",
+    },
+    "automation/bump-harn-runtime",
+  )
+  assert_eq(carried.ok, true)
+  assert_eq(carried.carried, 1)
+  assert_eq(harness.fs.read_text(path_join(root, "repair.txt")), "preserved\n")
+  assert_eq(harness.fs.read_text(path_join(root, "generated.txt")), "new pin output\n")
+}
+
+pipeline test_refresh_refuses_a_repair_that_no_longer_applies(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("harn-bump-repair-conflict-")
+  git_ok(harness.tools, root, ["init", "--quiet"])
+  git_ok(harness.tools, root, ["config", "user.email", "harn-test@example.invalid"])
+  git_ok(harness.tools, root, ["config", "user.name", "Harn Test"])
+  harness.fs.write_text(path_join(root, "consumer.txt"), "base\n")
+  git_ok(harness.tools, root, ["add", "consumer.txt"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "base"])
+  const base_oid = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
+  git_ok(harness.tools, root, ["checkout", "--quiet", "-b", "automation/bump-harn-runtime"])
+  harness.fs.write_text(path_join(root, ".harn-version"), "0.10.1\n")
+  git_ok(harness.tools, root, ["add", ".harn-version"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "chore: bump Harn runtime to v0.10.1"])
+  harness.fs.write_text(path_join(root, "consumer.txt"), "repair\n")
+  git_ok(harness.tools, root, ["add", "consumer.txt"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "repair consumer"])
+  const repair_head = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
+  git_ok(harness.tools, root, ["checkout", "--quiet", "--detach", base_oid])
+  harness.fs.write_text(path_join(root, "consumer.txt"), "refreshed incompatibly\n")
+  const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    adoption_remote(),
+    {repo_dir: root},
+    harness.fs,
+  )
+  const carried = adapter.carry_forward_repairs(
+    {
+      number: 2,
+      head_oid: repair_head,
+      base_ref: "main",
+      base_oid: base_oid,
+      auto_merge_enabled: false,
+      auto_merge_method: nil,
+      url: "https://example.test/pull/2",
+      state: "open",
+    },
+    "automation/bump-harn-runtime",
+  )
+  assert_eq(carried.ok, false)
+  assert(contains(carried.detail, "no longer applies"), carried.detail)
+  assert_eq(harness.fs.read_text(path_join(root, "consumer.txt")), "refreshed incompatibly\n")
 }
 
 pipeline test_apply_version_reports_refresh_failure(harness: Harness) {

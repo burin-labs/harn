@@ -21,6 +21,7 @@ import {
   BumpCommitResult,
   BumpPrState,
   BumpPrUpsert,
+  BumpRepairCarryForward,
   BumpRevisionRelation,
 } from "std/bump/runtime"
 import { command_run } from "std/command"
@@ -58,7 +59,7 @@ pub type LiveBumpRemote = {
   latest_release_tag: fn() -> string,
   release_view: fn(string) -> LiveBumpRelease,
   base_head: fn() -> BumpBaseHead,
-  fetch_base: fn(string) -> LiveBumpFetch,
+  fetch_ref: fn(string, string) -> LiveBumpFetch,
   find_bump_pr: fn() -> BumpPrState?,
   disable_auto_merge: fn(BumpPrState, string) -> bool,
   publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
@@ -99,6 +100,10 @@ pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
 
 fn __git(tools: HarnessTools, repo_dir: string, argv: list<string>) {
   return command_run(tools, ["git", "-C", repo_dir] + argv)
+}
+
+fn __git_stdin(tools: HarnessTools, repo_dir: string, argv: list<string>, stdin: string) {
+  return command_run(tools, {mode: "argv", argv: ["git", "-C", repo_dir] + argv, stdin: stdin})
 }
 
 fn __shell(tools: HarnessTools, repo_dir: string, command: string) {
@@ -282,7 +287,7 @@ fn __adopt_base(
   if to_oid == "" {
     return __adoption_failure("no advanced base identity to adopt")
   }
-  const fetch = remote.fetch_base(to_oid)
+  const fetch = remote.fetch_ref(request.base, to_oid)
   if !fetch.ok {
     return __adoption_failure("fetching ${request.base} failed: ${fetch.detail}")
   }
@@ -400,6 +405,85 @@ fn __adopt_base(
   }
 }
 
+fn __repair_failure(detail: string) -> BumpRepairCarryForward {
+  return {ok: false, carried: 0, detail: detail}
+}
+
+/** Carry only commits planted after the bot's first bump commit. */
+fn __carry_forward_repairs(
+  tools: HarnessTools,
+  remote: LiveBumpRemote,
+  cfg: LiveBumpConfig,
+  existing: BumpPrState?,
+  branch: string,
+) -> BumpRepairCarryForward {
+  if existing == nil {
+    return {ok: true, carried: 0, detail: "no existing bump pull request"}
+  }
+  const pull = existing
+  const fetched = remote.fetch_ref(branch, pull.head_oid)
+  if !fetched.ok {
+    return __repair_failure("fetching existing bump head failed: ${fetched.detail}")
+  }
+  const merged = __git(tools, cfg.repo_dir, ["merge-base", "HEAD", pull.head_oid])
+  const branch_base = trim(merged.stdout ?? "")
+  if !merged.success || branch_base == "" {
+    return __repair_failure("existing bump head has no merge base with the refreshed checkout")
+  }
+  const listed = __git(
+    tools,
+    cfg.repo_dir,
+    ["rev-list", "--reverse", "${branch_base}..${pull.head_oid}"],
+  )
+  if !listed.success {
+    return __repair_failure("could not enumerate existing bump commits")
+  }
+  const commits = __lines(listed.stdout)
+  if len(commits) == 0 {
+    return __repair_failure("existing bump pull request has no commit beyond its base")
+  }
+  const bot_commit = commits[0] ?? ""
+  const subject = trim(
+    __git(tools, cfg.repo_dir, ["show", "-s", "--format=%s", bot_commit]).stdout ?? "",
+  )
+  if !subject.starts_with("chore: bump Harn runtime to ") {
+    return __repair_failure("first bump commit has unexpected subject: ${subject}")
+  }
+  const repair_count = len(commits) - 1
+  if repair_count == 0 {
+    return {ok: true, carried: 0, detail: "existing bump has no repair commits"}
+  }
+  const diff = __git(tools, cfg.repo_dir, ["diff", "--binary", "${bot_commit}..${pull.head_oid}"])
+  if !diff.success {
+    return __repair_failure("could not read the existing repair delta")
+  }
+  const check = __git_stdin(
+    tools,
+    cfg.repo_dir,
+    ["apply", "--3way", "--check", "-"],
+    diff.stdout ?? "",
+  )
+  if !check.success {
+    return __repair_failure(
+      "repair delta no longer applies to the refreshed tree: "
+        + trim((check.stderr ?? "") + (check.stdout ?? "")),
+    )
+  }
+  const applied = __git_stdin(
+    tools,
+    cfg.repo_dir,
+    ["apply", "--3way", "--index", "-"],
+    diff.stdout ?? "",
+  )
+  if !applied.success {
+    return __repair_failure(
+      "applying the checked repair delta failed: "
+        + trim((applied.stderr ?? "") + (applied.stdout ?? "")),
+    )
+  }
+  return {ok: true, carried: repair_count, detail: "carried repair delta from ${pull.head_oid}"}
+}
+
 fn __release_finalized(release: LiveBumpRelease) -> bool {
   const missing = REQUIRED_RELEASE_ASSETS.filter({ name -> !contains(release.asset_names, name) })
     .to_list()
@@ -479,6 +563,13 @@ pub fn live_bump_adapter(
     base_sha: fn() { return trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? "") },
     apply_version:
       fn(target, revision) { return __apply_version(fs, tools, cfg, target, revision) },
+    carry_forward_repairs: fn(existing, branch) { return __carry_forward_repairs(
+      tools,
+      remote,
+      cfg,
+      existing,
+      branch,
+    ) },
     run_validation: fn() {
       if trim(cfg.validation_command) == "" {
         return {ok: true, steps: [], detail: "no validation command declared"}

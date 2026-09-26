@@ -35,6 +35,9 @@ fn make_fake(config: dict = {}) {
     revision_relation: "untracked",
     apply_ok: true,
     apply_changed: true,
+    carry_ok: true,
+    carry_count: 0,
+    carry_detail: "",
     refreshed: ["harn.lock"],
     validation_ok: true,
     validation_detail: "",
@@ -87,6 +90,11 @@ fn make_fake(config: dict = {}) {
         },
       }
     },
+    carry_forward_repairs: fn(existing, _branch) { return {
+      ok: cfg.carry_ok,
+      carried: cfg.carry_count,
+      detail: cfg.carry_detail,
+    } },
     run_validation: fn() {
       record("run_validation", nil)
       return {
@@ -434,6 +442,25 @@ pipeline test_refresh_failure_opt_in_does_not_publish_without_a_mutation(
   assert_eq(call_names(fake.calls()), ["remote_base_head", "apply_version"])
 }
 
+pipeline test_repair_conflict_preserves_existing_pr_head(harness: Harness, task: unknown) {
+  const open: BumpPrState = {
+    number: 70,
+    head_oid: "repair-head",
+    base_ref: "main",
+    base_oid: "base000",
+    auto_merge_enabled: false,
+    auto_merge_method: nil,
+    url: "https://example.test/pull/70",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: open, carry_ok: false, carry_detail: "repair.txt conflicts"})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "repair_conflict")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.pr_action, "none")
+  assert_eq(call_names(fake.calls()), ["remote_base_head", "apply_version"])
+}
+
 /**
  * 6. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
  * BEFORE refresh and validation begin. Order matters.
@@ -505,12 +532,13 @@ pipeline test_existing_pr_is_refreshed_in_place(harness: Harness, task: unknown)
     url: "https://example.test/pull/88",
     state: "open",
   }
-  const fake = make_fake({existing_pr: open})
+  const fake = make_fake({existing_pr: open, carry_count: 2})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "committed")
   assert_eq(receipt.lease_recovered, false)
   assert_eq(receipt.pr_action, "refreshed")
   assert_eq(receipt.pr_number, 88)
+  assert_eq(receipt.repair_commits_carried, 2)
   assert_eq(
     call_names(fake.calls()),
     [
