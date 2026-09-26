@@ -26,6 +26,7 @@ use super::{
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
 
+mod nested;
 pub(super) mod swiftpm;
 mod toolchain_roots;
 
@@ -99,6 +100,28 @@ fn wrap_with_sandbox_exec(
             super::SandboxMechanismAvailability::AbsentOnHost,
             profile,
         );
+    }
+    match nested::nesting(policy) {
+        nested::Nesting::NotNested => {}
+        // Already confined at least as strictly: macOS would refuse a second
+        // profile, so the child runs under this process's own. The program
+        // still gets the arguments that adapt it to confinement.
+        nested::Nesting::Inherit => {
+            nested::report_inherited();
+            return Ok(PrepareOutcome::WrappedExec {
+                wrapper: program.to_string(),
+                args: macos_sandbox_compatible_args(program, args),
+            });
+        }
+        nested::Nesting::Unenforceable(narrowing) => {
+            nested::report_unenforceable(&narrowing);
+            return Err(super::sandbox_rejection(format!(
+                "this process is already inside another sandbox, which allows {}; this run's \
+                 policy denies that, and macOS cannot apply a second sandbox to enforce it, so \
+                 the child was not started",
+                narrowing.describe()
+            )));
+        }
     }
     let mut wrapped_args = vec![
         "-p".to_string(),
