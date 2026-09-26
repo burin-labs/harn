@@ -2,25 +2,17 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::FromRawHandle;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Output;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, LocalFree, SetHandleInformation, GENERIC_READ, GENERIC_WRITE, HANDLE,
-    HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
+    CloseHandle, SetHandleInformation, GENERIC_READ, GENERIC_WRITE, HANDLE, HANDLE_FLAG_INHERIT,
+    INVALID_HANDLE_VALUE,
 };
-use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
-use windows_sys::Win32::Security::Isolation::{
-    CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
-};
-use windows_sys::Win32::Security::{
-    CreateWellKnownSid, WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
-    PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES,
-};
+use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
-use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicUIRestrictions,
     JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
@@ -32,14 +24,11 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS, JOB_OBJECT_UILIMIT_WRITECLIPBOARD,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
-use windows_sys::Win32::System::SystemServices::SE_GROUP_ENABLED;
 use windows_sys::Win32::System::Threading::{
     DeleteProcThreadAttributeList, InitializeProcThreadAttributeList, UpdateProcThreadAttribute,
 };
 
 use super::{
-    policy_allows_network, process_sandbox_developer_toolchain_read_roots,
-    process_sandbox_package_manager_config_read_roots, process_sandbox_path_read_roots,
     process_spawn_error, sandbox_rejection, unavailable, PrepareOutcome, ProcessCommandConfig,
     SandboxBackend,
 };
@@ -48,11 +37,11 @@ use crate::value::VmError;
 
 // Declared here rather than in the sandbox module index: this backend is its
 // only consumer, and the index is a platform-neutral surface.
-#[path = "windows_system_roots.rs"]
-mod system_roots;
+/// The identity a confined child runs as.
+#[path = "windows_token.rs"]
+mod token;
 
-// The ACL grant machinery answers a different question from process launch, and
-// carries the measurements that justify each rule.
+/// Where that identity may write, granted once per policy.
 #[path = "windows_acl_grants.rs"]
 mod acl_grants;
 
@@ -68,16 +57,16 @@ impl SandboxBackend for Backend {
     }
 
     fn filesystem_mechanism() -> &'static str {
-        "windows_app_container"
+        "windows_restricted_token"
     }
 
     fn available() -> bool {
         true
     }
 
-    /// `std::process::Command` cannot carry an AppContainer
-    /// `SECURITY_CAPABILITIES` block — Windows requires
-    /// `STARTUPINFOEX` plumbing handled directly by `CreateProcessW`.
+    /// `std::process::Command` cannot launch under a restricted token:
+    /// Windows requires `CreateProcessAsUserW` with `STARTUPINFOEX`
+    /// plumbing, which only this backend's launch owns.
     /// Callers that need an `Output` go through [`Backend::run_to_output`],
     /// and callers that keep the child (the process tools) through
     /// [`spawn_confined`]. A caller that still asks for a confined `Command`
@@ -89,10 +78,10 @@ impl SandboxBackend for Backend {
         _policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        // Only `command_output()` owns the `STARTUPINFOEX` plumbing an
-        // AppContainer needs; `std_command_for()` cannot carry one.
+        // Only `command_output()` owns the restricted-token launch;
+        // `std_command_for()` cannot carry one.
         unavailable(
-            super::SandboxMechanism::WindowsAppContainer,
+            super::SandboxMechanism::WindowsRestrictedToken,
             super::SandboxMechanismAvailability::EntryPointCannotAttach,
             profile,
         )
@@ -105,9 +94,9 @@ impl SandboxBackend for Backend {
         _policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        // As above: `tokio_command_for()` cannot carry an AppContainer either.
+        // As above: `tokio_command_for()` cannot carry a restricted token either.
         unavailable(
-            super::SandboxMechanism::WindowsAppContainer,
+            super::SandboxMechanism::WindowsRestrictedToken,
             super::SandboxMechanismAvailability::EntryPointCannotAttach,
             profile,
         )
@@ -123,7 +112,7 @@ impl SandboxBackend for Backend {
         // `mod.rs::command_output` only routes here after
         // `active_sandbox_policy()` decides the spawn should be
         // confined (profile is `Worktree` or `OsHardened` and
-        // `HARN_HANDLER_SANDBOX` is not `off`). The AppContainer
+        // `HARN_HANDLER_SANDBOX` is not `off`). The restricted-token
         // launch is the only meaningful path on Windows.
         sandboxed_output(program, args, config, policy).map_err(|error| {
             process_spawn_error(&error)
@@ -213,197 +202,6 @@ fn read_to_end_async(mut file: std::fs::File) -> std::thread::JoinHandle<io::Res
         file.read_to_end(&mut output)?;
         Ok(output)
     })
-}
-
-struct AppContainerProfile {
-    label: String,
-    sid: PSID,
-}
-
-impl AppContainerProfile {
-    /// The container for `policy`, created on first use and reused after.
-    /// See [`acl_grants::container_identity`] for why it is not per spawn.
-    fn for_policy(
-        policy: &CapabilityPolicy,
-        process_capabilities: &mut ProcessCapabilities,
-    ) -> io::Result<Self> {
-        let name = acl_grants::container_identity(policy, policy_allows_network(policy));
-        let wide_name = str_to_wide(&name);
-        let display = str_to_wide("Harn Sandbox");
-        let description = str_to_wide("Harn per-process capability sandbox");
-        let mut sid = std::ptr::null_mut();
-        let hr = unsafe {
-            CreateAppContainerProfile(
-                wide_name.as_ptr(),
-                display.as_ptr(),
-                description.as_ptr(),
-                process_capabilities.attributes_mut_ptr(),
-                process_capabilities.count(),
-                &mut sid,
-            )
-        };
-        if failed(hr) {
-            let derived =
-                unsafe { DeriveAppContainerSidFromAppContainerName(wide_name.as_ptr(), &mut sid) };
-            if failed(derived) {
-                return Err(io::Error::from_raw_os_error(derived));
-            }
-        }
-        Ok(Self { label: name, sid })
-    }
-
-    fn label(&self) -> &str {
-        &self.label
-    }
-
-    fn security_capabilities(
-        &self,
-        process_capabilities: &mut ProcessCapabilities,
-    ) -> SECURITY_CAPABILITIES {
-        SECURITY_CAPABILITIES {
-            AppContainerSid: self.sid,
-            Capabilities: process_capabilities.attributes_mut_ptr(),
-            CapabilityCount: process_capabilities.count(),
-            Reserved: 0,
-        }
-    }
-
-    fn sid_string(&self) -> io::Result<String> {
-        let mut raw = std::ptr::null_mut();
-        if unsafe { ConvertSidToStringSidW(self.sid, &mut raw) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let result = wide_ptr_to_string(raw);
-        unsafe {
-            LocalFree(raw.cast());
-        }
-        Ok(result)
-    }
-
-    fn local_app_data(&self, sid_string: &str) -> io::Result<PathBuf> {
-        let wide_sid = str_to_wide(sid_string);
-        let mut raw = std::ptr::null_mut();
-        let hr = unsafe { GetAppContainerFolderPath(wide_sid.as_ptr(), &mut raw) };
-        if failed(hr) {
-            return Err(io::Error::from_raw_os_error(hr));
-        }
-        let path = wide_ptr_to_string(raw);
-        unsafe {
-            CoTaskMemFree(raw.cast());
-        }
-        Ok(PathBuf::from(path))
-    }
-
-    fn environment_overrides(&self, sid_string: &str) -> io::Result<Vec<(String, String)>> {
-        let local_app_data = self.local_app_data(sid_string)?;
-        let temp = local_app_data.join("Temp");
-        std::fs::create_dir_all(&temp)?;
-        Ok(vec![
-            (
-                "LOCALAPPDATA".to_string(),
-                local_app_data.to_string_lossy().into_owned(),
-            ),
-            ("TEMP".to_string(), temp.to_string_lossy().into_owned()),
-            ("TMP".to_string(), temp.to_string_lossy().into_owned()),
-        ])
-    }
-}
-
-struct ProcessCapabilities {
-    // The attribute records point into these allocations. Boxes keep the SID
-    // addresses stable if the owning vector or this struct moves.
-    _sid_storage: Vec<Box<[u8; SECURITY_MAX_SID_SIZE as usize]>>,
-    attributes: Vec<SID_AND_ATTRIBUTES>,
-}
-
-impl ProcessCapabilities {
-    fn for_policy(policy: &CapabilityPolicy) -> io::Result<Self> {
-        if !policy_allows_network(policy) {
-            return Ok(Self {
-                _sid_storage: Vec::new(),
-                attributes: Vec::new(),
-            });
-        }
-
-        let mut sid_storage = Vec::with_capacity(2);
-        let mut attributes = Vec::with_capacity(2);
-        for sid_type in [
-            WinCapabilityInternetClientSid,
-            WinCapabilityPrivateNetworkClientServerSid,
-        ] {
-            let mut sid = Box::new([0u8; SECURITY_MAX_SID_SIZE as usize]);
-            let mut sid_size = SECURITY_MAX_SID_SIZE;
-            if unsafe {
-                CreateWellKnownSid(
-                    sid_type,
-                    std::ptr::null_mut(),
-                    sid.as_mut_ptr().cast(),
-                    &mut sid_size,
-                )
-            } == 0
-            {
-                return Err(io::Error::last_os_error());
-            }
-            attributes.push(SID_AND_ATTRIBUTES {
-                Sid: sid.as_mut_ptr().cast(),
-                Attributes: SE_GROUP_ENABLED as u32,
-            });
-            sid_storage.push(sid);
-        }
-
-        Ok(Self {
-            _sid_storage: sid_storage,
-            attributes,
-        })
-    }
-
-    fn attributes_mut_ptr(&mut self) -> *mut SID_AND_ATTRIBUTES {
-        if self.attributes.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            self.attributes.as_mut_ptr()
-        }
-    }
-
-    fn count(&self) -> u32 {
-        u32::try_from(self.attributes.len()).expect("process capability count fits in u32")
-    }
-}
-
-/// Frees the SID only. The profile itself persists with its grants, which is
-/// what lets the next spawn under the same policy skip them.
-impl Drop for AppContainerProfile {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.sid.is_null() {
-                LocalFree(self.sid.cast());
-            }
-        }
-    }
-}
-
-fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    // `presets: None` means "use the runtime defaults" per
-    // `ProcessSandboxPolicy`'s own documented contract (types.rs), and those
-    // defaults include `DeveloperToolchains` and `PackageManagerConfig`. This
-    // used to short-circuit on the raw `None` field and return nothing,
-    // silently granting neither preset's read roots on Windows for every
-    // policy that never explicitly customized `process_sandbox.presets` —
-    // the common case, since nothing in the burin-mini/playground path sets
-    // it. `process_sandbox_developer_toolchain_read_roots` and
-    // `process_sandbox_package_manager_config_read_roots` already resolve
-    // presets correctly via `effective_presets()`, so this guard was both
-    // redundant with their own checks and wrong when it disagreed with them
-    // (harn#7993).
-    process_sandbox_developer_toolchain_read_roots(policy)
-        .into_iter()
-        .chain(process_sandbox_package_manager_config_read_roots(policy))
-        // Owned by `mod.rs` so the pre-launch coverage check reads the same
-        // set this loop grants an ACE for; see
-        // `process_sandbox_path_read_roots`. `optional: true` in the grant
-        // loop above already skips an entry that is not on disk.
-        .chain(process_sandbox_path_read_roots(policy))
-        .collect()
 }
 
 /// How much a confined child's Job Object lets its tree use.
@@ -691,25 +489,6 @@ impl Drop for ProcThreadAttributes {
     }
 }
 
-fn run_icacls<const N: usize>(path: &Path, args: [&str; N]) -> io::Result<()> {
-    let output = std::process::Command::new("icacls")
-        .arg(path)
-        .args(args)
-        .output()?;
-    if !output.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!(
-                "icacls failed for '{}': {}{}",
-                path.display(),
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            ),
-        ));
-    }
-    Ok(())
-}
-
 fn sandbox_trace(label: &str, message: impl AsRef<str>) {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if !*ENABLED.get_or_init(|| std::env::var_os("HARN_WINDOWS_SANDBOX_TRACE").is_some()) {
@@ -834,14 +613,10 @@ fn wide_ptr_to_string(raw: *const u16) -> String {
     }
 }
 
-fn failed(hr: i32) -> bool {
-    hr < 0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::{ProcessSandboxPolicy, ProcessSandboxPreset};
+    use std::path::PathBuf;
 
     fn workspace_policy(root: &Path, write: bool) -> CapabilityPolicy {
         let mut policy = CapabilityPolicy {
@@ -858,68 +633,196 @@ mod tests {
         policy
     }
 
-    /// One policy names one container, so its grants can be reused; a policy
-    /// that may not write names another, so it never inherits a write grant.
+    /// Removes a policy's scratch directory, and the entry granted on it, so
+    /// a test leaves nothing outside its own temp dirs.
+    struct ScratchCleanup(PathBuf);
+
+    impl ScratchCleanup {
+        fn for_policy(policy: &CapabilityPolicy) -> Self {
+            let label = launch::policy_label(&acl_grants::policy_digest(policy));
+            Self(launch::scratch_dir(&label))
+        }
+    }
+
+    impl Drop for ScratchCleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn run(policy: &CapabilityPolicy, cwd: &Path, program: &str, args: &[&str]) -> Output {
+        let config = ProcessCommandConfig {
+            cwd: Some(cwd.to_path_buf()),
+            ..ProcessCommandConfig::default()
+        };
+        let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+        sandboxed_output(program, &args, &config, policy)
+            .unwrap_or_else(|error| panic!("{program} {args:?} did not launch: {error}"))
+    }
+
+    fn describe(output: &Output) -> String {
+        format!(
+            "status={:#x} stdout={:?} stderr={:?}",
+            output.status.code().unwrap_or_default() as u32,
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
+
+    /// One policy names one SID, so its grants can be reused; a policy that
+    /// may not write names another, so it never inherits a write grant.
     #[test]
-    fn a_container_is_named_by_its_grant_plan() {
+    fn a_policy_sid_is_named_by_its_grant_plan() {
         let workspace = tempfile::tempdir().expect("workspace");
         let writable = workspace_policy(workspace.path(), true);
         let read_only = workspace_policy(workspace.path(), false);
-        assert_eq!(
-            acl_grants::container_identity(&writable, false),
-            acl_grants::container_identity(&writable, false)
-        );
-        assert_ne!(
-            acl_grants::container_identity(&writable, false),
-            acl_grants::container_identity(&read_only, false)
-        );
-        assert_ne!(
-            acl_grants::container_identity(&writable, false),
-            acl_grants::container_identity(&writable, true)
-        );
+        let sid = |policy: &CapabilityPolicy| {
+            token::Sid::for_policy_digest(&acl_grants::policy_digest(policy))
+                .and_then(|sid| sid.to_sddl())
+                .expect("policy sid")
+        };
+        assert_eq!(sid(&writable), sid(&writable));
+        assert_ne!(sid(&writable), sid(&read_only));
+        assert!(sid(&writable).starts_with("S-1-5-21-"));
     }
 
-    /// The per-run grant is gone: the second spawn under a policy rewrites
-    /// nothing, and it learns that from the disk, as a fresh process would.
+    /// The second spawn under a policy rewrites nothing, and it learns that
+    /// from the disk, as a fresh process would.
     #[test]
     fn a_policy_pays_for_its_grants_once() {
         let workspace = tempfile::tempdir().expect("workspace");
         std::fs::write(workspace.path().join("file.txt"), "x").expect("workspace file");
         let policy = workspace_policy(workspace.path(), true);
-        let mut capabilities = ProcessCapabilities::for_policy(&policy).expect("capabilities");
-        let profile =
-            AppContainerProfile::for_policy(&policy, &mut capabilities).expect("container");
-        let sid = profile.sid_string().expect("sid");
-        let first = acl_grants::WorkspaceAclGrants::grant("test", &sid, &policy).expect("grant");
+        let sid = token::Sid::for_policy_digest(&acl_grants::policy_digest(&policy)).expect("sid");
+        let first =
+            acl_grants::PolicyWriteGrants::grant("test", &sid, &policy, None).expect("grant");
         assert!(first.rewrites > 0, "the first spawn grants the workspace");
-        acl_grants::forget_container_grants();
-        let second = acl_grants::WorkspaceAclGrants::grant("test", &sid, &policy).expect("grant");
+        acl_grants::forget_grants();
+        let second =
+            acl_grants::PolicyWriteGrants::grant("test", &sid, &policy, None).expect("grant");
         assert_eq!(
             second.rewrites, 0,
-            "the second spawn found the grants in place"
+            "the second spawn found the grants in place; it rewrote {:?}",
+            second.rewritten
         );
     }
 
+    /// The programs an agent's commands are made of start under the
+    /// restricted token and exit cleanly.
     #[test]
-    fn environment_block_forces_appcontainer_temp_roots() {
+    fn windows_process_sandbox_starts_common_programs() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let policy = workspace_policy(workspace.path(), true);
+        let _cleanup = ScratchCleanup::for_policy(&policy);
+        let mut cases: Vec<(&str, Vec<&str>, Option<&str>)> = vec![
+            ("cmd", vec!["/c", "echo", "ok"], Some("ok")),
+            ("cmd", vec!["/c", "echo", "x>nul"], None),
+            (
+                "powershell",
+                vec!["-NoProfile", "-Command", "'ps-ok'"],
+                Some("ps-ok"),
+            ),
+        ];
+        // git is on every CI runner; a host without it has nothing to start.
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            cases.push(("git", vec!["--version"], Some("git version")));
+        }
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|(program, args, expected)| {
+                let output = run(&policy, workspace.path(), program, args);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let ok = output.status.success()
+                    && expected.is_none_or(|expected| stdout.contains(expected));
+                (!ok).then(|| format!("{program} {args:?}: {}", describe(&output)))
+            })
+            .collect();
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// The token confines writes: the workspace is writable, a directory the
+    /// user may write but the policy was not granted is not.
+    #[test]
+    fn windows_process_sandbox_writes_only_inside_granted_roots() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let outside = tempfile::tempdir().expect("outside");
+        let policy = workspace_policy(workspace.path(), true);
+        let _cleanup = ScratchCleanup::for_policy(&policy);
+
+        let inside_target = workspace.path().join("inside.txt");
+        let inside = run(
+            &policy,
+            workspace.path(),
+            "cmd",
+            &["/c", "echo", &format!("x>{}", inside_target.display())],
+        );
+        assert!(
+            inside.status.success() && inside_target.exists(),
+            "a write inside the workspace must succeed: {}",
+            describe(&inside)
+        );
+
+        let outside_target = outside.path().join("outside.txt");
+        let refused = run(
+            &policy,
+            workspace.path(),
+            "cmd",
+            &["/c", "echo", &format!("x>{}", outside_target.display())],
+        );
+        assert!(
+            !refused.status.success() && !outside_target.exists(),
+            "a write outside the granted roots must be refused: {}",
+            describe(&refused)
+        );
+    }
+
+    /// MSYS programs (Git for Windows' grep and bash) die creating their
+    /// shared-memory section under the restricted token. This asserts the
+    /// documented failure so the test flips when harn#8811 fixes it.
+    #[test]
+    fn windows_process_sandbox_msys_programs_fail_known_issue_8811() {
+        let usr_bin = Path::new("C:\\Program Files\\Git\\usr\\bin");
+        if !usr_bin.join("bash.exe").exists() {
+            return;
+        }
+        let workspace = tempfile::tempdir().expect("workspace");
+        let policy = workspace_policy(workspace.path(), true);
+        let _cleanup = ScratchCleanup::for_policy(&policy);
+        for (program, args) in [
+            (usr_bin.join("grep.exe"), vec!["--version"]),
+            (usr_bin.join("bash.exe"), vec!["-c", "echo bash-ok"]),
+        ] {
+            let output = run(
+                &policy,
+                workspace.path(),
+                &program.display().to_string(),
+                &args,
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                !output.status.success() && stderr.contains("CreateFileMapping"),
+                "{} changed behavior; if it now succeeds, harn#8811 is fixed and this test \
+                 should assert success: {}",
+                program.display(),
+                describe(&output)
+            );
+        }
+    }
+
+    #[test]
+    fn environment_block_sandbox_overrides_win_over_caller_temp() {
         let overrides = vec![
             ("TEMP".to_string(), "C:\\outside".to_string()),
             ("TMP".to_string(), "C:\\outside".to_string()),
             ("CUSTOM".to_string(), "kept".to_string()),
         ];
         let sandbox_overrides = vec![
-            (
-                "LOCALAPPDATA".to_string(),
-                "C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC".to_string(),
-            ),
-            (
-                "TEMP".to_string(),
-                "C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC\\Temp".to_string(),
-            ),
-            (
-                "TMP".to_string(),
-                "C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC\\Temp".to_string(),
-            ),
+            ("TEMP".to_string(), "C:\\workspace\\.harn-tmp".to_string()),
+            ("TMP".to_string(), "C:\\workspace\\.harn-tmp".to_string()),
         ];
 
         let decoded = decode_environment_block(&environment_block(
@@ -930,14 +833,12 @@ mod tests {
         ));
 
         assert!(decoded.iter().any(|entry| entry == "CUSTOM=kept"));
-        assert!(decoded.iter().any(|entry| entry
-            == "LOCALAPPDATA=C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC"));
-        assert!(decoded.iter().any(|entry| entry
-            == "TEMP=C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC\\Temp"));
         assert!(decoded
             .iter()
-            .any(|entry| entry
-                == "TMP=C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC\\Temp"));
+            .any(|entry| entry == "TEMP=C:\\workspace\\.harn-tmp"));
+        assert!(decoded
+            .iter()
+            .any(|entry| entry == "TMP=C:\\workspace\\.harn-tmp"));
         assert!(!decoded.iter().any(|entry| entry == "TEMP=C:\\outside"));
         assert!(!decoded.iter().any(|entry| entry == "TMP=C:\\outside"));
     }
@@ -964,90 +865,5 @@ mod tests {
             .filter(|part| !part.is_empty())
             .map(|part| OsString::from_wide(part).to_string_lossy().into_owned())
             .collect()
-    }
-
-    /// `presets: None` means "use the runtime defaults", so an untouched policy
-    /// must resolve to exactly what naming those defaults resolves to. Before
-    /// harn#7993 this function short-circuited on the raw `None` field and
-    /// returned nothing, so every policy that never customized
-    /// `process_sandbox.presets` -- the common case -- silently lost both
-    /// presets' read roots on Windows. Comparing the two policies rather than
-    /// asserting a concrete path keeps the case meaningful on a host with no
-    /// home directory, where both sides are legitimately empty.
-    #[test]
-    fn implicit_default_presets_match_explicitly_named_defaults() {
-        let implicit = CapabilityPolicy::default();
-        let explicit = CapabilityPolicy {
-            process_sandbox: Box::new(ProcessSandboxPolicy {
-                presets: Some(ProcessSandboxPreset::default_presets().to_vec()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            process_sandbox_preset_acl_roots(&implicit),
-            process_sandbox_preset_acl_roots(&explicit),
-            "an untouched policy must resolve the same Windows ACL roots as one naming the default presets"
-        );
-    }
-
-    #[test]
-    fn explicit_empty_presets_do_not_materialize_home_acl_roots() {
-        let policy = CapabilityPolicy {
-            process_sandbox: Box::new(ProcessSandboxPolicy {
-                presets: Some(Vec::new()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-
-        assert!(process_sandbox_preset_acl_roots(&policy).is_empty());
-    }
-
-    #[test]
-    fn explicit_home_presets_materialize_acl_roots_when_home_is_available() {
-        if crate::user_dirs::home_dir().is_none() {
-            return;
-        }
-
-        let policy = CapabilityPolicy {
-            process_sandbox: Box::new(ProcessSandboxPolicy {
-                presets: Some(vec![
-                    ProcessSandboxPreset::DeveloperToolchains,
-                    ProcessSandboxPreset::PackageManagerConfig,
-                ]),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-
-        let roots = process_sandbox_preset_acl_roots(&policy);
-        assert!(
-            roots.iter().any(|path| path.ends_with(".cargo")),
-            "explicit Windows preset requests should still materialize developer/package roots"
-        );
-    }
-
-    #[test]
-    fn network_policy_materializes_public_and_private_capabilities() {
-        let denied = ProcessCapabilities::for_policy(&CapabilityPolicy {
-            side_effect_level: Some("process_exec".to_string()),
-            ..Default::default()
-        })
-        .expect("construct denied capability set");
-        assert_eq!(denied.count(), 0);
-
-        let allowed = ProcessCapabilities::for_policy(&CapabilityPolicy {
-            side_effect_level: Some("network".to_string()),
-            ..Default::default()
-        })
-        .expect("construct network capability set");
-        assert_eq!(allowed.count(), 2);
-        assert!(allowed.attributes.iter().all(|entry| !entry.Sid.is_null()));
-        assert!(allowed
-            .attributes
-            .iter()
-            .all(|entry| entry.Attributes == SE_GROUP_ENABLED as u32));
     }
 }

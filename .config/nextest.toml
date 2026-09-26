@@ -172,9 +172,9 @@ harn-cli-bin = { max-threads = 8 }
 # verdict meaningful on the platforms that still enforce it rather than
 # trading it away for concurrency.
 harn-dap = { max-threads = 1 }
-# Windows AppContainer process launches and `icacls` grants exercise shared
-# OS resources. Keep these tests serialized under nextest so a valid sandbox
-# spawn is not forced to contend with several sibling AppContainer launches.
+# Windows restricted-token process launches and their ACL grants exercise
+# shared OS resources. Keep these tests serialized under nextest so a valid
+# sandbox spawn is not forced to contend with several sibling launches.
 harn-windows-sandbox = { max-threads = 1 }
 
 [[profile.default.overrides]]
@@ -207,7 +207,7 @@ filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_sco
 test-group = "harn-windows-sandbox"
 
 # The same shared OS resources, reached from the CLI suite instead of the VM
-# one. This case spawns a sandboxed AppContainer child and has it read the host
+# one. This case spawns a sandboxed Windows child and has it read the host
 # Node toolchain, so it contends with the harn-vm sandbox launches above for
 # exactly the resource that group exists to serialize — but the group's filter
 # is scoped to harn-vm, so it never covered this test. Its measured spread on

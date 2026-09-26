@@ -66,8 +66,14 @@ impl Drop for UndeclaredName {
 /// Cases known to fail on this platform, and the issue that owns the fix.
 ///
 /// The run must fail exactly these: a new failure is a regression, and a case
-/// that starts holding means the fix landed and its entry must go.
-const KNOWN_GAPS: &[&str] = &[];
+/// that starts holding means the fix landed and its entry must go. Windows
+/// confines a child's writes with a write-restricted token, which leaves its
+/// reads open (#8738).
+const KNOWN_GAPS: &[&str] = if cfg!(windows) {
+    &["fs.outside_read_refused", "fs.sibling_temp_read_refused"]
+} else {
+    &[]
+};
 
 fn enforcement_required() -> bool {
     std::env::var(REQUIRE_ENFORCEMENT_ENV)

@@ -33,7 +33,7 @@ Confinement then comes in two layers. Harn checks every path itself, against
 the roots in the active policy. Separately, when a script spawns a
 subprocess, the operating system confines that child using whatever mechanism
 the platform provides: Landlock on Linux, `sandbox-exec` on macOS,
-AppContainer on Windows.
+a write-restricted token on Windows.
 
 Both layers stay in force alongside approval policy, the separate rule set
 that decides which risky operations have to ask a human first. None of the
@@ -194,7 +194,7 @@ A profile decides two independent questions:
   and `read_only_roots`, plus the launch-cwd check for subprocesses. It
   is portable and deterministic, because Harn performs it itself.
 - **OS confinement** — is a platform mechanism (Linux Landlock+seccomp,
-  macOS sandbox-exec, Windows AppContainer) applied to spawned
+  macOS sandbox-exec, Windows restricted token) applied to spawned
   subprocesses? This depends on a mechanism that may be unavailable, and
   it is the only axis that can deny a child something Harn never asked
   about.
@@ -239,7 +239,7 @@ A spawn refused because the platform mechanism could not be attached carries
 the cause as typed fields rather than as advice prose. The caught value is a
 `tool_rejected` dict whose `source` is `sandbox_mechanism` and whose
 `sandbox_mechanism` member names the `mechanism` (`linux_landlock`,
-`macos_sandbox_exec`, `windows_app_container`), the `availability`
+`macos_sandbox_exec`, `windows_restricted_token`), the `availability`
 (`absent_on_host` or `entry_point_cannot_attach`), the requested `profile`, the
 unsatisfied `requirement` (`profile` or `fallback`), and `selector_honored` —
 false when the requested profile requires the mechanism outright, so no
@@ -348,14 +348,10 @@ paths gain no write grant, and repository-local config cannot add process read
 roots. Credential-helper data files are not inferred from helper arguments;
 on macOS and Linux, the credential read denylist still takes precedence.
 
-Windows AppContainer confinement is more conservative for omitted presets:
-granting a home-scoped root requires mutating filesystem ACLs recursively, so
-the Windows backend does not materialize implicit default
-`developer_toolchains` or `package_manager_config` roots on every spawn. A
-policy that explicitly sets `process_sandbox.presets` still asks Windows to
-grant those preset roots, and `process_sandbox.read_roots` / `.write_roots`
-remain the preferred way to add the specific SDK, cache, or config directory a
-subprocess needs.
+Windows confines writes only. A confined child reads whatever the user can
+read, so read presets and `process_sandbox.read_roots` grant nothing there;
+`process_sandbox.write_roots` remain the way to add a directory a subprocess
+must write.
 
 Other admitted child variables still come from the parent environment. That
 includes corporate proxy and CA variables such as `HTTP_PROXY`,
@@ -626,20 +622,21 @@ successor when one exists.
 
 | Capability / policy | Win32 mechanism | Effect |
 |---|---|---|
-| always | `CreateAppContainerProfile` + `STARTUPINFOEX` + `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` | the process runs inside a per-spawn AppContainer with no capability SIDs |
-| always | `GetAppContainerFolderPath` plus child `LOCALAPPDATA` / `TEMP` / `TMP` overrides | child processes use AppContainer-owned profile and scratch directories instead of inheriting host-user temp paths that the AppContainer cannot access |
-| `workspace.write_text` / `workspace.delete` | `icacls /grant *<sid>:(OI)(CI)M /T /C` on each `workspace_roots` entry | the AppContainer SID gets Modify access on the roots; revoked on `Drop` |
-| read-only (denied workspace write, or any `read_only_roots` entry) | `icacls /grant *<sid>:(OI)(CI)RX /T /C` | the AppContainer SID gets ReadAndExecute; `read_only_roots` always use this grant even when workspace writes are allowed |
-| explicit `process_sandbox.presets` includes `developer_toolchains` / `package_manager_config` | `icacls /grant *<sid>:(OI)(CI)RX /T /C` on existing home-scoped preset roots | explicit preset requests get read-only access; omitted presets are not materialized as recursive ACL grants on Windows |
-| `process_sandbox.read_roots` / `.write_roots` | `icacls /grant *<sid>:(OI)(CI)RX` or Modify | process-only roots, with writes gated by workspace-write capability |
+| always | `CreateRestrictedToken(WRITE_RESTRICTED)` from the caller's token, restricting SIDs Everyone, the logon SID and a per-policy SID, launched with `CreateProcessAsUserW` | reads are the user's own; a write also needs one of the restricting SIDs to be granted it, so the child writes only where the policy SID was granted |
+| always | the token's default DACL replaced with one granting the user, SYSTEM, the logon SID and the policy SID | the child can open the objects it creates while starting |
+| `workspace.write_text` / `workspace.delete` | an inheritable Modify entry for the policy SID on each `workspace_roots` and `process_sandbox.write_roots` entry, through `SetEntriesInAclW` + `SetNamedSecurityInfoW` | the child may write those roots; nothing else |
+| always | the policy SID derived from the policy's writable roots and write permission | the grant is durable and made once; a later spawn under the same policy finds it with one non-recursive DACL read |
+| always | child `TEMP` / `TMP` point at the session temp dir, else the workspace temp dir, else a granted per-policy directory under `LOCALAPPDATA` | the child always has a writable temp dir |
 | always | `CreateJobObjectW` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `_DIE_ON_UNHANDLED_EXCEPTION`, `_ACTIVE_PROCESS` (cap 32), `_PROCESS_MEMORY` (cap 512 MiB) | resource caps and lifecycle binding |
-| `side_effect_level >= network` | AppContainer `internetClient` and `privateNetworkClientServer` capability SIDs | public-network client access plus private-network client and server (inbound) access; otherwise the AppContainer receives no network capability |
-| always | direct `CreateProcessW` with `CREATE_NO_WINDOW`, explicit handle list, `STARTF_USESTDHANDLES`, and Job Object UI restrictions | stdin/stdout/stderr inheritance is restricted to the three pipes the runtime created, console commands do not bind to an interactive desktop, and child UI escape surfaces stay disabled |
+| always | `CREATE_NO_WINDOW`, explicit handle list, `STARTF_USESTDHANDLES`, and Job Object UI restrictions | stdin/stdout/stderr inheritance is restricted to the three pipes the runtime created, console commands do not bind to an interactive desktop, and child UI escape surfaces stay disabled |
 
-`std::process::Command` cannot carry an AppContainer
-`SECURITY_CAPABILITIES` block, so Windows callers must use
-`process_sandbox::command_output(...)` (which goes through
-`SandboxBackend::run_to_output`). The `std_command_for` /
+Reads and network are not confined on Windows. Git for Windows' MSYS
+programs (`bash`, `grep`) do not start under the restricted token yet
+(harn#8811).
+
+`std::process::Command` cannot launch under a restricted token, so
+Windows callers must use `process_sandbox::command_output(...)` (which
+goes through `SandboxBackend::run_to_output`). The `std_command_for` /
 `tokio_command_for` helpers warn-or-error per the active fallback
 policy.
 
@@ -671,7 +668,7 @@ process_sandbox::{command_output, std_command_for, tokio_command_for}
         ├── linux::Backend       (pre_exec → seccomp + Landlock)
         ├── macos::Backend       (wrap with sandbox-exec)
         ├── openbsd::Backend     (pre_exec → unveil + pledge)
-        └── windows::Backend     (CreateProcessW with AppContainer + Job Object)
+        └── windows::Backend     (CreateProcessAsUserW with a restricted token + Job Object)
 ```
 
 The backend trait is defined in

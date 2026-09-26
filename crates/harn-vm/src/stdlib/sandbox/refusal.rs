@@ -421,7 +421,7 @@ pub(crate) fn path_is_denied(candidate: &Path, denied: &[PathBuf]) -> bool {
 pub enum SandboxMechanism {
     LinuxLandlock,
     MacosSandboxExec,
-    WindowsAppContainer,
+    WindowsRestrictedToken,
 }
 
 impl SandboxMechanism {
@@ -429,7 +429,7 @@ impl SandboxMechanism {
         match self {
             Self::LinuxLandlock => "linux_landlock",
             Self::MacosSandboxExec => "macos_sandbox_exec",
-            Self::WindowsAppContainer => "windows_app_container",
+            Self::WindowsRestrictedToken => "windows_restricted_token",
         }
     }
 
@@ -439,7 +439,7 @@ impl SandboxMechanism {
         match self {
             Self::LinuxLandlock => "Linux Landlock",
             Self::MacosSandboxExec => "macOS sandbox-exec",
-            Self::WindowsAppContainer => "Windows AppContainer",
+            Self::WindowsRestrictedToken => "Windows restricted token",
         }
     }
 }
@@ -452,8 +452,8 @@ pub enum SandboxMechanismAvailability {
     /// The host does not provide it (no Landlock ABI, no `sandbox-exec`).
     AbsentOnHost,
     /// The host provides it, but this spawn entry point cannot carry it:
-    /// Windows can only attach an AppContainer through the `Output`-returning
-    /// path, which owns the `STARTUPINFOEX` plumbing.
+    /// Windows can only launch under a restricted token through the
+    /// `Output`-returning path, which owns the `CreateProcessAsUserW` plumbing.
     EntryPointCannotAttach,
 }
 

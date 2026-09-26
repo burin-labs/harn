@@ -1,6 +1,6 @@
-//! Windows: the process tools' children, launched inside the AppContainer.
+//! Windows: the process tools' children, launched under the restricted token.
 //!
-//! A `Command` cannot carry an AppContainer, so on Windows a spawn the active
+//! A `Command` cannot carry a restricted token, so on Windows a spawn the active
 //! policy confines is prepared exactly as any other (program, arguments,
 //! session environment, working directory) and then launched by
 //! `harn_vm::process_sandbox::spawn_confined` instead of `Command::spawn`.

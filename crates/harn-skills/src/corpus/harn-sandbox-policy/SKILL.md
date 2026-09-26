@@ -1,7 +1,7 @@
 ---
 name: harn-sandbox-policy
 short: What a confined child may read and write, the credential denylist, and how to prove a change to either.
-description: Use for the process sandbox — read/write roots, the credential denylist, the toolchain-cache environment, and the per-backend profile emission on macOS seatbelt, Linux Landlock, and Windows AppContainer.
+description: Use for the process sandbox — read/write roots, the credential denylist, the toolchain-cache environment, and the per-backend profile emission on macOS seatbelt, Linux Landlock, and the Windows restricted token.
 when_to_use: Use when adding a read root or a denylist row, when a toolchain command fails "Permission denied" or "No module named X" under an agent, or when changing anything under stdlib/sandbox.
 ---
 

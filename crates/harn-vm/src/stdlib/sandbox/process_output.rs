@@ -155,11 +155,11 @@ mod tests {
     }
 }
 
-/// Run the Windows AppContainer output path without blocking a Tokio worker.
+/// Run the Windows restricted-token output path without blocking a Tokio worker.
 ///
-/// Windows cannot attach an AppContainer to `tokio::process::Command`, so an
+/// Windows cannot attach a restricted token to `tokio::process::Command`, so an
 /// async capability call captures its policy and closed environment before
-/// moving the custom `CreateProcessW` launch to the blocking pool.
+/// moving the custom `CreateProcessAsUserW` launch to the blocking pool.
 #[cfg(target_os = "windows")]
 pub(crate) async fn windows_command_output(
     program: String,

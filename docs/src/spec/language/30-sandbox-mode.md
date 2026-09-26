@@ -168,10 +168,12 @@ per-platform mechanisms are:
   Writes are limited to scratch dirs plus declared `workspace_roots`
   only when the policy allows workspace writes; network is allowed
   only when the side-effect ceiling permits `network`.
-- **Windows**: a per-spawn AppContainer with no capability SIDs plus
-  a Job Object capping memory, process count, and UI surface;
-  `icacls` grants the AppContainer SID Modify (or ReadAndExecute)
-  on each `workspace_roots` entry for the lifetime of the spawn.
+- **Windows**: a write-restricted copy of the caller's token plus a
+  Job Object capping memory, process count, and UI surface. A write
+  succeeds only where a per-policy SID was granted Modify, which is
+  each `workspace_roots` entry when the policy allows workspace
+  writes; the grant is made once per policy. Reads and network are
+  not confined on Windows.
 - **OpenBSD**: `pledge` promises and `unveil` path permissions
   derived from the same policy.
 

@@ -5,7 +5,7 @@
 //! with each `SandboxProfile` variant onto the orchestration stack and
 //! observing how `enforce_process_cwd` and the OS-level spawn helpers
 //! react. The OS-level confinement itself (Linux Landlock+seccomp,
-//! macOS sandbox-exec, Windows AppContainer) is exercised by the
+//! macOS sandbox-exec, Windows restricted token) is exercised by the
 //! per-platform unit tests inside `crates/harn-vm/src/stdlib/sandbox/`.
 
 use std::collections::BTreeMap;

@@ -181,7 +181,7 @@ pub(crate) struct PreparedSpawn {
     #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) env_cleared: bool,
     /// Windows: the active policy confines this spawn, so the command is only
-    /// a description and must be launched through the AppContainer.
+    /// a description and must be launched through the confined launch.
     #[cfg(target_os = "windows")]
     pub(crate) confined_launch: bool,
 }

@@ -70,10 +70,10 @@ pub fn std_command_for_with_env_state(
 /// [`std_command_for_with_env_state`] for a command the caller will launch
 /// through [`crate::process_sandbox::spawn_confined`].
 ///
-/// A `Command` cannot carry an AppContainer, so building one through the
+/// A `Command` cannot carry a restricted token, so building one through the
 /// backend reports confinement as unavailable. This builds the same program,
 /// arguments and session environment without that report; the confined
-/// launch attaches the container itself and refuses what it cannot render.
+/// launch attaches the token itself and refuses what it cannot render.
 #[cfg(target_os = "windows")]
 pub fn std_command_for_confined_launch(
     program: &str,

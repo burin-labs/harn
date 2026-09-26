@@ -444,7 +444,7 @@ async fn terminate_process_exec_child(
 /// This function projects it onto Tokio for `process.spawn` and for
 /// `process.exec` on platforms whose sandbox can decorate a Tokio command.
 /// Windows exec projects the same launch onto `ProcessCommandConfig` because
-/// AppContainer requires the custom output backend.
+/// the restricted-token launch requires the custom output backend.
 pub(crate) fn build_sandboxed_command(
     params: &crate::value::DictMap,
     label: &str,
@@ -477,7 +477,7 @@ pub(crate) fn build_sandboxed_command(
 /// Parsing, cwd confinement, execution-context overlays, caller overrides,
 /// removals, workspace-local paths, and deterministic locale policy happen
 /// once here. Platform launchers are deliberately boring projections of this
-/// value so Windows AppContainer and Tokio-backed hosts cannot drift.
+/// value so the Windows restricted-token and Tokio-backed hosts cannot drift.
 struct ProcessExecLaunch {
     program: String,
     args: Vec<String>,

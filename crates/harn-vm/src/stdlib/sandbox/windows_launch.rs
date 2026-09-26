@@ -1,41 +1,41 @@
 //! Launching a confined child that outlives the call.
 //!
-//! `std::process::Command` cannot carry an AppContainer, so every confined
-//! Windows child is created here with `CreateProcessW` and returned as a live
-//! [`ConfinedChild`]. `command_output` waits on one and collects its pipes;
-//! the process tools keep one as the handle they stream, time out and cancel.
-//! Both therefore get the same container, grants, environment and Job
-//! Object, and neither can reach a child any other way.
+//! `std::process::Command` cannot launch under a restricted token, so every
+//! confined Windows child is created here with `CreateProcessAsUserW` and
+//! returned as a live [`ConfinedChild`]. `command_output` waits on one and
+//! collects its pipes; the process tools keep one as the handle they stream,
+//! time out and cancel. Both therefore get the same token, grants,
+//! environment and Job Object, and neither can reach a child any other way.
 
 use std::fs::File;
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::os::windows::process::ExitStatusExt;
+use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::sync::Arc;
 
 use windows_sys::Win32::Foundation::{
     DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
-use windows_sys::Win32::Security::SECURITY_CAPABILITIES;
 use windows_sys::Win32::System::Console::{
     GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, GetCurrentProcess, GetExitCodeProcess, ResumeThread, TerminateProcess,
+    CreateProcessAsUserW, GetCurrentProcess, GetExitCodeProcess, ResumeThread, TerminateProcess,
     WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
     EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 
-use super::acl_grants::WorkspaceAclGrants;
+use super::acl_grants::{policy_digest, writable_roots, PolicyWriteGrants};
+use super::token::{write_restricted_token, Sid};
 use super::{
     command_line, environment_block, path_to_wide, resolve_application_name, sandbox_trace,
-    AppContainerProfile, InheritablePipe, InheritableStdinPipe, JobLimits, JobObject, OwnedHandle,
-    ProcThreadAttributes, ProcessCapabilities,
+    InheritablePipe, InheritableStdinPipe, JobLimits, JobObject, OwnedHandle, ProcThreadAttributes,
 };
 use crate::orchestration::CapabilityPolicy;
-use crate::stdlib::sandbox::{path_is_within, process_sandbox_roots, ProcessCommandConfig};
+use crate::stdlib::sandbox::{path_is_within, workspace_local_tmpdir, ProcessCommandConfig};
 
 /// Where the child's standard input comes from.
 pub enum ChildInput {
@@ -54,7 +54,7 @@ pub enum ChildOutput {
     /// This process's own stream.
     Inherit,
     /// An already open file. The child writes through the open handle, so
-    /// the file need not be readable by the container.
+    /// the file need not be writable by the restricted token.
     File(File),
 }
 
@@ -136,7 +136,8 @@ impl ConfinedChild {
     }
 }
 
-/// The checks that decide whether AppContainer can render a policy at all.
+/// The checks that decide whether the restricted-token launch can render a
+/// policy at all.
 /// A policy it cannot render is refused before anything is created, and the
 /// refusal is `Unsupported` so the caller reports a spawn refusal rather
 /// than running the child wider than asked.
@@ -150,13 +151,13 @@ pub(super) fn ensure_renderable(policy: &CapabilityPolicy) -> io::Result<()> {
     if policy.process_sandbox.allow_tcp_loopback {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "TCP loopback-only child networking is not enforceable by AppContainer capabilities",
+            "TCP loopback-only child networking is not enforceable by the Windows process sandbox",
         ));
     }
     if !policy.process_sandbox.unix_socket_roots.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "path-scoped Unix-domain sockets for child processes are not enforceable by AppContainer capabilities",
+            "path-scoped Unix-domain sockets for child processes are not enforceable by the Windows process sandbox",
         ));
     }
     Ok(())
@@ -177,16 +178,18 @@ pub(super) fn launch(
         "pending",
         format!("start program={program:?} argc={}", args.len()),
     );
-    let mut process_capabilities = ProcessCapabilities::for_policy(policy)?;
-    let profile = AppContainerProfile::for_policy(policy, &mut process_capabilities)?;
-    let trace_label = profile.label().to_string();
-    sandbox_trace(&trace_label, "profile ready");
-    let sid_string = profile.sid_string()?;
-    let grants = WorkspaceAclGrants::grant(&trace_label, &sid_string, policy)?;
+    let digest = policy_digest(policy);
+    let trace_label = policy_label(&digest);
+    let policy_sid = Sid::for_policy_digest(&digest)?;
+    let temp = child_temp(config, policy, &trace_label)?;
+    let grants =
+        PolicyWriteGrants::grant(&trace_label, &policy_sid, policy, temp.scratch.as_deref())?;
     sandbox_trace(
         &trace_label,
-        format!("workspace ACL grants ready rewrites={}", grants.rewrites),
+        format!("write grants ready rewrites={}", grants.rewrites),
     );
+    let token = write_restricted_token(&policy_sid)?;
+    sandbox_trace(&trace_label, "restricted token ready");
 
     // Parent ends are kept; child ends are inherited and closed after create.
     let mut stdin_pipe = None;
@@ -204,13 +207,7 @@ pub(super) fn launch(
     let (stderr_parent, stderr_child) = output_handles(stdio.stderr, STD_ERROR_HANDLE)?;
     let inherited_handles = [stdin_child.raw(), stdout_child.raw(), stderr_child.raw()];
 
-    let mut security_capabilities = profile.security_capabilities(&mut process_capabilities);
-    let mut attributes = ProcThreadAttributes::new(2)?;
-    attributes.update(
-        PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
-        (&mut security_capabilities as *mut SECURITY_CAPABILITIES).cast(),
-        std::mem::size_of::<SECURITY_CAPABILITIES>(),
-    )?;
+    let mut attributes = ProcThreadAttributes::new(1)?;
     attributes.update(
         PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
         inherited_handles.as_ptr().cast(),
@@ -227,10 +224,9 @@ pub(super) fn launch(
 
     let mut command_line = command_line(program, args);
     let application = resolve_application_name(program);
-    let sandbox_env = container_environment(&profile, &sid_string, config, policy)?;
     let mut environment = environment_block(
         &config.env,
-        &sandbox_env,
+        &temp.env,
         config.closed_env,
         &config.env_remove,
     );
@@ -238,9 +234,10 @@ pub(super) fn launch(
     let job = JobObject::create(limits)?;
 
     let mut process_info = PROCESS_INFORMATION::default();
-    sandbox_trace(&trace_label, "CreateProcessW begin");
+    sandbox_trace(&trace_label, "CreateProcessAsUserW begin");
     let created = unsafe {
-        CreateProcessW(
+        CreateProcessAsUserW(
+            token.raw(),
             application
                 .as_ref()
                 .map_or(std::ptr::null(), |value| value.as_ptr()),
@@ -293,19 +290,35 @@ pub(super) fn launch(
     })
 }
 
-/// The container's own directories, and the temp dir the child uses.
+/// The name a policy's trace lines and scratch directory carry.
+pub(super) fn policy_label(digest: &[u8; 32]) -> String {
+    let hex: String = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("harn.sandbox.{hex}")
+}
+
+/// The child's temp-dir environment, and the directory it needs granted.
+struct ChildTemp {
+    env: Vec<(String, String)>,
+    scratch: Option<PathBuf>,
+}
+
+/// The child's `TEMP` and `TMP`, and the scratch directory to grant when
+/// neither the caller nor the workspace provides a writable one.
 ///
-/// `LOCALAPPDATA` is always the container's. `TEMP` and `TMP` stay as the
-/// caller set them when they name a directory the container may write, which
-/// is how the session temp dir reaches the child; anywhere else the container
-/// could not write, so they fall back to the container's own temp dir.
-fn container_environment(
-    profile: &AppContainerProfile,
-    sid: &str,
+/// A caller's `TEMP`/`TMP` stays when it names a directory the child may
+/// write, which is how the session temp dir reaches the child. Otherwise the
+/// workspace's own temp dir is used, and a policy that may not write its
+/// workspace gets a per-policy directory under `LOCALAPPDATA` instead, since
+/// the user's own temp dir is not writable through the restricted token.
+fn child_temp(
     config: &ProcessCommandConfig,
     policy: &CapabilityPolicy,
-) -> io::Result<Vec<(String, String)>> {
-    let writable = process_sandbox_roots(policy);
+    label: &str,
+) -> io::Result<ChildTemp> {
+    let writable = writable_roots(policy);
     let caller_temp_is_writable = |key: &str| {
         config
             .env
@@ -316,14 +329,42 @@ fn container_environment(
                 writable.iter().any(|root| path_is_within(path, root))
             })
     };
-    Ok(profile
-        .environment_overrides(sid)?
+    if caller_temp_is_writable("TEMP") && caller_temp_is_writable("TMP") {
+        return Ok(ChildTemp {
+            env: Vec::new(),
+            scratch: None,
+        });
+    }
+    let (temp, scratch) = match workspace_local_tmpdir(policy)
+        .filter(|dir| writable.iter().any(|root| path_is_within(dir, root)))
+    {
+        Some(dir) => (dir, None),
+        None => {
+            let dir = scratch_dir(label);
+            std::fs::create_dir_all(&dir)?;
+            (dir.clone(), Some(dir))
+        }
+    };
+    let temp = temp.to_string_lossy().into_owned();
+    let overrides = ["TEMP", "TMP"]
         .into_iter()
-        .filter(|(key, _)| {
-            !(key.eq_ignore_ascii_case("TEMP") || key.eq_ignore_ascii_case("TMP"))
-                || !caller_temp_is_writable(key)
-        })
-        .collect())
+        .filter(|key| !caller_temp_is_writable(key))
+        .map(|key| (key.to_string(), temp.clone()))
+        .collect();
+    Ok(ChildTemp {
+        env: overrides,
+        scratch,
+    })
+}
+
+/// A per-policy scratch directory, for a child with no writable temp dir.
+pub(super) fn scratch_dir(label: &str) -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("harn")
+        .join("sandbox")
+        .join(label)
 }
 
 /// The parent's end (for a pipe) and the child's inheritable end.

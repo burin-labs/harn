@@ -4,7 +4,7 @@
 //! `harn-hostlib` deterministic-tool builtins) must funnel every spawn
 //! through these helpers so the active orchestration capability policy is
 //! enforced — Linux seccomp/landlock filters via `pre_exec`, macOS
-//! `sandbox-exec` wrapping, Windows AppContainer + Job Object launches
+//! `sandbox-exec` wrapping, Windows restricted-token + Job Object launches
 //! through `command_output`, plus workspace-root cwd enforcement.
 //!
 //! The same surface also exposes [`check_fs_path_scope`] so embedders that
@@ -33,7 +33,7 @@ pub use crate::stdlib::sandbox::{
 };
 
 /// Windows: a confined child that the caller keeps, streams and cancels.
-/// `Command` cannot carry an AppContainer, so a caller that owns its child
+/// `Command` cannot carry a restricted token, so a caller that owns its child
 /// builds it with [`std_command_for_confined_launch`] and launches it here.
 #[cfg(target_os = "windows")]
 pub use crate::stdlib::sandbox::command_for::std_command_for_confined_launch;

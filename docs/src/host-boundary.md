@@ -109,7 +109,7 @@ executing user code. The runtime confines every subprocess it spawns
 under that ceiling unless the operator passes `--no-sandbox`. The
 default profile is workspace-root path enforcement plus best-effort
 OS-level confinement (Linux Landlock + default-deny seccomp allowlist,
-macOS sandbox-exec, Windows AppContainer + Job Object), with network
+macOS sandbox-exec, Windows restricted token + Job Object), with network
 side effects denied by the default ceiling. Pipelines that spawn
 untrusted code opt into `os_hardened`, which makes the OS confinement
 *required* and turns every spawn into a `tool_rejected` if the platform

@@ -85,7 +85,7 @@ fn a_profile_that_honors_the_fallback_reports_the_selector_as_honored() {
 #[test]
 fn caught_value_exposes_the_fields_a_consumer_would_have_parsed() {
     let error = match unavailable(
-        SandboxMechanism::WindowsAppContainer,
+        SandboxMechanism::WindowsRestrictedToken,
         SandboxMechanismAvailability::EntryPointCannotAttach,
         SandboxProfile::OsHardened,
     ) {
@@ -110,7 +110,7 @@ fn caught_value_exposes_the_fields_a_consumer_would_have_parsed() {
         other => panic!("{key} must be a string, got {other:?}"),
     };
     assert_eq!(cause_string("schema"), SandboxMechanismUnavailable::SCHEMA);
-    assert_eq!(cause_string("mechanism"), "windows_app_container");
+    assert_eq!(cause_string("mechanism"), "windows_restricted_token");
     assert_eq!(cause_string("availability"), "entry_point_cannot_attach");
     assert_eq!(cause_string("profile"), "os_hardened");
     assert_eq!(cause_string("requirement"), "profile");

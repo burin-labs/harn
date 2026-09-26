@@ -37,7 +37,7 @@ in the built-in method table for the full rule syntax.
 
 | Variable | Description |
 |---|---|
-| `HARN_HANDLER_SANDBOX` | How the `worktree` sandbox profile reacts when the platform's OS confinement mechanism (Linux Landlock + seccomp, macOS `sandbox-exec`, Windows AppContainer) is unavailable: `enforce`/`required`/`1`/`true` fail the spawn, `warn` (default) logs once and continues with workspace-root path enforcement but **without** OS confinement, and `off`/`none`/`0`/`false` disables the OS portion silently. Workspace-root path enforcement for file builtins is unaffected either way. The `os_hardened` profile always enforces and ignores this variable. |
+| `HARN_HANDLER_SANDBOX` | How the `worktree` sandbox profile reacts when the platform's OS confinement mechanism (Linux Landlock + seccomp, macOS `sandbox-exec`, Windows restricted token) is unavailable: `enforce`/`required`/`1`/`true` fail the spawn, `warn` (default) logs once and continues with workspace-root path enforcement but **without** OS confinement, and `off`/`none`/`0`/`false` disables the OS portion silently. Workspace-root path enforcement for file builtins is unaffected either way. The `os_hardened` profile always enforces and ignores this variable. |
 | `HARN_EGRESS_ALLOW` | Comma-separated egress allow rules seeding the egress policy. Rules accept exact hosts, `*.suffix` wildcards, IP literals/CIDR, and an optional `:port`. |
 | `HARN_EGRESS_DENY` | Comma-separated egress deny rules, same syntax as `HARN_EGRESS_ALLOW`. Deny wins over allow. |
 | `HARN_EGRESS_DEFAULT` | Action for destinations matching no rule: `allow` (default) or `deny` (allowlist mode). |

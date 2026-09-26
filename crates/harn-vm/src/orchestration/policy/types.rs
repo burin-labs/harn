@@ -185,7 +185,7 @@ pub enum SandboxProfile {
     /// Workspace-root path enforcement plus required OS confinement.
     /// Spawns fail with `tool_rejected` if the platform's hardening
     /// mechanism (Linux Landlock+seccomp, macOS sandbox-exec, Windows
-    /// AppContainer) is unavailable, regardless of
+    /// restricted token) is unavailable, regardless of
     /// `HARN_HANDLER_SANDBOX`.
     OsHardened,
 }
@@ -235,7 +235,7 @@ impl SandboxProfile {
     }
 
     /// Whether an OS mechanism (Linux Landlock+seccomp, macOS
-    /// sandbox-exec, Windows AppContainer) is applied to subprocesses
+    /// sandbox-exec, Windows restricted token) is applied to subprocesses
     /// spawned under this policy.
     ///
     /// This axis is the only one that can deny a child something Harn did

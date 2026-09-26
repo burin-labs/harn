@@ -760,8 +760,8 @@ mod stage_summary_tests {
 /// working correctly, not an escape — using it as a denial arm produced a
 /// false violation. (An even earlier version used `%TEMP%` directly inside
 /// the sandboxed command, which was vacuous for a different reason: the
-/// Windows backend overrides the child's own `TEMP`/`TMP` to an
-/// AppContainer-local path — see `environment_overrides` in `windows.rs` —
+/// Windows backend overrides the child's own `TEMP`/`TMP` to a
+/// sandbox-local path — see `child_temp` in `windows_launch.rs` —
 /// so `%TEMP%` expanded inside the child never resolved to the host path
 /// this test was checking.)
 ///
@@ -921,7 +921,7 @@ fn process_filesystem_isolation_is_active() -> bool {
 
 #[cfg(windows)]
 fn process_filesystem_isolation_is_active() -> bool {
-    // The AppContainer this backend launches is always available.
+    // The restricted token this backend launches under is always available.
     true
 }
 
@@ -1137,7 +1137,7 @@ fn windows_sandboxed_run_child_can_read_the_host_node_toolchain() {
 /// The macOS/Linux half of the same adversarial check the Windows test above
 /// runs (harn#7993 swarm brief). The three OS backends confine writes through
 /// three different mechanisms -- seatbelt on macOS, Landlock on Linux, an
-/// AppContainer plus file permissions on Windows -- so the confinement claim
+/// a write-restricted token plus file permissions on Windows -- so the confinement claim
 /// is only as good as its weakest backend, and until now only Windows was
 /// asserted.
 ///

@@ -128,7 +128,7 @@ sandbox is available. It's whether one is on before anyone remembers to ask.
 
 `harn run` confines a script to its own project directory before the VM starts,
 and the operating system confines any subprocess the script spawns, using
-Landlock on Linux, `sandbox-exec` on macOS, and AppContainer on Windows. The
+Landlock on Linux, `sandbox-exec` on macOS, and a restricted token on Windows. The
 default side-effect ceiling stops below `network`, so a script can touch its own
 files but can't open a socket until a run grants it.
 
