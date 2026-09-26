@@ -161,4 +161,55 @@ commit_all "$contests_repo" "edit a contests-prefixed source file"
 contests_output=$(expect_fail "$contests_repo" "$contests_base")
 grep -q "crates/harn-vm/src/contests/mod.rs" <<<"$contests_output"
 
+# A breaking change must say what a downstream consumer changes. Consumers read
+# the folded Breaking section to migrate, so a breaking fragment without a
+# `Migration:` section fails, and no bypass label waives it.
+breaking_repo=$(new_repo breaking)
+mkdir -p "$breaking_repo/crates/harn-cli/src" "$breaking_repo/changelog.d"
+printf 'pub fn flag() -> &str { "--foo" }\n' > "$breaking_repo/crates/harn-cli/src/lib.rs"
+commit_all "$breaking_repo" base
+breaking_base=$(git -C "$breaking_repo" rev-parse HEAD)
+printf 'pub fn flag() -> &str { "--bar" }\n' > "$breaking_repo/crates/harn-cli/src/lib.rs"
+printf -- '- `harn run --foo` is removed.\n' > "$breaking_repo/changelog.d/7.breaking.md"
+commit_all "$breaking_repo" "remove a flag without migration notes"
+breaking_output=$(expect_fail "$breaking_repo" "$breaking_base")
+grep -q "7.breaking.md is a breaking change with no" <<<"$breaking_output"
+breaking_output=$(BYPASS_REASON="label" expect_fail "$breaking_repo" "$breaking_base")
+grep -q "7.breaking.md is a breaking change with no" <<<"$breaking_output"
+
+# A `Migration:` heading with nothing under it is not a migration.
+printf -- '- `harn run --foo` is removed.\n\n  Migration:\n\n' > "$breaking_repo/changelog.d/7.breaking.md"
+commit_all "$breaking_repo" "empty migration section"
+expect_fail "$breaking_repo" "$breaking_base" >/dev/null
+
+cat > "$breaking_repo/changelog.d/7.breaking.md" <<'FRAGMENT'
+- `harn run --foo` is removed.
+
+  Migration: pass `--bar` instead.
+
+  ```sh
+  harn run --foo x   # before
+  harn run --bar x   # after
+  ```
+FRAGMENT
+commit_all "$breaking_repo" "add migration notes"
+expect_pass "$breaking_repo" "$breaking_base" >/dev/null
+BREAKING_LABELLED=true expect_pass "$breaking_repo" "$breaking_base" >/dev/null
+
+# A PR labelled `breaking` must carry a breaking fragment with its migration,
+# even when another fragment or the bypass label would satisfy the gate.
+labelled_repo=$(new_repo labelled)
+mkdir -p "$labelled_repo/crates/harn-cli/src" "$labelled_repo/changelog.d"
+printf 'pub fn v() -> u8 { 1 }\n' > "$labelled_repo/crates/harn-cli/src/lib.rs"
+commit_all "$labelled_repo" base
+labelled_base=$(git -C "$labelled_repo" rev-parse HEAD)
+printf 'pub fn v() -> u8 { 2 }\n' > "$labelled_repo/crates/harn-cli/src/lib.rs"
+printf -- '- Changed a value.\n' > "$labelled_repo/changelog.d/8.changed.md"
+commit_all "$labelled_repo" "labelled breaking with only a changed fragment"
+expect_pass "$labelled_repo" "$labelled_base" >/dev/null
+labelled_output=$(BREAKING_LABELLED=true expect_fail "$labelled_repo" "$labelled_base")
+grep -q "labelled \`breaking\` but adds no" <<<"$labelled_output"
+labelled_output=$(BREAKING_LABELLED=true BYPASS_REASON="label" expect_fail "$labelled_repo" "$labelled_base")
+grep -q "labelled \`breaking\` but adds no" <<<"$labelled_output"
+
 echo "changelog_fragment_check_test: ok"

@@ -125,11 +125,17 @@ jobs:
             bypass="PR carries the $BYPASS_LABEL label."
           fi
 
+          breaking=false
+          if printf '%s' "$PR_LABELS_JSON" | jq -e 'any(. == "breaking")' > /dev/null; then
+            breaking=true
+          fi
+
           {
             echo "skip=0"
             echo "base_sha=$PR_BASE_SHA"
             echo "head_sha=$PR_HEAD_SHA"
             echo "bypass_reason=$bypass"
+            echo "breaking=$breaking"
           } >> "$GITHUB_OUTPUT"
 
       - name: Run gate
@@ -138,6 +144,7 @@ jobs:
           BASE_SHA: ${{ steps.inputs.outputs.base_sha }}
           HEAD_SHA: ${{ steps.inputs.outputs.head_sha }}
           BYPASS_REASON: ${{ steps.inputs.outputs.bypass_reason }}
+          BREAKING_LABELLED: ${{ steps.inputs.outputs.breaking }}
           GATE_SCRIPT: ${{ matrix.gate.script }}
         run: |
           set -euo pipefail
