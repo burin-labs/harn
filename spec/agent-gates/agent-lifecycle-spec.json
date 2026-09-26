@@ -298,8 +298,8 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       }
     ],
     "reason": "The embedder's pre-approval deny seam; forwarded to dispatch so the session policy guard installs it.",

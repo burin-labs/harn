@@ -489,7 +489,7 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
     "expression": "__resolve_intra_turn_failure_fanout_cap(turn_opts)",
     "owner": "__resolve_intra_turn_failure_fanout_cap",
     "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
@@ -503,7 +503,7 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
     "expression": "__resolve_intra_turn_resource_fail_fast(turn_opts)",
     "owner": "__resolve_intra_turn_resource_fail_fast",
     "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
@@ -511,6 +511,20 @@
       {
         "scope": "AgentSpec",
         "function": "__resolve_intra_turn_resource_fail_fast",
+        "parameter": "turn_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "__loop_dispatch_options(turn_opts, session_id, cap)",
+    "owner": "__loop_dispatch_options",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__loop_dispatch_options",
         "parameter": "turn_opts"
       }
     ]

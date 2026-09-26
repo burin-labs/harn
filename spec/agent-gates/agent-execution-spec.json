@@ -64,8 +64,8 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -219,7 +219,7 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
         "reader": "__resolve_intra_turn_failure_fanout_cap"
       },
       {
@@ -240,7 +240,7 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
         "reader": "__resolve_intra_turn_resource_fail_fast"
       },
       {
@@ -427,7 +427,7 @@
         "reader": "agent_primitive_option_int"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
         "reader": "__resolve_max_concurrent_tools"
       },
       {
@@ -654,8 +654,8 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
@@ -755,8 +755,8 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
@@ -839,8 +839,8 @@
         "reader": "agent_primitive_option_int"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -856,8 +856,8 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
@@ -935,8 +935,8 @@
         "reader": "agent_primitive_option_int"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

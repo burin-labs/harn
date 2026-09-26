@@ -294,10 +294,11 @@ mod tests {
 
     /// The top-level keys of the dispatch options literal the loop builds.
     fn forwarded_keys() -> BTreeSet<String> {
-        let source = stdlib("agent/loop_resource_dispatch");
+        let source = stdlib("agent/loop_dispatch_options");
         let literal = source
-            .split("const dispatch_options = {")
+            .split("pub fn __loop_dispatch_options(")
             .nth(1)
+            .and_then(|rest| rest.split("  return {").nth(1))
             .and_then(|rest| rest.split("\n  }\n").next())
             .expect("the loop dispatch options literal is present");
         let key = regex::Regex::new(r"(?m)^    ([a-z_]+):").expect("key pattern");
