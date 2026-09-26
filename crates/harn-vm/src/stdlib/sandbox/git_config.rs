@@ -67,6 +67,7 @@ pub(super) fn read_roots_for_workspaces(
             }
         }
     }
+    roots.extend(env_named_config_files(|key| std::env::var_os(key)));
     let workspaces: Vec<_> = workspaces
         .iter()
         .map(|workspace| normalize_for_policy(workspace))
@@ -78,6 +79,19 @@ pub(super) fn read_roots_for_workspaces(
                 .iter()
                 .any(|workspace| root.starts_with(workspace))
         })
+        .collect()
+}
+
+/// Git opens the files these variables name even when they hold no entries,
+/// and an unreadable config file is fatal. An empty file never appears in the
+/// origin listing, so an empty job-scoped config would otherwise go ungranted.
+fn env_named_config_files(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"]
+        .into_iter()
+        .filter_map(var)
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() && path.is_file())
+        .map(|path| normalize_for_policy(&path))
         .collect()
 }
 
@@ -207,5 +221,20 @@ file:/tmp/harn-git-home/.gitconfig\0user.name\nSomeone\0";
         assert!(!without_home.contains(&normalize_for_policy(Path::new(
             "/tmp/harn-git-home/ignore"
         ))));
+    }
+
+    #[test]
+    fn an_empty_env_named_config_file_is_granted() {
+        let temp = tempfile::tempdir().unwrap();
+        let empty = temp.path().join("job-gitconfig");
+        std::fs::write(&empty, "").unwrap();
+        let missing = temp.path().join("missing-gitconfig");
+        let roots = env_named_config_files(|key| match key {
+            "GIT_CONFIG_GLOBAL" => Some(empty.clone().into_os_string()),
+            "GIT_CONFIG_SYSTEM" => Some(missing.clone().into_os_string()),
+            _ => None,
+        });
+        assert_eq!(roots, vec![normalize_for_policy(&empty)]);
+        assert!(env_named_config_files(|_| Some("relative/gitconfig".into())).is_empty());
     }
 }
