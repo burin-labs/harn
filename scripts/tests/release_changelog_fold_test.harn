@@ -59,6 +59,29 @@ const EXISTING_TOP_FILES: list<ReleaseFragmentFile> = [
 const EXISTING_TOP_EXPECTED =
   "# Changelog\n\n## v1.2.4\n\n### Added\n\n- **Late addition (#801).**\n\n- **Earlier addition (#800).**\n\n### Fixed\n\n- **Fragment fix (#802).**\n\n- **Earlier fix (#799).**\n\n## v1.2.3\n\n- old\n"
 
+// Downstream update tooling reads the migration snippet out of the released
+// Breaking section, so the fold must keep it byte for byte, fence and all, and
+// keep Breaking first.
+const MIGRATION_FILES: list<ReleaseFragmentFile> = [
+  {name: "11.added.md", body: "- **New flag (#11).**\n"},
+  {
+    name: "12.breaking.md",
+    body:
+      "- **`--foo` is removed (#12).**\n\n  Migration: rename the flag.\n\n  ```sh\n  harn run --foo x   # before\n  harn run --bar x   # after\n  ```\n",
+  },
+]
+
+const MIGRATION_EXPECTED =
+  "# Changelog\n\nAll notable changes to this project are documented here.\n\n## v1.2.4\n\n### Breaking\n\n- **`--foo` is removed (#12).**\n\n  Migration: rename the flag.\n\n  ```sh\n  harn run --foo x   # before\n  harn run --bar x   # after\n  ```\n\n### Added\n\n- **New flag (#11).**\n\n## v1.2.3\n\n### Fixed\n\n- **Older fix (#10).** Kept as published.\n"
+
+@test
+pipeline test_fold_keeps_a_breaking_migration_snippet_first_and_verbatim() {
+  const fold = fold_release_changelog(BASIC_CHANGELOG, MIGRATION_FILES, "1.2.4")
+  assert_eq(fold.findings, [])
+  assert(fold.success)
+  assert_eq(fold.text, MIGRATION_EXPECTED)
+}
+
 fn write_fixture(fs: HarnessFs, root: string, changelog: string, files: list<ReleaseFragmentFile>) {
   fs.mkdir(path_join(root, "changelog.d"))
   fs.write_text(path_join(root, "CHANGELOG.md"), changelog)

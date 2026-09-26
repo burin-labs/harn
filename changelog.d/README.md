@@ -45,7 +45,30 @@ Example: `changelog.d/2492.breaking.md`
   their declared return types across bare returns, fallthrough, nested
   returns, and exhaustive final matches, and top-level forward
   placeholders promote to their concrete binding types.
+
+  Migration: give each generic parameter the concrete type it holds, and
+  make every path of a typed function return its declared type.
 ```
+
+A `breaking` fragment must also say what a downstream consumer changes: a
+`Migration:` line followed by the change, preferably as a before-and-after
+snippet. The pull-request gate refuses a breaking fragment without one, and
+refuses a pull request labelled `breaking` that adds no such fragment. No
+bypass label waives either rule. The release fold keeps the snippet and puts
+`### Breaking` first in each release, where consumers' update tooling reads
+it.
+
+````markdown
+- **`harn run --foo` is removed (#2494).** Use `--bar`, which takes the
+  same value.
+
+  Migration: rename the flag.
+
+  ```sh
+  harn run --foo x   # before
+  harn run --bar x   # after
+  ```
+````
 
 Example: `changelog.d/2493.fixed.md`
 
