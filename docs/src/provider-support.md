@@ -209,6 +209,7 @@ Notes:
 Caveats:
 
 - Direct tool calling has not been probed in this refresh; the capability row follows DeepSeek's published API documentation.
+- Chinese public holidays receive off-peak rates but are not modeled; cost estimates on those weekdays may be high.
 
 ### Gemini API
 

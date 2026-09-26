@@ -4983,6 +4983,8 @@ strengths = ["vision", "coding", "agentic"]
 # V4 Flash is retired: its legacy ID temporarily serves V4.1 Flash.
 # Direct prices below are peak rates; the schedules halve all token rates
 # outside 01:00-04:00 and 06:00-10:00 UTC on weekdays.
+# Chinese public holidays also receive off-peak pricing, but Harn has no
+# holiday calendar; those weekdays conservatively settle at peak rates.
 #
 # Every OpenRouter, Together and DeepInfra row in this file was re-read
 # against the provider's live models endpoint on 2026-09-20; rates and

@@ -1060,7 +1060,8 @@
         "DeepSeek V4.1 Flash is the current direct Flash route; the older deepseek-v4-flash ID temporarily serves the same model."
       ],
       "caveats": [
-        "Direct tool calling has not been probed in this refresh; the capability row follows DeepSeek's published API documentation."
+        "Direct tool calling has not been probed in this refresh; the capability row follows DeepSeek's published API documentation.",
+        "Chinese public holidays receive off-peak rates but are not modeled; cost estimates on those weekdays may be high."
       ],
       "mcp_notes": [],
       "local_setup_notes": []
