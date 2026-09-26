@@ -203,6 +203,31 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "ci.yml:audit-scripts must run on Rust-changing main pushes only",
     ),
   )
+  // The Windows cross-compile check is required on every merge-group
+  // candidate: a main-only job, a job queued behind the Linux lanes, or an
+  // aggregate that tolerates a merge-group skip each reopen the gap.
+  let main_only_cross = ci
+  main_only_cross.jobs["windows-cross-check"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
+  assert(
+    minimal_pr_capacity_errors(main_only_cross, publish).contains(
+      "ci.yml:windows-cross-check must run on every merge-group candidate and on Rust-changing main pushes",
+    ),
+  )
+  let queued_cross = ci
+  queued_cross.jobs["windows-cross-check"].needs = ["changes", "rust-artifacts-ready"]
+  assert(
+    minimal_pr_capacity_errors(queued_cross, publish).contains(
+      "ci.yml:windows-cross-check must need only changes",
+    ),
+  )
+  let skip_tolerant = ci
+  skip_tolerant.jobs["ci-status"].steps[0].env.WINDOWS_CROSS_REQUIRED = "$"
+    + "{{ github.event_name == 'push' }}"
+  assert(
+    minimal_pr_capacity_errors(skip_tolerant, publish).contains(
+      "ci.yml:ci-status must require the Windows cross-compile check wherever the job itself must run",
+    ),
+  )
   let main_publish = publish
   main_publish["on"].push.branches = ["main"]
   assert(

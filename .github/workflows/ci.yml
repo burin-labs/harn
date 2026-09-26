@@ -1848,8 +1848,13 @@ jobs:
   # Deterministic Windows compile integration ratchet, and the only Windows lane
   # in this workflow. Native Windows is advisory: `windows-nightly.yml` runs the
   # full workspace nightly, on dispatch, and on release pull requests, and never
-  # gates a pull request or merge-group candidate. This pinned cross-rs pass
-  # runs on each Rust-changing main tree and reports through `ci-status`.
+  # gates a pull request or merge-group candidate. This pinned cross-rs pass is
+  # the one Windows admission check: it runs on every merge-group candidate and
+  # on each Rust-changing main push, and reports through `ci-status`. It needs
+  # only `changes`, and nothing but `ci-status` waits on it, so it runs beside
+  # the Linux lanes rather than in front of them. A successful run on the
+  # candidate is also what lets the identical main push reuse the merge-group
+  # proof (scripts/ci_merge_group_proof.sh requires it by name).
   # `cross check` performs no linking, so the windows-gnu target compiles the
   # C-dependency graph in the digest-pinned MinGW image and reaches workspace Rust —
   # `x86_64-pc-windows-msvc` cannot (it needs the Windows SDK headers). The
@@ -1859,11 +1864,13 @@ jobs:
   windows-cross-check:
     name: Windows cross-compile check
     needs: changes
-    # Main pushes force the Rust surface on, while non-Rust pushes may skip.
+    # Every merge-group candidate runs it; main pushes run it when the Rust
+    # surface is on, so a push already proven on merge_group may skip.
     if: >-
-      github.event_name == 'push'
+      github.event_name == 'merge_group'
+      || (github.event_name == 'push'
       && github.ref == 'refs/heads/main'
-      && needs.changes.outputs.rust == 'true'
+      && needs.changes.outputs.rust == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -2338,6 +2345,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           GIT_REF: ${{ github.ref }}
           RUST_SELECTED: ${{ needs.changes.outputs.rust }}
+          WINDOWS_CROSS_REQUIRED: ${{ github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
         run: |
           # A skipped job is valid only when its owning condition permits it.
           # Missing, pending, failed, and cancelled results always fail closed.
@@ -2524,13 +2532,14 @@ jobs:
             "Repository policy checks failed or skipped on a Rust-changing main push." \
             test "${EVENT_NAME}:${GIT_REF}:${RUST_SELECTED}" != "push:refs/heads/main:true"
 
-          # Cross-compilation is an integration ratchet. It runs on every
-          # Rust-changing main tree and remains visible through this aggregate.
+          # The one Windows admission check. A merge-group candidate must
+          # produce a success; a skip there is a failure. On a Rust-changing
+          # main push it is the integration ratchet; elsewhere a skip is fine.
           windows_cross_result="${{ needs['windows-cross-check'].result }}"
-          echo "Windows cross-compile check: $windows_cross_result"
+          echo "Windows cross-compile check: $windows_cross_result (required=$WINDOWS_CROSS_REQUIRED)"
           require_result "$windows_cross_result" \
-            "Windows cross-compile check failed or skipped on a Rust-changing main push." \
-            test "${EVENT_NAME}:${GIT_REF}:${RUST_SELECTED}" != "push:refs/heads/main:true"
+            "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push." \
+            [ "$WINDOWS_CROSS_REQUIRED" != "true" ]
 
           # The macOS job runs on `push` to main and on pull requests whose
           # diff touches macOS-gated process/sandbox/secret-store/CLI paths. It

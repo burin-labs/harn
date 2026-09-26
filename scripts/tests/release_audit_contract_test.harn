@@ -160,17 +160,17 @@ pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task: 
       {
         ...receipt(),
         platforms: [
+          platform("windows", 123, 456, 900),
           {
-            ...platform("windows", 123, 456, 900),
-            run: {...platform("windows", 123, 456, 900).run, conclusion: "failure"},
+            ...platform("macos", 124, 457, 700),
+            run: {...platform("macos", 124, 457, 700).run, conclusion: "failure"},
           },
-          platform("macos", 124, 457, 700),
         ],
       },
       SHA,
       BINARY_SHA,
     ).reason,
-    "invalid_receipt",
+    "platform_proof_run_not_successful",
   )
   assert_eq(
     release_audit_receipt_plan(
@@ -284,5 +284,75 @@ pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task: 
       BINARY_SHA,
     ).reason,
     "invalid_receipt",
+  )
+}
+
+fn failed_windows_platform() {
+  const base = platform("windows", 123, 456, 900)
+  return {
+    ...base,
+    run: {...base.run, conclusion: "failure"},
+    jobs: {
+      ...base.jobs,
+      jobs: base.jobs.jobs.map({ job -> {...job, conclusion: "failure"} }).to_list(),
+    },
+  }
+}
+
+/**
+ * Native Windows is advisory in release certification. A failed or missing
+ * Windows nightly certifies, and the outcome is carried as a named advisory.
+ */
+pipeline test_release_audit_windows_nightly_is_advisory(harness: Harness, task: unknown) {
+  const cfg = release_audit_contract_parse(contract())
+  assert(cfg != nil)
+  const accepted = release_audit_receipt_plan(cfg, receipt(), SHA, BINARY_SHA)
+  assert_eq(
+    accepted.advisories,
+    [
+      "WINDOWS_NIGHTLY_ADVISORY state=success run=https://github.com/burin-labs/harn/actions/runs/123",
+    ],
+  )
+  const failed = release_audit_receipt_plan(
+    cfg,
+    {...receipt(), platforms: [failed_windows_platform(), platform("macos", 124, 457, 700)]},
+    SHA,
+    BINARY_SHA,
+  )
+  assert_eq(failed.reason, "receipt_accepted")
+  assert_eq(failed.receipt_reused, true)
+  assert_eq(failed.lane_names, ["release-metadata"])
+  assert_eq(
+    failed.advisories,
+    [
+      "WINDOWS_NIGHTLY_ADVISORY state=failure run=https://github.com/burin-labs/harn/actions/runs/123 reason=run_not_successful",
+    ],
+  )
+  const missing = release_audit_receipt_plan(
+    cfg,
+    {
+      ...receipt(),
+      platforms: [platform("macos", 124, 457, 700)],
+      join: {...receipt().join, duration_ms: 700, completed_at_ms: 800, critical_path: "macos"},
+    },
+    SHA,
+    BINARY_SHA,
+  )
+  assert_eq(missing.reason, "receipt_accepted")
+  assert_eq(missing.advisories, ["WINDOWS_NIGHTLY_ADVISORY state=missing run=none"])
+  // macOS stays required: its absence still refuses the receipt.
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...receipt(), platforms: [platform("windows", 123, 456, 900)]},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "platform_proofs_mismatch",
+  )
+  // A rejected receipt carries no advisory to print.
+  assert_eq(
+    release_audit_receipt_plan(cfg, {...receipt(), extra: true}, SHA, BINARY_SHA).advisories,
+    [],
   )
 }
