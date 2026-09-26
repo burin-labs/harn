@@ -1,15 +1,11 @@
 import { approval_reviewer_on_route } from "std/agent/approval_review"
 
 /**
- * The options `agent_loop` hands tool dispatch, and the loop settings that
- * size a tool batch.
+ * How many tool calls of one batch may run at once; `1` unless the caller set
+ * `max_concurrent_tools` above it.
  *
- * Split from `loop_resource_dispatch` so the one list of options dispatch
- * receives has a home of its own. It is an allowlist: an option not named in
- * `__loop_dispatch_options` never reaches dispatch, which is how
- * `approval_reviewer` and later `tool_precheck` were accepted by the loop and
- * never applied. `DISPATCH_READ_KEYS` in the VM pins it against what dispatch
- * reads.
+ * @effects: []
+ * @errors: []
  */
 pub fn __resolve_max_concurrent_tools(turn_opts: any) -> int {
   const raw = turn_opts?.max_concurrent_tools
@@ -48,6 +44,13 @@ pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts: any) -> int {
   return 0
 }
 
+/**
+ * Whether dispatch fails fast on an intra-turn resource failure; on unless
+ * the caller set `intra_turn_resource_fail_fast` to false.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn __resolve_intra_turn_resource_fail_fast(turn_opts: any) -> bool {
   const raw = turn_opts?.intra_turn_resource_fail_fast
   if type_of(raw) == "bool" {
@@ -58,6 +61,11 @@ pub fn __resolve_intra_turn_resource_fail_fast(turn_opts: any) -> bool {
 
 /**
  * Build the options one tool batch is dispatched with.
+ *
+ * This is an allowlist: an option not named here never reaches dispatch, which
+ * is how `approval_reviewer` and later `tool_precheck` were accepted by the
+ * loop and never applied. `DISPATCH_READ_KEYS` in the VM pins it against what
+ * dispatch reads.
  *
  * @effects: []
  * @errors: []
