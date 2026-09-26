@@ -24,7 +24,7 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/loop_call_resolution.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn
-# count   30  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
+# count   28  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
 # count   12  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
@@ -283,8 +283,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_re
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_resource_keys
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_result_mutated
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__invoke_tool_with_index
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_intra_turn_failure_fanout_cap
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_max_concurrent_tools
 crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn::__tool_result_name
 crates/harn-stdlib/src/stdlib/agent/loop_run.harn::__agent_loop_run
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_build_turn_prompt

@@ -1,0 +1,110 @@
+import { approval_reviewer_on_route } from "std/agent/approval_review"
+
+/**
+ * How many tool calls of one batch may run at once; `1` unless the caller set
+ * `max_concurrent_tools` above it.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __resolve_max_concurrent_tools(turn_opts: any) -> int {
+  const raw = turn_opts?.max_concurrent_tools
+  if type_of(raw) == "int" && raw > 1 {
+    return raw
+  }
+  return 1
+}
+
+/**
+ * Resolve the intra-turn failing-fan-out cap K (#A4). When a single model
+ * response fans out a large batch of byte-identical FAILING tool calls, every
+ * call is dispatched synchronously with no LLM call or progress check between
+ * them, so the cross-turn loop-detector / no-progress terminator fire a whole
+ * turn too late — after all N drain, having burned turn/wall budget and flooded
+ * context with N identical errors (observed: 127 identical `edit` rejections in
+ * ~2.7s on swift-feat). This cap is the intra-turn analog of the cross-turn
+ * no-progress terminator: after the Kth consecutive byte-identical failing
+ * result within ONE batch, the remaining identical calls are skipped and
+ * collapsed into a single synthetic result.
+ *
+ * Default OFF: returns `0` (no cap) unless `intra_turn_failure_fanout_cap` is
+ * set to a positive int. A value of e.g. `3` collapses after 3 identical
+ * failures. Reachability is exercised by the `agent_loop_intra_turn_*`
+ * conformance tests, which prove that flipping the flag changes dispatch
+ * behavior end-to-end.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts: any) -> int {
+  const raw = turn_opts?.intra_turn_failure_fanout_cap
+  if type_of(raw) == "int" && raw > 0 {
+    return raw
+  }
+  return 0
+}
+
+/**
+ * Whether dispatch fails fast on an intra-turn resource failure; on unless
+ * the caller set `intra_turn_resource_fail_fast` to false.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __resolve_intra_turn_resource_fail_fast(turn_opts: any) -> bool {
+  const raw = turn_opts?.intra_turn_resource_fail_fast
+  if type_of(raw) == "bool" {
+    return raw
+  }
+  return true
+}
+
+/**
+ * Build the options one tool batch is dispatched with.
+ *
+ * This is an allowlist: an option not named here never reaches dispatch, which
+ * is how `approval_reviewer` and later `tool_precheck` were accepted by the
+ * loop and never applied. `DISPATCH_READ_KEYS` in the VM pins it against what
+ * dispatch reads.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __loop_dispatch_options(turn_opts: any, session_id: any, cap: int) -> dict {
+  return {
+    session_id: session_id,
+    tool_format: turn_opts.tool_format,
+    policy: turn_opts?.policy,
+    approval_policy: turn_opts?.approval_policy,
+    // The AutoReview answerer, on this loop's route. This list is an allowlist:
+    // an option not named here never reaches dispatch, which is how the seam
+    // once worked when called directly and did nothing through the loop.
+    approval_reviewer: approval_reviewer_on_route(
+      turn_opts?.approval_reviewer,
+      {provider: turn_opts?.provider, model: turn_opts?.model},
+    ),
+    command_policy: turn_opts?.command_policy,
+    permissions: turn_opts?.permissions,
+    // The embedder's pre-approval deny seam. Left off this list, a precheck
+    // passed to `agent_loop` was accepted and never consulted.
+    tool_precheck: turn_opts?.tool_precheck,
+    reminders: turn_opts?.reminders,
+    // Read by the dispatch primitive's retry loop and by the tool envelope
+    // that audit receipts are written from. Every public key dispatch reads
+    // must be named here; `DISPATCH_OPTION_KEYS` in the VM pins this list.
+    tool_retries: turn_opts?.tool_retries,
+    tool_backoff_ms: turn_opts?.tool_backoff_ms,
+    model: turn_opts?.model,
+    provider: turn_opts?.provider,
+    run_id: turn_opts?.run_id,
+    _iteration: turn_opts?._iteration ?? 0,
+    _tool_caller: turn_opts?._tool_caller,
+    _max_concurrent_tools: cap,
+    _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
+    _stop_reason: turn_opts?._stop_reason ?? "",
+    _intra_turn_failure_fanout_cap: __resolve_intra_turn_failure_fanout_cap(turn_opts),
+    _intra_turn_resource_fail_fast: __resolve_intra_turn_resource_fail_fast(turn_opts),
+    _stop_after_successful_tools: turn_opts?.stop_after_successful_tools ?? [],
+    _tool_batch_dependency_state: turn_opts?._tool_batch_dependency_state,
+  }
+}
