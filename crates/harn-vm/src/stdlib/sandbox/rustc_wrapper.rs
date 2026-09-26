@@ -36,6 +36,13 @@
 //! is killed: it can only do harm. A server that was already running outside
 //! the sandbox is not new and not confined, so a wrapper that merely connects
 //! to it is kept.
+//!
+//! Only a process the probe build started counts. The build is marked in two
+//! ways that a server it starts inherits: a nonce in its environment, read
+//! back on Linux, and a profile that denies reading one marker file, read back
+//! on macOS, which does not expose another process's environment. Other
+//! confined work of the same user, such as a concurrent agent command, can
+//! start in the same instant, carries neither mark, and is never stopped.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -262,9 +269,20 @@ fn measure(
     if let Some(known) = configured.as_deref().and_then(known_wrapper) {
         known.prepare();
     }
-    let before = confined_processes_of_this_user();
-    let with_wrapper = build(scratch.path(), cwd, caller.to_vec());
-    let survivors: Vec<u32> = confined_processes_of_this_user()
+    let mark = match ProbeMark::create(scratch.path()) {
+        Ok(mark) => mark,
+        Err(error) => {
+            return decision(
+                RustcWrapperDisposition::Unmeasured,
+                None,
+                format!("could not create the probe's marker file: {error}"),
+                cwd,
+            )
+        }
+    };
+    let before = confined_processes_started_by(&mark);
+    let with_wrapper = build(scratch.path(), cwd, caller.to_vec(), Some(&mark));
+    let survivors: Vec<u32> = confined_processes_started_by(&mark)
         .difference(&before)
         .copied()
         .collect();
@@ -274,6 +292,18 @@ fn measure(
     };
     let wrapper = with_wrapper.wrapper.clone();
 
+    if survivors.len() > MAX_PROBE_SURVIVORS {
+        return decision(
+            RustcWrapperDisposition::Unmeasured,
+            wrapper,
+            format!(
+                "{} confined processes matched the probe's mark, more than one build starts; \
+                 the mark is not telling them apart, so none were stopped",
+                survivors.len()
+            ),
+            cwd,
+        );
+    }
     if !survivors.is_empty() {
         kill(&survivors);
         return decision(
@@ -308,7 +338,7 @@ fn measure(
         .iter()
         .map(|key| (key.to_string(), String::new()))
         .collect();
-    match build(scratch.path(), cwd, blanked) {
+    match build(scratch.path(), cwd, blanked, None) {
         Ok(without) if without.success => decision(
             RustcWrapperDisposition::Disabled,
             wrapper.or_else(|| with_wrapper.failed_wrapper.clone()),
@@ -461,7 +491,12 @@ struct BuildOutcome {
     error_line: String,
 }
 
-fn build(scratch: &Path, cwd: &Path, env: Vec<(String, String)>) -> Result<BuildOutcome, String> {
+fn build(
+    scratch: &Path,
+    cwd: &Path,
+    mut env: Vec<(String, String)>,
+    mark: Option<&ProbeMark>,
+) -> Result<BuildOutcome, String> {
     let manifest = scratch.join("Cargo.toml");
     let target = scratch.join("target");
     let args = vec![
@@ -478,7 +513,14 @@ fn build(scratch: &Path, cwd: &Path, env: Vec<(String, String)>) -> Result<Build
     // wrapper the profile refuses is exactly the failure being measured.
     let sandbox = crate::stdlib::sandbox::active_sandbox_policy()
         .ok_or_else(|| "no sandbox policy is active".to_string())?;
-    let (policy, profile) = sandbox;
+    let (mut policy, profile) = sandbox;
+    if let Some(mark) = mark {
+        env.push((PROBE_NONCE_ENV.to_string(), mark.nonce.clone()));
+        policy
+            .process_sandbox
+            .read_deny_roots
+            .push(mark.marker.display().to_string());
+    }
     let overlay =
         crate::stdlib::process::session_closed_env_for_command("cargo", env.clone().into_iter())
             .map_err(|error| format!("the session environment refused the probe: {error:?}"))?;
@@ -564,14 +606,55 @@ fn failed_wrapper(stderr: &str) -> Option<String> {
 /// child of another live process (another agent's command, say) still has
 /// that parent and is never in the set. Neither is a compiler-cache server
 /// the user started outside the sandbox, which is not confined.
-fn confined_processes_of_this_user() -> BTreeSet<u32> {
+/// More marked survivors than one probe build starts (a wrapper that
+/// daemonizes on every call leaves one per compiler call) means the mark matched
+/// processes it did not start; stopping them would be the harm, not the cure.
+const MAX_PROBE_SURVIVORS: usize = 16;
+
+/// The environment variable that carries a probe build's nonce.
+const PROBE_NONCE_ENV: &str = "RUSTC_WRAPPER_PROBE_NONCE";
+
+/// What marks one probe build, and so every process it starts.
+struct ProbeMark {
+    /// Unique to this probe build; carried in its environment.
+    nonce: String,
+    /// An existing file the build's profile denies reading.
+    marker: PathBuf,
+    /// Its sibling, which the build's profile still allows reading.
+    control: PathBuf,
+}
+
+impl ProbeMark {
+    fn create(scratch: &Path) -> std::io::Result<Self> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let started = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let nonce = format!("{}-{sequence}-{started}", std::process::id());
+        let marker = scratch.join("probe-marker");
+        let control = scratch.join("probe-control");
+        std::fs::write(&marker, &nonce)?;
+        std::fs::write(&control, &nonce)?;
+        // The kernel answers for the resolved path, not a symlinked alias.
+        Ok(Self {
+            nonce,
+            marker: marker.canonicalize()?,
+            control: control.canonicalize()?,
+        })
+    }
+}
+
+/// Detached, confined processes of this user that carry `mark`.
+fn confined_processes_started_by(mark: &ProbeMark) -> BTreeSet<u32> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let mut refresh = ProcessRefreshKind::nothing().with_user(UpdateKind::Always);
+    if cfg!(target_os = "linux") {
+        refresh = refresh.with_environ(UpdateKind::Always);
+    }
     let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing().with_user(UpdateKind::Always),
-    );
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, refresh);
     let me = sysinfo::get_current_pid().ok();
     let my_user = me
         .and_then(|pid| system.process(pid))
@@ -592,20 +675,61 @@ fn confined_processes_of_this_user() -> BTreeSet<u32> {
                 && process.user_id() == my_user.as_ref()
                 && detached(process)
         })
+        .filter(|(pid, process)| is_confined(pid.as_u32()) && carries(process, mark))
         .map(|(pid, _)| pid.as_u32())
-        .filter(|pid| is_confined(*pid))
         .collect()
+}
+
+/// macOS keeps another process's environment private, but answers whether its
+/// sandbox would refuse a read. Only the probe's profile refuses the marker
+/// while allowing its sibling: an app sandbox refuses both.
+#[cfg(target_os = "macos")]
+fn carries(process: &sysinfo::Process, mark: &ProbeMark) -> bool {
+    let pid = process.pid().as_u32() as libc::pid_t;
+    read_refused(pid, &mark.marker) == Some(true) && read_refused(pid, &mark.control) == Some(false)
+}
+
+#[cfg(target_os = "macos")]
+fn read_refused(pid: libc::pid_t, path: &Path) -> Option<bool> {
+    const SANDBOX_FILTER_PATH: libc::c_int = 1;
+    let path = std::ffi::CString::new(path.display().to_string()).ok()?;
+    // 1 is refused, 0 is allowed, and -1 is an error such as a pid that is gone.
+    match unsafe {
+        sandbox_check(
+            pid,
+            c"file-read-data".as_ptr(),
+            SANDBOX_FILTER_PATH,
+            path.as_ptr(),
+        )
+    } {
+        1 => Some(true),
+        0 => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn carries(process: &sysinfo::Process, mark: &ProbeMark) -> bool {
+    let entry = format!("{PROBE_NONCE_ENV}={}", mark.nonce);
+    process
+        .environ()
+        .iter()
+        .any(|variable| variable.to_str() == Some(entry.as_str()))
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    // Variadic: arm64 passes a filter argument on the stack.
+    fn sandbox_check(
+        pid: libc::pid_t,
+        operation: *const libc::c_char,
+        kind: libc::c_int,
+        ...
+    ) -> libc::c_int;
 }
 
 #[cfg(target_os = "macos")]
 fn is_confined(pid: u32) -> bool {
-    unsafe extern "C" {
-        fn sandbox_check(
-            pid: libc::pid_t,
-            operation: *const libc::c_char,
-            kind: libc::c_int,
-        ) -> libc::c_int;
-    }
     // A null operation asks only whether the process is sandboxed at all.
     // 1 is sandboxed, 0 is not, and -1 is an error such as a pid that is gone.
     unsafe { sandbox_check(pid as libc::pid_t, std::ptr::null(), 0) > 0 }
@@ -643,6 +767,61 @@ fn kill(_pids: &[u32]) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Starts `sleep` detached from this process under `profile`; returns its pid.
+    #[cfg(target_os = "macos")]
+    fn detached_sleep_under(profile: &str) -> u32 {
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("(/usr/bin/sandbox-exec -p \"$1\" /bin/sleep 60 </dev/null >/dev/null 2>&1 & echo $!)")
+            .arg("sh")
+            .arg(profile)
+            .output()
+            .expect("start detached sleep");
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .expect("detached pid")
+    }
+
+    /// Only the probe's own profile carries the mark. A concurrent confined
+    /// run allows the marker; an app sandbox refuses the marker and its
+    /// sibling alike. Neither may be stopped.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn only_the_probes_own_profile_carries_its_mark() {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let mark = ProbeMark::create(scratch.path()).expect("mark");
+        let deny = |path: &Path| format!("(deny file-read* (literal \"{}\"))", path.display());
+        let probe =
+            detached_sleep_under(&format!("(version 1)(allow default){}", deny(&mark.marker)));
+        let app_sandbox = detached_sleep_under(&format!(
+            "(version 1)(allow default){}{}",
+            deny(&mark.marker),
+            deny(&mark.control)
+        ));
+        let other_run = detached_sleep_under("(version 1)(allow default)(deny network-outbound)");
+        // The detaching shell has exited once its output is read, but the
+        // sleeps may not have been reparented yet.
+        let mut found = BTreeSet::new();
+        for _ in 0..50 {
+            found = confined_processes_started_by(&mark);
+            if found.contains(&probe) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        kill(&[probe, app_sandbox, other_run]);
+        assert!(
+            found.contains(&probe),
+            "{found:?} lacks the probe's {probe}"
+        );
+        assert!(
+            !found.contains(&app_sandbox),
+            "{found:?} holds {app_sandbox}"
+        );
+        assert!(!found.contains(&other_run), "{found:?} holds {other_run}");
+    }
 
     #[test]
     fn the_running_line_names_the_wrapper_chain_before_the_compiler() {
