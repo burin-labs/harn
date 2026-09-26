@@ -3,21 +3,30 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/verify_release_tag_main_ancestry.sh --tag vX.Y.Z[-PRERELEASE] [--repo PATH]
+Usage: scripts/verify_release_tag_main_ancestry.sh --tag vX.Y.Z[-PRERELEASE] [--repo PATH] [--expect-commit SHA]
 
 Verify that an immutable remote release tag selects a genuine matching release
 on main or a trusted signed release candidate based on main. The command is read-only with respect to
 the remote and does not trust ambient local tag refs.
+
+--expect-commit also refuses a tag that selects any other commit. This script is
+the one reader of which commit a release tag selects, lightweight or annotated;
+callers pass the commit they hold instead of reading the tag again.
 EOF
   exit 2
 }
 
 tag=""
 repo="."
+expect_commit=""
 while (($# > 0)); do
   case "$1" in
     --tag)
       tag="${2:-}"
+      shift 2
+      ;;
+    --expect-commit)
+      expect_commit="${2:-}"
       shift 2
       ;;
     --repo)
@@ -36,6 +45,10 @@ done
 
 if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
   echo "error: expected canonical release tag, got '${tag:-<empty>}'" >&2
+  exit 2
+fi
+if [[ -n "$expect_commit" && ! "$expect_commit" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "error: --expect-commit takes one full commit sha, got '$expect_commit'" >&2
   exit 2
 fi
 if [[ ! -d "$repo/.git" && ! -f "$repo/.git" ]]; then
@@ -57,6 +70,10 @@ if [[ "$tag_object" =~ ^[0-9a-f]{40}$ && -z "$tag_target" ]]; then
 fi
 if [[ ! "$tag_object" =~ ^[0-9a-f]{40}$ || ! "$tag_target" =~ ^[0-9a-f]{40}$ ]]; then
   echo "error: origin/$tag is missing or does not resolve to one exact commit" >&2
+  exit 1
+fi
+if [[ -n "$expect_commit" && "$tag_target" != "$expect_commit" ]]; then
+  echo "error: origin/$tag selects $tag_target, not the expected commit $expect_commit" >&2
   exit 1
 fi
 
