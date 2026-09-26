@@ -117,7 +117,8 @@ fn git(root: &Path, args: &[&str]) {
         .expect("run isolated git");
     assert!(
         output.status.success(),
-        "git {args:?}: {}",
+        "git {args:?}: {}{}",
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -291,6 +292,10 @@ fn restored_graph_reconciles_a_commit_and_an_uncommitted_edit() {
     assert_eq!(before.len(), after.len());
     fs::write(&a, after).unwrap();
     filetime::set_file_mtime(&a, old_mtime).unwrap();
+    // Git's index trusts a matching size and mtime. Where it has no inode
+    // change time to compare (Windows), `git add` would stage nothing and the
+    // commit would find nothing to commit. Dropping the entry forces a re-hash.
+    git(dir.path(), &["rm", "--cached", "-q", "src/a.rs"]);
     git(dir.path(), &["add", "src/a.rs"]);
     git(
         dir.path(),
