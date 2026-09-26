@@ -615,12 +615,7 @@ async fn evaluate_internal(
         {
             // A failed durable invalidation still fails this evaluation closed.
             if hold.retain_contract_violation().is_err() {
-                outcome = outcome::budget_cut(
-                    &reference,
-                    "run_cost",
-                    bound,
-                    evaluation.policy.run_cost_limit,
-                );
+                outcome = native_admission_failure(&reference, bound);
             }
         } else if hold.settle(settled).is_err() {
             outcome = native_admission_failure(&reference, bound);
