@@ -1,0 +1,113 @@
+/* A withdrawn closing turn is always followed by a user message.
+
+   When the completion adjudicator vetoes a closing draft, the loop replaces
+   the draft with a fixed placeholder that says "see the directive that
+   follows". The directive is the adjudicator's rejection text, delivered at
+   the next turn boundary. If a standing reminder already carries the same
+   text, the reminder system treats the rejection as a duplicate of something
+   the model has already seen and appends nothing. The next request then ends
+   on the placeholder, an assistant message. OpenAI-compatible servers read a
+   trailing assistant message as a prefill, and two in a row are refused
+   outright.
+
+   So after every veto, each request must end on a non-assistant message, and
+   the placeholder must be immediately followed by a user message carrying the
+   rejection text. The case whose standing reminder has a different body is
+   the control: it never collided and must keep passing. */
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_session_inject_reminder } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+/** The placeholder text the loop writes in place of a withdrawn draft. */
+const WITHDRAWN = "[withdrawn: this closing report was rejected; see the directive that follows]"
+
+/** The adjudicator's rejection text, which the judge's `detail` passes through. */
+const REJECTION = "Evidence is incomplete: run the test suite before closing."
+
+/** Flatten one message's content to the text a model would read. */
+fn message_text(message: dict) -> string {
+  const content = message?.content
+  if type_of(content) == "string" {
+    return content
+  }
+  return json_stringify(content ?? "")
+}
+
+/**
+ * Run the loop with a standing contract reminder and `vetoes` rejected
+ * closing drafts, then report what every later request ended on.
+ */
+fn run_case(harness: Harness, label: string, standing_body: string, vetoes: int) {
+  const session = "withdrawn-turn-" + label + "-" + harness.random.uuid()
+  harness.agent.open(session)
+  agent_session_inject_reminder(
+    harness.agent,
+    session,
+    {body: standing_body, authority: "contract", dedupe_key: "standing/closing_rule"},
+  )
+  let script = []
+  for index in range(vetoes) {
+    script = script
+      + [
+        llm_text("Closing draft ${index + 1}. ##DONE##"),
+        llm_text(json_stringify({verdict: "continue", detail: REJECTION})),
+      ]
+  }
+  script = script.appending(llm_text("Working on it after the directive."))
+  const options: AgentSpec = {
+    session_id: session,
+    provider: "mock",
+    loop_until_done: true,
+    max_iterations: vetoes + 1,
+    max_nudges: 3,
+    done_sentinel: "##DONE##",
+    verify_completion_judge: true,
+  }
+  with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const result = agent_loop(
+        harness,
+        "Close the task; the adjudicator vetoes the closing draft.",
+        nil,
+        options,
+      )
+      let trailing_assistant = 0
+      let markers = 0
+      let markers_followed_by_directive = 0
+      for call in harness.llm.mock_calls() {
+        const messages = call.messages ?? []
+        if len(messages) > 0 && messages[len(messages) - 1]?.role == "assistant" {
+          trailing_assistant = trailing_assistant + 1
+        }
+        for entry in messages.enumerate() {
+          if entry.value?.role == "assistant" && message_text(entry.value) == WITHDRAWN {
+            markers = markers + 1
+            if entry.index + 1 < len(messages) {
+              const next = messages[entry.index + 1]
+              if next?.role == "user" && message_text(next).contains(REJECTION) {
+                markers_followed_by_directive = markers_followed_by_directive + 1
+              }
+            }
+          }
+        }
+      }
+      harness.stdio.println("${label}.vetoes=${result.completion_judge.vetoes}")
+      harness.stdio.println("${label}.requests_ending_on_assistant=${trailing_assistant}")
+      harness.stdio.println("${label}.marker_reaches_model=${markers > 0}")
+      harness.stdio.println(
+        "${label}.every_marker_followed_by_directive="
+          + to_string(markers == markers_followed_by_directive),
+      )
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  run_case(harness, "colliding_one_veto", REJECTION, 1)
+  run_case(harness, "colliding_two_vetoes", REJECTION, 2)
+  run_case(harness, "control_one_veto", "Keep the closing report short.", 1)
+  run_case(harness, "control_two_vetoes", "Keep the closing report short.", 2)
+}
