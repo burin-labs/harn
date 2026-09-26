@@ -1270,7 +1270,18 @@ pub fn __dispatch_tool_calls(harness: Harness, session_id: any, tool_calls: any,
     ),
     command_policy: turn_opts?.command_policy,
     permissions: turn_opts?.permissions,
+    // The embedder's pre-approval deny seam. Left off this list, a precheck
+    // passed to `agent_loop` was accepted and never consulted.
+    tool_precheck: turn_opts?.tool_precheck,
     reminders: turn_opts?.reminders,
+    // Read by the dispatch primitive's retry loop and by the tool envelope
+    // that audit receipts are written from. Every public key dispatch reads
+    // must be named here; `DISPATCH_OPTION_KEYS` in the VM pins this list.
+    tool_retries: turn_opts?.tool_retries,
+    tool_backoff_ms: turn_opts?.tool_backoff_ms,
+    model: turn_opts?.model,
+    provider: turn_opts?.provider,
+    run_id: turn_opts?.run_id,
     _iteration: turn_opts?._iteration ?? 0,
     _tool_caller: turn_opts?._tool_caller,
     _max_concurrent_tools: cap,
