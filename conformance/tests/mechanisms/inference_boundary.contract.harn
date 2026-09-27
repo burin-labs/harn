@@ -26,7 +26,7 @@ fn hosted_probe(harness: Harness) {
 }
 
 pipeline default(harness: Harness) {
-  if harness.env.get("HARN_INFERENCE_CONTRACT_PROBE") != nil {
+  if harness.env.get("HARN_EXT_INFERENCE_CONTRACT_PROBE") != nil {
     hosted_probe(harness)
     return
   }
@@ -46,7 +46,7 @@ pipeline default(harness: Harness) {
       [binary, "run", script],
       {
         env: {
-          HARN_INFERENCE_CONTRACT_PROBE: "1",
+          HARN_EXT_INFERENCE_CONTRACT_PROBE: "1",
           HARN_INFERENCE_BOUNDARY_JSON: boundary.value,
           OPENAI_API_KEY: "inference-contract-fixture-only",
           HARN_LLM_CALLS_DISABLED: "0",
