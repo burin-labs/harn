@@ -56,6 +56,9 @@ pub(crate) use journal::{
 };
 pub(crate) use subscribers::registered_subscribers_for;
 pub use subscribers::{append_subscriber, subscriber_count, subscribers_for, SessionSubscriber};
+/// Origin of an actor chain no principal authenticated. The same subject
+/// `harn-serve` gives an unauthenticated ACP client.
+const ANONYMOUS_ORIGIN: &str = "anonymous";
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
 const LIVE_CLIENT_PERMISSION_EVENT_KIND: &str = "live_session_permission_route";
 
@@ -869,10 +872,19 @@ pub fn open_child_session_with_actor(
     id: Option<String>,
     actor: Option<&str>,
 ) -> Result<String, SessionOpenError> {
-    let actor_chain = actor_chain(parent_id).map(|chain| match actor {
-        Some(actor) if !actor.trim().is_empty() => chain.pushed(actor.trim()),
-        _ => chain,
-    });
+    let parent_chain = actor_chain(parent_id);
+    let actor_chain = match actor.map(str::trim).filter(|actor| !actor.is_empty()) {
+        // A named child is delegated even under a parent no principal
+        // authenticated. Dropping the hop there would stamp the child's
+        // provider calls exactly like the parent's, so start the chain at the
+        // unauthenticated origin instead (harn#8927).
+        Some(actor) => Some(
+            parent_chain
+                .unwrap_or_else(|| ActorChain::new(ANONYMOUS_ORIGIN))
+                .pushed(actor),
+        ),
+        None => parent_chain,
+    };
     let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     admit_linked_sessions(parent_id, &resolved, actor_chain, None)?;
     Ok(resolved)

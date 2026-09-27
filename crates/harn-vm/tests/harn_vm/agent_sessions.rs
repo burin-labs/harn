@@ -556,3 +556,52 @@ pipeline main(harness: Harness, task: unknown) {{
     ));
     assert_eq!(lines, vec!["false", "true"]);
 }
+
+#[test]
+fn open_with_parent_and_actor_opens_a_delegated_child() {
+    let lines = out(r#"
+pipeline main(harness: Harness, task: unknown) {
+  const root = harness.agent.open(nil)
+  const planner = harness.agent.open(nil, {parent: root, actor: " planner "})
+  const worker = harness.agent.open(nil, {parent: planner, actor: "worker"})
+  const linked = harness.agent.open(nil, {parent: root})
+  harness.stdio.log(json_stringify(harness.agent.actor_chain(root)))
+  harness.stdio.log(json_stringify(harness.agent.actor_chain(planner)))
+  harness.stdio.log(json_stringify(harness.agent.actor_chain(worker)))
+  harness.stdio.log(json_stringify(harness.agent.actor_chain(linked)))
+  harness.stdio.log(harness.agent.snapshot(planner)["parent_id"] == root)
+  harness.stdio.log(harness.agent.open(planner, {parent: root, actor: "planner"}) == planner)
+  harness.stdio.log(json_stringify(harness.agent.actor_chain(planner)))
+}
+"#);
+    assert_eq!(
+        lines,
+        vec![
+            "null",
+            r#"{"act":{"sub":"planner"},"sub":"anonymous"}"#,
+            r#"{"act":{"act":{"sub":"planner"},"sub":"worker"},"sub":"anonymous"}"#,
+            "null",
+            "true",
+            "true",
+            r#"{"act":{"sub":"planner"},"sub":"anonymous"}"#,
+        ]
+    );
+}
+
+#[test]
+fn open_refuses_an_actor_without_a_known_parent() {
+    let orphan = run(r#"
+pipeline main(harness: Harness, task: unknown) {
+  harness.agent.open(nil, {actor: "planner"})
+}
+"#)
+    .expect_err("an actor with no parent is refused");
+    assert!(orphan.contains("requires `parent`"), "{orphan}");
+    let unknown = run(r#"
+pipeline main(harness: Harness, task: unknown) {
+  harness.agent.open(nil, {parent: "no-such-session", actor: "planner"})
+}
+"#)
+    .expect_err("an unknown parent is refused");
+    assert!(unknown.contains("unknown parent session id"), "{unknown}");
+}

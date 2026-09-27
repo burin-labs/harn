@@ -226,7 +226,8 @@ fn ok_result(fields: &[(&str, serde_json::Value)]) -> VmValue {
     crate::stdlib::json_to_vm_value(&serde_json::Value::Object(result))
 }
 
-const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor", "workspace_policy"];
+const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] =
+    &["workspace_anchor", "workspace_policy", "parent", "actor"];
 const AGENT_SESSION_ADD_ROOT_OPT_KEYS: &[&str] = &["mount_mode", "reason"];
 const AGENT_SESSION_ATTACH_OPT_KEYS: &[&str] = &[
     "mode",
@@ -243,7 +244,7 @@ const AGENT_SESSION_METADATA_OPT_KEYS: &[&str] = &["metadata"];
     effects = [],
     sig = "agent_session_open(id?: string, opts?: dict) -> string",
     category = "agent.session",
-    doc = "Open or create a first-class agent session. opts may carry workspace_anchor and workspace_policy."
+    doc = "Open or create a first-class agent session. opts may carry workspace_anchor, workspace_policy, and parent with an optional actor to open a delegated child whose actor chain gains that actor."
 )]
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_opt(args, 0, "agent_session_open", "id")?;
@@ -282,8 +283,26 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
             .map_err(|message| err(format!("agent_session_open: {message}")))?,
         ),
     };
-    let resolved = agent_sessions::open_or_create(id)
-        .map_err(|error| err(format!("agent_session_open: {error}")))?;
+    let actor = opt_string(&opts, "agent_session_open", "actor")?
+        .map(|actor| actor.trim().to_string())
+        .filter(|actor| !actor.is_empty());
+    let resolved = match opt_string(&opts, "agent_session_open", "parent")? {
+        Some(parent) => {
+            if !agent_sessions::exists(&parent) {
+                return Err(err(format!(
+                    "agent_session_open: unknown parent session id '{parent}'"
+                )));
+            }
+            agent_sessions::open_child_session_with_actor(&parent, id, actor.as_deref())
+        }
+        None if actor.is_some() => {
+            return Err(err(
+                "agent_session_open: `actor` names a delegated child and requires `parent`",
+            ))
+        }
+        None => agent_sessions::open_or_create(id),
+    }
+    .map_err(|error| err(format!("agent_session_open: {error}")))?;
     if let Some(policy) = workspace_policy {
         agent_sessions::set_workspace_policy(&resolved, policy)
             .map_err(|message| err(format!("agent_session_open: {message}")))?;
