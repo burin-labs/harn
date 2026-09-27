@@ -28,15 +28,15 @@ use super::{CompactionSourceMeasurement, RecapMetrics};
 /// Current on-the-wire schema version for [`CompactionReceipt`]. Bump this when
 /// the receipt's meaning changes in a way readers must branch on; additive
 /// optional fields do not require a bump because `#[serde(default)]` fills them.
-pub const COMPACTION_RECEIPT_SCHEMA_VERSION: u32 = 1;
+pub const COMPACTION_RECEIPT_SCHEMA_VERSION: u32 = 2;
 
 fn default_schema_version() -> u32 {
-    COMPACTION_RECEIPT_SCHEMA_VERSION
+    1
 }
 
 /// One serializable, versioned record of a single transcript compaction. See the
 /// module docs for how it flows through every projection.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CompactionReceipt {
     /// Schema version. Lets readers migrate: a receipt read from an older
@@ -86,6 +86,9 @@ pub struct CompactionReceipt {
     /// Observation-mask recap metrics; `None` for the LLM/truncate/custom
     /// strategies, which do not spend a recap budget.
     pub recap: Option<RecapMetrics>,
+    /// Per-message decisions and the confidence-floor application. Absent on
+    /// legacy receipts and strategies that did not perform classification.
+    pub classification: Option<Box<super::ClassificationReceipt>>,
     /// Source-window and summary byte measurement for this compaction.
     ///
     /// `None` means this compaction path took no measurement. That is
@@ -226,6 +229,9 @@ impl CompactionReceipt {
             recap: payload
                 .get("recap")
                 .and_then(|value| serde_json::from_value::<RecapMetrics>(value.clone()).ok()),
+            classification: payload
+                .get("classification")
+                .and_then(|value| serde_json::from_value(value.clone()).ok()),
             // A host script may forward the engine's typed measurement. When it
             // does not, `None` remains "not measured", never a measured zero.
             source_measurement: payload.get("source_measurement").and_then(|value| {
@@ -268,6 +274,7 @@ mod tests {
                 dropped_count: 1,
                 carried_prior_recap: true,
             }),
+            classification: None,
             // A measured zero must round-trip as a measured zero, not collapse
             // into "no measurement".
             source_measurement: Some(CompactionSourceMeasurement {
@@ -308,6 +315,7 @@ mod tests {
             instruction_source: None,
             compaction_policy: None,
             recap: None,
+            classification: None,
             source_measurement: Some(CompactionSourceMeasurement {
                 source_message_count: Some(4),
                 source_bytes: Some(35_583),
@@ -354,13 +362,13 @@ mod tests {
     }
 
     #[test]
-    fn missing_schema_version_defaults_to_current() {
+    fn missing_schema_version_remains_legacy() {
         let receipt: CompactionReceipt = serde_json::from_value(serde_json::json!({
             "receipt_id": "compaction-xyz",
             "mode": "manual",
         }))
         .expect("partial receipt loads");
-        assert_eq!(receipt.schema_version, COMPACTION_RECEIPT_SCHEMA_VERSION);
+        assert_eq!(receipt.schema_version, 1);
         assert_eq!(receipt.receipt_id, "compaction-xyz");
         assert!(receipt.recap.is_none());
     }

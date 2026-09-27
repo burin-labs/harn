@@ -1,6 +1,13 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "type_of(opts?.compaction)",
+    "owner": "__compact_options",
+    "evidence": "Shape guard on the already registered compaction option before reading its registered classify field; no additional policy value."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "opts?._turn_end_judge_due",
     "owner": "__completion_policy_plan",

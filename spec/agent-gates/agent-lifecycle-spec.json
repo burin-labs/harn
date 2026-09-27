@@ -136,6 +136,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
         "reader": "agent_autocompact_if_needed"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "reader": "__compact_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

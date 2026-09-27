@@ -10,6 +10,7 @@ mod context_window;
 pub mod data_controls;
 mod dialect;
 pub(crate) mod errors;
+mod isolated_request;
 mod ollama;
 mod openai_normalize;
 pub(crate) mod options;

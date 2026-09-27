@@ -3702,6 +3702,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
     public var compactionPolicy: HarnACPValue
     public var recap: HarnACPValue
     public var sourceMeasurement: HarnACPValue
+    public var classification: HarnACPValue
     public var replayed: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -3724,6 +3725,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         case compactionPolicy
         case recap
         case sourceMeasurement
+        case classification
         case replayed
     }
 
@@ -3748,6 +3750,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         compactionPolicy = try values.decode(HarnACPValue.self, forKey: .compactionPolicy)
         recap = try values.decode(HarnACPValue.self, forKey: .recap)
         sourceMeasurement = try values.decode(HarnACPValue.self, forKey: .sourceMeasurement)
+        classification = try values.decode(HarnACPValue.self, forKey: .classification)
         replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
     }
 
@@ -3772,6 +3775,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         try values.encode(compactionPolicy, forKey: .compactionPolicy)
         try values.encode(recap, forKey: .recap)
         try values.encode(sourceMeasurement, forKey: .sourceMeasurement)
+        try values.encode(classification, forKey: .classification)
         try values.encodeIfPresent(replayed, forKey: .replayed)
     }
 }
@@ -4131,6 +4135,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"]?["harn"] != nil {
             if value["_meta"]?["harn"]?["archivedMessages"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is required") }
             if (value["_meta"]?["harn"]?["archivedMessages"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is below its minimum") }
+            if value["_meta"]?["harn"]?["classification"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.classification is required") }
             if value["_meta"]?["harn"]?["compactionPolicy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.compactionPolicy is required") }
             if value["_meta"]?["harn"]?["engineStrategy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.engineStrategy is required") }
             if value["_meta"]?["harn"]?["estimatedTokensAfter"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensAfter is required") }

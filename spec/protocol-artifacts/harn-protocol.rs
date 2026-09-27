@@ -3549,6 +3549,7 @@ pub struct ACPTranscriptCompactedUpdateMetaHarn {
     pub recap: Value,
     #[serde(rename = "sourceMeasurement")]
     pub source_measurement: Value,
+    pub classification: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed: Option<bool>,
 }
@@ -4584,6 +4585,11 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                         {
                             return Err(serde::de::Error::custom(
                                 "session update _meta.harn.archivedMessages is below its minimum",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/classification").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.classification is required",
                             ));
                         }
                         if value.pointer("/_meta/harn/compactionPolicy").is_none() {

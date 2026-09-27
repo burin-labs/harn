@@ -28,7 +28,6 @@
     "crates/harn-vm/src/llm/reminder_providers.rs",
     "crates/harn-vm/src/mcp_oauth.rs",
     "crates/harn-vm/src/metadata.rs",
-    "crates/harn-vm/src/orchestration/compaction.rs",
     "crates/harn-vm/src/orchestration/hooks.rs",
     "crates/harn-vm/src/orchestration/merge_captain_audit.rs",
     "crates/harn-vm/src/orchestration/workflow_bundle/mod.rs",
