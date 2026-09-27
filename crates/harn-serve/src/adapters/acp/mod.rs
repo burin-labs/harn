@@ -902,6 +902,7 @@ impl AcpSandboxConfig {
             || !self.process.write_roots.is_empty()
             || self.process.allow_tcp_loopback
             || !self.process.unix_socket_roots.is_empty()
+            || self.process.allow_child_workspace_write
     }
 
     pub fn with_read_only_roots(roots: Vec<String>) -> Self {

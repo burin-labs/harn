@@ -26,6 +26,10 @@ Confusing these is the most common mistake here.
    grants on this axis: loopback admits IP on `localhost`, socket roots admit
    Unix-domain sockets whose socket file lives under a root, and neither opens
    remote egress. Both are host-owned: a nested policy cannot invent them.
+   Whether a child may write *any* of its writable roots is
+   `CapabilityPolicy::children_may_write`: the `workspace` write capability, or
+   `process_sandbox.allow_child_workspace_write` for a role that runs commands
+   but edits nothing. Every backend reads that one predicate.
 3. **`sandbox_profile`** decides whether either is enforced at all.
    `enforces_path_scope()` gates axis 1 and the toolchain-cache environment;
    `confines_processes()` gates axis 2.
@@ -104,7 +108,10 @@ reach for every time:
 - `home_read` — tool config under `~` that no preset grants or the denylist
   refuses. Point the tool at a workspace-local config through its `*_HOME` /
   `*_CONFIG` variable rather than widening a read root.
-- `write` — a cache outside every write root; see the first shape above.
+- `write` — a cache outside every write root; see the first shape above. When
+  the policy's children may write nowhere (a read-only role with no child write
+  grant), even the workspace and `TMPDIR` are refused, and the fix is
+  `allow_child_workspace_write`, not another root.
 
 The classifier is `sandbox/refusal_mechanism.rs`; its phrase vocabulary is
 `sandbox/refusal_markers.toml`. A new tool that prints a new phrase for one of

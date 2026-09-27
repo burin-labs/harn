@@ -95,6 +95,28 @@ pub enum ConformanceCase {
     /// helper started inside the sandbox would keep the sandbox for its whole
     /// life and serve later builds with it.
     RustcWrapperThatDaemonizesIsSwitchedOff,
+    /// Under a read-only role (tools that run commands and edit nothing) with
+    /// no child write grant, a write inside the workspace is refused. The
+    /// control for the grant cases below: without it they would pass on a
+    /// backend that let every child write its workspace regardless.
+    ReadOnlyRoleWorkspaceWriteRefused,
+    /// The same role with `allow_child_workspace_write`: a write inside the
+    /// workspace lands.
+    ChildWriteGrantWorkspaceWriteAdmitted,
+    /// The same role with the grant: a write to the child's own `TMPDIR`
+    /// lands, so a build or test runner has a temp dir.
+    ChildWriteGrantTempWriteAdmitted,
+    /// The same role with the grant: a write under a read-only root is still
+    /// refused. The grant widens the writable roots, never the read-only ones.
+    ChildWriteGrantReadOnlyRootWriteRefused,
+    /// The same role with the grant: a write outside every writable root is
+    /// still refused. The grant changes which roots are writable, never their
+    /// boundary.
+    ChildWriteGrantOutsideWriteRefused,
+    /// The same role with the grant: a read under a read-only root lands. The
+    /// liveness leg for the refusal above, which a backend that withheld the
+    /// read-only root entirely would also pass.
+    ChildWriteGrantReadOnlyRootReadAdmitted,
 }
 
 impl ConformanceCase {
@@ -118,6 +140,12 @@ impl ConformanceCase {
         Self::RustcWrapperThatRunsIsKept,
         Self::RustcWrapperThatCannotRunIsSwitchedOff,
         Self::RustcWrapperThatDaemonizesIsSwitchedOff,
+        Self::ReadOnlyRoleWorkspaceWriteRefused,
+        Self::ChildWriteGrantWorkspaceWriteAdmitted,
+        Self::ChildWriteGrantTempWriteAdmitted,
+        Self::ChildWriteGrantReadOnlyRootWriteRefused,
+        Self::ChildWriteGrantOutsideWriteRefused,
+        Self::ChildWriteGrantReadOnlyRootReadAdmitted,
     ];
 
     pub fn id(self) -> &'static str {
@@ -145,6 +173,18 @@ impl ConformanceCase {
             }
             Self::RustcWrapperThatDaemonizesIsSwitchedOff => {
                 "rustc_wrapper.daemonizing_is_switched_off"
+            }
+            Self::ReadOnlyRoleWorkspaceWriteRefused => "read_only_role.workspace_write_refused",
+            Self::ChildWriteGrantWorkspaceWriteAdmitted => {
+                "child_write_grant.workspace_write_admitted"
+            }
+            Self::ChildWriteGrantTempWriteAdmitted => "child_write_grant.temp_write_admitted",
+            Self::ChildWriteGrantReadOnlyRootWriteRefused => {
+                "child_write_grant.read_only_root_write_refused"
+            }
+            Self::ChildWriteGrantOutsideWriteRefused => "child_write_grant.outside_write_refused",
+            Self::ChildWriteGrantReadOnlyRootReadAdmitted => {
+                "child_write_grant.read_only_root_read_admitted"
             }
         }
     }
@@ -178,9 +218,11 @@ impl ConformanceCase {
     /// cases measure liveness, not a dimension.
     pub fn dimension(self) -> Option<ConfinementDimension> {
         match self {
-            Self::OutsideWriteRefused | Self::GuardianOutsideWriteRefused => {
-                Some(ConfinementDimension::Writes)
-            }
+            Self::OutsideWriteRefused
+            | Self::GuardianOutsideWriteRefused
+            | Self::ReadOnlyRoleWorkspaceWriteRefused
+            | Self::ChildWriteGrantReadOnlyRootWriteRefused
+            | Self::ChildWriteGrantOutsideWriteRefused => Some(ConfinementDimension::Writes),
             Self::OutsideReadRefused | Self::SiblingTempReadRefused => {
                 Some(ConfinementDimension::Reads)
             }
@@ -251,7 +293,10 @@ impl ConformanceCase {
             | Self::NetworkConnectAdmitted
             | Self::RustcWrapperThatRunsIsKept
             | Self::RustcWrapperThatCannotRunIsSwitchedOff
-            | Self::RustcWrapperThatDaemonizesIsSwitchedOff => {
+            | Self::RustcWrapperThatDaemonizesIsSwitchedOff
+            | Self::ChildWriteGrantWorkspaceWriteAdmitted
+            | Self::ChildWriteGrantTempWriteAdmitted
+            | Self::ChildWriteGrantReadOnlyRootReadAdmitted => {
                 Expectation::Observe(Observation::Admitted)
             }
             Self::OutsideWriteRefused
@@ -261,7 +306,10 @@ impl ConformanceCase {
             | Self::NetworkConnectRefused
             | Self::GuardianOutsideWriteRefused
             | Self::UndeclaredEnvironmentNameWithheld
-            | Self::GuardianUndeclaredEnvironmentNameWithheld => {
+            | Self::GuardianUndeclaredEnvironmentNameWithheld
+            | Self::ReadOnlyRoleWorkspaceWriteRefused
+            | Self::ChildWriteGrantReadOnlyRootWriteRefused
+            | Self::ChildWriteGrantOutsideWriteRefused => {
                 Expectation::Observe(Observation::Refused)
             }
             Self::UnixSocketBindUnderRoot | Self::UnixSocketBindUnderRootWithNetwork => {

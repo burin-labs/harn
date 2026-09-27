@@ -296,7 +296,8 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
     "read_roots": ["/opt/vendor-sdk"],
     "write_roots": ["/opt/vendor-cache"],
     "allow_tcp_loopback": false,
-    "unix_socket_roots": []
+    "unix_socket_roots": [],
+    "allow_child_workspace_write": false
   }
 }
 ```
@@ -319,11 +320,11 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
   granted: they hold every other process's files. Caches that default there,
   such as clang's module cache and xcrun's lookup cache, are pointed into the
   workspace by the child's environment instead. Writable only when the active
-  capability policy already allows workspace writes.
+  policy lets child processes write (see `allow_child_workspace_write` below).
 
 An explicit empty `presets: []` disables every named preset. `read_roots` and
-`write_roots` are for subprocesses only; `write_roots` are also gated by the
-workspace-write capability. `CapabilityPolicy::intersect` narrows presets and
+`write_roots` are for subprocesses only; `write_roots` are also gated by
+whether child processes may write at all. `CapabilityPolicy::intersect` narrows presets and
 roots to their common set, so managed or parent ceilings can prevent a child
 policy from adding host filesystem reach. `read_deny_roots` is the one subtractive term: it beats every
 grant, and it unions rather than intersects as policies nest, because narrowing
@@ -334,6 +335,38 @@ a denial would widen authority. See the
 nor erase an outer host grant. `unix_socket_roots` follows the same rule: a
 nested policy keeps only the roots the outer grant already covers. Stage-policy validation also rejects a flattened
 child that tries to introduce it beyond its ceiling.
+
+#### Child writes for read-only roles
+
+A child process may write its writable roots (the workspace roots,
+`write_roots`, the session temp dir, and the toolchain caches) when the policy's
+`workspace` capability grants `write_text` or `delete`, when `capabilities` is
+empty, or when `process_sandbox.allow_child_workspace_write` is `true`.
+Otherwise it can write nothing, not even its `TMPDIR`, and every build or test
+it runs fails on its first write.
+
+`allow_child_workspace_write` exists for roles whose tools run commands but edit
+nothing, such as a reviewer or a verifier:
+
+```json
+{
+  "capabilities": {"process": ["exec"], "workspace": ["read_text", "list"]},
+  "sandbox_profile": "os_hardened",
+  "process_sandbox": {"allow_child_workspace_write": true}
+}
+```
+
+It changes only the OS profile rendered for child processes. Harn's own file
+builtins still read the `workspace` capability, so the role above cannot call
+`write_text`. `read_only_roots` stay unwritable to the child on every backend,
+and nothing outside the writable roots becomes writable. A nested policy keeps
+the grant only when its ceiling's children could already write, through the
+same grant or through the ceiling's `workspace` capability; stage-policy
+validation rejects a flattened child that adds it beyond that. The
+`harn run` provenance receipt reports `process_child_writes` (whether children
+may write) and `process_child_workspace_write_granted` (whether the grant is
+what allowed it), and a refused write under a policy whose children may write
+nowhere is explained as the missing grant.
 
 ### Running real toolchains in the sandbox
 
@@ -601,7 +634,8 @@ small, named kernel feature, never an open-ended escape hatch.
 | `workspace.delete` | Landlock `_REMOVE_DIR` + `_REMOVE_FILE` | removes scoped to `workspace_roots` |
 | `read_only_roots: [...]` | Landlock `_READ_FILE` + `_READ_DIR` + `_EXECUTE` only | each read-only root is readable but never writable, regardless of the `workspace.*` capabilities |
 | `process_sandbox.presets` includes `package_manager_config` | Landlock read-only rules for existing npm, pip, cargo, git, and CA config/cache roots under `$HOME` | package managers can resolve real per-user config without granting Harn file builtin access or write rights |
-| `process_sandbox.read_roots` / `.write_roots` | Landlock read-only rules, plus writable rules only when workspace writes are allowed | process-only roots for SDKs/caches without widening Harn file builtins |
+| `process_sandbox.allow_child_workspace_write` | the full write set above on `workspace_roots`, plus writable `process_sandbox.write_roots` and toolchain caches | a read-only role's children can build and test; `read_only_roots` keep read-only rules |
+| `process_sandbox.read_roots` / `.write_roots` | Landlock read-only rules, plus writable rules only when child writes are allowed | process-only roots for SDKs/caches without widening Harn file builtins |
 | standard process devices | Landlock grants read/write on `/dev/null` and read-only access on `/dev/zero`, `/dev/random`, and `/dev/urandom`; ABI ≥ 5 also handles `_IOCTL_DEV` but does not grant it to these device rules | language runtimes and test harnesses can open the devices they normally need without broad `/dev` access or device ioctl rights |
 | `side_effect_level < network` | seccomp-bpf allowlist excludes addressable socket openers: `socket`, `connect`, `accept`, `accept4`, `bind`, `listen`. `socketpair`, `sendto`, `sendmsg`, `recvfrom`, and `recvmsg` stay allowlisted for inherited anonymous local IPC | addressable-socket / egress syscalls fail with `EPERM`, while local IPC keeps working |
 | always | seccomp-bpf default-deny allowlist omits tier-1 dangerous syscalls including `bpf`, mount/module/kexec/sysctl families, `ptrace`, `process_vm_readv`/`process_vm_writev`, `io_uring_*`, `perf_event_open`, `userfaultfd`, `fanotify_init`, and `open_by_handle_at` | unknown and dangerous syscalls fail with `EPERM` |
@@ -623,7 +657,7 @@ falls back to the warn/enforce decision documented above.
 | `process_sandbox.allow_tcp_loopback` | bind/inbound on local `localhost:*`; outbound to remote `localhost:*` | IPv4 and IPv6 loopback servers and clients work without opening remote egress |
 | `process_sandbox.unix_socket_roots` | `(allow network-bind (subpath "<root>"))`, `(allow network-inbound (subpath "<root>"))`, `(allow network-outbound (subpath "<root>"))` for each granted root, and for the session temp dir when the `user_temp` preset is on | build servers bind and connect Unix-domain sockets whose socket file lives under a granted root or the session temp dir; a daemon that binds under the shared temp dirs (sbt under `/tmp/bsbt`) needs that root named; `subpath` never matches an IP endpoint, so no egress opens |
 | `workspace_roots: [...]` / `read_only_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace and read-only roots are readable |
-| `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | writable `user_temp`, `process_sandbox.write_roots`, and `workspace_roots`, followed by `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs, explicit process-write roots, and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |
+| `workspace.write_text` / `workspace.delete` (or empty `capabilities`, or `process_sandbox.allow_child_workspace_write`) | writable `user_temp`, `process_sandbox.write_roots`, and `workspace_roots`, followed by `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs, explicit process-write roots, and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |
 | `side_effect_level >= network` | `(allow network*)` | otherwise outbound network is denied |
 
 SwiftPM commands (`swift build`, `swift test`, `swift run`, and
@@ -644,11 +678,11 @@ successor when one exists.
 | Capability / policy | OpenBSD mechanism | Effect |
 |---|---|---|
 | always | `unveil("/bin", "rx")`, `("/usr", "rx")`, `("/lib", "rx")`, `("/etc", "r")`, `("/dev", "rw")` | minimum surface required to exec |
-| `workspace_roots: [...]` | `unveil("<root>", "rwcx" \| "rx")` | rwcx when `workspace.write_text` / `workspace.delete` present, otherwise rx |
+| `workspace_roots: [...]` | `unveil("<root>", "rwcx" \| "rx")` | rwcx when `workspace.write_text` / `workspace.delete` present or `process_sandbox.allow_child_workspace_write` is set, otherwise rx |
 | `read_only_roots: [...]` | `unveil("<root>", "rx")` | each read-only root is read+execute only, never write/create |
-| `process_sandbox.read_roots` / `.write_roots` | `unveil("<root>", "rx" \| "rwcx")` | process-only roots, with writes gated by workspace-write capability |
+| `process_sandbox.read_roots` / `.write_roots` | `unveil("<root>", "rx" \| "rwcx")` | process-only roots, with writes gated by whether child processes may write |
 | always | `pledge("stdio rpath proc exec", NULL)` | minimum process-exec promise set |
-| `workspace.write_text` / `workspace.delete` | adds `wpath cpath dpath` to pledge | filesystem mutation promises |
+| `workspace.write_text` / `workspace.delete`, or `process_sandbox.allow_child_workspace_write` | adds `wpath cpath dpath` to pledge | filesystem mutation promises |
 | `side_effect_level >= network` | adds `inet dns` to pledge | network promises |
 
 ### Windows and other platforms without a backend

@@ -204,7 +204,7 @@ fn read_probes() -> Vec<PathBuf> {
 /// only make a probe fail, which refuses the spawn: it was refused before.
 fn writable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    if super::policy_allows_workspace_write(policy) {
+    if super::policy_allows_child_writes(policy) {
         roots.extend(super::process_sandbox_roots(policy));
         roots.extend(super::process_sandbox_policy_write_roots(policy));
         roots.extend(super::preset_write_roots(policy).iter().map(PathBuf::from));
