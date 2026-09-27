@@ -120,7 +120,7 @@ async fn a_replayed_tool_call_keeps_its_metadata_tool_name() {
                 "id": "event-call",
                 "kind": "tool_call",
                 "role": "assistant",
-                "visibility": "public",
+                "visibility": "internal",
                 "metadata": {"tool_call_id": "tool-1", "tool_name": "look"},
             }
         }),
@@ -210,4 +210,117 @@ async fn internal_rows_stay_out_of_the_restored_transcript() {
         &restored[0].event,
         AgentEvent::AgentMessageChunk { content, .. } if content == "here is the answer"
     ));
+}
+
+/// The journal writes every tool call and tool result as an internal row, with
+/// the name under `metadata` on the call and on the stored provider message
+/// beside the result. This is that shape, copied from a real store. Replay
+/// dropped all four rows as internal bookkeeping, so a resumed session showed
+/// no tool rows at all (harn#8920). Internal prose still stays hidden.
+#[tokio::test]
+async fn journal_shaped_tool_rows_replay_and_internal_prose_stays_hidden() {
+    let session_id = "journal-shaped";
+    let store = store_with_session(session_id).await;
+    let call = |id: &str, file: &str| {
+        let mut event = AppendEvent::new(
+            SessionEventKind::ToolCall,
+            serde_json::json!({
+                "transcript_event": {
+                    "id": format!("event-{id}"),
+                    "kind": "tool_call",
+                    "role": "assistant",
+                    "visibility": "internal",
+                    "text": "",
+                    "metadata": {
+                        "raw_input": {"file": file},
+                        "status": "pending",
+                        "tool_call_id": id,
+                        "tool_name": "look",
+                    },
+                }
+            }),
+        );
+        event
+            .headers
+            .insert("tool_call_id".to_string(), id.to_string());
+        event
+    };
+    let result = |id: &str, text: &str, is_error: bool| {
+        let mut event = AppendEvent::new(
+            SessionEventKind::ToolResult,
+            serde_json::json!({
+                "transcript_event": {
+                    "id": format!("result-{id}"),
+                    "kind": "tool_result",
+                    "role": "tool_result",
+                    "visibility": "internal",
+                    "text": text,
+                },
+                "raw_message": {
+                    "content": text,
+                    "is_error": is_error,
+                    "name": "look",
+                    "role": "tool_result",
+                    "tool_call_id": id,
+                },
+            }),
+        );
+        event
+            .headers
+            .insert("tool_call_id".to_string(), id.to_string());
+        event
+    };
+    let internal_prose = AppendEvent::new(
+        SessionEventKind::Message,
+        serde_json::json!({
+            "transcript_event": {
+                "kind": "message",
+                "role": "user",
+                "visibility": "internal",
+                "text": "<context-directives speaker=\"harness\">",
+            }
+        }),
+    );
+    for event in [
+        internal_prose,
+        call("call-1", "calc.py"),
+        call("call-2", "gone.py"),
+        result("call-1", "calc.py (3 lines)", false),
+        result("call-2", "no such file", true),
+    ] {
+        store.append(session_id, event).await.expect("append row");
+    }
+
+    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+        .await
+        .expect("restore should not error")
+        .expect("the store knows this session");
+    let rows: Vec<String> = restored
+        .iter()
+        .map(|entry| match &entry.event {
+            AgentEvent::ToolCall {
+                tool_call_id,
+                tool_name,
+                raw_input,
+                ..
+            } => format!("call {tool_call_id} {tool_name} {raw_input}"),
+            AgentEvent::ToolCallUpdate {
+                tool_call_id,
+                tool_name,
+                status,
+                ..
+            } => format!("result {tool_call_id} {tool_name} {status:?}"),
+            other => format!("other {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            r#"call call-1 look {"file":"calc.py"}"#,
+            r#"call call-2 look {"file":"gone.py"}"#,
+            "result call-1 look Completed",
+            "result call-2 look Failed",
+        ],
+        "every stored tool row replays, named and with its input; internal prose does not"
+    );
 }
