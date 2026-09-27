@@ -132,6 +132,8 @@ fn complementary_reviewer_skips_bedrock_without_aws_configuration() {
         author_provider: Some("openai".to_string()),
         intent: ComplementaryReviewerIntent::Review,
         max_price_multiplier: None,
+        min_price_cap_per_mtok: None,
+        max_price_cap_per_mtok: None,
     };
 
     let selection = pick_complementary_reviewer(options.clone());
