@@ -187,7 +187,7 @@ pub(super) fn llm_resolved_options_builtin(
         }
         let options = Some(defaults_options);
         let provider = crate::llm::helpers::vm_resolve_provider(&options);
-        let model = crate::llm::helpers::vm_resolve_model(&options, &provider);
+        let model = crate::llm::helpers::vm_resolve_model(&options, &provider)?;
         (model, provider)
     };
     let defaults = llm_config::model_params_for_route(&final_provider, &resolved_id);

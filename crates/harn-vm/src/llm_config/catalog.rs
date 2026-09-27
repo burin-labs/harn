@@ -897,15 +897,43 @@ pub fn qc_default_model(provider: &str) -> Option<String> {
         })
 }
 
-pub fn default_model_for_provider(provider: &str) -> String {
+pub fn default_model_for_provider(provider: &str) -> Result<String, ModelResolutionError> {
     if provider_uses_acp(provider) {
-        return "default".to_string();
+        return Ok("default".to_string());
+    }
+    if provider == "mock" {
+        return Ok("mock".to_string());
     }
     let config = effective_config();
+    if !config.providers.contains_key(provider) {
+        return Err(ModelResolutionError::UnknownProvider {
+            provider: provider.to_string(),
+            catalog_version: MODEL_CATALOG_VERSION.to_string(),
+            suggestions: Vec::new(),
+        });
+    }
     local_model_env_override(provider)
         .or_else(|| config.provider_defaults.get(provider)?.runtime.clone())
-        .or_else(|| config.fallback_model.clone())
-        .expect("embedded catalog must declare fallback_model")
+        .or_else(|| {
+            (config.default_provider.as_deref() == Some(provider))
+                .then(|| config.fallback_model.clone())
+                .flatten()
+        })
+        .ok_or_else(|| ModelResolutionError::MissingProviderDefault {
+            provider: provider.to_string(),
+            catalog_version: MODEL_CATALOG_VERSION.to_string(),
+            routes: config
+                .models
+                .iter()
+                .filter(|(_, model)| {
+                    model.provider == provider
+                        && !model.deprecated
+                        && model.supports_operation(ModelOperation::TextGeneration)
+                })
+                .take(4)
+                .map(|(id, _)| format!("{provider}:{id}"))
+                .collect(),
+        })
 }
 
 /// The portal's configured choice uses the same catalog contract as the VM.

@@ -189,7 +189,8 @@ pub(super) fn non_empty_env(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-pub(super) fn configured_llm_route_for_capabilities() -> (String, String) {
+pub(super) fn configured_llm_route_for_capabilities(
+) -> Result<(String, String), harn_vm::llm_config::ModelResolutionError> {
     let provider = non_empty_env("HARN_LLM_PROVIDER")
         .filter(|provider| !provider.eq_ignore_ascii_case("auto"))
         .or_else(|| {
@@ -219,14 +220,18 @@ pub(super) fn configured_llm_route_for_capabilities() -> (String, String) {
     });
     let model = raw_model
         .map(|model| harn_vm::llm_config::resolve_model(&model).0)
-        .unwrap_or_else(|| harn_vm::llm_config::default_model_for_provider(&provider));
+        .map_or_else(
+            || harn_vm::llm_config::default_model_for_provider(&provider),
+            Ok,
+        )?;
 
-    (provider, model)
+    Ok((provider, model))
 }
 
 pub(super) fn acp_prompt_capabilities() -> serde_json::Value {
-    let (provider, model) = configured_llm_route_for_capabilities();
-    let capabilities = harn_vm::llm::capabilities::lookup(&provider, &model);
+    let capabilities = configured_llm_route_for_capabilities()
+        .map(|(provider, model)| harn_vm::llm::capabilities::lookup(&provider, &model))
+        .unwrap_or_default();
     serde_json::json!({
         "image": capabilities.vision || capabilities.vision_supported,
         "audio": capabilities.audio,

@@ -74,7 +74,7 @@ fn test_llm_resolved_options_uses_dispatch_defaults_without_model() {
     let _guard = crate::llm::env_guard();
     llm_config::clear_user_overrides();
     let expected_provider = crate::llm::helpers::vm_resolve_provider(&None);
-    let expected_model = crate::llm::helpers::vm_resolve_model(&None, &expected_provider);
+    let expected_model = crate::llm::helpers::vm_resolve_model(&None, &expected_provider).unwrap();
     let mut out = String::new();
     for options in [
         build_dict(vec![]),
@@ -91,6 +91,72 @@ fn test_llm_resolved_options_uses_dispatch_defaults_without_model() {
             Some(expected_model.clone())
         );
     }
+}
+
+#[test]
+fn test_provider_without_default_requires_explicit_model() {
+    let _guard = crate::llm::env_guard();
+    let _env = crate::test_env::test_env_guard();
+    llm_config::clear_user_overrides();
+    let provider = "fixture-no-default";
+    let model_id = "fixture-model";
+    let mut overlay = llm_config::ProvidersConfig::default();
+    overlay.providers.insert(
+        provider.to_string(),
+        llm_config::ProviderDef {
+            base_url: "https://fixture.invalid/v1".to_string(),
+            chat_endpoint: "/chat/completions".to_string(),
+            ..Default::default()
+        },
+    );
+    let mut model = llm_config::model_catalog_entries()
+        .into_iter()
+        .find(|(_, model)| {
+            !model.deprecated
+                && model.supports_operation(llm_config::ModelOperation::TextGeneration)
+        })
+        .expect("catalog has a text-generation model")
+        .1;
+    model.provider = provider.to_string();
+    overlay.models.insert(model_id.to_string(), model);
+    llm_config::set_user_overrides(Some(overlay));
+
+    let mut out = String::new();
+    let error = llm_resolved_options_builtin(
+        &[build_dict(vec![("provider", VmValue::string(provider))])],
+        &mut out,
+    )
+    .expect_err("provider without a default must fail before dispatch");
+    let crate::value::VmError::Thrown(value) = error else {
+        panic!("expected a typed model-resolution error");
+    };
+    let fields = value.as_dict().expect("typed error fields");
+    assert_eq!(
+        fields.get("code").map(VmValue::display).as_deref(),
+        Some("model_resolution_failed")
+    );
+    assert!(fields
+        .get("message")
+        .is_some_and(|message| { message.display().contains("pass an explicit model") }));
+
+    let result = llm_resolved_options_builtin(
+        &[build_dict(vec![
+            ("provider", VmValue::string(provider)),
+            ("model", VmValue::string(model_id)),
+        ])],
+        &mut out,
+    )
+    .expect("explicit catalog model still resolves");
+    let fields = result.as_dict().expect("resolved options");
+    assert_eq!(
+        fields.get("provider").map(VmValue::display).as_deref(),
+        Some(provider)
+    );
+    assert_eq!(
+        fields.get("model").map(VmValue::display).as_deref(),
+        Some(model_id)
+    );
+    llm_config::clear_user_overrides();
 }
 
 #[test]
