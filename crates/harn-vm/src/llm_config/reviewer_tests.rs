@@ -263,22 +263,15 @@ fn opus_with_openai_key_keeps_reviewer_below_absolute_ceiling() {
             intent: ComplementaryReviewerIntent::Critique,
             max_price_multiplier: Some(3.0),
             min_price_cap_per_mtok: None,
-            max_price_cap_per_mtok: Some(0.1),
+            max_price_cap_per_mtok: Some(0.000_000_001),
         },
         |provider| provider == "anthropic" || provider == "openai",
     );
-    if too_low_ceiling.fallback {
-        assert_eq!(
-            too_low_ceiling.fallback_code.as_deref(),
-            Some("no_diff_family_within_price")
-        );
-    } else {
-        let low_cost = too_low_ceiling
-            .estimated_incremental_cost
-            .as_ref()
-            .expect("priced reviewer under a cap");
-        assert!(low_cost.total_per_mtok <= 0.1, "{too_low_ceiling:?}");
-    }
+    assert!(too_low_ceiling.fallback, "{too_low_ceiling:?}");
+    assert_eq!(
+        too_low_ceiling.fallback_code.as_deref(),
+        Some("no_diff_family_within_price")
+    );
 }
 
 #[test]
