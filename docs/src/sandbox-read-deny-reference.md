@@ -140,6 +140,6 @@ agent-handler denial shape (`gate: "process_sandbox"`, `retryable: false`). Its
 `sandbox.denial_reporting` field is always present. `inferred_only` means a
 null `denial` is not evidence that every child operation was allowed;
 `backend_unavailable` and `not_enforced` name the other two coverage states.
-Current Landlock, seatbelt, and AppContainer integrations cannot report a
+Current Landlock and seatbelt integrations cannot report a
 resource or operation directly, so inferred records use `resource: null` and
 `operation: "unknown"` rather than parsing tool- or locale-specific prose.

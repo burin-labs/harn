@@ -36,14 +36,11 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
     let resolved = resolved.unwrap();
     let env: std::collections::BTreeMap<_, _> = resolved.env.into_iter().collect();
     let decision = rustc_wrapper::rustc_wrapper_decision(&policy, &cwd, &config.env);
-    // Cargo does not yet build inside the Windows container at all, so there
-    // the probe cannot tell, and an unproven wrapper is switched off too.
-    let expected = if cfg!(windows) {
-        rustc_wrapper::RustcWrapperDisposition::Unmeasured
-    } else {
-        rustc_wrapper::RustcWrapperDisposition::Disabled
-    };
-    assert_eq!(decision.disposition, expected, "{decision:?}");
+    assert_eq!(
+        decision.disposition,
+        rustc_wrapper::RustcWrapperDisposition::Disabled,
+        "{decision:?}"
+    );
     assert!(decision.disables(), "{decision:?}");
     assert!(
         decision.wrapper.as_deref().is_some_and(|wrapper| wrapper
