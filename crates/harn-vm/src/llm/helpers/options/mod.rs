@@ -7,8 +7,9 @@
 //! provider-native tool shaping, [`defaults`] active-step/model-role defaults,
 //! [`system_prompt`] system-prompt assembly and context fragments,
 //! [`reminders`] system-reminder rendering, [`thinking`] reasoning/thinking
-//! options, [`tool_search`] tool-search options, and [`extract`] the
-//! `extract_llm_options` orchestrator that drives them.
+//! options, [`tool_search`] tool-search options, [`resolution`] the per-call
+//! resolution receipt, and [`extract`] the `extract_llm_options` orchestrator
+//! that drives them.
 
 mod defaults;
 mod directive_placement;
@@ -19,6 +20,7 @@ mod json;
 mod model_resolution;
 mod output;
 mod reminders;
+mod resolution;
 mod routing;
 mod system_prompt;
 mod thinking;
@@ -35,6 +37,8 @@ pub(crate) use reminders::{
 pub(crate) use reminders::{strip_directive_commit_metadata, tracked_directive_envelope_message};
 pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 
+#[cfg(test)]
+mod cache_default_tests;
 #[cfg(test)]
 mod capability_admission_tests;
 #[cfg(test)]

@@ -88,9 +88,36 @@ pub(crate) fn resolve_thinking_config(
     model: &str,
     caps: &crate::llm::capabilities::Capabilities,
 ) -> Result<crate::llm::api::ThinkingConfig, VmError> {
+    resolve_thinking_config_with_source(options, model_defaults, provider, model, caps)
+        .map(|(thinking, _)| thinking)
+}
+
+/// [`resolve_thinking_config`], plus which configuration layer decided it,
+/// for the per-call resolution receipt.
+pub(crate) fn resolve_thinking_config_with_source(
+    options: Option<&crate::value::DictMap>,
+    model_defaults: &std::collections::BTreeMap<String, toml::Value>,
+    provider: &str,
+    model: &str,
+    caps: &crate::llm::capabilities::Capabilities,
+) -> Result<(crate::llm::api::ThinkingConfig, &'static str), VmError> {
     let policy =
         crate::llm::reasoning_policy::resolve_for_llm_call(options, provider, model, caps)?;
+    let has = |key: &str| options.is_some_and(|opts| opts.contains_key(key));
+    // Same precedence as `resolve_thinking_config_with_policy`.
+    let source = if has("effort") {
+        "caller.effort"
+    } else if policy.is_some() {
+        "reasoning_policy"
+    } else if has("thinking") {
+        "caller.thinking"
+    } else if model_defaults.contains_key("reasoning_effort") {
+        "catalog.model_defaults.reasoning_effort"
+    } else {
+        "unset"
+    };
     resolve_thinking_config_with_policy(options, model_defaults, provider, model, caps, policy)
+        .map(|thinking| (thinking, source))
 }
 
 /// Resolve catalog defaults without inheriting ambient session policy.

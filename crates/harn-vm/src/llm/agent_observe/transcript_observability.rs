@@ -568,6 +568,7 @@ pub(super) fn dump_llm_request(
         "route_policy": opts.route_policy.as_label(),
         "fallback_chain": opts.fallback_chain.clone(),
         "routing_decision": opts.routing_decision.clone(),
+        "resolution": opts.resolution,
     });
     project_call_stage(&mut request_event, opts.call_stage.as_deref());
     if verbose_llm_transcript_enabled() {
