@@ -53,7 +53,7 @@ on:
         type: boolean
         default: false
       benchmark_source_ref:
-        description: 'Optional immutable source ref to build under current-main benchmark policy.'
+        description: 'Optional immutable source ref to build under the policy from the dispatched workflow ref.'
         required: false
         type: string
         default: ''
@@ -83,7 +83,7 @@ permissions:
   packages: read
 
 concurrency:
-  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
+  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
   # Candidate runs are push runs, so they get a run-qualified lane and a later
   # main push can never cancel a release candidate. An immutable-source
   # benchmark has a source-qualified lane. Setup may resolve a push to a no-op;
@@ -229,16 +229,12 @@ jobs:
                 echo "::error::benchmark_source_ref and benchmark_source_sha must be provided together"
                 exit 1
               fi
-              if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
-                echo "::error::an explicit benchmark source must be dispatched from main so current policy is authoritative (got ${REF_TYPE}/${REF_NAME})"
-                exit 1
-              fi
               if [[ ! "$INPUT_BENCHMARK_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
                 echo "::error::benchmark_source_sha must be an exact lowercase 40-hex commit"
                 exit 1
               fi
               REF="$INPUT_BENCHMARK_SOURCE_REF"
-              echo "::notice::Current policy will benchmark immutable source ${REF} at ${INPUT_BENCHMARK_SOURCE_SHA}."
+              echo "::notice::Policy from ${REF_TYPE}/${REF_NAME} will benchmark immutable source ${REF} at ${INPUT_BENCHMARK_SOURCE_SHA}."
             fi
             BUILD_MODE=benchmark
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE" "$INPUT_TARGETS")"
