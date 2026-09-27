@@ -27,17 +27,14 @@ pub struct InferenceBoundary {
 /// environment; an unconfigured standalone Harn run keeps its existing policy.
 pub const HOST_BOUNDARY_ENV: &str = "HARN_INFERENCE_BOUNDARY_JSON";
 
-fn host_boundary() -> Option<InferenceBoundary> {
+fn host_boundary() -> Result<Option<InferenceBoundary>, String> {
     let raw = crate::stdlib::process::session_env_var(HOST_BOUNDARY_ENV)
-        .unwrap_or_else(|_| Some(String::new()))?;
-    Some(parse_host_boundary(&raw))
+        .map_err(|_| "inference_boundary.host_environment_unavailable".to_string())?;
+    raw.as_deref().map(parse_host_boundary).transpose()
 }
 
-fn parse_host_boundary(raw: &str) -> InferenceBoundary {
-    serde_json::from_str(raw).unwrap_or(InferenceBoundary {
-        reach: InferenceReach::LocalOnly,
-        allow_training_discounts: false,
-    })
+fn parse_host_boundary(raw: &str) -> Result<InferenceBoundary, String> {
+    serde_json::from_str(raw).map_err(|_| "inference_boundary.host_boundary_malformed".to_string())
 }
 
 thread_local! {
@@ -81,7 +78,11 @@ pub(crate) fn meet(
 }
 
 pub(crate) fn effective(requested: Option<InferenceBoundary>) -> Option<InferenceBoundary> {
-    meet(meet(host_boundary(), current_ambient_boundary()), requested)
+    let host = host_boundary().unwrap_or(Some(InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    }));
+    meet(meet(host, current_ambient_boundary()), requested)
 }
 
 pub(crate) fn parse_vm_value(value: &VmValue) -> Result<InferenceBoundary, VmError> {
@@ -200,6 +201,9 @@ pub(crate) fn preflight(
     provider: &str,
     model: &str,
 ) -> Result<Option<&'static str>, String> {
+    // An explicitly supplied but malformed host ceiling is a refusal even
+    // when the resolved model is local; no fallback may mask bad authority.
+    host_boundary()?;
     let Some(boundary) = effective(boundary) else {
         return Ok(None);
     };
@@ -226,12 +230,10 @@ mod tests {
 
     #[test]
     fn malformed_host_ceiling_fails_closed() {
-        assert_eq!(
-            parse_host_boundary(r#"{"reach":"unexpected","allow_training_discounts":true}"#),
-            InferenceBoundary {
-                reach: InferenceReach::LocalOnly,
-                allow_training_discounts: false,
-            }
+        assert!(
+            parse_host_boundary(r#"{"reach":"unexpected","allow_training_discounts":true}"#)
+                .unwrap_err()
+                .contains("host_boundary_malformed")
         );
     }
 
