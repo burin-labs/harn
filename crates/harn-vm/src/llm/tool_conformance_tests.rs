@@ -1340,6 +1340,11 @@ fn report_satisfies_tool_probe_when_text_fallback_passes() {
         ToolProbeEvidenceSource::SavedResponse
     );
     assert!(!report_satisfies_required_probe(&report, "tool_probe"));
+    let mut legacy = serde_json::to_value(&report).unwrap();
+    legacy.as_object_mut().unwrap().remove("evidence_source");
+    legacy["schema_version"] = serde_json::json!(1);
+    let legacy: ToolConformanceReport = serde_json::from_value(legacy).unwrap();
+    assert!(!report_satisfies_required_probe(&legacy, "tool_probe"));
     report.evidence_source = ToolProbeEvidenceSource::LiveRequest;
     assert!(report_satisfies_required_probe(&report, "tool_probe"));
     assert!(!report_satisfies_required_probe(
