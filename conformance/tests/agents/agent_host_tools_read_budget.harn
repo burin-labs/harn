@@ -10,10 +10,7 @@ struct CommandIdentity {
 }
 
 fn read_content(result: any) -> string {
-  const parsed: ReadContent = schema_expect(
-    json_parse(result.rendered_result),
-    schema_of(ReadContent),
-  )
+  const parsed = schema_expect(json_parse(result.rendered_result), schema_of(ReadContent))
   return parsed.content
 }
 
@@ -72,7 +69,7 @@ pipeline main(harness: Harness) {
     tools,
   )
   assert(command.ok)
-  const command_result: CommandIdentity = schema_expect(
+  const command_result = schema_expect(
     json_parse(command.rendered_result),
     schema_of(CommandIdentity),
   )
