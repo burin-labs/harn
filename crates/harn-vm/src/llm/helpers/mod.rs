@@ -584,7 +584,10 @@ mod tests {
 
         let resolved = vm_resolve_model(&None, "openrouter");
 
-        assert_eq!(resolved, "anthropic/claude-sonnet-4.6");
+        let row = crate::llm_config::model_catalog_entry_for_route("openrouter", &resolved)
+            .expect("OpenRouter default must name a catalog route");
+        assert_eq!(row.provider, "openrouter");
+        assert!(!row.deprecated);
     }
 
     #[test]
