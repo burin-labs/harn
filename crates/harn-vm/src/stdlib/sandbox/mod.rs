@@ -89,7 +89,7 @@ mod locked_append;
 mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
-mod paths;
+pub(crate) mod paths;
 mod process_config;
 mod process_output;
 mod read_roots;

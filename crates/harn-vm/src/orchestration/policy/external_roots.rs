@@ -13,7 +13,7 @@ use std::path::Path;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::approval_rules::normalize_path;
+use crate::stdlib::sandbox::paths::normalize_for_policy;
 use crate::tool_annotations::SideEffectLevel;
 use crate::workspace_path::WorkspacePathInfo;
 
@@ -91,7 +91,7 @@ impl ExternalRoot {
     }
 
     fn normalized(&self) -> std::path::PathBuf {
-        normalize_path(Path::new(&self.path))
+        normalize_for_policy(Path::new(&self.path))
     }
 }
 
@@ -150,11 +150,15 @@ impl<'de> Deserialize<'de> for ExternalRoot {
 
 /// The root that governs `path`: the deepest entry containing it, so a host
 /// can carve a read-only subtree out of a writable root or the reverse.
+///
+/// Both sides resolve the way the OS sandbox resolves its roots: through the
+/// longest existing ancestor's real path, so a symlinked spelling such as
+/// `/tmp` and `/private/tmp` names one root rather than slipping past it.
 pub(crate) fn governing_root<'a>(
     path: &str,
     roots: &'a [ExternalRoot],
 ) -> Option<&'a ExternalRoot> {
-    let path = normalize_path(Path::new(path));
+    let path = normalize_for_policy(Path::new(path));
     roots
         .iter()
         .map(|root| (root, root.normalized()))
@@ -330,5 +334,31 @@ mod tests {
             Some(&ExternalRoot::read_write("/opt/tree"))
         );
         assert_eq!(governing_root("/opt/treehouse/a.txt", &roots), None);
+    }
+
+    /// A root and a path that name one directory through different spellings
+    /// (a symlink, or macOS `/tmp` against `/private/tmp`) still match, in both
+    /// directions, including for a file that does not exist yet.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_spelling_of_a_root_is_the_same_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).expect("real dir");
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(&real, &alias).expect("symlink");
+        let by_alias = vec![ExternalRoot::read(alias.to_string_lossy())];
+        let by_real = vec![ExternalRoot::read(real.to_string_lossy())];
+        let real_file = real.join("new.txt");
+        let alias_file = alias.join("new.txt");
+
+        assert_eq!(
+            governing_root(&real_file.to_string_lossy(), &by_alias),
+            Some(&by_alias[0])
+        );
+        assert_eq!(
+            governing_root(&alias_file.to_string_lossy(), &by_real),
+            Some(&by_real[0])
+        );
     }
 }
