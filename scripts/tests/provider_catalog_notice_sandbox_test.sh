@@ -9,7 +9,19 @@ fi
 export HARN_LLM_CALLS_DISABLED=1
 
 tmp_root="$(mktemp -d)"
-trap 'rm -rf "$tmp_root"' EXIT
+cleanup() {
+  local status=$?
+  if (( status != 0 )); then
+    for phase in no-grants notice-only read-only granted; do
+      if [[ -f "$tmp_root/$phase.err" ]]; then
+        printf '%s stderr:\n' "$phase" >&2
+        tail -n 8 "$tmp_root/$phase.err" >&2
+      fi
+    done
+  fi
+  rm -rf "$tmp_root"
+}
+trap cleanup EXIT
 tmp_root="$(cd "$tmp_root" && pwd -P)"
 notice_root="$tmp_root/notice"
 extraction_root="$tmp_root/extraction"
