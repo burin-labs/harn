@@ -157,7 +157,7 @@ pub(crate) fn prepare_guardian(
             &payload_spec.args,
             RULESET_FD,
         )
-        .map_err(|error| ProcessError::SandboxSetup(format!("{error:?}")))?;
+        .map_err(ProcessError::sandbox_setup)?;
         let prepared = super::real::prepare_command_from(
             &payload_spec,
             Some(cleanup_token.clone()),

@@ -1,0 +1,52 @@
+/**
+ * `harness.system.sandbox_confinement()` states, before any spawn, whether
+ * this host can confine child processes, and the exact value an `os_hardened`
+ * spawn is refused with when it cannot. The status and the real refusal must
+ * agree on every host: a Linux kernel without Landlock refuses, one with it
+ * confines. Both spawn paths are checked, because hostlib's `run_command` used
+ * to flatten the typed refusal into a `backend_error` string.
+ */
+fn os_hardened_outcome(harness: Harness, attempt: any) -> any {
+  return harness.runtime.with_execution_policy(
+    {sandbox_profile: "os_hardened"},
+    { ->
+      const outcome = try {
+        attempt()
+        "ran"
+      } catch (refused) {
+        refused
+      }
+      outcome
+    },
+  )
+}
+
+fn agrees(status: dict, outcome: any) -> bool {
+  if status.confines_processes {
+    return outcome == "ran"
+  }
+  return outcome == status.os_hardened_refusal
+}
+
+pipeline default(harness: Harness) {
+  const status = harness.system.sandbox_confinement()
+  harness.stdio.println(status.schema)
+  harness.stdio.println(status.backend == harness.system.sandbox_active_backend())
+  // Refusal present exactly when the host cannot confine.
+  harness.stdio.println(status.confines_processes == (status.os_hardened_refusal == nil))
+  const argv = if harness.system.platform().os == "windows" {
+    ["cmd", "/C", "echo ok"]
+  } else {
+    ["printf", "ok"]
+  }
+  const hostlib = os_hardened_outcome(
+    harness,
+    { -> harness.tools.run_command({argv: argv, cwd: harness.fs.workspace_temp_dir()}) },
+  )
+  harness.stdio.println(agrees(status, hostlib))
+  const process = os_hardened_outcome(
+    harness,
+    { -> harness.process.run({program: argv[0], args: argv[1:len(argv)]}) },
+  )
+  harness.stdio.println(agrees(status, process))
+}

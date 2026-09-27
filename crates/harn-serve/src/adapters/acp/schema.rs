@@ -136,6 +136,12 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
             "promptResultExtensionFields": HARN_PROMPT_RESULT_EXTENSION_FIELDS,
             "stagedWritesPendingFields": HARN_STAGED_WRITES_PENDING_FIELDS,
             "stagedWriteFields": HARN_STAGED_WRITE_FIELDS,
+            // Whether this engine's host can confine the commands it spawns,
+            // and the refusal an `os_hardened` spawn gets when it cannot. A
+            // client reads it once at bring-up to warn before the first turn.
+            "sandboxConfinement": harn_vm::llm::vm_value_to_json(
+                &harn_vm::process_sandbox::host_confinement(),
+            ),
             // ACP `ExtNotification` methods this server emits beyond the
             // canonical `session/update` stream. Clients that recognize
             // the method consume the payload; clients that don't MUST
@@ -550,4 +556,27 @@ pub(super) fn prompt_messages_for_content(content: &[serde_json::Value]) -> Vec<
         "role": "user",
         "content": message_content,
     })]
+}
+
+#[cfg(test)]
+mod tests {
+    /// A client warns at bring-up from this field, so it must be the runtime's
+    /// own confinement fact and must name the refusal exactly when it applies.
+    #[test]
+    fn initialize_meta_carries_the_hosts_sandbox_confinement() {
+        let meta = super::harn_acp_extension_meta();
+        let confinement = &meta["harn"]["sandboxConfinement"];
+        assert_eq!(
+            confinement,
+            &harn_vm::llm::vm_value_to_json(&harn_vm::process_sandbox::host_confinement())
+        );
+        assert_eq!(
+            confinement["schema"],
+            harn_vm::process_sandbox::SANDBOX_CONFINEMENT_SCHEMA
+        );
+        let confines = confinement["confines_processes"]
+            .as_bool()
+            .expect("confines_processes is a boolean");
+        assert_eq!(confinement["os_hardened_refusal"].is_null(), confines);
+    }
 }

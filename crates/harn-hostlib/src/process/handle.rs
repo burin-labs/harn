@@ -284,6 +284,11 @@ pub enum ProcessError {
     /// Sandbox setup (e.g. landlock policy assembly) failed.
     #[error("sandbox setup failed: {0}")]
     SandboxSetup(String),
+    /// The spawn required a platform sandbox mechanism this host cannot
+    /// supply. Harn's typed refusal is carried whole, so a script catches the
+    /// same value a spawn made by the VM itself throws.
+    #[error("{0}")]
+    SandboxMechanismUnavailable(Box<harn_vm::process_sandbox::SandboxMechanismUnavailable>),
     /// Sandbox rejected the supplied cwd.
     #[error("sandbox cwd rejected: {0}")]
     SandboxCwd(String),
@@ -330,6 +335,17 @@ pub enum ProcessError {
         /// see which of its own options produced the refusal.
         mode: &'static str,
     },
+}
+
+impl ProcessError {
+    /// A sandbox setup failure. A missing platform mechanism stays typed;
+    /// anything else keeps its diagnostic text.
+    pub(crate) fn sandbox_setup(error: harn_vm::VmError) -> Self {
+        match error.sandbox_mechanism_unavailable() {
+            Some(refusal) => Self::SandboxMechanismUnavailable(Box::new(refusal.clone())),
+            None => Self::SandboxSetup(format!("{error:?}")),
+        }
+    }
 }
 
 use std::cell::RefCell;

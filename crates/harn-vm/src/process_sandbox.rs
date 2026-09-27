@@ -21,7 +21,7 @@ pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_filesystem_available,
     active_backend_filesystem_mechanism, active_backend_name, active_workspace_process_env,
     apply_active_rustc_wrapper_policy, check_fs_path_scope, command_output, conformance,
-    deterministic_message_locale_env, enforce_process_cwd, enforcement,
+    deterministic_message_locale_env, enforce_process_cwd, enforcement, host_confinement,
     infer_process_sandbox_mechanism, is_process_sandbox_signal, process_spawn_error,
     process_violation_error, push_process_sandbox_scope, render_policy_root, rustc_wrapper,
     session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
@@ -30,7 +30,7 @@ pub use crate::stdlib::sandbox::{
     ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
     ProcessSandboxReportingContext, ProcessSandboxScope, ProcessSandboxScopeGuard,
     SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
-    SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
+    SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV, SANDBOX_CONFINEMENT_SCHEMA,
 };
 
 /// The subcommand the namespace helper is invoked as, and the flags that

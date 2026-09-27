@@ -527,6 +527,9 @@ pub(super) fn process_exec_stdin(
 
 fn contextualize_process_error(label: &str, stage: &str, error: VmError) -> VmError {
     match error {
+        // Typed: a `catch` branches on its fields, so prefixing a stage label
+        // would turn it back into text only a substring match could read.
+        refusal @ VmError::SandboxMechanismUnavailable(_) => refusal,
         VmError::CategorizedError { message, category } => VmError::CategorizedError {
             message: format!("host_call {label} {stage}: {message}"),
             category,

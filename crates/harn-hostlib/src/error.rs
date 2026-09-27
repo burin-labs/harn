@@ -101,6 +101,16 @@ pub enum HostlibError {
         message: String,
     },
 
+    /// A spawn required a platform sandbox mechanism this host cannot supply.
+    /// Converts to the VM's own typed refusal, never to a message string.
+    #[error("{refusal}")]
+    SandboxMechanismUnavailable {
+        /// Fully-qualified builtin name.
+        builtin: &'static str,
+        /// Harn's typed refusal.
+        refusal: Box<harn_vm::process_sandbox::SandboxMechanismUnavailable>,
+    },
+
     /// A host capability cannot preserve the active sandbox contract.
     #[error("{message}")]
     SandboxUnsupported {
@@ -141,6 +151,7 @@ impl HostlibError {
             | HostlibError::NativeSecretStoreUnavailable { builtin, .. }
             | HostlibError::ProcessSpawn { builtin, .. }
             | HostlibError::SandboxViolation { builtin, .. }
+            | HostlibError::SandboxMechanismUnavailable { builtin, .. }
             | HostlibError::SandboxUnsupported { builtin, .. }
             | HostlibError::CatastrophicFloor { builtin, .. } => builtin,
         }
@@ -149,6 +160,14 @@ impl HostlibError {
 
 impl From<HostlibError> for VmError {
     fn from(err: HostlibError) -> VmError {
+        // A missing sandbox mechanism is the VM's own typed error; the `catch`
+        // value is its structured refusal, identical to a VM-made spawn's.
+        let err = match err {
+            HostlibError::SandboxMechanismUnavailable { refusal, .. } => {
+                return VmError::SandboxMechanismUnavailable(refusal);
+            }
+            other => other,
+        };
         // Surface as a `Thrown` dict so Harn `try`/`catch` can pattern-match
         // on `kind`, `builtin`, and `message`. This matches how the existing
         // `host_call` error path shapes its exceptions.
@@ -161,6 +180,7 @@ impl From<HostlibError> for VmError {
             HostlibError::ProcessSpawn { kind, .. } => *kind,
             HostlibError::SandboxViolation { .. } => "tool_rejected",
             HostlibError::SandboxUnsupported { .. } => "sandbox_unsupported",
+            HostlibError::SandboxMechanismUnavailable { .. } => "tool_rejected",
             HostlibError::CatastrophicFloor { .. } => "catastrophic_floor",
         };
         // Carry the offending path on sandbox violations so `catch` blocks

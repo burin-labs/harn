@@ -183,7 +183,7 @@ pub(crate) fn prepare_command(
 ) -> Result<PreparedSpawn, ProcessError> {
     validate_program(spec)?;
     let command = process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
-        .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+        .map_err(ProcessError::sandbox_setup)?;
     prepare_command_from(spec, cleanup_token, command)
 }
 
