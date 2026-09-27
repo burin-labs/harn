@@ -45,7 +45,6 @@ pub(crate) async fn vm_call_completion_full(
         return Ok(mock_completion_response(prefix, suffix));
     }
 
-    crate::llm::ensure_real_llm_allowed(&opts.provider)?;
     let controls = super::data_controls::resolve(
         &opts.provider,
         &opts.model,
@@ -59,6 +58,7 @@ pub(crate) async fn vm_call_completion_full(
         &controls.receipt,
     )
     .map_err(VmError::Runtime)?;
+    crate::llm::ensure_real_llm_allowed(&opts.provider)?;
 
     let resolved = crate::llm_config::provider_config(&opts.provider);
     let completion_endpoint = resolved.and_then(|p| p.completion_endpoint);
