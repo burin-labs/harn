@@ -118,6 +118,9 @@ pub struct DataControlsReceipt {
     /// train would read as safe if this reported the provider's line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Governing rule when an embedder supplied an inference boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_boundary_rule: Option<String>,
 }
 
 impl DataControlsReceipt {
@@ -242,6 +245,7 @@ pub(crate) fn resolve(
                 control_scope: declaration.as_ref().map(|entry| entry.control_scope),
                 applied: Vec::new(),
                 note: route_note(declaration.and_then(|entry| entry.note)),
+                inference_boundary_rule: None,
             },
         };
     }
@@ -259,6 +263,7 @@ pub(crate) fn resolve(
                 control_scope: None,
                 applied: Vec::new(),
                 note: route_note(None),
+                inference_boundary_rule: None,
             },
         };
     };
@@ -301,6 +306,7 @@ pub(crate) fn resolve(
             control_scope: Some(declaration.control_scope),
             applied,
             note: route_note(declaration.note),
+            inference_boundary_rule: None,
         },
     }
 }

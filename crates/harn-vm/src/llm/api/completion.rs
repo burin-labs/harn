@@ -46,11 +46,14 @@ pub(crate) async fn vm_call_completion_full(
     }
 
     crate::llm::ensure_real_llm_allowed(&opts.provider)?;
+    let boundary_rule =
+        super::inference_boundary::preflight(opts.inference_boundary, &opts.provider, &opts.model)
+            .map_err(VmError::Runtime)?;
 
     let resolved = crate::llm_config::provider_config(&opts.provider);
     let completion_endpoint = resolved.and_then(|p| p.completion_endpoint);
 
-    match completion_endpoint.as_deref() {
+    let mut result = match completion_endpoint.as_deref() {
         Some("/api/generate") => {
             reject_completion_options(
                 opts,
@@ -81,7 +84,9 @@ pub(crate) async fn vm_call_completion_full(
             vm_call_completion_openai_style(opts, prefix, suffix).await
         }
         None => vm_call_completion_fallback(opts, prefix, suffix).await,
-    }
+    }?;
+    result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
+    Ok(result)
 }
 
 fn reject_completion_options(

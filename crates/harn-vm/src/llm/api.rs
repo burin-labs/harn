@@ -10,6 +10,7 @@ mod context_window;
 pub mod data_controls;
 mod dialect;
 pub(crate) mod errors;
+mod inference_boundary;
 mod isolated_request;
 mod ollama;
 mod openai_normalize;
@@ -49,6 +50,7 @@ pub(crate) use errors::{
 /// envelope. Public so the protocol-artifact generator can project them into
 /// every host binding rather than leaving `kind`/`reason` as bare strings.
 pub use errors::{LlmErrorKind, LlmErrorReason};
+pub(crate) use inference_boundary::InferenceBoundary;
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;
 pub use ollama::{
@@ -478,6 +480,12 @@ async fn vm_call_llm_full_inner_request(
     }
 
     super::ensure_real_llm_allowed(&request.provider)?;
+    let boundary_rule = inference_boundary::preflight(
+        request.inference_boundary,
+        &request.provider,
+        &request.model,
+    )
+    .map_err(VmError::Runtime)?;
     request.emit_reminder_lifecycle();
     observed.record_provider_dispatch();
 
@@ -485,6 +493,7 @@ async fn vm_call_llm_full_inner_request(
     // This layer executes exactly one route so no attempt can bypass the
     // canonical ledger, quarantine, or exhaustion contract.
     let mut result = vm_call_llm_api(request, delta_tx).await?;
+    result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
     super::mock::mark_live_after_mock_prefix(request, &mut result);
 
     if replay_mode == LlmReplayMode::Record {
@@ -542,6 +551,12 @@ async fn vm_call_llm_full_inner_offthread(
     }
 
     super::ensure_real_llm_allowed(&request.provider).map_err(OffthreadLlmError::from_vm_error)?;
+    let boundary_rule = inference_boundary::preflight(
+        request.inference_boundary,
+        &request.provider,
+        &request.model,
+    )
+    .map_err(OffthreadLlmError::from_display_message)?;
     observed.record_provider_dispatch();
 
     // Keep the off-thread transport primitive single-route as well. The caller
@@ -549,6 +564,7 @@ async fn vm_call_llm_full_inner_offthread(
     let mut result = vm_call_llm_api(request, delta_tx)
         .await
         .map_err(OffthreadLlmError::from_vm_error)?;
+    result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
     super::mock::mark_live_after_mock_prefix(request, &mut result);
 
     if replay_mode == LlmReplayMode::Record {

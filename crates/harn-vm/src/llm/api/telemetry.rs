@@ -114,6 +114,10 @@ pub struct ProviderTelemetry {
     /// ceiling, and an inline receipt pushes that frame over it. The box is
     /// serde-transparent, so the wire and VM shapes are unchanged.
     pub data_controls: Option<Box<crate::llm::api::data_controls::DataControlsReceipt>>,
+    /// The catalog rule admitting this concrete route under the caller's
+    /// inference boundary. Missing means no boundary was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_boundary_rule: Option<String>,
     /// Total server-side wall clock (Ollama `total_duration`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_total_ms: Option<u64>,
@@ -276,6 +280,7 @@ impl ProviderTelemetry {
             serving_fingerprint,
             cache_accounting_declared,
             data_controls,
+            inference_boundary_rule,
             server_total_ms,
             server_load_ms,
             server_prompt_eval_ms,
@@ -307,6 +312,7 @@ impl ProviderTelemetry {
             && serving_fingerprint.is_none()
             && cache_accounting_declared.is_none()
             && data_controls.is_none()
+            && inference_boundary_rule.is_none()
             && server_total_ms.is_none()
             && server_load_ms.is_none()
             && server_prompt_eval_ms.is_none()
@@ -591,6 +597,9 @@ impl ProviderTelemetry {
                 arcstr::ArcStr::from("data_controls"),
                 data_controls.as_vm_dict(),
             );
+        }
+        if let Some(ref rule) = self.inference_boundary_rule {
+            dict.put_str("inference_boundary_rule", rule);
         }
         insert_opt_u64(&mut dict, "server_total_ms", self.server_total_ms);
         insert_opt_u64(&mut dict, "server_load_ms", self.server_load_ms);

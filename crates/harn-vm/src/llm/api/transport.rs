@@ -365,7 +365,17 @@ pub(crate) async fn vm_call_llm_api_with_body(
         crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
         opts.data_controls,
     );
-    let data_controls_receipt = data_controls.receipt.clone();
+    let mut data_controls_receipt = data_controls.receipt.clone();
+    if let Some(boundary) = opts.inference_boundary {
+        let rule = super::inference_boundary::governing_rule(
+            boundary,
+            &opts.provider,
+            &opts.model,
+            &data_controls_receipt,
+        )
+        .map_err(VmError::Runtime)?;
+        data_controls_receipt.inference_boundary_rule = Some(rule.to_string());
+    }
     let mut result = vm_call_llm_api_with_body_inner(
         opts,
         delta_tx,
