@@ -3084,22 +3084,28 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) bills
-# empty native completions with no dispatchable tool calls in eval JSONL, so it
-# stays off the provider-native channel. Between the two TEXT-channel grammars
-# (`json` fenced-block vs `text` heredoc), an empirical A/B (2026-06-21, real
-# Fireworks calls, 3 samples per arm, task = author a Zig file heavy in `\\`
-# multiline-string literals) showed `json` corrupts the file body in 3/3 runs
-# (doubled `\\` -> `\\\\` multiline prefixes, escaped quotes `\"name\"`, and one
-# run leaked literal `\n`/`\"` for the whole file) while `text`/heredoc emitted
-# byte-clean Zig in 3/3 because a JSON string arg forces the model to escape
-# the backslashes the Zig source already needs, and gpt-oss double-escapes them.
-# Tool-call dispatch was 3/3 on BOTH channels (no heredoc-wrapper regression).
-# Pin to `text` so escape-free heredoc bodies carry source verbatim.
+# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) uses the
+# provider-native tool channel, re-measured 2026-09-27 (burin-code#9352):
+#   * Agent eval, Burin canonical-25 tune cells, N=5, same build, only the
+#     channel changed. Native vs fenced `json`: visible reasoning-voice prose
+#     in main-agent replies 0/19 trials vs 4/19 (21%, 95% CI [5%, 42%]); pass
+#     18/19 vs 16/20 measured; $0.27 vs $0.32. 224 native main-agent replies:
+#     202 carried a tool call, 0 were empty. The "bills empty native
+#     completions" failure that closed this channel in June did not recur.
+#   * Direct calls: 12/12 clean `tool_calls`, reasoning in `thinking`, empty
+#     visible text.
+# Residual risk, still open: a JSON string argument makes the model escape
+# backslashes. A backslash-heavy Zig body round-tripped byte-exact in 3 of 10
+# native calls (doubled `\`, a literal `\n`). The 2026-06-21 A/B saw the same
+# class on fenced `json` (0/3 clean) and a clean heredoc `text` channel (3/3),
+# so native is no worse than `json` here but worse than `text`. N=5 per cell
+# and no held-out cells. Revert trigger: backslash-heavy authoring regressions
+# on this route (zig cells) -> restore `native_tools = false` and
+# `preferred_tool_format = "text"`.
 [[provider.fireworks]]
 model_match = "accounts/fireworks/models/gpt-oss-*"
-native_tools = false
-preferred_tool_format = "text"
+native_tools = true
+preferred_tool_format = "native"
 text_tool_wire_format_supported = true
 supports_parallel_tool_calls = false
 requires_parallel_tool_calls_false = true
