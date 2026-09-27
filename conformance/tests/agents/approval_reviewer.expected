@@ -3,4 +3,5 @@ memo_identical_reused=true
 memo_changed_rule_called=true
 memo_other_target_called=true
 memo_other_reviewer_called=true
+memo_unavailable_not_cached=true
 approval_reviewer_ok

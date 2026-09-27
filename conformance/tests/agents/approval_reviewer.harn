@@ -5,7 +5,7 @@ import {
   approval_reviewer_for,
 } from "std/agent/approval_review"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
-import { llm_text, with_llm_script } from "std/testing"
+import { llm_error, llm_text, with_llm_script } from "std/testing"
 
 struct RunOutcome {
   success: bool
@@ -372,21 +372,18 @@ pipeline default(harness: Harness) {
   // A repeated refusal in one reviewer session needs one judgment. A
   // different target or a separately installed reviewer must still call the
   // model, or an approval could silently cross an authorization boundary.
+  const memo_verdict = llm_text(
+    "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this file\"}",
+  )
   with_llm_script(
     harness.llm,
     [
-      llm_text(
-        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this file\"}",
-      ),
-      llm_text(
-        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this file\"}",
-      ),
-      llm_text(
-        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this file\"}",
-      ),
-      llm_text(
-        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this file\"}",
-      ),
+      memo_verdict,
+      memo_verdict,
+      memo_verdict,
+      memo_verdict,
+      llm_error("reviewer temporarily unavailable"),
+      memo_verdict,
     ],
     { ->
       const policy = {reviewer: {provider: "mock", model: "mock"}}
@@ -416,6 +413,9 @@ pipeline default(harness: Harness) {
       const other_reviewer = approval_reviewer_for(harness, policy, goal)
       const other = other_reviewer(request)
       const other_count = len(harness.llm.mock_calls())
+      const recovery_request = request + {arguments: {path: "c.rs"}}
+      const unavailable = reviewer(recovery_request)
+      const recovered = reviewer(recovery_request)
       harness.stdio.println("memo_first_approved=" + to_string(first.approved && repeated.approved))
       harness.stdio.println("memo_identical_reused=" + to_string(repeated_count == first_count))
       harness.stdio.println(
@@ -429,6 +429,10 @@ pipeline default(harness: Harness) {
       harness.stdio.println(
         "memo_other_reviewer_called="
           + to_string(other_count == distinct_count + 1 && other.approved),
+      )
+      harness.stdio.println(
+        "memo_unavailable_not_cached="
+          + to_string(!unavailable.reviewer_answered && recovered.approved),
       )
     },
   )
