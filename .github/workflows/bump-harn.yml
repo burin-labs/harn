@@ -18,6 +18,10 @@ on:
         description: "Optional Harn tag to bump to (vX.Y.Z). Defaults to the latest published release."
         required: false
         type: string
+      source-revision:
+        description: "Optional exact Harn commit descended from the selected release tag. Advances an equal-tag source pin."
+        required: false
+        type: string
       orchestration-sha:
         description: "Exact Harn commit that owns this reusable workflow, setup action, and bump driver. Must match the caller's pinned uses SHA."
         required: true
@@ -173,6 +177,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           INPUT_VERSION: ${{ inputs.version }}
+          INPUT_SOURCE_REVISION: ${{ inputs.source-revision }}
         shell: bash
         # Bootstrap only: resolve which Harn to INSTALL. The target release
         # embeds std/bump/*, so the orchestration (including the already-current
@@ -189,6 +194,11 @@ jobs:
             echo "Expected tag like vX.Y.Z, got '${VERSION}'" >&2
             exit 1
           fi
+          if [ -n "${INPUT_SOURCE_REVISION}" ] \
+            && [[ ! "${INPUT_SOURCE_REVISION}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source-revision must be an exact lowercase 40-character commit SHA" >&2
+            exit 1
+          fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       # The orchestration script and checksum-verifying setup-harn action come
@@ -201,6 +211,7 @@ jobs:
           repository: burin-labs/harn
           ref: ${{ inputs.orchestration-sha }}
           path: .harn-runtime
+          fetch-depth: 0
           persist-credentials: false
 
       # Install the TARGET Harn through the checksum-verifying setup-harn
@@ -258,6 +269,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
+          HARN_BUMP_SOURCE_REVISION: ${{ inputs.source-revision }}
           HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}
           HARN_BUMP_FORMAT_COMMAND: ${{ inputs.format-command }}
           HARN_BUMP_VALIDATE_COMMAND: ${{ inputs.validate-command }}

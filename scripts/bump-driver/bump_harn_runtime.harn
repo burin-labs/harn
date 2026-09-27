@@ -63,6 +63,7 @@ pipeline main(harness: Harness) {
       token: token,
       branch: branch,
       base: base,
+      source_revision: env_or(harness.env, "HARN_BUMP_SOURCE_REVISION", ""),
       package_test_receipt: package_test_receipt(harness.fs, harness.env) ?? "",
     },
   )
@@ -81,6 +82,7 @@ pipeline main(harness: Harness) {
       readiness_max_attempts: env_int(harness.env, "HARN_BUMP_READINESS_ATTEMPTS", 1),
       readiness_interval_ms: env_int(harness.env, "HARN_BUMP_READINESS_INTERVAL_MS", 20000),
       readiness_timeout_ms: env_int(harness.env, "HARN_BUMP_READINESS_TIMEOUT_MS", 20000),
+      source_repo_dir: "../.harn-runtime",
     },
     harness.fs,
   )
@@ -91,6 +93,7 @@ pipeline main(harness: Harness) {
         branch: branch,
         base: base,
         tag: env_or(harness.env, "HARN_BUMP_TARGET_TAG", ""),
+        source_revision: env_or(harness.env, "HARN_BUMP_SOURCE_REVISION", ""),
         enable_auto_merge: enable_auto_merge,
         publish_failure_for_repair: publish_failure_for_repair,
       },
@@ -101,6 +104,7 @@ pipeline main(harness: Harness) {
   gha_write_output(harness, "outcome", receipt.outcome)
   gha_write_output(harness, "ok", gha_bool_output(receipt.ok))
   gha_write_output(harness, "target_tag", receipt.target_tag)
+  gha_write_output(harness, "target_revision", receipt.target_revision)
   gha_write_output(harness, "ready", gha_bool_output(receipt.ready))
   if receipt.pr_number != nil {
     gha_write_output(harness, "pr_number", gha_int_output(receipt.pr_number))

@@ -21,6 +21,7 @@ import {
   BumpCommitResult,
   BumpPrState,
   BumpPrUpsert,
+  BumpRevisionRelation,
 } from "std/bump/runtime"
 import { command_run } from "std/command"
 import { poll_until } from "std/poll"
@@ -31,6 +32,8 @@ pub type LiveBumpConfig = {
   release_repo: string,
   repo_dir: string,
   version_file: string,
+  revision_file: string,
+  source_repo_dir: string,
   refresh_command: string,
   validation_command: string,
   readiness_max_attempts: int,
@@ -84,6 +87,8 @@ pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
     release_repo: to_string(o.release_repo ?? "burin-labs/harn"),
     repo_dir: to_string(o.repo_dir ?? "."),
     version_file: to_string(o.version_file ?? ".harn-version"),
+    revision_file: to_string(o.revision_file ?? ".harn-revision"),
+    source_repo_dir: to_string(o.source_repo_dir ?? ""),
     refresh_command: to_string(o.refresh_command ?? "harn install --locked || harn install"),
     validation_command: to_string(o.validation_command ?? ""),
     readiness_max_attempts: to_int(o.readiness_max_attempts ?? 1) ?? 1,
@@ -152,14 +157,81 @@ fn __read_version(fs: HarnessFs?, path: string) -> string {
   return trim(fs.read_text(path))
 }
 
+fn __revision_relation(
+  tools: HarnessTools,
+  cfg: LiveBumpConfig,
+  previous: string,
+  target: string,
+  tag: string,
+) -> BumpRevisionRelation {
+  if regex_match(r"^[0-9a-f]{40}$", target) == nil {
+    throw "std/bump/live: source revision must be a full lowercase commit SHA"
+  }
+  if cfg.source_repo_dir == "" {
+    throw "std/bump/live: source_repo_dir is required for a source revision bump"
+  }
+  if !__git(tools, cfg.source_repo_dir, ["cat-file", "-e", "${target}^{commit}"]).success {
+    throw "std/bump/live: source revision ${target} is absent from the Harn checkout"
+  }
+  if !__git(tools, cfg.source_repo_dir, ["merge-base", "--is-ancestor", tag, target]).success {
+    throw "std/bump/live: source revision ${target} is not descended from ${tag}"
+  }
+  if !__git(
+    tools,
+    cfg.source_repo_dir,
+    ["merge-base", "--is-ancestor", target, "refs/remotes/origin/main"],
+  ).success {
+    throw "std/bump/live: source revision ${target} is not on Harn main"
+  }
+  if previous == "" {
+    return "untracked"
+  }
+  if regex_match(r"^[0-9a-f]{40}$", previous) == nil
+    || !__git(tools, cfg.source_repo_dir, ["cat-file", "-e", "${previous}^{commit}"]).success {
+    throw "std/bump/live: current source revision is invalid or absent from the Harn checkout"
+  }
+  if previous == target {
+    return "equal"
+  }
+  const forward = __git(
+    tools,
+    cfg.source_repo_dir,
+    ["merge-base", "--is-ancestor", previous, target],
+  )
+  if forward.success {
+    return "behind"
+  }
+  if forward.exit_code != 1 {
+    throw "std/bump/live: could not compare Harn source revisions"
+  }
+  const backward = __git(
+    tools,
+    cfg.source_repo_dir,
+    ["merge-base", "--is-ancestor", target, previous],
+  )
+  if backward.success {
+    return "ahead"
+  }
+  if backward.exit_code != 1 {
+    throw "std/bump/live: could not compare Harn source revisions"
+  }
+  return "diverged"
+}
+
 fn __apply_version(
   fs: HarnessFs?,
   tools: HarnessTools,
   cfg: LiveBumpConfig,
   target: string,
+  source_revision: string,
 ) -> VersionApplyResult {
-  const write = __write_version(fs, cfg.version_file, strip_v(target))
-  const refresh = if write.ok {
+  const version_write = __write_version(fs, cfg.version_file, strip_v(target))
+  const revision_write = if version_write.ok && source_revision != "" {
+    __write_version(fs, cfg.revision_file, source_revision)
+  } else {
+    {ok: true, detail: ""}
+  }
+  const refresh = if version_write.ok && revision_write.ok {
     __shell(tools, cfg.repo_dir, cfg.refresh_command)
   } else {
     nil
@@ -168,11 +240,13 @@ fn __apply_version(
   const changes = __working_changes(tools, cfg.repo_dir)
   const refreshed = changes.additions + changes.deletions
   return {
-    ok: write.ok && refresh_ok,
+    ok: version_write.ok && revision_write.ok && refresh_ok,
     changed: len(refreshed) > 0,
     refreshed: refreshed,
-    detail: if !write.ok {
-      "version-file write failed: " + write.detail
+    detail: if !version_write.ok {
+      "version-file write failed: " + version_write.detail
+    } else if !revision_write.ok {
+      "revision-file write failed: " + revision_write.detail
     } else if refresh_ok {
       "refresh ok"
     } else {
@@ -394,8 +468,17 @@ pub fn live_bump_adapter(
       }
     },
     read_current_version: fn() { return __read_version(fs, cfg.version_file) },
+    read_current_revision: fn() { return __read_version(fs, cfg.revision_file) },
+    revision_relation: fn(previous, target, tag) { return __revision_relation(
+      tools,
+      cfg,
+      previous,
+      target,
+      tag,
+    ) },
     base_sha: fn() { return trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? "") },
-    apply_version: fn(target) { return __apply_version(fs, tools, cfg, target) },
+    apply_version:
+      fn(target, revision) { return __apply_version(fs, tools, cfg, target, revision) },
     run_validation: fn() {
       if trim(cfg.validation_command) == "" {
         return {ok: true, steps: [], detail: "no validation command declared"}
