@@ -134,9 +134,13 @@ impl DecisionBackend for NativeDecisionBackend {
     ) -> Result<RawDecisionResponse, DecisionTransportError> {
         crate::llm::ensure_real_llm_allowed(request.provider)
             .map_err(|_| DecisionTransportError::AuthorityDenied)?;
-        let boundary_rule =
-            crate::llm::api::inference_boundary::preflight(None, request.provider, request.model)
-                .map_err(|diagnostic| DecisionTransportError::LocalAdmissionDenied { diagnostic })?;
+        let boundary_rule = crate::llm::api::inference_boundary::preflight(
+            None,
+            request.provider,
+            request.model,
+            &privacy_plan(&request).receipt,
+        )
+        .map_err(|diagnostic| DecisionTransportError::LocalAdmissionDenied { diagnostic })?;
         let body = request_body(&request)?;
         let definition = crate::llm_config::provider_config(request.provider)
             .ok_or_else(|| unsupported("decision provider is not configured"))?;

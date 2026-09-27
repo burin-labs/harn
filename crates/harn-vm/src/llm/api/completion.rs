@@ -46,9 +46,19 @@ pub(crate) async fn vm_call_completion_full(
     }
 
     crate::llm::ensure_real_llm_allowed(&opts.provider)?;
-    let boundary_rule =
-        super::inference_boundary::preflight(opts.inference_boundary, &opts.provider, &opts.model)
-            .map_err(VmError::Runtime)?;
+    let controls = super::data_controls::resolve(
+        &opts.provider,
+        &opts.model,
+        crate::llm_config::DataControlDialect::OpenAiSse,
+        crate::llm_config::DataPosture::Default,
+    );
+    let boundary_rule = super::inference_boundary::preflight(
+        opts.inference_boundary,
+        &opts.provider,
+        &opts.model,
+        &controls.receipt,
+    )
+    .map_err(VmError::Runtime)?;
 
     let resolved = crate::llm_config::provider_config(&opts.provider);
     let completion_endpoint = resolved.and_then(|p| p.completion_endpoint);

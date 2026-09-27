@@ -480,12 +480,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     super::ensure_real_llm_allowed(&request.provider)?;
-    let boundary_rule = inference_boundary::preflight(
-        request.inference_boundary,
-        &request.provider,
-        &request.model,
-    )
-    .map_err(VmError::Runtime)?;
+    let boundary_rule = inference_boundary::preflight_chat(request).map_err(VmError::Runtime)?;
     request.emit_reminder_lifecycle();
     observed.record_provider_dispatch();
 
@@ -551,12 +546,8 @@ async fn vm_call_llm_full_inner_offthread(
     }
 
     super::ensure_real_llm_allowed(&request.provider).map_err(OffthreadLlmError::from_vm_error)?;
-    let boundary_rule = inference_boundary::preflight(
-        request.inference_boundary,
-        &request.provider,
-        &request.model,
-    )
-    .map_err(OffthreadLlmError::from_display_message)?;
+    let boundary_rule = inference_boundary::preflight_chat(request)
+        .map_err(OffthreadLlmError::from_display_message)?;
     observed.record_provider_dispatch();
 
     // Keep the off-thread transport primitive single-route as well. The caller

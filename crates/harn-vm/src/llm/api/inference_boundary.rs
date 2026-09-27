@@ -218,6 +218,7 @@ pub(crate) fn preflight(
     boundary: Option<InferenceBoundary>,
     provider: &str,
     model: &str,
+    controls: &DataControlsReceipt,
 ) -> Result<Option<&'static str>, String> {
     // An explicitly supplied but malformed host ceiling is a refusal even
     // when the resolved model is local; no fallback may mask bad authority.
@@ -225,13 +226,39 @@ pub(crate) fn preflight(
     let Some(boundary) = effective(boundary) else {
         return Ok(None);
     };
-    let facts = super::data_controls::resolve(
-        provider,
-        model,
-        crate::llm_config::DataControlDialect::OpenAiSse,
-        crate::llm_config::DataPosture::Default,
+    governing_rule(boundary, provider, model, controls).map(Some)
+}
+
+pub(crate) fn preflight_chat(
+    request: &super::options::LlmRequestPayload,
+) -> Result<Option<&'static str>, String> {
+    // The shared HTTP transports apply the resolved data-control plan again
+    // at send time. Native/ACP adapters do not, so never credit a planned
+    // no-training control to one of those routes.
+    let shared_transport =
+        !matches!(
+            request.provider.as_str(),
+            "bedrock" | "azure_openai" | "vertex" | "gemini"
+        ) && !crate::llm::providers::AcpProvider::is_configured_acp(&request.provider);
+    let posture = if shared_transport {
+        request.data_controls
+    } else {
+        crate::llm_config::DataPosture::Default
+    };
+    let controls = super::data_controls::resolve(
+        &request.provider,
+        &request.model,
+        super::data_controls::dialect_of(
+            super::DialectContract::for_request(request).stream_protocol(),
+        ),
+        posture,
     );
-    governing_rule(boundary, provider, model, &facts.receipt).map(Some)
+    preflight(
+        request.inference_boundary,
+        &request.provider,
+        &request.model,
+        &controls.receipt,
+    )
 }
 
 #[cfg(test)]

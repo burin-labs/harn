@@ -177,12 +177,20 @@ pub(crate) fn training_refusal(
     provider: &str,
     model: &str,
     posture: DataPosture,
+    receipt: &DataControlsReceipt,
 ) -> Option<String> {
     if posture != DataPosture::StrictestAvailable {
         return None;
     }
     if crate::llm_config::effective_training_default(provider, model)
         != Some(crate::llm_config::TrainingDefault::Trains)
+    {
+        return None;
+    }
+    if receipt
+        .applied
+        .iter()
+        .any(|control| control.effect == "training")
     {
         return None;
     }
