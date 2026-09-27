@@ -379,6 +379,7 @@ pub enum LiveClientMode {
 }
 
 mod control_events;
+mod delegation;
 pub(crate) mod event_facts;
 mod host_injection;
 mod live_clients;
@@ -395,6 +396,7 @@ use text_tool_call_seq::{
 };
 
 pub use control_events::{control_events, record_control_event, ControlRecordOutcome};
+pub use delegation::open_session;
 pub use host_injection::*;
 pub use live_clients::*;
 pub use metadata::*;
@@ -869,10 +871,7 @@ pub fn open_child_session_with_actor(
     id: Option<String>,
     actor: Option<&str>,
 ) -> Result<String, SessionOpenError> {
-    let actor_chain = actor_chain(parent_id).map(|chain| match actor {
-        Some(actor) if !actor.trim().is_empty() => chain.pushed(actor.trim()),
-        _ => chain,
-    });
+    let actor_chain = ActorChain::delegated(actor_chain(parent_id), actor);
     let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     admit_linked_sessions(parent_id, &resolved, actor_chain, None)?;
     Ok(resolved)
