@@ -60,7 +60,7 @@ use crate::tools::args::{
 
 use super::builtins::SharedIndex;
 use super::state::IndexState;
-use super::symbol_graph::{NodeKind, SymbolGraph};
+use super::symbol_graph::{Node as GraphNode, NodeKind, SymbolGraph};
 
 pub(super) const BUILTIN: &str = "hostlib_code_index_rename_symbol";
 
@@ -274,7 +274,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         .iter()
         .filter(|id| **id != seed_node_id)
         .filter_map(|id| state.symbols.node(*id))
-        .filter(|node| is_rename_declaration(node.kind) && in_scope_files.contains(&node.path))
+        .filter(|node| is_rename_declaration(node) && in_scope_files.contains(&node.path))
         .map(|node| (node.path.clone(), node.line, node.kind.as_str()))
         .collect();
     if !competing_declarations.is_empty() {
@@ -420,14 +420,14 @@ fn resolve_seed(
     line: Option<u32>,
     kind: Option<NodeKind>,
 ) -> SeedLookup {
-    let candidates: Vec<&super::symbol_graph::Node> = graph
+    let candidates: Vec<&GraphNode> = graph
         .nodes_named(name)
         .iter()
         .filter_map(|id| graph.node(*id))
-        .filter(|node| is_rename_declaration(node.kind))
+        .filter(|node| is_rename_declaration(node))
         .collect();
 
-    let mut narrowed: Vec<&super::symbol_graph::Node> = candidates
+    let mut narrowed: Vec<&GraphNode> = candidates
         .iter()
         .copied()
         .filter(|node| paths_match(&node.path, relative_path))
@@ -459,9 +459,17 @@ fn resolve_seed(
     }
 }
 
-fn is_rename_declaration(kind: NodeKind) -> bool {
+fn is_rename_declaration(node: &GraphNode) -> bool {
+    if node.kind == NodeKind::Module
+        && (node.signature.strip_prefix("module ") == Some(node.path.as_str())
+            || (node.language == "harn" && node.signature.starts_with("impl ")))
+    {
+        // The graph adds a synthetic module for every file and projects Harn
+        // implementation blocks as modules. Neither declares a new binding.
+        return false;
+    }
     matches!(
-        kind,
+        node.kind,
         NodeKind::Function
             | NodeKind::Type
             | NodeKind::Field
