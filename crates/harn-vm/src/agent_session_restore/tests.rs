@@ -106,6 +106,51 @@ async fn a_session_with_no_transcript_yet_is_still_restorable() {
     );
 }
 
+/// The journal persists a tool lifecycle event with its identity under
+/// `metadata`, and stamps the call id into a header. Replay must restore the
+/// tool's real name from that shape, not a generic placeholder.
+#[tokio::test]
+async fn a_replayed_tool_call_keeps_its_metadata_tool_name() {
+    let session_id = "with-tool-call";
+    let store = store_with_session(session_id).await;
+    let mut event = AppendEvent::new(
+        SessionEventKind::ToolCall,
+        serde_json::json!({
+            "transcript_event": {
+                "id": "event-call",
+                "kind": "tool_call",
+                "role": "assistant",
+                "visibility": "public",
+                "metadata": {"tool_call_id": "tool-1", "tool_name": "look"},
+            }
+        }),
+    );
+    event
+        .headers
+        .insert("tool_call_id".to_string(), "tool-1".to_string());
+    store
+        .append(session_id, event)
+        .await
+        .expect("append tool call row");
+
+    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+        .await
+        .expect("restore should not error")
+        .expect("the store knows this session");
+    assert_eq!(restored.len(), 1, "the tool call replays: {restored:?}");
+    match &restored[0].event {
+        AgentEvent::ToolCall {
+            tool_call_id,
+            tool_name,
+            ..
+        } => {
+            assert_eq!(tool_call_id, "tool-1");
+            assert_eq!(tool_name, "look");
+        }
+        other => panic!("expected a replayed tool call, got {other:?}"),
+    }
+}
+
 /// Internal bookkeeping rows (usage checkpoints, audit annotations) are not
 /// conversation, and must not surface in a restored transcript.
 #[tokio::test]
