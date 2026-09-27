@@ -95,6 +95,13 @@ pub(crate) fn governing_rule(
 ) -> Result<&'static str, String> {
     let provider_def = crate::llm_config::provider_config(provider)
         .ok_or_else(|| format!("inference_boundary.catalog_provider_unknown: {provider}"))?;
+    if provider_def.local_runtime.is_some()
+        && !is_loopback_endpoint(&crate::llm_config::resolve_base_url(&provider_def))
+    {
+        return Err(format!(
+            "inference_boundary.local_endpoint_untrusted: {provider}/{model} does not resolve to a loopback endpoint"
+        ));
+    }
     let facts = RouteFacts {
         local: provider_def.local_runtime.is_some(),
         open_weight: crate::llm_config::model_catalog_entry_for_route(provider, model)
@@ -106,6 +113,21 @@ pub(crate) fn governing_rule(
             .any(|control| control.effect == "training"),
     };
     decide(boundary, provider, model, facts)
+}
+
+fn is_loopback_endpoint(endpoint: &str) -> bool {
+    let Ok(url) = url::Url::parse(endpoint) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
 }
 
 fn decide(
@@ -176,6 +198,14 @@ pub(crate) fn preflight(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_provider_tag_does_not_make_a_remote_endpoint_local() {
+        assert!(is_loopback_endpoint("http://127.0.0.2:11434"));
+        assert!(is_loopback_endpoint("http://[::1]:11434"));
+        assert!(!is_loopback_endpoint("https://localhost.example.com:11434"));
+        assert!(!is_loopback_endpoint("https://api.example.com:11434"));
+    }
 
     #[test]
     fn local_ceiling_refuses_a_hosted_route_before_training_facts() {
