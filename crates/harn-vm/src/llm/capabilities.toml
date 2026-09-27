@@ -3094,14 +3094,19 @@ thinking_block_style = "inline"
 #     completions" failure that closed this channel in June did not recur.
 #   * Direct calls: 12/12 clean `tool_calls`, reasoning in `thinking`, empty
 #     visible text.
-# Residual risk, still open: a JSON string argument makes the model escape
-# backslashes. A backslash-heavy Zig body round-tripped byte-exact in 3 of 10
-# native calls (doubled `\`, a literal `\n`). The 2026-06-21 A/B saw the same
-# class on fenced `json` (0/3 clean) and a clean heredoc `text` channel (3/3),
-# so native is no worse than `json` here but worse than `text`. N=5 per cell
-# and no held-out cells. Revert trigger: backslash-heavy authoring regressions
-# on this route (zig cells) -> restore `native_tools = false` and
-# `preferred_tool_format = "text"`.
+# Residual risk, still open: backslash-heavy file bodies. Measured 2026-09-27
+# through agent_loop, 20 trials per cell (Python raw strings / LaTeX / Zig):
+#   channel   byte-exact   exact modulo edge newline   backslashes altered
+#   native    29/60        31/60                       29/60 (LaTeX 19, Zig 9)
+#   json       0/60        40/60                       20/60 (Zig 17, Py 3)
+#   text       0/60        43/60                       16/60 (Zig 14, LaTeX 2)
+# Native double-escapes JSON-looking sequences (`\t` in `\textbackslash`);
+# the text channels lose the body's final newline (a Harn parser defect, not
+# the model). No channel is byte-safe here; native trades more backslash
+# corruption than json on LaTeX for the leak fix above. The leak pair is
+# N=5 per cell with no held-out cells. Revert trigger:
+# backslash-heavy authoring regressions on this route -> restore
+# `native_tools = false` and `preferred_tool_format = "text"`.
 [[provider.fireworks]]
 model_match = "accounts/fireworks/models/gpt-oss-*"
 native_tools = true
