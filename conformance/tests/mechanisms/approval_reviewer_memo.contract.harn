@@ -4,7 +4,7 @@ import { llm_text, with_llm_script } from "std/testing"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
 fn note_tools(runtime: HarnessRuntime, executed: any) {
-  let tools = tool_registry()
+  const tools = tool_registry()
   return tool_define(
     tools,
     "note",
