@@ -352,6 +352,14 @@ async fn run_standard_command(
                 allow_empty: args.allow_empty || args.internal_conformance_worker.is_some(),
                 cli_skill_dirs: &cli_skill_dirs,
             };
+            // Workers inherit the cache this warms, so only the top-level
+            // process pays for it.
+            if args.internal_conformance_worker.is_none() {
+                conformance::warm_stdlib_before_cases(
+                    crate::test_runner::resolve_parallel_workers(args.jobs),
+                    args.json,
+                );
+            }
             if args.parallel {
                 run_parallel_conformance_tests(
                     t,
