@@ -617,6 +617,35 @@ fn records_system_prompt_as_metadata_event_without_message() {
     assert_eq!(event_count_by_kind(&id, "system_prompt"), 1);
 }
 
+#[test]
+fn records_directive_nonce_in_transcript_metadata_without_rotating_it() {
+    reset_session_store();
+    let id = open_or_create(Some("directive-nonce-session".into()));
+
+    assert_eq!(
+        record_directive_nonce(&id, "first-nonce"),
+        Ok(Some("first-nonce".into()))
+    );
+    assert_eq!(
+        record_directive_nonce(&id, "second-nonce"),
+        Ok(Some("first-nonce".into()))
+    );
+    assert_eq!(directive_nonce(&id).as_deref(), Some("first-nonce"));
+
+    let transcript = transcript(&id).expect("canonical transcript");
+    assert!(matches!(
+        transcript
+            .as_dict()
+            .and_then(|transcript| transcript.get("metadata"))
+            .and_then(VmValue::as_dict)
+            .and_then(|metadata| metadata.get("_harn_directive_nonce")),
+        Some(VmValue::String(value)) if value.as_str() == "first-nonce"
+    ));
+    assert_eq!(message_count(&id), 0);
+
+    reset_session_store();
+}
+
 #[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "HARN-CACHE-001")]
