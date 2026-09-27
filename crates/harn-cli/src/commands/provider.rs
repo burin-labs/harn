@@ -301,6 +301,14 @@ fn aggregate_tool_scorecard(
                 harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_SCHEMA_VERSION
             ));
         }
+        if report.evidence_source
+            != harn_vm::llm::tool_conformance::ToolProbeEvidenceSource::LiveRequest
+        {
+            return Err(format!(
+                "error: tool-probe report {} is not live provider evidence",
+                path.display()
+            ));
+        }
         reports.push(report);
     }
     Ok(harn_vm::llm::tool_scorecard::scorecard_from_tool_reports(

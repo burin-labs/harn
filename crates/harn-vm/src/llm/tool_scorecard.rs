@@ -196,6 +196,13 @@ impl CaseStats {
 }
 
 pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolScorecardReport {
+    let reports = reports
+        .into_iter()
+        .filter(|report| {
+            report.evidence_source
+                == crate::llm::tool_conformance::ToolProbeEvidenceSource::LiveRequest
+        })
+        .collect::<Vec<_>>();
     let catalog_claims = catalog_claims_by_route();
     let fitness = fitness_store_from_tool_reports(&reports);
     let mut grouped: BTreeMap<(String, String), RouteAccumulator> = BTreeMap::new();

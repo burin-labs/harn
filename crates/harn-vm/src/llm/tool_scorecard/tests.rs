@@ -73,6 +73,25 @@ fn fitness_store_records_each_tuple_and_recommends_by_pass_then_latency() {
 }
 
 #[test]
+fn saved_response_cannot_become_route_fitness() {
+    let mut saved = report(
+        "acme",
+        "model",
+        vec![case(
+            ToolProbeClassification::StructuredNativeToolCall,
+            true,
+        )],
+    );
+    saved.evidence_source = crate::llm::tool_conformance::ToolProbeEvidenceSource::SavedResponse;
+    assert!(fitness_store_from_tool_reports(&[saved.clone()])
+        .records
+        .is_empty());
+    let scorecard = scorecard_from_tool_reports(vec![saved]);
+    assert_eq!(scorecard.route_count, 0);
+    assert_eq!(scorecard.summary.trusted, 0);
+}
+
+#[test]
 fn scorecard_ranks_successful_native_route_first() {
     let pass = complete_success_reports(
         "anthropic",
@@ -901,7 +920,8 @@ fn report_with_probe_case(
     cases: Vec<ToolConformanceCase>,
 ) -> ToolConformanceReport {
     ToolConformanceReport {
-        schema_version: 1,
+        schema_version: crate::llm::tool_conformance::TOOL_CONFORMANCE_SCHEMA_VERSION,
+        evidence_source: crate::llm::tool_conformance::ToolProbeEvidenceSource::LiveRequest,
         provider: provider.to_string(),
         model: model.to_string(),
         tool_format: crate::llm::tool_conformance::ToolProbeFormat::Native,

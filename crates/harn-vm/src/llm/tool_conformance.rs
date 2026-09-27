@@ -41,7 +41,7 @@ pub use types::{
     ToolConformanceRequestWarning, ToolProbeFormat, ToolProbeMode, ToolProbeRequestProfile,
 };
 
-pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
+pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 2;
 pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 4;
 pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 5;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
@@ -229,6 +229,8 @@ impl ToolProbeFallbackMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolConformanceReport {
     pub schema_version: u32,
+    #[serde(default)]
+    pub evidence_source: ToolProbeEvidenceSource,
     pub provider: String,
     pub model: String,
     #[serde(default)]
@@ -243,6 +245,15 @@ pub struct ToolConformanceReport {
     pub expected_value: String,
     pub cases: Vec<ToolConformanceCase>,
     pub tool_calling: ToolCallingConformanceSummary,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolProbeEvidenceSource {
+    #[default]
+    Unknown,
+    LiveRequest,
+    SavedResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -408,6 +419,7 @@ pub async fn run_tool_conformance_probe(
         provider,
         model_id,
         base_url,
+        ToolProbeEvidenceSource::LiveRequest,
         options.tool_format,
         options.probe_case,
         options.marker,
@@ -511,6 +523,7 @@ fn classify_tool_conformance_fixture_with_policy(
         provider,
         model,
         None,
+        ToolProbeEvidenceSource::SavedResponse,
         tool_format,
         probe_case,
         marker,
@@ -812,6 +825,9 @@ pub fn tool_conformance_request_catalog_audit(
 }
 
 pub fn report_satisfies_required_probe(report: &ToolConformanceReport, requirement: &str) -> bool {
+    if report.evidence_source != ToolProbeEvidenceSource::LiveRequest {
+        return false;
+    }
     match requirement {
         "tool_probe" | "tool_call_probe" => {
             report.tool_calling.fallback_mode != ToolProbeFallbackMode::Disabled
@@ -855,6 +871,7 @@ fn report_from_cases(
     provider: String,
     model: String,
     base_url: Option<String>,
+    evidence_source: ToolProbeEvidenceSource,
     tool_format: ToolProbeFormat,
     probe_case: ToolProbeCase,
     marker: String,
@@ -864,6 +881,7 @@ fn report_from_cases(
     let summary = summarize_cases(&cases, tool_format);
     ToolConformanceReport {
         schema_version: TOOL_CONFORMANCE_SCHEMA_VERSION,
+        evidence_source,
         provider,
         model,
         tool_format,

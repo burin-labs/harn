@@ -2245,8 +2245,10 @@ harn provider tool-probe openai --model gpt-5.4-mini --tool-format json
 
 Use `--response-fixture` to classify a saved provider response without making a
 network request. Use `--repeat` for live reliability checks; repeated summaries
-only pass when every attempted probe for that mode succeeds. `harn local switch`
-can consume the JSON with `--probe-result`. `--tool-format native|json|text`
+only pass when every attempted probe for that mode succeeds. JSON reports label
+their `evidence_source` as `live_request` or `saved_response`. Only live reports
+can satisfy `harn local switch --probe-result` or route-fitness gates. Saved
+responses remain useful for parser checks. `--tool-format native|json|text`
 forces the live emission contract and exact parser; it does not enable the
 permissive `adaptive` parser. Probes preserve route generation defaults and
 raise only the minimum output budget when necessary to leave visible tool-call
@@ -2278,8 +2280,9 @@ global default. Snapshot recommendations can only select `native`, `json`, or
 ## harn provider tool-scorecard
 
 Aggregate one or more `harn provider tool-probe --json` reports into a stable
-route scorecard. Fixture input is offline-only: the command reads saved probe
-reports and does not call providers. The JSON report uses `schema_version: 8`
+route scorecard. The command reads saved JSON reports from live probes and does
+not call providers itself. It rejects reports classified from `--response-fixture`
+and legacy reports without live provenance. The JSON report uses `schema_version: 8`
 and includes route-level `catalog_claim`, `catalog_mismatches`, and
 `suggested_catalog_updates` fields plus a `fitness` store with exact
 provider/model/format/case observations. Suggested catalog updates remain

@@ -28,6 +28,15 @@ pub fn run_provider_catalog_notice(harness: Harness, _event: TriggerEvent) -> di
   const extraction = harness.env.get_or("HARN_PROVIDER_NOTICE_EXTRACTION_FILE", "")
   if extraction != "" {
     args = args + ["--extraction", extraction]
+  } else {
+    const provider = harness.env.get_or("HARN_PROVIDER_NOTICE_EXTRACTION_PROVIDER", "")
+    const model = harness.env.get_or("HARN_PROVIDER_NOTICE_EXTRACTION_MODEL", "")
+    if provider != "" {
+      args = args + ["--provider", provider]
+    }
+    if model != "" {
+      args = args + ["--model", model]
+    }
   }
   const result = harness.process.run({program: "harn", args: args, cwd: root})
   return {

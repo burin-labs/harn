@@ -529,13 +529,22 @@ mod tests {
         assert_eq!(gate.missing_required_probes, vec!["tool_probe".to_string()]);
 
         let mut evidence = RuntimeProbeEvidence::new();
-        evidence.add_tool_report(classify_tool_conformance_fixture(
+        let mut saved_response = classify_tool_conformance_fixture(
             "ollama",
             "gemma4:26b",
             ToolProbeMode::NonStreaming,
             "harn_tool_probe_marker",
             r#"{"content":"echo_marker({ value: \"harn_tool_probe_marker\" })"}"#,
-        ));
+        );
+        evidence.add_tool_report(saved_response.clone());
+        let gate = evaluate_runtime_profile_gate(&report, &evidence, false);
+        assert!(
+            !gate.allowed,
+            "saved response cannot authorize runtime: {gate:?}"
+        );
+        saved_response.evidence_source =
+            crate::llm::tool_conformance::ToolProbeEvidenceSource::LiveRequest;
+        evidence.add_tool_report(saved_response);
         let gate = evaluate_runtime_profile_gate(&report, &evidence, false);
         assert!(gate.allowed, "{gate:?}");
     }

@@ -126,6 +126,11 @@ pub fn fitness_store_from_tool_reports(
         BTreeMap::<(String, String, ToolProbeFormat, ToolProbeCase), FitnessAccumulator>::new();
     let mut formats = BTreeMap::<(String, String, ToolProbeFormat), FitnessAccumulator>::new();
     for report in reports {
+        if report.evidence_source
+            != crate::llm::tool_conformance::ToolProbeEvidenceSource::LiveRequest
+        {
+            continue;
+        }
         for case in &report.cases {
             records
                 .entry((

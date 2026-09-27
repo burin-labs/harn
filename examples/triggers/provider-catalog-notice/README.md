@@ -8,6 +8,10 @@ public email, webhook, or document-store adapter writes one neutral
 - `HARN_PROVIDER_NOTICE_FILE`: the adapter's notice JSON path;
 - `HARN_PROVIDER_NOTICE_EXTRACTION_FILE`: optional deterministic extraction
   replay for testing.
+- `HARN_PROVIDER_NOTICE_EXTRACTION_PROVIDER` and
+  `HARN_PROVIDER_NOTICE_EXTRACTION_MODEL`: optional own-key inference route.
+  Set both to a catalogued route whose notice extraction has been measured;
+  otherwise the workflow uses that provider's catalog default.
 
 The handler invokes `scripts/provider_catalog_notice.harn --apply --open-pr`.
 That workflow validates provenance and current catalog state, applies only a
