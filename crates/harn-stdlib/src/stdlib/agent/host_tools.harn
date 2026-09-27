@@ -179,13 +179,27 @@ fn __agent_host_render(value: any, options: dict?, key: string) {
   return json_stringify(value)
 }
 
+fn __agent_host_bounded_length(requested: any, configured: any, fallback: int) -> int {
+  const cap = max(0, to_int(configured) ?? fallback)
+  const length = to_int(requested)
+  return if length == nil {
+    cap
+  } else {
+    max(0, min(length, cap))
+  }
+}
+
 fn __agent_host_read_file_request(args: dict, options: dict?) {
-  let req = {path: __agent_host_resolve_path(args.path, options)}
+  let req = {
+    path: __agent_host_resolve_path(args.path, options),
+    limit_bytes: __agent_host_bounded_length(
+      args?.limit_bytes,
+      __agent_host_options(options)?.read_bytes,
+      65536,
+    ),
+  }
   if args?.offset != nil {
     req = req + {offset: args.offset}
-  }
-  if args?.limit_bytes != nil {
-    req = req + {limit_bytes: args.limit_bytes}
   }
   if args?.encoding != nil {
     req = req + {encoding: args.encoding}
@@ -611,14 +625,22 @@ fn __agent_host_read_command_request(args: dict, options: dict?) {
   req = req
     + {
       offset: args?.offset ?? 0,
-      length: args?.length ?? __agent_host_options(options)?.read_bytes ?? 65536,
+      length: __agent_host_bounded_length(
+        args?.length,
+        __agent_host_options(options)?.read_bytes,
+        65536,
+      ),
     }
   return req
 }
 
 fn __agent_host_tail_command_request(tool_runtime: HarnessTools, args: dict, options: dict?) {
   const locator = __agent_host_reader_locator(args)
-  const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
+  const length = __agent_host_bounded_length(
+    args?.length,
+    __agent_host_options(options)?.tail_bytes,
+    12000,
+  )
   const meta = tool_runtime.read_command_output(locator + {offset: 0, length: 0})
   const offset = if meta.total_bytes > length {
     meta.total_bytes - length
@@ -630,7 +652,11 @@ fn __agent_host_tail_command_request(tool_runtime: HarnessTools, args: dict, opt
 
 fn __agent_host_tail_file_request(fs: HarnessFs, args: dict, options: dict?) {
   const path = __agent_host_resolve_path(args.path, options)
-  const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
+  const length = __agent_host_bounded_length(
+    args?.length,
+    __agent_host_options(options)?.tail_bytes,
+    12000,
+  )
   const info = fs.stat(path)
   const offset = if info.size > length {
     info.size - length
