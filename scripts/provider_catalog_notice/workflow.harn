@@ -3,7 +3,7 @@ import "./types.harn"
 
 pub fn provider_notice_checks() -> list<string> {
   return [
-    "check-provider-catalog-drift",
+    "check-provider-catalog-drift-core",
     "check-provider-catalog",
     "check-provider-matrix",
     "check-provider-support",

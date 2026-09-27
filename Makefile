@@ -2,6 +2,7 @@
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache gh-check-state
 .PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
 .PHONY: check-typescript-protocol-binding check-swift-protocol-binding
+.PHONY: check-provider-catalog-drift-core
 .PHONY: check-scheduled-workflows check-e2e-trigger-contract
 .PHONY: sync-docs-diagnostics
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
@@ -1039,10 +1040,12 @@ check-connector-matrix:
 # The fixture workflow installs its own deterministic per-Harness egress policy. Clear
 # operator/environment policy variables so that policy is not configured twice
 # before the Harn script reaches its fixture setup.
-check-provider-catalog-drift:
+check-provider-catalog-drift-core:
 	@echo "=== Checking provider catalog refresh workflow ==="
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) run --allow-process-network scripts/update_provider_catalog.harn -- --check
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/provider_catalog_notice_test.harn
+
+check-provider-catalog-drift: check-provider-catalog-drift-core
 	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/tests/provider_catalog_notice_sandbox_test.sh
 	@echo "    Provider catalog refresh OK."
 
