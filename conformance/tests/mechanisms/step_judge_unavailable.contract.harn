@@ -1,0 +1,132 @@
+// MECHANISM CONTRACT (onramp tier): a step judge that cannot review a turn
+// says so, and never reads as an approval.
+//
+// Contract = {trigger, effect, negative}:
+//   trigger  — the configured step judge is a label-only decision model (the
+//              catalog declares it without text generation), so it can never
+//              return the verdict schema;
+//   effect   — the FIRST judged step emits `step_judge_decision` with
+//              `verdict: "unavailable"`, `unavailable_reason:
+//              "schema_unsupported"` and `unavailable_count: 1`; every later
+//              step climbs the count; no judge call is dispatched; the turn
+//              still proceeds to completion;
+//   negative — a text model that returns `pass` emits a plain pass with no
+//              unavailable reason and a zero count.
+//
+// Why this contract exists. The step judge swallowed its own errors as
+// `verdict: "pass"`. Pointed at a label-only model it failed on every step,
+// and a session looked fully reviewed while nothing had been reviewed.
+//
+// The instrument is the emitted decision's verdict and reason, deliberately,
+// not the absence of a veto. A missing veto is also what a genuine pass, a
+// skipped judge and a broken fixture look like.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_calls, llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+// A catalog row declared with only the `decision` operation. Named, not
+// derived, so removing the row fails this contract instead of agreeing with it.
+const LABEL_ONLY_MODEL = "openrouter/typesafe/jev-latest"
+
+fn decisions(captured: dict) -> list {
+  return captured.events.filter({ event -> event.type == "step_judge_decision" }).to_list()
+}
+
+fn judge_call_count(harness: Harness) -> int {
+  return len(
+    llm_calls(harness.llm).filter(
+      { call -> call?.output_format?.schema?.properties?.verdict != nil },
+    ),
+  )
+}
+
+fn run(harness: Harness, session: string, judge_cfg: dict) -> dict {
+  return agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "What is 2 + 2?",
+      nil,
+      {
+        provider: "mock",
+        loop_until_done: true,
+        max_iterations: 4,
+        session_id: session,
+        step_judge: judge_cfg,
+      },
+    ) },
+  )
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Let me check the arithmetic first."),
+      llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const captured = run(
+        harness,
+        "step-judge-label-only-" + harness.random.uuid(),
+        {provider: "mock", model: LABEL_ONLY_MODEL, on_veto: "replace"},
+      )
+      const seen = decisions(captured)
+      contract_effect(
+        harness.stdio,
+        "effect_first_step_is_unavailable_not_pass",
+        len(seen) > 0 && seen[0].verdict == "unavailable",
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_reason_is_schema_unsupported",
+        len(seen) > 0 && seen[0]?.unavailable_reason == "schema_unsupported",
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_count_climbs_per_unreviewed_step",
+        seen.map({ d -> d?.unavailable_count ?? 0 }).to_list() == [1, 2],
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_no_judge_call_dispatched",
+        judge_call_count(harness) == 0,
+      )
+      contract_negative(
+        harness.stdio,
+        "effect_no_unavailable_step_reads_as_pass",
+        len(seen.filter({ d -> d.verdict == "pass" })) > 0,
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_turn_still_completes",
+        captured?.result?.status == "done",
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
+      llm_text(
+        "{\"verdict\":\"pass\",\"reasoning\":\"correct\",\"critique\":\"\",\"confidence\":0.95}",
+      ),
+    ],
+    { ->
+      const captured = run(
+        harness,
+        "step-judge-text-model-" + harness.random.uuid(),
+        {provider: "mock", on_veto: "replace"},
+      )
+      const seen = decisions(captured)
+      contract_negative(
+        harness.stdio,
+        "negative_a_reviewing_judge_is_not_unavailable",
+        len(seen) == 0 || seen[0].verdict != "pass" || seen[0]?.unavailable_reason != nil
+          || (seen[0]?.unavailable_count ?? 0) != 0,
+      )
+    },
+  )
+}
