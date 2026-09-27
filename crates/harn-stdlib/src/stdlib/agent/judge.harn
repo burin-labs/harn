@@ -460,7 +460,8 @@ fn __judge_invoke_structured(
     if unavailable {
       const judge_outcome = if checkpoint?.status == "admission_refused" {
         "admission_refused"
-      } else if checkpoint?.status == "model_unconfigured" {
+      } else if checkpoint?.status == "model_unconfigured"
+        || checkpoint?.status == "schema_unsupported" {
         // Its own outcome, not a timeout. A misconfiguration reported as a
         // deadline sends the reader to look at latency for a setting that was
         // never set, which is how this class of defect stays open.

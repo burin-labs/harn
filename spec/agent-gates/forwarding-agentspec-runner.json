@@ -883,7 +883,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_step_judge(\n            harness,\n            session,\n            llm_result,\n            turn_opts,\n            iteration_index + 1,\n            stall_warning,\n            step_judge_attempts,\n            remaining_iterations,\n          )",
+    "expression": "agent_step_judge(\n            harness,\n            session,\n            llm_result,\n            turn_opts,\n            iteration_index + 1,\n            stall_warning,\n            step_judge_attempts,\n            remaining_iterations,\n            step_judge_unavailable_count,\n          )",
     "owner": "agent_step_judge",
     "evidence": "Consumer agent_step_judge.opts in crates/harn-stdlib/src/stdlib/agent/step_judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [

@@ -1,8 +1,4 @@
-import {
-  __judge_classify_verdict,
-  __judge_resolve_model,
-  __judge_run_checkpoint,
-} from "std/agent/judge_internals"
+import { __judge_classify_verdict, __judge_run_checkpoint } from "std/agent/judge_internals"
 import { step_judge_system_prompt, step_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
 import { estimate_call_cost } from "std/llm/economics"
@@ -51,6 +47,30 @@ fn __payload(agent: HarnessAgent, session: dict, llm_result: dict?, iteration: i
   }
 }
 
+/**
+ * `replace` removes the vetoed assistant turn, so it only applies while that
+ * turn is still the last message. Parse repair can append a paired
+ * `tool_result` after it before the judge runs; removing the assistant turn
+ * then would orphan that result, and the removal refuses. Such a veto is
+ * applied as `retain` instead: the turn and its pairing stay, and the critique
+ * follows them.
+ */
+fn __effective_on_veto(
+  agent: HarnessAgent,
+  session_id: any,
+  on_veto: string,
+  vetoed: bool,
+) -> string {
+  if !vetoed || on_veto != "replace" {
+    return on_veto
+  }
+  const messages = agent_session_messages(agent, session_id)
+  if len(messages) == 0 || messages[len(messages) - 1]?.role != "assistant" {
+    return "retain"
+  }
+  return on_veto
+}
+
 fn __should_skip(
   judge_cfg: dict,
   llm_result: dict,
@@ -96,6 +116,9 @@ fn __unavailable_reason_for(checkpoint: dict) -> StepJudgeUnavailableReason {
   if status == "model_unconfigured" {
     return "model_unconfigured"
   }
+  if status == "schema_unsupported" {
+    return "schema_unsupported"
+  }
   if status == "admission_refused" {
     return "admission_refused"
   }
@@ -128,31 +151,7 @@ fn __unavailable(
   }
 }
 
-/**
- * A judge model the catalog declares without text generation (a label-only
- * decision model such as Jev) can never fill the verdict schema. Refuse before
- * dispatch with a typed reason rather than spending a call on a certain error.
- */
-fn __schema_unsupported_detail(llm: HarnessLlm, judge_cfg: dict, opts: dict) -> string? {
-  const resolved = __judge_resolve_model(llm, judge_cfg, opts)
-  if resolved == nil {
-    return nil
-  }
-  const info = llm.model_info(resolved.model)
-  const operations = info?.catalog?.operations
-  if type_of(operations) != "list" || operations.contains("text_generation") {
-    return nil
-  }
-  return "step judge model `" + resolved.model + "` serves only "
-    + join(operations.map({ op -> to_string(op) }), ", ")
-    + "; the step judge needs a text-generation model that can return its verdict schema"
-}
-
 fn __invoke(harness: Harness, judge_cfg: dict, opts: dict, payload: any) {
-  const unsupported = __schema_unsupported_detail(harness.llm, judge_cfg, opts)
-  if unsupported != nil {
-    return __unavailable("schema_unsupported", unsupported, 0, nil)
-  }
   const system = step_judge_system_prompt(harness.fs, {rubric: judge_cfg?.rubric ?? "default"})
   const user = step_judge_user_prompt(harness.fs, payload)
   const schema = __step_judge_schema()
@@ -334,6 +333,12 @@ pub fn agent_step_judge(
   } else {
     invoked + {unavailable_count: unavailable_count}
   }
-  __emit_decision(harness.agent, session.session_id, iteration, on_veto, verdict)
-  return verdict + {on_veto: on_veto, attempts: attempts + 1}
+  const applied_on_veto = __effective_on_veto(
+    harness.agent,
+    session.session_id,
+    on_veto,
+    verdict?.vetoed ?? false,
+  )
+  __emit_decision(harness.agent, session.session_id, iteration, applied_on_veto, verdict)
+  return verdict + {on_veto: applied_on_veto, attempts: attempts + 1}
 }
