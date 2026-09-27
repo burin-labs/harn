@@ -179,7 +179,7 @@ receipt reference; only `verdict` exposes an accepted `value`.
 | `low_confidence` | `candidate: PredicateVerdict`, `threshold: float` | Abstain, request evidence, or invoke a separately budgeted policy. Neither boolean branch runs implicitly. |
 | `refused` | Closed reason: `provider_refusal`, `schema_invalid`, or `output_truncated`; bounded diagnostics | Preserve an unassessed result. A schema error is not `false`. |
 | `budget_cut` | Closed limit kind and requested/remaining quantities | Stop or defer. No retry is implicit. |
-| `unavailable` | Closed reason: `model_unconfigured`, `unsupported_options`, `transport_failed`, `authority_denied`, `producer_cancelled`, or `cache_miss` | Report the unavailable evaluation. Never choose a default verdict. |
+| `unavailable` | Closed reason: `model_unconfigured`, `unsupported_options`, `transport_failed`, `authority_denied`, `admission_refused`, `producer_cancelled`, or `cache_miss` | Report the unavailable evaluation. Never choose a default verdict. |
 | `replay_mismatch` | Expected/actual identity and occurrence, without raw sensitive inputs | Fail replay/test infrastructure. |
 | `cancelled` | Accepted control-event reference | Return control without running either branch. |
 

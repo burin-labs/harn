@@ -412,6 +412,18 @@ pub(crate) fn reserve_decision(
     reserve_money(&scope, &mut ledger, bound, per_call)
 }
 
+/// The `admission_reason` an admission refusal carries, such as
+/// `late_activation`. `None` for an error this module did not raise.
+pub(crate) fn denial_reason(error: &VmError) -> Option<String> {
+    let VmError::Thrown(value) = error else {
+        return None;
+    };
+    match value.as_dict()?.get("admission_reason")? {
+        VmValue::String(reason) => Some(reason.to_string()),
+        _ => None,
+    }
+}
+
 /// A measured allowance only exists after conservative authority was installed.
 pub(crate) fn remaining_allowance() -> Option<f64> {
     SCOPE.with(|slot| {

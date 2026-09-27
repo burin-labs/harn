@@ -114,6 +114,7 @@ pub type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: 
     | "unsupported_options" \
     | "transport_failed" \
     | "authority_denied" \
+    | "admission_refused" \
     | "producer_cancelled" \
     | "cache_miss",
   receipt: string,
@@ -183,6 +184,7 @@ pub type EvaluationOutcome = {
     | "unsupported_options" \
     | "transport_failed" \
     | "authority_denied" \
+    | "admission_refused" \
     | "producer_cancelled" \
     | "cache_miss",
   receipt: string,
