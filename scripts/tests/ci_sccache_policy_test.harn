@@ -219,7 +219,10 @@ fn workflow() {
     "needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'"
   const artifact_consumer_needs = ["changes", "rust-artifacts-ready"]
   return {
-    env: {HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270", HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"},
+    env: {
+      HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270",
+      HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS: "10",
+    },
     jobs: {
       "package-audit": package_audit,
       "rust-check-inputs": {
