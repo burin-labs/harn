@@ -33,3 +33,63 @@ spec/run-view-fixtures/cases/**/*.json eol=lf
 # not_localized`); autocrlf on the Windows runners otherwise checks it out
 # with CRLF and breaks the test deterministically.
 crates/harn-hostlib/src/ast/scala_repro_fixture.scala eol=lf
+
+# Generated outputs never merge line by line (#8817). Two pull requests that
+# each regenerate one of these files would otherwise merge into a file no
+# generator produced, and the stale result only fails on main. With -merge the
+# second one conflicts instead: rebase it and rerun its gen-* target. This list
+# is the tracked outputs of every gen-* artifact in
+# scripts/generated_artifacts.toml; `make check-generated-registry` fails when
+# one is missing.
+docs/src/dev/agent-gates/runner.md -merge
+docs/src/dev/agent-gates/stop-decision.md -merge
+docs/src/dev/agent-gates/stall-handler.md -merge
+scripts/release_contract.json -merge
+scripts/release_contract.env -merge
+spec/language-vocabulary.json -merge
+crates/harn-wasm/demo/language-vocabulary.json -merge
+crates/harn-capability-contracts/src/vm_declared.rs -merge
+crates/harn-wasm/wit/harn-kernel.json -merge
+crates/harn-wasm/demo/package.json -merge
+spec/schemas/portable-kernel-benchmark.v1.schema.json -merge
+editors/vscode/syntaxes/harn-prompt.tmLanguage.json -merge
+tree-sitter-harn/grammar/keywords.js -merge
+tree-sitter-harn/src/** -merge
+crates/harn-hostlib/data/grammar-fitness/receipt.v1.json -merge
+spec/protocol-artifacts/harn-protocol.rs -merge
+spec/protocol-artifacts/harn-protocol.ts -merge
+spec/protocol-artifacts/harn-tools.ts -merge
+spec/protocol-artifacts/HarnProtocol.swift -merge
+spec/protocol-artifacts/manifest.json -merge
+spec/protocol-artifacts/schemas/harn-tools-v2.schema.json -merge
+spec/protocol-artifacts/schemas/plan-document-v1.schema.json -merge
+crates/harn-vm/src/triggers/event/schemas_generated.rs -merge
+crates/harn-parser/src/diagnostic/harness_migrations_generated.rs -merge
+spec/openapi.snapshot -merge
+crates/harn-serve/openapi.yaml -merge
+spec/schemas/session-bundle.v1.schema.json -merge
+spec/run-view-fixtures/cases/legacy-sparse/expected/runs/run.run_view.json -merge
+spec/run-view-fixtures/cases/legacy-sparse/expected/session_view.json -merge
+spec/run-view-fixtures/cases/root-transcript/expected/runs/run.run_view.json -merge
+spec/run-view-fixtures/cases/root-transcript/expected/session_view.json -merge
+spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/00-root.run_view.json -merge
+spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/01-child.run_view.json -merge
+spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/session_view.json -merge
+spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/runs/run.run_view.json -merge
+spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/session_view.json -merge
+crates/harn-vm/src/llm/providers.toml -merge
+crates/harn-vm/src/llm/capabilities.toml -merge
+spec/provider-catalog/provider-catalog.json -merge
+spec/provider-catalog/provider-catalog.schema.json -merge
+spec/provider-catalog/harn-provider-catalog.d.ts -merge
+spec/provider-catalog/harn-provider-catalog.harn -merge
+spec/provider-catalog/HarnProviderCatalog.swift -merge
+crates/harn-stdlib/src/stdlib/llm/provider_names.harn -merge
+docs/llm/harn-triggers-quickref.md -merge
+docs/src/provider-matrix.md -merge
+docs/src/provider-support.md -merge
+docs/provider-support.json -merge
+docs/src/connectors/parity-matrix.md -merge
+# The external scanner is hand-written and only seeded into the generated
+# parser tree, so it keeps ordinary text merges.
+tree-sitter-harn/src/scanner.c merge
