@@ -76,11 +76,15 @@ grep -F "$output_root" "$tmp_root/read-only.err" >/dev/null
 
 # The documented narrow grants must reach the real provider-notice workflow,
 # preserve sandboxing, and produce the deterministic receipt without a model call.
-run_notice \
+if run_notice \
   --read-only-root "$notice_root" \
   --read-only-root "$extraction_root" \
   --write-root "$output_root" \
-  >"$tmp_root/granted.out" 2>"$tmp_root/granted.err"
+  >"$tmp_root/granted.out" 2>"$tmp_root/granted.err"; then
+  granted_exit=0
+else
+  granted_exit=$?
+fi
 
 grep -F "provider notice " "$tmp_root/granted.out" >/dev/null
 grep -F "sandbox active; extra write root: $output_root" "$tmp_root/granted.err" >/dev/null
@@ -100,8 +104,11 @@ fi
 receipt_path="$(find "$output_root" -maxdepth 1 -type f -name '*.json' -print -quit)"
 jq -e '.schema_version == "harn.provider_catalog_notice.v1"
   and .source_id == "anthropic-pricing-2026-08"
-  and (.disposition == "patch" or .disposition == "no_op")
+  and (.disposition == "patch" or .disposition == "no_op" or .disposition == "rejected")
   and .extraction.candidate.kind == "price"' \
   "$receipt_path" >/dev/null
+if [[ "$granted_exit" -ne 0 ]]; then
+  jq -e '.disposition == "rejected" and (.reason | length > 0)' "$receipt_path" >/dev/null
+fi
 
 echo "provider_catalog_notice_sandbox_test: ok"

@@ -242,6 +242,17 @@ pipeline test_existing_new_price_on_wrong_model_cannot_hide_identity_error(
   )
   assert_eq(plan.receipt.disposition, "rejected")
   assert_eq(plan.patch, nil)
+  const exact_notice = input.notice
+    + {text: input.notice.text + " Model id claude-3-5-haiku-20241022."}
+  assert_eq(
+    plan_notice(
+      harness,
+      exact_notice,
+      {classification: "candidate", candidate: candidate},
+      catalog,
+    ).receipt.disposition,
+    "no_op",
+  )
 }
 
 @test
