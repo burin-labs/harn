@@ -509,9 +509,13 @@ fn build(
 ) -> Result<BuildOutcome, String> {
     let manifest = scratch.join("Cargo.toml");
     let target = scratch.join("target");
+    // Every reader below parses Cargo's plain words (`error`, `Running \``), so
+    // a caller's `CARGO_TERM_COLOR=always` must not reach the probe's output.
     let args = vec![
         "build".to_string(),
         "-v".to_string(),
+        "--color".to_string(),
+        "never".to_string(),
         "--offline".to_string(),
         "--manifest-path".to_string(),
         manifest.display().to_string(),
