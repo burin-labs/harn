@@ -384,6 +384,16 @@ pub fn plan_notice(
       ),
     }
   }
+  if extraction?.classification == "uncertain" {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "rejected",
+        extraction?.reason ?? "notice requires model identity review",
+      ),
+    }
+  }
   if extraction?.classification != "candidate" || extraction?.candidate == nil {
     return {receipt: __base_receipt(harness, notice, "rejected", "malformed extraction result")}
   }
@@ -427,6 +437,21 @@ pub fn plan_notice(
   }
   const models = __model_rows(catalog, candidate.provider, candidate.model_id)
   if len(models) == 0 {
+    if candidate.kind != "addition" {
+      return {
+        receipt: __base_receipt(
+          harness,
+          notice,
+          "rejected",
+          "existing-model change requires an exact catalog model id",
+        )
+          + {
+            model_id: candidate.model_id,
+            change_kind: candidate.kind,
+            evidence: candidate.evidence,
+          },
+      }
+    }
     return {
       receipt: __base_receipt(
         harness,
@@ -840,25 +865,58 @@ pub fn apply_candidate_to_source(
   return Ok(unwrap(outcome).join("\n"))
 }
 
-pub fn extraction_prompt(notice: ProviderNotice) -> string {
+pub fn catalog_model_context(catalog: dict, notice: ProviderNotice) -> list {
+  let provider_models = []
+  for row in catalog?.models ?? [] {
+    if row?.provider == notice.provider {
+      provider_models = provider_models + [row]
+    }
+  }
+  let context = []
+  for row in provider_models {
+    if len(provider_models) <= 60
+      || (__nonempty(row?.id) && contains(notice.text ?? "", row.id))
+      || (__nonempty(row?.name) && contains(notice.text ?? "", row.name)) {
+      context = context + [{id: row.id, name: row?.name, pricing: row?.pricing}]
+    }
+  }
+  return context
+}
+
+pub fn extraction_prompt(notice: ProviderNotice, catalog: dict) -> string {
   return """
 Extract at most one provider-catalog change from this trusted notice.
 Return classification "candidate" with kind "addition" when the notice explicitly names a
 new provider model. An addition needs provider, model_id, and evidence only; it becomes a
 reviewable incomplete proposal, never an automatic catalog row. For existing models, extract
-one explicit price, temporary promotion, retirement, endpoint, or capability change.
+one explicit price, temporary promotion, retirement, endpoint, or capability change. Select
+model_id only from the catalog rows below, using the old value and model name to disambiguate.
+If no row matches unambiguously, do not invent an id; return "uncertain" with the ambiguity
+as the reason. An actual addition must be explicitly described as a new model by the notice.
 Return "irrelevant" only when no catalog change is stated. Never infer missing identifiers
 or values. Preserve a short supporting excerpt or immutable link as evidence.
+
+Current provider catalog rows:
+${json_stringify_pretty(catalog_model_context(catalog, notice))}
 
 Neutral notice:
 ${json_stringify_pretty(notice)}
 """
 }
 
-pub fn extract_notice(llm: HarnessLlm, notice: ProviderNotice, options: dict) -> NoticeExtraction {
+pub fn extract_notice(
+  llm: HarnessLlm,
+  notice: ProviderNotice,
+  catalog: dict,
+  options: dict,
+) -> NoticeExtraction {
   const resolved: LlmCallOptions = schema_expect(
     options + {budget: options?.budget ?? {max_cost_usd: 0.1}, max_tokens: 1200},
     schema_of(LlmCallOptions),
   )
-  return llm.call_structured(extraction_prompt(notice), schema_of(NoticeExtraction), resolved)
+  return llm.call_structured(
+    extraction_prompt(notice, catalog),
+    schema_of(NoticeExtraction),
+    resolved,
+  )
 }

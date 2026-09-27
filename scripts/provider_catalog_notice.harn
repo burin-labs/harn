@@ -340,6 +340,10 @@ pipeline main(harness: Harness, task: unknown) {
   const notice_loaded = __read_json(harness.fs, __from_root(root, options.notice))
   const notice_raw = notice_loaded?.notice ?? notice_loaded
   const validated = validate_notice(harness, notice_raw)
+  const catalog = __read_json(
+    harness.fs,
+    path_join(root, "spec/provider-catalog/provider-catalog.json"),
+  )
   const extraction_value = if options?.extraction != nil {
     const loaded = __read_json(harness.fs, __from_root(root, options.extraction))
     loaded?.extraction ?? loaded
@@ -352,6 +356,7 @@ pipeline main(harness: Harness, task: unknown) {
     extract_notice(
       harness.llm,
       unwrap(validated),
+      catalog,
       if options?.model == nil {
         extraction_options
       } else {
@@ -362,10 +367,6 @@ pipeline main(harness: Harness, task: unknown) {
     {classification: "candidate"}
   }
   const extraction: dict = json_parse(json_stringify(extraction_value))
-  const catalog = __read_json(
-    harness.fs,
-    path_join(root, "spec/provider-catalog/provider-catalog.json"),
-  )
   let plan = plan_notice(harness, notice_raw, extraction, catalog)
   const output_dir = __ensure_output_dir(harness.fs, root, options.output_dir)
   plan.receipt = plan.receipt

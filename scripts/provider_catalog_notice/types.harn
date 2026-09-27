@@ -98,7 +98,7 @@ pub type ProviderCatalogCandidate = PriceChange \
   | AdditionChange
 
 pub type NoticeExtraction = {
-  classification: "candidate" | "irrelevant",
+  classification: "candidate" | "irrelevant" | "uncertain",
   candidate?: ProviderCatalogCandidate,
   reason?: string,
 }
