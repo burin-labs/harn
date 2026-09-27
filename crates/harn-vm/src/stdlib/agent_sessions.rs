@@ -253,14 +253,7 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         Some(VmValue::Dict(opts)) => opts.as_ref().clone(),
         _ => return Err(err("agent_session_open: `opts` must be a dict or nil")),
     };
-    for key in opts.keys() {
-        if !AGENT_SESSION_OPEN_OPT_KEYS.contains(&key.as_str()) {
-            let expected = AGENT_SESSION_OPEN_OPT_KEYS.join(", ");
-            return Err(err(format!(
-                "agent_session_open: unknown option key '{key}' (expected one of: {expected})"
-            )));
-        }
-    }
+    reject_unknown_opts(&opts, "agent_session_open", AGENT_SESSION_OPEN_OPT_KEYS)?;
     let workspace_policy = match opts.get("workspace_policy") {
         None | Some(VmValue::Nil) => None,
         Some(value) => Some(
@@ -283,26 +276,10 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
             .map_err(|message| err(format!("agent_session_open: {message}")))?,
         ),
     };
-    let actor = opt_string(&opts, "agent_session_open", "actor")?
-        .map(|actor| actor.trim().to_string())
-        .filter(|actor| !actor.is_empty());
-    let resolved = match opt_string(&opts, "agent_session_open", "parent")? {
-        Some(parent) => {
-            if !agent_sessions::exists(&parent) {
-                return Err(err(format!(
-                    "agent_session_open: unknown parent session id '{parent}'"
-                )));
-            }
-            agent_sessions::open_child_session_with_actor(&parent, id, actor.as_deref())
-        }
-        None if actor.is_some() => {
-            return Err(err(
-                "agent_session_open: `actor` names a delegated child and requires `parent`",
-            ))
-        }
-        None => agent_sessions::open_or_create(id),
-    }
-    .map_err(|error| err(format!("agent_session_open: {error}")))?;
+    let parent = opt_string(&opts, "agent_session_open", "parent")?;
+    let actor = opt_string(&opts, "agent_session_open", "actor")?;
+    let resolved = agent_sessions::open_session(id, parent.as_deref(), actor.as_deref())
+        .map_err(|error| err(format!("agent_session_open: {error}")))?;
     if let Some(policy) = workspace_policy {
         agent_sessions::set_workspace_policy(&resolved, policy)
             .map_err(|message| err(format!("agent_session_open: {message}")))?;

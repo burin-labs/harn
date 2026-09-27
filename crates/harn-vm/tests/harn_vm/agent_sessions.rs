@@ -603,5 +603,5 @@ pipeline main(harness: Harness, task: unknown) {
 }
 "#)
     .expect_err("an unknown parent is refused");
-    assert!(unknown.contains("unknown parent session id"), "{unknown}");
+    assert!(unknown.contains("unknown parent session"), "{unknown}");
 }
