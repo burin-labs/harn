@@ -162,6 +162,13 @@ fn resolve_thinking_config_with_policy(
             model,
         ));
     }
+    if has_thinking_option
+        && matches!(thinking, crate::llm::api::ThinkingConfig::Disabled)
+        && !caps.reasoning_disable_supported
+        && !effort_ladder_check_suspended()
+    {
+        return Err(unsupported_option_error("thinking", provider, model));
+    }
     validate_thinking_supported(
         &thinking,
         provider,
