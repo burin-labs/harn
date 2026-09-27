@@ -9,6 +9,72 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.145
+
+### Added
+
+- Add classified transcript compaction with per-message keep, reword, and drop
+  decisions, confidence-based preservation, protected prior recaps, bounded
+  evaluation windows, and typed receipts. Failed or cancelled compaction leaves
+  the original transcript intact.
+- The reusable Harn bump workflow accepts an exact source commit. It advances a consumer pinned to the same release tag
+  when that commit is newer, and refuses stale or divergent commit targets.
+
+### Changed
+
+- **The missing-tool-call classifier, the scope classifier, and the step judge
+  declare their label sets as schema enums (#8800).** Strict structured output
+  and the typed-output decoder now refuse an out-of-set label instead of
+  mapping it after the fact, and the refusal takes each classifier's existing
+  error path: `ambiguous` or `escalate` with an `error` original label, and a
+  `judge_unavailable` step-judge decision under the default `fail_open`.
+- An open release pull request now refolds itself when main gains changelog fragments
+  it did not fold. A push to main that changes `changelog.d/` prepares the release
+  again from current main with the same version and resets the release branch in
+  place, so a late fix rides the release without closing and reopening it.
+- A release is now built and checked while its release pull request waits in the
+  merge queue, at the exact commit that lands on main, and promotion publishes
+  those files as soon as the release merges instead of after a second build.
+- **Release candidates use measured larger runners for Apple and Linux artifacts
+  (#8881).** Both Apple targets now build on GitHub macOS XLarge, Linux targets
+  use a glibc-compatible Blacksmith 16-core image, and typed runner metadata
+  rejects incompatible operating systems and glibc floors before dispatch.
+
+### Fixed
+
+- `agent_loop` now forwards `tool_precheck`, `tool_retries`, `tool_backoff_ms`, `model`, `provider`, and
+  `run_id` to tool dispatch. Before, a precheck passed to the loop was never consulted, tool retries
+  never engaged, and tool audit receipts recorded model and provider as empty.
+- After a completion adjudicator withdraws a closing draft, the next model request always ends on a
+  user message carrying the rejection, even when a standing reminder already committed the same
+  text. Previously the request could end on the withdrawal placeholder, which OpenAI-compatible
+  servers read as a prefill and, after a second veto, refused with HTTP 400.
+- **Provider catalog notice safety (#8847).** Incomplete new-model notices now produce local proposals without a Git branch
+  or pull request. Validated notice edits regenerate every catalog projection and open signed draft pull requests with only
+  tracked changes staged; live extraction uses the provider's catalog default and accepts explicit cost and timeout limits.
+- A release pull request batched ahead of another merge-queue entry is no longer
+  silently left untagged. The queue now removes an entry queued behind a release
+  commit, so a release always lands as the last entry of its push, and a push
+  that still buries a release commit fails its build instead of running green as
+  a warm-cache build.
+- **Code index rename protects separate declarations (#8879).** Workspace symbol
+  renames now stop before writing when the index finds another declaration with
+  the same name in scope, and report the collision so an agent can use a
+  binding-aware rename.
+- **DeepInfra DeepSeek V4.1 Flash route and cache usage (#8882).** The catalog now includes the served DeepInfra route
+  with source-backed prices and a review date for its promotion. OpenAI-compatible cache counters reported as null
+  remain unmeasured instead of blocking an otherwise valid response. Harn verified one native tool call in both
+  streaming and non-streaming modes.
+
+### Security
+
+- **A macOS confined child with no preset, policy, or cache write roots can no
+  longer write outside its workspace (#8493).** The macOS sandbox profile
+  rendered an unfiltered `(allow file-write*)` rule when every aggregate
+  write-root list was empty, as with a process preset list of only
+  `system_runtime`. The aggregate rule is now emitted only when it names at
+  least one root, so such a child writes its workspace roots and nothing else.
+
 ## v0.10.144
 
 ### Added
