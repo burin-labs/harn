@@ -541,6 +541,7 @@ pub(super) fn session_project_root_for_cwd(cwd: &Path) -> PathBuf {
 
 /// Why a persisted-session request cannot be scoped to one project.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum AcpSessionProjectRootError {
     Missing,
     Invalid { cwd: String, detail: String },

@@ -56,6 +56,7 @@ pub struct ReviewerConfig {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum OnReviewerError {
     #[default]
     Deny,

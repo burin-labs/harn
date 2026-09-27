@@ -14,6 +14,7 @@ use harn_vm::{VmError, VmValue};
 /// through [`HostlibError::Unimplemented`] so embedders and tests can
 /// distinguish intentionally scaffolded contracts from runtime failures.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum HostlibError {
     /// The method exists in the registration table but has no implementation
     /// yet. This is the canonical scaffold-stage error: it tells callers

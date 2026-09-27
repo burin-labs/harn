@@ -58,6 +58,15 @@ bypass label waives either rule. The release fold keeps the snippet and puts
 `### Breaking` first in each release, where consumers' update tooling reads
 it.
 
+Two checks also decide from the diff that a pull request is breaking and then
+require the same fragment. The `Breaking CLI surface` gate fails when a line
+disappears from `spec/cli-surface.txt`, the generated listing of every `harn`
+command, alias, flag, and positional argument (`make gen-cli-surface`). The
+`Verify publishable crates` job runs `cargo-semver-checks` on the published
+crates against the merge base and fails on a major-level change. Keeping the
+old spelling as an alias, or adding a variant to a `#[non_exhaustive]` enum,
+is not breaking and needs no fragment.
+
 ````markdown
 - **`harn run --foo` is removed (#2494).** Use `--bar`, which takes the
   same value.

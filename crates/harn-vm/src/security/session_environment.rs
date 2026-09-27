@@ -795,6 +795,7 @@ pub struct GrantReceipt {
 /// Errors raised while validating, resolving, or enforcing session grants. All
 /// are launch-boundary failures; none carries a secret value.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EnvironmentPolicyError {
     /// A grant spec had an empty name.
     EmptyName,

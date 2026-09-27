@@ -542,6 +542,7 @@ pub struct EmittedTape {
 
 /// Errors surfaced when activating or finalizing a testbench session.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum TestbenchError {
     Subprocess(String),
     Tape(String),

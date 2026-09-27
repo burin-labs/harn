@@ -203,6 +203,7 @@ pub fn initialize_runtime_assets() {
 
 /// A startup condition that must stop the process before any work begins.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum RuntimeInitError {
     /// The Harn-owned environment namespace holds an unknown or malformed key.
     Environment(environment_registry::EnvironmentValidationError),

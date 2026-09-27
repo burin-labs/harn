@@ -114,6 +114,7 @@ pub struct RawDecisionResponse {
 /// Why a dispatch produced no response. Each maps onto exactly one outcome
 /// arm, so a transport can never collapse a rate limit into a generic failure.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum DecisionTransportError {
     /// A paid response can fail validation while retaining its settlement.
     Accounted {

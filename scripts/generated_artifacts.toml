@@ -554,6 +554,19 @@ ci = true
 make_all = true
 
 [[artifact]]
+id = "cli-surface"
+description = "Flat sorted listing of every harn command, alias, flag, positional slot, and enumerated value, projected from the live Clap parser; the pull-request gate diffs it to refuse an undeclared removal."
+gen = "gen-cli-surface"
+check = "check-cli-surface"
+outputs = ["spec/cli-surface.txt"]
+sources = [
+  "crates/harn-cli/src/cli/",
+  "crates/harn-cli/src/commands/argument_schema.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "provider-matrix"
 description = "Provider/model capability matrix doc generated from the authoritative provider catalog and capability registry."
 gen = "gen-provider-matrix"
@@ -697,6 +710,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-harness-migrations" = "binary"
 "check-session-bundle-schema" = "binary"
 "check-trigger-quickref" = "binary"
+"check-cli-surface" = "binary"
 "check-provider-matrix" = "binary"
 "check-provider-support" = "binary"
 "check-provider-catalog" = "binary"

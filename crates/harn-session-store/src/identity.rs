@@ -167,6 +167,7 @@ pub(crate) fn normalize_identity_headers_in_place(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EventIdentityError {
     Invalid {
         field: EventIdentityField,

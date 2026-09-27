@@ -435,6 +435,10 @@ jobs:
       HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The public API check diffs against a pull request merge commit's
+          # first parent, so keep one parent.
+          fetch-depth: 2
       - uses: ./.github/actions/rust-toolchain
       # Bounded coarse rust-cache. The former per-object sccache GHA backend
       # used 5.35 GiB / 6,785 entries for a 31% warm hit rate, crowding the
@@ -461,6 +465,41 @@ jobs:
         # so their shared feature graph compiles once, then checks every exact
         # publishable archive in one temporary Cargo workspace.
         run: ./scripts/verify_crate_packages.sh
+      # A public API break in a published crate needs a breaking fragment with
+      # its migration. This lane already restored the workspace's compiled
+      # dependency graph, which the rustdoc builds reuse.
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        with:
+          tool: cargo-semver-checks@0.50.0
+      - name: Resolve the public API baseline
+        id: api-baseline
+        env:
+          EVENT: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # The checkout is shallow, so name the "before" commit explicitly
+          # rather than asking git for a merge base: a pull request's merge
+          # commit's first parent, the merge group's base, or the pushed range.
+          case "$EVENT" in
+            pull_request) base="$(git rev-parse HEAD^1)" ;;
+            merge_group) base="$MERGE_GROUP_BASE_SHA" ;;
+            *) base="$PUSH_BEFORE_SHA" ;;
+          esac
+          git fetch --no-tags --depth=1 origin "$base"
+          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+      - name: Check public Rust API for an undeclared break
+        env:
+          BASE_SHA: ${{ steps.api-baseline.outputs.base_sha }}
+          HEAD_SHA: HEAD
+        run: ./.github/scripts/breaking-surface-check.sh rust-api
+      # The baseline checkout and its placeholder workspaces are per-commit,
+      # so keep them out of the saved cache.
+      - name: Drop the public API baseline workspace
+        if: always()
+        run: rm -rf target/semver-checks
 
   lint-md:
     name: Markdown lint
