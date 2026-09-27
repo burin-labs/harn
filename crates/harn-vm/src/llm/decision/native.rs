@@ -305,12 +305,15 @@ pub(super) fn read_response(
                 let mut receipt = privacy_plan(request).receipt;
                 receipt.inference_boundary_rule = boundary_rule.map(str::to_string);
                 if boundary_rule.is_some() {
-                    receipt.inference_catalog_evidence =
+                    receipt.inference_catalog_evidence = Some(
                         crate::llm::api::inference_boundary::catalog_evidence(
                             request.provider,
                             request.model,
                         )
-                        .ok();
+                        .map_err(|diagnostic| {
+                            DecisionTransportError::LocalAdmissionDenied { diagnostic }
+                        })?,
+                    );
                 }
                 receipt
             },
