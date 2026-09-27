@@ -167,7 +167,7 @@ pub fn record_directive_nonce(id: &str, nonce: &str) -> Result<Option<String>, S
             .and_then(VmValue::as_dict)
             .map(|metadata| metadata.as_ref().clone())
             .unwrap_or_else(crate::value::DictMap::new);
-        metadata.put_str(DIRECTIVE_NONCE_METADATA_KEY, nonce.to_string());
+        metadata.put_str(DIRECTIVE_NONCE_METADATA_KEY, nonce);
         transcript.insert(
             crate::value::intern_key("metadata"),
             VmValue::dict(metadata),
