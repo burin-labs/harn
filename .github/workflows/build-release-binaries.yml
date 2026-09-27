@@ -305,11 +305,43 @@ jobs:
               exit 1
             fi
             QUEUE_RUN_ID=""
-            if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]] &&
-               ! QUEUE_RUN_ID="$(release_candidate_run_id "$GITHUB_REPOSITORY" "$GITHUB_SHA")"; then
-              # Unread is not "none": building again is slow but always safe.
-              echo "::warning::Could not read whether the merge group built v$VERSION at $GITHUB_SHA; building it here."
-              QUEUE_RUN_ID=""
+            if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
+              QUEUE_RESOLUTION=""
+              if ! QUEUE_RESOLUTION="$(release_candidate_run_resolution \
+                "$GITHUB_REPOSITORY" \
+                "$GITHUB_SHA" \
+                "${GITHUB_RUN_ID:-}" \
+                "${RELEASE_CANDIDATE_WAIT_ATTEMPTS:-60}" \
+                "${RELEASE_CANDIDATE_POLL_SECONDS:-60}"
+              )"; then
+                QUEUE_RESOLUTION="unread||"
+              fi
+              IFS='|' read -r QUEUE_STATE QUEUE_CANDIDATE_RUN QUEUE_DETAIL <<< "$QUEUE_RESOLUTION"
+              case "$QUEUE_STATE" in
+                success)
+                  QUEUE_RUN_ID="$QUEUE_CANDIDATE_RUN"
+                  ;;
+                absent)
+                  echo "::notice::No exact-SHA merge-group candidate exists for v$VERSION at $GITHUB_SHA; building it on the push."
+                  ;;
+                failed)
+                  echo "::warning::Exact-SHA merge-group candidate run $QUEUE_CANDIDATE_RUN concluded ${QUEUE_DETAIL:-unknown}; rebuilding v$VERSION on the push."
+                  ;;
+                missing_manifest)
+                  echo "::warning::Exact-SHA merge-group run $QUEUE_CANDIDATE_RUN succeeded without candidate-manifest-$GITHUB_SHA; rebuilding v$VERSION on the push."
+                  ;;
+                timed_out)
+                  echo "::warning::Timed out waiting for exact-SHA merge-group candidate run $QUEUE_CANDIDATE_RUN while it was ${QUEUE_DETAIL:-in progress}; rebuilding v$VERSION on the push."
+                  ;;
+                unread)
+                  # Unread is not "none": building again is slow but always safe.
+                  echo "::warning::Could not read whether the merge group built v$VERSION at $GITHUB_SHA; building it here."
+                  ;;
+                *)
+                  echo "::error::Unknown exact-SHA candidate resolution '$QUEUE_RESOLUTION'."
+                  exit 1
+                  ;;
+              esac
             fi
             if [[ -n "$QUEUE_RUN_ID" ]]; then
               BUILD_MODE=queued

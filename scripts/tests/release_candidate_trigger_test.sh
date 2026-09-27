@@ -38,8 +38,38 @@ cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 [[ "${FAKE_GH_FAIL:-0}" == 1 ]] && exit 1
 case "$2" in
-  */build-release-binaries.yml/runs\?*) [[ -z "${FAKE_QUEUE_RUN:-}" ]] || printf '%s\n' "$FAKE_QUEUE_RUN" ;;
-  */artifacts\?name=candidate-manifest-*) printf '1\n' ;;
+  */build-release-binaries.yml/runs\?*)
+    if [[ -n "${FAKE_QUEUE_SEQUENCE:-}" ]]; then
+      state_file="${FAKE_GH_STATE_FILE:?FAKE_GH_STATE_FILE required with FAKE_QUEUE_SEQUENCE}"
+      read_count=0
+      [[ ! -f "$state_file" ]] || read -r read_count < "$state_file"
+      read_count=$((read_count + 1))
+      printf '%s\n' "$read_count" > "$state_file"
+      IFS=',' read -r -a states <<< "$FAKE_QUEUE_SEQUENCE"
+      index=$((read_count - 1))
+      (( index < ${#states[@]} )) || index=$((${#states[@]} - 1))
+      state="${states[$index]}"
+      if [[ "$*" == *"--jq"* ]]; then
+        [[ "$state" != success ]] || printf '%s\n' "${FAKE_QUEUE_RUN:-4242}"
+      else
+        conclusion=null
+        [[ "$state" != success ]] || conclusion='"success"'
+        [[ "$state" != failed ]] || conclusion='"failure"'
+        printf '{"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"%s","conclusion":%s}]}\n' \
+          "${FAKE_QUEUE_RUN:-4242}" "${GITHUB_SHA:?}" "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion"
+      fi
+    else
+      if [[ "$*" == *"--jq"* ]]; then
+        [[ -z "${FAKE_QUEUE_RUN:-}" ]] || printf '%s\n' "$FAKE_QUEUE_RUN"
+      elif [[ -n "${FAKE_QUEUE_RUN:-}" ]]; then
+        printf '{"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"completed","conclusion":"success"}]}\n' \
+          "$FAKE_QUEUE_RUN" "${GITHUB_SHA:?}"
+      else
+        printf '{"workflow_runs":[]}\n'
+      fi
+    fi
+    ;;
+  */artifacts\?name=candidate-manifest-*) printf '%s\n' "${FAKE_CANDIDATE_MANIFEST_COUNT:-1}" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -188,6 +218,81 @@ resolve pushed_after_queue PUSH_BEFORE="$push_base" FAKE_QUEUE_RUN=4242
    "$(matrix_targets pushed_after_queue)" == "" ]] \
   || fail "the push rebuilt a candidate its merge group had built: $(cat "$tmp/pushed_after_queue.outputs")"
 grep -Fq "Merge group run 4242" "$tmp/pushed_after_queue.log" || fail "the push does not name the queue's run"
+
+# A candidate that is still running when the push starts is waited on, then
+# reused after its exact manifest becomes available. The old resolver rebuilt
+# immediately because its success-only query made in-progress look absent.
+resolve pushed_waits_for_queue \
+  PUSH_BEFORE="$push_base" \
+  GITHUB_RUN_ID=9999 \
+  FAKE_QUEUE_RUN=4242 \
+  FAKE_QUEUE_SEQUENCE=in_progress,success \
+  FAKE_GH_STATE_FILE="$tmp/wait-state" \
+  RELEASE_CANDIDATE_WAIT_ATTEMPTS=2 \
+  RELEASE_CANDIDATE_POLL_SECONDS=0
+[[ "$(output pushed_waits_for_queue build_mode)" == queued &&
+   "$(output pushed_waits_for_queue should_build_binaries)" == false ]] \
+  || fail "the push rebuilt while its exact queue candidate was finishing: $(cat "$tmp/pushed_waits_for_queue.outputs")"
+[[ "$(cat "$tmp/wait-state")" == 2 ]] \
+  || fail "the resolver did not re-read the in-progress candidate"
+grep -Fq "candidate run 4242 is in_progress; waiting" "$tmp/pushed_waits_for_queue.log" \
+  || fail "the resolver did not report the bounded wait"
+
+# A terminal failed candidate, an exhausted wait, and an unread API each take
+# the safe rebuild path and name why. None may collapse into reuse.
+resolve pushed_after_failed_queue \
+  PUSH_BEFORE="$push_base" \
+  GITHUB_RUN_ID=9999 \
+  FAKE_QUEUE_RUN=4243 \
+  FAKE_QUEUE_SEQUENCE=failed \
+  FAKE_GH_STATE_FILE="$tmp/failed-state" \
+  RELEASE_CANDIDATE_WAIT_ATTEMPTS=1 \
+  RELEASE_CANDIDATE_POLL_SECONDS=0
+[[ "$(output pushed_after_failed_queue build_mode)" == candidate ]] \
+  || fail "a failed queue candidate was reused"
+grep -Fq "candidate run 4243 concluded failure" "$tmp/pushed_after_failed_queue.log" \
+  || fail "the failed-candidate rebuild did not name its reason"
+
+resolve pushed_after_manifestless_queue \
+  PUSH_BEFORE="$push_base" \
+  GITHUB_RUN_ID=9999 \
+  FAKE_QUEUE_RUN=4246 \
+  FAKE_QUEUE_SEQUENCE=success \
+  FAKE_GH_STATE_FILE="$tmp/manifestless-state" \
+  FAKE_CANDIDATE_MANIFEST_COUNT=0 \
+  RELEASE_CANDIDATE_WAIT_ATTEMPTS=1 \
+  RELEASE_CANDIDATE_POLL_SECONDS=0
+[[ "$(output pushed_after_manifestless_queue build_mode)" == candidate ]] \
+  || fail "a successful run without the exact candidate manifest was reused"
+grep -Fq "run 4246 succeeded without candidate-manifest-$queue_sha" "$tmp/pushed_after_manifestless_queue.log" \
+  || fail "the manifestless rebuild did not name its reason"
+
+resolve pushed_after_queue_timeout \
+  PUSH_BEFORE="$push_base" \
+  GITHUB_RUN_ID=9999 \
+  FAKE_QUEUE_RUN=4244 \
+  FAKE_QUEUE_SEQUENCE=in_progress \
+  FAKE_GH_STATE_FILE="$tmp/timeout-state" \
+  RELEASE_CANDIDATE_WAIT_ATTEMPTS=1 \
+  RELEASE_CANDIDATE_POLL_SECONDS=0
+[[ "$(output pushed_after_queue_timeout build_mode)" == candidate ]] \
+  || fail "a timed-out queue candidate was reused"
+grep -Fq "Timed out waiting for exact-SHA merge-group candidate run 4244" "$tmp/pushed_after_queue_timeout.log" \
+  || fail "the timed-out rebuild did not name its reason"
+
+# The push workflow itself has the same SHA and is always in progress during
+# setup. Even a synthetic successful row with its id must not be reused.
+resolve pushed_excludes_itself \
+  PUSH_BEFORE="$push_base" \
+  GITHUB_RUN_ID=4245 \
+  FAKE_QUEUE_RUN=4245 \
+  FAKE_QUEUE_SEQUENCE=success \
+  FAKE_GH_STATE_FILE="$tmp/self-state" \
+  RELEASE_CANDIDATE_WAIT_ATTEMPTS=1 \
+  RELEASE_CANDIDATE_POLL_SECONDS=0
+[[ "$(output pushed_excludes_itself build_mode)" == candidate ]] \
+  || fail "the push reused its own workflow run"
+
 resolve pushed_unread PUSH_BEFORE="$push_base" FAKE_GH_FAIL=1
 [[ "$(output pushed_unread build_mode)" == candidate && "$(output pushed_unread candidate_source_sha)" == "$queue_sha" ]] \
   || fail "an unreadable queue run did not fall back to building: $(cat "$tmp/pushed_unread.outputs")"
