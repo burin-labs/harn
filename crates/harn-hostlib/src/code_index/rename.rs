@@ -13,8 +13,8 @@
 //! - `conflict`    — `new_name` already exists as an identifier in at
 //!   least one file the rename would have touched.
 //! - `no_match`    — `symbol_ref` did not resolve to a node in the graph.
-//! - `ambiguous_symbol` — multiple distinct symbols match `symbol_ref`
-//!   and the caller didn't pin them down (no `line`, multiple files).
+//! - `ambiguous_symbol` — multiple distinct symbols match `symbol_ref`,
+//!   or another declaration with the same name is inside the rewrite scope.
 //! - `unsupported_language` — at least one in-scope file uses a grammar
 //!   that does not have an identifier table here yet.
 //! - `syntax_error` — a rewritten file failed re-parse with `validate=true`.
@@ -264,6 +264,29 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         return Ok(no_match_response(&env));
     }
 
+    // The index's REFS edges are name-based, not binding-resolved. Pinning a
+    // declaration identifies the seed, but cannot establish which same-named
+    // declaration each use refers to. The identifier rewrite below would
+    // otherwise silently rename both definitions and their unrelated uses.
+    let competing_declarations: Vec<_> = state
+        .symbols
+        .nodes_named(&symbol_name)
+        .iter()
+        .filter(|id| **id != seed_node_id)
+        .filter_map(|id| state.symbols.node(*id))
+        .filter(|node| is_rename_declaration(node.kind) && in_scope_files.contains(&node.path))
+        .map(|node| (node.path.clone(), node.line, node.kind.as_str()))
+        .collect();
+    if !competing_declarations.is_empty() {
+        let mut candidates = vec![(seed_path, seed_node.line, seed_node.kind.as_str())];
+        candidates.extend(competing_declarations);
+        return Ok(ambiguous_response_with_details(
+            &env,
+            &candidates,
+            "rename aborted without writes: the scope contains separate declarations with this name. Pinning the seed does not disambiguate their references; use a binding-aware LSP rename or narrow the scope.",
+        ));
+    }
+
     // The identifier-validity gate is a rename-only concern: an arbitrary
     // `replacement_text` (e.g. `client.fetch(`) is intentionally not an
     // identifier. Syntax validation (below) is the safety net for replace mode.
@@ -401,16 +424,7 @@ fn resolve_seed(
         .nodes_named(name)
         .iter()
         .filter_map(|id| graph.node(*id))
-        .filter(|node| {
-            matches!(
-                node.kind,
-                NodeKind::Function
-                    | NodeKind::Type
-                    | NodeKind::Field
-                    | NodeKind::EnumCase
-                    | NodeKind::Module
-            )
-        })
+        .filter(|node| is_rename_declaration(node.kind))
         .collect();
 
     let mut narrowed: Vec<&super::symbol_graph::Node> = candidates
@@ -443,6 +457,17 @@ fn resolve_seed(
                 .collect(),
         ),
     }
+}
+
+fn is_rename_declaration(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Function
+            | NodeKind::Type
+            | NodeKind::Field
+            | NodeKind::EnumCase
+            | NodeKind::Module
+    )
 }
 
 fn paths_match(a: &str, b: &str) -> bool {
@@ -793,6 +818,18 @@ fn ambiguous_response(
     env: &ResponseEnv<'_>,
     candidates: &[(String, u32, &'static str)],
 ) -> VmValue {
+    ambiguous_response_with_details(
+        env,
+        candidates,
+        "multiple symbols share `symbol_ref.name`; pass `symbol_ref.line` (and optionally `symbol_ref.kind`) to disambiguate. Candidates surfaced in the `warnings` field.",
+    )
+}
+
+fn ambiguous_response_with_details(
+    env: &ResponseEnv<'_>,
+    candidates: &[(String, u32, &'static str)],
+    details: &str,
+) -> VmValue {
     let candidate_list: Vec<VmValue> = candidates
         .iter()
         .map(|(path, line, kind)| {
@@ -808,10 +845,7 @@ fn ambiguous_response(
         "ambiguous_symbol",
         ResponseExtras {
             warnings: candidate_list,
-            details: "multiple symbols share `symbol_ref.name`; pass `symbol_ref.line` \
-                 (and optionally `symbol_ref.kind`) to disambiguate. \
-                 Candidates surfaced in the `warnings` field."
-                .to_string(),
+            details: details.to_string(),
             ..Default::default()
         },
     )
@@ -1117,6 +1151,39 @@ mod tests {
         assert!(list_len(field(&result, "conflicts")) >= 1);
         let on_disk = fs::read_to_string(root.join("src/main.rs")).unwrap();
         assert_eq!(on_disk, original_main, "rename must not write on conflict");
+    }
+
+    #[test]
+    fn workspace_rename_does_not_change_an_unrelated_same_named_type() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let target = "pub struct Reading { pub value: i32 }\n";
+        let unrelated = "pub struct Reading { pub archived: bool }\n";
+        fs::write(root.join("src/target.rs"), target).unwrap();
+        fs::write(root.join("src/archive.rs"), unrelated).unwrap();
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub mod target;\npub mod archive;\n",
+        )
+        .unwrap();
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("Reading")),
+            ("path", vm_string("src/target.rs")),
+            ("kind", vm_string("Type")),
+        ]);
+
+        let result = rename(&capability, symbol_ref, "Measurement", "workspace");
+        assert_eq!(s(field(&result, "result")), "ambiguous_symbol");
+        assert_eq!(
+            fs::read_to_string(root.join("src/target.rs")).unwrap(),
+            target
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("src/archive.rs")).unwrap(),
+            unrelated
+        );
     }
 
     #[test]
