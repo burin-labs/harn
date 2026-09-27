@@ -94,8 +94,8 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) uses the
-# provider-native tool channel, re-measured 2026-09-27 (burin-code#9352):
-#   * Agent eval, Burin canonical-25 tune cells, N=5, same build, only the
+# provider-native tool channel, re-measured 2026-09-27 in a downstream host:
+#   * Agent eval, the host's canonical-25 tune cells, N=5, same build, only the
 #     channel changed. Native vs fenced `json`: visible reasoning-voice prose
 #     in main-agent replies 0/19 trials vs 4/19 (21%, 95% CI [5%, 42%]); pass
 #     18/19 vs 16/20 measured; $0.27 vs $0.32. 224 native main-agent replies:

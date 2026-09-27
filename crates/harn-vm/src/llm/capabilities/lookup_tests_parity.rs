@@ -21,8 +21,8 @@ use super::{clear_user_overrides, lookup, set_user_overrides_toml};
 fn tool_mode_parity_reports_whether_anyone_declared_it() {
     clear_user_overrides();
 
-    // Reported in #5885. No row states a parity verdict for it.
-    let derived = lookup("fireworks", "accounts/fireworks/models/gpt-oss-120b");
+    // The #5885 shape: a text-only row that states no parity verdict.
+    let derived = lookup("openrouter", "openai/gpt-oss-120b");
     assert_eq!(derived.tool_mode_parity.as_deref(), Some("text_only"));
     assert_eq!(
         derived.tool_mode_parity_source,
