@@ -290,15 +290,21 @@ pub(super) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize 
             .cloned()
             .unwrap_or(VmValue::Nil),
     );
-    let Some(last) = messages.last() else {
+    // The assistant turn whose calls are open is the last one, with only its
+    // own tool results after it. A cancel between parallel calls leaves some
+    // answered and some not, so results may already trail it (harn#8951).
+    let Some(last) = messages
+        .iter()
+        .rposition(|message| message_role(message) == "assistant")
+        .filter(|index| {
+            messages[index + 1..]
+                .iter()
+                .all(|message| is_tool_result_role(&message_role(message)))
+        })
+        .map(|index| &messages[index])
+    else {
         return 0;
     };
-    let role = dict_get(last, "role")
-        .map(|v| v.display())
-        .unwrap_or_default();
-    if role != "assistant" {
-        return 0;
-    }
     let already_paired = paired_tool_result_ids(&messages);
     let synthetic = synthesize_orphan_tool_results(last, feedback, &already_paired);
     let mut repaired = 0;
@@ -308,6 +314,90 @@ pub(super) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize 
         }
     }
     repaired
+}
+
+fn message_role(message: &VmValue) -> String {
+    dict_get(message, "role")
+        .map(|v| v.display())
+        .unwrap_or_default()
+}
+
+fn is_tool_result_role(role: &str) -> bool {
+    role == "tool_result" || role == "tool"
+}
+
+/// What the model reads for a tool call no result answered (harn#8951).
+pub(crate) const UNANSWERED_TOOL_CALL_OBSERVATION: &str =
+    "No result: the turn was stopped before this tool call finished.";
+
+/// Answer every native tool call in `messages` that no tool result pairs.
+///
+/// Providers reject a request that carries an unanswered call: OpenAI with
+/// "No tool output found for function call", Anthropic with "tool_use ids were
+/// found without tool_result blocks". A turn stopped mid-tool leaves exactly
+/// that call in the stored transcript, and every later request, a resumed
+/// session's included, then fails the same way (harn#8951). Each unanswered
+/// call gets the harness's typed repair result, placed right after the
+/// assistant turn's own results so the pairing is adjacent for every provider.
+///
+/// Pure over its input: the stored transcript is never rewritten here, so a
+/// transcript written before this fix heals on its next request. Only calls
+/// with an id are answered; a call without one cannot be paired by any
+/// provider, and inventing a result for it would add a message the provider
+/// never asked for. Returns `None` when every call is already answered.
+pub(crate) fn answer_unanswered_tool_calls(
+    messages: &[serde_json::Value],
+) -> Option<Vec<serde_json::Value>> {
+    let vm_messages: Vec<VmValue> = messages
+        .iter()
+        .map(crate::stdlib::json_to_vm_value)
+        .collect();
+    let paired = paired_tool_result_ids(&vm_messages);
+    let unanswered = |message: &VmValue| {
+        if message_role(message) != "assistant" {
+            return Vec::new();
+        }
+        assistant_tool_use_blocks(message)
+            .into_iter()
+            .filter(|block| !block.id.is_empty() && !paired.contains(&block.id))
+            .collect::<Vec<_>>()
+    };
+    if !vm_messages
+        .iter()
+        .any(|message| !unanswered(message).is_empty())
+    {
+        return None;
+    }
+    let mut out = Vec::with_capacity(messages.len() + 1);
+    let mut index = 0;
+    while index < messages.len() {
+        out.push(messages[index].clone());
+        let open = unanswered(&vm_messages[index]);
+        index += 1;
+        if open.is_empty() {
+            continue;
+        }
+        while index < messages.len() && is_tool_result_role(&message_role(&vm_messages[index])) {
+            out.push(messages[index].clone());
+            index += 1;
+        }
+        for block in open {
+            let answer = super::tool_result_messages::tool_result_message(
+                super::tool_result_messages::ToolResultMessageInput {
+                    channel: crate::llm_config::ToolFormatChannel::Native,
+                    name: &block.name,
+                    tool_call_id: &block.id,
+                    observation: UNANSWERED_TOOL_CALL_OBSERVATION,
+                    ok: false,
+                    screenshots: &[],
+                    data: None,
+                    origin: ToolResultOrigin::HarnessRepair,
+                },
+            );
+            out.push(crate::llm::helpers::vm_value_to_json(&answer));
+        }
+    }
+    Some(out)
 }
 
 /// Synthesize a matching tool-result for each orphaned `tool_use`/`tool_call`
@@ -342,3 +432,7 @@ const MESSAGE_HISTORY_BUILTINS: &[&VmBuiltinDef] = &[
 pub(super) fn register_message_history_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, MESSAGE_HISTORY_BUILTINS);
 }
+
+#[cfg(test)]
+#[path = "message_history_tests.rs"]
+mod tests;
