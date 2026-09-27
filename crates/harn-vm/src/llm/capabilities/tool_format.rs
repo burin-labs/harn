@@ -273,6 +273,37 @@ fn suggested_alternative_provider_hint(model: &str) -> String {
     }
 }
 
+/// The refusal for tools offered on a text-channel `tool_format` outside
+/// `agent_loop`, or `None` for the native channel.
+///
+/// A text-channel format sends no tool schemas; the model learns the call
+/// grammar only from the contract `agent_loop` renders into the system prompt.
+/// A direct call would reach the wire with nothing tool-related on it. The
+/// runtime and `harn check` share this so both name the same fix.
+pub fn direct_call_text_tools_refusal(
+    provider: &str,
+    model: &str,
+    tool_format: &str,
+) -> Option<String> {
+    if ToolFormatWire::classify(tool_format) != Some(ToolFormatWire::Text) {
+        return None;
+    }
+    let native_hint = if lookup(provider, model).native_tools {
+        ""
+    } else {
+        " on a route that supports native tools"
+    };
+    let rule = super::lookup::capability_rule_provenance(provider, model)
+        .map(|rule| format!(" The format came from {rule}."))
+        .unwrap_or_default();
+    Some(format!(
+        "`tools` with tool_format `{tool_format}` needs the tool-call contract that only \
+         `agent_loop` renders; a direct call would send no tools to `{model}` (provider \
+         `{provider}`). Drive the tools through `agent_loop`, or pass \
+         `tool_format: \"native\"`{native_hint}.{rule}"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::lookup::{clear_user_overrides, lookup_with_user_overrides};
@@ -668,35 +699,4 @@ mod tests {
     }
 
     // --- `extends = true` field-wise fall-through ---
-}
-
-/// The refusal for tools offered on a text-channel `tool_format` outside
-/// `agent_loop`, or `None` for the native channel.
-///
-/// A text-channel format sends no tool schemas; the model learns the call
-/// grammar only from the contract `agent_loop` renders into the system prompt.
-/// A direct call would reach the wire with nothing tool-related on it. The
-/// runtime and `harn check` share this so both name the same fix.
-pub fn direct_call_text_tools_refusal(
-    provider: &str,
-    model: &str,
-    tool_format: &str,
-) -> Option<String> {
-    if ToolFormatWire::classify(tool_format) != Some(ToolFormatWire::Text) {
-        return None;
-    }
-    let native_hint = if lookup(provider, model).native_tools {
-        ""
-    } else {
-        " on a route that supports native tools"
-    };
-    let rule = super::lookup::capability_rule_provenance(provider, model)
-        .map(|rule| format!(" The format came from {rule}."))
-        .unwrap_or_default();
-    Some(format!(
-        "`tools` with tool_format `{tool_format}` needs the tool-call contract that only \
-         `agent_loop` renders; a direct call would send no tools to `{model}` (provider \
-         `{provider}`). Drive the tools through `agent_loop`, or pass \
-         `tool_format: \"native\"`{native_hint}.{rule}"
-    ))
 }
