@@ -1,13 +1,9 @@
 import { agent_host_tools } from "std/agent/host_tools"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 
-struct ReadContent {
-  content: string
-}
+type ReadContent = {content: string}
 
-struct CommandIdentity {
-  command_id: string
-}
+type CommandIdentity = {command_id: string}
 
 fn read_content(result: any) -> string {
   const parsed = schema_expect(json_parse(result.rendered_result), schema_of(ReadContent))
