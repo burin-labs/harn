@@ -1034,7 +1034,10 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             region: opts.region.clone(),
             api_key: opts.api_key.clone(),
             api_mode: opts.api_mode,
-            messages: opts.messages.clone(),
+            // A call left unanswered by a stopped turn is answered here, so no
+            // provider sees an invalid history (harn#8951).
+            messages: crate::llm::agent_session_host::answer_unanswered_tool_calls(&opts.messages)
+                .unwrap_or_else(|| opts.messages.clone()),
             system: opts.system.clone(),
             max_tokens: opts.max_tokens,
             temperature: opts.temperature,

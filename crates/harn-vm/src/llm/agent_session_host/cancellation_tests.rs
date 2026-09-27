@@ -955,3 +955,70 @@ fn cancelled_nested_guard_does_not_pop_callers_policy() {
     drop(abandoned_stack);
     clear_execution_policy_stacks();
 }
+
+/// harn#8951: a stop that lands while a tool runs must not persist an
+/// unanswered call, or every resumed turn is refused by the provider. The
+/// durable transcript carries the typed repair result before the terminal.
+#[tokio::test(flavor = "current_thread")]
+async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
+    crate::agent_sessions::reset_session_store();
+    let root = tempfile::tempdir().expect("temp root");
+    let session_id = "cancelled-mid-tool";
+    let mut options = crate::value::DictMap::new();
+    options.put_str("root", root.path().to_string_lossy().as_ref());
+    let prepared = crate::agent_session_journal::prepare(
+        session_id,
+        &options,
+        "run-cancelled-mid-tool".to_string(),
+        "turn-cancelled-mid-tool".to_string(),
+    )
+    .await
+    .expect("prepare journal");
+    crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
+    crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
+    crate::llm::agent_session_host::seed_host_session_provider_model(session_id, "mock", "fixture");
+    for message in [
+        json!({"role": "user", "content": "run the slow command"}),
+        json!({"role": "assistant", "content": "", "tool_calls": [
+            {"id": "call_stopped", "type": "function", "function": {"name": "run", "arguments": "{}"}}
+        ]}),
+    ] {
+        crate::agent_sessions::inject_message(
+            session_id,
+            crate::stdlib::json_to_vm_value(&message),
+        )
+        .expect("enqueue transcript mutation");
+    }
+
+    super::abandon_agent_session(session_id)
+        .await
+        .expect("abandonment");
+
+    let store = crate::stdlib::session_store::open_canonical_agent_session(
+        &crate::stdlib::session_store::SessionStoreDir::under_root(root.path()),
+        session_id,
+        None,
+        harn_session_store::SessionType::User,
+    )
+    .await
+    .expect("open canonical session");
+    let payloads = crate::stdlib::session_store::read_all_events(&store, session_id)
+        .await
+        .expect("read canonical events")
+        .iter()
+        .map(|event| event.payload.to_string())
+        .collect::<Vec<_>>();
+    let answer = payloads
+        .iter()
+        .position(|payload| payload.contains("call_stopped") && payload.contains("harness_repair"))
+        .unwrap_or_else(|| panic!("no persisted answer for the open call: {payloads:#?}"));
+    let terminal = payloads
+        .iter()
+        .position(|payload| payload.contains("agent_run_terminal"))
+        .expect("terminal persisted");
+    assert!(
+        answer < terminal,
+        "the answer precedes the terminal: {payloads:#?}"
+    );
+    crate::agent_sessions::reset_session_store();
+}
