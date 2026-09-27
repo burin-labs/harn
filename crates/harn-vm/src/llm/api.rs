@@ -453,9 +453,10 @@ async fn vm_call_llm_full_inner_request(
         // Bypass fixture/replay so the script-driven fake never collides
         // with HARN_LLM_REPLAY/RECORD being set from an outer harness.
         request.emit_reminder_lifecycle();
-        let result = crate::llm::fake::FakeLlmProvider
+        let mut result = crate::llm::fake::FakeLlmProvider
             .chat_impl(request, delta_tx)
             .await?;
+        super::mock::mark_live_after_mock_prefix(request, &mut result);
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(request, &result);
         return Ok(result);
@@ -482,7 +483,8 @@ async fn vm_call_llm_full_inner_request(
     // Provider/model failover is owned by `routing::execute_with_routing`.
     // This layer executes exactly one route so no attempt can bypass the
     // canonical ledger, quarantine, or exhaustion contract.
-    let result = vm_call_llm_api(request, delta_tx).await?;
+    let mut result = vm_call_llm_api(request, delta_tx).await?;
+    super::mock::mark_live_after_mock_prefix(request, &mut result);
 
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
@@ -513,10 +515,11 @@ async fn vm_call_llm_full_inner_offthread(
 
     if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
         observed.record_provider_dispatch();
-        let result = crate::llm::fake::FakeLlmProvider
+        let mut result = crate::llm::fake::FakeLlmProvider
             .chat_impl(request, delta_tx)
             .await
             .map_err(OffthreadLlmError::from_vm_error)?;
+        super::mock::mark_live_after_mock_prefix(request, &mut result);
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(request, &result);
         return Ok(result);
@@ -542,9 +545,10 @@ async fn vm_call_llm_full_inner_offthread(
 
     // Keep the off-thread transport primitive single-route as well. The caller
     // routing executor owns all retries across provider/model alternatives.
-    let result = vm_call_llm_api(request, delta_tx)
+    let mut result = vm_call_llm_api(request, delta_tx)
         .await
         .map_err(OffthreadLlmError::from_vm_error)?;
+    super::mock::mark_live_after_mock_prefix(request, &mut result);
 
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
