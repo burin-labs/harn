@@ -41,8 +41,13 @@ pub(crate) fn visible_messages_with_lineage(
         &crate::llm::capabilities::Capabilities::default(),
         &reminders,
     );
+    let directive_nonce = crate::llm::helpers::directive_nonce_for_session(session_id);
     let source_count = messages.len();
-    let mut visible = crate::llm::helpers::apply_rendered_reminder_messages(messages, &rendered);
+    let mut visible = crate::llm::helpers::apply_rendered_reminder_messages(
+        messages,
+        &rendered,
+        &directive_nonce,
+    );
     let compaction_receipt_ref = latest_compaction_receipt_ref(session_id);
     for (position, message) in visible.iter_mut().enumerate() {
         let semantic_kind = semantic_kind(message);
@@ -165,7 +170,8 @@ fn host_agent_session_commit_directives_builtin(
         &reminders,
         withdrawal_reason.as_deref(),
     );
-    let Some(message) = crate::llm::helpers::directive_envelope_message(&pending) else {
+    let nonce = crate::llm::helpers::directive_nonce_for_session(&session_id);
+    let Some(message) = crate::llm::helpers::directive_envelope_message(&pending, &nonce) else {
         return Ok(VmValue::Int(0));
     };
     crate::agent_sessions::inject_message(&session_id, super::json_to_vm(&message))

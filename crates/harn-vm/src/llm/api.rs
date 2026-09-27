@@ -20,6 +20,7 @@ pub(crate) mod result;
 mod schema_stream;
 mod telemetry;
 mod thinking;
+mod tool_result_provenance;
 mod transport;
 pub(crate) use transport::reqwest_send_error;
 
