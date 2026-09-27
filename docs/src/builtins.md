@@ -1776,13 +1776,17 @@ operation uses the policy hook's authority; direct tool-handler calls and other
 host operations remain restricted.
 
 The never-approvable command floor runs before consent. It blocks fork bombs;
-`git reset --hard`, `git clean -fd`, and force-pushes; recursive deletion of the
+`git reset --hard`, `git clean -fd`, and force-pushes, including `--mirror` and
+`+ref` refspecs; recursive deletion of the
 project or paths outside it; `dd of=…`; filesystem formatting;
 `chmod -R 000`; and shell redirection or `truncate -s 0` against literal paths
 tracked by the enclosing Git worktree. New files, untracked files, and dynamic
 shell paths remain outside this never-approvable floor. They still receive the
 normal write-intent classification, so policy can deny them or require consent.
 Blocked commands return `status: "blocked"` without starting a child process.
+Pushes that delete a remote ref (`--delete`, `--prune`, or a `:ref` refspec)
+are not on the floor. They carry the `git_force_push` risk label along with
+force-pushes, so policy can deny them or require consent.
 
 The scanner follows quoted and chained commands, including commands nested
 under `bash -c` and common wrappers such as `sudo`, `env`, and `timeout`.
