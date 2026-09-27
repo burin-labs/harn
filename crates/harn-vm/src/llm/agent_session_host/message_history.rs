@@ -326,6 +326,30 @@ fn is_tool_result_role(role: &str) -> bool {
     role == "tool_result" || role == "tool"
 }
 
+/// Call ids a message answers through content blocks rather than as a tool
+/// message of its own: Anthropic `tool_result` blocks in a user turn, Gemini
+/// `functionResponse` parts, and Responses `function_call_output` items.
+fn block_result_ids(message: &VmValue) -> Vec<String> {
+    let Some(content) = dict_get(message, "content") else {
+        return Vec::new();
+    };
+    list_items(content)
+        .iter()
+        .filter_map(|block| {
+            let block_type = dict_get(block, "type")
+                .map(|v| v.display())
+                .unwrap_or_default();
+            match block_type.as_str() {
+                "tool_result" => dict_get(block, "tool_use_id"),
+                "function_call_output" => dict_get(block, "call_id"),
+                _ => dict_get(block, "functionResponse").and_then(|part| dict_get(part, "id")),
+            }
+            .map(|id| id.display())
+            .filter(|id| !id.is_empty())
+        })
+        .collect()
+}
+
 /// What the model reads for a tool call no result answered (harn#8951).
 pub(crate) const UNANSWERED_TOOL_CALL_OBSERVATION: &str =
     "No result: the turn was stopped before this tool call finished.";
@@ -352,7 +376,8 @@ pub(crate) fn answer_unanswered_tool_calls(
         .iter()
         .map(crate::stdlib::json_to_vm_value)
         .collect();
-    let paired = paired_tool_result_ids(&vm_messages);
+    let mut paired = paired_tool_result_ids(&vm_messages);
+    paired.extend(vm_messages.iter().flat_map(block_result_ids));
     let unanswered = |message: &VmValue| {
         if message_role(message) != "assistant" {
             return Vec::new();

@@ -77,6 +77,18 @@ fn a_well_formed_history_and_an_id_less_call_are_left_alone() {
         tool_result("a"),
     ];
     assert!(answer_unanswered_tool_calls(&answered).is_none());
+    // Anthropic answers inside a user turn's content blocks, possibly after an
+    // interleaved system message; that call is answered, not open.
+    let block_answered = vec![
+        json!({"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_01", "name": "read_file", "input": {}}
+        ]}),
+        json!({"role": "system", "content": "budget is now $0.25"}),
+        json!({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_01", "content": "contents"}
+        ]}),
+    ];
+    assert!(answer_unanswered_tool_calls(&block_answered).is_none());
     // Gemini's `functionCall` id is optional; no provider can pair a result to
     // it, so nothing is invented.
     let id_less = vec![
