@@ -256,6 +256,22 @@ pub enum ToolProbeEvidenceSource {
     SavedResponse,
 }
 
+impl ToolConformanceReport {
+    /// Only a current report from a live request can certify route behavior.
+    pub fn require_live_evidence(&self) -> Result<(), String> {
+        if self.schema_version != TOOL_CONFORMANCE_SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported tool-probe report schema_version {}; expected {}",
+                self.schema_version, TOOL_CONFORMANCE_SCHEMA_VERSION
+            ));
+        }
+        if self.evidence_source != ToolProbeEvidenceSource::LiveRequest {
+            return Err("not live provider evidence".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallingConformanceSummary {
     pub native: ToolProbeStatus,
@@ -825,7 +841,7 @@ pub fn tool_conformance_request_catalog_audit(
 }
 
 pub fn report_satisfies_required_probe(report: &ToolConformanceReport, requirement: &str) -> bool {
-    if report.evidence_source != ToolProbeEvidenceSource::LiveRequest {
+    if report.require_live_evidence().is_err() {
         return false;
     }
     match requirement {
