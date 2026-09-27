@@ -175,6 +175,10 @@ next_interval() {
 
 attempt=0
 unmeasured_attempts=0
+unmeasured_seconds=0
+# Backoff stretches each unmeasured poll, so the poll count alone no longer
+# bounds the wait. Unmeasured time keeps the budget the fixed interval gave it.
+max_unmeasured_seconds=$((max_unmeasured_attempts * interval_seconds))
 rate_limit_seconds=0
 queued_since=""
 wait_seconds=$interval_seconds
@@ -185,6 +189,7 @@ while :; do
   rate_limited=0
   if read_producer_state; then
     unmeasured_attempts=0
+    unmeasured_seconds=0
     case "$state" in
       queued|waiting|pending|requested)
         # Nothing can have been uploaded yet, so the inventory is not read.
@@ -247,6 +252,11 @@ while :; do
       echo "producer '${producer_job}' state unmeasured after ${max_unmeasured_attempts} polls; missing artifacts: ${missing[*]}" >&2
       exit 1
     fi
+    if (( max_unmeasured_seconds > 0 && unmeasured_seconds + wait_seconds > max_unmeasured_seconds )); then
+      echo "producer '${producer_job}' state unmeasured for ${unmeasured_seconds}s after ${unmeasured_attempts} polls; the next wait would pass the ${max_unmeasured_seconds}s budget; missing artifacts: ${missing[*]}" >&2
+      exit 1
+    fi
+    unmeasured_seconds=$((unmeasured_seconds + wait_seconds))
   fi
   if [ "$attempt" -eq 1 ] || [ $((attempt % 6)) -eq 0 ]; then
     echo "waiting for run artifacts (poll ${attempt}, producer ${state}, next in ${wait_seconds}s): ${missing[*]}"

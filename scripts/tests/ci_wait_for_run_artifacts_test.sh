@@ -97,7 +97,7 @@ run_case() {
   PATH="$fixture_root:$PATH" FIXTURE_ROOT="$fixture_root" FIXTURE_SCENARIO="$scenario" \
     GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID=123 GITHUB_RUN_ATTEMPT=2 \
     HARN_EXT_ARTIFACT_PRODUCER_JOB='Rust workspace tests' \
-    HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS=3 \
+    HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS="${WAIT_MAX_ATTEMPTS:-3}" \
     HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS="${WAIT_INTERVAL:-0}" \
     HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS="${WAIT_MAX_INTERVAL:-0}" \
     HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS="${WAIT_MAX_QUEUE:-1800}" \
@@ -164,6 +164,13 @@ done
 
 run_case api_error harn-cli.tar.zst
 assert_output stderr 'producer state unreadable (poll 1): HTTP 502: Bad Gateway'
+
+# Backoff must not stretch the unmeasured budget: six polls at a fixed 10s
+# were 60s, so a backed-off 10s, 20s, 40s wait stops at the third poll
+# instead of sleeping on toward six.
+WAIT_MAX_ATTEMPTS=6 WAIT_INTERVAL=10 WAIT_MAX_INTERVAL=60 run_case api_error harn-cli.tar.zst
+assert_result 1 0 3
+assert_output stderr "state unmeasured for 30s after 3 polls; the next wait would pass the 60s budget"
 
 # Three refused polls would exhaust the unmeasured budget of 3; a rate limit
 # is waited out for as long as the refusal's own reset header says, and the
