@@ -23,6 +23,23 @@ pub struct InferenceBoundary {
     pub allow_training_discounts: bool,
 }
 
+/// Host-owned run ceiling. Embedders grant this through the session
+/// environment; an unconfigured standalone Harn run keeps its existing policy.
+pub const HOST_BOUNDARY_ENV: &str = "HARN_INFERENCE_BOUNDARY_JSON";
+
+fn host_boundary() -> Option<InferenceBoundary> {
+    let raw = crate::stdlib::process::session_env_var(HOST_BOUNDARY_ENV)
+        .unwrap_or_else(|_| Some(String::new()))?;
+    Some(parse_host_boundary(&raw))
+}
+
+fn parse_host_boundary(raw: &str) -> InferenceBoundary {
+    serde_json::from_str(raw).unwrap_or(InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    })
+}
+
 thread_local! {
     static AMBIENT_BOUNDARY: std::cell::RefCell<Option<InferenceBoundary>> = const { std::cell::RefCell::new(None) };
 }
@@ -64,7 +81,7 @@ pub(crate) fn meet(
 }
 
 pub(crate) fn effective(requested: Option<InferenceBoundary>) -> Option<InferenceBoundary> {
-    meet(current_ambient_boundary(), requested)
+    meet(meet(host_boundary(), current_ambient_boundary()), requested)
 }
 
 pub(crate) fn parse_vm_value(value: &VmValue) -> Result<InferenceBoundary, VmError> {
@@ -205,6 +222,46 @@ mod tests {
         assert!(is_loopback_endpoint("http://[::1]:11434"));
         assert!(!is_loopback_endpoint("https://localhost.example.com:11434"));
         assert!(!is_loopback_endpoint("https://api.example.com:11434"));
+    }
+
+    #[test]
+    fn malformed_host_ceiling_fails_closed() {
+        assert_eq!(
+            parse_host_boundary(r#"{"reach":"unexpected","allow_training_discounts":true}"#),
+            InferenceBoundary {
+                reach: InferenceReach::LocalOnly,
+                allow_training_discounts: false,
+            }
+        );
+    }
+
+    #[test]
+    fn host_ceiling_reads_a_literal_session_grant() {
+        use crate::security::{
+            EnvironmentPolicyKind, GrantSourceSpec, GrantSpec, SessionEnvironment,
+        };
+
+        let environment = SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
+            vec![GrantSpec {
+                name: HOST_BOUNDARY_ENV.into(),
+                source: GrantSourceSpec::Literal {
+                    value: r#"{"reach":"local_only","allow_training_discounts":false}"#.into(),
+                },
+                expose_as_env: Some(HOST_BOUNDARY_ENV.into()),
+                for_command: None,
+            }],
+            &|_| None,
+        )
+        .unwrap();
+        let _guard = crate::stdlib::process::declare_session_environment_if_absent(environment);
+        assert_eq!(
+            effective(None),
+            Some(InferenceBoundary {
+                reach: InferenceReach::LocalOnly,
+                allow_training_discounts: false,
+            })
+        );
     }
 
     #[test]
