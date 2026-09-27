@@ -216,6 +216,35 @@ pipeline test_unresolved_existing_model_cannot_become_addition(harness: Harness,
 }
 
 @test
+pipeline test_existing_new_price_on_wrong_model_cannot_hide_identity_error(
+  harness: Harness,
+  task: unknown,
+) {
+  const input = fixture(harness.fs, "carried-update")
+  const catalog = BASE_CATALOG
+    + {
+      models: BASE_CATALOG.models
+        + [
+          {
+            provider: "anthropic",
+            id: "claude-3-5-haiku-20241022",
+            name: "Claude Haiku 3.5",
+            pricing: {input_per_mtok: 0.8, output_per_mtok: 4.0},
+          },
+        ],
+    }
+  const candidate = input.extraction.candidate + {model_id: "claude-3-5-haiku-20241022"}
+  const plan = plan_notice(
+    harness,
+    input.notice,
+    {classification: "candidate", candidate: candidate},
+    catalog,
+  )
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert_eq(plan.patch, nil)
+}
+
+@test
 pipeline test_irrelevant_notice_records_no_op(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "irrelevant")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)

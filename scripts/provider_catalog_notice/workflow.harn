@@ -83,6 +83,20 @@ fn __model_rows(catalog: dict, provider: string, model_id: string) -> list {
   return rows
 }
 
+fn __trusted_no_op_identity(
+  notice: ProviderNotice,
+  candidate: dict,
+  model_row: dict,
+  current_matches_old: bool,
+) -> bool {
+  if current_matches_old {
+    return true
+  }
+  const text = lowercase(notice.text ?? "")
+  return contains(text, lowercase(candidate.model_id))
+    || (__nonempty(model_row?.name) && contains(text, lowercase(model_row.name)))
+}
+
 fn __base_receipt(
   harness: Harness,
   notice: ProviderNotice,
@@ -494,6 +508,24 @@ pub fn plan_notice(
   } else {
     __values_equal(current, candidate.new_value)
   }
+  const current_matches_old = if candidate.kind == "promotion" {
+    current_promotion == nil && __price_rates_equal(current, candidate.old_value)
+  } else {
+    __values_equal(current, candidate.old_value)
+  }
+  if already_applied
+    && !__trusted_no_op_identity(notice, candidate, models[0], current_matches_old) {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "rejected",
+        "proposed value is present but the notice does not identify this exact model",
+      )
+        + {model_id: candidate.model_id, change_kind: candidate.kind, evidence: candidate.evidence},
+      candidate: candidate,
+    }
+  }
   if already_applied {
     return {
       receipt: __base_receipt(
@@ -511,12 +543,7 @@ pub fn plan_notice(
       candidate: candidate,
     }
   }
-  const current_matches = if candidate.kind == "promotion" {
-    current_promotion == nil && __price_rates_equal(current, candidate.old_value)
-  } else {
-    __values_equal(current, candidate.old_value)
-  }
-  if !current_matches {
+  if !current_matches_old {
     return {
       receipt: __base_receipt(
         harness,
@@ -890,6 +917,8 @@ new provider model. An addition needs provider, model_id, and evidence only; it 
 reviewable incomplete proposal, never an automatic catalog row. For existing models, extract
 one explicit price, temporary promotion, retirement, endpoint, or capability change. Select
 model_id only from the catalog rows below, using the old value and model name to disambiguate.
+For a price change, match the stated old price to that row's current field; do not select
+a different row merely because its current price equals the proposed new price.
 If no row matches unambiguously, do not invent an id; return "uncertain" with the ambiguity
 as the reason. An actual addition must be explicitly described as a new model by the notice.
 Return "irrelevant" only when no catalog change is stated. Never infer missing identifiers
