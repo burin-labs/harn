@@ -147,18 +147,10 @@ pub(super) fn opt_data_posture_field(
 pub(super) fn opt_inference_boundary_field(
     options: Option<&crate::value::DictMap>,
 ) -> Result<Option<crate::llm::api::InferenceBoundary>, VmError> {
-    let Some(value) = options.and_then(|opts| opts.get("inference_boundary")) else {
-        return Ok(None);
-    };
-    let Some(fields) = value.as_dict() else {
-        return Err(VmError::Runtime(
-            "inference_boundary: expected {reach, allow_training_discounts}".into(),
-        ));
-    };
-    let json = super::super::vm_value_dict_to_json(fields);
-    serde_json::from_value(json)
-        .map(Some)
-        .map_err(|error| VmError::Runtime(format!("inference_boundary: {error}")))
+    options
+        .and_then(|opts| opts.get("inference_boundary"))
+        .map(crate::llm::api::inference_boundary::parse_vm_value)
+        .transpose()
 }
 
 pub(super) fn parse_schema_value(

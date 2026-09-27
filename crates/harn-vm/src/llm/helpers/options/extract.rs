@@ -805,7 +805,9 @@ pub(crate) fn extract_llm_options(
         opt_str(&options, "previous_response_id").filter(|value| !value.trim().is_empty());
     let store = opt_responses_store_field(options.as_ref())?;
     let data_controls = opt_data_posture_field(options.as_ref())?;
-    let inference_boundary = opt_inference_boundary_field(options.as_ref())?;
+    let inference_boundary = crate::llm::api::inference_boundary::effective(
+        opt_inference_boundary_field(options.as_ref())?,
+    );
     let background = opt_bool_field(options.as_ref(), "background")?;
     let truncation = opt_str(&options, "truncation").filter(|value| !value.trim().is_empty());
     let compact = opt_bool_field(options.as_ref(), "compact")?;

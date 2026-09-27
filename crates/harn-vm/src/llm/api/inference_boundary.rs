@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::llm_config::TrainingDefault;
+use crate::value::{VmError, VmValue};
 
 use super::data_controls::DataControlsReceipt;
 
@@ -20,6 +21,60 @@ pub enum InferenceReach {
 pub struct InferenceBoundary {
     pub reach: InferenceReach,
     pub allow_training_discounts: bool,
+}
+
+thread_local! {
+    static AMBIENT_BOUNDARY: std::cell::RefCell<Option<InferenceBoundary>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(crate) fn swap_ambient_boundary(next: Option<InferenceBoundary>) -> Option<InferenceBoundary> {
+    AMBIENT_BOUNDARY.with(|slot| slot.replace(next))
+}
+
+pub(crate) fn current_ambient_boundary() -> Option<InferenceBoundary> {
+    AMBIENT_BOUNDARY.with(|slot| *slot.borrow())
+}
+
+fn reach_rank(reach: InferenceReach) -> u8 {
+    match reach {
+        InferenceReach::LocalOnly => 0,
+        InferenceReach::HostedOpenWeight => 1,
+        InferenceReach::AnyHosted => 2,
+    }
+}
+
+/// Nested scopes and explicit call options may tighten, never widen, the
+/// destination ceiling installed by an outer host run.
+pub(crate) fn meet(
+    inherited: Option<InferenceBoundary>,
+    requested: Option<InferenceBoundary>,
+) -> Option<InferenceBoundary> {
+    match (inherited, requested) {
+        (Some(outer), Some(inner)) => Some(InferenceBoundary {
+            reach: if reach_rank(outer.reach) <= reach_rank(inner.reach) {
+                outer.reach
+            } else {
+                inner.reach
+            },
+            allow_training_discounts: outer.allow_training_discounts
+                && inner.allow_training_discounts,
+        }),
+        (one, None) | (None, one) => one,
+    }
+}
+
+pub(crate) fn effective(requested: Option<InferenceBoundary>) -> Option<InferenceBoundary> {
+    meet(current_ambient_boundary(), requested)
+}
+
+pub(crate) fn parse_vm_value(value: &VmValue) -> Result<InferenceBoundary, VmError> {
+    let VmValue::Dict(fields) = value else {
+        return Err(VmError::Runtime(
+            "inference_boundary: expected {reach, allow_training_discounts}".into(),
+        ));
+    };
+    serde_json::from_value(crate::llm::helpers::vm_value_dict_to_json(fields))
+        .map_err(|error| VmError::Runtime(format!("inference_boundary: {error}")))
 }
 
 #[derive(Clone, Copy)]
@@ -106,7 +161,7 @@ pub(crate) fn preflight(
     provider: &str,
     model: &str,
 ) -> Result<Option<&'static str>, String> {
-    let Some(boundary) = boundary else {
+    let Some(boundary) = effective(boundary) else {
         return Ok(None);
     };
     let facts = super::data_controls::resolve(
@@ -216,5 +271,26 @@ mod tests {
             ),
             Ok("inference_boundary.any_hosted")
         );
+    }
+
+    #[tokio::test]
+    async fn scope_follows_a_spawned_worker_and_refuses_widening() {
+        let outer = InferenceBoundary {
+            reach: InferenceReach::LocalOnly,
+            allow_training_discounts: false,
+        };
+        let wider = InferenceBoundary {
+            reach: InferenceReach::AnyHosted,
+            allow_training_discounts: true,
+        };
+        crate::orchestration::scope_inference_boundary(outer, async move {
+            assert_eq!(effective(Some(wider)), Some(outer));
+            let child = tokio::spawn(crate::orchestration::scope_inline_subtask(async move {
+                effective(Some(wider))
+            }));
+            assert_eq!(child.await.expect("worker joins"), Some(outer));
+        })
+        .await;
+        assert_eq!(current_ambient_boundary(), None);
     }
 }

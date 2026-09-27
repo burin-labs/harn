@@ -366,7 +366,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         opts.data_controls,
     );
     let mut data_controls_receipt = data_controls.receipt.clone();
-    if let Some(boundary) = opts.inference_boundary {
+    if let Some(boundary) = super::inference_boundary::effective(opts.inference_boundary) {
         let rule = super::inference_boundary::governing_rule(
             boundary,
             &opts.provider,

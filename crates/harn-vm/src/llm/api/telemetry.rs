@@ -1073,6 +1073,7 @@ mod tests {
                 ..Default::default()
             })),
             data_controls: None,
+            inference_boundary_rule: Some("inference_boundary.local_runtime".to_string()),
             source: source::OLLAMA_CHAT.to_string(),
             serving_base_url: Some("https://provider.example/v1".to_string()),
             serving_fingerprint: Some("build-1".to_string()),
