@@ -418,6 +418,21 @@ mod tests {
         assert!(!legacy.thinking_modes.iter().any(|m| m == "effort"));
     }
 
+    #[test]
+    fn zai_glm53_flash_requires_thinking_while_glm52_can_disable_it() {
+        reset();
+        let flash = lookup("zai", "glm-5.3-flash");
+        assert!(!flash.reasoning_disable_supported);
+        assert!(!flash.reasoning_none_supported);
+        assert_eq!(
+            flash.reasoning_wire_format.as_deref(),
+            Some("thinking_type")
+        );
+
+        let previous = lookup("zai", "glm-5.2");
+        assert!(previous.reasoning_disable_supported);
+    }
+
     /// Every claim here was measured against Google's live endpoint on
     /// 2026-09-03, with an unknown-model negative control returning 404 first
     /// so a 200 means the route actually ran.

@@ -326,7 +326,15 @@ impl OpenAiCompatibleProvider {
             }
             Some("thinking_type") => {
                 if let Some(thinking) = typed_thinking_config(&opts.thinking) {
-                    body["thinking"] = thinking;
+                    // Some models require thinking on every request. An omitted
+                    // caller setting reaches us as Disabled, but sending the
+                    // explicit disable makes those endpoints reject a healthy
+                    // plain call. An explicit unsupported disable is rejected
+                    // during option extraction before it reaches this builder.
+                    let implicit_disable = matches!(opts.thinking, ThinkingConfig::Disabled);
+                    if !implicit_disable || caps.reasoning_disable_supported || !may_shape {
+                        body["thinking"] = thinking;
+                    }
                 }
             }
             _ => {}
