@@ -26,7 +26,7 @@ mod tool_choice;
 mod tool_search;
 mod validate;
 
-pub(crate) use directive_placement::uncommitted_directives;
+pub(crate) use directive_placement::turn_boundary_directives;
 pub(crate) use reminders::{
     apply_rendered_reminder_messages, directive_envelope_message, has_directive_commit_metadata,
     pending_reminders_from_session, render_pending_reminders, DIRECTIVE_IDS_KEY,

@@ -17,7 +17,7 @@ pub(crate) use options::{
     has_directive_commit_metadata, pending_reminders_from_session, prepare_llm_options,
     prepare_llm_options_safe, project_agent_tools, project_llm_options, render_pending_reminders,
     resolve_catalog_thinking_config, resolve_thinking_config, system_prompt_event_metadata,
-    system_prompt_metadata, uncommitted_directives, validate_llm_option_keys, validate_options,
+    system_prompt_metadata, turn_boundary_directives, validate_llm_option_keys, validate_options,
 };
 #[cfg(test)]
 pub(crate) use options::{strip_directive_commit_metadata, tracked_directive_envelope_message};
