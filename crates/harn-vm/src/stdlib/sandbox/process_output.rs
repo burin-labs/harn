@@ -108,10 +108,8 @@ mod tests {
             ..Default::default()
         };
 
-        let error = super::super::ensure_managed_process_egress_supported::<
-            super::super::ActiveBackend,
-        >(&policy)
-        .unwrap_err();
+        let error = super::super::ensure_spawn_enforceable::<super::super::ActiveBackend>(&policy)
+            .unwrap_err();
         assert!(error.to_string().contains("not enforceable"), "{error}");
     }
 
