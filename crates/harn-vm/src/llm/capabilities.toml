@@ -1264,6 +1264,12 @@ prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
 # Sonnet 4.6 rejects assistant prefill while keeping the 4.x tool surface.
+# It accepts `output_config.effort` at low/medium/high/max (no xhigh; high is
+# the API default) and adaptive thinking, with `enabled` + `budget_tokens`
+# still accepted but deprecated. Source: platform.claude.com/docs/en/
+# build-with-claude/effort (supportedModels lists claude-sonnet-4-6), read
+# 2026-09-27. Before this row declared effort, the portable `effort` option
+# was refused on Sonnet 4.6 as unsupported.
 [[provider.anthropic]]
 model_match = "claude-sonnet-*"
 version_min = [4, 6]
@@ -1281,7 +1287,9 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "native"
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "max"]
 vision_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -1575,7 +1583,9 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "native"
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "max"]
 vision_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
