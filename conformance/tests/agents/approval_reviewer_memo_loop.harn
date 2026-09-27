@@ -1,0 +1,87 @@
+import { approval_reviewer_for } from "std/agent/approval_review"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn note_tools(runtime: HarnessRuntime, executed: any) {
+  let tools = tool_registry()
+  return tool_define(
+    tools,
+    "note",
+    "Record a note",
+    {
+      handler: { _args ->
+        runtime.atomic_add(executed, 1)
+        return "noted"
+      },
+      parameters: {text: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  // The loop has two identical calls but only one scripted reviewer answer.
+  // If the second call invokes the reviewer, the provider-call census fails.
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [
+          {id: "first", name: "note", arguments: {text: "same"}},
+          {id: "second", name: "note", arguments: {text: "same"}},
+        ],
+      },
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this note\"}",
+      ),
+    ],
+    { ->
+      const executed = harness.runtime.atomic(0)
+      const review_requests = harness.runtime.atomic(0)
+      const review_grants = harness.runtime.atomic(0)
+      const reviewer = approval_reviewer_for(
+        harness,
+        {reviewer: {provider: "mock", model: "mock"}},
+        "Record the same note twice.",
+      )
+      agent_loop(
+        harness,
+        "Record the same note twice.",
+        nil,
+        {
+          provider: "mock",
+          tools: note_tools(harness.runtime, executed),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 1,
+          session_id: "memo-loop-session",
+          approval_policy: {require_approval: ["note"]},
+          approval_reviewer: { request ->
+            harness.runtime.atomic_add(review_requests, 1)
+            const decision = reviewer(request)
+            if decision.approved {
+              harness.runtime.atomic_add(review_grants, 1)
+            }
+            return decision
+          },
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(
+        "memo_loop_two_review_requests="
+          + to_string(harness.runtime.atomic_get(review_requests) == 2),
+      )
+      harness.stdio.println(
+        "memo_loop_both_actions_executed="
+          + to_string(
+            harness.runtime.atomic_get(executed) == 2
+              && harness.runtime.atomic_get(review_grants) == 2,
+          ),
+      )
+      // One agent turn, one reviewer answer, and the loop's terminal model
+      // call. A second reviewer round trip makes this count four.
+      harness.stdio.println("memo_loop_one_review=" + to_string(len(calls) == 3))
+    },
+  )
+}

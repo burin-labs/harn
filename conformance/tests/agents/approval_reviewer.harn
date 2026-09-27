@@ -369,5 +369,59 @@ pipeline default(harness: Harness) {
     !contains(approval_review_system_prompt({}), "OPERATOR INSTRUCTIONS"),
     "absent guidance must emit no section at all",
   )
+  // A repeated refusal in one reviewer session needs one judgment. A
+  // different target or a separately installed reviewer must still call the
+  // model, or an approval could silently cross an authorization boundary.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this file\"}",
+      ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this file\"}",
+      ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this file\"}",
+      ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this file\"}",
+      ),
+    ],
+    { ->
+      const policy = {reviewer: {provider: "mock", model: "mock"}}
+      const goal = "Read a source file."
+      const request = {
+        session_id: "memo-session",
+        tool: "read_file",
+        category: "read_workspace_file",
+        arguments: {path: "a.rs"},
+        reason: "this file needs an ask",
+        policy_decision: {action: "ask", context: {repeat_count: 1}},
+      }
+      const reviewer = approval_reviewer_for(harness, policy, goal)
+      const first = reviewer(request)
+      const first_count = len(harness.llm.mock_calls())
+      const repeated = reviewer(
+        request + {policy_decision: {action: "ask", context: {repeat_count: 2}}},
+      )
+      const repeated_count = len(harness.llm.mock_calls())
+      const distinct = reviewer(request + {arguments: {path: "b.rs"}})
+      const distinct_count = len(harness.llm.mock_calls())
+      const other_reviewer = approval_reviewer_for(harness, policy, goal)
+      const other = other_reviewer(request)
+      const other_count = len(harness.llm.mock_calls())
+      harness.stdio.println("memo_first_approved=" + to_string(first.approved && repeated.approved))
+      harness.stdio.println("memo_identical_reused=" + to_string(repeated_count == first_count))
+      harness.stdio.println(
+        "memo_other_target_called="
+          + to_string(distinct_count == repeated_count + 1 && distinct.approved),
+      )
+      harness.stdio.println(
+        "memo_other_reviewer_called="
+          + to_string(other_count == distinct_count + 1 && other.approved),
+      )
+    },
+  )
   harness.stdio.println("approval_reviewer_ok")
 }
