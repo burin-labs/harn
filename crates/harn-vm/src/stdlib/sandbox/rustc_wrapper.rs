@@ -339,26 +339,33 @@ fn measure(
         .iter()
         .map(|key| (key.to_string(), String::new()))
         .collect();
-    match build(scratch.path(), cwd, blanked, None) {
-        Ok(without) if without.success => decision(
-            RustcWrapperDisposition::Disabled,
-            wrapper.or_else(|| with_wrapper.failed_wrapper.clone()),
-            format!(
-                "the wrapper cannot run under this profile: {}",
-                with_wrapper.error_line
-            ),
-            cwd,
+    // Why the wrapper-free build failed is the only evidence that separates a
+    // broken toolchain from a broken wrapper, so the reason carries it.
+    let without_error = match build(scratch.path(), cwd, blanked, None) {
+        Ok(without) if without.success => {
+            return decision(
+                RustcWrapperDisposition::Disabled,
+                wrapper.or_else(|| with_wrapper.failed_wrapper.clone()),
+                format!(
+                    "the wrapper cannot run under this profile: {}",
+                    with_wrapper.error_line
+                ),
+                cwd,
+            )
+        }
+        Ok(without) => without.error_line,
+        Err(reason) => reason,
+    };
+    decision(
+        RustcWrapperDisposition::Unmeasured,
+        wrapper.or(with_wrapper.failed_wrapper),
+        format!(
+            "the probe crate failed to build with and without the wrapper: with it: {}; \
+             without it: {without_error}",
+            with_wrapper.error_line
         ),
-        _ => decision(
-            RustcWrapperDisposition::Unmeasured,
-            wrapper.or(with_wrapper.failed_wrapper),
-            format!(
-                "the probe crate failed to build with and without the wrapper: {}",
-                with_wrapper.error_line
-            ),
-            cwd,
-        ),
-    }
+        cwd,
+    )
 }
 
 /// The probe crate's directory, removed on every return path.
