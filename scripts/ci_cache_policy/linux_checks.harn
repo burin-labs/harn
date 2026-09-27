@@ -732,9 +732,9 @@ fn artifact_ready_barrier_errors(workflow: dict) -> list<string> {
   const ready_needs = ready_job?.needs ?? []
   const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for shared Harn binary")
   const ready_command = trim(ready_step?.run ?? "")
-  if trim(workflow?.env?.HARN_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
+  if trim(workflow?.env?.HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
     != ARTIFACT_WAIT_MAX_ATTEMPTS
-    || trim(workflow?.env?.HARN_ARTIFACT_WAIT_INTERVAL_SECONDS ?? "")
+    || trim(workflow?.env?.HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS ?? "")
       != ARTIFACT_WAIT_INTERVAL_SECONDS
     || trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
@@ -765,7 +765,7 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
   if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
       != "15"
-    || trim(ready_step?.env?.HARN_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
+    || trim(ready_step?.env?.HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
       != "6"
     || ready_needs != ["changes", "rust-check-inputs"]
     || !contains(trim(ready_job?.if ?? ""), "needs.rust-check-inputs.result == 'success'")

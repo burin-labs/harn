@@ -24,35 +24,35 @@ producer_job="${HARN_EXT_ARTIFACT_PRODUCER_JOB:?HARN_EXT_ARTIFACT_PRODUCER_JOB m
 run_attempt="${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT must identify the current attempt}"
 # Retained for callers using the existing setting: this bounds consecutive
 # unreadable producer-state observations, not time spent in a measured queue.
-max_unmeasured_attempts="${HARN_ARTIFACT_WAIT_MAX_ATTEMPTS:-66}"
-interval_seconds="${HARN_ARTIFACT_WAIT_INTERVAL_SECONDS:-10}"
+max_unmeasured_attempts="${HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS:-66}"
+interval_seconds="${HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS:-10}"
 # A rate-limited API is waited out rather than counted as unmeasured, up to
 # this many seconds in total across the whole wait. The default fits inside
 # the shortest job that runs this script; a reset further away fails at once,
 # naming it, rather than as a job timeout that names nothing.
-max_rate_limit_seconds="${HARN_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS:-240}"
+max_rate_limit_seconds="${HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS:-240}"
 # The poll interval doubles after each read that finds nothing new, up to this.
-max_interval_seconds="${HARN_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS:-60}"
+max_interval_seconds="${HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS:-60}"
 # A producer still queued after this long is starved, not slow.
-max_queue_seconds="${HARN_ARTIFACT_WAIT_MAX_QUEUE_SECONDS:-1800}"
+max_queue_seconds="${HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS:-1800}"
 
 case "$run_attempt" in
   ''|*[!0-9]*|0) echo "GITHUB_RUN_ATTEMPT must be a positive integer" >&2; exit 2 ;;
 esac
 case "$max_unmeasured_attempts" in
-  ''|*[!0-9]*|0) echo "HARN_ARTIFACT_WAIT_MAX_ATTEMPTS must be a positive integer" >&2; exit 2 ;;
+  ''|*[!0-9]*|0) echo "HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS must be a positive integer" >&2; exit 2 ;;
 esac
 case "$interval_seconds" in
-  ''|*[!0-9]*) echo "HARN_ARTIFACT_WAIT_INTERVAL_SECONDS must be a non-negative integer" >&2; exit 2 ;;
+  ''|*[!0-9]*) echo "HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS must be a non-negative integer" >&2; exit 2 ;;
 esac
 case "$max_rate_limit_seconds" in
-  ''|*[!0-9]*) echo "HARN_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS must be a non-negative integer" >&2; exit 2 ;;
+  ''|*[!0-9]*) echo "HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS must be a non-negative integer" >&2; exit 2 ;;
 esac
 case "$max_interval_seconds" in
-  ''|*[!0-9]*) echo "HARN_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS must be a non-negative integer" >&2; exit 2 ;;
+  ''|*[!0-9]*) echo "HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS must be a non-negative integer" >&2; exit 2 ;;
 esac
 case "$max_queue_seconds" in
-  ''|*[!0-9]*) echo "HARN_ARTIFACT_WAIT_MAX_QUEUE_SECONDS must be a non-negative integer" >&2; exit 2 ;;
+  ''|*[!0-9]*) echo "HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS must be a non-negative integer" >&2; exit 2 ;;
 esac
 
 artifacts=("$@")

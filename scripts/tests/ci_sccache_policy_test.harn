@@ -219,7 +219,7 @@ fn workflow() {
     "needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'"
   const artifact_consumer_needs = ["changes", "rust-artifacts-ready"]
   return {
-    env: {HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270", HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"},
+    env: {HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270", HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"},
     jobs: {
       "package-audit": package_audit,
       "rust-check-inputs": {
@@ -330,7 +330,7 @@ fn workflow() {
         steps: [
           {
             name: "Wait for Linux security tests",
-            env: {HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "6"},
+            env: {HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "6"},
             run: "./scripts/ci/wait_for_run_artifacts.sh harn-security.tar.zst",
           },
         ],
@@ -791,7 +791,7 @@ pipeline test_rejects_artifact_wait_shorter_than_cold_producer_headroom(
   const valid = workflow()
   const invalid = {
     ...valid,
-    env: {...valid.env, HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "66"},
+    env: {...valid.env, HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "66"},
     jobs: {
       ...valid.jobs,
       "security-tests-ready": {...valid.jobs["security-tests-ready"], "timeout-minutes": 12},
@@ -1212,7 +1212,7 @@ pipeline test_security_wait_bounds_unmeasured_metadata() {
       "security-tests-ready": {
         ...ready,
         steps: ready.steps.map(
-          { step -> return {...step, env: {HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"}} },
+          { step -> return {...step, env: {HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"}} },
         )
           .to_list(),
       },
