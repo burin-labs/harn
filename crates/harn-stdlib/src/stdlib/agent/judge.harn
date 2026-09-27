@@ -48,6 +48,7 @@ import {
   __completion_judge_gap_class,
   __completion_typed_green_terminal,
   __completion_verification_state_read,
+  __judge_checkpoint_route_unavailable,
   __judge_checkpoint_unavailable,
   __judge_emit_decision,
   __judge_emit_started,
@@ -464,6 +465,11 @@ fn __judge_invoke_structured(
         // deadline sends the reader to look at latency for a setting that was
         // never set, which is how this class of defect stays open.
         "model_unconfigured"
+      } else if __judge_checkpoint_route_unavailable(checkpoint) {
+        // The route never ran (no credential, no region). Its error is host
+        // configuration, so it ends the run on its own reason and, like every
+        // outcome in this branch, carries no `feedback` into the transcript.
+        "route_unavailable"
       } else {
         "timeout"
       }
@@ -471,6 +477,8 @@ fn __judge_invoke_structured(
         "completion_judge_deadline_admission_refused"
       } else if judge_outcome == "model_unconfigured" {
         "completion_judge_model_unconfigured"
+      } else if judge_outcome == "route_unavailable" {
+        "completion_judge_route_unavailable"
       } else {
         "completion_judge_deadline_timeout"
       }

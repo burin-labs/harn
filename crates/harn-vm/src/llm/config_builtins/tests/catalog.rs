@@ -19,6 +19,10 @@ fn provider_status_reports_deferred_for_platform_managed_providers() {
     std::env::remove_var("VERTEX_AI_ACCESS_TOKEN");
     std::env::remove_var("GOOGLE_OAUTH_ACCESS_TOKEN");
     std::env::remove_var("GOOGLE_APPLICATION_CREDENTIALS");
+    let _region = crate::llm::test_env::ScopedEnvVar::set("AWS_REGION", "us-east-1");
+    let _key = crate::llm::test_env::ScopedEnvVar::set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+    let _secret =
+        crate::llm::test_env::ScopedEnvVar::set("AWS_SECRET_ACCESS_KEY", "example-secret");
     let status = llm_provider_status_value();
     assert_eq!(credential_status_for(&status, "bedrock"), "deferred");
     assert_eq!(credential_status_for(&status, "vertex"), "deferred");

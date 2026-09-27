@@ -110,6 +110,38 @@ fn complementary_reviewer_skips_deprecated_model_on_available_provider() {
     assert_ne!(selection.reviewer.family, selection.author.family);
 }
 
+/// The real availability path, not an injected closure: on a host with no
+/// provider configured, Bedrock must not be chosen just because its credential
+/// resolution is platform managed. The author prefers `anthropic-claude`
+/// reviewers first, and with every key removed Bedrock is the only route that
+/// serves Claude, so a Bedrock that reads as available wins the selection.
+#[test]
+fn complementary_reviewer_skips_bedrock_without_aws_configuration() {
+    let _guard = crate::llm::env_guard();
+    let mut env = crate::llm::test_env::UnconfiguredProviderEnv::new();
+    let options = ComplementaryReviewerOptions {
+        author_model: "gpt-5.5".to_string(),
+        author_provider: Some("openai".to_string()),
+        intent: ComplementaryReviewerIntent::Review,
+        max_price_multiplier: None,
+    };
+
+    let selection = pick_complementary_reviewer(options.clone());
+    assert_ne!(selection.reviewer.provider, "bedrock", "{selection:?}");
+
+    // Negative control: a region and a key pair make Bedrock eligible again.
+    env.set("AWS_REGION", "us-east-1");
+    env.set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+    env.set("AWS_SECRET_ACCESS_KEY", "example-secret");
+    let selection = pick_complementary_reviewer(options);
+    assert!(!selection.fallback, "{selection:?}");
+    assert_eq!(selection.reviewer.provider, "bedrock", "{selection:?}");
+    assert_eq!(
+        selection.reviewer.family, "anthropic-claude",
+        "{selection:?}"
+    );
+}
+
 #[test]
 fn complementary_reviewer_reports_no_available_independent_route() {
     let selection = pick_complementary_reviewer_with_availability(
