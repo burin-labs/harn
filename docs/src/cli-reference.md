@@ -182,23 +182,45 @@ other: `--no-sandbox` leaves the environment policy fully in force, and an
 environment grant gives no file, network, or tool access. Approval policy is a
 third, separate thing again.
 
-Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]`:
+Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND][,to=in_process]`:
 
 | Part | Meaning |
 |---|---|
 | `NAME` | A unique, non-secret name used in receipts and diagnostics. |
 | `SOURCE` | `env:VAR_NAME` snapshots that launcher variable at session launch. `secret://ACCOUNT/KEY` keeps a live [secret-store](./hostlib/secret_store.md) reference, so rotation and revocation take effect without restarting the session. |
 | `,expose=ENV_VAR` | Optional. Makes the value available under this unique environment name. Without `,for=`, the exposure is session-scoped: `harness.env`, provider configuration, and every spawned command. |
-| `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process — Harn's own `harness.llm.call` is not an exec — so provider keys stay session-scoped by omitting `,for=`. |
+| `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process, because Harn's own `harness.llm.call` is not an exec. |
+| `,to=in_process` | Optional. Requires `,expose=` and rejects `,for=`. Makes the variable visible to Harn's own process only: provider credentials and configuration for `harness.llm.call`, and `harness.env`. No spawned command sees it, in value or as a secret reference. Use it for provider keys that only the run's model calls need. `,to=session` is the default. |
 
 ```bash
 # Let only `gh` see a vault-backed token; other process.exec calls do not inherit it.
 harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
 
-# Snapshot a provider key from the launcher env, exposed under the same name
-# for this run's model calls and every spawned command.
+# Snapshot a provider key for this run's own model calls. No spawned
+# command, including one the agent runs, can read it.
+harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY,to=in_process agent.harn
+
+# The same key for model calls and every spawned command.
 harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
 ```
+
+Each exposed grant reaches one audience:
+
+| Grant | Harn's own process | Spawned commands |
+|---|---|---|
+| `,expose=VAR` | yes | every command |
+| `,expose=VAR,for=COMMAND` | no | `COMMAND` only |
+| `,expose=VAR,to=in_process` | yes | none |
+
+"Spawned commands" means every child the session starts, not only
+`process.exec`: MCP stdio servers, ACP provider transports, and the git and
+other helper commands Harn runs itself all start with the session's resolved
+environment. An `isolated` or `granted` session therefore hands an MCP server
+or ACP provider only the runtime essentials, the grants that reach it, and the
+`env` entries in that server's or provider's own configuration.
+
+A run record's `admitted_environment` lists the names a child could see, so it
+omits in-process grants; their receipts carry `exposed_to: "in_process"`.
 
 Duplicate grant names and duplicate `expose` targets are launch errors. A child
 session inherits its parent's resolved environment by default. It may narrow
@@ -253,10 +275,12 @@ Terminology:
   ACP defines the session lifecycle; `environmentPolicy` is a Harn extension.
 - **Worker**: delegated work inside that lineage. It receives no more
   environment authority than its parent.
-- **Subprocess**: an operating-system command started by the session. It sees
-  the same resolved session environment plus explicit per-call overrides.
-- **Grant**: a named, receipted source-to-environment mapping. Grants are
-  session-wide today.
+- **Subprocess**: an operating-system command started by the session,
+  including MCP stdio servers and ACP provider transports. It sees the
+  resolved session environment minus in-process grants, plus explicit
+  per-call or per-server overrides.
+- **Grant**: a named, receipted source-to-environment mapping whose audience is
+  the whole session, one command, or Harn's own process.
 - **Sandbox**: the separate file/process/network boundary.
 - **Approval**: permission for a risky operation; it does not add environment
   values.

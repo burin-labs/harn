@@ -1380,6 +1380,7 @@ mod tests {
                 },
                 expose_as_env: Some("HARN_LLM_TIMEOUT".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             }],
             &|name| std::env::var(name).ok(),
         )

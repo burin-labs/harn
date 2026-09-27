@@ -231,6 +231,7 @@ fn std_command_for_closes_a_granted_session_that_carries_a_grant() {
             },
             expose_as_env: Some(DECLARED.to_string()),
             for_command: None,
+            expose_to: Default::default(),
         }],
         &|name| std::env::var(name).ok(),
     )
@@ -292,6 +293,7 @@ fn a_grant_naming_an_absent_variable_is_refused_by_name() {
             },
             expose_as_env: Some(UNRESOLVABLE.to_string()),
             for_command: None,
+            expose_to: Default::default(),
         }],
         &|name| std::env::var(name).ok(),
     )

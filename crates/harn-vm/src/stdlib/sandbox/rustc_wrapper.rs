@@ -468,7 +468,12 @@ impl KnownWrapper {
         let Some((program, args)) = self.prepare.split_first() else {
             return;
         };
-        let _ = std::process::Command::new(program)
+        // A compiler-cache server outlives the call that starts it, so it must
+        // not start with more of the engine environment than a build child gets.
+        let Ok(mut command) = crate::process_sandbox::session_std_command(program) else {
+            return;
+        };
+        let _ = command
             .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
