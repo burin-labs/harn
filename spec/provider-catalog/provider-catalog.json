@@ -7489,6 +7489,100 @@
       ]
     },
     {
+      "id": "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash",
+      "name": "DeepSeek V4.1 Flash (DeepInfra)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "DeepSeek V4.1 Flash",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4.1-flash",
+      "equivalence_group": "deepseek-v4.1-flash",
+      "served_variant": "deepinfra",
+      "wire_model": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 0.6,
+        "cache_read_per_mtok": 0.006,
+        "cache_write_per_mtok": null,
+        "promotions": [
+          {
+            "id": "deepinfra-v41-flash-intro",
+            "starts_on": "2026-09-26",
+            "review_after": "2026-10-04",
+            "source_url": "https://deepinfra.com/deepseek-ai/DeepSeek-V4.1-Flash",
+            "input_per_mtok": 0.14,
+            "output_per_mtok": 0.42,
+            "cache_read_per_mtok": 0.004,
+            "cache_write_per_mtok": null
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "tool_use",
+        "long_context",
+        "cheap"
+      ]
+    },
+    {
       "id": "deepinfra/moonshotai/Kimi-K2.7-Code",
       "name": "Kimi K2.7 Code (DeepInfra)",
       "operations": [
@@ -32961,6 +33055,25 @@
       "base_url": "https://api.deepinfra.com/v1/openai",
       "secret_env": "DEEPINFRA_API_KEY",
       "label": "DeepSeek V4 Pro (DeepInfra)",
+      "family": "deepseek",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "DeepSeek V4.1 Flash (DeepInfra)",
       "family": "deepseek",
       "capabilities": [
         "native_tools",

@@ -537,6 +537,21 @@ fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
 }
 
 #[test]
+fn deepinfra_v41_flash_resolves_to_the_served_route() {
+    let id = "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash";
+    let row = model_catalog_entry(id).expect("the observed DeepInfra route is catalogued");
+    assert_eq!(row.provider, "deepinfra");
+    assert_eq!(
+        row.wire_model.as_deref(),
+        Some("deepseek-ai/DeepSeek-V4.1-Flash")
+    );
+    let selected = resolve_model_request(id, None).expect("the route resolves");
+    assert_eq!(selected.resolved_provider, "deepinfra");
+    assert_eq!(selected.resolved_model, id);
+    assert!(model_catalog_entry("deepinfra/deepseek-ai/DeepSeek-V4.2-Flash").is_none());
+}
+
+#[test]
 fn test_external_config_overlays_default_catalog() {
     let mut config = default_config();
     let mut overlay = ProvidersConfig {
