@@ -388,3 +388,26 @@ async fn vm_call_completion_fallback(
     );
     super::vm_call_llm_full(&fallback_opts).await
 }
+
+#[cfg(test)]
+mod inference_boundary_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn local_ceiling_refuses_hosted_completion_before_provider_io() {
+        let opts = LlmCallOptions {
+            provider: "openai".into(),
+            model: "gpt-4o".into(),
+            api_key: "invalid-test-key".into(),
+            inference_boundary: Some(super::super::InferenceBoundary {
+                reach: super::super::inference_boundary::InferenceReach::LocalOnly,
+                allow_training_discounts: false,
+            }),
+            ..Default::default()
+        };
+        let refusal = vm_call_completion_full(&opts, "prefix", None)
+            .await
+            .expect_err("a hosted route cannot pass the local ceiling");
+        assert!(format!("{refusal:?}").contains("inference_boundary.local_only"));
+    }
+}
