@@ -79,4 +79,23 @@ mod tests {
         .unwrap();
         assert_eq!(usage.complete_prompt_tokens(0), None);
     }
+
+    #[test]
+    fn null_cache_counters_remain_unreported_without_masking_measured_zero() {
+        let absent = ReportedCacheUsage::from_value(&json!({
+            "prompt_tokens_details": {"cached_tokens": null, "cache_write_tokens": null}
+        }))
+        .unwrap();
+        assert_eq!(absent, ReportedCacheUsage::default());
+        let measured = ReportedCacheUsage::from_value(&json!({
+            "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0}
+        }))
+        .unwrap();
+        assert_eq!(measured.read_tokens, Some(0));
+        assert_eq!(measured.write_tokens, Some(0));
+        assert!(ReportedCacheUsage::from_value(
+            &json!({"prompt_tokens_details": {"cache_write_tokens": "0"}})
+        )
+        .is_err());
+    }
 }
