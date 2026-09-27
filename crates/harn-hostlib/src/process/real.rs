@@ -250,7 +250,7 @@ pub(crate) fn prepare_command(
             let granted: std::collections::BTreeSet<String> = session
                 .receipts()
                 .into_iter()
-                .filter_map(|receipt| receipt.exposed_as_env)
+                .filter_map(|receipt| receipt.child_visible_env().map(str::to_string))
                 .collect();
             for (key, _) in std::env::vars_os() {
                 if let Some(name) = key.to_str() {

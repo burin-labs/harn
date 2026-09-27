@@ -17,7 +17,7 @@
 //! ## Grant grammar
 //!
 //! ```text
-//! --grant NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]
+//! --grant NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND][,to=in_process]
 //!   SOURCE := env:VAR_NAME
 //!           | secret://ACCOUNT/KEY
 //! ```
@@ -30,17 +30,21 @@
 //! and every spawned subprocess). With `,for=COMMAND` the variable is bound to
 //! spawns whose executable basename matches `COMMAND` only — for example
 //! `,expose=GH_TOKEN,for=gh` so only `gh` sees the token (harn#5549).
+//! `,to=in_process` keeps the exposure inside Harn's own process (provider
+//! credentials and `harness.env`) and out of every spawned command; it
+//! requires `,expose=` and rejects `,for=` (harn#8913).
 //! Without `,expose=` the grant is carried and receipted but not exposed.
 //!
 //! ```text
 //! harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
-//! harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
+//! harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY,to=in_process agent.harn
 //! ```
 
 use clap::ValueEnum;
 
 use harn_vm::security::{
-    EnvironmentPolicyKind, GrantReceipt, GrantSourceSpec, GrantSpec, SessionEnvironment,
+    EnvironmentPolicyKind, GrantAudience, GrantReceipt, GrantSourceSpec, GrantSpec,
+    SessionEnvironment,
 };
 
 /// The `--environment-policy` value. A CLI-local enum so `clap`'s `ValueEnum`
@@ -122,7 +126,8 @@ impl EnvironmentPolicyConfig {
     }
 }
 
-/// Parse one longhand `--grant NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]` string.
+/// Parse one longhand
+/// `--grant NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND][,to=in_process]` string.
 fn parse_grant_spec(spec: &str) -> Result<GrantSpec, String> {
     let (name, rest) = spec.split_once('=').ok_or_else(|| {
         format!(
@@ -142,6 +147,7 @@ fn parse_grant_spec(spec: &str) -> Result<GrantSpec, String> {
     };
     let mut expose_as_env = None;
     let mut for_command = None;
+    let mut expose_to = None;
     if let Some(options) = options {
         for option in options.split(',') {
             let option = option.trim();
@@ -169,9 +175,24 @@ fn parse_grant_spec(spec: &str) -> Result<GrantSpec, String> {
                         "invalid --grant '{spec}': ',for=' may be declared only once"
                     ));
                 }
+            } else if let Some(audience) = option.strip_prefix("to=") {
+                let audience = match audience.trim() {
+                    "session" => GrantAudience::Session,
+                    "in_process" => GrantAudience::InProcess,
+                    other => {
+                        return Err(format!(
+                            "invalid --grant '{spec}': ',to=' must be 'session' or 'in_process', got '{other}'"
+                        ));
+                    }
+                };
+                if expose_to.replace(audience).is_some() {
+                    return Err(format!(
+                        "invalid --grant '{spec}': ',to=' may be declared only once"
+                    ));
+                }
             } else {
                 return Err(format!(
-                    "invalid --grant '{spec}': unknown option '{option}' (supported: ',expose=ENV_VAR', ',for=COMMAND')"
+                    "invalid --grant '{spec}': unknown option '{option}' (supported: ',expose=ENV_VAR', ',for=COMMAND', ',to=in_process')"
                 ));
             }
         }
@@ -182,6 +203,7 @@ fn parse_grant_spec(spec: &str) -> Result<GrantSpec, String> {
         source,
         expose_as_env,
         for_command,
+        expose_to: expose_to.unwrap_or_default(),
     })
 }
 
@@ -277,6 +299,10 @@ fn environment_disclosure(environment: &SessionEnvironment) -> String {
         .map(|receipt| {
             if let Some(target) = receipt.exposed_as_env.as_deref() {
                 match receipt.for_command.as_deref() {
+                    _ if receipt.exposed_to == GrantAudience::InProcess => format!(
+                        "{} ({}, exposed as {target} in-process only)",
+                        receipt.name, receipt.source_kind
+                    ),
                     Some(command) => format!(
                         "{} ({}, exposed as {target} for {command})",
                         receipt.name, receipt.source_kind
@@ -415,6 +441,26 @@ mod tests {
         let reordered = grant("gh_token=secret://gh/token,for=gh,expose=GH_TOKEN");
         assert_eq!(reordered.for_command.as_deref(), Some("gh"));
         assert_eq!(reordered.expose_as_env.as_deref(), Some("GH_TOKEN"));
+    }
+
+    #[test]
+    fn parses_in_process_audience_and_rejects_nonsense() {
+        let g = grant("fw=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY,to=in_process");
+        assert_eq!(g.expose_to, GrantAudience::InProcess);
+        assert_eq!(grant("fw=env:X,expose=Y").expose_to, GrantAudience::Session);
+        assert!(parse_grant_spec("fw=env:X,expose=Y,to=children").is_err());
+        assert!(parse_grant_spec("fw=env:X,expose=Y,to=in_process,to=session").is_err());
+        // The shape check lives in the runtime, once: `in_process` with `for=`
+        // parses here and is refused at launch.
+        let config = EnvironmentPolicyConfig::from_flags(
+            None,
+            &["fw=env:PATH,expose=Y,for=gh,to=in_process".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            config.launch().unwrap_err().code(),
+            "environment_policy.in_process_with_command"
+        );
     }
 
     #[test]

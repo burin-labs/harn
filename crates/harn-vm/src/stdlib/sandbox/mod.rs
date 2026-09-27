@@ -1,10 +1,8 @@
 //! Process sandbox dispatch and per-platform OS confinement.
 //!
-//! The runtime exposes one stable surface — [`command_output`],
-//! [`std_command_for`], [`tokio_command_for`], plus the
-//! `enforce_*` helpers — and dispatches into a per-OS
-//! [`SandboxBackend`] selected at compile time. The backend chooses
-//! how to attach the active capability ceiling to the spawn:
+//! The runtime exposes [`command_output`], [`std_command_for`],
+//! [`tokio_command_for`], and the `enforce_*` helpers. A per-OS
+//! [`SandboxBackend`] attaches the active capability ceiling:
 //!
 //! * **Linux** ([`linux::Backend`]): Landlock LSM filesystem scoping
 //!   plus a default-deny seccomp-bpf syscall allowlist installed via
@@ -17,8 +15,7 @@
 //!   no OS sandbox. Children run unconfined; `os_hardened` refuses and the
 //!   other confining profiles warn. See [`enforcement`].
 //!
-//! The [`SandboxProfile`] selected by the active [`CapabilityPolicy`]
-//! controls how strictly the backend is required:
+//! [`SandboxProfile`] sets how strictly [`CapabilityPolicy`] requires the backend:
 //!
 //! * `Unrestricted` — bypass everything (path enforcement and OS
 //!   confinement).
@@ -62,7 +59,10 @@ mod backend;
 mod build_command;
 pub(crate) use build_command::{build_std_command, build_tokio_command};
 mod command_for;
-pub use command_for::{std_command_for, std_command_for_with_env_state, tokio_command_for};
+pub use command_for::{
+    session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
+    tokio_command_for,
+};
 pub mod enforcement;
 use enforcement::ensure_spawn_enforceable;
 #[cfg(all(test, target_os = "linux"))]
