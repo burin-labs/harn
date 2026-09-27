@@ -1,7 +1,8 @@
 use super::*;
 use super::{
     defaults::*, generation::*, json::*, model_resolution::resolve_model_selection, output::*,
-    reminders::*, routing::*, system_prompt::*, thinking::*, tool_search::*,
+    reminders::*, routing::*, system_prompt::*, text_channel_tools::refuse_dropped_text_tools,
+    thinking::*, tool_search::*,
 };
 use crate::llm::{resolve_api_key_for_selection, ProviderSelectionSource};
 
@@ -741,6 +742,15 @@ pub(crate) fn extract_llm_options(
             ToolSearchResolution::Client => {}
         }
     }
+
+    refuse_dropped_text_tools(
+        &options,
+        &tool_format,
+        native_tools.as_ref().is_some_and(|tools| !tools.is_empty()),
+        caps.native_tools,
+        &capability_provider,
+        &capability_model,
+    )?;
 
     let tool_choice = options
         .as_ref()

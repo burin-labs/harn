@@ -23,6 +23,7 @@ mod reminders;
 mod resolution;
 mod routing;
 mod system_prompt;
+mod text_channel_tools;
 mod thinking;
 mod tool_choice;
 mod tool_search;
@@ -63,6 +64,8 @@ mod routing_responses_tests;
 mod routing_test_support;
 #[cfg(test)]
 mod routing_tests;
+#[cfg(test)]
+mod text_channel_tools_tests;
 #[cfg(test)]
 mod thinking_effort_tests;
 #[cfg(test)]
