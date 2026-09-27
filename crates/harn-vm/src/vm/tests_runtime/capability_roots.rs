@@ -439,3 +439,54 @@ fn test_policy_workspace_roots_reject_process_cwd_escape() {
         "expected process-cwd sandbox denial, got {err}"
     );
 }
+
+/// A `read` external root on the approval policy serves builtin reads and
+/// refuses builtin writes, whatever the approval policy would say about the
+/// call. The first read, with no approval policy, is the control: it is
+/// refused, so the later read is admitted by the external root alone.
+#[test]
+fn a_read_external_root_serves_builtin_reads_and_refuses_builtin_writes() {
+    let workspace = tempfile::tempdir().unwrap();
+    let external = tempfile::tempdir().unwrap();
+    let reference = external.path().join("reference.txt");
+    std::fs::write(&reference, "reference").unwrap();
+    let policy = crate::orchestration::CapabilityPolicy {
+        workspace_roots: vec![workspace.path().display().to_string()],
+        side_effect_level: Some("workspace_write".to_string()),
+        ..Default::default()
+    };
+    let read_source = format!(
+        r#"pipeline t(harness: Harness, task: unknown) {{ return harness.fs.read_text("{}") }}"#,
+        reference.display()
+    );
+    let write_source = format!(
+        r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.write_text("{}", "x") }}"#,
+        reference.display()
+    );
+
+    let unrooted = run_harn_with_policy(&read_source, policy.clone());
+    assert!(
+        unrooted.is_err(),
+        "control: without an external root the read must be out of scope"
+    );
+
+    crate::orchestration::push_approval_policy(crate::orchestration::ToolApprovalPolicy {
+        external_roots: vec![crate::orchestration::ExternalRoot::read(
+            external.path().display().to_string(),
+        )],
+        auto_approve: vec!["*".to_string()],
+        ..Default::default()
+    });
+    let read = run_harn_with_policy(&read_source, policy.clone());
+    let write = run_harn_with_policy(&write_source, policy);
+    crate::orchestration::pop_approval_policy();
+
+    let (_out, value) = read.expect("a read external root must serve builtin reads");
+    assert_eq!(value.display(), "reference");
+    let err = write.expect_err("a read external root must refuse builtin writes");
+    assert!(
+        err.to_string().contains("read-only workspace root"),
+        "expected the read-only refusal, got {err}"
+    );
+    assert_eq!(std::fs::read_to_string(&reference).unwrap(), "reference");
+}

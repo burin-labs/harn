@@ -9,6 +9,7 @@ mod consent_capability;
 pub(crate) use consent_capability::is_policy_machinery_consent_call;
 mod effect_call_cache;
 mod effects;
+mod external_roots;
 mod nested_budget;
 mod operator_grant;
 mod run_approval;
@@ -51,14 +52,16 @@ pub use approval_rules::{
     denial_gate_for_source, next_approval_policy_repeat_count,
     next_approval_unavailable_class_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
     PolicyMatchedRule, PolicyRule, PolicyRuleMatch, PolicyRuleSource, ToolApprovalRequest,
-    SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH,
-    SOURCE_NET_POLICY,
+    EXTERNAL_ROOT_READ_ONLY, SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD,
+    SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
 };
 pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
     effects_from_metadata, EffectKind, EffectRecord, EffectScope,
 };
 pub(crate) use effects::{contract_effect_allowed_by_ceiling, runtime_effects_from_contract};
+pub(crate) use external_roots::current_read_only_external_roots;
+pub use external_roots::{ExternalRoot, ExternalRootAccess};
 pub use nested_budget::{
     annotate_nested_execution_options, enter_nested_execution_policy, NestedExecutionGuard,
     NestedExecutionKind, NESTED_KIND_OPTION_KEY, NESTED_LABEL_OPTION_KEY,
@@ -869,9 +872,10 @@ pub struct ToolApprovalPolicy {
     /// Explicit opt-out for the external-path guard on declared path args.
     #[serde(default)]
     pub allow_external_paths: bool,
-    /// Host-absolute roots allowed when `allow_external_paths` is false.
+    /// Host-absolute roots allowed when `allow_external_paths` is false,
+    /// each with its access mode. A bare string entry means `read`.
     #[serde(default)]
-    pub external_roots: Vec<String>,
+    pub external_roots: Vec<ExternalRoot>,
     /// Optional repeated-call threshold for the same `(session, tool, args)`.
     #[serde(default, alias = "repeated_call_limit")]
     pub repeat_limit: Option<u64>,
@@ -926,6 +930,7 @@ impl ToolApprovalPolicy {
     ///   (if either policy has no patterns, the other's patterns are used)
     /// - auto_deny / require_approval: union (either policy can deny/gate)
     /// - write_path_allowlist: intersection (both must allow the path)
+    /// - external_roots: intersection; a shared root keeps the narrower mode
     pub fn intersect(&self, other: &ToolApprovalPolicy) -> ToolApprovalPolicy {
         let auto_approve = if self.auto_approve.is_empty() {
             other.auto_approve.clone()
@@ -959,17 +964,7 @@ impl ToolApprovalPolicy {
         sensitive_path_patterns.extend(other.sensitive_path_patterns.iter().cloned());
         sensitive_path_patterns.sort();
         sensitive_path_patterns.dedup();
-        let external_roots = if self.external_roots.is_empty() {
-            other.external_roots.clone()
-        } else if other.external_roots.is_empty() {
-            self.external_roots.clone()
-        } else {
-            self.external_roots
-                .iter()
-                .filter(|root| other.external_roots.contains(root))
-                .cloned()
-                .collect()
-        };
+        let external_roots = external_roots::intersect(&self.external_roots, &other.external_roots);
         ToolApprovalPolicy {
             rules,
             auto_approve,

@@ -58,6 +58,7 @@ use crate::value::{environment_io_error_thrown, ErrorCategory, VmError};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use read_roots::developer_toolchain_cache_write_roots_for_home;
+use read_roots::normalized_read_only_roots;
 pub(crate) use read_roots::{
     developer_toolchain_read_roots_for_home, package_manager_config_read_roots_for_home,
     sandbox_user_home_dir,
@@ -1594,27 +1595,6 @@ fn base_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
 
 pub(crate) fn process_sandbox_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     normalized_workspace_roots(policy)
-}
-
-/// Normalize the policy's read-only roots. Unlike
-/// [`normalized_workspace_roots`], an empty list stays empty — read-only
-/// scope is purely additive, so there is no execution-root fallback to
-/// synthesize.
-fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = policy
-        .read_only_roots
-        .iter()
-        .map(|root| normalize_for_policy(&resolve_policy_path(root)))
-        .collect();
-    // Object stores borrowed through `objects/info/alternates` (e.g. a
-    // `git clone --shared`) live outside the workspace and are only ever read
-    // by git; grant them read-only scope. See [`crate::stdlib::git_topology`].
-    for dir in git_scope_extension_for_roots(&base_workspace_roots(policy)).read_only {
-        if !roots.iter().any(|existing| existing == &dir) {
-            roots.push(dir);
-        }
-    }
-    roots
 }
 
 /// Merge the git-topology scope extension across every workspace `base_root`,
