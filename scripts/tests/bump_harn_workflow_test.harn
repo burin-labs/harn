@@ -149,7 +149,8 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   }
   const env = run?.env ?? {}
   if env?.GH_TOKEN != env?.HARN_BUMP_TOKEN {
-    errors = errors + ["consumer refresh commands must receive the same GitHub token as the bump driver"]
+    errors = errors
+      + ["consumer refresh commands must receive the same GitHub token as the bump driver"]
   }
   if env?.HARN_BUMP_REFRESH_COMMAND != "$" + "{{ inputs.refresh-command }}" {
     errors = errors + ["refresh-command must flow into the orchestration environment"]
