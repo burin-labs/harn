@@ -106,7 +106,7 @@
   },
   {
     "scope": "native-runner-option-helpers",
-    "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+    "file": "crates/harn-vm/src/llm/helpers/options/text_channel_tools.rs",
     "expression": "\"_tool_contract_rendered\"",
     "owner": "opt_bool",
     "evidence": "Internal rendering receipt from the agent loop: its system prompt carries the json/text tool-call contract, so text-channel tools are not a silent drop."
