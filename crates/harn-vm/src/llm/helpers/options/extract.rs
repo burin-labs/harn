@@ -535,6 +535,33 @@ pub(crate) fn extract_llm_options(
             &capability_model,
         ));
     }
+    // A text-channel tool format sends no tool schemas: the model learns the
+    // call grammar only from the contract `agent_loop` renders into the system
+    // prompt (`std/agent/preflight` marks those calls). A direct call would
+    // reach the wire with nothing tool-related on it, and the model would
+    // answer without calling anything. Refuse instead of sending that.
+    if tools_val.is_some()
+        && tool_format != "native"
+        && !opt_bool(&options, "_tool_contract_rendered")
+    {
+        return Err(crate::llm::call::invalid_request_error(
+            format!(
+                "`tools` with tool_format `{tool_format}` needs the tool-call contract that \
+                 only `agent_loop` renders; a direct call would send no tools to `{model}` \
+                 (provider `{provider}`). Drive the tools through `agent_loop`, or pass \
+                 `tool_format: \"native\"`{native_hint}.",
+                model = capability_model,
+                provider = capability_provider,
+                native_hint = if caps.native_tools {
+                    ""
+                } else {
+                    " on a route that supports native tools"
+                },
+            ),
+            &capability_provider,
+            &capability_model,
+        ));
+    }
     // harn#4743: in the text tool-call lane the model emits its call inside
     // `<tool_call>…</tool_call>` in visible content. With no stop sequence the
     // provider keeps generating past the terminator and fabricates further
