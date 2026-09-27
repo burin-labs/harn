@@ -1353,8 +1353,27 @@ pub fn __completion_gate_apply_budget(verdict: dict, vetoes_used: int, max_vetoe
 const __COMPLETION_JUDGE_ERROR_ATTEMPTS: int = 2
 
 /**
+ * True when the judge's route could not run at all: the call failed on a
+ * credential or host configuration gap (`auth` or `environment`) before any
+ * reply existed. Nothing was graded, a retry meets the same gap, and the error
+ * text is configuration, not feedback the model could act on.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_checkpoint_route_unavailable(checkpoint)
+ */
+pub fn __judge_checkpoint_route_unavailable(checkpoint: dict) -> bool {
+  const category = checkpoint?.error_category
+  return !(checkpoint?.ok ?? false)
+    && (category == "auth" || category == "environment")
+    && to_string(checkpoint?.raw_text ?? "") == ""
+}
+
+/**
  * True when the judge never produced a reading because it could not run inside
- * its deadline, as opposed to running and returning something unreadable.
+ * its deadline or its route could not run, as opposed to running and returning
+ * something unreadable.
  *
  * @effects: []
  * @errors: []
@@ -1364,6 +1383,7 @@ const __COMPLETION_JUDGE_ERROR_ATTEMPTS: int = 2
 pub fn __judge_checkpoint_unavailable(checkpoint: dict) -> bool {
   return checkpoint?.status == "admission_refused"
     || checkpoint?.status == "model_unconfigured"
+    || __judge_checkpoint_route_unavailable(checkpoint)
     || checkpoint?.status == "timeout"
     || checkpoint?.error_category == "timeout"
     || checkpoint?.error?.status == "timeout"
