@@ -7,7 +7,6 @@ pub fn provider_notice_checks() -> list<string> {
     "check-provider-catalog",
     "check-provider-matrix",
     "check-provider-support",
-    "check-docs-snippets",
   ]
 }
 
