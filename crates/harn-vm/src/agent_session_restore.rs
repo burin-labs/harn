@@ -200,11 +200,20 @@ fn tool_call_id(stored: &StoredEvent, transcript: &serde_json::Value) -> Option<
         })
 }
 
+/// Read the tool name from the transcript event, then from its `metadata`,
+/// the same order the journal reads a tool call's identity when it writes the
+/// row. Tool lifecycle events carry the name only under `metadata`.
 fn tool_name(transcript: &serde_json::Value) -> String {
-    transcript
-        .get("tool_name")
-        .or_else(|| transcript.get("name"))
-        .and_then(serde_json::Value::as_str)
+    [Some(transcript), transcript.get("metadata")]
+        .into_iter()
+        .flatten()
+        .find_map(|value| {
+            value
+                .get("tool_name")
+                .or_else(|| value.get("name"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+        })
         .unwrap_or("tool")
         .to_string()
 }
