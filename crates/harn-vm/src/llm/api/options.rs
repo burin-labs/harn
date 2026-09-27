@@ -380,6 +380,26 @@ impl ReminderLifecycleEmission {
     }
 }
 
+/// One applied request setting, the value it resolved to, and the
+/// configuration layer that decided it.
+///
+/// A provider quirk costs hours when a value silently came from somewhere the
+/// author did not look (a catalog default, a steer away from the requested
+/// tool channel, an ambient reasoning policy). Every call records these rows
+/// on its `provider_call_request` transcript event under `resolution`.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub(crate) struct ResolvedSetting {
+    pub setting: &'static str,
+    /// The caller's raw value, when the caller set one.
+    pub requested: Option<String>,
+    pub applied: String,
+    /// `caller.<option>`, `catalog.<field>`, `catalog.steer`,
+    /// `reasoning_policy`, `default`, or `derived`.
+    pub source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 /// All options for an LLM API call, extracted once from user-facing args.
 #[derive(Clone, Debug)]
 pub(crate) struct LlmCallOptions {
@@ -561,6 +581,9 @@ pub(crate) struct LlmCallOptions {
     pub cache: bool,
     pub prompt_cache_ttl: Option<PromptCacheTtl>,
 
+    /// How each request setting was decided; see [`ResolvedSetting`].
+    pub(crate) resolution: Vec<ResolvedSetting>,
+
     // --- Transport ---
     pub timeout: Option<u64>,
     /// Per-chunk idle timeout for streaming responses (seconds).
@@ -684,6 +707,7 @@ impl Default for LlmCallOptions {
             tool_choice: None,
             tool_search: None,
             cache: false,
+            resolution: Vec::new(),
             prompt_cache_ttl: None,
             timeout: None,
             idle_timeout: None,

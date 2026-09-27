@@ -63,7 +63,8 @@ pub(crate) use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmApiMode, LlmCallOptions, LlmRequestPayload,
     LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, LogprobsConfig,
     MirostatConfig, OutputFormat, PromptCacheTtl, ReasoningEffort, ReminderLifecycleEmission,
-    ThinkingConfig, TokenBias, ToolSearchConfig, ToolSearchMode, ToolSearchVariant, Verbosity,
+    ResolvedSetting, ThinkingConfig, TokenBias, ToolSearchConfig, ToolSearchMode,
+    ToolSearchVariant, Verbosity,
 };
 #[cfg(test)]
 pub(crate) use response::empty_generation_error;
