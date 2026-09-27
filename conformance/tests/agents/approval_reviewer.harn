@@ -406,6 +406,11 @@ pipeline default(harness: Harness) {
         request + {policy_decision: {action: "ask", context: {repeat_count: 2}}},
       )
       const repeated_count = len(harness.llm.mock_calls())
+      const changed_context = reviewer(
+        request
+          + {policy_decision: {action: "ask", context: {repeat_count: 2, source: "other_rule"}}},
+      )
+      const changed_context_count = len(harness.llm.mock_calls())
       const distinct = reviewer(request + {arguments: {path: "b.rs"}})
       const distinct_count = len(harness.llm.mock_calls())
       const other_reviewer = approval_reviewer_for(harness, policy, goal)
@@ -414,8 +419,12 @@ pipeline default(harness: Harness) {
       harness.stdio.println("memo_first_approved=" + to_string(first.approved && repeated.approved))
       harness.stdio.println("memo_identical_reused=" + to_string(repeated_count == first_count))
       harness.stdio.println(
+        "memo_changed_rule_called="
+          + to_string(changed_context_count == repeated_count + 1 && changed_context.approved),
+      )
+      harness.stdio.println(
         "memo_other_target_called="
-          + to_string(distinct_count == repeated_count + 1 && distinct.approved),
+          + to_string(distinct_count == changed_context_count + 1 && distinct.approved),
       )
       harness.stdio.println(
         "memo_other_reviewer_called="
