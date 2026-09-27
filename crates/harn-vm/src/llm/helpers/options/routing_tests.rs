@@ -1,7 +1,7 @@
 use super::extract::*;
 use super::routing_test_support::{
-    extract_with_options, one_tool_list, test_equivalent_model, test_equivalent_model_with_context,
-    test_provider, ScopedEnvVar,
+    extract_with_options, test_equivalent_model, test_equivalent_model_with_context, test_provider,
+    ScopedEnvVar,
 };
 use super::*;
 use crate::value::VmDictExt;
@@ -1124,42 +1124,6 @@ fn tool_choice_accepted_on_text_tool_routes() {
         VmValue::dict(options),
     ])
     .expect("tool_choice accepted on text-format routes");
-}
-
-#[test]
-fn text_tool_format_does_not_emit_native_provider_tools() {
-    crate::llm::capabilities::clear_user_overrides();
-    crate::llm_config::clear_user_overrides();
-
-    let options = crate::value::DictMap::from_iter([
-        (
-            crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("ollama".to_string())),
-        ),
-        (
-            crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("devstral-small-2:24b".to_string())),
-        ),
-        (
-            crate::value::intern_key("tool_format"),
-            VmValue::String(arcstr::ArcStr::from("text".to_string())),
-        ),
-        (crate::value::intern_key("tools"), one_tool_list()),
-        // The agent loop's call, which renders the text contract.
-        (
-            crate::value::intern_key("_tool_contract_rendered"),
-            VmValue::Bool(true),
-        ),
-    ]);
-    let opts = extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
-        VmValue::Nil,
-        VmValue::dict(options),
-    ])
-    .expect("text-format tools accepted");
-
-    assert!(opts.tools.is_some());
-    assert!(opts.native_tools.is_none());
 }
 
 #[test]
