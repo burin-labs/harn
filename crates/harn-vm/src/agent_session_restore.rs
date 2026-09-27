@@ -99,13 +99,20 @@ fn replay_event_from_stored(
     stored: &StoredEvent,
 ) -> Option<AgentSessionReplayEvent> {
     let transcript = stored.payload.get("transcript_event")?;
-    if transcript
-        .get("visibility")
-        .and_then(serde_json::Value::as_str)
-        == Some("internal")
+    // Internal visibility hides bookkeeping and prose the model wrote for
+    // itself. It does not hide tool rows: the journal writes every tool call
+    // and result as internal, because its text is not conversation, yet a
+    // client renders each as its own entry. Filtering them here restored a
+    // session with every tool call missing (harn#8920).
+    if matches!(stored.kind, SessionEventKind::Message)
+        && transcript
+            .get("visibility")
+            .and_then(serde_json::Value::as_str)
+            == Some("internal")
     {
         return None;
     }
+    let raw_message = stored.payload.get("raw_message");
     let role = transcript
         .get("role")
         .and_then(serde_json::Value::as_str)
@@ -132,11 +139,12 @@ fn replay_event_from_stored(
         (SessionEventKind::ToolCall, _) => AgentEvent::ToolCall {
             session_id: session_id.to_string(),
             tool_call_id: tool_call_id(stored, transcript)?,
-            tool_name: tool_name(transcript),
+            tool_name: tool_name(transcript, raw_message),
             kind: None,
             status: ToolCallStatus::Completed,
             raw_input: transcript
                 .get("input")
+                .or_else(|| transcript.pointer("/metadata/raw_input"))
                 .cloned()
                 .unwrap_or(serde_json::Value::Null),
             parsing: None,
@@ -145,10 +153,14 @@ fn replay_event_from_stored(
         (SessionEventKind::ToolResult, _) => AgentEvent::ToolCallUpdate {
             session_id: session_id.to_string(),
             tool_call_id: tool_call_id(stored, transcript)?,
-            tool_name: tool_name(transcript),
-            status: ToolCallStatus::Completed,
+            tool_name: tool_name(transcript, raw_message),
+            status: if result_failed(raw_message) {
+                ToolCallStatus::Failed
+            } else {
+                ToolCallStatus::Completed
+            },
             raw_output: Some(serde_json::Value::String(text.to_string())),
-            error: None,
+            error: result_failed(raw_message).then(|| text.to_string()),
             duration_ms: None,
             execution_duration_ms: None,
             error_category: None,
@@ -202,9 +214,10 @@ fn tool_call_id(stored: &StoredEvent, transcript: &serde_json::Value) -> Option<
 
 /// Read the tool name from the transcript event, then from its `metadata`,
 /// the same order the journal reads a tool call's identity when it writes the
-/// row. Tool lifecycle events carry the name only under `metadata`.
-fn tool_name(transcript: &serde_json::Value) -> String {
-    [Some(transcript), transcript.get("metadata")]
+/// row. Tool lifecycle events carry the name only under `metadata`; a tool
+/// result carries it only on the provider message stored beside it.
+fn tool_name(transcript: &serde_json::Value, raw_message: Option<&serde_json::Value>) -> String {
+    [Some(transcript), transcript.get("metadata"), raw_message]
         .into_iter()
         .flatten()
         .find_map(|value| {
@@ -216,6 +229,15 @@ fn tool_name(transcript: &serde_json::Value) -> String {
         })
         .unwrap_or("tool")
         .to_string()
+}
+
+/// Whether the stored tool result was an error, read from the provider message
+/// the journal keeps beside it.
+fn result_failed(raw_message: Option<&serde_json::Value>) -> bool {
+    raw_message
+        .and_then(|message| message.get("is_error"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn stored_kind_label(kind: &SessionEventKind) -> String {
