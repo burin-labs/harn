@@ -33,11 +33,9 @@ fn decisions(captured: dict) -> list {
   return captured.events.filter({ event -> event.type == "step_judge_decision" }).to_list()
 }
 
-fn judge_call_count(harness: Harness) -> int {
+fn judge_call_count(llm: HarnessLlm) -> int {
   return len(
-    llm_calls(harness.llm).filter(
-      { call -> call?.output_format?.schema?.properties?.verdict != nil },
-    ),
+    llm_calls(llm).filter({ call -> call?.output_format?.schema?.properties?.verdict != nil }),
   )
 }
 
@@ -92,7 +90,7 @@ pipeline default(harness: Harness) {
       contract_effect(
         harness.stdio,
         "effect_no_judge_call_dispatched",
-        judge_call_count(harness) == 0,
+        judge_call_count(harness.llm) == 0,
       )
       contract_negative(
         harness.stdio,
