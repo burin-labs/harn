@@ -1,6 +1,7 @@
 import { approval_reviewer_for } from "std/agent/approval_review"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
 fn note_tools(runtime: HarnessRuntime, executed: any) {
   let tools = tool_registry()
@@ -20,8 +21,7 @@ fn note_tools(runtime: HarnessRuntime, executed: any) {
 }
 
 pipeline default(harness: Harness) {
-  // The loop has two identical calls but only one scripted reviewer answer.
-  // If the second call invokes the reviewer, the provider-call census fails.
+  // Two identical calls reuse one answer; a different action must be reviewed.
   with_llm_script(
     harness.llm,
     [
@@ -30,24 +30,30 @@ pipeline default(harness: Harness) {
         tool_calls: [
           {id: "first", name: "note", arguments: {text: "same"}},
           {id: "second", name: "note", arguments: {text: "same"}},
+          {id: "different", name: "note", arguments: {text: "different"}},
         ],
       },
       llm_text(
         "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names this note\"}",
+      ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the task names the other note\"}",
       ),
     ],
     { ->
       const executed = harness.runtime.atomic(0)
       const review_requests = harness.runtime.atomic(0)
       const review_grants = harness.runtime.atomic(0)
+      const memo_hits = harness.runtime.atomic(0)
+      const different_memoized = harness.runtime.atomic(0)
       const reviewer = approval_reviewer_for(
         harness,
         {reviewer: {provider: "mock", model: "mock"}},
-        "Record the same note twice.",
+        "Record the same note twice, then a different note.",
       )
       agent_loop(
         harness,
-        "Record the same note twice.",
+        "Record the same note twice, then a different note.",
         nil,
         {
           provider: "mock",
@@ -60,6 +66,12 @@ pipeline default(harness: Harness) {
           approval_reviewer: { request ->
             harness.runtime.atomic_add(review_requests, 1)
             const decision = reviewer(request)
+            if decision?.memoized ?? false {
+              harness.runtime.atomic_add(memo_hits, 1)
+              if request.arguments.text == "different" {
+                harness.runtime.atomic_add(different_memoized, 1)
+              }
+            }
             if decision.approved {
               harness.runtime.atomic_add(review_grants, 1)
             }
@@ -68,20 +80,29 @@ pipeline default(harness: Harness) {
         },
       )
       const calls = harness.llm.mock_calls()
-      harness.stdio.println(
-        "memo_loop_two_review_requests="
-          + to_string(harness.runtime.atomic_get(review_requests) == 2),
+      contract_effect(
+        harness.stdio,
+        "memo_loop_three_review_requests",
+        harness.runtime.atomic_get(review_requests) == 3,
       )
       harness.stdio.println(
-        "memo_loop_both_actions_executed="
+        "memo_loop_all_actions_executed="
           + to_string(
-            harness.runtime.atomic_get(executed) == 2
-              && harness.runtime.atomic_get(review_grants) == 2,
+            harness.runtime.atomic_get(executed) == 3
+              && harness.runtime.atomic_get(review_grants) == 3,
           ),
       )
-      // One agent turn, one reviewer answer, and the loop's terminal model
-      // call. A second reviewer round trip makes this count four.
-      harness.stdio.println("memo_loop_one_review=" + to_string(len(calls) == 3))
+      // One agent turn, two reviewer answers, and the terminal model call.
+      contract_effect(
+        harness.stdio,
+        "memo_loop_identical_reused",
+        len(calls) == 4 && harness.runtime.atomic_get(memo_hits) == 1,
+      )
+      contract_negative(
+        harness.stdio,
+        "memo_loop_different_reviewed",
+        harness.runtime.atomic_get(different_memoized) != 0,
+      )
     },
   )
 }
