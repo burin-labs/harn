@@ -535,33 +535,6 @@ pub(crate) fn extract_llm_options(
             &capability_model,
         ));
     }
-    // A text-channel tool format sends no tool schemas: the model learns the
-    // call grammar only from the contract `agent_loop` renders into the system
-    // prompt (`std/agent/preflight` marks those calls). A direct call would
-    // reach the wire with nothing tool-related on it, and the model would
-    // answer without calling anything. Refuse instead of sending that.
-    if tools_val.is_some()
-        && tool_format != "native"
-        && !opt_bool(&options, "_tool_contract_rendered")
-    {
-        return Err(crate::llm::call::invalid_request_error(
-            format!(
-                "`tools` with tool_format `{tool_format}` needs the tool-call contract that \
-                 only `agent_loop` renders; a direct call would send no tools to `{model}` \
-                 (provider `{provider}`). Drive the tools through `agent_loop`, or pass \
-                 `tool_format: \"native\"`{native_hint}.",
-                model = capability_model,
-                provider = capability_provider,
-                native_hint = if caps.native_tools {
-                    ""
-                } else {
-                    " on a route that supports native tools"
-                },
-            ),
-            &capability_provider,
-            &capability_model,
-        ));
-    }
     // harn#4743: in the text tool-call lane the model emits its call inside
     // `<tool_call>…</tool_call>` in visible content. With no stop sequence the
     // provider keeps generating past the terminator and fabricates further
@@ -764,6 +737,36 @@ pub(crate) fn extract_llm_options(
             }
             ToolSearchResolution::Client => {}
         }
+    }
+
+    // A text-channel tool format sends no tool schemas: the model learns the
+    // call grammar only from the contract `agent_loop` renders into the system
+    // prompt (`std/agent/preflight` marks those calls). A direct call would
+    // reach the wire with nothing tool-related on it, and the model would
+    // answer without calling anything. Refuse instead of sending that. A
+    // native tool-search meta-tool is on the wire, so it is not this case.
+    if tool_format != "native"
+        && tools_value_has_entries(tools_val.as_ref())
+        && native_tools.as_ref().is_none_or(Vec::is_empty)
+        && !opt_bool(&options, "_tool_contract_rendered")
+    {
+        return Err(crate::llm::call::invalid_request_error(
+            format!(
+                "`tools` with tool_format `{tool_format}` needs the tool-call contract that \
+                 only `agent_loop` renders; a direct call would send no tools to `{model}` \
+                 (provider `{provider}`). Drive the tools through `agent_loop`, or pass \
+                 `tool_format: \"native\"`{native_hint}.",
+                model = capability_model,
+                provider = capability_provider,
+                native_hint = if caps.native_tools {
+                    ""
+                } else {
+                    " on a route that supports native tools"
+                },
+            ),
+            &capability_provider,
+            &capability_model,
+        ));
     }
 
     let tool_choice = options
@@ -1503,5 +1506,20 @@ prompt_cache_ttls = ["5m", "1h"]
             Err(err) => err,
         };
         assert!(thrown_message(err).contains("prompt_cache_ttl"));
+    }
+}
+
+/// Whether a `tools` option carries at least one tool: a non-empty list, or a
+/// registry dict whose `tools` list is non-empty. An empty set sends nothing
+/// either way, so it is not a dropped tool surface.
+fn tools_value_has_entries(tools: Option<&VmValue>) -> bool {
+    match tools {
+        None => false,
+        Some(VmValue::List(items)) => !items.is_empty(),
+        Some(VmValue::Dict(registry)) => match registry.get("tools") {
+            Some(VmValue::List(items)) => !items.is_empty(),
+            _ => true,
+        },
+        Some(_) => true,
     }
 }
