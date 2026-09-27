@@ -408,15 +408,13 @@ fn staged_fs_session_routes_writes_through_overlay() {
     let original = "pub fn alpha() {}\nfn caller() { alpha(); }\n";
     std::fs::write(root.join("src/lib.rs"), original).unwrap();
     let capability = build_index(&root);
-    // Session id needs to be unique across tests so the on-disk
-    // manifest in `.harn/state/staged/<id>/` doesn't collide.
+    // The temporary root already has a unique name, so staged manifests
+    // cannot collide without reading the wall clock.
     let session_id = format!(
-        "rename-test-{:?}-{}",
-        std::thread::current().id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
+        "rename-test-{}",
+        root.file_name()
+            .expect("temporary root name")
+            .to_string_lossy()
     );
 
     crate::fs::configure_session_root(&session_id, &root);

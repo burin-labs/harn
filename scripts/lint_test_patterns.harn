@@ -1012,7 +1012,6 @@ const INLINE_TEST_GRANDFATHER = [
   {rule: "ignore_attr", path: "crates/harn-vm/src/security/stance_judge.rs", count: 1},
   {rule: "instant_now_deadline", path: "crates/harn-vm/src/op_interrupt.rs", count: 1},
   {rule: "recv_timeout_millis", path: "crates/harn-vm/src/stdlib/session_wal_watch.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-hostlib/src/code_index/rename.rs", count: 1},
   {rule: "system_time", path: "crates/harn-hostlib/src/fs.rs", count: 1},
   {rule: "system_time", path: "crates/harn-vm/src/agent_events/sinks.rs", count: 2},
   {rule: "system_time", path: "crates/harn-vm/src/event_log/util.rs", count: 1},
