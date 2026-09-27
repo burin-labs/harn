@@ -304,6 +304,14 @@ pub(super) fn read_response(
             data_controls: {
                 let mut receipt = privacy_plan(request).receipt;
                 receipt.inference_boundary_rule = boundary_rule.map(str::to_string);
+                if boundary_rule.is_some() {
+                    receipt.inference_catalog_evidence =
+                        crate::llm::api::inference_boundary::catalog_evidence(
+                            request.provider,
+                            request.model,
+                        )
+                        .ok();
+                }
                 receipt
             },
             provider_attempts_reported: data

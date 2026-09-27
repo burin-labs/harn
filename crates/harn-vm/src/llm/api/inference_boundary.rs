@@ -23,6 +23,13 @@ pub struct InferenceBoundary {
     pub allow_training_discounts: bool,
 }
 
+/// Catalog facts used to admit a route under an inference boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InferenceCatalogEvidence {
+    pub local_runtime: bool,
+    pub open_weight: Option<bool>,
+}
+
 /// Host-owned run ceiling. Embedders grant this through the session
 /// environment; an unconfigured standalone Harn run keeps its existing policy.
 pub const HOST_BOUNDARY_ENV: &str = "HARN_INFERENCE_BOUNDARY_JSON";
@@ -111,6 +118,23 @@ pub(crate) fn governing_rule(
     model: &str,
     controls: &DataControlsReceipt,
 ) -> Result<&'static str, String> {
+    let evidence = catalog_evidence(provider, model)?;
+    let facts = RouteFacts {
+        local: evidence.local_runtime,
+        open_weight: evidence.open_weight,
+        training_default: controls.training_default,
+        training_control_applied: controls
+            .applied
+            .iter()
+            .any(|control| control.effect == "training"),
+    };
+    decide(boundary, provider, model, facts)
+}
+
+pub(crate) fn catalog_evidence(
+    provider: &str,
+    model: &str,
+) -> Result<InferenceCatalogEvidence, String> {
     let provider_def = crate::llm_config::provider_config(provider)
         .ok_or_else(|| format!("inference_boundary.catalog_provider_unknown: {provider}"))?;
     if provider_def.local_runtime.is_some()
@@ -120,17 +144,11 @@ pub(crate) fn governing_rule(
             "inference_boundary.local_endpoint_untrusted: {provider}/{model} does not resolve to a loopback endpoint"
         ));
     }
-    let facts = RouteFacts {
-        local: provider_def.local_runtime.is_some(),
+    Ok(InferenceCatalogEvidence {
+        local_runtime: provider_def.local_runtime.is_some(),
         open_weight: crate::llm_config::model_catalog_entry_for_route(provider, model)
             .and_then(|row| row.open_weight),
-        training_default: controls.training_default,
-        training_control_applied: controls
-            .applied
-            .iter()
-            .any(|control| control.effect == "training"),
-    };
-    decide(boundary, provider, model, facts)
+    })
 }
 
 fn is_loopback_endpoint(endpoint: &str) -> bool {

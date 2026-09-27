@@ -597,6 +597,14 @@ fn host_local_ceiling_allows_loopback_transport_and_records_its_rule() {
             .and_then(|receipt| receipt.inference_boundary_rule.as_deref()),
         Some("inference_boundary.local_runtime")
     );
+    let evidence = result
+        .telemetry
+        .data_controls
+        .as_ref()
+        .and_then(|receipt| receipt.inference_catalog_evidence.as_ref())
+        .expect("allowed route records the catalog facts used by the rule");
+    assert!(evidence.local_runtime);
+    assert_eq!(evidence.open_weight, None);
 }
 
 #[test]
