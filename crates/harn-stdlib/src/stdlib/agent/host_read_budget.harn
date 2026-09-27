@@ -9,7 +9,7 @@ pub fn agent_host_bounded_length(requested: any, configured: any, fallback: int)
   }
 }
 
-pub fn agent_host_file_read_request(path: string, args: dict, configured_read_bytes: any) {
+pub fn agent_host_file_read_request(path: string, args: dict, configured_read_bytes: any) -> dict {
   let req = {
     path: path,
     limit_bytes: agent_host_bounded_length(args?.limit_bytes, configured_read_bytes, 65536),
@@ -28,7 +28,7 @@ pub fn agent_host_file_tail_request(
   path: string,
   args: dict,
   configured_tail_bytes: any,
-) {
+) -> dict {
   const length = agent_host_bounded_length(args?.length, configured_tail_bytes, 12000)
   const info = fs.stat(path)
   const offset = if info.size > length {
@@ -39,7 +39,11 @@ pub fn agent_host_file_tail_request(
   return {path: path, offset: offset, limit_bytes: length}
 }
 
-pub fn agent_host_command_read_request(locator: dict, args: dict, configured_read_bytes: any) {
+pub fn agent_host_command_read_request(
+  locator: dict,
+  args: dict,
+  configured_read_bytes: any,
+) -> dict {
   return locator
     + {
       offset: args?.offset ?? 0,
@@ -52,7 +56,7 @@ pub fn agent_host_command_tail_request(
   locator: dict,
   args: dict,
   configured_tail_bytes: any,
-) {
+) -> dict {
   const length = agent_host_bounded_length(args?.length, configured_tail_bytes, 12000)
   const meta = tools.read_command_output(locator + {offset: 0, length: 0})
   const offset = if meta.total_bytes > length {
