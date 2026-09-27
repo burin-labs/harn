@@ -32,6 +32,9 @@ impl VisibleTextState {
     }
 }
 
+/// The opening of a `json`-format tool call fence.
+const JSON_TOOL_FENCE: &str = "```tool";
+
 fn internal_block_patterns() -> &'static [Regex] {
     static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
@@ -179,6 +182,45 @@ fn json_fence_regex() -> &'static Regex {
         .get_or_init(|| Regex::new(r"(?s)```json[^\n]*\n(.*?)```").expect("valid json fence regex"))
 }
 
+fn json_tool_fence_regex() -> &'static Regex {
+    static JSON_TOOL_FENCE_RE: OnceLock<Regex> = OnceLock::new();
+    JSON_TOOL_FENCE_RE.get_or_init(|| {
+        Regex::new(r"(?ms)^[ \t]*```tool[ \t]*\r?\n(.*?)```").expect("valid tool fence regex")
+    })
+}
+
+/// Hide the `json` tool format's calls: a fence whose opening line is exactly
+/// ```tool and whose body is one call object, `{"name": ..., "args": {...}}`
+/// (`arguments` accepted). The loop executes those, so showing them again
+/// repeats every call as raw JSON. A ```tool fence holding anything else is
+/// the model's text, not a call, and stays visible.
+fn strip_json_tool_fences(text: &str) -> String {
+    json_tool_fence_regex()
+        .replace_all(text, |caps: &regex::Captures| {
+            let body = caps.get(1).map_or("", |body| body.as_str());
+            if is_tool_call_object(body) {
+                String::new()
+            } else {
+                caps.get(0)
+                    .map(|whole| whole.as_str().to_string())
+                    .unwrap_or_default()
+            }
+        })
+        .to_string()
+}
+
+fn is_tool_call_object(body: &str) -> bool {
+    let Ok(serde_json::Value::Object(call)) = serde_json::from_str(body.trim()) else {
+        return false;
+    };
+    let named = call
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|name| !name.trim().is_empty());
+    let args = call.get("args").or_else(|| call.get("arguments"));
+    named && args.is_some_and(serde_json::Value::is_object)
+}
+
 fn inline_planner_json_regex() -> &'static Regex {
     static INLINE_PLANNER_JSON: OnceLock<Regex> = OnceLock::new();
     INLINE_PLANNER_JSON.get_or_init(|| {
@@ -301,6 +343,30 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
         {
             return text[..open_idx].to_string();
         }
+    }
+
+    // A ```tool fence still streaming: held back until it closes, when
+    // `strip_json_tool_fences` decides whether it was a call. A last line that
+    // is only the start of the opener (```t) is held back too, so it cannot
+    // flash.
+    let mut search_end = text.len();
+    while let Some(open_idx) = text[..search_end].rfind(JSON_TOOL_FENCE) {
+        let line_start = text[..open_idx].rfind('\n').map_or(0, |idx| idx + 1);
+        let (opener_rest, body) = text[open_idx + JSON_TOOL_FENCE.len()..]
+            .split_once('\n')
+            .unwrap_or((&text[open_idx + JSON_TOOL_FENCE.len()..], ""));
+        if text[line_start..open_idx].trim().is_empty() && opener_rest.trim().is_empty() {
+            if !body.contains("```") {
+                return text[..line_start].to_string();
+            }
+            break;
+        }
+        search_end = open_idx;
+    }
+    let last_line_start = text.rfind('\n').map_or(0, |idx| idx + 1);
+    let last_line = text[last_line_start..].trim_start_matches([' ', '\t']);
+    if last_line.len() >= 4 && JSON_TOOL_FENCE.starts_with(last_line) {
+        return text[..last_line_start].to_string();
     }
 
     if let Some(open_idx) = text.rfind("<done>") {
@@ -608,6 +674,7 @@ fn sanitize_inner(text: &str, partial: bool, superseded: Option<&mut String>) ->
     // user-facing response when one exists; otherwise unwrap
     // <assistant_prose> into plain narration.
     sanitized = extract_visible_prose(&sanitized, superseded);
+    sanitized = strip_json_tool_fences(&sanitized);
     sanitized = strip_internal_json_fences(&sanitized);
     sanitized = strip_inline_internal_planning_json(&sanitized, partial);
     // Unconditional: orphan/truncated control-token residue and bare internal
@@ -786,6 +853,58 @@ mod tests {
         let (visible, delta) = state.push("E##\nmore", true);
         assert_eq!(visible, "Hello\n\nmore");
         assert_eq!(delta, "\n\nmore");
+    }
+
+    /// The `json` tool format's calls are executed from ```tool fences, so the
+    /// reply must not show them again as raw JSON. This is the shape a local
+    /// Devstral route produced, including the close fence running straight
+    /// into the next sentence. Ordinary code fences stay.
+    #[test]
+    fn json_tool_fences_are_hidden_closed_and_while_streaming() {
+        let raw = "I'll look first.\n\n```tool\n{\"args\":{\"file\":\"calc.py\"},\"name\":\"look\"}\n```I see the bug.\n\n```python\nreturn a + b\n```";
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "I'll look first.\n\nI see the bug.\n\n```python\nreturn a + b\n```"
+        );
+
+        let mut state = VisibleTextState::default();
+        let (visible, _) = state.push("I'll look first.\n```to", true);
+        assert_eq!(visible, "I'll look first.");
+        let (visible, delta) = state.push("ol\n{\"name\":\"look\",\"args\":{", true);
+        assert_eq!(visible, "I'll look first.");
+        assert_eq!(delta, "");
+        let (visible, _) = state.push("}}\n```\nDone.", true);
+        assert_eq!(visible, "I'll look first.\n\nDone.");
+    }
+
+    /// Only a call object is hidden. Code in an answer, a ```json block, a
+    /// ```tool fence whose body is not a call, and a fence the stream never
+    /// closed all stay visible in the final text. These are the inputs a
+    /// broader call-shape reader erased (harn#8871).
+    #[test]
+    fn text_that_is_not_a_json_tool_call_stays_visible() {
+        for raw in [
+            "Use it like this:\n\n```js\nconst [s, set] = useState({ a: 1 })\n```",
+            "Call useState({ a: 1 }) once.",
+            "```rust\nlet p = Point{ x: 1, y: 2 };\n```",
+            "Note: make_coffee({ strength: \"strong\" })",
+            "The payload:\n\n```json\n{\"name\":\"look\",\"args\":{\"file\":\"a.rs\"}}\n```",
+            "Example:\n\n```tool\n{\"strength\": \"strong\"}\n```",
+            "Example:\n\n```tool\nlook calc.py\n```",
+        ] {
+            assert_eq!(sanitize_visible_assistant_text(raw, false), raw, "{raw}");
+        }
+
+        let unclosed = "Starting.\n```tool\n{\"name\":\"look\",\"args\":{";
+        assert_eq!(sanitize_visible_assistant_text(unclosed, true), "Starting.");
+        assert_eq!(sanitize_visible_assistant_text(unclosed, false), unclosed);
+
+        let not_a_call = "Example:\n```tool\n{\"strength\": 1}\n```\nMore.";
+        assert_eq!(
+            sanitize_visible_assistant_text(not_a_call, true),
+            not_a_call,
+            "a closed fence that is not a call must not be held back while streaming"
+        );
     }
 
     #[test]

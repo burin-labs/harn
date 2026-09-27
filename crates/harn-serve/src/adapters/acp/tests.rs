@@ -1485,6 +1485,7 @@ mod oauth_redirect;
 mod prompt_errors;
 mod runtime_overrides;
 mod served_agent_turn;
+mod served_json_tool_fence;
 mod session_environment;
 mod session_recap;
 mod session_restore;
