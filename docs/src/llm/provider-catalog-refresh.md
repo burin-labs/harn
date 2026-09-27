@@ -121,6 +121,11 @@ The model is limited to a schema-constrained extraction:
   and old/new values for changes that require them;
 - the model never receives a file mutation tool and never emits TOML.
 
+For an existing model, extraction sees that provider's catalog IDs, names,
+and current prices. An uncertain identity is rejected for review; an unknown
+ID in a price or retirement candidate cannot masquerade as a new-model
+addition.
+
 Deterministic code resolves the provider and model identity. For an existing
 model, it verifies the old value, finds exactly one owning source table, and
 applies the constrained edit. Duplicate identities are rejected. An
@@ -173,6 +178,10 @@ default the script only writes an idempotent local receipt below
 beside the receipt, even with `--apply --open-pr`, and leaves Git untouched.
 A validated patch with `--apply` requires a clean, dedicated worktree and
 regenerates the catalog, matrix, and support projections before their checks.
+Pass `--harn-bin /absolute/path/to/harn` to use one already built Harn binary
+for generation and checks. The workflow runs the catalog's deterministic
+refresh, artifact, matrix, and support gates. CI also runs the sandbox and
+documentation snippet gates outside this nested Harn execution.
 `--open-pr` signs the commit, stages only tracked changes, and opens a
 **draft** PR on a stable branch derived from the notice digest. It never
 enables merge or auto-merge. A repeated notice returns the existing PR.
