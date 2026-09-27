@@ -192,6 +192,70 @@ pipeline test_carried_update_prepares_patch(harness: Harness, task: unknown) {
 }
 
 @test
+pipeline test_live_extraction_uses_provider_catalog_identity(harness: Harness, task: unknown) {
+  const input = fixture(harness.fs, "carried-update")
+  const rows = catalog_model_context(BASE_CATALOG, input.notice)
+  assert_eq(len(rows), 1)
+  assert_eq(rows[0].id, input.extraction.candidate.model_id)
+  assert_eq(rows[0].pricing.input_per_mtok, input.extraction.candidate.old_value)
+}
+
+@test
+pipeline test_unresolved_existing_model_cannot_become_addition(harness: Harness, task: unknown) {
+  const input = fixture(harness.fs, "carried-update")
+  const candidate = input.extraction.candidate + {model_id: "Claude Haiku"}
+  const plan = plan_notice(
+    harness,
+    input.notice,
+    {classification: "candidate", candidate: candidate},
+    BASE_CATALOG,
+  )
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert_eq(plan.receipt.change_kind, "price")
+  assert_eq(plan.patch, nil)
+}
+
+@test
+pipeline test_existing_new_price_on_wrong_model_cannot_hide_identity_error(
+  harness: Harness,
+  task: unknown,
+) {
+  const input = fixture(harness.fs, "carried-update")
+  const catalog = BASE_CATALOG
+    + {
+      models: BASE_CATALOG.models
+        + [
+          {
+            provider: "anthropic",
+            id: "claude-3-5-haiku-20241022",
+            name: "Claude Haiku 3.5",
+            pricing: {input_per_mtok: 0.8, output_per_mtok: 4.0},
+          },
+        ],
+    }
+  const candidate = input.extraction.candidate + {model_id: "claude-3-5-haiku-20241022"}
+  const plan = plan_notice(
+    harness,
+    input.notice,
+    {classification: "candidate", candidate: candidate},
+    catalog,
+  )
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert_eq(plan.patch, nil)
+  const exact_notice = input.notice
+    + {text: input.notice.text + " Model id claude-3-5-haiku-20241022."}
+  assert_eq(
+    plan_notice(
+      harness,
+      exact_notice,
+      {classification: "candidate", candidate: candidate},
+      catalog,
+    ).receipt.disposition,
+    "no_op",
+  )
+}
+
+@test
 pipeline test_irrelevant_notice_records_no_op(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "irrelevant")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
