@@ -297,6 +297,7 @@ mod tests {
                 },
                 expose_as_env: Some(HOST_BOUNDARY_ENV.into()),
                 for_command: None,
+                expose_to: crate::security::GrantAudience::InProcess,
             }],
             &|_| None,
         )
