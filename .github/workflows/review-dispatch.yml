@@ -92,10 +92,19 @@ jobs:
           TARGET_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Optional: the review workflow's branch. Unset means its default
+          # branch; a branch is set only to prove a reviewer change before it
+          # lands there.
+          REVIEW_REF: ${{ vars.REVIEW_DISPATCH_REF }}
         run: |
           set -euo pipefail
+          ref_args=()
+          if [ -n "${REVIEW_REF:-}" ]; then
+            ref_args=(--ref "$REVIEW_REF")
+          fi
           gh workflow run "$REVIEW_WORKFLOW" \
             --repo "$REVIEW_REPOSITORY" \
+            "${ref_args[@]}" \
             -f repository="$TARGET_REPOSITORY" \
             -f pr="$PR_NUMBER" \
             -f head_sha="$HEAD_SHA"
