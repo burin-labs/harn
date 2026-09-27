@@ -9,6 +9,89 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.146
+
+### Added
+
+- Added a typed enforcement table saying what each process sandbox backend
+  confines: writes, reads, credential reads, network and process. Each cell is
+  `enforced`, `not_enforced` or `unmeasured`. `harn doctor` reports the active
+  backend's row, the sandboxing docs render the whole table, and an
+  `os_hardened` spawn is refused with `does_not_confine` when its policy requires
+  a dimension the backend does not hold. The sandbox conformance suite gains
+  cases for credential-denylist reads and loopback network connections, and it
+  judges every case against the table, so a cell that claims more or less than
+  the backend does fails a named case.
+- `harness.agent.open(id?, {parent, actor})` opens a delegated child session. `actor` pushes an `act` hop onto the
+  parent's actor chain, so every provider request the child makes carries its lineage instead of the parent's chain.
+  A parent with no chain starts from the `anonymous` origin, which also covers `sub_agent_run` children under an
+  unauthenticated parent. `open(nil)` and the existing options are unchanged.
+- LLM mock fixtures can replay a recorded prefix and then go live. A versioned
+  header with `"liveAfterCalls": K` serves the first K calls from the fixture,
+  then sends every later call to the configured provider through the normal
+  path. A call the prefix cannot serve fails closed instead of going live
+  early. Each call's `provider_telemetry.llm_mock_prefix` says whether the
+  fixture or the live provider answered it. Fixtures without the header field
+  behave as before.
+
+### Changed
+
+- `harn-cli` requires its `hostlib` feature. A `--no-default-features` build now fails first with an error that says so
+  instead of with over a hundred unresolved imports; build a lean embedding on `harn-serve` or `harn-vm`.
+
+### Removed
+
+- **`scripts/release_contract.json` no longer carries the `workflows` step-name
+  section (#8825).** Release orchestrators that read the contract get the
+  version, changelog, and tag policy only; job and step names of
+  `publish-release.yml` and `build-release-binaries.yml` are no longer part of it.
+- The Windows AppContainer process sandbox is removed. Windows now runs child
+  processes with no OS sandbox confinement, and says so: an `os_hardened` spawn
+  is refused as a typed `does_not_confine` refusal naming mechanism `none`, a
+  `worktree` spawn logs a one-time `handler_sandbox` warning and runs unconfined
+  (or refuses under `HARN_HANDLER_SANDBOX=enforce`), and `harn doctor` reports
+  `backend=unconfined filesystem_mechanism=none`. The `windows_app_container`
+  mechanism and the `entry_point_cannot_attach` availability no longer appear in
+  refusals, and `tools.run_command` reports sandbox kind `none` on Windows.
+
+### Fixed
+
+- `harn test conformance` warms the stdlib bytecode cache once before any case runs. A case that starts a
+  `harn run` child no longer spends its deadline compiling the stdlib alongside every sibling; on an unoptimized
+  build that child went from 10.7 s to 1.0 s.
+- A sandboxed `git` no longer fails with "unknown error occurred while reading the
+  configuration files" when `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM` names an
+  empty file outside the workspace. The sandbox now grants read access to the
+  files those variables name, whatever their content.
+- Bedrock no longer reports as available on a host with no AWS region or credential source. A platform-managed
+  provider is now available only when its client's offline prerequisites resolve: for Bedrock, a region from the
+  environment or the shared config file, and a credential from the environment key pair, a web identity token, a
+  container endpoint, the profile in the shared config or credentials file, or a prepared identity. Otherwise
+  `harness.llm.providers()` reports `available: false` with `credential_status` `region_unconfigured` or
+  `credentials_unconfigured`, so availability-based selection such as the different-family reviewer no longer picks a
+  route that fails on every call. Instance metadata is not probed; an explicit Bedrock call still resolves it. The
+  Bedrock region and credential lookups now honor `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`, and their
+  errors carry the `environment` and `auth` categories. A completion judge whose route fails on an `auth` or
+  `environment` error before any reply ends the run with `completion_judge_route_unavailable` instead of
+  `completion_judge_error`, and the error text is no longer added to the transcript as judge feedback.
+- Assistant text that hosts display no longer repeats `json`-format tool calls: a ```` ```tool ```` fence
+  holding one call object is hidden the same way a `<tool_call>` block is. Code fences, and ```` ```tool ````
+  fences that are not a call, stay visible.
+- The build freshness checker no longer overflows the Windows main thread's 1 MiB stack when it hashes the `harn`
+  binary. CI now lints that feature-gated binary.
+- A cold `harn check` over a large directory no longer peaks at several times the memory of a warm one. The predicate
+  census now scans imported modules through one shared parse instead of a private copy in every check worker.
+- Reopening a saved session replays each tool call under its real name. Replay now reads the name from the
+  event's `metadata.tool_name`, where tool lifecycle events store it, instead of labelling the call `tool`.
+- Allow plain calls to mandatory-thinking Z.AI GLM 5.3 models while rejecting explicit attempts to disable thinking.
+- The parallel scheduler fail-fast test no longer hangs its own two-worker runtime when both branches land on one worker.
+- Forward the scoped GitHub token to consumer refresh commands during automated Harn bumps.
+- Release pushes now wait for an in-progress exact merge-queue candidate before deciding to rebuild it.
+- Reopening a saved session replays its tool calls and results again. The journal stores tool rows as internal,
+  and replay dropped every internal row before checking its kind, so a resumed session showed no tool rows.
+- **Agent host reads honor configured byte limits (#8923).** File and command-output reads now cap both default and
+  explicit lengths at the host's read or tail budget. Agents can use offsets to page through larger content.
+
 ## v0.10.145
 
 ### Added
