@@ -70,7 +70,7 @@ run_notice \
   --write-root "$output_root" \
   >"$tmp_root/granted.out" 2>"$tmp_root/granted.err"
 
-grep -F ": patch" "$tmp_root/granted.out" >/dev/null
+grep -F "provider notice " "$tmp_root/granted.out" >/dev/null
 grep -F "sandbox active; extra write root: $output_root" "$tmp_root/granted.err" >/dev/null
 grep -F "extra read-only roots:" "$tmp_root/granted.err" >/dev/null
 grep -F "$notice_root" "$tmp_root/granted.err" >/dev/null
@@ -86,7 +86,10 @@ if [[ "$receipt_count" != "1" ]]; then
   exit 1
 fi
 receipt_path="$(find "$output_root" -maxdepth 1 -type f -name '*.json' -print -quit)"
-jq -e '.schema_version == "harn.provider_catalog_notice.v1" and .disposition == "patch"' \
+jq -e '.schema_version == "harn.provider_catalog_notice.v1"
+  and .source_id == "anthropic-pricing-2026-08"
+  and (.disposition == "patch" or .disposition == "no_op")
+  and .extraction.candidate.kind == "price"' \
   "$receipt_path" >/dev/null
 
 echo "provider_catalog_notice_sandbox_test: ok"
