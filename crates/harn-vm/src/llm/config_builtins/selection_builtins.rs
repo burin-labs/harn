@@ -292,7 +292,7 @@ fn llm_complementary_reviewer_builtin(
     Ok(json_to_vm_value(&json))
 }
 
-fn parse_complementary_reviewer_options(
+pub(super) fn parse_complementary_reviewer_options(
     value: Option<&VmValue>,
 ) -> Result<llm_config::ComplementaryReviewerOptions, VmError> {
     let dict = value.and_then(|value| value.as_dict()).ok_or_else(|| {
@@ -328,11 +328,37 @@ fn parse_complementary_reviewer_options(
         })?;
     let max_price_multiplier = dict
         .get("max_price_multiplier")
-        .map(vm_value_as_f64)
+        .map(|value| vm_value_as_f64(value, "max_price_multiplier"))
         .transpose()?;
     if max_price_multiplier.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err(VmError::Runtime(
             "llm_complementary_reviewer: max_price_multiplier must be positive".to_string(),
+        ));
+    }
+    let min_price_cap_per_mtok = dict
+        .get("min_price_cap_per_mtok")
+        .map(|value| vm_value_as_f64(value, "min_price_cap_per_mtok"))
+        .transpose()?;
+    let max_price_cap_per_mtok = dict
+        .get("max_price_cap_per_mtok")
+        .map(|value| vm_value_as_f64(value, "max_price_cap_per_mtok"))
+        .transpose()?;
+    if min_price_cap_per_mtok.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: min_price_cap_per_mtok must be positive".to_string(),
+        ));
+    }
+    if max_price_cap_per_mtok.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: max_price_cap_per_mtok must be positive".to_string(),
+        ));
+    }
+    if min_price_cap_per_mtok
+        .zip(max_price_cap_per_mtok)
+        .is_some_and(|(floor, ceiling)| floor > ceiling)
+    {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: min_price_cap_per_mtok must not exceed max_price_cap_per_mtok".to_string(),
         ));
     }
     Ok(llm_config::ComplementaryReviewerOptions {
@@ -340,16 +366,18 @@ fn parse_complementary_reviewer_options(
         author_provider,
         intent,
         max_price_multiplier,
+        min_price_cap_per_mtok,
+        max_price_cap_per_mtok,
     })
 }
 
-fn vm_value_as_f64(value: &VmValue) -> Result<f64, VmError> {
+fn vm_value_as_f64(value: &VmValue, field: &str) -> Result<f64, VmError> {
     match value {
         VmValue::Float(value) => Ok(*value),
         VmValue::Int(value) => Ok(*value as f64),
         other => Err(VmError::Runtime(format!(
-            "llm_complementary_reviewer: max_price_multiplier must be numeric, got {}",
-            other.type_name()
+            "llm_complementary_reviewer: {field} must be numeric, got {}",
+            other.type_name(),
         ))),
     }
 }

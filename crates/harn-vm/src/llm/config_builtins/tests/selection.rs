@@ -2,10 +2,35 @@
 
 use super::super::selection_builtins::{
     llm_model_defaults_builtin, llm_model_ladder_builtin, llm_resolved_options_builtin,
+    parse_complementary_reviewer_options,
 };
 use super::fixtures::build_dict;
 use crate::llm_config;
 use crate::value::VmValue;
+
+#[test]
+fn complementary_reviewer_budget_options_cross_builtin_boundary() {
+    let options = build_dict(vec![
+        ("author_model", VmValue::string("gpt-6-luna")),
+        ("max_price_multiplier", VmValue::Float(3.0)),
+        ("min_price_cap_per_mtok", VmValue::Float(6.0)),
+        ("max_price_cap_per_mtok", VmValue::Float(15.0)),
+    ]);
+    let parsed = parse_complementary_reviewer_options(Some(&options)).expect("valid budget");
+    assert_eq!(parsed.max_price_multiplier, Some(3.0));
+    assert_eq!(parsed.min_price_cap_per_mtok, Some(6.0));
+    assert_eq!(parsed.max_price_cap_per_mtok, Some(15.0));
+
+    let inverted = build_dict(vec![
+        ("author_model", VmValue::string("gpt-6-luna")),
+        ("min_price_cap_per_mtok", VmValue::Float(16.0)),
+        ("max_price_cap_per_mtok", VmValue::Float(15.0)),
+    ]);
+    assert!(parse_complementary_reviewer_options(Some(&inverted))
+        .expect_err("inverted budget must fail")
+        .to_string()
+        .contains("min_price_cap_per_mtok must not exceed"),);
+}
 
 #[test]
 fn test_llm_model_defaults_returns_empty_for_unknown_model() {
