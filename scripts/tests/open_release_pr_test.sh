@@ -72,6 +72,15 @@ case "$1 $2" in
     done
     printf 'https://github.com/example/harn/pull/9001\n'
     ;;
+  "pr edit")
+    cp "$HARN_RELEASE_ROOT/CHANGELOG.md" "$OPENER_STATE/changelog-at-edit.md"
+    while [[ $# -gt 0 ]]; do
+      if [[ "$1" == "--body-file" ]]; then
+        cp "$2" "$OPENER_STATE/body.md"
+      fi
+      shift
+    done
+    ;;
   *)
     echo "unexpected gh invocation: $*" >&2
     exit 2
@@ -186,6 +195,28 @@ merge_release_on_origin() {
   git -C "$other" commit --quiet -am "Release v1.2.4"
   git -C "$other" push --quiet origin HEAD:refs/heads/main
 }
+
+# Publish release/v1.2.4 on origin as one commit on the fixture's current main,
+# the shape the opener leaves: the fragments it folded are deleted.
+open_release_branch_on_origin() {
+  local fixture="$1"
+  git -C "$fixture" switch --quiet -c release/v1.2.4
+  git -C "$fixture" rm --quiet -- 'changelog.d/*.added.md' 'changelog.d/*.fixed.md'
+  git -C "$fixture" commit --quiet -m "Release v1.2.4"
+  git -C "$fixture" push --quiet origin HEAD:refs/heads/release/v1.2.4
+  git -C "$fixture" switch --quiet main
+  git -C "$fixture" branch --quiet -D release/v1.2.4
+}
+
+add_late_fragment() {
+  local fixture="$1"
+  printf -- '- **Late fix rides the release (#8900).**\n' > "$fixture/changelog.d/8900.fixed.md"
+  git -C "$fixture" add -A
+  git -C "$fixture" commit --quiet -m "late fragment"
+  git -C "$fixture" push --quiet origin HEAD:refs/heads/main
+}
+
+open_release_pr='[{"url":"https://github.com/example/harn/pull/77","title":"Release v1.2.4","headRefName":"release/v1.2.4"}]'
 
 # Run the opener in a fixture. Sets case_output, case_record, case_outputs,
 # case_status, and case_state.
@@ -362,6 +393,7 @@ assert_no_side_effects "existing title" "$by_title"
 
 by_branch=$(new_fixture by-branch 1.2.4-dev)
 add_fragments "$by_branch"
+open_release_branch_on_origin "$by_branch"
 FAKE_GH_PRS='[{"url":"https://github.com/example/harn/pull/78","title":"Retitled","headRefName":"release/v1.2.4"}]' \
   run_opener "$by_branch"
 grep -Fxq "pr_url=https://github.com/example/harn/pull/78" "$case_outputs" \
@@ -392,5 +424,67 @@ assert_no_side_effects "stable version" "$stable"
 if grep -q '^gh ' "$case_record"; then
   fail "stable-version case queried GitHub before deciding there is nothing to release"
 fi
+
+# --- A fragment lands while the release PR is open: refold it in place --------
+refold=$(new_fixture refold 1.2.4-dev)
+add_fragments "$refold"
+open_release_branch_on_origin "$refold"
+add_late_fragment "$refold"
+refold_base=$(git -C "$refold" rev-parse HEAD)
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--refold-only run_opener "$refold"
+[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "refold failed"; }
+grep -Fxq "action=refolded" "$case_outputs" || { cat "$case_output" >&2; fail "refold did not report action=refolded"; }
+grep -Fxq "pr_url=https://github.com/example/harn/pull/77" "$case_outputs" || fail "refold did not name the pull request"
+grep -Fq "misses 1 fragment(s) now on main" "$case_output" || { cat "$case_output" >&2; fail "refold did not name the missing fragment"; }
+grep -Fxq "publish branch=release/v1.2.4" "$case_record" || fail "refold published to the wrong branch"
+grep -Fxq "publish base=$refold_base" "$case_record" || fail "refold is not based on main's new head"
+if grep -q '^gh pr create' "$case_record"; then
+  fail "refold opened a second pull request"
+fi
+grep -Fq 'gh pr edit https://github.com/example/harn/pull/77 --body-file' "$case_record" \
+  || { cat "$case_record" >&2; fail "refold did not update the pull request body"; }
+grep -Fq "folds 3 changelog fragment(s)" "$case_state/body.md" || fail "refold body does not count every fragment"
+grep -Fq -- '- **Late fix rides the release (#8900).**' "$case_state/changelog-at-edit.md" \
+  || fail "refold did not fold the late fragment"
+grep -Fxq "D  changelog.d/8900.fixed.md" "$case_state/status-at-publish.txt" \
+  || { cat "$case_state/status-at-publish.txt" >&2; fail "refolded tree does not delete the late fragment"; }
+[[ "$(grep '^gh ' "$case_record" | tail -n 1)" == "gh pr merge https://github.com/example/harn/pull/77 --auto --squash" ]] \
+  || { cat "$case_record" >&2; fail "refold did not keep the pull request armed"; }
+
+# --- The plan names a due refold ---------------------------------------------
+planned_refold=$(new_fixture planned-refold 1.2.4-dev)
+add_fragments "$planned_refold"
+open_release_branch_on_origin "$planned_refold"
+add_late_fragment "$planned_refold"
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--plan run_opener "$planned_refold"
+[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "refold plan failed"; }
+grep -Fxq "action=refold" "$case_outputs" || fail "plan did not decide to refold"
+assert_no_side_effects "refold plan" "$planned_refold"
+
+# --- A release PR that folds everything on main is left alone -----------------
+current=$(new_fixture current 1.2.4-dev)
+add_fragments "$current"
+open_release_branch_on_origin "$current"
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--refold-only run_opener "$current"
+[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "current release PR case failed"; }
+grep -Fxq "action=existing" "$case_outputs" || fail "a current release pull request was not left alone"
+assert_no_side_effects "current release PR" "$current"
+
+# --- An unreadable release branch refuses; it is not "nothing to refold" ------
+lost_branch=$(new_fixture lost-branch 1.2.4-dev)
+add_fragments "$lost_branch"
+FAKE_GH_PRS="$open_release_pr" run_opener "$lost_branch"
+[[ "$case_status" -ne 0 ]] || fail "opener proceeded without reading the release branch"
+grep -Fq "refusing to refold Release v1.2.4 on unproved state" "$case_output" \
+  || { cat "$case_output" >&2; fail "unreadable release branch did not explain the refusal"; }
+assert_no_side_effects "unreadable release branch" "$lost_branch"
+
+# --- A push never opens a release: refold-only with none open is a no-op ------
+push_only=$(new_fixture push-only 1.2.4-dev)
+add_fragments "$push_only"
+OPENER_ARGS=--refold-only run_opener "$push_only"
+[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "refold-only case failed"; }
+grep -Fxq "action=none" "$case_outputs" || fail "refold-only opened or planned a release"
+assert_no_side_effects "refold-only without a release PR" "$push_only"
 
 echo "open_release_pr_test: ok"

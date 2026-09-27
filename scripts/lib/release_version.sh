@@ -189,6 +189,24 @@ release_push_is_stable_version_change() {
     && [[ "$current" != "$previous" ]]
 }
 
+# The commits in base..head (first parent, oldest first) that change the
+# workspace version to a stable X.Y.Z. A merge queue lands several entries in
+# one push, so the pushed head's parent need not be the previous main: a push is
+# judged over its whole range, never by HEAD^ alone.
+release_range_release_commits() {
+  local base="${1:?base commit required}"
+  local head="${2:?head commit required}"
+  local previous current commit
+  previous="$(git show "$base:Cargo.toml" | release_workspace_version)"
+  while read -r commit; do
+    current="$(git show "$commit:Cargo.toml" | release_workspace_version)"
+    if release_push_is_stable_version_change "$previous" "$current"; then
+      printf '%s\n' "$commit"
+    fi
+    previous="$current"
+  done < <(git rev-list --reverse --first-parent "$base..$head")
+}
+
 release_tag_is_canonical() {
   [[ "${1:-}" == v* ]] && release_version_is_canonical "${1#v}"
 }

@@ -121,6 +121,11 @@ The model is limited to a schema-constrained extraction:
   and old/new values for changes that require them;
 - the model never receives a file mutation tool and never emits TOML.
 
+For an existing model, extraction sees that provider's catalog IDs, names,
+and current prices. An uncertain identity is rejected for review; an unknown
+ID in a price or retirement candidate cannot masquerade as a new-model
+addition.
+
 Deterministic code resolves the provider and model identity. For an existing
 model, it verifies the old value, finds exactly one owning source table, and
 applies the constrained edit. Duplicate identities are rejected. An
@@ -164,14 +169,22 @@ harn run \
 ```
 
 For a live extraction, omit `--extraction` and optionally choose `--provider`
-and `--model`. The extraction has a $0.10 per-notice cap. By default the script
-only writes an idempotent local receipt below
-`.harn/provider-catalog-notices/`. `--apply` requires a clean, dedicated
-worktree and runs catalog generation plus drift, artifact, documentation,
-support, and capability checks. `--open-pr` uses a stable branch derived from
-the notice digest, pushes it, and opens a **draft** PR. It never enables merge
-or auto-merge. A repeated notice reuses the same digest and returns an existing
-PR instead of creating another.
+and `--model`. Without `--model`, Harn uses that provider's catalog default;
+it does not pair a cross-provider tier alias with the selected provider.
+`--max-cost-usd` caps its one model call at $0.10 by default;
+`--extraction-timeout-secs` caps that call at 90 seconds by default. By
+default the script only writes an idempotent local receipt below
+`.harn/provider-catalog-notices/`. An incomplete new model writes a proposal
+beside the receipt, even with `--apply --open-pr`, and leaves Git untouched.
+A validated patch with `--apply` requires a clean, dedicated worktree and
+regenerates the catalog, matrix, and support projections before their checks.
+Pass `--harn-bin /absolute/path/to/harn` to use one already built Harn binary
+for generation and checks. The workflow runs the catalog's deterministic
+refresh, artifact, matrix, and support gates. CI also runs the sandbox and
+documentation snippet gates outside this nested Harn execution.
+`--open-pr` signs the commit, stages only tracked changes, and opens a
+**draft** PR on a stable branch derived from the notice digest. It never
+enables merge or auto-merge. A repeated notice returns the existing PR.
 
 ```bash
 git worktree add ../harn-provider-notice origin/main

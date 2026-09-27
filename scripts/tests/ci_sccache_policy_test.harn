@@ -447,40 +447,32 @@ fn workflow() {
   }
 }
 
-fn windows_cache_pair() {
-  const checkout = {uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"}
-  const toolchain = {uses: "./.github/actions/rust-toolchain"}
-  const environment = {CARGO_INCREMENTAL: "0", CARGO_TERM_COLOR: "always", RUSTFLAGS: "-D warnings"}
-  const cache_inputs = {
-    "shared-key": "workspace-windows",
-    "target-dir": gha_expression("env.CARGO_TARGET_DIR"),
-  }
+/** The sole native-Windows cache writer; no pull-request lane consumes it. */
+fn windows_cache_writer() {
   return {
-    consumer: {
-      env: environment,
-      jobs: {
-        windows: {
-          steps: [checkout, toolchain, {uses: "./.github/actions/rust-cache", with: cache_inputs}],
-        },
-      },
-    },
-    producer: {
-      env: environment,
-      jobs: {
-        nextest: {
-          steps: [
-            checkout,
-            toolchain,
-            {
-              uses: "./.github/actions/rust-cache",
-              if: gha_expression("!startsWith(github.ref_name, 'release-certify/')"),
-              with: {...cache_inputs, save: true},
+    env: {CARGO_INCREMENTAL: "0", CARGO_TERM_COLOR: "always", RUSTFLAGS: "-D warnings"},
+    jobs: {
+      nextest: {
+        steps: [
+          {uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"},
+          {uses: "./.github/actions/rust-toolchain"},
+          {
+            uses: "./.github/actions/rust-cache",
+            if: gha_expression("!startsWith(github.ref_name, 'release-certify/')"),
+            with: {
+              "shared-key": "workspace-windows",
+              "target-dir": gha_expression("env.CARGO_TARGET_DIR"),
+              save: true,
             },
-          ],
-        },
+          },
+        ],
       },
     },
   }
+}
+
+fn with_windows_writer_steps(writer: dict, steps: list) -> dict {
+  return {...writer, jobs: {...writer.jobs, nextest: {...writer.jobs.nextest, steps: steps}}}
 }
 
 @test
@@ -1467,131 +1459,62 @@ pipeline test_rejects_a_missing_compile_lane(harness: Harness, task: unknown) {
 }
 
 @test
-pipeline test_accepts_plain_rustc_windows_cache_pair(harness: Harness, task: unknown) {
-  const pair = windows_cache_pair()
-  assert_eq(windows_shared_cache_errors(pair.consumer, pair.producer), [])
+pipeline test_accepts_plain_rustc_windows_cache_writer(harness: Harness, task: unknown) {
+  assert_eq(windows_shared_cache_errors(windows_cache_writer()), [])
 }
 
 @test
-pipeline test_rejects_windows_cache_wrapper_drift(harness: Harness, task: unknown) {
-  const pair = windows_cache_pair()
-  const producer = {
-    ...pair.producer,
-    jobs: {
-      ...pair.producer.jobs,
-      nextest: {
-        ...pair.producer.jobs.nextest,
-        steps: [
-          pair.producer.jobs.nextest.steps[0],
-          pair.producer.jobs.nextest.steps[1],
-          {uses: "mozilla-actions/sccache-action@untrusted"},
-          pair.producer.jobs.nextest.steps[2],
-        ],
-      },
-    },
-  }
-  const errors = windows_shared_cache_errors(pair.consumer, producer)
-  assert_eq(len(errors), 2)
-  assert(
-    errors.contains(
-      "workspace-windows producer and consumer must use plain rustc: [\"mozilla-actions/sccache-action@untrusted\"]",
-    ),
+pipeline test_rejects_windows_cache_wrapper(harness: Harness, task: unknown) {
+  const writer = windows_cache_writer()
+  const steps = writer.jobs.nextest.steps
+  const wrapped = with_windows_writer_steps(
+    writer,
+    [steps[0], steps[1], {uses: "mozilla-actions/sccache-action@untrusted"}, steps[2]],
   )
-  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
-  assert(errors.any({ error -> error.contains("rust-cache-source-key=") }))
-}
-
-@test
-pipeline test_rejects_windows_cache_environment_drift(harness: Harness, task: unknown) {
-  const pair = windows_cache_pair()
-  const producer = {
-    ...pair.producer,
-    env: {...pair.producer.env, RUSTFLAGS: "-D warnings -C target-cpu=native"},
-  }
-  const errors = windows_shared_cache_errors(pair.consumer, producer)
-  assert_eq(len(errors), 1)
-  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
-  assert(errors.any({ error -> error.contains("RUSTFLAGS=-D warnings -C target-cpu=native") }))
-  assert(errors.any({ error -> error.contains("rust-cache-source-key=") }))
+  assert_eq(
+    windows_shared_cache_errors(wrapped),
+    [
+      "workspace-windows producer must use plain rustc: [\"mozilla-actions/sccache-action@untrusted\"]",
+    ],
+  )
 }
 
 @test
 pipeline test_rejects_windows_cache_source_partitioning(harness: Harness, task: unknown) {
-  const pair = windows_cache_pair()
-  const producer_cache = pair.producer.jobs.nextest.steps[2]
-  const producer = {
-    ...pair.producer,
-    jobs: {
-      ...pair.producer.jobs,
-      nextest: {
-        ...pair.producer.jobs.nextest,
-        steps: [
-          pair.producer.jobs.nextest.steps[0],
-          pair.producer.jobs.nextest.steps[1],
-          {
-            ...producer_cache,
-            with: {
-              ...producer_cache?.with ?? {},
-              "source-key": gha_expression("hashFiles('Cargo.lock')"),
-            },
-          },
-        ],
+  const writer = windows_cache_writer()
+  const steps = writer.jobs.nextest.steps
+  const partitioned = with_windows_writer_steps(
+    writer,
+    [
+      steps[0],
+      steps[1],
+      {
+        ...steps[2],
+        with: {...steps[2]?.with ?? {}, "source-key": gha_expression("hashFiles('Cargo.lock')")},
       },
-    },
-  }
-  const errors = windows_shared_cache_errors(pair.consumer, producer)
-  assert_eq(len(errors), 2)
-  assert(
-    errors.contains(
-      "workspace-windows producer and consumer must use one stable native restore namespace",
-    ),
+    ],
   )
-  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
+  assert_eq(
+    windows_shared_cache_errors(partitioned),
+    ["workspace-windows producer must use one stable native restore namespace"],
+  )
 }
 
 @test
-pipeline test_rejects_paired_windows_cache_source_partitioning(harness: Harness, task: unknown) {
-  const pair = windows_cache_pair()
-  const drifted_source_key = gha_expression("hashFiles('Cargo.lock')")
-  const consumer_cache = pair.consumer.jobs.windows.steps[2]
-  const producer_cache = pair.producer.jobs.nextest.steps[2]
-  const consumer = {
-    ...pair.consumer,
-    jobs: {
-      ...pair.consumer.jobs,
-      windows: {
-        ...pair.consumer.jobs.windows,
-        steps: [
-          pair.consumer.jobs.windows.steps[0],
-          pair.consumer.jobs.windows.steps[1],
-          {
-            ...consumer_cache,
-            with: {...consumer_cache?.with ?? {}, "source-key": drifted_source_key},
-          },
-        ],
-      },
-    },
-  }
-  const producer = {
-    ...pair.producer,
-    jobs: {
-      ...pair.producer.jobs,
-      nextest: {
-        ...pair.producer.jobs.nextest,
-        steps: [
-          pair.producer.jobs.nextest.steps[0],
-          pair.producer.jobs.nextest.steps[1],
-          {
-            ...producer_cache,
-            with: {...producer_cache?.with ?? {}, "source-key": drifted_source_key},
-          },
-        ],
-      },
-    },
-  }
+pipeline test_rejects_a_missing_windows_cache_writer(harness: Harness, task: unknown) {
   assert_eq(
-    windows_shared_cache_errors(consumer, producer),
-    ["workspace-windows producer and consumer must use one stable native restore namespace"],
+    windows_shared_cache_errors({jobs: {}}),
+    ["workspace-windows must be written by windows-nightly.yml:nextest"],
+  )
+  const writer = windows_cache_writer()
+  const steps = writer.jobs.nextest.steps
+  const restore_only = with_windows_writer_steps(
+    writer,
+    [steps[0], steps[1], {...steps[2], with: {...steps[2]?.with ?? {}, save: false}}],
+  )
+  assert_eq(
+    windows_shared_cache_errors(restore_only),
+    ["windows-nightly.yml:nextest must write workspace-windows exactly once"],
   )
 }
 

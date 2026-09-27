@@ -364,6 +364,16 @@ pub const E2E_WORKFLOW_CANCEL_POLICY = "$"
 pub const MAIN_ONLY_RUST_IF =
   "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
 
+/**
+ * The Windows cross-compile check is the one Windows admission lane: every
+ * merge-group candidate, plus Rust-changing main pushes.
+ */
+pub const WINDOWS_CROSS_CHECK_IF =
+  "github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
+
+/** `ci-status` requires the cross-check exactly where the job itself must run. */
+pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"
+
 pub const MAIN_ONLY_POLICY_IF = MAIN_ONLY_RUST_IF
   + " && needs.rust-artifacts-ready.result == 'success'"
 
@@ -492,17 +502,9 @@ pub const WINDOWS_BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_WINDOWS"
 
 pub const HOSTED_WINDOWS_RUNNER = "windows-latest"
 
-pub const BLACKSMITH_8CPU_WINDOWS_RUNNER = "blacksmith-8vcpu-windows-2025"
-
-// The nightly compiles and runs the WHOLE workspace, not an affected-crate
-// closure, so it is the one Windows lane where core count buys real wall time.
-// The cache generation it writes does not depend on vCPU count, so the producer
-// and its consumer may sit on different sizes of the same tier.
+// The nightly compiles and runs the WHOLE workspace, so it is the one Windows
+// lane where core count buys real wall time.
 pub const BLACKSMITH_16CPU_WINDOWS_RUNNER = "blacksmith-16vcpu-windows-2025"
-
-pub const WINDOWS_WARM_RESTORE_STEP = "Restore Windows workspace warm artifact"
-
-pub const WINDOWS_WARM_REPORT_STEP = "Report Windows warm restore outcome"
 
 pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
 
@@ -513,42 +515,32 @@ pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
  */
 pub const WINDOWS_STORAGE_HEADROOM_FLAG = "--require-free-headroom"
 
-pub const WINDOWS_STORAGE_INITIAL_STEP = "Report Windows storage (initial)"
-
-pub const WINDOWS_STORAGE_INITIAL_STEP_ID = "windows-storage-initial"
-
-pub const WINDOWS_STORAGE_AFTER_RESTORE_STEP = "Report Windows storage (after restore)"
-
 pub const WINDOWS_STORAGE_TERMINAL_STEP = "Report Windows storage (terminal)"
 
 pub const WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP = "Report Windows storage (before build)"
 
-pub const WINDOWS_WARM_RESTORE_STEP_ID = "windows-warm-restore"
-
 pub const MACOS_WARM_RESTORE_STEP_ID = "macos-warm-restore"
-
-pub const WINDOWS_CACHE_FALLBACK_GUARD =
-  "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && "
-  + "steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'"
-
-pub const WINDOWS_TEST_STEP = "Compile Windows tests and run unit slice"
-
-pub const WINDOWS_TEST_STEP_ID = "windows-native-tests"
-
-pub const WINDOWS_TEST_COMPLETED_EXPRESSION = "$"
-  + "{{ steps.${WINDOWS_TEST_STEP_ID}.outputs.completed_epoch }}"
-
-// This checker rejects the old CI telemetry key; it does not declare a
-// Harn-owned environment variable, so keep the forbidden spelling non-contiguous.
-pub const WINDOWS_LEGACY_HARN_TELEMETRY = "HARN_" + "NATIVE_TEST_COMPLETED_EPOCH"
-
-pub const WINDOWS_BINARY_PRODUCER_STEP = "Produce exact Windows Harn binary"
-
-pub const WINDOWS_SMOKE_STEP = "Smoke test harn run"
 
 pub const WINDOWS_NIGHTLY_TEST_STEP = "Run workspace nextest"
 
 pub const WINDOWS_TEST_STACK_BYTES = "16777216"
+
+/** The one owner of release head-ref recognition that workflow steps source. */
+pub const RELEASE_REF_HELPER = ".github/scripts/release-ref.sh"
+
+/** The release-ref function that decides whether a release-PR-only lane runs. */
+pub const RELEASE_PR_ONLY_LANE_FN = "release_pr_only_lane_run"
+
+/** The native Windows nightly's routing job, step, and published decision. */
+pub const WINDOWS_ROUTE_JOB = "route"
+
+pub const WINDOWS_ROUTE_STEP = "Decide whether this event runs native Windows"
+
+pub const WINDOWS_ROUTE_STEP_ID = "decide"
+
+pub const WINDOWS_ROUTE_OUTPUT = "$" + "{{ steps.${WINDOWS_ROUTE_STEP_ID}.outputs.run }}"
+
+pub const WINDOWS_NIGHTLY_RELEASE_ROUTE_IF = "needs.${WINDOWS_ROUTE_JOB}.outputs.run == 'true'"
 
 pub const MACOS_CACHE_KEY = "workspace-macos"
 
@@ -640,15 +632,6 @@ pub fn policy_schema() {
  */
 pub fn windows_nightly_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
   return warm.dev_drive_size_full_workspace
-}
-
-pub fn windows_ci_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
-  return "$"
-    + "{{ github.event_name == 'pull_request' && '"
-    + warm.dev_drive_size_default
-    + "' || '"
-    + warm.dev_drive_size_full_workspace
-    + "' }}"
 }
 
 pub fn release_warm_cache_path_policy_schema() {
@@ -1778,8 +1761,17 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       }
     }
   }
-  if trim(jobs["windows-cross-check"]?.if ?? "") != MAIN_ONLY_RUST_IF {
-    errors = errors + ["ci.yml:windows-cross-check must run on Rust-changing main pushes only"]
+  const cross_check = jobs["windows-cross-check"] ?? {}
+  if trim(cross_check?.if ?? "") != WINDOWS_CROSS_CHECK_IF {
+    errors = errors
+      + [
+        "ci.yml:windows-cross-check must run on every merge-group candidate and on Rust-changing main pushes",
+      ]
+  }
+  // Off the critical path: it waits on the cheap `changes` router only.
+  const cross_needs = cross_check?.needs
+  if cross_needs != "changes" && cross_needs != ["changes"] {
+    errors = errors + ["ci.yml:windows-cross-check must need only changes"]
   }
   const status = jobs["ci-status"] ?? {}
   for name in [
@@ -1793,11 +1785,21 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       errors = errors + ["ci.yml:ci-status must retain ${name}"]
     }
   }
-  const status_run = step_by_name(status?.steps ?? [], "Verify required CI jobs")?.run ?? ""
+  const status_step = step_by_name(status?.steps ?? [], "Verify required CI jobs")
+  const status_run = status_step?.run ?? ""
+  // The skip allowance must read the same condition the job runs under, so a
+  // merge-group candidate cannot pass the aggregate with the check skipped.
+  if trim(to_string(status_step?.env?.WINDOWS_CROSS_REQUIRED ?? "")) != WINDOWS_CROSS_REQUIRED_ENV
+    || !contains(status_run, "[ \"$WINDOWS_CROSS_REQUIRED\" != \"true\" ]") {
+    errors = errors
+      + [
+        "ci.yml:ci-status must require the Windows cross-compile check wherever the job itself must run",
+      ]
+  }
   for message in [
     "Repository policy checks failed or skipped on a Rust-changing main push.",
     "Fast repository policy gates failed or skipped while Rust proof was required.",
-    "Windows cross-compile check failed or skipped on a Rust-changing main push.",
+    "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push.",
   ] {
     if !contains(status_run, message) {
       errors = errors + ["ci.yml:ci-status does not enforce '${message}'"]

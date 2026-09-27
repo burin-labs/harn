@@ -9,6 +9,7 @@ fn __step_judge_schema() {
     properties: {
       verdict: {
         type: "string",
+        enum: ["pass", "revise"],
         description:
           "Use `pass` if the response advances the task acceptably, `revise` to request regeneration.",
       },

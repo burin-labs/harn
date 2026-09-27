@@ -54,7 +54,7 @@ const NEGATED_EXISTS_BASELINE = [
   {path: "scripts/check_xfail_count.harn", count: 1},
   {path: "scripts/hook_timing_summary.harn", count: 1},
   {path: "scripts/pr_binary_size_signal.harn", count: 3},
-  {path: "scripts/provider_catalog_notice.harn", count: 2},
+  {path: "scripts/provider_catalog_notice.harn", count: 1},
   {path: "scripts/provider_tool_probe_campaign/catalog.harn", count: 1},
   {path: "scripts/provider_tool_probe_campaign/env.harn", count: 2},
   {path: "scripts/provider_tool_probe_campaign/execute.harn", count: 1},

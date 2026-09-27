@@ -9,8 +9,8 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -26,8 +26,8 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -97,8 +97,8 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -118,6 +118,10 @@
         "reader": "__judge_tool_descriptor"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
+        "reader": "__loop_dispatch_options"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "reader": "__tool_batch_call_classification"
       },
@@ -128,10 +132,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "reader": "__intra_turn_resource_guard"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__dispatch_tool_calls"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",

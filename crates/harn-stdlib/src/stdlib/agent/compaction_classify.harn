@@ -1,0 +1,140 @@
+import {
+  ConfidenceKind,
+  EvaluationPolicy,
+  EvaluationQuestion,
+  choice,
+  evaluation_windows,
+} from "std/predicate"
+
+pub type CompactionClassifyItem = {index: int, role: string, content: string}
+
+pub type CompactionClassifyChoice = "keep" | "reword" | "drop"
+
+pub type CompactionClassifyDecision = {
+  index: int,
+  question_id: string,
+  choice: CompactionClassifyChoice,
+  confidence: float,
+  confidence_kind: ConfidenceKind,
+  evaluation_receipt: string,
+}
+
+pub type CompactionFixtureInput = {items: list<CompactionClassifyItem>, anchor: string, round: int}
+
+pub type CompactionClassifyDecisions = list<CompactionClassifyDecision>
+
+pub type CompactionClassifyFixture = fn(CompactionFixtureInput) -> CompactionClassifyDecisions
+
+pub type CompactionClassifyRequest = {
+  items: list<CompactionClassifyItem>,
+  anchor: string,
+  round: int,
+  budget_tokens: int,
+  max_questions: int,
+  policy: EvaluationPolicy,
+  fixture?: CompactionClassifyFixture,
+}
+
+pub type CompactionClassifyRound = {
+  kind: "answered" | "unavailable" | "window_refused",
+  decisions: list<CompactionClassifyDecision>,
+  reason: string,
+}
+
+/**
+ * Classify one round through the shared evaluator. Compaction owns confidence
+ * floors and message application; this export only batches questions and
+ * preserves the evaluator's reported answers.
+ *
+ * @effects: [llm.call]
+ * @errors: ["invalid window budget", "invalid classifier answer", "cancelled"]
+ */
+pub fn classify_compaction_round(
+  harness: {fs: HarnessFs, llm: HarnessLlm},
+  request: CompactionClassifyRequest,
+) -> CompactionClassifyRound {
+  const planning = try {
+    evaluation_windows(
+      harness.llm,
+      request.items,
+      {
+        anchor: request.anchor,
+        budget_tokens: request.budget_tokens,
+        max_items: request.max_questions,
+      },
+    )
+  }
+  if is_err(planning) {
+    return {kind: "window_refused", decisions: [], reason: to_string(unwrap_err(planning))}
+  }
+  const planned = unwrap(planning)
+  if request?.fixture != nil {
+    return {
+      kind: "answered",
+      decisions: request.fixture(
+        {items: request.items, anchor: request.anchor, round: request.round},
+      ),
+      reason: "",
+    }
+  }
+  let decisions: list<CompactionClassifyDecision> = []
+  for window in planned.windows {
+    const items = request.items.slice(window.first_index, window.last_index + 1)
+    let questions: dict<string, EvaluationQuestion> = {}
+    for item in items {
+      questions["message_" + to_string(item.index)] = choice(
+        harness.fs.render_prompt(
+          "std/agent/prompts/compaction_classify.harn.prompt",
+          {index: item.index},
+        ),
+        {
+          keep: "Keep the complete original message because its details remain necessary.",
+          reword: "Keep the information in a faithful short rewrite; full detail is unnecessary.",
+          drop: "Remove the message because it is irrelevant, redundant, or superseded.",
+        },
+      )
+    }
+    const state: {anchor: string, items: list<CompactionClassifyItem>} = {
+      anchor: request.anchor,
+      items: items,
+    }
+    const outcome = harness.llm.evaluate_request(
+      "agent.compaction.classify.v1",
+      state,
+      questions,
+      request.policy + {threshold: 0.0},
+    )
+    match outcome.kind {
+      "cancelled" -> {
+        throw {category: "cancelled", message: "compaction classification cancelled"}
+      }
+      "answered" -> {
+        for item in items {
+          const question_id = "message_" + to_string(item.index)
+          const answer = outcome.value[question_id]
+          if answer.kind != "choice"
+            || (answer.choice != "keep" && answer.choice != "reword" && answer.choice != "drop") {
+            throw "invalid classifier answer"
+          }
+          decisions = decisions
+            + [
+              {
+                index: item.index,
+                question_id: question_id,
+                choice: answer.choice,
+                confidence: answer.confidence,
+                confidence_kind: answer.confidence_kind,
+                evaluation_receipt: outcome.receipt,
+              },
+            ]
+        }
+      }
+      _ -> { return {
+        kind: "unavailable",
+        decisions: [],
+        reason: outcome.kind + ": " + outcome.receipt,
+      } }
+    }
+  }
+  return {kind: "answered", decisions: decisions, reason: ""}
+}
