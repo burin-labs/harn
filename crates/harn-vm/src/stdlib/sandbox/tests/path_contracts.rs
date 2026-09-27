@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use super::super::{is_standard_io_device_for_access, path_is_within, FsAccess};
+use super::super::paths::is_standard_io_device_for_access;
+use super::super::{path_is_within, FsAccess};
 
 #[test]
 fn standard_io_devices_are_narrowly_classified() {
