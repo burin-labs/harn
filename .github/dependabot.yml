@@ -1,6 +1,23 @@
 version: 2
 
+# This file is the source projected into repositories that use GitHub Actions.
+# Cooldown gives a compromised release time to be yanked or flagged before an
+# automated PR proposes it.
 updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"
+
   - package-ecosystem: "cargo"
     directories:
       - "/"
@@ -96,17 +113,3 @@ updates:
       - dependency-name: "@types/vscode"
     cooldown:
       default-days: 7
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "America/Los_Angeles"
-    cooldown:
-      default-days: 7
-    groups:
-      actions:
-        patterns:
-          - "*"
