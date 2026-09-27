@@ -798,3 +798,40 @@ fn malformed_channel_keys_on_the_error_message_not_the_frame() {
         Some("terminal")
     );
 }
+
+/// An exhausted balance arrives as HTTP 429. It must not carry the 429's
+/// `rate_limit` category, or every retry layer backs off and resends into the
+/// same refusal, and the product reports it as a capacity blip.
+#[test]
+fn an_exhausted_provider_balance_is_a_terminal_billing_stop_not_a_rate_limit() {
+    let error = provider_http_error(
+        None,
+        "openai",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        &reqwest::header::HeaderMap::new(),
+        r#"{"error":{"type":"insufficient_quota","code":"billing_limit","message":"credit_balance_exhausted"}}"#,
+    );
+    assert_eq!(thrown_field(&error, "kind").as_deref(), Some("terminal"));
+    assert_eq!(
+        thrown_field(&error, "reason").as_deref(),
+        Some("billing_limit")
+    );
+    assert_eq!(thrown_field(&error, "category").as_deref(), Some("generic"));
+
+    // A plain throttle keeps its retryable category.
+    let throttle = provider_http_error(
+        None,
+        "openai",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        &reqwest::header::HeaderMap::new(),
+        r#"{"error":{"type":"requests","code":"rate_limit_exceeded","message":"slow down"}}"#,
+    );
+    assert_eq!(
+        thrown_field(&throttle, "reason").as_deref(),
+        Some("rate_limit")
+    );
+    assert_eq!(
+        thrown_field(&throttle, "category").as_deref(),
+        Some("rate_limit")
+    );
+}

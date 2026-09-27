@@ -31,6 +31,11 @@ pub enum AgentTerminalClass {
     ContextOverflow,
     ProviderMisconfigured,
     ProviderUnavailable,
+    /// The provider account is out of credit or over a hard spend or quota
+    /// limit. Terminal until someone changes the account: a retry sends the
+    /// same request into the same refusal. Arrives as an HTTP 429, so it must
+    /// be told apart from `RateLimited` by the provider's own billing code.
+    ProviderBilling,
     RateLimited,
     Timeout,
     ResourceBusy,
@@ -42,10 +47,11 @@ pub enum AgentTerminalClass {
 }
 
 impl AgentTerminalClass {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
+        Self::ProviderBilling,
         Self::RateLimited,
         Self::Timeout,
         Self::ResourceBusy,
@@ -61,6 +67,7 @@ impl AgentTerminalClass {
             Self::ContextOverflow => "context_overflow",
             Self::ProviderMisconfigured => "provider_misconfigured",
             Self::ProviderUnavailable => "provider_unavailable",
+            Self::ProviderBilling => "provider_billing",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
             Self::ResourceBusy => "resource_busy",
@@ -78,6 +85,7 @@ impl AgentTerminalClass {
             Self::ContextOverflow
                 | Self::ProviderMisconfigured
                 | Self::ProviderUnavailable
+                | Self::ProviderBilling
                 | Self::RateLimited
                 | Self::Timeout
         )
@@ -88,6 +96,7 @@ impl AgentTerminalClass {
             "context_overflow" => Some(Self::ContextOverflow),
             "provider_misconfigured" => Some(Self::ProviderMisconfigured),
             "provider_unavailable" => Some(Self::ProviderUnavailable),
+            "provider_billing" => Some(Self::ProviderBilling),
             "rate_limited" => Some(Self::RateLimited),
             "timeout" => Some(Self::Timeout),
             "resource_busy" => Some(Self::ResourceBusy),
@@ -167,6 +176,8 @@ pub fn agent_terminal_class(
                 | "provider_misconfigured"
                 | "provider_not_configured"
                 | "provider_unavailable"
+                | "provider_billing"
+                | "billing_limit"
                 | "rate_limit"
                 | "rate_limited"
                 | "timeout"
@@ -204,6 +215,14 @@ fn agent_terminal_class_from_structured_error(
     }
     if terminal_error_signal_matches(error, |signal| signal == "no_llm_call") {
         return Some(AgentTerminalClass::ProviderMisconfigured);
+    }
+    // Before any `category`: a billing stop arrives as a 429, and producers
+    // that predate its own category still label it `rate_limit`. The reason is
+    // the provider's closed billing code, so it decides.
+    if terminal_error_signal_matches(error, |signal| {
+        signal == "billing_limit" || signal == "provider_billing"
+    }) {
+        return Some(AgentTerminalClass::ProviderBilling);
     }
     if terminal_error_signal_matches(error, |signal| signal == "resource_busy") {
         return Some(AgentTerminalClass::ResourceBusy);
@@ -367,6 +386,7 @@ fn terminal_class_from_exact_signal(signal: &str) -> Option<AgentTerminalClass> 
             Some(AgentTerminalClass::ProviderMisconfigured)
         }
         "provider_unavailable" => Some(AgentTerminalClass::ProviderUnavailable),
+        "provider_billing" | "billing_limit" => Some(AgentTerminalClass::ProviderBilling),
         "rate_limit" | "rate_limited" => Some(AgentTerminalClass::RateLimited),
         "timeout" | "timed_out" | "deadline_exceeded" => Some(AgentTerminalClass::Timeout),
         "resource_busy" => Some(AgentTerminalClass::ResourceBusy),
@@ -488,6 +508,7 @@ mod tests {
                 AgentTerminalClass::ProviderUnavailable,
                 "provider_unavailable",
             ),
+            (AgentTerminalClass::ProviderBilling, "provider_billing"),
             (AgentTerminalClass::RateLimited, "rate_limited"),
             (AgentTerminalClass::Timeout, "timeout"),
             (AgentTerminalClass::ResourceBusy, "resource_busy"),
@@ -747,5 +768,44 @@ mod tests {
         assert!(!agent_loop_made_no_llm_call("error", false, 0, 0, 0));
         assert!(!agent_loop_made_no_llm_call("failed", false, 0, 0, 0));
         assert!(!agent_loop_made_no_llm_call("", true, 0, 0, 0));
+    }
+
+    /// A billing stop is its own terminal class, whether the producer labels
+    /// its category `generic` (current) or `rate_limit` (older envelopes and
+    /// the 429 status). Falsifier: before `ProviderBilling`, the category key
+    /// won and the class read `rate_limited`, which embedders present as
+    /// "may work on another try".
+    #[test]
+    fn a_billing_stop_is_provider_billing_even_when_labelled_rate_limit() {
+        for category in ["generic", "rate_limit"] {
+            let error = json!({
+                "category": category,
+                "kind": "terminal",
+                "reason": "billing_limit",
+                "provider": "openai",
+                "model": "gpt-6-sol",
+                "message": "openai HTTP 429 [billing_limit] credit_balance_exhausted",
+            });
+            assert_eq!(
+                agent_terminal_class("failed", "error", Some(&error)),
+                Some(AgentTerminalClass::ProviderBilling),
+                "category {category}"
+            );
+        }
+        let throttle = json!({
+            "category": "rate_limit",
+            "kind": "transient",
+            "reason": "rate_limit",
+            "provider": "openai",
+        });
+        assert_eq!(
+            agent_terminal_class("failed", "error", Some(&throttle)),
+            Some(AgentTerminalClass::RateLimited)
+        );
+        assert!(AgentTerminalClass::ProviderBilling.is_provider_error());
+        assert_eq!(
+            AgentTerminalClass::from_wire("provider_billing"),
+            Some(AgentTerminalClass::ProviderBilling)
+        );
     }
 }
