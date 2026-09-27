@@ -248,10 +248,10 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Release
 
-- Run live releases only through the `hosted-release.yml` workflow on
-  `burin-labs/harn-bump-fleet`, pinned to an exact current `origin/main` SHA,
-  and approve its protected `release` environment. Do not run the local
-  harness or `scripts/release_ship.sh` for a normal live release.
+- Run live releases from `burin-labs/harn-bump-fleet` through its canonical
+  `release_harn.harn` harness, pinned to an exact current `origin/main` SHA.
+  Follow the owning [release how-to](https://github.com/burin-labs/harn-bump-fleet/blob/main/docs/how-to/release-harn.md).
+  Do not invoke `scripts/release_ship.sh` directly for a normal live release.
 - After the tag exists, resume durable post-tag proof from `harn-bump-fleet`
   with
   `scripts/watch_harn_release.sh --tag vX.Y.Z --repo <harn-checkout> --yes-live-release`.
@@ -260,8 +260,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   Completion requires the release PR, complete asset manifest, and transient-ref
   cleanup. Cache warming is explicit: pass `--warm-cache` when required, and
   otherwise retain its `not_requested` receipt instead of claiming it passed.
-  Downstream convergence belongs to hosted release and its `converge_fleet`
-  input; the crate publisher does not start a second update controller.
+  Downstream convergence belongs to the generated fleet bump orchestration;
+  the crate publisher does not start a second update controller.
 - Dry-run the full release gate with
   `./scripts/release_gate.sh full --bump patch --dry-run`.
 - Dry-run crate publishing with `./scripts/publish.sh --dry-run`.

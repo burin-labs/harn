@@ -1,150 +1,57 @@
 ---
 name: release-harn
-short: Merge-queue-safe Harn patch/minor/major release workflow.
-description: Cut a Harn release through the merge queue. One PR carries CHANGELOG + Cargo.toml bump + regenerated artifacts; candidate builds certify the proposed tree, then a signed tag selects and publishes the merged main squash commit.
-when_to_use: Use when cutting the declared Harn `vX.Y.Z-dev` target as a stable patch release, cutting a minor or major release from main, or recovering from a partially-failed release run.
+short: Cut and verify an immutable Harn release through the owning harness.
+description: Use harn-bump-fleet to prepare, certify, publish, and recover one exact Harn release candidate.
+when_to_use: Use when cutting a stable, development, minor, or major Harn release from main, or recovering a partial release.
 ---
 
 # Release Harn
 
-Use this skill when cutting the declared Harn `vX.Y.Z-dev` target from `main`, or
-recovering from a partial release.
+`burin-labs/harn-bump-fleet` owns release preparation, candidate certification,
+immutable attempt refs, publication, and recovery. Follow its
+[release how-to](https://github.com/burin-labs/harn-bump-fleet/blob/main/docs/how-to/release-harn.md)
+for the complete procedure and receipt contract. Keep that procedure in its
+owning repository.
 
-Pair it with [[harn-providers]] when the release includes provider
-catalog or capability matrix changes (the bump regenerates those
-artifacts).
+## Cut an exact candidate
 
-## Shape of a release
-
-A Harn release is **one human PR** titled `Release vX.Y.Z` carrying
-the consolidated bump:
-
-- `CHANGELOG.md` — a new `## vX.Y.Z` section at the top with
-  `### Added` / `### Changed` / `### Fixed` subsections summarising
-  everything that lands in this version.
-- `Cargo.toml` (workspace `version` field) bumped to `X.Y.Z`.
-- `Cargo.lock` re-locked.
-- Any per-crate manifest bumps the release-prep script touches
-  (`crates/*/Cargo.toml`).
-- Regenerated mirror artifacts the release-prep script refreshes
-  (provider catalog JSON / TS / Swift, capability matrix, highlight
-  keywords, etc. — whatever the previous release shipped).
-
-After this PR lands through the merge queue, two GitHub Actions
-workflows cascade automatically under the `harn-release-bot` App
-identity:
-
-```text
-version commit merges to main
-  → build-release-binaries.yml candidate mode at that exact commit:
-    five-target archives (sign/notarize/attest), SHA256SUMS,
-    release-assets.json, release notes, candidate manifest
-  → same run: residual release audit + release smoke on those files
-  → promotion verifies the run and every digest, then tags and publishes
-```
-
-Nothing is rebuilt after it is tested. A release publishes exactly the files
-the candidate run built and checked.
-
-## Local entry points
-
-The default flow:
+Run from the `harn-bump-fleet` checkout:
 
 ```bash
-./scripts/release_ship.sh --prepare --bump patch
+scripts/with_env.sh harn run --no-sandbox release_harn.harn -- \
+  --repo /path/to/harn --mode ship-pr --agent --yes-live-release \
+  --at-sha <exact-main-commit> --expect-pr <required-pr>
 ```
 
-Recovery / partial-run reentry:
+- Select an exact main commit and require each release-critical PR with
+  `--expect-pr`. The harness isolates the source checkout and preserves that
+  pin throughout preparation.
+- The harness owns version selection. A declared `X.Y.Z-dev` names the stable
+  patch target; a stable workspace version uses the next version after the
+  published floor. Do not implement a second version calculation.
+- The harness prepares the `Release vX.Y.Z` PR and durable watch receipt.
+  Follow the current merge authority before landing it.
+- Never push to a PR after auto-merge is armed or while it is queued. Do not
+  rebase an explicitly frozen candidate to absorb later main changes.
+- Use the owning harness for recovery. Do not invoke `release_ship.sh`
+  directly, create a tag by hand, or reconstruct a retired hosted launcher.
+
+## Prove publication
+
+Resume the durable watcher from the same `harn-bump-fleet` checkout:
 
 ```bash
-./scripts/release_ship.sh --finalize
-./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...
+scripts/watch_harn_release.sh --tag vX.Y.Z --repo /path/to/harn --yes-live-release
 ```
 
-Manual workflow_dispatch entry points for recovery:
+Completion requires the release PR to land, the signed tag and published
+version to agree, the complete required asset manifest, and transient-ref
+cleanup. The published files must be the certified files. Cache warming is
+explicit; a `not_requested` receipt proves no warm was requested.
 
-```bash
-gh workflow run publish-release.yml --ref main
-gh workflow run bump-release.yml --ref main          # reconstruct a missed bump PR
-```
+Downstream updates use the generated fleet bump orchestration and its
+receipts. Their success is a separate claim from publication.
 
-## Before opening the PR
-
-Sanity-check the local developer surface so any release-note bump that
-mentions setup still works:
-
-- `README.md`
-- `CONTRIBUTING.md`
-- `docs/src/portal.md`
-- `scripts/dev_setup.sh`
-- `Makefile`
-- `.githooks/`
-
-## Commit pattern
-
-A real release lands as **one** commit on `main` after squash:
-
-1. `Release vX.Y.Z` — code + docs + `CHANGELOG.md` + Cargo.toml /
-   Cargo.lock + per-crate manifest bumps + regenerated mirrors.
-   Authored by you via `release_ship.sh --prepare --bump <type>`.
-   Then **rebased onto latest `origin/main` before push**, because
-   `--prepare` takes 1–15 min and main may have moved meanwhile.
-   Landed through PR / merge queue with `gh pr merge --auto`
-   enabled, so it lands as soon as CI is green.
-
-That's it. The bot takes over once it lands.
-
-After publication, the same release workflow opens an auto-merge PR that
-advances the workspace to the next patch's `-dev` identity. Mid-cycle builds
-therefore never claim to be the last stable release. A release strips the
-exact `-dev` suffix and fails closed when main is not in that state.
-
-## Cross-repo consumers don't wait on releases
-
-An IDE host's `scripts/fetch-harn.sh --local` builds Harn from
-`~/projects/harn` and installs the binaries directly. Use that during
-cross-repo iteration instead of waiting for crates.io. Release batching
-is a published-version concern, not a developer-loop concern.
-
-## Workflows
-
-- `.github/workflows/publish-release.yml` (display name: "Publish
-  release") — publishes crates only after the signed tag is proven to
-  select the matching Release squash commit on `main`.
-- `.github/workflows/build-release-binaries.yml` (display name:
-  "Build release binaries") — on the push that changes the workspace
-  version to a stable `X.Y.Z`, builds and checks the release candidate at
-  that commit and writes `candidate-manifest-<sha>`; other main pushes only
-  warm caches.
-- `.github/workflows/bump-release.yml`, display name "Open version bump
-  PR (recovery)". It is `workflow_dispatch` only. Use it to reconstruct
-  a bump PR if a "Prepare vX.Y.Z release"-style commit accidentally
-  lands on main without the consolidated bump.
-
-## Hard rules
-
-- **Never push to a PR already in the merge queue.** GitHub silently
-  snapshots the PR at enqueue time and ignores subsequent pushes.
-  The pre-push hook detects this and aborts.
-- **Always rebase the release PR onto latest `origin/main` before
-  the final push.** `release_ship.sh --prepare` takes long enough
-  that main usually moves; not rebasing means the merge queue sees
-  a stale base and reorders the bump behind unrelated work.
-- **Never amend the release commit after CI starts.** Open a new
-  bump PR via the recovery workflow instead.
-
-## Required repo state
-
-- Secrets: `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`,
-  `CARGO_REGISTRY_TOKEN`.
-- App permissions on the repo: `Contents: write`, `Pull requests:
-  write`, `Actions: write`, `Metadata: read`.
-
-## Verify
-
-- The release bump passes the repository check seam: `make check`.
-- Conformance still passes: `make conformance`.
-- Catalog artifacts are in sync: `harn provider catalog generate --check`.
-- The CHANGELOG entry is non-empty and cites the issue / PR numbers
-  the release contains.
-- `Cargo.toml` workspace `version` matches the PR title's `vX.Y.Z`.
+For cross-repository development, use the consumer's owning source-pin and
+repin procedure. Release batching does not require waiting to test an
+unreleased Harn commit.
