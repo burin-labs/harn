@@ -1145,6 +1145,11 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
             VmValue::String(arcstr::ArcStr::from("text".to_string())),
         ),
         (crate::value::intern_key("tools"), one_tool_list()),
+        // The agent loop's call, which renders the text contract.
+        (
+            crate::value::intern_key("_tool_contract_rendered"),
+            VmValue::Bool(true),
+        ),
     ]);
     let opts = extract_llm_options(&[
         VmValue::String(arcstr::ArcStr::from("hello".to_string())),

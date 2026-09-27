@@ -56,6 +56,12 @@ tool_mode_parity = "text_only"
             VmValue::String(arcstr::ArcStr::from(override_reason)),
         ),
         (crate::value::intern_key("tools"), one_tool_list()),
+        // A blank reason steers to the text channel, which only the agent
+        // loop may drive; model that caller so the steering itself is tested.
+        (
+            crate::value::intern_key("_tool_contract_rendered"),
+            VmValue::Bool(true),
+        ),
     ]);
     let result = extract_llm_options(&[
         VmValue::String(arcstr::ArcStr::from("hello")),
