@@ -9275,10 +9275,10 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "parity_source": "derived",
         "tool_search": []
       },
@@ -33357,6 +33357,7 @@
       "capabilities": [
         "batch",
         "extended_thinking",
+        "native_tools",
         "prefers_markdown_scaffolding",
         "reasoning_effort",
         "streaming",

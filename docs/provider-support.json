@@ -1080,7 +1080,7 @@
         "provider": "fireworks",
         "model": "accounts/fireworks/models/gpt-oss-120b",
         "display_name": "GPT-OSS 120B (Fireworks)",
-        "tool_format": "text",
+        "tool_format": "native",
         "harn_options": [
           "provider = \"fireworks\"",
           "model = \"accounts/fireworks/models/gpt-oss-120b\"",
@@ -1089,10 +1089,10 @@
         ]
       },
       "capabilities": {
-        "native_tools": false,
+        "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "text",
-        "tool_mode_parity": "text_only",
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
         "structured_output_transport": "none",
         "structured_output_mode": "native_json",
         "streaming": true,
