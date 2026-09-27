@@ -107,6 +107,13 @@
   {
     "scope": "native-runner-option-helpers",
     "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+    "expression": "\"_tool_contract_rendered\"",
+    "owner": "opt_bool",
+    "evidence": "Internal rendering receipt from the agent loop: its system prompt carries the json/text tool-call contract, so text-channel tools are not a silent drop."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
     "expression": "\"_done_sentinel_form\"",
     "owner": "opt_str",
     "evidence": "The completion projection supplies the resolved marker form; the public completion settings own that decision."
