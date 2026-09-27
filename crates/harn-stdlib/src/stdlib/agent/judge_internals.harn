@@ -305,6 +305,29 @@ pub fn __judge_resolve_model(
 }
 
 /**
+ * Why `model` cannot be a judge, or nil when it can.
+ *
+ * Every judge asks for a structured verdict. A model the catalog lists without
+ * the `text_generation` operation (a label-only decision model) cannot produce
+ * one. A model the catalog does not list is allowed: the catalog is the
+ * authority only for the rows it has.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_schema_unsupported_message(harness.llm, "openrouter/typesafe/jev-latest")
+ */
+pub fn __judge_schema_unsupported_message(llm: HarnessLlm, model: string) -> string? {
+  const operations = llm.model_info(model)?.catalog?.operations
+  if type_of(operations) != "list" || operations.contains("text_generation") {
+    return nil
+  }
+  return "judge model `" + model + "` serves only "
+    + join(operations.map({ op -> to_string(op) }), ", ")
+    + "; a judge needs a text-generation model that can return its verdict schema"
+}
+
+/**
  * What a caller is told when no judge model is configured.
  *
  * Names the setting and the reason, so the reader does not have to guess which
@@ -374,6 +397,29 @@ pub fn __judge_run_checkpoint(
         ),
         receipt: refusal,
       },
+      duration_ms: 0,
+      admission: refusal,
+    }
+  }
+  // A model the catalog declares without text generation (a label-only
+  // decision model) can never return the judge's schema. Refuse before any
+  // receipt or call, with its own status, instead of failing the same way on
+  // every invocation.
+  const unsupported = __judge_schema_unsupported_message(harness.llm, resolved_judge.model)
+  if unsupported != nil {
+    const refusal = {
+      schema: "harn.completion_judge_admission.v1",
+      checkpoint_name: checkpoint_name,
+      admitted: false,
+      judge_model: resolved_judge.model,
+      judge_model_source: resolved_judge.source,
+      outcome: "schema_unsupported",
+    }
+    if checkpoint_name == "agent.completion_judge" {
+      agent_emit_event(harness.agent, payload.session_id, "typed_checkpoint", refusal)
+    }
+    return {
+      checkpoint: {ok: false, status: "schema_unsupported", error: unsupported, receipt: refusal},
       duration_ms: 0,
       admission: refusal,
     }
@@ -1383,6 +1429,7 @@ pub fn __judge_checkpoint_route_unavailable(checkpoint: dict) -> bool {
 pub fn __judge_checkpoint_unavailable(checkpoint: dict) -> bool {
   return checkpoint?.status == "admission_refused"
     || checkpoint?.status == "model_unconfigured"
+    || checkpoint?.status == "schema_unsupported"
     || __judge_checkpoint_route_unavailable(checkpoint)
     || checkpoint?.status == "timeout"
     || checkpoint?.error_category == "timeout"

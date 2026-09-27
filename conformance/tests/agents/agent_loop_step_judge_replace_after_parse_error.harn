@@ -1,0 +1,118 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Two defects that met in one live session (harn v0.10.146, Burin dogfood).
+ *
+ * Case 1: a step-judge veto in `replace` mode on a turn that parse repair has
+ * already answered must not crash the loop. Repair appends a `tool_result`
+ * paired to the turn's call before the judge runs, so the turn is no longer
+ * last, and removing it used to throw
+ * `pop_last_if_assistant: trailing message role is 'tool_result'`. The veto
+ * now applies as `retain`: the critique still reaches the agent and the run
+ * finishes.
+ *
+ * Case 2: a purpose-label block next to a valid native call is not a broken
+ * tool call. Its prose body named functions (`mul()`), which the tool-shape
+ * detector read as call syntax, so the agent was told a call failed that had
+ * run. No `unparsed_tool_syntax` repair may be produced.
+ */
+fn lookup_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Read a file.",
+    {
+      handler: { args -> return "contents of " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn run(harness: Harness, label: string, first_text: string, judge_first: string) -> any {
+  return with_llm_script(
+    harness.llm,
+    [
+      {
+        text: first_text,
+        tool_calls: [{id: "call_first", name: "lookup", arguments: {path: "app.txt"}}],
+      },
+      llm_text(judge_first),
+      {tool_calls: [{id: "call_second", name: "lookup", arguments: {path: "app.txt"}}]},
+      llm_text("{\"verdict\":\"pass\",\"reasoning\":\"ok\",\"critique\":\"\",\"confidence\":0.9}"),
+      llm_text("Read it. ##DONE##"),
+      llm_text("{\"verdict\":\"pass\",\"reasoning\":\"ok\",\"critique\":\"\",\"confidence\":0.9}"),
+    ],
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      return try {
+        agent_capture_events(
+          harness.agent,
+          session,
+          fn() { return agent_loop(
+            harness,
+            "Read app.txt.",
+            nil,
+            {
+              provider: "mock",
+              tools: lookup_tools(),
+              tool_format: "native",
+              purpose_labels: true,
+              loop_until_done: true,
+              done_sentinel: "##DONE##",
+              final_wrapup: false,
+              max_iterations: 6,
+              session_id: session,
+              step_judge: {provider: "mock", on_veto: "replace"},
+            },
+          ) },
+        )
+      }
+    },
+  )
+}
+
+fn repair_count(captured: dict) -> int {
+  return len(
+    captured.events.filter({ event -> json_stringify(event).contains("unparsed_tool_syntax") }),
+  )
+}
+
+pipeline default(harness: Harness) {
+  const revise =
+    "{\"verdict\":\"revise\",\"reasoning\":\"x\",\"critique\":\"Read the file once.\",\"confidence\":0.9}"
+  // Case 1: genuine tool-shaped text beside a valid call, then a veto.
+  const vetoed = run(
+    harness,
+    "replace-after-repair",
+    "Reading it. <fetch>lookup({ path: \"b.txt\" })</fetch>",
+    revise,
+  )
+  if is_err(vetoed) {
+    harness.stdio.println("crashed: " + to_string(unwrap_err(vetoed)).substring(0, 120))
+  } else {
+    const captured = unwrap(vetoed)
+    const decisions = captured.events.filter(
+      { event -> event.type == "step_judge_decision" && (event?.vetoed ?? false) },
+    )
+    harness.stdio.println(captured.result.status)
+    harness.stdio.println(repair_count(captured) > 0)
+    harness.stdio.println(len(decisions))
+    harness.stdio.println(decisions[0].on_veto)
+  }
+  // Case 2: a purpose label beside a valid call is not a parse failure.
+  const labelled = run(
+    harness,
+    "purpose-beside-call",
+    "<purpose>\nAdding mul() and div() to calc.py\n</purpose>\nNow I will read it:",
+    "{\"verdict\":\"pass\",\"reasoning\":\"ok\",\"critique\":\"\",\"confidence\":0.9}",
+  )
+  const captured = unwrap(labelled)
+  harness.stdio.println(captured.result.status)
+  harness.stdio.println(repair_count(captured))
+}
