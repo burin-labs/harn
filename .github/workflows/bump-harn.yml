@@ -266,6 +266,7 @@ jobs:
       - name: Run bump orchestration
         working-directory: package
         env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
