@@ -230,6 +230,12 @@ pub struct ProviderTelemetry {
     /// Harn does not hard-code one router's schema.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_metadata: Option<serde_json::Value>,
+    /// Whether a recorded fixture entry or the configured provider answered
+    /// this call, present only while a `liveAfterCalls` mock fixture is
+    /// installed. The replay/live handoff is the first call marked `live`.
+    /// Boxed for the same stack-frame reason as `data_controls`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_mock_prefix: Option<Box<crate::llm::mock::LlmMockPrefixMarker>>,
 }
 
 impl ProviderTelemetry {
@@ -293,6 +299,7 @@ impl ProviderTelemetry {
             request_id,
             provider_cost_usd,
             provider_metadata,
+            llm_mock_prefix,
         } = self;
         source.is_empty()
             && billing.is_none()
@@ -323,6 +330,7 @@ impl ProviderTelemetry {
             && request_id.is_none()
             && provider_cost_usd.is_none()
             && provider_metadata.is_none()
+            && llm_mock_prefix.is_none()
     }
 
     /// Convert nanoseconds (Ollama's reporting unit) to milliseconds with
@@ -654,6 +662,12 @@ impl ProviderTelemetry {
             dict.insert(
                 crate::value::intern_key("provider_metadata"),
                 crate::stdlib::json_to_vm_value(provider_metadata),
+            );
+        }
+        if let Some(ref marker) = self.llm_mock_prefix {
+            dict.put(
+                "llm_mock_prefix",
+                crate::stdlib::json_to_vm_value(&serde_json::json!(marker)),
             );
         }
         Some(VmValue::dict(dict))
@@ -1080,6 +1094,11 @@ mod tests {
             request_id: Some("req-1".to_string()),
             provider_cost_usd: Some(0.5),
             provider_metadata: Some(serde_json::json!({"tier": "standard"})),
+            llm_mock_prefix: Some(Box::new(crate::llm::mock::LlmMockPrefixMarker {
+                served_by: crate::llm::mock::LlmMockPrefixServedBy::Live,
+                call: 3,
+                live_after_calls: 2,
+            })),
         };
 
         let encoded = serde_json::to_value(&telemetry).expect("telemetry serializes");

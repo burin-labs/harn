@@ -288,6 +288,12 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
+path = "src/llm/hash_replay.rs"
+statics = ["LLM_REPLAY_MODE", "LLM_FIXTURE_DIR"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/llm/introspection.rs"
 statics = ["LAST_RESOLVED_LLM_CALL"]
 category = "logical_task"
@@ -295,7 +301,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/mock.rs"
-statics = ["LLM_REPLAY_MODE", "LLM_FIXTURE_DIR", "TOOL_RECORDINGS", "LLM_MOCK_CONTEXT", "LLM_MOCK_STREAM_CHUNKS"]
+statics = ["TOOL_RECORDINGS", "LLM_MOCK_CONTEXT", "LLM_MOCK_STREAM_CHUNKS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

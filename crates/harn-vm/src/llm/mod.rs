@@ -79,6 +79,7 @@ pub mod decision;
 pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod first_token;
+mod hash_replay;
 pub(crate) mod helpers;
 pub mod introspection;
 pub mod jsonl;

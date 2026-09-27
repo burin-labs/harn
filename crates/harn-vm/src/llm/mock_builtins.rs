@@ -80,6 +80,12 @@ fn llm_mock_load_jsonl_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
         "strict_scopes".to_string(),
         VmValue::Bool(receipt.strict_scopes),
     );
+    if let Some(live_after_calls) = receipt.live_after_calls {
+        result.insert(
+            "live_after_calls".to_string(),
+            VmValue::Int(i64::try_from(live_after_calls).unwrap_or(i64::MAX)),
+        );
+    }
     result.insert("count".to_string(), VmValue::Int(receipt.count as i64));
     result.insert(
         "scopes".to_string(),
