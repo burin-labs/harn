@@ -134,9 +134,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   committed files; binary checks require a fresh Harn executable.
 - Generated/local paths include `docs/dist/`, `.harn-runs/`, `.harn/`,
   `.harn/receipts/`, `.claude/`, `.burin/`, `target/`, and `node_modules/`.
-- The prompt-template engine is
-  `crates/harn-vm/src/stdlib/template.rs`. Host and script rendering both use
-  `render_template_result`; do not add another parser or evaluator.
+- The prompt-template engine is `crates/harn-vm/src/stdlib/template/mod.rs`.
+  Host and script rendering both use `render_template_result`; do not add
+  another parser or evaluator.
 - Preserve pre-v2 `{{name}}` missing-identifier passthrough. New constructs
   fail with parse errors. Vocabulary lives in
   `crates/harn-vm/src/stdlib/template/vocabulary.rs`; regenerate with

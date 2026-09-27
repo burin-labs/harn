@@ -85,7 +85,7 @@ surfaces exist and are tested:
 | Surface | Current home |
 |---|---|
 | Connector trait/base name, registry, and provider metadata | `crates/harn-vm/src/connectors/mod.rs`, `std/triggers::list_providers()` |
-| Raw webhook substrate and signed generic webhook receiver | `crates/harn-vm/src/connectors/webhook/`, `crates/harn-cli/src/commands/orchestrator/listener.rs` |
+| Raw webhook substrate and signed generic webhook receiver | `crates/harn-vm/src/connectors/webhook/`, `crates/harn-cli/src/commands/orchestrator/listener/` |
 | Cron scheduler primitive | `crates/harn-vm/src/connectors/cron/` |
 | Raw body, bytes, HMAC, encoding, JWT/JWKS, OAuth refresh, and constant-time helpers | `TriggerEvent.raw_body`, stdlib crypto/encoding builtins, `connectors::{hmac, shared}`, `std/connectors/shared` |
 | Durable inbox dedupe and dispatcher handoff | `crates/harn-vm/src/triggers/inbox.rs`, `triggers/dispatcher/` |
