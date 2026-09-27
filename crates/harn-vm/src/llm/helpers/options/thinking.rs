@@ -558,3 +558,49 @@ mod thinking_value_grammar_tests {
         );
     }
 }
+
+/// Check-time admission for literal reasoning options on a known route.
+///
+/// Runs the same resolution and capability gates a call would, over a dict
+/// holding only the literal `effort` / `thinking` values, and returns the
+/// refusal message a call would raise. `harn check` uses it so a known-bad
+/// literal (effort on a route without it) fails before any run.
+pub fn admit_reasoning_literals(
+    provider: &str,
+    model: &str,
+    effort: Option<&str>,
+    thinking: Option<bool>,
+) -> Result<(), String> {
+    let mut options = crate::value::DictMap::new();
+    if let Some(effort) = effort {
+        options.insert(
+            crate::value::intern_key("effort"),
+            VmValue::String(arcstr::ArcStr::from(effort)),
+        );
+    }
+    if let Some(thinking) = thinking {
+        options.insert(
+            crate::value::intern_key("thinking"),
+            VmValue::Bool(thinking),
+        );
+    }
+    let capability_model = crate::llm_config::capability_model_id(provider, model);
+    let caps = crate::llm::capabilities::lookup(provider, &capability_model);
+    let model_defaults = crate::llm_config::model_params_for_route(provider, &capability_model);
+    resolve_thinking_config_with_policy(
+        Some(&options),
+        &model_defaults,
+        provider,
+        &capability_model,
+        &caps,
+        None,
+    )
+    .map(|_| ())
+    .map_err(|error| match error {
+        VmError::Thrown(VmValue::Dict(fields)) => fields
+            .get("message")
+            .map(VmValue::display)
+            .unwrap_or_else(|| "reasoning option refused".to_string()),
+        other => other.to_string(),
+    })
+}

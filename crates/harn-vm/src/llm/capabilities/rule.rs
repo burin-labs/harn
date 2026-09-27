@@ -928,17 +928,26 @@ pub(super) struct RuleResolution {
     pub(super) merged: Option<ProviderRule>,
     /// `model_match` provenance of every absorbed rule, in precedence order.
     pub(super) matched_patterns: Vec<String>,
+    /// Each absorbed rule as an author would find it: its table header,
+    /// `model_match`, and whether it came from a user overlay or Harn's
+    /// built-in capability sources. Named in refusals and steer notes so a
+    /// quirk is attributed to the row that caused it.
+    pub(super) matched_rules: Vec<String>,
 }
 
 impl RuleResolution {
     /// Merge `rule` into the accumulator. Returns `true` when the walk must
     /// terminate: the rule does not opt into `extends` fall-through, which is
     /// exactly the pre-`extends` first-match-wins behavior.
-    fn absorb(&mut self, layer_provider: &str, rule: &ProviderRule) -> bool {
+    fn absorb(&mut self, layer_provider: &str, rule: &ProviderRule, origin: &str) -> bool {
         if self.provider.is_none() {
             self.provider = Some(layer_provider.to_string());
         }
         self.matched_patterns.push(rule.match_label());
+        self.matched_rules.push(format!(
+            "[[provider.{layer_provider}]] model_match = \"{}\" ({origin})",
+            rule.match_label()
+        ));
         match &mut self.merged {
             None => self.merged = Some(rule.clone()),
             Some(merged) => merged.fill_missing_from(rule),
@@ -966,10 +975,17 @@ pub(super) fn absorb_layer_matches(
     model: &str,
     resolution: &mut RuleResolution,
 ) -> bool {
-    for file in user.into_iter().chain(std::iter::once(builtin)) {
+    let files = user
+        .map(|file| (file, "user capability overlay"))
+        .into_iter()
+        .chain(std::iter::once((
+            builtin,
+            "Harn built-in, crates/harn-vm/src/llm/capability_sources",
+        )));
+    for (file, origin) in files {
         if let Some(rules) = file.provider.get(layer_provider) {
             for rule in rules {
-                if rule_matches(rule, model) && resolution.absorb(layer_provider, rule) {
+                if rule_matches(rule, model) && resolution.absorb(layer_provider, rule, origin) {
                     return true;
                 }
             }

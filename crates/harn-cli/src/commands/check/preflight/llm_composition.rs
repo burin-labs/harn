@@ -156,6 +156,25 @@ fn check_literal_composition(
         });
     }
 
+    check_literal_reasoning(
+        call_name,
+        options,
+        &provider,
+        &resolved_model,
+        file_path,
+        source,
+        diagnostics,
+    );
+    check_direct_text_tools(
+        call_name,
+        options,
+        &provider,
+        &resolved_model,
+        file_path,
+        source,
+        diagnostics,
+    );
+
     // Raw LLM calls only care about a tool format when they offer tools.
     // Agent calls and option constructors feed the tool-bearing agent loop.
     if call_name.starts_with("llm_")
@@ -213,6 +232,108 @@ fn check_literal_composition(
              tool_format_override_reason for a deliberate provider probe"
                 .to_string()
         }),
+        tags: None,
+    });
+}
+
+/// Literal `effort` / `thinking` values go through the runtime's own reasoning
+/// resolution for the literal route, so a known-bad pair (effort on a route
+/// without it) is a check-time error with the runtime's message.
+#[allow(clippy::too_many_arguments)]
+fn check_literal_reasoning(
+    call_name: &str,
+    options: &SNode,
+    provider: &str,
+    model: &str,
+    file_path: &Path,
+    source: &str,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    let effort_node = dict_literal_field(options, "effort");
+    let thinking_node = dict_literal_field(options, "thinking");
+    let effort = effort_node.and_then(literal_string);
+    let thinking = thinking_node.and_then(|node| match node.node {
+        Node::BoolLiteral(value) => Some(value),
+        _ => None,
+    });
+    if effort.is_none() && thinking.is_none() {
+        return;
+    }
+    let Err(reason) =
+        harn_vm::llm::admit_reasoning_literals(provider, model, effort.as_deref(), thinking)
+    else {
+        return;
+    };
+    let span = effort_node
+        .filter(|_| effort.is_some())
+        .or(thinking_node)
+        .map_or(options.span, |node| node.span);
+    diagnostics.push(PreflightDiagnostic {
+        code: Code::LlmCapabilityCompositionInvalid,
+        path: file_path.display().to_string(),
+        source: source.to_string(),
+        span,
+        message: format!("preflight: `{call_name}` requests a known-unsupported reasoning option: {reason}"),
+        help: Some(
+            "use the reasoning control the route declares (see `harn provider catalog matrix`), or choose a route that supports it"
+                .to_string(),
+        ),
+        tags: None,
+    });
+}
+
+/// A direct model call (not `agent_loop`) that offers literal tools on a
+/// text-channel format sends no tools at all. Reports the runtime's refusal.
+#[allow(clippy::too_many_arguments)]
+fn check_direct_text_tools(
+    call_name: &str,
+    options: &SNode,
+    provider: &str,
+    model: &str,
+    file_path: &Path,
+    source: &str,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    let direct_call = call_name.starts_with("llm_") || call_name.starts_with("harness.llm.");
+    let Some(tools) = dict_literal_field(options, "tools") else {
+        return;
+    };
+    if !direct_call
+        || matches!(&tools.node, Node::NilLiteral)
+        || matches!(&tools.node, Node::ListLiteral(items) if items.is_empty())
+        || dict_literal_field(options, "tool_search").is_some()
+    {
+        return;
+    }
+    let requested = match dict_literal_field(options, "tool_format") {
+        Some(node) => match literal_string(node) {
+            Some(format) if format != "auto" => format,
+            _ => return,
+        },
+        None => harn_vm::llm_config::default_tool_format(model, provider),
+    };
+    let effective =
+        harn_vm::llm::capabilities::validate_tool_format(provider, model, &requested).effective;
+    // A steered format is already reported by the tool-format check, which
+    // names the requested channel and the row that forbids it.
+    if effective != requested {
+        return;
+    }
+    let Some(reason) =
+        harn_vm::llm::capabilities::direct_call_text_tools_refusal(provider, model, &effective)
+    else {
+        return;
+    };
+    diagnostics.push(PreflightDiagnostic {
+        code: Code::LlmCapabilityCompositionInvalid,
+        path: file_path.display().to_string(),
+        source: source.to_string(),
+        span: tools.span,
+        message: format!("preflight: `{call_name}` would drop its tools: {reason}"),
+        help: Some(
+            "drive the tools through agent_loop, or use tool_format \"native\" on a route that supports it"
+                .to_string(),
+        ),
         tags: None,
     });
 }

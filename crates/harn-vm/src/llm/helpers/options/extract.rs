@@ -751,7 +751,6 @@ pub(crate) fn extract_llm_options(
         &options,
         &tool_format,
         native_tools.as_ref().is_some_and(|tools| !tools.is_empty()),
-        caps.native_tools,
         &capability_provider,
         &capability_model,
     )?;

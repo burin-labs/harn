@@ -171,6 +171,20 @@ pub(crate) fn effective_capability_route<'a>(
     }
 }
 
+/// The capability rule(s) that decided a route, as an author would find them:
+/// table header, `model_match`, and origin (a user overlay such as a
+/// `harn.toml` `[capabilities]` table, or Harn's built-in sources). `None`
+/// when no rule names the route. Refusals, steer notes and `harn check` cite
+/// this so a provider quirk is attributed to the row that caused it.
+pub fn capability_rule_provenance(provider: &str, model: &str) -> Option<String> {
+    let user = current_user_overrides();
+    let model = crate::llm_config::capability_model_id(provider, model);
+    let (resolution, _, _) =
+        super::route::resolve_route(user.as_ref(), builtin(), provider, &model);
+    (!resolution.matched_rules.is_empty()).then(|| resolution.matched_rules.join(", then "))
+}
+
+/// [`lookup`] through [`effective_capability_route`].
 /// [`lookup`] through [`effective_capability_route`].
 pub fn lookup_for_mockable_route(provider: &str, model: &str) -> Capabilities {
     let (provider, model) = effective_capability_route(provider, model);

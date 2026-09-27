@@ -12,7 +12,6 @@ pub(super) fn refuse_dropped_text_tools(
     options: &Option<crate::value::DictMap>,
     tool_format: &str,
     native_tools_on_wire: bool,
-    route_supports_native_tools: bool,
     provider: &str,
     model: &str,
 ) -> Result<(), VmError> {
@@ -24,21 +23,14 @@ pub(super) fn refuse_dropped_text_tools(
     {
         return Ok(());
     }
-    Err(crate::llm::call::invalid_request_error(
-        format!(
-            "`tools` with tool_format `{tool_format}` needs the tool-call contract that \
-             only `agent_loop` renders; a direct call would send no tools to `{model}` \
-             (provider `{provider}`). Drive the tools through `agent_loop`, or pass \
-             `tool_format: \"native\"`{native_hint}.",
-            native_hint = if route_supports_native_tools {
-                ""
-            } else {
-                " on a route that supports native tools"
-            },
-        ),
-        provider,
-        model,
-    ))
+    // One owner for the words: `harn check` reports the same refusal, naming
+    // the catalog rule that chose the text channel.
+    match crate::llm::capabilities::direct_call_text_tools_refusal(provider, model, tool_format) {
+        Some(message) => Err(crate::llm::call::invalid_request_error(
+            message, provider, model,
+        )),
+        None => Ok(()),
+    }
 }
 
 /// Whether a `tools` option carries at least one tool: a non-empty list, or a

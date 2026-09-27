@@ -19,6 +19,7 @@ pub(crate) use messages::{
     json_messages_to_vm, vm_add_role_message, vm_message_value, vm_messages_to_json,
 };
 pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
+pub use options::admit_reasoning_literals;
 pub(crate) use options::{
     apply_rendered_reminder_messages, assemble_system_prompt, compose_system_prompt,
     directive_envelope_message, directive_nonce_for_session, expects_structured_output,
