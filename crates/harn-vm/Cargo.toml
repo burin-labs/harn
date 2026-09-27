@@ -223,7 +223,7 @@ thiserror = "2"
 opentelemetry = { version = "0.33", optional = true }
 opentelemetry_sdk = { version = "0.33", optional = true, features = ["rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"] }
 opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-json", "reqwest-client", "reqwest-rustls"], optional = true }
-tracing-opentelemetry = { version = "0.33", optional = true }
+tracing-opentelemetry = { version = "0.34", optional = true }
 zeroize = "1"
 flate2 = { version = "1.1.9", optional = true }
 zstd = "0.14.0"
