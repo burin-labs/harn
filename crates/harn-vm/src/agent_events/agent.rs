@@ -433,21 +433,15 @@ pub enum AgentEvent {
         skipped: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-        /// True when the step judge could not review the turn: the turn
-        /// proceeded with `verdict: "unavailable"`, which is not an approval.
-        /// Mirrors `reason: "judge_unavailable"`.
+        /// The judge could not review the turn; it proceeded as `unavailable`, not a pass.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         judge_error: bool,
-        /// Why the judge was unavailable, from a closed set:
-        /// `schema_unsupported`, `model_unconfigured`, `admission_refused`,
-        /// `provider_error`. Present only when `judge_error` is true.
+        /// Closed-set cause when `judge_error`: schema_unsupported, model_unconfigured, ...
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unavailable_reason: Option<String>,
-        /// Running count of unavailable step-judge decisions in this loop,
-        /// including this one, so a host can show how many turns went
-        /// unreviewed without keeping its own tally.
-        #[serde(default, skip_serializing_if = "is_zero_u64")]
-        unavailable_count: u64,
+        /// Unavailable decisions so far in this loop, including this one.
+        #[serde(default, skip_serializing_if = "is_zero_usize")]
+        unavailable_count: usize,
         on_veto: String,
         input_tokens: u64,
         output_tokens: u64,
@@ -1388,10 +1382,6 @@ pub enum AgentEvent {
 }
 
 fn is_zero_usize(value: &usize) -> bool {
-    *value == 0
-}
-
-fn is_zero_u64(value: &u64) -> bool {
     *value == 0
 }
 
