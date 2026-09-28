@@ -6637,6 +6637,7 @@ migration to another machine.
 | Function | Description |
 |---|---|
 | `checkpoint(key, value)` | Save `value` at `key`; writes to disk immediately |
+| `checkpoint_insert(key, value)` | Save only if absent; return `{inserted, value}` with the retained value |
 | `checkpoint_get(key)` | Retrieve saved value, or `nil` if absent |
 | `checkpoint_exists(key)` | Return `true` if `key` is present (even if value is `nil`) |
 | `checkpoint_delete(key)` | Remove a single key; no-op if absent |
@@ -6645,6 +6646,12 @@ migration to another machine.
 
 `checkpoint_exists` is preferable to `checkpoint_get(key) == nil` when `nil`
 is a valid checkpoint value.
+
+Mutations reload durable state under a bounded exclusive file lock, so independent
+processes do not overwrite unrelated keys. `checkpoint_insert` combines the
+absence check and write under that lock, including when the retained value is
+`nil`. Use it to establish one shared campaign deadline or other immutable
+initial value. A read followed by `checkpoint` is not an atomic insertion.
 
 ### std/checkpoint module
 

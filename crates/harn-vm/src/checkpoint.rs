@@ -100,6 +100,20 @@ impl CheckpointState {
         self.persist()
     }
 
+    fn insert(&mut self, key: String, value: serde_json::Value) -> Result<VmValue, String> {
+        let _lock = self.lock()?;
+        self.load()?;
+        let inserted = !self.data.contains_key(&key);
+        if inserted {
+            self.data.insert(key.clone(), value);
+            self.persist()?;
+        }
+        Ok(VmValue::dict(BTreeMap::from([
+            ("inserted".to_owned(), VmValue::Bool(inserted)),
+            ("value".to_owned(), json_to_vm(&self.data[&key])),
+        ])))
+    }
+
     fn clear(&mut self) -> Result<(), String> {
         let _lock = self.lock()?;
         match std::fs::remove_file(&self.path) {
@@ -236,6 +250,7 @@ fn register_checkpoint_state(vm: &mut Vm, state: CheckpointState) {
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &CHECKPOINT_IMPL_DEF,
+    &CHECKPOINT_INSERT_IMPL_DEF,
     &CHECKPOINT_GET_IMPL_DEF,
     &CHECKPOINT_CLEAR_IMPL_DEF,
     &CHECKPOINT_LIST_IMPL_DEF,
@@ -258,6 +273,21 @@ fn checkpoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         state.set(key, json_val).map_err(VmError::Runtime)
     })?;
     Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    exposure = "harness.runtime.checkpoint_insert",
+    effects = ["state.mutate@arg0"],
+    sig = "checkpoint_insert(key: string, value: unknown) -> {inserted: bool, value: unknown}",
+    category = "checkpoint",
+    doc = "Atomically save a value only when its key is absent; return the retained value and whether this call inserted it."
+)]
+fn checkpoint_insert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let key = args.first().map(|a| a.display()).unwrap_or_default();
+    let value = vm_to_json(args.get(1).unwrap_or(&VmValue::Nil))?;
+    with_state("checkpoint_insert", |state| {
+        state.insert(key, value).map_err(VmError::Runtime)
+    })
 }
 
 #[harn_builtin(

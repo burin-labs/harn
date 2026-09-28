@@ -106,6 +106,71 @@ async fn damaged_store_refuses_reads_and_mutations_until_explicit_recovery() {
     }
 }
 
+#[test]
+fn concurrent_checkpoint_insert_retains_one_candidate_and_reports_one_winner() {
+    let root = tempfile::tempdir().unwrap();
+    let ready = std::sync::Arc::new(std::sync::Barrier::new(8));
+    let receipts = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..8)
+            .map(|candidate| {
+                let ready = ready.clone();
+                let root = root.path();
+                scope.spawn(move || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .unwrap();
+                    let mut vm = vm(root);
+                    ready.wait();
+                    let receipt = runtime
+                        .block_on(vm.call_named_builtin(
+                            "checkpoint_insert",
+                            vec![VmValue::string("deadline"), VmValue::Int(candidate)],
+                        ))
+                        .unwrap();
+                    vm_to_json(&receipt).unwrap()
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(receipts.len(), 8);
+    assert_eq!(receipts.iter().filter(|r| r["inserted"] == true).count(), 1);
+    let retained = &receipts[0]["value"];
+    assert!(retained
+        .as_i64()
+        .is_some_and(|value| (0..8).contains(&value)));
+    assert!(receipts.iter().all(|receipt| &receipt["value"] == retained));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn checkpoint_insert_preserves_nil_and_refuses_damaged_storage() {
+    let root = tempfile::tempdir().unwrap();
+    let mut vm = vm(root.path());
+    for (candidate, inserted) in [(VmValue::Nil, true), (VmValue::Int(7), false)] {
+        let receipt = vm
+            .call_named_builtin("checkpoint_insert", vec![VmValue::string("nil"), candidate])
+            .await
+            .unwrap();
+        assert_eq!(
+            vm_to_json(&receipt).unwrap(),
+            serde_json::json!({"inserted": inserted, "value": null})
+        );
+    }
+    let path = root.path().join("checkpoints/recovery.json");
+    std::fs::write(&path, "{").unwrap();
+    assert!(vm
+        .call_named_builtin(
+            "checkpoint_insert",
+            vec![VmValue::string("deadline"), VmValue::Int(7)]
+        )
+        .await
+        .is_err());
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "{");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn absent_store_is_empty_but_unreadable_store_is_not() {
     let root = tempfile::tempdir().unwrap();

@@ -186,6 +186,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("runtime", "checkpoint_delete"),
     ("runtime", "checkpoint_exists"),
     ("runtime", "checkpoint_get"),
+    ("runtime", "checkpoint_insert"),
     ("runtime", "checkpoint_list"),
     ("runtime", "circuit_breaker"),
     ("runtime", "circuit_check"),

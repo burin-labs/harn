@@ -1,4 +1,3 @@
-import { checkpoint_stage } from "std/checkpoint"
 import { get_typed_value } from "std/schema"
 
 pub type ProviderProbeCampaignWindow = {
@@ -28,31 +27,27 @@ pub fn provider_probe_campaign_window(
   guard trim(campaign) != "" && max_duration_secs > 0 else {
     throw "campaign identity and positive duration are required"
   }
-  const resumed = runtime.checkpoint_exists(provider_probe_campaign_window_key(campaign))
-  const stored = checkpoint_stage(
-    runtime,
+  const started = clock.now_ms()
+  const stored = runtime.checkpoint_insert(
     provider_probe_campaign_window_key(campaign),
-    { ->
-      const started = clock.now_ms()
-      return {
-        schema_version: "harn.provider_probe_campaign_window.v1",
-        started_at_ms: started,
-        deadline_at_ms: started + max_duration_secs * 1000,
-        max_duration_secs: max_duration_secs,
-      }
+    {
+      schema_version: "harn.provider_probe_campaign_window.v1",
+      started_at_ms: started,
+      deadline_at_ms: started + max_duration_secs * 1000,
+      max_duration_secs: max_duration_secs,
     },
   )
-  const window = get_typed_value(stored, schema_of(ProviderProbeCampaignWindow))
+  const window = get_typed_value(stored.value, schema_of(ProviderProbeCampaignWindow))
   guard window.max_duration_secs == max_duration_secs
     && window.deadline_at_ms == window.started_at_ms + max_duration_secs * 1000
     && clock.now_ms() >= window.started_at_ms else {
     throw "campaign deadline policy differs or its retained clock is invalid"
   }
   return {
-    decision: if resumed {
-      "resumed"
-    } else {
+    decision: if stored.inserted {
       "created"
+    } else {
+      "resumed"
     },
     window: window,
     remaining_ms: max(0, window.deadline_at_ms - clock.now_ms()),
