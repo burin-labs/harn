@@ -616,12 +616,12 @@ mod tests {
     fn lifetime_allowance_keeps_interrupted_reservations_across_calendar_rollover() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("spend.sqlite");
-        let clock = Arc::new(harn_clock::PausedClock::new(
+        let clock = harn_clock::PausedClock::new(
             Date::from_calendar_date(2028, time::Month::December, 31)
                 .unwrap()
                 .midnight()
                 .assume_utc(),
-        ));
+        );
         let policy = MachineSpendPolicy {
             daily_limit_microusd: None,
             monthly_limit_microusd: None,
