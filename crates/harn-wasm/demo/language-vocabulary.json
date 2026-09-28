@@ -498,6 +498,7 @@
     "llm_model_info",
     "llm_model_ladder",
     "llm_model_tier",
+    "llm_option_probe_call",
     "llm_pick_model",
     "llm_pricing",
     "llm_provider_catalog",
