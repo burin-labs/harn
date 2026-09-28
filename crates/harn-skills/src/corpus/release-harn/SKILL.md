@@ -2,7 +2,7 @@
 name: release-harn
 short: Cut and verify an immutable Harn release through the owning harness.
 description: Use harn-bump-fleet to prepare, certify, publish, and recover one exact Harn release candidate.
-when_to_use: Use when cutting a stable, development, minor, or major Harn release from main, or recovering a partial release.
+when_to_use: Use when cutting a Harn patch release from main, or recovering a partial release.
 ---
 
 # Release Harn
