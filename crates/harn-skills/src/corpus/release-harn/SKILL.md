@@ -26,9 +26,9 @@ scripts/with_env.sh harn run --no-sandbox release_harn.harn -- \
 - Select an exact main commit and require each release-critical PR with
   `--expect-pr`. The harness isolates the source checkout and preserves that
   pin throughout preparation.
-- The harness owns version selection. A declared `X.Y.Z-dev` names the stable
-  patch target; a stable workspace version uses the next version after the
-  published floor. Do not implement a second version calculation.
+- Select a source whose workspace version is exactly `X.Y.Z-dev`; preparation
+  refuses a stable workspace version. The harness owns version selection and
+  publication checks. Do not implement a second version calculation.
 - The harness prepares the `Release vX.Y.Z` PR and durable watch receipt.
   Follow the current merge authority before landing it.
 - Never push to a PR after auto-merge is armed or while it is queued. Do not
