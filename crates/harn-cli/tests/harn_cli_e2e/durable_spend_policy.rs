@@ -249,8 +249,8 @@ async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
         String::from_utf8_lossy(&denied.stderr)
     );
     let report: serde_json::Value = serde_json::from_slice(&denied.stdout).unwrap();
-    assert_eq!(report["admission"]["denied_attempts"], 1);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(report["admission"]["denied_attempts"], 1, "{report}");
     assert_eq!(
         quota.receipt().unwrap().lifetime_reserved_microusd,
         charged.lifetime_reserved_microusd

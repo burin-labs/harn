@@ -425,7 +425,11 @@ fn reserve_money(
         .machine
         .as_ref()
         .map(|machine| machine.reserve(bound))
-        .transpose()?;
+        .transpose()
+        .map_err(|error| {
+            ledger.denied += 1;
+            error
+        })?;
     ledger.in_flight += bound;
     ledger.attempts_started = ledger.attempts_started.saturating_add(1);
     Ok(MonetaryReservation {

@@ -698,6 +698,7 @@ fn native_decisions_draw_on_and_are_refused_by_the_machine_quota() {
                     // The execution ceiling allows 0.6, but the durable
                     // machine allowance of 0.5 refuses it before transport.
                     assert!(reserve_decision(0.6, Some(1.0), Some(1.0)).is_err());
+                    assert_eq!(typed_receipt().unwrap().denied_attempts, 1);
                     let hold = reserve_decision(0.4, Some(1.0), Some(1.0)).unwrap();
                     assert_eq!(machine.receipt().unwrap().reserved_microusd, 400_000);
                     // Complete usage releases only the proven-unused amount.
