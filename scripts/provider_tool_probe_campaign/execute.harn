@@ -576,6 +576,33 @@ pub fn provider_tool_probe_campaign_scorecard_inputs(
     + {input_sha256: "sha256:" + sha256(json_stringify(identity))}
 }
 
+/** Bind reusable cells to the output, producer sources, runtime, and credentials. */
+pub fn provider_tool_probe_campaign_resume_identity(
+  fs: HarnessFs,
+  output_dir: string,
+  runtime: ProviderToolProbeRuntimeReceipt,
+  catalog: ProviderToolProbeCatalogReceipt,
+  providers_config: string,
+  auth_env: dict,
+) -> dict {
+  return {
+    output_identity: fs.canonicalize_existing(output_dir),
+    runtime: {
+      version: runtime.version,
+      source_revision: runtime.source_revision,
+      runtime_content_fingerprint: runtime.runtime_content_fingerprint,
+    },
+    catalog_sha256: catalog.catalog_sha256,
+    source: provider_tool_probe_campaign_source_receipt(fs),
+    provider_config_sha256: if providers_config == "" {
+      nil
+    } else {
+      "sha256:" + sha256(fs.read_bytes(providers_config))
+    },
+    auth_fingerprint: "sha256:" + sha256(json_stringify(auth_env)),
+  }
+}
+
 pub fn provider_tool_probe_campaign_source_receipt(fs: HarnessFs) -> dict {
   const paths = [
     "scripts/provider_tool_probe_campaign.harn",
