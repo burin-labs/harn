@@ -380,4 +380,27 @@ if ! grep -Fq 'scanned=0 kept=0 removed=0 reclaimed_bytes=0 retained_bytes=0 pen
   exit 1
 fi
 
+# An entry holding a git repository is never removed, whatever rule selected
+# it. The plain orphan beside it in the same run is the control that the GC
+# still removes orphans, so the refusal cannot pass by removing nothing.
+git_storage="$tmp_root/git-storage"
+mkdir -p "$git_storage/harn-target/orphan-clone/src/.git" \
+  "$git_storage/harn-target/orphan-bare/mirror.git/objects/pack" \
+  "$git_storage/harn-target/orphan-plain/debug"
+# Activity is the newest thing inside an entry, so age every path in it.
+find "$git_storage" -exec touch -t 202001010000 {} +
+HARN_DEV_SETUP_STORAGE_ROOT="$git_storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" > "$tmp_root/git-run.txt" 2>&1 || true
+if [[ ! -d "$git_storage/harn-target/orphan-clone/src/.git" ]] \
+  || [[ ! -d "$git_storage/harn-target/orphan-bare/mirror.git/objects/pack" ]] \
+  || [[ -e "$git_storage/harn-target/orphan-plain" ]] \
+  || ! grep -Fq 'refusing to remove orphan: orphan-clone holds a git repository' "$tmp_root/git-run.txt" \
+  || ! grep -Eq 'pending_candidates=2' "$tmp_root/git-run.txt"; then
+  echo "an entry holding a git repository was removed, or the control orphan was kept" >&2
+  cat "$tmp_root/git-run.txt" >&2
+  exit 1
+fi
+
 echo "prune_stale_targets_test: ok"

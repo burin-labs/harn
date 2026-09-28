@@ -72,17 +72,16 @@ pub(crate) fn expected_report(set: &[&str]) -> String {
         .join(",")
 }
 
-/// A POSIX shell snippet printing the report for the child's own environment.
-pub(crate) fn sh_report() -> String {
-    NAMES
-        .iter()
-        .map(|name| {
-            format!(
-                "if [ -n \"${{{name}+x}}\" ]; then printf {name}=set; else printf {name}=unset; fi"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; printf ,; ")
+/// A child command printing the same environment report as the MCP probe.
+/// Python is already required by the cross-platform stdio transport tests.
+pub(crate) fn report_command() -> (String, Vec<String>) {
+    (
+        "python3".to_string(),
+        vec![
+            "-c".to_string(),
+            format!("import os; print({}, end='')", python_report()),
+        ],
+    )
 }
 
 /// A Python expression evaluating to the report for the child's environment.
