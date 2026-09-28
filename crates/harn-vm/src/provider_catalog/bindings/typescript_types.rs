@@ -81,7 +81,7 @@ export interface HarnProviderEndpoint {
   region_env?: string
   regions?: Record<string, HarnProviderEndpointRegion>
   chat_endpoint: string
-  chat_api_adapter?: 'model_default' | 'ollama_openai_compat'
+  chat_api_adapter?: __HARN_CHAT_API_ADAPTERS__
   completion_endpoint?: string
   embeddings_endpoint?: string
 }

@@ -195,7 +195,12 @@ pub enum ProviderClassification {
 pub enum ChatApiAdapter {
     /// Explicitly restore the model's ordinary contract over an inherited adapter.
     ModelDefault,
+    #[serde(rename = "ollama_openai_compat")]
     OllamaOpenAiCompat,
+}
+
+impl ChatApiAdapter {
+    pub const ALL: [Self; 2] = [Self::ModelDefault, Self::OllamaOpenAiCompat];
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
