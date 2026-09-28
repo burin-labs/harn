@@ -607,6 +607,15 @@ pub(crate) async fn execute_with_routing(
             "routing_policy.failover.max_attempts: must be >= 1".to_string(),
         ));
     }
+    // A contract probe observes its primary route once. This ceiling also
+    // prevents racing from starting a backup or a verifier from refining it.
+    let max_attempts = if crate::llm::provider_contract_probe::requires_single_request(
+        base_opts.provider_contract_probe,
+    ) {
+        1
+    } else {
+        max_attempts
+    };
     let mut last_error: Option<VmError> = None;
     let mut last_snapshot: Option<RoutingErrorSnapshot> = None;
     // The terminal marker for the attempt that produced the last error, tracked

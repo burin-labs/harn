@@ -598,9 +598,7 @@ async fn execute_routing_schema_retry_loop(
     delta_sink: Option<api::DeltaSender>,
 ) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
-    let schema_retries = helpers::opt_int(&options, "schema_retries")
-        .unwrap_or(1)
-        .max(0) as usize;
+    let schema_retries = schema_retry_budget(&opts, &options);
     let nudge_mode = parse_schema_nudge(&options);
     let output_validation_mode = output_validation_mode(&opts).to_string();
     let expects_structured = helpers::expects_structured_output(&opts);
@@ -756,6 +754,19 @@ pub(crate) struct SchemaLoopOutcome {
     pub usages: Vec<super::usage::LlmUsage>,
 }
 
+fn schema_retry_budget(
+    opts: &api::LlmCallOptions,
+    options: &Option<crate::value::DictMap>,
+) -> usize {
+    if super::provider_contract_probe::requires_single_request(opts.provider_contract_probe) {
+        0
+    } else {
+        helpers::opt_int(options, "schema_retries")
+            .unwrap_or(1)
+            .max(0) as usize
+    }
+}
+
 pub(crate) async fn execute_schema_retry_loop(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     mut opts: api::LlmCallOptions,
@@ -768,9 +779,7 @@ pub(crate) async fn execute_schema_retry_loop(
     // fail-fast on transient provider errors (compose `with_retry` from
     // `std/llm/handlers` for retry policy). Small/local models often need
     // the corrective nudge to produce conforming JSON.
-    let schema_retries = helpers::opt_int(&options, "schema_retries")
-        .unwrap_or(1)
-        .max(0) as usize;
+    let schema_retries = schema_retry_budget(&opts, &options);
     let nudge_mode = parse_schema_nudge(&options);
 
     let tool_format = helpers::opt_str(&options, "tool_format");
