@@ -106,55 +106,25 @@ impl DialectContract {
                 }
             }
             use crate::llm::capabilities::PortableOption;
+            if let Some(option) = request.portable_option_intent.iter().find(|option| {
+                matches!(
+                    option,
+                    PortableOption::TopK
+                        | PortableOption::MinP
+                        | PortableOption::RepetitionPenalty
+                        | PortableOption::Mirostat
+                        | PortableOption::LogitBias
+                        | PortableOption::Prediction
+                        | PortableOption::Verbosity
+                        | PortableOption::ParallelToolCalls
+                )
+            }) {
+                return Err(VmError::Runtime(format!(
+                    "Ollama OpenAI-compatible chat does not support the `{}` request option",
+                    option.name()
+                )));
+            }
             let unsupported = [
-                (
-                    request
-                        .portable_option_intent
-                        .contains(&PortableOption::TopK),
-                    "top_k",
-                ),
-                (
-                    request
-                        .portable_option_intent
-                        .contains(&PortableOption::MinP),
-                    "min_p",
-                ),
-                (
-                    request
-                        .portable_option_intent
-                        .contains(&PortableOption::RepetitionPenalty),
-                    "repetition_penalty",
-                ),
-                (
-                    request
-                        .portable_option_intent
-                        .contains(&PortableOption::Mirostat),
-                    "mirostat",
-                ),
-                (
-                    request
-                        .portable_option_intent
-                        .contains(&PortableOption::LogitBias),
-                    "logit_bias",
-                ),
-                (
-                    request
-                        .portable_option_intent
-                        .contains(&PortableOption::Prediction),
-                    "prediction",
-                ),
-                (
-                    request
-                        .portable_option_intent
-                        .contains(&PortableOption::Verbosity),
-                    "verbosity",
-                ),
-                (
-                    request
-                        .portable_option_intent
-                        .contains(&PortableOption::ParallelToolCalls),
-                    "parallel_tool_calls",
-                ),
                 (
                     request.tool_choice.as_ref().is_some_and(|choice| {
                         choice.as_str() != Some("auto")
