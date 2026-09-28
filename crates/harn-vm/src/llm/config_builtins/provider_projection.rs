@@ -181,7 +181,7 @@ pub(super) fn provider_catalog_to_vm_value() -> VmValue {
     for catalog_provider in &artifact.providers {
         let name = &catalog_provider.id;
         if let Some(pdef) = llm_config::provider_config(name) {
-            let mut provider = match provider_def_to_vm_value(Some(&name), &pdef) {
+            let mut provider = match provider_def_to_vm_value(Some(name), &pdef) {
                 VmValue::Dict(provider) => provider.as_ref().clone(),
                 _ => unreachable!("provider_def_to_vm_value returns a dict"),
             };
