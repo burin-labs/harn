@@ -295,3 +295,54 @@ async fn loading_an_older_session_backfills_its_spend_from_recorded_calls() {
         })
         .await;
 }
+
+/// When the session's earlier spend cannot be read, only a capped turn is
+/// refused: it cannot be held to a ceiling it cannot measure. An uncapped turn
+/// has nothing to enforce and still runs.
+#[tokio::test(flavor = "current_thread")]
+async fn an_unreadable_spend_refuses_only_a_capped_turn() {
+    let _reset = ResetActiveEventLog;
+    harn_vm::reset_thread_local_state();
+    let _mocks = install_priced_mocks(1);
+    let (_dir, project, pipeline) = project_with_pipeline();
+    // A directory where the store file belongs: every open of it fails.
+    std::fs::create_dir_all(project.join(".harn/session-store.sqlite")).expect("block the store");
+    for (config, capped) in [
+        (
+            AcpServerConfig::new(Some(pipeline.to_string_lossy().into_owned())),
+            false,
+        ),
+        (capped_config(&pipeline), true),
+    ] {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (request_tx, mut response_rx, server, session_id) =
+                    start_acp_channel_session_with_config(config, serde_json::json!(project))
+                        .await;
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0", "id": 2, "method": "session/prompt",
+                        "params": {"sessionId": session_id, "prompt": [{"type": "text", "text": "go"}]},
+                    }))
+                    .expect("send session/prompt");
+                let response = loop {
+                    let message = recv_json(&mut response_rx).await;
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({"jsonrpc": "2.0", "id": message["id"], "result": {}}))
+                            .expect("send host capabilities response");
+                    } else if message["id"] == 2 {
+                        break message;
+                    }
+                };
+                assert_eq!(
+                    response.get("error").is_some(),
+                    capped,
+                    "capped={capped}: {response}"
+                );
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
+    }
+}

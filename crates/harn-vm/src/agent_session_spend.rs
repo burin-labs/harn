@@ -23,16 +23,15 @@ const MICROS_PER_USD: f64 = 1_000_000.0;
 const READ_PAGE: usize = 512;
 
 /// What `session_id` has spent on LLM calls so far, in USD, per the canonical
-/// store under `project_root`. A project with no store, or a store with no such
-/// session, has spent nothing.
+/// store under `project_root`. A store with no such session has spent nothing.
 pub async fn load_session_llm_spend_usd(
     project_root: &Path,
     session_id: &str,
 ) -> Result<f64, VmError> {
-    let Some(store) = crate::stdlib::session_store::open_existing_canonical_store(project_root)?
-    else {
-        return Ok(0.0);
-    };
+    // The writable open, not the read-only one: it waits on the store's init
+    // lock, so a store another process is still creating is read once it is
+    // initialized instead of failing the turn's admission.
+    let store = crate::stdlib::session_store::open_canonical_store(project_root)?;
     load_session_llm_spend_usd_from_store(&store, session_id).await
 }
 

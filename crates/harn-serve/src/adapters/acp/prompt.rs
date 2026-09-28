@@ -177,19 +177,22 @@ impl AcpServer {
                 return;
             }
         };
-        // Fail closed: a turn whose earlier spend is unknown cannot be held to
-        // the session's ceiling.
-        let llm_spent_usd = match self.session_llm_spend_usd(&session_id).await {
-            Ok(spent) => spent,
-            Err(message) => {
-                self.send_prompt_error(id, &message);
-                return;
-            }
-        };
         let turn_budget = llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .turn_budget(prompt_budget);
+        // A capped turn whose earlier spend is unknown cannot be held to the
+        // session's ceiling, so it fails closed. An uncapped turn still runs,
+        // but its total is neither carried nor persisted: it would omit the
+        // unread earlier spend and overwrite the stored total with less.
+        let llm_spent_usd = match self.session_llm_spend_usd(&session_id).await {
+            Ok(spent) => Some(spent),
+            Err(message) if turn_budget.llm_cost_usd.is_some() => {
+                self.send_prompt_error(id, &message);
+                return;
+            }
+            Err(_) => None,
+        };
         #[cfg(feature = "hostlib")]
         harn_hostlib::fs::configure_session_root(&session_id, &project_root);
         let before_turn_transcript = harn_vm::agent_sessions::transcript(&session_id)
@@ -394,8 +397,10 @@ impl AcpServer {
         let host_bridge_for_response = host_bridge.clone();
         let result = mode_policy
             .run(Box::pin(async {
-                let _budget_guard = turn_budget.install_session_turn(llm_spent_usd);
-                let _spend_recorder = SessionSpendRecorder(llm_spend.clone());
+                let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
+                let _spend_recorder = llm_spent_usd
+                    .is_some()
+                    .then(|| SessionSpendRecorder(llm_spend.clone()));
                 execute::execute_chunk(
                     chunk,
                     bridge.clone(),
@@ -422,18 +427,24 @@ impl AcpServer {
             .await;
         self.finish_profile_turn(&session_id, profile_turn);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
-        let turn_spent_usd = llm_spend
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .spent_usd
-            .unwrap_or(llm_spent_usd);
-        if let Err(error) = harn_vm::agent_session_spend::record_session_llm_spend_usd(
-            &project_root,
-            &session_id,
-            turn_spent_usd,
-        )
-        .await
-        {
+        let turn_spent_usd = llm_spent_usd.and_then(|_| {
+            llm_spend
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .spent_usd
+        });
+        let persisted = match turn_spent_usd {
+            Some(spent) => {
+                harn_vm::agent_session_spend::record_session_llm_spend_usd(
+                    &project_root,
+                    &session_id,
+                    spent,
+                )
+                .await
+            }
+            None => Ok(()),
+        };
+        if let Err(error) = persisted {
             bridge.send_log(
                 "warn",
                 &format!("Session spend was not persisted; a resumed session may under-count it: {error}"),

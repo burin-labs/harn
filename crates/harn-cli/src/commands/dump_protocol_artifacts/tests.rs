@@ -869,11 +869,11 @@ fn transport_control_acp_methods_match_artifact() {
         .read_text("crates/harn-serve/src/adapters/acp/sessions.rs")
         .expect("read acp sessions");
     let body = sessions
-        .split_once("pub(super) fn apply_session_budget_rearm")
-        .expect("budget rearm function")
+        .split_once("impl BudgetRearm {")
+        .expect("budget rearm parser")
         .1
-        .split_once("\nfn rearm_dimension")
-        .expect("budget rearm function end")
+        .split_once("fn apply_live")
+        .expect("budget rearm parser end")
         .0;
     let mut handled = BTreeSet::new();
     for capture in regex::Regex::new(r#""([^"]+)""#)
