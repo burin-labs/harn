@@ -3,10 +3,13 @@
 //! Unix re-executes the current embedding executable as a small reaper plus a
 //! process-group-leading guardian. The executable must dispatch
 //! [`run_if_requested`] before its public argument parser. The supervisor
-//! retains the only write end of the guardian's stdin pipe. Kernel EOF
-//! therefore remains reliable even when the supervisor is killed before Rust
-//! destructors or session cleanup can run, while the out-of-group reaper makes
-//! guardian PGID disappearance deterministic.
+//! holds the write end of the reaper's stdin pipe, and the reaper relays it to
+//! the guardian's stdin. Kernel EOF therefore arrives even when the supervisor
+//! is killed before Rust destructors or session cleanup can run. The reaper is
+//! the supervisor's direct child, so it also sees the supervisor exit as a
+//! changed parent pid and closes the relay then: a process that inherited a
+//! copy of the supervisor's write end cannot keep the guardian alive. The
+//! out-of-group reaper also makes guardian PGID disappearance deterministic.
 
 #[cfg(unix)]
 use std::cell::RefCell;
@@ -38,6 +41,12 @@ const MODE_ENV: &str = "HARN_INTERNAL_PROCESS_GUARDIAN_MODE";
 const PIPE_MODE: &str = "request-pipe-v1";
 #[cfg(unix)]
 const REAPER_ENV: &str = "HARN_INTERNAL_PROCESS_GUARDIAN_REAPER";
+/// The supervisor's pid, which the reaper compares with its parent pid.
+#[cfg(unix)]
+const OWNER_PID_ENV: &str = "HARN_INTERNAL_PROCESS_GUARDIAN_OWNER_PID";
+/// How often the reaper checks that its supervisor is still its parent.
+#[cfg(unix)]
+const OWNER_POLL_INTERVAL_MS: libc::c_int = 200;
 #[cfg(unix)]
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
@@ -181,6 +190,7 @@ pub(crate) fn prepare_guardian(
     guardian
         .env(MODE_ENV, PIPE_MODE)
         .env(REAPER_ENV, "1")
+        .env(OWNER_PID_ENV, std::process::id().to_string())
         .env_remove(harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -679,27 +689,91 @@ fn read_request() -> io::Result<Vec<u8>> {
 
 #[cfg(unix)]
 fn run_guardian_reaper() -> ! {
+    // Before anything else, so a supervisor that is already gone shows up as
+    // a parent pid that no longer matches.
+    let owner = std::env::var(OWNER_PID_ENV)
+        .ok()
+        .and_then(|pid| pid.parse::<libc::pid_t>().ok())
+        .unwrap_or_else(|| unsafe { libc::getppid() });
     let executable = std::env::current_exe().unwrap_or_else(|error| {
         eprintln!("resolve guardian executable: {error}");
         std::process::exit(1);
     });
-    let mut guardian = Command::new(executable);
-    guardian
-        .args(std::env::args_os().skip(1))
-        .env_remove(REAPER_ENV)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .process_group(0);
-    let mut guardian = guardian.spawn().unwrap_or_else(|error| {
-        eprintln!("spawn process guardian: {error}");
+    // Created while this process is still single-threaded, so no concurrent
+    // spawn can inherit the write end before it is close-on-exec.
+    let (relay_reader, relay_writer) = io::pipe().unwrap_or_else(|error| {
+        eprintln!("create guardian liveness relay: {error}");
         std::process::exit(1);
     });
+    let mut guardian = {
+        let mut guardian = Command::new(executable);
+        guardian
+            .args(std::env::args_os().skip(1))
+            .env_remove(REAPER_ENV)
+            .env_remove(OWNER_PID_ENV)
+            .stdin(Stdio::from(relay_reader))
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .process_group(0);
+        guardian.spawn().unwrap_or_else(|error| {
+            eprintln!("spawn process guardian: {error}");
+            std::process::exit(1);
+        })
+    };
+    std::thread::spawn(move || relay_owner_liveness(owner, relay_writer));
     match guardian.wait() {
         Ok(status) => propagate_exit(status),
         Err(error) => {
             eprintln!("reap process guardian: {error}");
             std::process::exit(1);
+        }
+    }
+}
+
+/// Copy the supervisor's liveness pipe to the guardian until the supervisor
+/// is gone, then close the guardian's end.
+///
+/// EOF on the supervisor's pipe is not enough on its own. A process the
+/// supervisor spawned from another thread while that pipe was still
+/// inheritable holds a copy of its write end, and the pipe then never closes;
+/// Rust sets close-on-exec separately from `pipe()` on macOS, so that window is
+/// real. This process is the supervisor's direct child, so the supervisor's
+/// exit also shows up as a changed parent pid, which no inherited descriptor
+/// can hide and a reused pid cannot fake.
+#[cfg(unix)]
+fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
+    let mut buffer = [0_u8; 4096];
+    while unsafe { libc::getppid() } == owner {
+        let mut poll_fd = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        match unsafe { libc::poll(&raw mut poll_fd, 1, OWNER_POLL_INTERVAL_MS) } {
+            0 => continue,
+            ready if ready < 0 => {
+                if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return;
+            }
+            _ => {}
+        }
+        let read =
+            unsafe { libc::read(libc::STDIN_FILENO, buffer.as_mut_ptr().cast(), buffer.len()) };
+        match read {
+            0 => return,
+            read if read > 0 => {
+                if guardian.write_all(&buffer[..read as usize]).is_err() {
+                    return;
+                }
+            }
+            _ => {
+                if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return;
+            }
         }
     }
 }
