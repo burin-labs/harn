@@ -49,6 +49,8 @@ pipeline test_complete_cells_reuse_without_admission_and_refuse_changed_artifact
       )
       assert_eq(cached, {decision: "reused", cells: [cell]})
       harness.fs.write_text(artifact, "changed result")
+      const retry_key = root + "/unexpected-producer"
+      harness.runtime.store_set(retry_key, false)
       assert_throws(
         { ->
           provider_probe_campaign_cell(
@@ -57,12 +59,14 @@ pipeline test_complete_cells_reuse_without_admission_and_refuse_changed_artifact
             identity,
             true,
             { ->
-              throw "damaged receipt retried provider"
+              harness.runtime.store_set(retry_key, true)
+              return [cell]
             },
             { _ -> true },
           )
         },
       )
+      assert_eq(harness.runtime.store_get(retry_key), false)
       harness.runtime.checkpoint_delete(key)
       const blocked = provider_probe_campaign_cell(
         harness.runtime,
