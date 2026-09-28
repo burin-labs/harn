@@ -301,7 +301,7 @@ async fn script_option_probe_preserves_other_guards_and_makes_one_request() {
     std::fs::write(
         root.path().join("option.harn"),
         r#"
-      import { provider_option_probe } from "std/cli/providers/option_probe"
+      import { provider_option_probe } from "std/llm/option_probe"
       fn main(harness: Harness) {
         const before = provider_option_probe(
           harness.llm, "openai", "gpt-5.6-luna", "temperature", 8, false

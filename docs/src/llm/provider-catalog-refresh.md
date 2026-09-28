@@ -388,7 +388,7 @@ Scripts use the same planner, classifier, and call boundary without launching
 a child producer:
 
 ```harn
-import { provider_option_probe } from "std/cli/providers/option_probe"
+import { provider_option_probe } from "std/llm/option_probe"
 
 fn main(harness: Harness) {
   const report = provider_option_probe(
