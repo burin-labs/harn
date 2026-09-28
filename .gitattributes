@@ -73,7 +73,6 @@ crates/harn-vm/src/triggers/event/schemas_generated.rs -merge
 crates/harn-parser/src/diagnostic/harness_migrations_generated.rs -merge
 spec/cli-surface.txt -merge
 spec/openapi.snapshot -merge
-crates/harn-serve/openapi.yaml -merge
 spec/schemas/session-bundle.v1.schema.json -merge
 spec/run-view-fixtures/cases/legacy-sparse/expected/runs/run.run_view.json -merge
 spec/run-view-fixtures/cases/legacy-sparse/expected/session_view.json -merge

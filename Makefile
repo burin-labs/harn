@@ -452,19 +452,18 @@ lint-md:
 	npx markdownlint-cli2 "**/*.md"
 
 # Lint the Harn Agents Protocol OpenAPI source contract with Redocly. The
-# generated public path/schema snapshot (spec/openapi.snapshot) and the
-# embedded server copy (crates/harn-serve/openapi.yaml) are guarded separately
-# by `check-openapi-snapshot`, registered in scripts/generated_artifacts.toml.
+# generated public path/schema snapshot (spec/openapi.snapshot) is guarded
+# separately by `check-openapi-snapshot`, registered in scripts/generated_artifacts.toml.
 spec-lint:
-	./node_modules/.bin/redocly lint spec/openapi.yaml
+	./node_modules/.bin/redocly lint crates/harn-serve/openapi.yaml
 
-# Regenerate the OpenAPI public-surface snapshot and the embedded server copy
-# from spec/openapi.yaml after an intentional surface change.
+# Regenerate the OpenAPI public-surface snapshot after an intentional change
+# to the canonical schema embedded by harn-serve.
 gen-openapi-snapshot:
 	$(HARN_CMD) run scripts/check_openapi_snapshot.harn -- --update
 
-# Drift guard: fail if spec/openapi.snapshot or the embedded
-# crates/harn-serve/openapi.yaml copy no longer matches spec/openapi.yaml.
+# Drift guard: fail if the public surface snapshot no longer matches the
+# canonical schema in crates/harn-serve/openapi.yaml.
 check-openapi-snapshot:
 	@echo "=== Checking OpenAPI surface snapshot is up to date ==="
 	@$(HARN_CMD) run scripts/check_openapi_snapshot.harn

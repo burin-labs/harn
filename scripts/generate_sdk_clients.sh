@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPEC_PATH="${ROOT}/spec/openapi.yaml"
+SPEC_PATH="${ROOT}/crates/harn-serve/openapi.yaml"
 OUTPUT_DIR="${ROOT}/target/generated-sdks"
 LANGUAGE="all"
 
@@ -14,7 +14,7 @@ usage() {
   cat <<'USAGE'
 usage: scripts/generate_sdk_clients.sh [--language python|typescript|all] [--output-dir DIR]
 
-Regenerates Harn Agents API SDK clients from spec/openapi.yaml.
+Regenerates Harn Agents API SDK clients from crates/harn-serve/openapi.yaml.
 
 Environment overrides:
   PYTHON_GENERATOR_VERSION      openapi-python-client version
@@ -87,7 +87,7 @@ write_manifest() {
     echo "language=${language}"
     echo "harn_version=$(harn_version)"
     echo "sdk_version=$(sdk_version)"
-    echo "openapi_spec=spec/openapi.yaml"
+    echo "openapi_spec=crates/harn-serve/openapi.yaml"
     echo "openapi_sha256=$(shasum -a 256 < "$SPEC_PATH" | awk '{print $1}')"
     case "$language" in
       python) echo "generator=openapi-python-client@${PYTHON_GENERATOR_VERSION}" ;;
@@ -145,7 +145,7 @@ generate_typescript() {
       --package "@hey-api/openapi-ts@${TYPESCRIPT_GENERATOR_VERSION}" \
       --package "typescript@${TYPESCRIPT_VERSION}" \
       openapi-ts \
-      -i ./spec/openapi.yaml \
+      -i ./crates/harn-serve/openapi.yaml \
       -o "$out" \
       -p @hey-api/typescript @hey-api/sdk @hey-api/client-fetch \
       --no-log-file
