@@ -257,6 +257,19 @@ pub enum ToolProbeEvidenceSource {
 }
 
 impl ToolConformanceReport {
+    pub fn passed_probes(&self) -> Vec<String> {
+        [
+            "tool_probe",
+            "tool_call_probe",
+            "native_tool_probe",
+            "streaming_tool_probe",
+        ]
+        .into_iter()
+        .filter(|requirement| report_satisfies_required_probe(self, requirement))
+        .map(str::to_owned)
+        .collect()
+    }
+
     /// Only a current report from a live request can certify route behavior.
     pub fn require_live_evidence(&self) -> Result<(), String> {
         if self.schema_version != TOOL_CONFORMANCE_SCHEMA_VERSION {

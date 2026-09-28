@@ -29,6 +29,7 @@ struct RouteAccumulator {
     provider: String,
     model: String,
     report_count: usize,
+    passed_probes: BTreeSet<String>,
     cases: Vec<ToolScorecardObservedCase>,
 }
 
@@ -204,14 +205,17 @@ pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolS
     let fitness = fitness_store_from_tool_reports(&reports);
     let mut grouped: BTreeMap<(String, String), RouteAccumulator> = BTreeMap::new();
     for report in reports {
+        let passed_probes = report.passed_probes();
         let key = (report.provider.clone(), report.model.clone());
         let entry = grouped.entry(key).or_insert_with(|| RouteAccumulator {
             provider: report.provider,
             model: report.model,
             report_count: 0,
+            passed_probes: BTreeSet::new(),
             cases: Vec::new(),
         });
         entry.report_count += 1;
+        entry.passed_probes.extend(passed_probes);
         entry.cases.extend(
             report
                 .cases
@@ -1013,6 +1017,7 @@ fn score_route(
         model: acc.model,
         catalog_claim,
         report_count: acc.report_count,
+        passed_probes: acc.passed_probes.into_iter().collect(),
         case_count,
         successful_cases: stats.successful_cases,
         parseable_tool_call_cases: stats.parseable_tool_call_cases,

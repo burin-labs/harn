@@ -103,7 +103,11 @@ pub type NoticeExtraction = {
   reason?: string,
 }
 
-pub type NoticeDisposition = "patch" | "no_op" | "incomplete_add" | "rejected"
+pub type NoticeDisposition = "patch" \
+  | "no_op" \
+  | "incomplete_add" \
+  | "incomplete_capability" \
+  | "rejected"
 
 pub type NoticeValidationReceipt = {
   schema_version: "harn.provider_catalog_notice.v1",
@@ -119,6 +123,7 @@ pub type NoticeValidationReceipt = {
   reason: string,
   evidence?: string,
   extraction?: dict,
+  tool_evidence?: dict,
   extraction_run?: {mode: "live" | "replay", max_cost_usd: float, timeout_secs: int},
   source_url?: string,
   source_path?: string,

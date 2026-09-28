@@ -38,6 +38,10 @@ pub fn run_provider_catalog_notice(harness: Harness, _event: TriggerEvent) -> di
       args = args + ["--model", model]
     }
   }
+  const tool_report = harness.env.get_or("HARN_PROVIDER_NOTICE_TOOL_PROBE_REPORT", "")
+  if tool_report != "" {
+    args = args + ["--tool-probe-report", tool_report]
+  }
   const result = harness.process.run({program: "harn", args: args, cwd: root})
   return {
     status: if result.exit_code == 0 {

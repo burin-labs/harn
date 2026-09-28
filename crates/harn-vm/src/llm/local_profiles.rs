@@ -95,16 +95,7 @@ impl RuntimeProbeEvidence {
     }
 
     pub fn add_tool_report(&mut self, report: ToolConformanceReport) {
-        if report_satisfies_required_probe(&report, "tool_probe") {
-            self.passed.insert("tool_probe".to_string());
-            self.passed.insert("tool_call_probe".to_string());
-        }
-        if report_satisfies_required_probe(&report, "native_tool_probe") {
-            self.passed.insert("native_tool_probe".to_string());
-        }
-        if report_satisfies_required_probe(&report, "streaming_tool_probe") {
-            self.passed.insert("streaming_tool_probe".to_string());
-        }
+        self.passed.extend(report.passed_probes());
         self.tool_reports.push(report);
     }
 

@@ -82,6 +82,11 @@ fn saved_response_cannot_become_route_fitness() {
             true,
         )],
     );
+    saved.tool_calling.native = ToolProbeStatus::Pass;
+    let live = scorecard_from_tool_reports(vec![saved.clone()]);
+    assert!(live.routes[0]
+        .passed_probes
+        .contains(&"native_tool_probe".into()));
     saved.evidence_source = crate::llm::tool_conformance::ToolProbeEvidenceSource::SavedResponse;
     assert!(fitness_store_from_tool_reports(&[saved.clone()])
         .records
