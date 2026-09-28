@@ -1,0 +1,22 @@
+import { assert_eq, assert_throws } from "std/testing"
+import {
+  provider_probe_campaign_window,
+  provider_probe_campaign_window_key,
+} from "../provider_tool_probe_campaign/resume"
+
+pipeline test_campaign_resume_keeps_deadline_and_rejects_policy_reset(harness: Harness) {
+  const identity = "resume-window-fixture"
+  const key = provider_probe_campaign_window_key(identity)
+  harness.runtime.checkpoint_delete(key)
+  harness.testing.clock_set(1000)
+  const first = provider_probe_campaign_window(harness.runtime, harness.clock, identity, 10)
+  assert_eq(first.deadline_at_ms, 11000)
+  harness.testing.clock_set(12000)
+  const resumed = provider_probe_campaign_window(harness.runtime, harness.clock, identity, 10)
+  assert_eq(resumed, first)
+  assert(resumed.deadline_at_ms < harness.clock.now_ms())
+  assert_throws({ -> provider_probe_campaign_window(harness.runtime, harness.clock, identity, 20) })
+  harness.runtime.checkpoint(key, {schema_version: "broken"})
+  assert_throws({ -> provider_probe_campaign_window(harness.runtime, harness.clock, identity, 10) })
+  harness.runtime.checkpoint_delete(key)
+}

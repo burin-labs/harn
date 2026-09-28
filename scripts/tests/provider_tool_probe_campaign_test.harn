@@ -1561,6 +1561,7 @@ pipeline test_campaign_expired_deadline_refuses_dispatch(harness: Harness) {
     max_probes: 1,
     max_cost_usd: 1.0,
     max_duration_secs: 0,
+    deadline_at_ms: harness.clock.now_ms(),
   }
   const expired = __live_cells(request)
   assert_true(expired.slice.deadline_stopped)
@@ -1568,7 +1569,9 @@ pipeline test_campaign_expired_deadline_refuses_dispatch(harness: Harness) {
   assert_eq(expired.slice.probe_executions_selected, 0)
   assert_eq(len(expired.cells), 0)
   // A live allowance reaches credential readiness and emits explicit skips.
-  const ready = __live_cells(request + {max_duration_secs: 60})
+  const ready = __live_cells(
+    request + {max_duration_secs: 60, deadline_at_ms: harness.clock.now_ms() + 60000},
+  )
   assert_false(ready.slice.deadline_stopped)
   assert_true(ready.slice.probe_executions_selected > 0)
   assert_true(len(ready.cells) > 0)

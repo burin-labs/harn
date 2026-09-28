@@ -1,0 +1,45 @@
+import { checkpoint_stage } from "std/checkpoint"
+import { get_typed_value } from "std/schema"
+
+pub type ProviderProbeCampaignWindow = {
+  schema_version: "harn.provider_probe_campaign_window.v1",
+  started_at_ms: int,
+  deadline_at_ms: int,
+  max_duration_secs: int,
+}
+
+pub fn provider_probe_campaign_window_key(campaign: string) -> string {
+  return "provider-probe-campaign/window/" + sha256(campaign)
+}
+
+/** Reopening a campaign retains its original deadline, including downtime. */
+pub fn provider_probe_campaign_window(
+  runtime: HarnessRuntime,
+  clock: HarnessClock,
+  campaign: string,
+  max_duration_secs: int,
+) -> ProviderProbeCampaignWindow {
+  guard trim(campaign) != "" && max_duration_secs > 0 else {
+    throw "campaign identity and positive duration are required"
+  }
+  const stored = checkpoint_stage(
+    runtime,
+    provider_probe_campaign_window_key(campaign),
+    { ->
+      const started = clock.now_ms()
+      return {
+        schema_version: "harn.provider_probe_campaign_window.v1",
+        started_at_ms: started,
+        deadline_at_ms: started + max_duration_secs * 1000,
+        max_duration_secs: max_duration_secs,
+      }
+    },
+  )
+  const window = get_typed_value(stored, schema_of(ProviderProbeCampaignWindow))
+  guard window.max_duration_secs == max_duration_secs
+    && window.deadline_at_ms == window.started_at_ms + max_duration_secs * 1000
+    && clock.now_ms() >= window.started_at_ms else {
+    throw "campaign deadline policy differs or its retained clock is invalid"
+  }
+  return window
+}

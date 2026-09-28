@@ -51,6 +51,7 @@ pub import {
   provider_tool_probe_campaign_observed_spend,
   provider_tool_probe_campaign_report,
 } from "./provider_tool_probe_campaign/report"
+import { provider_probe_campaign_window } from "./provider_tool_probe_campaign/resume"
 import "./provider_tool_probe_campaign/support"
 pub import {
   ProviderToolProbeBehavior,
@@ -214,6 +215,12 @@ fn main(harness: Harness) {
         max_probes: max_probes,
         max_cost_usd: max_cost_usd,
         max_duration_secs: max_duration_secs,
+        deadline_at_ms: provider_probe_campaign_window(
+          harness.runtime,
+          harness.clock,
+          output_dir,
+          max_duration_secs,
+        ).deadline_at_ms,
       },
     )
   } else {

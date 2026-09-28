@@ -84,12 +84,14 @@ pub type ProviderToolProbeLiveCellsRequest = {
   max_probes: int,
   max_cost_usd?: float,
   max_duration_secs: int,
+  deadline_at_ms: int,
 }
 
 pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
   const llm = request.llm
   const clock = request.clock
-  const deadline_ms = clock.monotonic_ms() + request.max_duration_secs * 1000
+  const deadline_ms = clock.monotonic_ms()
+    + min(request.max_duration_secs * 1000, max(0, request.deadline_at_ms - clock.now_ms()))
   const fs = request.fs
   const process = request.process
   const routes = request.routes
@@ -218,6 +220,7 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
         budget_stopped: budget_stopped
           || provider_tool_probe_campaign_observed_spend(cells).admission_denied_attempts > 0,
         max_duration_secs: request.max_duration_secs,
+        deadline_at_ms: request.deadline_at_ms,
         deadline_stopped: deadline_stopped,
         probe_executions_excluded_by_deadline: probe_executions_excluded_by_deadline,
       },
