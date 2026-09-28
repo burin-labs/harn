@@ -1,0 +1,35 @@
+import { resolve_workspace_guidance } from "std/agent/workspace_guidance"
+
+/**
+ * The subtree walk finds instruction files at every depth it is allowed, in
+ * breadth-first order, and still refuses skipped and dot directories. The
+ * depth and directory bounds are the load-bearing half: a walk that ignored
+ * them would pass the positive assertions and read the whole tree.
+ */
+pipeline test(harness: Harness) {
+  const base = harness.fs.mkdtemp_in_workspace("harn-guidance-walk-")
+  const root = path_join(base, "repo")
+  harness.fs.mkdir(path_join(root, "a/b/c"))
+  harness.fs.mkdir(path_join(root, "node_modules/pkg"))
+  harness.fs.mkdir(path_join(root, ".hidden"))
+  harness.fs.write_text(path_join(root, "a/AGENTS.md"), "Shallow rule.")
+  harness.fs.write_text(path_join(root, "a/b/c/CLAUDE.md"), "Deep rule.")
+  harness.fs.write_text(path_join(root, "node_modules/pkg/AGENTS.md"), "Vendored rule.")
+  harness.fs.write_text(path_join(root, ".hidden/AGENTS.md"), "Hidden rule.")
+  const request = {workspace_root: root, include_ancestors: false, include_user_scope: false}
+  const resolved = resolve_workspace_guidance(harness.fs, request)
+  const paths = resolved.sources.map({ entry -> return entry.path }).to_list()
+  const bodies = join(resolved.sources.map({ entry -> return entry.body }).to_list(), "\n")
+  assert(!bodies.contains("Vendored rule"), "a skipped directory is never read")
+  assert(!bodies.contains("Hidden rule"), "a dot directory is never read")
+  assert(paths.count() == 2, "both scoped files load")
+  assert(paths[0] == path_join(root, "a/AGENTS.md"), "the shallower file comes first")
+  assert(paths[1] == path_join(root, "a/b/c/CLAUDE.md"), "a CLAUDE.md-only directory loads")
+  const shallow = resolve_workspace_guidance(harness.fs, request + {max_depth: 2})
+  const shallow_bodies = join(shallow.sources.map({ entry -> return entry.body }).to_list(), "\n")
+  assert(shallow_bodies.contains("Shallow rule"), "a file within the depth bound loads")
+  assert(!shallow_bodies.contains("Deep rule"), "a file below the depth bound does not")
+  const narrow = resolve_workspace_guidance(harness.fs, request + {max_dirs: 1})
+  assert(narrow.sources.count() == 1, "the directory bound caps the walk")
+  harness.stdio.log("workspace_guidance_subtree_walk passed")
+}

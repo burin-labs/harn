@@ -797,10 +797,11 @@ mod tests {
     async fn provider_transport_starts_under_the_session_environment_policy() {
         use crate::security::child_env_probe as probe;
         let _planted = probe::plant();
+        let (command, args) = probe::report_command();
         let runtime = AcpProviderRuntime {
             provider: "probe-acp".to_string(),
-            command: "/bin/sh".to_string(),
-            args: vec!["-c".to_string(), probe::sh_report()],
+            command,
+            args,
             env: BTreeMap::new(),
             cwd: absolute_cwd(Some(".".to_string())).unwrap(),
             mcp_servers: Vec::new(),
@@ -813,6 +814,7 @@ mod tests {
                 .output()
                 .await
                 .expect("run the provider command");
+            assert!(output.status.success(), "provider probe failed: {output:?}");
             String::from_utf8(output.stdout).expect("utf8 report")
         }
 
