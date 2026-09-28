@@ -13,7 +13,7 @@ use rust_decimal::Decimal;
 use time::{Date, OffsetDateTime};
 use uuid::Uuid;
 
-use super::{error, unavailable, DenialKind};
+use super::{error, provider_violation, unavailable, DenialKind};
 use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteSchema};
 use crate::value::{ErrorCategory, VmError};
 
