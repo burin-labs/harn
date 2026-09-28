@@ -9,6 +9,136 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.147
+
+### Breaking
+
+- **A provider credential can now reach Harn's own model calls without
+  reaching any child process, and every child a session starts now gets the
+  session's environment (#8913).** A grant with `expose_to: "in_process"`
+  (`--grant NAME=SOURCE,expose=VAR,to=in_process` on the CLI) is visible to
+  provider authentication and configuration for `llm_call` and to
+  `harness.env`, and to no spawned command, as a value or as a secret
+  reference. It requires `expose_as_env` and rejects `for_command`. Its
+  receipt records `exposed_to: "in_process"`, and the run record's
+  `admitted_environment` omits it because no child could see it.
+
+  Before this change, MCP stdio servers, ACP provider transports, and the git,
+  `gh`, pager, verifier, and toolchain-resolver commands Harn runs itself
+  started with the engine's whole environment even under an `isolated` or
+  `granted` policy. They now start with the session's resolved environment:
+  the runtime essentials, the grants that reach that program, and the `env`
+  entries in the server's or provider's own configuration. Sessions under the
+  default `inherited` policy are unchanged. Rust embedders that build
+  `GrantSpec` or `GrantReceipt` with struct literals must set the new
+  `expose_to` / `exposed_to` field.
+
+  Migration: under `isolated` or `granted`, give an MCP server or ACP provider
+  that needs a variable either an `env` entry in its own configuration or a
+  grant that reaches it. Bind a credential to the server's executable to keep
+  it out of other children:
+
+  ```text
+  # before: the server inherited GITHUB_TOKEN from the engine
+  harn run --environment-policy granted agent.harn
+  # after
+  harn run --grant gh=env:GITHUB_TOKEN,expose=GITHUB_TOKEN,for=github-mcp-server agent.harn
+  ```
+
+  A host that grants a provider key only for model calls should declare it
+  in-process:
+
+  ```json
+  {"name": "provider_key", "source": {"env": {"var": "OPENAI_API_KEY"}},
+   "expose_as_env": "OPENAI_API_KEY", "expose_to": "in_process"}
+  ```
+
+  Rust: add `expose_to: GrantAudience::Session` (or `Default::default()`) to
+  each `GrantSpec { .. }` literal and `exposed_to` to each `GrantReceipt { .. }`
+  literal.
+
+### Added
+
+- **Complementary reviewers can use bounded catalog price caps (#8912).**
+  Callers can keep a useful independent reviewer available for low-cost actors
+  while limiting candidate input-plus-output list price for higher-cost actors.
+- **Request transcript rows say how each setting was resolved (#8949).** Every
+  `provider_call_request` row now carries a `resolution` list covering
+  `max_tokens`, `tool_format`, the tool wire, reasoning, cache, and stream.
+  Each entry gives the caller's raw value, the applied value, and the layer
+  that decided it: a caller option, a catalog default, a catalog steer (with
+  the steer's reason), a reasoning policy, or the default.
+
+### Changed
+
+- **Fireworks gpt-oss uses provider-native tool calls (#8947).**
+  `accounts/fireworks/models/gpt-oss-*` moves from the heredoc text tool
+  channel to native tool calls, which stops analysis-voice prose from leaking
+  into visible replies ahead of a tool call. Backslash-heavy file bodies can
+  still be altered on this channel; the measurement and the revert trigger are
+  recorded beside the catalog row.
+- **A direct `llm_call` with text-channel tools is refused (#8948).** A `json`
+  or `text` tool_format sends no tool schemas, and only `agent_loop` renders the
+  call contract into the prompt, so a direct call reached the model with no
+  tools and it answered without calling any. Such a call now fails with an
+  `invalid_request` error that names the route and the fix: drive the tools
+  through `agent_loop`, or pass `tool_format: "native"` on a route that
+  supports native tools. Empty tool sets and native tool-search tools are
+  unaffected.
+- The session code-index warm thread now runs at background priority (utility QoS
+  on macOS, nice 10 on Linux), so a rebuild no longer competes for the CPU with
+  the engine thread preparing the first model call.
+
+### Fixed
+
+- Portal setup lists active catalog models and skips unavailable providers; catalog generation rejects retired default routes.
+- **Provider defaults stay within the selected provider.** Harn asks for an explicit model when a provider has no catalog
+  default, instead of sending another provider's model to it (#8865).
+- An `unmeasured` rustc wrapper decision now quotes the wrapper-free build's error beside the with-wrapper one, so a
+  probe that failed both ways says whether the toolchain or the wrapper broke. The probe's Cargo builds now run with
+  `--color never`: under `CARGO_TERM_COLOR=always` every reader of Cargo's words missed its line, so the reason fell
+  back to the last stderr line and a wrapper's `Running` line was never recognized.
+- **Anthropic `thinking: true` without a budget no longer fails on small
+  output caps (#8945).** The default thinking budget was a fixed 10,000 tokens,
+  which Anthropic refuses with a 400 whenever `max_tokens` is 10,000 or less.
+  It now derives from the cap: `max_tokens - 1`, at least Anthropic's 1,024
+  minimum and at most 10,000. A budget the caller names passes through
+  unchanged.
+- **`effort` works on Claude Sonnet 4.6 (#8946).** The catalog now declares
+  adaptive thinking and the `effort` levels low, medium, high, and max for
+  `claude-sonnet-4-6` and its `anthropic/`-prefixed route, so the portable
+  `effort` option is no longer refused as unsupported there.
+- Stopping a turn while a tool runs no longer breaks the session. The
+  unanswered tool call gets a typed harness-repair result when the turn is
+  cancelled, and every provider request answers any call a stored transcript
+  left open, so a resumed or cleared session also recovers. Before, every
+  later OpenAI turn failed with "No tool output found for function call" and
+  Anthropic turns with "tool_use ids were found without tool_result blocks".
+- The shared target GC now refuses to remove an entry that holds a `.git` entry or a bare object store,
+  and keeps it as a pending candidate. It also no longer crashes under bash 3.2 when it keeps its first entry.
+- A native decision refused by local spend admission, such as one whose
+  `run_cost_limit` arrives after an earlier unbudgeted model call, now returns
+  `unavailable` with reason `admission_refused` instead of `authority_denied`.
+  Its receipt records the cause in `admission_reason`.
+- Workspace guidance discovery walks the subtree once through the ignore-aware
+  `fs.walk` instead of listing and stat-ing every entry, and reads only the
+  instruction files that walk saw. Directories the project ignore stack excludes
+  are no longer searched for `AGENTS.md` / `CLAUDE.md`.
+- An exhausted provider balance or hard spend limit (HTTP 429 with a billing
+  code such as `insufficient_quota`, `billing_limit`, or
+  `credit_balance_exhausted`) is no longer retried as a rate limit. Its thrown
+  category is `generic` rather than the status's `rate_limit`, the agent
+  loop's retry policy never retries `billing_limit`, and the agent terminal
+  outcome carries the new `provider_billing` class instead of `rate_limited`,
+  so embedders can tell a person the account needs attention instead of
+  "try again".
+- An unavailable step judge is now loud. Its `step_judge_decision` reports `verdict: "unavailable"`,
+  never `pass`, with a typed `unavailable_reason` and a running `unavailable_count`. A label-only
+  decision model configured as a judge is refused before dispatch instead of failing on every step.
+  A `replace` veto on a turn that parse repair already answered no longer crashes the loop: it
+  applies as `retain`. A purpose-label block next to a valid call is no longer reported as an
+  unparsed tool call.
+
 ## v0.10.146
 
 ### Added
