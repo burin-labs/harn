@@ -20,9 +20,10 @@ async fn llm_tool_probe_builtin(
             "tool_probe expects one options dictionary".into(),
         ));
     };
-    let options: ToolConformanceProbeOptions =
-        serde_json::from_value(crate::llm::vm_value_to_json(options))
-            .map_err(|error| VmError::TypeError(format!("tool_probe: {error}")))?;
+    let value = crate::llm::vm_value_to_json_strict(options, "tool_probe.options")
+        .map_err(VmError::TypeError)?;
+    let options: ToolConformanceProbeOptions = serde_json::from_value(value)
+        .map_err(|error| VmError::TypeError(format!("tool_probe: {error}")))?;
     if options.model.trim().is_empty() || options.repeat == 0 || options.timeout_secs == 0 {
         return Err(VmError::TypeError(
             "tool_probe requires a model, positive repeat, and positive timeout_secs".into(),

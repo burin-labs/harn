@@ -223,6 +223,9 @@ pub fn vm_value_to_export_json_strict(
 /// existing snapshots for no safety gain.
 pub fn vm_value_to_json_strict(val: &VmValue, path: &str) -> Result<serde_json::Value, String> {
     match val {
+        VmValue::Float(value) if !value.is_finite() => {
+            Err(format!("{path}: non-finite numbers are not serializable"))
+        }
         VmValue::List(list) => {
             let mut items = Vec::with_capacity(list.len());
             for (index, item) in list.iter().enumerate() {
@@ -279,6 +282,26 @@ mod tests {
     use crate::value::VmDictExt;
 
     use std::rc::Rc;
+
+    #[test]
+    fn strict_json_refuses_nonfinite_budget_values_instead_of_null() {
+        for amount in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let options = VmValue::dict(crate::value::DictMap::from_iter([(
+                crate::value::intern_key("max_cost_usd"),
+                VmValue::Float(amount),
+            )]));
+            let error = vm_value_to_json_strict(&options, "probe").unwrap_err();
+            assert!(error.starts_with("probe.max_cost_usd:"), "{error}");
+        }
+        assert_eq!(
+            vm_value_to_json_strict(&VmValue::Float(0.0), "probe").unwrap(),
+            serde_json::json!(0.0)
+        );
+        assert_eq!(
+            vm_value_to_json_strict(&VmValue::Nil, "probe").unwrap(),
+            serde_json::Value::Null
+        );
+    }
 
     #[test]
     fn strict_export_json_preserves_nominal_enums_and_rejects_resources() {
