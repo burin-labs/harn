@@ -1073,3 +1073,46 @@ fn nested_budget_scope_cannot_pollute_the_outer_sessions_observed_usage() {
     );
     reset_cost_state();
 }
+
+#[test]
+fn a_seeded_cost_scope_charges_the_sessions_earlier_spend_against_its_ceiling() {
+    // A durable session installs one cost scope per prompt. Unseeded, the
+    // second prompt of a session that already spent 95c of a $1 cap starts at
+    // $0 and is admitted; seeded, the same call is refused and the refusal
+    // reports what the session actually spent.
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    reset_cost_state();
+    let opts = long_transcript_opts(100.0);
+
+    {
+        let _fresh = install_llm_cost_budget(1.0);
+        check_llm_preflight_budget(&opts).expect("an unspent $1 cap admits a ~15c call");
+    }
+
+    let outer_total = peek_total_cost();
+    {
+        let _seeded = install_llm_cost_budget_seeded(Some(1.0), 0.95);
+        assert!((peek_total_cost() - 0.95).abs() < 1e-12);
+        let dict = thrown_dict(
+            check_llm_preflight_budget(&opts).expect_err("95c spent leaves no room for ~15c"),
+        );
+        assert!((dict_float(&dict, "session_cost_usd") - 0.95).abs() < 1e-12);
+        assert!(dict_str(&dict, "message").contains("spent $0.950000 of $1.000000"));
+
+        // Completed calls add to the seed, which is the total a host carries
+        // into the session's next scope.
+        accumulate_llm_usage("fixture", 10, 10, 0.01).expect("96c is under the $1 cap");
+        assert!((peek_total_cost() - 0.96).abs() < 1e-12);
+    }
+    assert_eq!(peek_total_cost(), outer_total, "the seed must not leak out");
+
+    // No ceiling still tracks spend, so an uncapped session can be capped later.
+    {
+        let _uncapped = install_llm_cost_budget_seeded(None, 0.5);
+        check_llm_preflight_budget(&opts).expect("no ceiling admits the call");
+        accumulate_llm_usage("fixture", 10, 10, 0.25).expect("no ceiling to exceed");
+        assert!((peek_total_cost() - 0.75).abs() < 1e-12);
+    }
+    reset_cost_state();
+}
