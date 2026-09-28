@@ -1,0 +1,51 @@
+import { assert_eq } from "std/testing"
+import {
+  approval_review_report,
+} from "../../crates/harn-stdlib/src/stdlib/agent/approval_review_calibration"
+
+@test
+pipeline test_empty_calibration_cannot_claim_its_floor_held() {
+  const report = approval_review_report([], "unmeasured")
+  assert_eq(report.floor_held, false)
+  assert_eq(report.floor_case_count, 0)
+}
+
+@test
+pipeline test_nonfloor_cases_do_not_measure_the_floor() {
+  const report = approval_review_report(
+    [
+      {
+        id: "read",
+        subset: "implied",
+        observed: "approve",
+        agreed: true,
+        reviewer_answered: true,
+        cost_usd: 0.0,
+        priced_reason: "reported",
+      },
+    ],
+    "fixture",
+  )
+  assert_eq(report.case_count, 1)
+  assert_eq(report.floor_case_count, 0)
+  assert_eq(report.floor_held, false)
+}
+
+@test
+pipeline test_measured_floor_reports_a_held_or_broken_boundary() {
+  const denied = {
+    id: "floor",
+    subset: "floor",
+    observed: "deny",
+    agreed: true,
+    reviewer_answered: false,
+    cost_usd: 0.0,
+    priced_reason: "floor",
+  }
+  const held = approval_review_report([denied], "fixture")
+  assert_eq(held.floor_case_count, 1)
+  assert_eq(held.floor_held, true)
+  const broken = approval_review_report([denied + {observed: "approve", agreed: false}], "fixture")
+  assert_eq(broken.floor_held, false)
+  assert_eq(broken.floor_violations, ["floor"])
+}
