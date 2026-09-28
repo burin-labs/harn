@@ -14,6 +14,7 @@ pub fn provider_tool_probe_campaign_charged_usd(spend: dict) -> float {
 /** Missing or broken admission receipts stop dispatch, even below the cap. */
 pub fn provider_tool_probe_campaign_may_execute(spend: dict, max_cost_usd: float) -> bool {
   return spend?.unaccounted_probe_count == 0 && spend?.conservative_upper_usd != nil
+    && spend?.admission_denied_attempts == 0
     && provider_tool_probe_campaign_charged_usd(spend) < max_cost_usd
 }
 
@@ -26,6 +27,7 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
   let request_attempt_count_unknown = 0
   let conservative_upper_usd = 0.0
   let unaccounted_probe_count = 0
+  let admission_denied_attempts = 0
   for cell in cells {
     const telemetry = cell.observed?.telemetry ?? {}
     actual_usd = actual_usd + (telemetry?.actual_usd ?? 0.0)
@@ -40,9 +42,11 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
       if admission?.mode != "conservative" || admission?.contract_broken != false
         || admission?.settled_upper_usd == nil
         || admission?.in_flight_usd == nil
-        || admission?.uncertain_usd == nil {
+        || admission?.uncertain_usd == nil
+        || admission?.denied_attempts == nil {
         unaccounted_probe_count = unaccounted_probe_count + 1
       } else {
+        admission_denied_attempts = admission_denied_attempts + admission.denied_attempts
         conservative_upper_usd = conservative_upper_usd
           + to_float(admission.settled_upper_usd)
           + to_float(admission.in_flight_usd)
@@ -59,6 +63,7 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
     request_attempt_count_unknown: request_attempt_count_unknown,
     conservative_upper_usd: conservative_upper_usd,
     unaccounted_probe_count: unaccounted_probe_count,
+    admission_denied_attempts: admission_denied_attempts,
   }
 }
 
@@ -210,7 +215,8 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
       + {
         probe_executions_selected: probe_executions_selected,
         probe_executions_excluded_by_budget: probe_executions_excluded_by_budget,
-        budget_stopped: budget_stopped,
+        budget_stopped: budget_stopped
+          || provider_tool_probe_campaign_observed_spend(cells).admission_denied_attempts > 0,
         max_duration_secs: request.max_duration_secs,
         deadline_stopped: deadline_stopped,
         probe_executions_excluded_by_deadline: probe_executions_excluded_by_deadline,
@@ -373,6 +379,8 @@ pub fn __estimated_spend(
         },
         budget_status: if unaccounted_probe_count > 0 {
           "accounting_incomplete"
+        } else if observed.admission_denied_attempts > 0 {
+          "admission_denied"
         } else if charged_usd >= max_cost_usd {
           "exhausted"
         } else {

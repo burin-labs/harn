@@ -1064,6 +1064,7 @@ pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(
             settled_upper_usd: "0.003",
             in_flight_usd: "0",
             uncertain_usd: "0",
+            denied_attempts: 0,
           },
           telemetry: {
             actual_usd: 0.003,
@@ -1522,12 +1523,19 @@ pipeline test_campaign_unpriced_requests_need_conservative_admission_receipts() 
     unpriced_case_count: 1,
     conservative_upper_usd: 0.6,
     unaccounted_probe_count: 0,
+    admission_denied_attempts: 0,
   }
   assert_true(provider_tool_probe_campaign_may_execute(bounded, 5.0))
   assert_eq(provider_tool_probe_campaign_charged_usd(bounded), 0.6)
   assert_false(provider_tool_probe_campaign_may_execute(bounded, 0.6))
   assert_false(
     provider_tool_probe_campaign_may_execute(bounded + {unaccounted_probe_count: 1}, 5.0),
+  )
+  assert_false(
+    provider_tool_probe_campaign_may_execute(
+      bounded + {admission_denied_attempts: 1, conservative_upper_usd: 0.0},
+      5.0,
+    ),
   )
 }
 
