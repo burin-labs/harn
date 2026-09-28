@@ -200,6 +200,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // Retained spend admission must survive a fresh CLI process and refuse
   // before HTTP; an in-process call misses startup and VM scope installation.
   "crates/harn-cli/tests/harn_cli_e2e/durable_spend_policy.rs",
+  // Independent CLI processes must agree on one durable checkpoint insertion.
+  "crates/harn-cli/tests/harn_cli_e2e/checkpoint_concurrency.rs",
   // Cancellation poisoning crosses the async hostlib/VM/CLI boundary. A real
   // CLI process proves a caught launch error leaves the parent execution live.
   "crates/harn-cli/tests/harn_cli_e2e/command_probe_parent_liveness.rs",
