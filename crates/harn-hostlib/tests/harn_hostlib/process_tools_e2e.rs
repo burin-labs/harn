@@ -316,15 +316,31 @@ fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
 
 /// The liveness pipe's EOF is not the only owner-death signal: a leaked copy
 /// of its write end keeps the pipe open after the owner is gone, and the
-/// background group must still die.
+/// background group must still die. Run as a stress loop, because the owner
+/// check races the owner's exit and one clean trial would not show a lost
+/// wakeup.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn managed_background_group_dies_when_a_sibling_holds_the_liveness_pipe() {
-    assert_managed_background_group_dies_with_supervisor(true);
+    for _ in 0..OWNER_EXIT_STRESS_TRIALS {
+        assert_managed_background_group_dies_with_supervisor(true);
+    }
 }
+
+const OWNER_EXIT_STRESS_TRIALS: usize = 20;
+
+/// Serializes the owner-death trials. Each trial's report pipe is inheritable
+/// on purpose, so a supervisor spawned by a concurrent trial holds a copy of
+/// it, and a liveness holder forked from that supervisor would keep it open
+/// past the other trial's deadline.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+static OWNER_DEATH_TRIAL_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn assert_managed_background_group_dies_with_supervisor(leak_liveness_pipe: bool) {
+    let _serial = OWNER_DEATH_TRIAL_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut report_pipe = [0_i32; 2];
     assert_eq!(unsafe { libc::pipe(report_pipe.as_mut_ptr()) }, 0);
     let read_fd = report_pipe[0];
