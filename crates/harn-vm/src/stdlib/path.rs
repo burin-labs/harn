@@ -514,6 +514,38 @@ fn path_workspace_canonicalize_existing_impl(
 }
 
 #[harn_builtin(
+    exposure = "harness.fs.canonicalize_existing",
+    effects = ["fs.read@arg0"],
+    sig = "path_canonicalize_existing(path: string) -> string",
+    category = "path",
+    doc = "Resolve an existing path to its absolute filesystem identity, following symlinks; refuse inaccessible or missing paths."
+)]
+fn path_canonicalize_existing_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let path = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    let resolved = crate::stdlib::process::resolve_source_relative_path(&path);
+    crate::stdlib::sandbox::enforce_fs_path(
+        "path_canonicalize_existing",
+        &resolved,
+        crate::stdlib::sandbox::FsAccess::Read,
+    )?;
+    let canonical = std::fs::canonicalize(&resolved).map_err(|error| {
+        crate::value::io_error_thrown(&error, "Cannot canonicalize existing path", None)
+    })?;
+    crate::stdlib::sandbox::enforce_fs_path(
+        "path_canonicalize_existing",
+        &canonical,
+        crate::stdlib::sandbox::FsAccess::Read,
+    )?;
+    Ok(VmValue::string(canonical.to_string_lossy()))
+}
+
+#[harn_builtin(
     exposure = "pure",
     effects = [],
     sig = "path_segments(path: string?) -> list", category = "path"
@@ -546,12 +578,51 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &PATH_WORKSPACE_INFO_IMPL_DEF,
     &PATH_WORKSPACE_NORMALIZE_IMPL_DEF,
     &PATH_WORKSPACE_CANONICALIZE_EXISTING_IMPL_DEF,
+    &PATH_CANONICALIZE_EXISTING_IMPL_DEF,
     &PATH_SEGMENTS_IMPL_DEF,
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn canonical_existing_path_unifies_aliases_and_refuses_missing_targets() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("campaign");
+        std::fs::create_dir(&directory).unwrap();
+        let mut vm = Vm::new();
+        register_path_helper_builtins(&mut vm);
+        let aliases = [directory.clone(), directory.join(".")].into_iter();
+        #[cfg(unix)]
+        let aliases = {
+            let alias = root.path().join("alias");
+            std::os::unix::fs::symlink(&directory, &alias).unwrap();
+            aliases.chain(std::iter::once(alias))
+        };
+        let expected = std::fs::canonicalize(&directory).unwrap();
+        for alias in aliases {
+            let value = vm
+                .call_named_builtin(
+                    "path_canonicalize_existing",
+                    vec![VmValue::string(alias.to_string_lossy())],
+                )
+                .await
+                .unwrap();
+            assert_eq!(value.display(), expected.to_string_lossy());
+        }
+        let error = vm
+            .call_named_builtin(
+                "path_canonicalize_existing",
+                vec![VmValue::string(directory.join("missing").to_string_lossy())],
+            )
+            .await
+            .unwrap_err();
+        let VmError::Thrown(record) = error else {
+            panic!("expected the shared typed filesystem error");
+        };
+        assert_eq!(crate::llm::vm_value_to_json(&record)["kind"], "not_found");
+    }
 
     #[test]
     fn normalize_collapses_dot_dot() {

@@ -67,6 +67,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("clock", "timing_event"),
     ("clock", "timing_now_monotonic_ms"),
     ("clock", "timing_start"),
+    ("fs", "canonicalize_existing"),
     ("fs", "load_run_tree"),
     ("fs", "run_record_load"),
     ("fs", "run_record_save"),

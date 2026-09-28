@@ -2,7 +2,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use crate::test_util::process::harn_e2e_command;
+use crate::test_util::process::{harn_e2e_binary, harn_e2e_command};
 use harn_vm::llm::{MachineSpendPolicy, MachineSpendQuota};
 
 fn write_policy(root: &std::path::Path, limit: i64) {
@@ -16,7 +16,11 @@ fn write_policy(root: &std::path::Path, limit: i64) {
     .unwrap();
 }
 
-async fn invoke(root: &std::path::Path, shorthand: bool) -> std::process::Output {
+async fn invoke(
+    root: &std::path::Path,
+    shorthand: bool,
+    args: Vec<String>,
+) -> std::process::Output {
     let root = root.to_path_buf();
     tokio::task::spawn_blocking(move || {
         let mut command = harn_e2e_command();
@@ -30,7 +34,7 @@ async fn invoke(root: &std::path::Path, shorthand: bool) -> std::process::Output
         if !shorthand {
             command.arg("run");
         }
-        command.arg("probe.harn").output().unwrap()
+        command.args(args).output().unwrap()
     })
     .await
     .unwrap()
@@ -74,7 +78,7 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
     )
     .unwrap();
     write_policy(root.path(), 2_000_000);
-    let first = invoke(root.path(), false).await;
+    let first = invoke(root.path(), false, vec!["probe.harn".into()]).await;
     assert!(
         first.status.success(),
         "{}",
@@ -94,10 +98,51 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
     assert!(receipt.lifetime_reserved_microusd > 0);
     assert_eq!(receipt.lifetime_actual_known_microusd, 0);
     assert_eq!(receipt.lifetime_usage_unknown_attempts, 1);
-    policy.lifetime_limit_microusd = Some(receipt.lifetime_reserved_microusd);
+    let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scripts/provider_tool_probe_campaign/types.harn");
+    let mut parent = format!(
+        "import {{provider_tool_probe_campaign_command_env}} from {}\n",
+        serde_json::to_string(&module.to_string_lossy()).unwrap()
+    );
+    parent.push_str(
+        r#"fn main(harness: Harness) {
+          const env = provider_tool_probe_campaign_command_env(
+            argv[1] + "/providers.toml", harness.env.get_or("HARN_SPEND_POLICY", ""), true
+          ) + {PROBE_PROVIDER_KEY: "local-fixture-only", HARN_SECRET_PROVIDERS: "env"}
+          const child = harness.process.run({
+            program: argv[0], args: ["run", "probe.harn"], cwd: argv[1], env: env, timeout_ms: 30000
+          })
+          guard child.exit_code == 0 else { throw child.stderr }
+          harness.stdio.println("campaign_child_completed")
+        }"#,
+    );
+    std::fs::write(root.path().join("parent.harn"), parent).unwrap();
+    let child = invoke(
+        root.path(),
+        false,
+        vec![
+            "parent.harn".into(),
+            "--".into(),
+            harn_e2e_binary().to_string_lossy().into_owned(),
+            root.path().to_string_lossy().into_owned(),
+        ],
+    )
+    .await;
+    assert!(
+        child.status.success(),
+        "{}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    assert!(String::from_utf8_lossy(&child.stdout).contains("campaign_child_completed"));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let child_receipt = quota.receipt().unwrap();
+    assert_eq!(child_receipt.lifetime_usage_unknown_attempts, 2);
+    assert_eq!(child_receipt.lifetime_actual_known_microusd, 0);
+    assert!(child_receipt.lifetime_reserved_microusd > receipt.lifetime_reserved_microusd);
+    policy.lifetime_limit_microusd = Some(child_receipt.lifetime_reserved_microusd);
     quota.update_policy(policy, "test-host").unwrap();
-    write_policy(root.path(), receipt.lifetime_reserved_microusd);
-    let restarted = invoke(root.path(), true).await;
+    write_policy(root.path(), child_receipt.lifetime_reserved_microusd);
+    let restarted = invoke(root.path(), true, vec!["probe.harn".into()]).await;
     server.abort();
     assert!(!restarted.status.success());
     assert!(
@@ -107,11 +152,11 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
     );
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        1,
+        2,
         "denied restart reached HTTP"
     );
     assert_eq!(
         quota.receipt().unwrap().lifetime_reserved_microusd,
-        receipt.lifetime_reserved_microusd
+        child_receipt.lifetime_reserved_microusd
     );
 }

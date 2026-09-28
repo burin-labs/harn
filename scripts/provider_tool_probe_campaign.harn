@@ -198,7 +198,12 @@ fn main(harness: Harness) {
   const command_env = provider_tool_probe_campaign_command_env(providers_config, spend_policy, live)
   const env = auth_env + command_env
   const campaign_window = if live {
-    provider_probe_campaign_window(harness.runtime, harness.clock, output_dir, max_duration_secs)
+    provider_probe_campaign_window(
+      harness.runtime,
+      harness.clock,
+      harness.fs.canonicalize_existing(output_dir),
+      max_duration_secs,
+    )
   } else {
     nil
   }
