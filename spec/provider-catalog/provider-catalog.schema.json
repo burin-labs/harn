@@ -311,6 +311,12 @@
         "base_url_env": {
           "type": "string"
         },
+        "chat_api_adapter": {
+          "enum": [
+            "model_default",
+            "ollama_open_ai_compat"
+          ]
+        },
         "chat_endpoint": {
           "minLength": 1,
           "type": "string"

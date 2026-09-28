@@ -90,6 +90,7 @@ pub type HarnProviderCatalogDeprecation = {
 pub type HarnProviderCatalogEndpoint = {
   base_url: string,
   base_url_env?: string,
+  chat_api_adapter?: "model_default" | "ollama_open_ai_compat",
   chat_endpoint: string,
   completion_endpoint?: string,
   embeddings_endpoint?: string,
