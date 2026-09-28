@@ -45,24 +45,32 @@ async fn local_provider(root: &std::path::Path) -> (Arc<AtomicUsize>, tokio::tas
     let counter = calls.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let app = axum::Router::new().route(
-        "/v1/chat/completions",
-        axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
-            counter.fetch_add(1, Ordering::SeqCst);
-            async move {
-                let model = body["model"].clone();
-                if body["stream"] == serde_json::json!(true) {
-                    let chunk = serde_json::json!({"model": model, "choices": [{"index": 0,
+    let handler = move |axum::Json(body): axum::Json<serde_json::Value>| {
+        counter.fetch_add(1, Ordering::SeqCst);
+        async move {
+            let model = body["model"].clone();
+            if body.get("input").is_some() {
+                let reply = serde_json::json!({"id": "fixture", "model": model,
+                        "status": "completed", "output": [{"type": "message", "role": "assistant",
+                        "content": [{"type": "output_text", "text": "ok"}]}]});
+                ([("content-type", "application/json")], reply.to_string())
+            } else if body["stream"] == serde_json::json!(true) {
+                let chunk = serde_json::json!({"model": model, "choices": [{"index": 0,
                         "delta": {"content": "ok"}, "finish_reason": "stop"}]});
-                    ([("content-type", "text/event-stream")], format!("data: {chunk}\n\ndata: [DONE]\n\n"))
-                } else {
-                    let reply = serde_json::json!({"model": model, "choices": [{"index": 0,
+                (
+                    [("content-type", "text/event-stream")],
+                    format!("data: {chunk}\n\ndata: [DONE]\n\n"),
+                )
+            } else {
+                let reply = serde_json::json!({"model": model, "choices": [{"index": 0,
                         "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]});
-                    ([("content-type", "application/json")], reply.to_string())
-                }
+                ([("content-type", "application/json")], reply.to_string())
             }
-        }),
-    );
+        }
+    };
+    let app = axum::Router::new()
+        .route("/v1/chat/completions", axum::routing::post(handler.clone()))
+        .route("/v1/responses", axum::routing::post(handler));
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     std::fs::write(root.join("providers.toml"), format!(
         "[providers.openai]\nbase_url = \"http://{address}/v1\"\nauth_env = \"PROBE_PROVIDER_KEY\"\n"
