@@ -457,7 +457,6 @@ pub async fn run_tool_conformance_probe(
         options.tool_format,
         options.probe_case,
         options.marker,
-        expected_value,
         cases,
     )
 }
@@ -561,7 +560,6 @@ fn classify_tool_conformance_fixture_with_policy(
         tool_format,
         probe_case,
         marker,
-        expected_value,
         vec![case],
     )
 }
@@ -909,10 +907,10 @@ fn report_from_cases(
     tool_format: ToolProbeFormat,
     probe_case: ToolProbeCase,
     marker: String,
-    expected_value: String,
     cases: Vec<ToolConformanceCase>,
 ) -> ToolConformanceReport {
     let summary = summarize_cases(&cases, tool_format);
+    let expected_value = probe_case.expected_value(&marker);
     ToolConformanceReport {
         schema_version: TOOL_CONFORMANCE_SCHEMA_VERSION,
         evidence_source,
