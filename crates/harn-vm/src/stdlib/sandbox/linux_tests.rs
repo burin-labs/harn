@@ -1587,12 +1587,19 @@ fn a_tool_on_path_runs_confined_while_one_off_path_and_credentials_stay_denied()
             && String::from_utf8_lossy(&on_path.stdout).contains("PATH-PROBE-RAN"),
         "a tool whose directory is on PATH must run confined: {on_path:?}"
     );
-    let off_path = off_path.expect("the off-PATH spawn is prepared");
-    assert!(
-        !off_path.status.success()
-            && !String::from_utf8_lossy(&off_path.stdout).contains("PATH-PROBE-RAN"),
-        "the same file off PATH must stay refused, or case 1 proves nothing: {off_path:?}"
-    );
+    // The runtime reports an OS-sandbox refusal as a typed error rather than a
+    // failed exit, so either shape counts as refused; a successful run does not.
+    match off_path {
+        Err(error) => assert!(
+            format!("{error:?}").contains("denied by the OS sandbox"),
+            "the off-PATH spawn failed for a reason other than the sandbox: {error:?}"
+        ),
+        Ok(output) => assert!(
+            !output.status.success()
+                && !String::from_utf8_lossy(&output.stdout).contains("PATH-PROBE-RAN"),
+            "the same file off PATH must stay refused, or case 1 proves nothing: {output:?}"
+        ),
+    }
     let credential_read = credential_read.expect("the credential spawn is prepared");
     assert!(
         !String::from_utf8_lossy(&credential_read.stdout).contains("PATH-GRANT-SECRET"),
