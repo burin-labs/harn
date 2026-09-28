@@ -42,6 +42,7 @@ async fn invoke(
 
 async fn local_provider(
     root: &std::path::Path,
+    response_text: &'static str,
 ) -> (
     Arc<AtomicUsize>,
     Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
@@ -61,18 +62,18 @@ async fn local_provider(
             if body.get("input").is_some() {
                 let reply = serde_json::json!({"id": "fixture", "model": model,
                         "status": "completed", "output": [{"type": "message", "role": "assistant",
-                        "content": [{"type": "output_text", "text": "ok"}]}]});
+                        "content": [{"type": "output_text", "text": response_text}]}]});
                 ([("content-type", "application/json")], reply.to_string())
             } else if body["stream"] == serde_json::json!(true) {
                 let chunk = serde_json::json!({"model": model, "choices": [{"index": 0,
-                        "delta": {"content": "ok"}, "finish_reason": "stop"}]});
+                        "delta": {"content": response_text}, "finish_reason": "stop"}]});
                 (
                     [("content-type", "text/event-stream")],
                     format!("data: {chunk}\n\ndata: [DONE]\n\n"),
                 )
             } else {
                 let reply = serde_json::json!({"model": model, "choices": [{"index": 0,
-                        "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]});
+                        "message": {"role": "assistant", "content": response_text}, "finish_reason": "stop"}]});
                 ([("content-type", "application/json")], reply.to_string())
             }
         }
@@ -90,7 +91,7 @@ async fn local_provider(
 #[tokio::test]
 async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
     let root = tempfile::tempdir().unwrap();
-    let (calls, _, server) = local_provider(root.path()).await;
+    let (calls, _, server) = local_provider(root.path(), "ok").await;
     std::fs::write(
         root.path().join("probe.harn"),
         r#"fn main(harness: Harness) {
@@ -188,7 +189,7 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
 async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
     let workspace = tempfile::tempdir().unwrap();
     let authority = tempfile::tempdir().unwrap();
-    let (calls, _, server) = local_provider(workspace.path()).await;
+    let (calls, _, server) = local_provider(workspace.path(), "ok").await;
     write_policy(authority.path(), 2_000_000);
     let ledger = authority.path().join("spend.sqlite");
     let policy = authority.path().join("policy.toml");
@@ -295,7 +296,7 @@ async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
 #[tokio::test]
 async fn script_option_probe_preserves_other_guards_and_makes_one_request() {
     let root = tempfile::tempdir().unwrap();
-    let (calls, requests, server) = local_provider(root.path()).await;
+    let (calls, requests, server) = local_provider(root.path(), "").await;
     write_policy(root.path(), 2_000_000);
     std::fs::write(
         root.path().join("option.harn"),
@@ -340,6 +341,7 @@ async fn script_option_probe_preserves_other_guards_and_makes_one_request() {
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["probe"]["verdict"], "accepted");
+    assert_eq!(report["probe"]["attempt"]["reason"], "served_empty");
     assert_eq!(report["diff"]["status"], "drift");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let requests = requests.lock().unwrap();
