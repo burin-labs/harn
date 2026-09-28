@@ -78,7 +78,7 @@ fn derive(policy: &CapabilityPolicy) -> Rc<ScopeRoots> {
     Rc::new(ScopeRoots {
         workspace: super::normalized_workspace_roots(policy),
         read_only: super::normalized_read_only_roots(policy),
-        read_deny: super::refusal::process_sandbox_read_deny_roots(policy),
+        read_deny: super::process_sandbox_read_deny_roots(policy),
     })
 }
 
