@@ -209,6 +209,73 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
 }
 
 #[test]
+fn nested_approval_external_read_root_cannot_widen_parent_filesystem_roots() {
+    let allowed = tempfile::tempdir().unwrap();
+    let external = tempfile::tempdir().unwrap();
+    let host_granted = tempfile::tempdir().unwrap();
+    let allowed_fixture = allowed.path().join("inside-parent.txt");
+    let external_fixture = external.path().join("outside-parent.txt");
+    let host_fixture = host_granted.path().join("host-granted.txt");
+    std::fs::write(&allowed_fixture, "inside fixture").unwrap();
+    std::fs::write(&external_fixture, "must remain unreadable").unwrap();
+    std::fs::write(&host_fixture, "host grant remains readable").unwrap();
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([
+            ("state".to_string(), vec!["write".to_string()]),
+            ("workspace".to_string(), vec!["read_text".to_string()]),
+        ]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        read_only_roots: vec![host_granted.path().display().to_string()],
+        ..Default::default()
+    };
+    let root_literal = serde_json::to_string(&external.path().display().to_string()).unwrap();
+    let wrapped_read = |path: &std::path::Path| {
+        let path_literal = serde_json::to_string(&path.display().to_string()).unwrap();
+        format!(
+            r#"
+pipeline main(harness: Harness, task: unknown) {{
+  return harness.runtime.with_approval_policy(
+    {{external_roots: [{{path: {root_literal}, access: "read"}}]}},
+    fn() {{ return harness.fs.read_text({path_literal}) }}
+  )
+}}
+"#
+        )
+    };
+
+    let baseline_source = format!(
+        r#"pipeline main(harness: Harness, task: unknown) {{ return harness.fs.read_text({}) }}"#,
+        serde_json::to_string(&external_fixture.display().to_string()).unwrap()
+    );
+    let baseline_err = run_harn_with_policy(&baseline_source, policy.clone())
+        .expect_err("outside read without the nested approval wrapper must be refused");
+    assert!(
+        baseline_err.to_string().contains("sandbox violation"),
+        "expected baseline parent-root refusal, got {baseline_err}"
+    );
+
+    let (_, allowed_value) = run_harn_with_policy(&wrapped_read(&allowed_fixture), policy.clone())
+        .expect("with_approval_policy must execute and preserve an in-root read");
+    assert_eq!(
+        allowed_value.display(),
+        "inside fixture",
+        "positive control must return bytes from the fixture through the same wrapper"
+    );
+
+    let (_, host_value) = run_harn_with_policy(&wrapped_read(&host_fixture), policy.clone())
+        .expect("a host-projected read-only root must remain usable inside the wrapper");
+    assert_eq!(host_value.display(), "host grant remains readable");
+
+    let err = run_harn_with_policy(&wrapped_read(&external_fixture), policy)
+        .expect_err("nested approval metadata must not grant filesystem read authority");
+    assert!(
+        err.to_string().contains("sandbox violation"),
+        "expected parent-root sandbox refusal, got {err}"
+    );
+}
+
+#[test]
 fn recursive_mkdir_treats_existing_sandbox_roots_as_read_only_noops() {
     let writable = tempfile::tempdir().unwrap();
     let read_only = tempfile::tempdir().unwrap();
@@ -440,10 +507,9 @@ fn test_policy_workspace_roots_reject_process_cwd_escape() {
     );
 }
 
-/// A `read` external root on the approval policy serves builtin reads and
-/// refuses builtin writes, whatever the approval policy would say about the
-/// call. The first read, with no approval policy, is the control: it is
-/// refused, so the later read is admitted by the external root alone.
+/// A host projects an external read root into both capability read scope and
+/// approval metadata. That grant serves builtin reads and refuses writes;
+/// approval metadata alone does not create filesystem scope.
 #[test]
 fn a_read_external_root_serves_builtin_reads_and_refuses_builtin_writes() {
     let workspace = tempfile::tempdir().unwrap();
@@ -477,8 +543,12 @@ fn a_read_external_root_serves_builtin_reads_and_refuses_builtin_writes() {
         auto_approve: vec!["*".to_string()],
         ..Default::default()
     });
-    let read = run_harn_with_policy(&read_source, policy.clone());
-    let write = run_harn_with_policy(&write_source, policy);
+    let host_projected_policy = crate::orchestration::CapabilityPolicy {
+        read_only_roots: vec![external.path().display().to_string()],
+        ..policy.clone()
+    };
+    let read = run_harn_with_policy(&read_source, host_projected_policy.clone());
+    let write = run_harn_with_policy(&write_source, host_projected_policy);
     crate::orchestration::pop_approval_policy();
 
     let (_out, value) = read.expect("a read external root must serve builtin reads");

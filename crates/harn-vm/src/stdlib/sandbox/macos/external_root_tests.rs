@@ -8,10 +8,9 @@ use std::process::Command;
 use super::tests::macos_policy_with_workspace_ops;
 use super::{render_profile, SANDBOX_EXEC_PATH};
 
-/// A `read` external root on the active approval policy reaches a confined
-/// child as a read root and never as a write root. The first spawn, with no
-/// approval policy, is the control: the same read is refused, so the grant
-/// the second spawn sees came from the external root and nothing else.
+/// A host projects an external read root into capability scope and approval
+/// metadata. The first spawn, without that capability grant, is refused; once
+/// projected, a confined child can read the root but cannot write there.
 #[test]
 fn a_read_external_root_is_readable_but_not_writable_by_a_confined_child() {
     if !Path::new(SANDBOX_EXEC_PATH).exists() {
@@ -24,8 +23,12 @@ fn a_read_external_root_is_readable_but_not_writable_by_a_confined_child() {
     let written = external.path().join("written.txt");
     let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text"]);
     policy.workspace_roots = vec![workspace.path().display().to_string()];
+    let host_projected_policy = crate::orchestration::CapabilityPolicy {
+        read_only_roots: vec![external.path().display().to_string()],
+        ..policy.clone()
+    };
 
-    let run = |script: &str| {
+    let run = |policy: &crate::orchestration::CapabilityPolicy, script: &str| {
         Command::new(SANDBOX_EXEC_PATH)
             .args([
                 "-p",
@@ -42,10 +45,10 @@ fn a_read_external_root_is_readable_but_not_writable_by_a_confined_child() {
     let read_script = format!("cat '{}'", reference.display());
     let write_script = format!("echo x > '{}'", written.display());
 
-    let unrooted = run(&read_script);
+    let unrooted = run(&policy, &read_script);
     assert!(
         !unrooted.status.success(),
-        "control: without an external root the child must not read outside the workspace"
+        "control: without a capability read root the child must not read outside the workspace"
     );
 
     crate::orchestration::push_approval_policy(crate::orchestration::ToolApprovalPolicy {
@@ -54,8 +57,8 @@ fn a_read_external_root_is_readable_but_not_writable_by_a_confined_child() {
         )],
         ..Default::default()
     });
-    let read = run(&read_script);
-    let write = run(&write_script);
+    let read = run(&host_projected_policy, &read_script);
+    let write = run(&host_projected_policy, &write_script);
     crate::orchestration::pop_approval_policy();
 
     assert!(

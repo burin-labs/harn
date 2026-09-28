@@ -228,29 +228,6 @@ pub(crate) fn intersect(left: &[ExternalRoot], right: &[ExternalRoot]) -> Vec<Ex
         .collect()
 }
 
-/// The `read` roots of the innermost active approval policy.
-///
-/// This is the one projection of external roots into Harn's read-only file
-/// scope. The sandbox folds these into the capability policy's
-/// `read_only_roots` when it resolves read scope, which is the single
-/// resolution both the in-process filesystem builtins and the OS sandbox
-/// profile for a confined child read. Folding at resolution rather than into
-/// the pushed `CapabilityPolicy` keeps the ceiling that nested policies
-/// intersect against unchanged: an empty `read_only_roots` still means
-/// unbounded there.
-pub(crate) fn current_read_only_external_roots() -> Vec<String> {
-    super::EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
-        stack.borrow().last().map_or_else(Vec::new, |policy| {
-            policy
-                .external_roots
-                .iter()
-                .filter(|root| root.access == ExternalRootAccess::Read)
-                .map(|root| root.path.clone())
-                .collect()
-        })
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

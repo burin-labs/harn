@@ -60,7 +60,6 @@ pub use effects::{
     effects_from_metadata, EffectKind, EffectRecord, EffectScope,
 };
 pub(crate) use effects::{contract_effect_allowed_by_ceiling, runtime_effects_from_contract};
-pub(crate) use external_roots::current_read_only_external_roots;
 pub use external_roots::{ExternalRoot, ExternalRootAccess};
 pub use nested_budget::{
     annotate_nested_execution_options, enter_nested_execution_policy, NestedExecutionGuard,

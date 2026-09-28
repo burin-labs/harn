@@ -8,8 +8,9 @@
 //! of the jail from drifting apart.
 //!
 //! [`normalized_read_only_roots`] is the one policy reading here: the
-//! read-only scope both consumers resolve, including the approval policy's
-//! `read` external roots.
+//! read-only scope both consumers resolve. Host-granted external roots arrive
+//! through `CapabilityPolicy::read_only_roots`; approval-policy metadata does
+//! not independently grant filesystem access.
 
 use std::path::{Path, PathBuf};
 
@@ -21,20 +22,15 @@ use crate::orchestration::CapabilityPolicy;
 /// scope is purely additive, so there is no execution-root fallback to
 /// synthesize.
 ///
-/// The active approval policy's `read` external roots join here. This is the
-/// one place they become read-only file scope, and every consumer of read
-/// scope resolves through it: the in-process filesystem builtins
-/// ([`super::check_fs_path_scope`]) and the OS sandbox profile a confined child is
-/// launched under. A `read_write` external root is not projected; the
-/// approval boundary alone governs it.
+/// Host-granted external roots are already projected into the capability
+/// policy's `read_only_roots`. Keeping this scope owned by the capability
+/// policy means a caller-authored approval policy cannot widen filesystem
+/// access. Both the in-process filesystem builtins
+/// ([`super::check_fs_path_scope`]) and the OS sandbox profile for a confined
+/// child resolve the same roots here.
 pub(super) fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
-    for root in policy
-        .read_only_roots
-        .iter()
-        .cloned()
-        .chain(crate::orchestration::current_read_only_external_roots())
-    {
+    for root in policy.read_only_roots.iter().cloned() {
         let root = normalize_for_policy(&super::resolve_policy_path(&root));
         if !roots.contains(&root) {
             roots.push(root);
