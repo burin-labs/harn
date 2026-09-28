@@ -48,6 +48,7 @@ pub use changed_paths::{
     session_changed_paths, take_session_changed_paths,
 };
 mod journal;
+pub mod reclaim_hooks;
 mod subscribers;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
 pub(crate) use journal::{
@@ -1043,56 +1044,6 @@ pub fn register_event_log_sink(session_id: &str) {
     try_register_event_log(session_id);
 }
 
-/// A hook run when an agent session is closed and removed from the store.
-pub type SessionClosedHook = Arc<dyn Fn(&str) + Send + Sync>;
-
-static NEXT_SESSION_CLOSED_HOOK_ID: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(1);
-static SESSION_CLOSED_HOOKS: std::sync::LazyLock<
-    std::sync::Mutex<BTreeMap<u64, SessionClosedHook>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(BTreeMap::new()));
-
-/// Owns one session-closed hook registration; dropping it unregisters the hook.
-#[must_use = "dropping the registration unregisters the session-closed hook"]
-pub struct SessionClosedHookRegistration {
-    id: u64,
-}
-
-impl Drop for SessionClosedHookRegistration {
-    fn drop(&mut self) {
-        SESSION_CLOSED_HOOKS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&self.id);
-    }
-}
-
-/// Register a hook for resources a session owns for its whole life, such as
-/// background processes that must outlive the agent-loop run that started
-/// them. It fires when the session is closed, not when one run over it ends:
-/// a session a host opened stays open across its turns, while a session an
-/// agent loop opened for itself closes when that loop finishes.
-pub fn register_session_closed_hook(hook: SessionClosedHook) -> SessionClosedHookRegistration {
-    let id = NEXT_SESSION_CLOSED_HOOK_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    SESSION_CLOSED_HOOKS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(id, hook);
-    SessionClosedHookRegistration { id }
-}
-
-fn fire_session_closed_hooks(id: &str) {
-    let hooks = SESSION_CLOSED_HOOKS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .values()
-        .cloned()
-        .collect::<Vec<_>>();
-    for hook in hooks {
-        hook(id);
-    }
-}
-
 /// Close an idle session.
 ///
 /// A live journal owns an unfinished persistence obligation. Dropping that
@@ -1117,8 +1068,7 @@ pub fn close(id: &str) -> bool {
         return false;
     }
     if removed {
-        clear_session_changed_paths(id);
-        fire_session_closed_hooks(id);
+        reclaim_hooks::release_closed_session(id);
     }
     // Cross-thread per-session state must be released too, otherwise
     // pending inbox entries can be delivered to a future session that
@@ -1167,8 +1117,7 @@ pub fn close_with_status(
     if !removed {
         return Ok(false);
     }
-    clear_session_changed_paths(id);
-    fire_session_closed_hooks(id);
+    reclaim_hooks::release_closed_session(id);
     crate::orchestration::agent_inbox::clear_session(id);
     clear_unknown_host_event_warnings(id);
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::SessionClosed {

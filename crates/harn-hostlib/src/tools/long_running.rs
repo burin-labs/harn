@@ -1206,7 +1206,7 @@ pub(crate) fn list_session_handles(session_id: &str) -> VmValue {
 type SessionKillEntry = (Arc<dyn ProcessKiller>, Arc<CancelState>);
 
 /// Cancel all in-flight handles for a given session. Called when the session
-/// closes and when a stop is accepted for it.
+/// closes, when a stop abandons its run, and when a stop is accepted for it.
 pub fn cancel_session_handles(session_id: &str) {
     let to_kill: Vec<SessionKillEntry> = {
         let mut store = HANDLE_STORE
@@ -1240,16 +1240,19 @@ pub fn cancel_session_handles(session_id: &str) {
 /// multiple times (e.g. in tests).
 ///
 /// A handle belongs to its session, so it is cancelled when the session
-/// closes, not when the agent-loop run that started it ends. A host's session
-/// runs one loop per turn, and a later turn must still be able to poll a
-/// command an earlier turn backgrounded.
+/// closes or a stop abandons its run, not when the agent-loop run that started
+/// it ends. A host's session runs one loop per turn, and a later turn must
+/// still be able to poll a command an earlier turn backgrounded.
 pub(crate) fn register_cleanup_hook() {
-    static REGISTERED: OnceLock<harn_vm::agent_sessions::SessionClosedHookRegistration> =
-        OnceLock::new();
+    static REGISTERED: OnceLock<
+        harn_vm::agent_sessions::reclaim_hooks::SessionReclaimHookRegistration,
+    > = OnceLock::new();
     REGISTERED.get_or_init(|| {
-        harn_vm::agent_sessions::register_session_closed_hook(Arc::new(|session_id: &str| {
-            cancel_session_handles(session_id);
-        }))
+        harn_vm::agent_sessions::reclaim_hooks::register_session_reclaim_hook(Arc::new(
+            |session_id: &str| {
+                cancel_session_handles(session_id);
+            },
+        ))
     });
 }
 
