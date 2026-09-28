@@ -4,11 +4,15 @@
  *
  * The normal runtime admits and shapes options from the capability catalog.
  * That is correct for product calls and circular evidence for a probe. The
- * Rust dispatch shim therefore selects a typed probe contract for exactly the
- * chosen option. Option extraction carries that contract through spawned
+ * runtime call boundary selects a typed probe contract for the chosen option.
+ * Option extraction carries that contract through spawned
  * transport work. Every unrelated catalog guard remains active.
  */
 import { parse, parser } from "std/cli/argparse"
+import {
+  PROVIDER_OPTION_PROBE_VALUES,
+  provider_portable_option_catalog_field,
+} from "std/cli/providers/contracts"
 pub import {
   ProviderOptionProbeAttempt,
   ProviderOptionProbeReport,
@@ -17,17 +21,8 @@ pub import {
   provider_option_probe_catalog_claim,
   provider_option_probe_route,
 } from "std/cli/providers/contracts"
-import { provider_portable_option_catalog_field } from "std/cli/providers/contracts"
 
-const __OPTIONS = [
-  "temperature",
-  "top_p",
-  "top_k",
-  "seed",
-  "frequency_penalty",
-  "presence_penalty",
-  "stop",
-]
+const __OPTIONS = PROVIDER_OPTION_PROBE_VALUES.keys()
 
 fn __probe_verdict(value: string) -> ProviderOptionProbeVerdict {
   if value == "accepted" {
@@ -51,86 +46,22 @@ fn __attempt(
   model: string,
   option: ProviderPortableProbeOption,
   max_tokens: int,
+  ungated: bool,
 ) -> unknown {
   const prompt = "Reply with the single word: ok"
-  if option == "temperature" {
-    return try {
-      llm.call(
-        prompt,
-        nil,
-        {provider: provider, model: model, max_tokens: max_tokens, stream: false, temperature: 0.2},
-      )
-    }
-  }
-  if option == "top_p" {
-    return try {
-      llm.call(
-        prompt,
-        nil,
-        {provider: provider, model: model, max_tokens: max_tokens, stream: false, top_p: 0.9},
-      )
-    }
-  }
-  if option == "top_k" {
-    return try {
-      llm.call(
-        prompt,
-        nil,
-        {provider: provider, model: model, max_tokens: max_tokens, stream: false, top_k: 1},
-      )
-    }
-  }
-  if option == "seed" {
-    return try {
-      llm.call(
-        prompt,
-        nil,
-        {provider: provider, model: model, max_tokens: max_tokens, stream: false, seed: 1},
-      )
-    }
-  }
-  if option == "frequency_penalty" {
-    return try {
-      llm.call(
-        prompt,
-        nil,
-        {
-          provider: provider,
-          model: model,
-          max_tokens: max_tokens,
-          stream: false,
-          frequency_penalty: 0.1,
-        },
-      )
-    }
-  }
-  if option == "presence_penalty" {
-    return try {
-      llm.call(
-        prompt,
-        nil,
-        {
-          provider: provider,
-          model: model,
-          max_tokens: max_tokens,
-          stream: false,
-          presence_penalty: 0.1,
-        },
-      )
-    }
+  const options = {
+    provider: provider,
+    model: model,
+    max_tokens: max_tokens,
+    stream: false,
+    [option]: PROVIDER_OPTION_PROBE_VALUES[option],
   }
   return try {
-    llm.call(
-      prompt,
-      nil,
-      {
-        provider: provider,
-        model: model,
-        max_tokens: max_tokens,
-        stream: false,
-        stop: ["harn-option-probe-stop"],
-      },
-    )
+    if ungated {
+      llm.option_probe_call(prompt, option, options)
+    } else {
+      llm.call(prompt, nil, options)
+    }
   }
 }
 
@@ -279,6 +210,28 @@ fn __render(report: ProviderOptionProbeReport) -> string {
     + report.diff.status
 }
 
+/** Observe one option through the current host's credentials and spending authority. */
+pub fn provider_option_probe(
+  llm: HarnessLlm,
+  provider: string,
+  model: string,
+  option: ProviderPortableProbeOption,
+  max_tokens: int = 8,
+  ungated: bool = true,
+) -> ProviderOptionProbeReport {
+  const caps = llm.provider_capabilities(provider, model)
+  return provider_option_probe_report(
+    provider,
+    model,
+    provider_option_probe_route(caps),
+    option,
+    provider_option_probe_catalog_claim(caps, option),
+    ungated,
+    provider_option_probe_classify(__attempt(llm, provider, model, option, max_tokens, ungated)),
+  )
+    + {admission: llm.session_cost()?.admission}
+}
+
 fn main(harness: Harness) {
   const parsed = parse(
     parser(
@@ -308,33 +261,31 @@ fn main(harness: Harness) {
   const option: ProviderPortableProbeOption = option_text
   const provider = to_string(args.provider)
   const model = to_string(args.model)
-  const caps = harness.llm.provider_capabilities(provider, model)
-  const route = provider_option_probe_route(caps)
-  const claimed = provider_option_probe_catalog_claim(caps, option)
   const ungated = args.ungated ?? false
   if args.plan {
+    const caps = harness.llm.provider_capabilities(provider, model)
     const plan = {
       schema_version: "harn.provider_option_probe_plan.v1",
-      endpoint: {provider: provider, model: model, route: route},
+      endpoint: {provider: provider, model: model, route: provider_option_probe_route(caps)},
       option: option,
-      catalog: {field: provider_portable_option_catalog_field(option), claimed_supported: claimed},
+      catalog: {
+        field: provider_portable_option_catalog_field(option),
+        claimed_supported: provider_option_probe_catalog_claim(caps, option),
+      },
       request_count: 1,
       ungated: ungated,
     }
     harness.stdio.println(json_stringify_pretty(plan))
     return
   }
-  const outcome = __attempt(harness.llm, provider, model, option, args.max_tokens)
-  const report: ProviderOptionProbeReport = provider_option_probe_report(
+  const report = provider_option_probe(
+    harness.llm,
     provider,
     model,
-    route,
     option,
-    claimed,
+    args.max_tokens,
     ungated,
-    provider_option_probe_classify(outcome),
   )
-    + {admission: harness.llm.session_cost()?.admission}
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(json_stringify_pretty(report))
   } else {

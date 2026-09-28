@@ -17,6 +17,7 @@ mod catalog_projection;
 mod execution_contract;
 mod healthcheck_builtins;
 mod model_projection;
+mod option_probe;
 mod option_registry;
 mod provider_projection;
 mod rate_limit_builtins;
@@ -60,6 +61,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
 }
 
 const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
+    &option_probe::LLM_OPTION_PROBE_CALL_BUILTIN_DEF,
     &tool_probe::LLM_TOOL_PROBE_BUILTIN_DEF,
     &cache_report::LLM_CACHE_CONFORMANCE_BUILTIN_DEF,
     &PROVIDER_CAPABILITIES_BUILTIN_DEF,

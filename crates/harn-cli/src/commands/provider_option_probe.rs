@@ -1,9 +1,8 @@
 //! `harn provider option-probe` dispatch shim.
 //!
 //! The Harn script owns planning, provider-error classification, and the typed
-//! catalog diff. This shim owns the task-scoped authority a truthful negative
-//! probe needs: suspending catalog shaping for exactly the option named on the
-//! command line and limiting the observation to one physical provider request.
+//! catalog diff. The runtime owns selected-option authority and the one-request
+//! limit; this shim supplies the command's optional conservative allowance.
 
 use crate::cli::ProviderOptionProbeArgs;
 
@@ -18,15 +17,8 @@ pub(crate) async fn run(mut args: ProviderOptionProbeArgs) -> i32 {
         };
     let argv = option_probe_argv(&args);
     let ceiling = args.max_cost_usd;
-    let dispatch =
+    let run =
         crate::dispatch::dispatch_to_embedded_script("providers/option_probe", argv, args.json);
-    let run = async {
-        if args.gated {
-            dispatch.await
-        } else {
-            harn_vm::llm::with_portable_option_probe(args.option.portable_option(), dispatch).await
-        }
-    };
     let Some(ceiling) = ceiling else {
         return run.await;
     };

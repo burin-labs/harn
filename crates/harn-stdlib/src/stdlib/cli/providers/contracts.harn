@@ -9,6 +9,17 @@ pub type ProviderPortableProbeOption = "temperature" \
 
 pub type ProviderOptionProbeVerdict = "accepted" | "rejected" | "inconclusive" | "gated_locally"
 
+/** Default request values for the portable option observation contract. */
+pub const PROVIDER_OPTION_PROBE_VALUES: dict<string, unknown> = {
+  temperature: 0.2,
+  top_p: 0.9,
+  top_k: 1,
+  seed: 1,
+  frequency_penalty: 0.1,
+  presence_penalty: 0.1,
+  stop: ["harn-option-probe-stop"],
+}
+
 pub type ProviderOptionProbeAttempt = {
   verdict: ProviderOptionProbeVerdict,
   measured: bool,

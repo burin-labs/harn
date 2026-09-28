@@ -106,6 +106,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("llm", "model_info"),
     ("llm", "model_ladder"),
     ("llm", "model_tier"),
+    ("llm", "option_probe_call"),
     ("llm", "pick_model"),
     ("llm", "probe_provider_capabilities"),
     ("llm", "provider_capabilities"),

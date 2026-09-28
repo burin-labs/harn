@@ -373,7 +373,7 @@ served-empty response reports one.
 
 Normal calls use the catalog to reject or remove unsupported options before
 egress. A truthful negative probe must let its selected option reach the
-provider, or it can only confirm the catalog against itself. The CLI selects
+provider, or it can only confirm the catalog against itself. The runtime selects
 probe authority in a typed async-task scope, then option extraction captures it
 in the resolved call contract and carries it through spawned transport work.
 It suspends shaping for the selected option only; sibling calls and unrelated
@@ -383,6 +383,25 @@ leaves every guard enabled.
 Pass `--max-cost-usd` to reserve a conservative allowance before the option
 probe request. Its JSON report includes the same `admission` receipt as tool
 probes. Unknown pricing or unsupported billing remains unmeasured.
+
+Scripts use the same planner, classifier, and call boundary without launching
+a child producer:
+
+```harn
+import { provider_option_probe } from "std/cli/providers/option_probe"
+
+fn main(harness: Harness) {
+  const report = provider_option_probe(
+    harness.llm, "openai", "gpt-5.6-luna", "temperature"
+  )
+  harness.stdio.println(json_stringify(report))
+}
+```
+
+This uses the running host's credential grants and spending authority. Pass
+`ungated: false` to keep ordinary catalog guards enabled. The CLI is a caller
+of this helper. The campaign still needs its host-binding cutover before using
+the direct tool and option interfaces.
 
 An `accepted` verdict proves that the endpoint accepted a meaningful,
 non-default value on the wire. It does not prove that a provider honored the

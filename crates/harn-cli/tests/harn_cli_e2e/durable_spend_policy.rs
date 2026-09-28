@@ -40,13 +40,22 @@ async fn invoke(
     .unwrap()
 }
 
-async fn local_provider(root: &std::path::Path) -> (Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+async fn local_provider(
+    root: &std::path::Path,
+) -> (
+    Arc<AtomicUsize>,
+    Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    tokio::task::JoinHandle<()>,
+) {
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured = requests.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let handler = move |axum::Json(body): axum::Json<serde_json::Value>| {
         counter.fetch_add(1, Ordering::SeqCst);
+        captured.lock().unwrap().push(body.clone());
         async move {
             let model = body["model"].clone();
             if body.get("input").is_some() {
@@ -75,13 +84,13 @@ async fn local_provider(root: &std::path::Path) -> (Arc<AtomicUsize>, tokio::tas
     std::fs::write(root.join("providers.toml"), format!(
         "[providers.openai]\nbase_url = \"http://{address}/v1\"\nauth_env = \"PROBE_PROVIDER_KEY\"\n"
     )).unwrap();
-    (calls, server)
+    (calls, requests, server)
 }
 
 #[tokio::test]
 async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
     let root = tempfile::tempdir().unwrap();
-    let (calls, server) = local_provider(root.path()).await;
+    let (calls, _, server) = local_provider(root.path()).await;
     std::fs::write(
         root.path().join("probe.harn"),
         r#"fn main(harness: Harness) {
@@ -179,7 +188,7 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
 async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
     let workspace = tempfile::tempdir().unwrap();
     let authority = tempfile::tempdir().unwrap();
-    let (calls, server) = local_provider(workspace.path()).await;
+    let (calls, _, server) = local_provider(workspace.path()).await;
     write_policy(authority.path(), 2_000_000);
     let ledger = authority.path().join("spend.sqlite");
     let policy = authority.path().join("policy.toml");
@@ -281,4 +290,59 @@ async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
         charged.lifetime_reserved_microusd
     );
     server.abort();
+}
+
+#[tokio::test]
+async fn script_option_probe_preserves_other_guards_and_makes_one_request() {
+    let root = tempfile::tempdir().unwrap();
+    let (calls, requests, server) = local_provider(root.path()).await;
+    write_policy(root.path(), 2_000_000);
+    std::fs::write(
+        root.path().join("option.harn"),
+        r#"
+      import { provider_option_probe } from "std/cli/providers/option_probe"
+      fn main(harness: Harness) {
+        const before = provider_option_probe(
+          harness.llm, "openai", "gpt-5.6-luna", "temperature", 8, false
+        )
+        guard before.probe.verdict == "gated_locally" && before.probe.request_count == 0 else {
+          throw "ordinary option guard did not fire"
+        }
+        const probe = provider_option_probe(
+          harness.llm, "openai", "gpt-5.6-luna", "temperature"
+        )
+        guard probe.probe.verdict == "accepted" && probe.probe.request_count == 1 else {
+          throw json_stringify(probe)
+        }
+        const after = provider_option_probe(
+          harness.llm, "openai", "gpt-5.6-luna", "temperature", 8, false
+        )
+        guard after.probe.verdict == "gated_locally" else { throw "probe authority escaped" }
+        const unrelated = try {
+          harness.llm.option_probe_call("ok", "temperature", {
+            provider: "openai", model: "gpt-5.6-luna", max_tokens: 8,
+            stream: false, temperature: 0.2, top_p: 0.9
+          })
+        }
+        guard is_err(unrelated) else { throw "unselected option guard was bypassed" }
+        harness.stdio.println(json_stringify(probe))
+      }
+    "#,
+    )
+    .unwrap();
+    let output = invoke(root.path(), false, vec!["option.harn".into()]).await;
+    server.abort();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["probe"]["verdict"], "accepted");
+    assert_eq!(report["diff"]["status"], "drift");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["temperature"], 0.2);
 }
