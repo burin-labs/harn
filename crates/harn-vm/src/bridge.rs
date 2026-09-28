@@ -1508,6 +1508,19 @@ impl HostBridge {
         );
     }
 
+    /// Drop the per-call visible-text state a `send_call_progress` stream
+    /// built, for a stream that ends without a `call_end` notification.
+    pub fn finish_call_progress(&self, call_id: &str) {
+        self.visible_call_states
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(call_id);
+        self.visible_call_streams
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(call_id);
+    }
+
     /// Send a `session/update` with `call_end` — signals completion of a call.
     pub fn send_call_end(
         &self,
