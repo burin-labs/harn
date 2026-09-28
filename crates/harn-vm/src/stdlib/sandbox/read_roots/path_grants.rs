@@ -20,7 +20,7 @@ pub(crate) struct PathEntryGrant {
 /// shell resolves a bare name inside the already-confined child, so a tool
 /// installed outside the preset toolchain homes was refused even when it was
 /// first on `PATH`. setup-node on a self-hosted runner installs `node` under
-/// `~/actions-runners/<runner>/_work/_tool`, and every sandboxed `node` there
+/// the runner's `_work/_tool` cache, and every sandboxed `node` there
 /// exited 126 (harn#8998).
 ///
 /// Outside `home`, an entry grants its install prefix: the parent of a `bin`
