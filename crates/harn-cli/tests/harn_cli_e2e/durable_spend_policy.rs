@@ -322,7 +322,7 @@ async fn script_option_probe_preserves_other_guards_and_makes_one_request() {
         const unrelated = try {
           harness.llm.option_probe_call("ok", "temperature", {
             provider: "openai", model: "gpt-5.6-luna", max_tokens: 8,
-            stream: false, temperature: 0.2, top_p: 0.9
+            stream: false, temperature: 0.2, top_k: 1
           })
         }
         guard is_err(unrelated) else { throw "unselected option guard was bypassed" }
@@ -343,8 +343,8 @@ async fn script_option_probe_preserves_other_guards_and_makes_one_request() {
     assert_eq!(report["probe"]["verdict"], "accepted");
     assert_eq!(report["probe"]["attempt"]["reason"], "served_empty");
     assert_eq!(report["diff"]["status"], "drift");
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
     let requests = requests.lock().unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "{requests:?}");
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0]["temperature"], 0.2);
 }
