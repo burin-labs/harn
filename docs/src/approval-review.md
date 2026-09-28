@@ -137,7 +137,10 @@ harn run scripts/run_approval_review_calibration.harn -- --policy reviewer-polic
 ```
 
 Omitted fields inherit the bundled policy through `approval_review_policy`.
-The receipt records the effective `policy_sha256` and its source. An unreadable
+The receipt records the effective `policy_sha256` and its source. Add
+`--diagnostics` to include Harn's canonical reviewer trace with raw verdicts,
+schema retries, and validation failures. Each case also retains its failure
+detail when the reviewer cannot answer. An unreadable
 or malformed overlay fails the run before asking the reviewer.
 
 The corpus pairs the same command under a goal that authorizes it and one that
