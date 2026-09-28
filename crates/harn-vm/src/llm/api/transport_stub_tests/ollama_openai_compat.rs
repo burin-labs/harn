@@ -67,7 +67,13 @@ fn install_ollama_openai_compat(addr: std::net::SocketAddr) {
             ..Default::default()
         },
     );
-    crate::llm_config::set_user_overrides(Some(providers));
+    // Catalog export/import must retain the adapter, or the same route falls
+    // back to native NDJSON when a downstream host consumes its projection.
+    let catalog = crate::provider_catalog::artifact_embedded(Some(&providers), None);
+    let catalog = serde_json::from_value(serde_json::to_value(catalog).unwrap()).unwrap();
+    crate::llm_config::set_user_overrides(Some(crate::provider_catalog::config_from_artifact(
+        &catalog,
+    )));
     crate::llm::capabilities::set_user_overrides_toml(
         r#"
 [[provider.ollama]]

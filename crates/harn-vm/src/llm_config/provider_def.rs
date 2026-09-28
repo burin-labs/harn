@@ -7,16 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
-/// Request/response adapter for provider chat endpoints whose request body and
-/// response stream use different conventions than the model's default wire
-/// dialect.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ChatApiAdapter {
-    /// Ollama model route using the supported OpenAI Chat Completions request
-    /// fields and SSE response envelope.
-    OllamaOpenAiCompat,
-}
+pub use harn_provider_catalog::ChatApiAdapter;
 
 /// Versioned managed-supply provider declaration.
 ///
