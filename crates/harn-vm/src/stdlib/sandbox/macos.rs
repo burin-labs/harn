@@ -155,7 +155,7 @@ fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> Strin
     // Rendered with the other toolchain reads, so the read denylist emitted at
     // the end of the profile beats these grants too (last match wins).
     developer_toolchain_read_roots.extend(
-        super::process_sandbox_path_entry_grants(policy)
+        super::read_roots::path_grants::process_sandbox_path_entry_grants(policy)
             .into_iter()
             .map(|grant| grant.root),
     );

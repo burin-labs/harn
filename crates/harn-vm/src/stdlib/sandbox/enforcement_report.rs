@@ -102,7 +102,7 @@ fn process_filesystem_sandbox_report_matches_live_escape() {
     // receipt says which directory and why rather than leaving it implied.
     let mut receipt = format!("{marker}\n");
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    for grant in super::process_sandbox_path_entry_grants(
+    for grant in super::read_roots::path_grants::process_sandbox_path_entry_grants(
         &current_execution_policy().expect("probe policy is pushed"),
     ) {
         receipt.push_str(&format!(

@@ -511,7 +511,7 @@ fn landlock_profile(
     }
     // Through `push_rule`, so the credential denylist is subtracted from these
     // exactly as from every other grant.
-    for grant in super::process_sandbox_path_entry_grants(policy) {
+    for grant in super::read_roots::path_grants::process_sandbox_path_entry_grants(policy) {
         push_rule(&mut profile, grant.root, read_only_access(), true)?;
     }
     let workspace_access = workspace_access(policy);
@@ -1442,6 +1442,10 @@ use netns::{namespaced_loopback_grant, namespaced_outcome, resolve_netns_launche
 #[cfg(test)]
 #[path = "linux_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "linux_path_grant_tests.rs"]
+mod path_grant_tests;
 
 #[cfg(test)]
 #[path = "netns_tests.rs"]
