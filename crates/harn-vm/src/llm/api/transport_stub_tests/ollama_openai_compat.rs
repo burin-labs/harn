@@ -93,58 +93,62 @@ fn ollama_openai_compat_maps_supported_fields_and_reads_terminal_usage() {
     let observed_request = Arc::new(Mutex::new(None));
     let request_count_server = request_count.clone();
     let observed_request_server = observed_request.clone();
-    let server = spawn_llm_stub("Ollama OpenAI-compatible SSE", move |stream| {
-        use std::io::Write;
-        request_count_server.fetch_add(1, Ordering::SeqCst);
-        let (headers, request) = read_http_request(stream);
-        *observed_request_server.lock().expect("request lock") =
-            Some(serde_json::json!({"headers": headers, "body": request}));
-        // Preserve the captured 24-frame grammar without publishing project
-        // content: 22 deltas, a content-terminal frame, then separate usage.
-        let mut body = String::new();
-        for fragment in [
-            "Local",
-            " ",
-            "response",
-            " ",
-            "through",
-            " ",
-            "the",
-            " ",
-            "shared",
-            " ",
-            "Harn",
-            " ",
-            "route",
-            " ",
-            "preserves",
-            " ",
-            "text",
-            " ",
-            "and",
-            " ",
-            "usage",
-            ".",
-        ] {
-            let frame = serde_json::json!({
-                "id": "chatcmpl-captured", "object": "chat.completion.chunk",
-                "model": "devstral-small-2:24b",
-                "choices": [{"index": 0, "delta": {"content": fragment}, "finish_reason": null}]
-            });
-            body.push_str(&format!("data: {frame}\n\n"));
-        }
-        body.push_str(concat!(
+    let server = spawn_llm_stub_many(
+        "Ollama OpenAI-compatible SSE",
+        2,
+        move |_attempt, stream| {
+            use std::io::Write;
+            request_count_server.fetch_add(1, Ordering::SeqCst);
+            let (headers, request) = read_http_request(stream);
+            *observed_request_server.lock().expect("request lock") =
+                Some(serde_json::json!({"headers": headers, "body": request}));
+            // Preserve the captured 24-frame grammar without publishing project
+            // content: 22 deltas, a content-terminal frame, then separate usage.
+            let mut body = String::new();
+            for fragment in [
+                "Local",
+                " ",
+                "response",
+                " ",
+                "through",
+                " ",
+                "the",
+                " ",
+                "shared",
+                " ",
+                "Harn",
+                " ",
+                "route",
+                " ",
+                "preserves",
+                " ",
+                "text",
+                " ",
+                "and",
+                " ",
+                "usage",
+                ".",
+            ] {
+                let frame = serde_json::json!({
+                    "id": "chatcmpl-captured", "object": "chat.completion.chunk",
+                    "model": "devstral-small-2:24b",
+                    "choices": [{"index": 0, "delta": {"content": fragment}, "finish_reason": null}]
+                });
+                body.push_str(&format!("data: {frame}\n\n"));
+            }
+            body.push_str(concat!(
             "data: {\"id\":\"chatcmpl-captured\",\"object\":\"chat.completion.chunk\",\"model\":\"devstral-small-2:24b\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
             "data: {\"id\":\"chatcmpl-captured\",\"object\":\"chat.completion.chunk\",\"model\":\"devstral-small-2:24b\",\"choices\":[],\"usage\":{\"prompt_tokens\":1240,\"completion_tokens\":23,\"total_tokens\":1263}}\n\n",
             "data: [DONE]\n\n"
         ));
-        write!(
+            write!(
             stream,
             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
         )
         .expect("write captured Ollama SSE response");
-    });
+        },
+    );
     install_ollama_openai_compat(server.addr());
 
     let runtime = tokio::runtime::Builder::new_current_thread()
