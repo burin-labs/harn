@@ -113,7 +113,7 @@ fn main(harness: Harness) {
 ```
 
 The receipt is the same `runtime_content_fingerprint` value published by
-[`harn version --json`](../cli-json-contract.md#version).
+[`harn version --json`](../cli-json-contract.md).
 It identifies runtime content, not the host's provider configuration or
 credential view. Those inputs need their own binding in measurement receipts.
 
