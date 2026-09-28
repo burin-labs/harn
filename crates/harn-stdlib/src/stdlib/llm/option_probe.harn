@@ -198,7 +198,11 @@ pub fn provider_option_probe_report(
   }
 }
 
-/** Observe one option through the current host's credentials and spending authority. */
+/**
+ * Observe one option through the current host's credentials and spending authority.
+ * @effects: [llm]
+ * @errors: []
+ */
 pub fn provider_option_probe(
   llm: HarnessLlm,
   provider: string,

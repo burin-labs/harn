@@ -348,3 +348,34 @@ async fn script_option_probe_preserves_other_guards_and_makes_one_request() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0]["temperature"], 0.2);
 }
+
+#[tokio::test]
+async fn script_option_probe_does_not_repeat_for_output_validation() {
+    let root = tempfile::tempdir().unwrap();
+    let (calls, requests, server) = local_provider(root.path(), "{}").await;
+    write_policy(root.path(), 2_000_000);
+    std::fs::write(
+        root.path().join("schema.harn"),
+        r#"fn main(harness: Harness) {
+          const probe = try {
+            harness.llm.option_probe_call("Reply with JSON", "temperature", {
+              provider: "openai", model: "gpt-5.6-luna", max_tokens: 8,
+              stream: false, temperature: 0.2, schema_retries: 2,
+              output: {schema: {type: "object", required: ["ok"],
+                properties: {ok: {type: "boolean"}}}, strict: true, validation: "error"}
+            })
+          }
+          guard is_err(probe) else { throw "invalid output passed validation" }
+        }"#,
+    )
+    .unwrap();
+    let output = invoke(root.path(), false, vec!["schema.harn".into()]).await;
+    server.abort();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let requests = requests.lock().unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "{requests:?}");
+}
