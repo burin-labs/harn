@@ -43,6 +43,7 @@ async fn invoke(
 async fn local_provider(
     root: &std::path::Path,
     response_text: &'static str,
+    response_status: axum::http::StatusCode,
 ) -> (
     Arc<AtomicUsize>,
     Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
@@ -63,18 +64,27 @@ async fn local_provider(
                 let reply = serde_json::json!({"id": "fixture", "model": model,
                         "status": "completed", "output": [{"type": "message", "role": "assistant",
                         "content": [{"type": "output_text", "text": response_text}]}]});
-                ([("content-type", "application/json")], reply.to_string())
+                (
+                    response_status,
+                    [("content-type", "application/json")],
+                    reply.to_string(),
+                )
             } else if body["stream"] == serde_json::json!(true) {
                 let chunk = serde_json::json!({"model": model, "choices": [{"index": 0,
                         "delta": {"content": response_text}, "finish_reason": "stop"}]});
                 (
+                    response_status,
                     [("content-type", "text/event-stream")],
                     format!("data: {chunk}\n\ndata: [DONE]\n\n"),
                 )
             } else {
                 let reply = serde_json::json!({"model": model, "choices": [{"index": 0,
                         "message": {"role": "assistant", "content": response_text}, "finish_reason": "stop"}]});
-                ([("content-type", "application/json")], reply.to_string())
+                (
+                    response_status,
+                    [("content-type", "application/json")],
+                    reply.to_string(),
+                )
             }
         }
     };
@@ -91,7 +101,7 @@ async fn local_provider(
 #[tokio::test]
 async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
     let root = tempfile::tempdir().unwrap();
-    let (calls, _, server) = local_provider(root.path(), "ok").await;
+    let (calls, _, server) = local_provider(root.path(), "ok", axum::http::StatusCode::OK).await;
     std::fs::write(
         root.path().join("probe.harn"),
         r#"fn main(harness: Harness) {
@@ -189,7 +199,8 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
 async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
     let workspace = tempfile::tempdir().unwrap();
     let authority = tempfile::tempdir().unwrap();
-    let (calls, _, server) = local_provider(workspace.path(), "ok").await;
+    let (calls, _, server) =
+        local_provider(workspace.path(), "ok", axum::http::StatusCode::OK).await;
     write_policy(authority.path(), 2_000_000);
     let ledger = authority.path().join("spend.sqlite");
     let policy = authority.path().join("policy.toml");
@@ -296,7 +307,8 @@ async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
 #[tokio::test]
 async fn script_option_probe_preserves_other_guards_and_makes_one_request() {
     let root = tempfile::tempdir().unwrap();
-    let (calls, requests, server) = local_provider(root.path(), "").await;
+    let (calls, requests, server) =
+        local_provider(root.path(), "", axum::http::StatusCode::OK).await;
     write_policy(root.path(), 2_000_000);
     std::fs::write(
         root.path().join("option.harn"),
@@ -352,7 +364,8 @@ async fn script_option_probe_preserves_other_guards_and_makes_one_request() {
 #[tokio::test]
 async fn script_option_probe_does_not_repeat_for_output_validation() {
     let root = tempfile::tempdir().unwrap();
-    let (calls, requests, server) = local_provider(root.path(), "{}").await;
+    let (calls, requests, server) =
+        local_provider(root.path(), "{}", axum::http::StatusCode::OK).await;
     write_policy(root.path(), 2_000_000);
     std::fs::write(
         root.path().join("schema.harn"),
@@ -378,4 +391,45 @@ async fn script_option_probe_does_not_repeat_for_output_validation() {
     );
     let requests = requests.lock().unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1, "{requests:?}");
+}
+
+#[tokio::test]
+async fn script_option_probe_does_not_race_or_fail_over() {
+    let root = tempfile::tempdir().unwrap();
+    let (calls, requests, server) = local_provider(
+        root.path(),
+        "fixture failure",
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+    )
+    .await;
+    write_policy(root.path(), 2_000_000);
+    std::fs::write(
+        root.path().join("routing.harn"),
+        r#"fn main(harness: Harness) {
+          const policy = harness.llm.routing_policy({
+            chain: [{provider: "openai", model: "gpt-5.6-luna"},
+              {provider: "openai", model: "gpt-5.4-mini"}],
+            failover: {on_status: [500], max_attempts: 3},
+            latency: {race_after_ms: 1}
+          })
+          const probe = try {
+            harness.llm.option_probe_call("ok", "temperature", {
+              provider: "openai", model: "gpt-5.6-luna", max_tokens: 8,
+              stream: false, temperature: 0.2, routing: policy
+            })
+          }
+          guard is_err(probe) else { throw "failed provider was accepted" }
+        }"#,
+    )
+    .unwrap();
+    let output = invoke(root.path(), false, vec!["routing.harn".into()]).await;
+    server.abort();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let requests = requests.lock().unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "{requests:?}");
+    assert_eq!(requests[0]["model"], "gpt-5.6-luna");
 }
