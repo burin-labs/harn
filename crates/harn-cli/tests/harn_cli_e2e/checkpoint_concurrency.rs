@@ -20,11 +20,11 @@ fn concurrent_processes_retain_one_checkpoint_candidate() {
     };
     std::fs::write(
         root.path().join("candidate.harn"),
-        r#"fn main(harness: Harness) {
+        r"fn main(harness: Harness) {
           const identity = harness.fs.canonicalize_existing(argv[1])
           const receipt = harness.runtime.checkpoint_insert(sha256(identity), json_parse(argv[0]))
           harness.stdio.println(json_stringify(receipt + {identity: identity}))
-        }"#,
+        }",
     )
     .unwrap();
     let ready = std::sync::Arc::new(std::sync::Barrier::new(8));
