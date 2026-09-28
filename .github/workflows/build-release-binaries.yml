@@ -159,6 +159,12 @@ jobs:
           # scripts/check_ci_cache_policy.harn enforces this.
           fetch-depth: 0
 
+      - name: Install the source candidate decision runtime
+        if: inputs.source_candidate
+        uses: ./.github/actions/setup-harn
+        with:
+          version-file: .harn-bootstrap-version
+
       - name: Detect release build inputs
         id: release-build-inputs
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -232,26 +238,39 @@ jobs:
               --targets "$targets"
           }
 
-          if [[ "$INPUT_BENCHMARK_CARGO_BLOAT" == "true" && "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
+          if [[ "${INPUT_SOURCE_CANDIDATE:-false}" != true && "$INPUT_BENCHMARK_CARGO_BLOAT" == "true" && "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
             echo "::error::benchmark_cargo_bloat requires benchmark_only=true"
             exit 1
           fi
-          if [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" || -n "$INPUT_TARGETS" ]] &&
+          if [[ "${INPUT_SOURCE_CANDIDATE:-false}" != true ]] &&
+             [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" || -n "$INPUT_TARGETS" ]] &&
              [[ "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
             echo "::error::targets, benchmark_source_ref, and benchmark_source_sha require benchmark_only=true"
             exit 1
           fi
           if [[ "${INPUT_SOURCE_CANDIDATE:-false}" == "true" ]]; then
-            if [[ "$EVENT_NAME" != "$HARN_SOURCE_CANDIDATE_EVENT" ||
-                  "$REF_TYPE" != "$HARN_SOURCE_CANDIDATE_REF_TYPE" ||
-                  "$REF_NAME" != "$HARN_SOURCE_CANDIDATE_REF_NAME" ||
-                  "$INPUT_WARM_CACHE_ONLY" == true || "$INPUT_BENCHMARK_ONLY" == true ||
-                  "$RUNNER_PROFILE" != "$HARN_SOURCE_CANDIDATE_RUNNER_PROFILE" ]]; then
-              echo "::error::source_candidate requires an exclusive workflow_dispatch on main with policy runners"
+            SOURCE_REQUEST="${GITHUB_OUTPUT}.source-request.json"
+            SOURCE_DECISION="${GITHUB_OUTPUT}.source-decision.json"
+            jq -n --arg event "$EVENT_NAME" --arg ref_type "$REF_TYPE" \
+              --arg ref_name "$REF_NAME" --arg runner_profile "$RUNNER_PROFILE" \
+              --argjson warm_cache_only "$INPUT_WARM_CACHE_ONLY" \
+              --argjson benchmark_only "$INPUT_BENCHMARK_ONLY" \
+              --arg targets "$INPUT_TARGETS" --arg benchmark_source_ref "$INPUT_BENCHMARK_SOURCE_REF" \
+              --arg benchmark_source_sha "$INPUT_BENCHMARK_SOURCE_SHA" \
+              --argjson benchmark_cargo_bloat "$INPUT_BENCHMARK_CARGO_BLOAT" \
+              '{event:$event,ref_type:$ref_type,ref_name:$ref_name,runner_profile:$runner_profile,
+                warm_cache_only:$warm_cache_only,benchmark_only:$benchmark_only,targets:$targets,
+                benchmark_source_ref:$benchmark_source_ref,benchmark_source_sha:$benchmark_source_sha,
+                benchmark_cargo_bloat:$benchmark_cargo_bloat}' > "$SOURCE_REQUEST"
+            if ! harn run --standalone --no-sandbox scripts/release_contract.harn -- \
+                --source-candidate-request "$SOURCE_REQUEST" > "$SOURCE_DECISION"; then
+              echo "::error::Source candidate request refused: $(cat "$SOURCE_DECISION")"
               exit 1
             fi
-            BUILD_MODE="$HARN_SOURCE_CANDIDATE_BUILD_MODE"
-            CANDIDATE_PURPOSE="$HARN_SOURCE_CANDIDATE_PURPOSE"
+            BUILD_MODE="$(jq -er '.build_mode' "$SOURCE_DECISION")"
+            CANDIDATE_PURPOSE="$(jq -er '.candidate_purpose' "$SOURCE_DECISION")"
+            printf 'source_candidate_decision=%s\n' "$(cat "$SOURCE_DECISION")" >> "$GITHUB_OUTPUT"
+            printf '\nSource candidate decision: %s\n' "$(cat "$SOURCE_DECISION")" >> "$GITHUB_STEP_SUMMARY"
             REF="$GITHUB_SHA"
             CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"

@@ -24,6 +24,7 @@ repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$repo/.github"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" "$repo/scripts/lib/"
 cp "$root/scripts/release_contract.env" "$root/scripts/release_runner_matrix.sh" "$repo/scripts/"
+cp "$root/scripts/release_contract.harn" "$root/scripts/path_visibility.harn" "$repo/scripts/"
 cp "$root/.github/release-runner-policy.json" "$repo/.github/"
 git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Trigger Test"
@@ -159,7 +160,9 @@ resolve source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true
   || fail "explicit source candidate does not reuse the signed archive producer"
 [[ "$(matrix_targets source)" == "$(matrix_targets warm)" ]] \
   || fail "source candidate does not cover the existing full matrix"
-for invalid_source in branch tag conflict benchmark profile targets event; do
+[[ "$(output source source_candidate_decision | jq -er '.accepted and .reason == "accepted"')" == true ]] \
+  || fail "actual source resolver did not emit its typed admission receipt"
+for invalid_source in branch tag conflict benchmark profile targets event source_ref source_sha bloat; do
   case "$invalid_source" in
     branch) invalid_args=(REF_NAME=topic) ;;
     tag) invalid_args=(REF_TYPE=tag) ;;
@@ -168,11 +171,17 @@ for invalid_source in branch tag conflict benchmark profile targets event; do
     profile) invalid_args=(INPUT_RUNNER_PROFILE=standard) ;;
     targets) invalid_args=(INPUT_TARGETS=aarch64-apple-darwin) ;;
     event) invalid_args=(EVENT_NAME=push) ;;
+    source_ref) invalid_args=(INPUT_BENCHMARK_SOURCE_REF=topic) ;;
+    source_sha) invalid_args=(INPUT_BENCHMARK_SOURCE_SHA=0123456789012345678901234567890123456789) ;;
+    bloat) invalid_args=(INPUT_BENCHMARK_CARGO_BLOAT=true) ;;
   esac
   if run_resolver "source_$invalid_source" EVENT_NAME=workflow_dispatch \
        INPUT_SOURCE_CANDIDATE=true "${invalid_args[@]}"; then
     fail "source candidate accepted invalid $invalid_source context"
   fi
+  [[ "$(jq -er '.accepted == false and .reason != "accepted" and .build_mode == "none"' \
+      "$tmp/source_$invalid_source.outputs.source-decision.json")" == true ]] \
+    || fail "invalid source $invalid_source omitted its typed refusal receipt"
 done
 
 # Execute promotion's real version decision at that development commit. An

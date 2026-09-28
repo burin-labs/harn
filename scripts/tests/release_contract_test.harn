@@ -3,6 +3,8 @@ import {
   release_contract,
   release_contract_parse,
   release_contract_source_errors,
+  source_candidate_decision,
+  source_candidate_decision_parse,
 } from "../release_contract"
 
 pipeline test_generated_release_contract_is_typed(harness: Harness, task: unknown) {
@@ -27,4 +29,50 @@ pipeline test_release_contract_rejects_unknown_fields(task: unknown) {
 
 pipeline test_release_contract_matches_owning_sources(harness: Harness, task: unknown) {
   assert_eq(release_contract_source_errors(harness.fs, "../.."), [])
+}
+
+pipeline test_source_candidate_decision_reports_admission_and_refusal(task: unknown) {
+  const request = {
+    event: "workflow_dispatch",
+    ref_type: "branch",
+    ref_name: "main",
+    runner_profile: "policy",
+    warm_cache_only: false,
+    benchmark_only: false,
+    targets: "",
+    benchmark_source_ref: "",
+    benchmark_source_sha: "",
+    benchmark_cargo_bloat: false,
+  }
+  const admitted = source_candidate_decision(request)
+  assert_eq(admitted.accepted, true)
+  assert_eq(admitted.reason, "accepted")
+  assert_eq(admitted.build_mode, "candidate")
+  assert_eq(admitted.candidate_purpose, "source")
+  const invalid = [
+    request + {event: "push"},
+    request + {ref_name: "topic"},
+    request + {ref_type: "tag"},
+    request + {runner_profile: "standard"},
+    request + {warm_cache_only: true},
+    request + {benchmark_only: true},
+    request + {targets: "aarch64-apple-darwin"},
+    request + {benchmark_source_ref: "main"},
+    request + {benchmark_source_sha: "0123456789012345678901234567890123456789"},
+    request + {benchmark_cargo_bloat: true},
+  ]
+  for conflict in invalid {
+    const refused = source_candidate_decision(conflict)
+    assert_eq(refused.accepted, false)
+    assert(refused.reason != "accepted")
+    assert_eq(refused.build_mode, "none")
+    assert_eq(refused.candidate_purpose, "none")
+  }
+  for malformed in [nil, {}, request + {unknown_field: true}, request + {warm_cache_only: "false"}] {
+    const refused = source_candidate_decision_parse(malformed)
+    assert_eq(refused.accepted, false)
+    assert_eq(refused.reason, "invalid_request")
+    assert_eq(refused.build_mode, "none")
+  }
+  assert_eq(source_candidate_decision_parse(json_parse(json_stringify(request))), admitted)
 }
