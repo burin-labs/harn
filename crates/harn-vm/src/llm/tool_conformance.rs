@@ -1016,7 +1016,7 @@ async fn execute_live_probe_case(
             }
         };
         let deadline = std::time::Duration::from_secs(timeout_secs);
-        request.timeout = Some(deadline);
+        request.timeout = Some(timeout_secs);
         let result = match tokio::time::timeout(
             deadline,
             crate::llm::api::probe_llm_request(&request),
