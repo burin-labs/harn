@@ -21,6 +21,14 @@ pub type ReleaseContract = {
   versions: ReleaseVersionContract,
   changelog: {published_heading: "top_version_heading", candidate_fragments: "must_be_folded"},
   tag: ReleaseTagContract,
+  source_candidate: {
+    event: "workflow_dispatch",
+    ref_type: "branch",
+    ref_name: "main",
+    runner_profile: "policy",
+    build_mode: "candidate",
+    purpose: "source",
+  },
 }
 
 /** Harn's release semantics, projected for orchestrators and recovery tools. */
@@ -37,6 +45,14 @@ pub fn release_contract() -> ReleaseContract {
       anchor: "certified_candidate_commit",
       release_subject_template: "Release v{version}",
       candidate_trailer: "Harn-Release-Candidate",
+    },
+    source_candidate: {
+      event: "workflow_dispatch",
+      ref_type: "branch",
+      ref_name: "main",
+      runner_profile: "policy",
+      build_mode: "candidate",
+      purpose: "source",
     },
   }
 }
@@ -70,6 +86,16 @@ pub fn release_contract_schema() {
           anchor: schema_literal("certified_candidate_commit"),
           release_subject_template: schema_literal("Release v{version}"),
           candidate_trailer: schema_literal("Harn-Release-Candidate"),
+        },
+      ),
+      source_candidate: schema_closed_object(
+        {
+          event: schema_literal("workflow_dispatch"),
+          ref_type: schema_literal("branch"),
+          ref_name: schema_literal("main"),
+          runner_profile: schema_literal("policy"),
+          build_mode: schema_literal("candidate"),
+          purpose: schema_literal("source"),
         },
       ),
     },
@@ -130,6 +156,24 @@ fn main(harness: Harness) {
   const shell_path = path_join(root, shell_output)
   const shell_rendered = "HARN_RELEASE_DEVELOPMENT_PRERELEASE="
     + contract.versions.development_prerelease
+    + "\n"
+    + "HARN_SOURCE_CANDIDATE_EVENT="
+    + contract.source_candidate.event
+    + "\n"
+    + "HARN_SOURCE_CANDIDATE_REF_TYPE="
+    + contract.source_candidate.ref_type
+    + "\n"
+    + "HARN_SOURCE_CANDIDATE_REF_NAME="
+    + contract.source_candidate.ref_name
+    + "\n"
+    + "HARN_SOURCE_CANDIDATE_RUNNER_PROFILE="
+    + contract.source_candidate.runner_profile
+    + "\n"
+    + "HARN_SOURCE_CANDIDATE_BUILD_MODE="
+    + contract.source_candidate.build_mode
+    + "\n"
+    + "HARN_SOURCE_CANDIDATE_PURPOSE="
+    + contract.source_candidate.purpose
     + "\n"
   if check {
     const loaded = read_json_result(harness.fs, path)

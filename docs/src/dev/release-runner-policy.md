@@ -21,6 +21,17 @@ mode requires an explicit target subset and either `standard` or `fast`. It
 compiles and runs the binary-size gate, but cannot sign, notarize, package,
 upload, or save a cache.
 
+The `source_candidate` dispatch input defaults to false. When true, it requires
+the main branch and policy runners, excludes warm and benchmark inputs, and
+uses the same five-target candidate builder, signing, notarization,
+attestations, manifest and checks as a release candidate. Its context records
+`candidate_purpose=source`, and its notes identify the unreleased commit.
+Promotion accepts only stable version-changing main pushes, so this dispatch
+does not publish a tag or release. The request policy lives in
+`scripts/release_contract.harn`, with generated JSON and shell projections;
+scheduled source production and downstream artifact consumption are separate
+from this explicit producer input.
+
 ```bash
 gh workflow run build-release-binaries.yml \
   --ref <branch> \

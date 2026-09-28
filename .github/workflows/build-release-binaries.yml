@@ -26,7 +26,9 @@ name: Build release binaries
 #
 #   3. schedule, daily — safety-net warm-up against GitHub's 7-day eviction.
 #
-#   4. workflow_dispatch — warm_cache_only, or benchmark_only size gates.
+#   4. workflow_dispatch — warm_cache_only, benchmark_only size gates, or an
+#      explicit source_candidate on main. Source candidates reuse the full
+#      signed producer and checks; dispatches cannot trigger promotion.
 #
 #   5. merge_group whose head is a release commit — candidate mode at the
 #      merge group's commit, which is the commit that lands on main, so the
@@ -52,6 +54,11 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:
+      source_candidate:
+        description: 'Build, sign, notarize and attest the main source commit without publishing a release.'
+        required: false
+        type: boolean
+        default: false
       warm_cache_only:
         description: 'Build the release matrix on main only to refresh default-branch Rust caches.'
         required: false
@@ -126,6 +133,7 @@ jobs:
       candidate_source_sha: ${{ steps.resolve.outputs.candidate_source_sha }}
       build_matrix: ${{ steps.resolve.outputs.build_matrix }}
       build_mode: ${{ steps.resolve.outputs.build_mode }}
+      candidate_purpose: ${{ steps.resolve.outputs.candidate_purpose }}
       runner_profile: ${{ steps.resolve.outputs.runner_profile }}
       cli_aot_primary_runner: ${{ steps.resolve.outputs.cli_aot_primary_runner }}
       cli_aot_standard_runner: ${{ steps.resolve.outputs.cli_aot_standard_runner }}
@@ -181,6 +189,7 @@ jobs:
       - name: Resolve release context
         id: resolve
         env:
+          INPUT_SOURCE_CANDIDATE: ${{ inputs.source_candidate && 'true' || 'false' }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
           INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
@@ -206,6 +215,7 @@ jobs:
           SHOULD_PACKAGE_ARCHIVES=false
           CANDIDATE_SOURCE_SHA=""
           BUILD_MODE=""
+          CANDIDATE_PURPOSE=none
           RUNNER_PROFILE="${INPUT_RUNNER_PROFILE:-policy}"
           BUILD_MATRIX="[]"
           CLI_AOT_PRIMARY_RUNNER="$(jq -er '.jobs.cli_aot.primary | select(type == "string" and length > 0)' .github/release-runner-policy.json)"
@@ -231,7 +241,24 @@ jobs:
             echo "::error::targets, benchmark_source_ref, and benchmark_source_sha require benchmark_only=true"
             exit 1
           fi
-          if [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
+          if [[ "${INPUT_SOURCE_CANDIDATE:-false}" == "true" ]]; then
+            if [[ "$EVENT_NAME" != "$HARN_SOURCE_CANDIDATE_EVENT" ||
+                  "$REF_TYPE" != "$HARN_SOURCE_CANDIDATE_REF_TYPE" ||
+                  "$REF_NAME" != "$HARN_SOURCE_CANDIDATE_REF_NAME" ||
+                  "$INPUT_WARM_CACHE_ONLY" == true || "$INPUT_BENCHMARK_ONLY" == true ||
+                  "$RUNNER_PROFILE" != "$HARN_SOURCE_CANDIDATE_RUNNER_PROFILE" ]]; then
+              echo "::error::source_candidate requires an exclusive workflow_dispatch on main with policy runners"
+              exit 1
+            fi
+            BUILD_MODE="$HARN_SOURCE_CANDIDATE_BUILD_MODE"
+            CANDIDATE_PURPOSE="$HARN_SOURCE_CANDIDATE_PURPOSE"
+            REF="$GITHUB_SHA"
+            CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
+            BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
+            SHOULD_BUILD_BINARIES=true
+            SHOULD_PACKAGE_ARCHIVES=true
+            echo "::notice::Building signed source candidate $GITHUB_SHA with the existing full candidate producer. This dispatch cannot publish a release."
+          elif [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::benchmark_only is only valid for workflow_dispatch"
               exit 1
@@ -391,8 +418,12 @@ jobs:
             BUILD_MODE=none
             echo "::notice::Pull requests build nothing; a release's merge group builds its candidate."
           elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "::error::workflow_dispatch requires warm_cache_only=true or benchmark_only=true"
+            echo "::error::workflow_dispatch requires source_candidate=true, warm_cache_only=true or benchmark_only=true"
             exit 1
+          fi
+
+          if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == none ]]; then
+            CANDIDATE_PURPOSE=release
           fi
 
           {
@@ -402,6 +433,7 @@ jobs:
             echo "should_package_archives=$SHOULD_PACKAGE_ARCHIVES"
             echo "candidate_source_sha=$CANDIDATE_SOURCE_SHA"
             echo "build_mode=$BUILD_MODE"
+            echo "candidate_purpose=$CANDIDATE_PURPOSE"
             echo "runner_profile=$RUNNER_PROFILE"
             echo "cli_aot_primary_runner=$CLI_AOT_PRIMARY_RUNNER"
             echo "cli_aot_standard_runner=$CLI_AOT_STANDARD_RUNNER"
@@ -418,6 +450,7 @@ jobs:
             echo "| Ref | $REF |"
             echo "| Version | $VERSION |"
             echo "| Build mode | $BUILD_MODE |"
+            echo "| Candidate purpose | $CANDIDATE_PURPOSE |"
             echo "| Runner profile | $RUNNER_PROFILE |"
             echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
             echo "| Package archives | $SHOULD_PACKAGE_ARCHIVES |"
@@ -1498,6 +1531,7 @@ jobs:
           SOURCE_COMMIT: ${{ needs.setup.outputs.candidate_source_sha }}
           POLICY_REVISION: ${{ github.workflow_sha }}
           VERSION: ${{ needs.setup.outputs.version }}
+          CANDIDATE_PURPOSE: ${{ needs.setup.outputs.candidate_purpose }}
         run: |
           set -euo pipefail
           downloads="$RUNNER_TEMP/candidate-artifacts"
@@ -1532,9 +1566,14 @@ jobs:
             --artifacts-dir "$archives" \
             --tag "v$VERSION" \
             --output "$release_files/release-assets.json"
-          "$tools/harn" run scripts/render_release_notes.harn -- \
-            --version "$VERSION" \
-            --output "$release_files/release-notes.md"
+          if [[ "$CANDIDATE_PURPOSE" == source ]]; then
+            printf 'Unreleased source candidate %s at %s.\n' "$VERSION" "$SOURCE_COMMIT" \
+              > "$release_files/release-notes.md"
+          else
+            "$tools/harn" run scripts/render_release_notes.harn -- \
+              --version "$VERSION" \
+              --output "$release_files/release-notes.md"
+          fi
 
           scripts/assemble_candidate_manifest.sh \
             --output "$manifest_dir/candidate-manifest.json" \
