@@ -184,6 +184,31 @@ async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
     let ledger = authority.path().join("spend.sqlite");
     let policy = authority.path().join("policy.toml");
     std::fs::write(
+        workspace.path().join("mismatch.harn"),
+        r#"
+      fn main(harness: Harness) {
+        harness.llm.tool_probe({provider: "anthropic", model: "gpt-5.6-luna"})
+      }
+    "#,
+    )
+    .unwrap();
+    let mismatch = invoke(
+        workspace.path(),
+        false,
+        vec![
+            "--spend-policy".into(),
+            policy.to_string_lossy().into_owned(),
+            "mismatch.harn".into(),
+        ],
+    )
+    .await;
+    assert!(
+        !mismatch.status.success(),
+        "a contradictory provider/model pair was accepted: {}",
+        String::from_utf8_lossy(&mismatch.stdout)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    std::fs::write(
         workspace.path().join("probe.harn"),
         r#"
       fn main(harness: Harness) {
