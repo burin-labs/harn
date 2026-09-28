@@ -66,6 +66,16 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         cmd.print_help().ok();
         return;
     };
+    if let Err(error) =
+        crate::spend_policy::run(cli.spend_policy.as_deref(), dispatch(subcommand)).await
+    {
+        eprintln!("error: {error}");
+        process::exit(1);
+    }
+}
+
+#[allow(clippy::large_stack_frames)]
+async fn dispatch(subcommand: Command) {
     match subcommand {
         Command::Version(args) => {
             let exit = run_version(args).await;

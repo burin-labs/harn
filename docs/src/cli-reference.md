@@ -7,6 +7,34 @@ To add a new subcommand or port an existing one off Rust, see
 machine-readable side of `--json` modes, see the
 [`harn --json` contract](./cli-json-contract.md).
 
+## Durable provider allowance
+
+`--spend-policy PATH` applies a TOML policy to provider calls in the invocation's
+execution tree. `HARN_SPEND_POLICY` supplies the same path when the flag is absent.
+Each invocation must receive the policy; subprocess environment isolation may
+remove the environment variable. Multicall LSP/DAP entry points do not parse it.
+
+```toml
+ledger_path = "/absolute/private/path/spend.sqlite"
+scope = "weekly-catalog-maintenance"
+
+[limits]
+lifetime_limit_microusd = 2000000
+```
+
+Limits are integer micro-USD. Daily and monthly ceilings are optional
+`daily_limit_microusd` and `monthly_limit_microusd` fields in `limits`.
+At least one nonnegative ceiling is required. Reuse the same ledger and scope
+when resuming work. Lifetime ceilings do not reset when the day or month changes.
+Known usage settles the catalog reservation; interrupted or unreported calls keep
+their reservation. Unknown pricing is refused before provider transport.
+An ordinary reopen cannot change a stored ceiling; an authorized host policy
+update is required. Keep this host policy outside an agent's writable roots.
+
+```bash
+harn --spend-policy /absolute/private/path/policy.toml provider option-probe --help
+```
+
 ## harn self
 
 Use a released Harn binary for an exact before-and-after check without

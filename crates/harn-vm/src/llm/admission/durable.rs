@@ -40,7 +40,8 @@ struct QuotaConfig {
     clock: Arc<dyn harn_clock::Clock>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MachineSpendPolicy {
     pub daily_limit_microusd: Option<i64>,
     pub monthly_limit_microusd: Option<i64>,
@@ -764,19 +765,30 @@ mod tests {
             harn_sqlite::SchemaVersion::new("machine_spend_quota", 1), |tx| {
                 tx.execute_batch("CREATE TABLE spend_policy (scope TEXT PRIMARY KEY, daily_limit INTEGER, monthly_limit INTEGER, contract_broken INTEGER NOT NULL DEFAULT 0);
                     CREATE TABLE spend_policy_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, at_ms INTEGER NOT NULL, approved_by TEXT NOT NULL, old_daily INTEGER, old_monthly INTEGER, new_daily INTEGER, new_monthly INTEGER);
-                    INSERT INTO spend_policy VALUES ('person', 1000000, 1000000, 0);")
+                    CREATE TABLE spend_period (scope TEXT NOT NULL, period TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), PRIMARY KEY(scope, period));
+                    CREATE TABLE spend_attempt (id TEXT PRIMARY KEY, scope TEXT NOT NULL, day TEXT NOT NULL, month TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), actual INTEGER, settled INTEGER NOT NULL DEFAULT 0, created_ms INTEGER NOT NULL);
+                    INSERT INTO spend_policy VALUES ('person', 1000000, 1000000, 0);
+                    INSERT INTO spend_period VALUES ('person', 'D:2029-01-02', 600000), ('person', 'M:2029-01', 600000);
+                    INSERT INTO spend_attempt VALUES ('old-call', 'person', 'D:2029-01-02', 'M:2029-01', 600000, NULL, 0, 0);")
             }).unwrap();
         drop(connection);
-        let quota = MachineSpendQuota::open(&path, "person", policy(1_000_000)).unwrap();
-        drop(quota.reserve(Decimal::new(6, 1)).unwrap());
-        drop(quota);
-        let reopened = MachineSpendQuota::open(&path, "person", policy(1_000_000)).unwrap();
+        let now = Date::from_calendar_date(2029, time::Month::January, 2)
+            .unwrap()
+            .midnight()
+            .assume_utc();
+        let clock = harn_clock::PausedClock::new(now);
+        let reopened =
+            MachineSpendQuota::open_with_clock(&path, "person", policy(1_000_000), clock).unwrap();
         assert!(reopened.reserve(Decimal::new(5, 1)).is_err());
         assert_eq!(
             reopened.receipt().unwrap().lifetime_reserved_microusd,
             600_000
         );
         assert_eq!(reopened.policy().unwrap(), policy(1_000_000));
+        assert_eq!(
+            reopened.receipt().unwrap().lifetime_usage_unknown_attempts,
+            1
+        );
         let incompatible = MachineSpendPolicy {
             lifetime_limit_microusd: Some(2_000_000),
             ..policy(1_000_000)
@@ -798,12 +810,18 @@ mod tests {
     fn concurrent_connections_cannot_spend_the_same_remainder() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("spend.sqlite");
-        let quota = MachineSpendQuota::open(&path, "person", policy(1_000_000)).unwrap();
+        let policy = MachineSpendPolicy {
+            daily_limit_microusd: None,
+            monthly_limit_microusd: None,
+            lifetime_limit_microusd: Some(1_000_000),
+        };
+        let quota = MachineSpendQuota::open(&path, "person", policy.clone()).unwrap();
         let handles: Vec<_> = (0..8)
             .map(|_| {
                 let path = path.clone();
+                let policy = policy.clone();
                 std::thread::spawn(move || {
-                    let quota = MachineSpendQuota::open(path, "person", policy(1_000_000)).unwrap();
+                    let quota = MachineSpendQuota::open(path, "person", policy).unwrap();
                     quota.reserve(Decimal::new(3, 1)).is_ok()
                 })
             })

@@ -303,6 +303,10 @@ use clap::{Parser, Subcommand};
     arg_required_else_help = true
 )]
 pub(crate) struct Cli {
+    /// Apply a durable provider allowance from a TOML policy file.
+    #[arg(long, global = true, env = "HARN_SPEND_POLICY", value_name = "PATH")]
+    pub spend_policy: Option<std::path::PathBuf>,
+
     /// Emit the versioned argument tree used by the native CLI parser.
     #[arg(long = "argument-schema", global = false)]
     pub argument_schema: bool,
