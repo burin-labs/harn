@@ -8,9 +8,9 @@ fn machine_and_session_remaining_project_the_tighter_limit() {
         temp.path().join("spend.sqlite"),
         "person",
         crate::llm::MachineSpendPolicy {
-            daily_limit_microusd: Some(300_000),
-            monthly_limit_microusd: Some(500_000),
-            lifetime_limit_microusd: None,
+            daily_limit_microusd: Some(500_000),
+            monthly_limit_microusd: Some(700_000),
+            lifetime_limit_microusd: Some(300_000),
         },
     )
     .unwrap();

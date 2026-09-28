@@ -557,6 +557,7 @@ pub(crate) fn machine_remaining_usd() -> Result<Option<f64>, VmError> {
             let remaining = [
                 receipt.daily_remaining_microusd,
                 receipt.monthly_remaining_microusd,
+                receipt.lifetime_remaining_microusd,
             ]
             .into_iter()
             .flatten()
