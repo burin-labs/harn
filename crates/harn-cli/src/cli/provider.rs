@@ -840,15 +840,7 @@ impl ProviderPortableOptionArg {
     ];
 
     pub(crate) const fn name(self) -> &'static str {
-        match self {
-            Self::Temperature => "temperature",
-            Self::TopP => "top_p",
-            Self::TopK => "top_k",
-            Self::Seed => "seed",
-            Self::FrequencyPenalty => "frequency_penalty",
-            Self::PresencePenalty => "presence_penalty",
-            Self::Stop => "stop",
-        }
+        self.portable_option().name()
     }
 
     pub(crate) const fn portable_option(self) -> harn_vm::llm::capabilities::PortableOption {
