@@ -219,6 +219,7 @@ pub(super) fn probe_request_payload_for_format(
         presence_penalty: None,
         parallel_tool_calls: None,
         provider_contract_probe: None,
+        portable_option_intent: Default::default(),
         fast: false,
         reasoning_mode: None,
         output_format: OutputFormat::Text,
