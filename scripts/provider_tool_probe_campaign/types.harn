@@ -144,10 +144,24 @@ pub fn provider_tool_probe_campaign_providers_config(
   return trim(inherited)
 }
 
-pub fn provider_tool_probe_campaign_command_env(providers_config: string) -> dict {
+pub fn provider_tool_probe_campaign_command_env(
+  providers_config: string,
+  spend_policy: string = "",
+  require_durable: bool = false,
+) -> dict {
   const path = trim(providers_config)
-  if path == "" {
-    return {}
+  const policy = trim(spend_policy)
+  guard !require_durable || policy != "" else {
+    throw "live campaigns require HARN_SPEND_POLICY for shared durable admission"
   }
-  return {HARN_PROVIDERS_CONFIG: path}
+  return if path == "" {
+    {}
+  } else {
+    {HARN_PROVIDERS_CONFIG: path}
+  }
+    + if policy == "" {
+      {}
+    } else {
+      {HARN_SPEND_POLICY: policy}
+    }
 }

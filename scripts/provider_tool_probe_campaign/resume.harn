@@ -8,6 +8,12 @@ pub type ProviderProbeCampaignWindow = {
   max_duration_secs: int,
 }
 
+pub type ProviderProbeCampaignWindowReceipt = {
+  decision: "created" | "resumed",
+  window: ProviderProbeCampaignWindow,
+  remaining_ms: int,
+}
+
 pub fn provider_probe_campaign_window_key(campaign: string) -> string {
   return "provider-probe-campaign/window/" + sha256(campaign)
 }
@@ -18,10 +24,11 @@ pub fn provider_probe_campaign_window(
   clock: HarnessClock,
   campaign: string,
   max_duration_secs: int,
-) -> ProviderProbeCampaignWindow {
+) -> ProviderProbeCampaignWindowReceipt {
   guard trim(campaign) != "" && max_duration_secs > 0 else {
     throw "campaign identity and positive duration are required"
   }
+  const resumed = runtime.checkpoint_exists(provider_probe_campaign_window_key(campaign))
   const stored = checkpoint_stage(
     runtime,
     provider_probe_campaign_window_key(campaign),
@@ -41,5 +48,13 @@ pub fn provider_probe_campaign_window(
     && clock.now_ms() >= window.started_at_ms else {
     throw "campaign deadline policy differs or its retained clock is invalid"
   }
-  return window
+  return {
+    decision: if resumed {
+      "resumed"
+    } else {
+      "created"
+    },
+    window: window,
+    remaining_ms: max(0, window.deadline_at_ms - clock.now_ms()),
+  }
 }

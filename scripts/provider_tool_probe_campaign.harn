@@ -123,6 +123,7 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   const live = parsed?.live ?? false
+  const spend_policy = trim(harness.env.get_or("HARN_SPEND_POLICY", ""))
   const repeat = parsed?.repeat ?? 1
   const timeout_secs = parsed?.timeout_secs ?? 60
   const max_duration_secs = parsed.max_duration_secs
@@ -194,8 +195,13 @@ fn main(harness: Harness) {
   const env_load = __load_env_file(harness.fs, env_file_path)
   const ambient_env = provider_tool_probe_campaign_env_from_host(harness.env, routes)
   const auth_env = ambient_env + (env_load.env ?? {})
-  const command_env = provider_tool_probe_campaign_command_env(providers_config)
+  const command_env = provider_tool_probe_campaign_command_env(providers_config, spend_policy, live)
   const env = auth_env + command_env
+  const campaign_window = if live {
+    provider_probe_campaign_window(harness.runtime, harness.clock, output_dir, max_duration_secs)
+  } else {
+    nil
+  }
   const cell_plan = if live {
     __live_cells(
       {
@@ -215,12 +221,7 @@ fn main(harness: Harness) {
         max_probes: max_probes,
         max_cost_usd: max_cost_usd,
         max_duration_secs: max_duration_secs,
-        deadline_at_ms: provider_probe_campaign_window(
-          harness.runtime,
-          harness.clock,
-          output_dir,
-          max_duration_secs,
-        ).deadline_at_ms,
+        deadline_at_ms: unwrap(campaign_window).window.deadline_at_ms,
       },
     )
   } else {
@@ -264,7 +265,8 @@ fn main(harness: Harness) {
     {
       env: auth_env,
       env_source: (env_load.source ?? {}) + {ambient_key_count: len(ambient_env.keys())},
-      campaign_slice: (cell_plan.slice ?? {}) + {max_duration_secs: max_duration_secs},
+      campaign_slice: (cell_plan.slice ?? {})
+        + {max_duration_secs: max_duration_secs, window: campaign_window},
       scorecard_artifacts: scorecard_artifacts,
     },
     runtime,

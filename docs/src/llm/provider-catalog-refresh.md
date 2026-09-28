@@ -254,7 +254,12 @@ harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- \
   --output-dir .harn-runs/provider-tool-probe-campaign/openai-nano
 ```
 
-Add `--live` only after reviewing that plan. Each child receives the remaining
+Add `--live` only after reviewing that plan. Live campaigns require
+`HARN_SPEND_POLICY` pointing to the host-owned TOML policy described in the
+[CLI reference](../cli-reference.md#durable-provider-allowance). The campaign
+forwards that path to every child, which draws from the same durable lifetime
+allowance. Keep the policy and ledger outside the agent's writable roots.
+Each child also receives the remaining
 `--max-cost-usd` allowance before dispatch. Tool and option probes use Harn's
 shared conservative admission boundary. The campaign sums settled, in-flight,
 and uncertain reservations; it stops at the cap or after a missing or broken
@@ -266,6 +271,10 @@ limits selected route/behavior/mode units independently of the dollar cap.
 process teardown. Each child gets the remaining monotonic time as its process
 timeout; Harn's process owner terminates the child tree. Reaching either limit
 leaves an explicitly partial report and exits nonzero. Dry runs show both caps.
+The output directory identifies the campaign's retained wall-time window.
+Resuming it includes downtime and preserves the original deadline; changing
+its duration or reading malformed saved state fails. Use a new output directory
+for a new campaign, with a separately authorized allowance.
 
 Each live output directory contains:
 
