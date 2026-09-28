@@ -314,7 +314,7 @@
         "chat_api_adapter": {
           "enum": [
             "model_default",
-            "ollama_open_ai_compat"
+            "ollama_openai_compat"
           ]
         },
         "chat_endpoint": {
