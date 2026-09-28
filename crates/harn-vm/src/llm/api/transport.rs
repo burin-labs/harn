@@ -295,7 +295,8 @@ async fn dispatch_to_registered_provider(
             .await;
     }
 
-    match DialectContract::for_request(opts).stream_protocol() {
+    let dialect = DialectContract::for_request(opts);
+    match dialect.stream_protocol() {
         StreamProtocol::OllamaNdjson => {
             crate::llm::providers::OllamaProvider
                 .chat_impl(opts, delta_tx)
@@ -313,7 +314,7 @@ async fn dispatch_to_registered_provider(
         }
         StreamProtocol::OpenAiSse => {
             crate::llm::providers::OpenAiCompatibleProvider::new(provider.clone())
-                .chat_impl(opts, delta_tx)
+                .chat_impl_with_dialect(opts, delta_tx, dialect)
                 .await
         }
     }
@@ -334,6 +335,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
     body: serde_json::Value,
     dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
+    dialect.validate_request(opts)?;
     let started = Instant::now();
     // Absolute counterpart of `started`. `Instant` is monotonic and carries no
     // date, and settlement needs a date to pick a promotion or a time-of-day
@@ -504,6 +506,9 @@ async fn vm_call_llm_api_with_body_inner(
             opts.provider_overrides.as_ref(),
         );
     }
+    if dialect.is_ollama_openai_compat() {
+        DialectContract::project_ollama_openai_request(&mut body);
+    }
     if stream_protocol == StreamProtocol::AnthropicSse {
         crate::llm::providers::anthropic::reconcile_request_body(
             &mut body,
@@ -526,12 +531,7 @@ async fn vm_call_llm_api_with_body_inner(
         );
     }
 
-    dialect.apply_stream_transport_fields(
-        &mut body,
-        provider,
-        &resolved.endpoint,
-        use_stream_transport,
-    );
+    dialect.apply_stream_transport_fields(&mut body, provider, use_stream_transport);
 
     // Last write wins, deliberately. A declared retention/training control
     // must survive the caller's `provider_overrides` escape hatch, or the

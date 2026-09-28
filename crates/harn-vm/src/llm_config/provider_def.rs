@@ -7,6 +7,17 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
+/// Request/response adapter for provider chat endpoints whose request body and
+/// response stream use different conventions than the model's default wire
+/// dialect.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatApiAdapter {
+    /// Ollama model route using the supported OpenAI Chat Completions request
+    /// fields and SSE response envelope.
+    OllamaOpenAiCompat,
+}
+
 /// Versioned managed-supply provider declaration.
 ///
 /// The empty-looking v1 payload is deliberate: catalog identity is derived
@@ -41,6 +52,10 @@ pub struct ProviderDef {
     pub auth_style: String,
     pub auth_header: Option<String>,
     pub auth_env: AuthEnv,
+    /// Explicit adapter for a chat endpoint whose request/response contract
+    /// differs from the model's default message wire format. Omitted keeps the
+    /// legacy provider/model dialect selection.
+    pub chat_api_adapter: Option<ChatApiAdapter>,
     /// How this provider's credentials are resolved. `"env"` (default) means
     /// the generic `auth_env` lookup is authoritative: missing env vars are a
     /// hard "missing API key" error. `"platform_managed"` means the provider's
@@ -145,6 +160,8 @@ struct ProviderDefWire {
     #[serde(default)]
     auth_env: AuthEnv,
     #[serde(default)]
+    chat_api_adapter: Option<ChatApiAdapter>,
+    #[serde(default)]
     credential_resolution: Option<String>,
     #[serde(default)]
     extra_headers: BTreeMap<String, String>,
@@ -217,6 +234,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             auth_style: wire.auth_style.unwrap_or_else(default_bearer),
             auth_header: wire.auth_header,
             auth_env: wire.auth_env,
+            chat_api_adapter: wire.chat_api_adapter,
             credential_resolution: wire
                 .credential_resolution
                 .unwrap_or_else(default_credential_resolution),
@@ -264,6 +282,7 @@ impl Default for ProviderDef {
             auth_style: default_bearer(),
             auth_header: None,
             auth_env: AuthEnv::None,
+            chat_api_adapter: None,
             credential_resolution: default_credential_resolution(),
             extra_headers: BTreeMap::new(),
             chat_endpoint: String::new(),
@@ -318,6 +337,7 @@ impl ProviderDef {
         if !overlay.auth_env.is_none() {
             self.auth_env = overlay.auth_env.clone();
         }
+        merge_option(&mut self.chat_api_adapter, &overlay.chat_api_adapter);
         if overlay.credential_resolution != default_credential_resolution() {
             self.credential_resolution = overlay.credential_resolution.clone();
         }

@@ -41,6 +41,24 @@ rows even when synchronous calls use Interactions. The [provider
 reference](../llm/providers.md#gemini-interactions-api) describes that public
 capability split.
 
+## Explicit chat API adapters
+
+Some servers use one request vocabulary and a different response stream. A
+provider definition can declare `chat_api_adapter` to select that complete
+contract explicitly; Harn does not infer it from an endpoint URL. For example,
+`ollama_openai_compat` requires an Ollama `message_wire_format`, keeps the
+Ollama route identity, and uses the OpenAI Chat Completions response envelope
+and SSE parser.
+
+Ollama's `/v1/chat/completions` request type consumes standard top-level fields
+such as `max_tokens`, `temperature`, `top_p`, `seed`, `stop`, and
+`response_format`. The adapter projects Harn's request into those fields and
+filters fields Ollama ignores, such as native `options`, `keep_alive`, and
+`think`. It does not promise `/v1` support for context-window or model-lifetime
+controls; configure context in the Ollama model and use native `/api/chat` when
+those Ollama-only controls are required. Native `/api/chat` remains the
+default Ollama contract and retains its NDJSON response and runtime options.
+
 ## Mechanics stay behind one seam
 
 Moving every JSON loop into Harn source would increase allocation and erase
