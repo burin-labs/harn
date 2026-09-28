@@ -33,7 +33,7 @@ fn lookup_tools() {
   return tools
 }
 
-// Unannotated, so the step is judged: a declared read is never vetoed.
+/** Unannotated, so the step is judged: a declared read is never vetoed. */
 fn run(harness: Harness, label: string, first_text: string, judge_first: string) -> any {
   return with_llm_script(
     harness.llm,
