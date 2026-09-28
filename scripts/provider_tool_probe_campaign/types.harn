@@ -107,7 +107,7 @@ pub type ProviderOptionClaimControls = {
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v10",
+  schema_version: "harn.provider_tool_probe_campaign.v12",
   runtime: ProviderToolProbeRuntimeReceipt,
   catalog: ProviderToolProbeCatalogReceipt,
   live: bool,

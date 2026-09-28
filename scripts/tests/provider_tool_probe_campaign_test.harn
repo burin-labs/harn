@@ -1057,7 +1057,13 @@ pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(
       + {
         status: "pass",
         observed: {
-          admission: {mode: "conservative", contract_broken: false, settled_upper_usd: "0.003", in_flight_usd: "0", uncertain_usd: "0"},
+          admission: {
+            mode: "conservative",
+            contract_broken: false,
+            settled_upper_usd: "0.003",
+            in_flight_usd: "0",
+            uncertain_usd: "0",
+          },
           telemetry: {
             actual_usd: 0.003,
             observed_cost_count: 2,
@@ -1492,11 +1498,19 @@ pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(
 
 @test
 pipeline test_campaign_unpriced_requests_need_conservative_admission_receipts() {
-  const bounded = {actual_usd: 0.0, unpriced_case_count: 1, conservative_upper_usd: 0.6, unaccounted_probe_count: 0}
+  assert_false(provider_tool_probe_campaign_may_execute({}, 5.0))
+  const bounded = {
+    actual_usd: 0.0,
+    unpriced_case_count: 1,
+    conservative_upper_usd: 0.6,
+    unaccounted_probe_count: 0,
+  }
   assert_true(provider_tool_probe_campaign_may_execute(bounded, 5.0))
   assert_eq(provider_tool_probe_campaign_charged_usd(bounded), 0.6)
   assert_false(provider_tool_probe_campaign_may_execute(bounded, 0.6))
-  assert_false(provider_tool_probe_campaign_may_execute(bounded + {unaccounted_probe_count: 1}, 5.0))
+  assert_false(
+    provider_tool_probe_campaign_may_execute(bounded + {unaccounted_probe_count: 1}, 5.0),
+  )
 }
 
 @test
@@ -1527,6 +1541,8 @@ pipeline test_campaign_reports_the_charged_figure_apart_from_the_priced_one(
   )
   assert_eq(report.spend.actual_usd_known, false)
   assert_eq(report.spend.unaccounted_probe_count, 1)
+  assert_eq(report.spend.charged_usd_known, false)
+  assert_eq(report.spend.charged_usd, nil)
   assert_false(provider_tool_probe_campaign_may_execute(report.spend, 10.0))
   assert_eq(report.spend.budget_status, "accounting_incomplete")
 }

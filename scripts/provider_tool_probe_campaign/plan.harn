@@ -43,9 +43,12 @@ pub fn __option_probe_command(
     "--fail-on-drift",
     "--json",
   ]
-  return command + if max_cost_usd != nil {
-    ["--max-cost-usd", to_string(max_cost_usd)]
-  } else { [] }
+  return command
+    + if max_cost_usd != nil {
+      ["--max-cost-usd", to_string(max_cost_usd)]
+    } else {
+      []
+    }
 }
 
 pub type ProviderToolProbeCommandRequest = {
@@ -86,11 +89,12 @@ pub fn __tool_probe_command(request: ProviderToolProbeCommandRequest) -> list<st
     to_string(timeout_secs),
     "--json",
   ]
-  return command + if request.max_cost_usd != nil {
-    ["--max-cost-usd", to_string(request.max_cost_usd)]
-  } else {
-    []
-  }
+  return command
+    + if request.max_cost_usd != nil {
+      ["--max-cost-usd", to_string(request.max_cost_usd)]
+    } else {
+      []
+    }
 }
 
 pub fn __cell_id(

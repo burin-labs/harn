@@ -333,7 +333,8 @@ fn main(harness: Harness) {
     claimed,
     ungated,
     provider_option_probe_classify(outcome),
-  ) + {admission: harness.llm.session_cost()?.admission}
+  )
+    + {admission: harness.llm.session_cost()?.admission}
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(json_stringify_pretty(report))
   } else {

@@ -254,11 +254,13 @@ harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- \
   --output-dir .harn-runs/provider-tool-probe-campaign/openai-nano
 ```
 
-Add `--live` only after reviewing that plan. Live repeats are executed as
-separate probe processes so the campaign accounts for every physical request
-before starting the next one. The campaign stops when the observed
-runtime-priced cost reaches `--max-cost-usd`; it also fails closed after an
-unpriced case instead of continuing with an unknown ledger. `--max-probes`
+Add `--live` only after reviewing that plan. Each child receives the remaining
+`--max-cost-usd` allowance before dispatch. Tool and option probes use Harn's
+shared conservative admission boundary. The campaign sums settled, in-flight,
+and uncertain reservations; it stops at the cap or after a missing or broken
+admission receipt. Actual priced usage remains separate from that upper bound.
+Case counts do not imply physical request counts, since admission can refuse
+before transport. `--max-probes`
 limits selected route/behavior/mode units independently of the dollar cap.
 
 Each live output directory contains:
@@ -319,6 +321,10 @@ in the resolved call contract and carries it through spawned transport work.
 It suspends shaping for the selected option only; sibling calls and unrelated
 options keep normal catalog policy. Pass `--gated` for a confirm-only run that
 leaves every guard enabled.
+
+Pass `--max-cost-usd` to reserve a conservative allowance before the option
+probe request. Its JSON report includes the same `admission` receipt as tool
+probes. Unknown pricing or unsupported billing remains unmeasured.
 
 An `accepted` verdict proves that the endpoint accepted a meaningful,
 non-default value on the wire. It does not prove that a provider honored the

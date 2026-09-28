@@ -1,0 +1,62 @@
+import { command_run } from "std/command"
+import { resolve_harn_bin } from "../_common"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  const root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const binary = resolve_harn_bin(harness, root)
+  for kind in ["tool-probe", "option-probe"] {
+    const flags = if kind == "tool-probe" {
+      ["--case", "no_tool_answer_or_refusal", "--mode", "non-streaming"]
+    } else {
+      ["--option", "temperature", "--fail-on-drift"]
+    }
+    const child = command_run(
+      harness.tools,
+      [
+        binary,
+        "provider",
+        kind,
+        "openai",
+        "--model",
+        "gpt-5.6-luna",
+        "--max-cost-usd",
+        "0.0000001",
+        "--json",
+      ]
+        + flags,
+      {
+        env: {
+          OPENAI_API_KEY: "probe-budget-fixture-only",
+          HARN_SECRET_PROVIDERS: "env",
+          HARN_LLM_CALLS_DISABLED: "1",
+          HARN_EGRESS_DEFAULT: "deny",
+        },
+        capture: {max_inline_bytes: 32768},
+      },
+    )
+    const report = json_parse(child.stdout)
+    const admission = report?.admission
+    contract_effect(
+      harness.stdio,
+      kind + "_admission_reached",
+      admission?.mode == "conservative" && admission?.denied_attempts == 1,
+    )
+    contract_effect(
+      harness.stdio,
+      kind + "_no_reserved_spend",
+      to_string(admission?.settled_upper_usd) == "0"
+        && to_string(admission?.uncertain_usd) == "0"
+        && to_string(admission?.in_flight_usd) == "0",
+    )
+    contract_negative(
+      harness.stdio,
+      kind + "_no_provider_success",
+      if kind == "tool-probe" {
+        report?.cases?.[0]?.ok ?? false
+      } else {
+        report?.probe?.measured_count != 0 || report?.probe?.request_count != 0
+      },
+    )
+  }
+}

@@ -13,7 +13,7 @@ pub fn provider_tool_probe_campaign_charged_usd(spend: dict) -> float {
 
 /** Missing or broken admission receipts stop dispatch, even below the cap. */
 pub fn provider_tool_probe_campaign_may_execute(spend: dict, max_cost_usd: float) -> bool {
-  return (spend?.unaccounted_probe_count ?? 0) == 0
+  return spend?.unaccounted_probe_count == 0 && spend?.conservative_upper_usd != nil
     && provider_tool_probe_campaign_charged_usd(spend) < max_cost_usd
 }
 
@@ -38,7 +38,8 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
     if contains(["pass", "fail", "error"], cell.status) {
       const admission = cell.observed?.admission
       if admission?.mode != "conservative" || admission?.contract_broken != false
-        || admission?.settled_upper_usd == nil || admission?.in_flight_usd == nil
+        || admission?.settled_upper_usd == nil
+        || admission?.in_flight_usd == nil
         || admission?.uncertain_usd == nil {
         unaccounted_probe_count = unaccounted_probe_count + 1
       } else {
@@ -342,7 +343,12 @@ pub fn __estimated_spend(
       + {
         unaccounted_probe_count: unaccounted_probe_count,
         actual_usd_known: accounting_complete,
-        charged_usd: charged_usd,
+        charged_usd: if unaccounted_probe_count == 0 {
+          charged_usd
+        } else {
+          nil
+        },
+        charged_usd_known: unaccounted_probe_count == 0,
         accounting: if accounting_complete {
           "summed from runtime-priced per-case usage receipts"
         } else {

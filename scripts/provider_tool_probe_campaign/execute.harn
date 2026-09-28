@@ -70,7 +70,8 @@ pub fn provider_tool_probe_campaign_probe_telemetry(report: dict) -> dict {
     request_attempt_count: 0,
     request_attempt_count_unknown: case_count,
     retry_count: 0,
-    retry_accounting: "case counts are not physical request counts; adapter admission may refuse before transport",
+    retry_accounting:
+      "case counts are not physical request counts; adapter admission may refuse before transport",
     rate_limited_count: rate_limited_count,
     route_unavailable_count: route_unavailable_count,
     observed_latency_count: observed_latency_count,
@@ -420,7 +421,12 @@ pub fn __run_option_probe(
   if len(missing) > 0 {
     return __skipped_cells_for_missing_env(llm, route, behavior, "non-streaming", missing)
   }
-  const command = __option_probe_command(harn_bin, route, behavior.probe_option ?? "temperature", max_cost_usd)
+  const command = __option_probe_command(
+    harn_bin,
+    route,
+    behavior.probe_option ?? "temperature",
+    max_cost_usd,
+  )
   const artifact_path = provider_tool_probe_campaign_artifact_path(
     route,
     behavior,
