@@ -548,6 +548,15 @@ pub(crate) async fn execute_llm_call_outcome(
     }
 }
 
+/// Whether a call asked for its visible text to stream to the host.
+///
+/// `_user_visible` is the host-plumbing spelling `llm_call_options` keeps, and
+/// the agent loop sets it on the turn request a person is waiting to read.
+/// `user_visible` is the direct `llm_call` option the bridge builtin reads.
+fn requests_user_visible_stream(options: &Option<crate::value::DictMap>) -> bool {
+    helpers::opt_bool(options, "user_visible") || helpers::opt_bool(options, "_user_visible")
+}
+
 fn finish_llm_call(outcome: SchemaLoopOutcome) -> Result<VmValue, VmError> {
     if outcome.errors.is_empty() {
         return Ok(outcome.vm_result);
@@ -774,8 +783,17 @@ pub(crate) async fn execute_schema_retry_loop(
     let nudge_mode = parse_schema_nudge(&options);
 
     let tool_format = helpers::opt_str(&options, "tool_format");
+    // A call that reached `llm_call` without the bridge-registered builtin (a
+    // `harness.llm.call` on a VM an ACP server set up, for example) still
+    // projects its progress through the host bridge that server installed.
+    let ambient_bridge = if bridge.is_none() {
+        super::agent_runtime::current_host_bridge()
+    } else {
+        None
+    };
+    let bridge = bridge.or(ambient_bridge.as_ref());
     let bridged = bridge.is_some();
-    let user_visible = bridged && helpers::opt_bool(&options, "user_visible");
+    let user_visible = bridged && requests_user_visible_stream(&options);
     let output_validation_mode = output_validation_mode(&opts).to_string();
     let expects_structured = helpers::expects_structured_output(&opts);
     // Snapshot the caller's original messages once. Each schema retry
@@ -1116,3 +1134,5 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
 
 #[cfg(test)]
 mod schema_stream_abort_retry_tests;
+#[cfg(test)]
+mod stream_visibility_tests;
