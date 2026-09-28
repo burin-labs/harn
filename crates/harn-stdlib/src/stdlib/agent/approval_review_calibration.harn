@@ -44,6 +44,7 @@ pub type CalibrationCaseResult = {
   risk: any,
   authorization: any,
   rationale: string,
+  detail: string,
   reviewer_answered: bool,
   cost_usd: any,
   // Why this verdict does or does not contribute to the cost total. A floor
@@ -114,6 +115,7 @@ pub fn approval_review_run_case(
     risk: decision?.risk,
     authorization: decision?.authorization,
     rationale: trim(to_string(decision?.rationale ?? "")),
+    detail: to_string(decision?.detail ?? ""),
     reviewer_answered: decision?.reviewer_answered ?? false,
     cost_usd: decision?.cost_usd,
     priced: (decision?.reviewer_answered ?? false) && decision?.cost_usd != nil,
