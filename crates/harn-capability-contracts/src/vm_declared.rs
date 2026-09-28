@@ -199,6 +199,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("runtime", "close_channel"),
     ("runtime", "command_policy_pop"),
     ("runtime", "command_policy_push"),
+    ("runtime", "content_fingerprint"),
     ("runtime", "continue_as_new"),
     ("runtime", "correction_query"),
     ("runtime", "correction_record"),

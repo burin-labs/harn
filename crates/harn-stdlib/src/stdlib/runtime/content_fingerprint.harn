@@ -48,3 +48,12 @@ pub type RuntimeContentFingerprint = {
 pub fn runtime_content_fingerprint_value(value: unknown) -> RuntimeContentFingerprint {
   return get_typed_value(value, schema_of(RuntimeContentFingerprint))
 }
+
+/**
+ * Return the content linked into the VM executing this script.
+ *
+ * @effects: []
+ */
+pub fn runtime_content_fingerprint(runtime: HarnessRuntime) -> RuntimeContentFingerprint {
+  return runtime_content_fingerprint_value(runtime.content_fingerprint())
+}

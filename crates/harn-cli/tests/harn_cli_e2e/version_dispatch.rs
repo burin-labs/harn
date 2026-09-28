@@ -62,6 +62,43 @@ fn version_json_ignores_runtime_revision_environment() {
     assert_runtime_content_fingerprint(&value);
 }
 
+#[test]
+fn script_identity_uses_the_linked_vm_despite_spoofed_environment() {
+    let root = tempfile::tempdir().expect("script workspace");
+    std::fs::write(
+        root.path().join("identity.harn"),
+        r#"
+        import { runtime_content_fingerprint } from "std/runtime/content_fingerprint"
+        fn main(harness: Harness) {
+          harness.stdio.println(json_stringify(runtime_content_fingerprint(harness.runtime)))
+        }
+        "#,
+    )
+    .expect("script");
+    let output = crate::test_util::harn_e2e_command()
+        .current_dir(root.path())
+        .args(["run", "identity.harn"])
+        .env(
+            "HARN_RUNTIME_CONTENT_FINGERPRINT",
+            "{\"schema\":\"host-supplied\"}",
+        )
+        .env(
+            "HARN_BUILD_REVISION",
+            "ffffffffffffffffffffffffffffffffffffffff",
+        )
+        .output()
+        .expect("run script");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let actual: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("script identity");
+    let expected = serde_json::to_value(harn_vm::runtime_content_fingerprint()).unwrap();
+    assert_eq!(actual, expected);
+}
+
 fn assert_runtime_content_fingerprint(value: &serde_json::Value) {
     let expected = serde_json::to_value(harn_vm::runtime_content_fingerprint())
         .expect("runtime content fingerprint serializes");

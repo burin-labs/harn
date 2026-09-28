@@ -3,8 +3,8 @@
  *
  * Build-time constants come from env vars set by the dispatch shim in
  * crates/harn-cli/src/entrypoint.rs's `run_version`: HARN_BUILD_NAME,
- * HARN_BUILD_VERSION, HARN_BUILD_DESCRIPTION, HARN_BUILD_REVISION, and the
- * VM-owned HARN_RUNTIME_CONTENT_FINGERPRINT receipt.
+ * HARN_BUILD_VERSION, HARN_BUILD_DESCRIPTION, and HARN_BUILD_REVISION.
+ * The content fingerprint comes directly from the linked VM.
  * The shim reads package metadata and the optional revision embedded by the
  * build script, never from the caller's runtime environment or checkout.
  *
@@ -13,7 +13,7 @@
  */
 import {
   RuntimeContentFingerprint,
-  runtime_content_fingerprint_value,
+  runtime_content_fingerprint,
 } from "std/runtime/content_fingerprint"
 
 fn render_banner(version: string) -> string {
@@ -56,12 +56,8 @@ fn main(harness: Harness) {
     } else {
       raw_revision
     }
-    const runtime_content_fingerprint = runtime_content_fingerprint_value(
-      json_parse(harness.env.get_or("HARN_RUNTIME_CONTENT_FINGERPRINT", "{}")),
-    )
-    harness.stdio.println(
-      render_json(name, version, description, source_revision, runtime_content_fingerprint),
-    )
+    const fingerprint = runtime_content_fingerprint(harness.runtime)
+    harness.stdio.println(render_json(name, version, description, source_revision, fingerprint))
   } else {
     harness.stdio.println(render_banner(version))
   }

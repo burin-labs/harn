@@ -31,6 +31,22 @@ pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
     }
 }
 
+/// Project the linked VM's identity without consulting host environment values.
+#[harn_builtin(
+    exposure = "harness.runtime.content_fingerprint",
+    effects = [],
+    sig = "runtime_content_fingerprint() -> dict",
+    category = "runtime_scope"
+)]
+fn runtime_content_fingerprint_impl(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let value = serde_json::to_value(crate::runtime_content_fingerprint())
+        .map_err(|error| VmError::Runtime(format!("runtime_content_fingerprint: {error}")))?;
+    Ok(crate::stdlib::json_to_vm_value(&value))
+}
+
 #[harn_builtin(
     exposure = "harness.runtime.current_policy",
     effects = ["state.read@const=runtime-policy"],
@@ -208,6 +224,7 @@ async fn with_dynamic_permissions_impl(
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &RUNTIME_CONTENT_FINGERPRINT_IMPL_DEF,
     &CURRENT_POLICY_IMPL_DEF,
     &WITH_AUTONOMY_POLICY_IMPL_DEF,
     &WITH_EXECUTION_POLICY_IMPL_DEF,
