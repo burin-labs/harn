@@ -635,10 +635,18 @@ mod tests {
         clock.advance_time(time::Duration::days(2));
         let restarted =
             MachineSpendQuota::open_with_clock(&path, "campaign", policy, clock).unwrap();
-        assert!(
-            restarted.reserve(Decimal::new(5, 1)).is_err(),
-            "calendar rollover replenished campaign allowance"
-        );
+        let VmError::Thrown(receipt) = restarted
+            .reserve(Decimal::new(5, 1))
+            .expect_err("calendar rollover replenished campaign allowance")
+        else {
+            panic!("rollover refusal did not produce a structured budget receipt");
+        };
+        let receipt = crate::value::vm_to_storage_json(&receipt).unwrap();
+        assert_eq!(receipt["category"], "budget_exceeded");
+        assert_eq!(receipt["period"], "lifetime");
+        assert_eq!(receipt["reserved_microusd"], 600_000);
+        assert_eq!(receipt["remaining_microusd"], 400_000);
+        assert!(receipt["reset_at_unix_ms"].is_null());
         // A genuinely different billing scope remains independent.
         let other = MachineSpendQuota::open(
             &path,
