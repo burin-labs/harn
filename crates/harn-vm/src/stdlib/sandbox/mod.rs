@@ -49,6 +49,8 @@ pub(crate) use read_roots::{
     developer_toolchain_read_roots_for_home, package_manager_config_read_roots_for_home,
     sandbox_user_home_dir,
 };
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) use read_roots::{path_entry_grants, PathEntryGrant};
 
 use paths::{
     access_is_exempt_from_scope, is_standard_io_device_for_access, normalize_for_policy,
@@ -1632,6 +1634,35 @@ pub(crate) fn process_sandbox_developer_toolchain_read_roots(
         return Vec::new();
     };
     developer_toolchain_read_roots_for_home(&home)
+}
+
+/// The read-and-execute grants this process's `PATH` earns a confined child,
+/// gated on the `DeveloperToolchains` preset like every other toolchain root.
+/// See [`path_entry_grants`] for which directory each entry grants and why.
+///
+/// It is this process's `PATH`, the one its children inherit, because every
+/// spawn path prepares confinement before it applies a command's own
+/// environment; a per-command `PATH` override is not visible here. A child
+/// given a narrower `PATH` holds grants it will not use, and one given a
+/// wider `PATH` is refused the extra entries, which fails closed.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn process_sandbox_path_entry_grants(policy: &CapabilityPolicy) -> Vec<PathEntryGrant> {
+    if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains) {
+        return Vec::new();
+    }
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return Vec::new();
+    };
+    let grants = path_entry_grants(&path_var, sandbox_user_home_dir().as_deref());
+    for grant in &grants {
+        tracing::debug!(
+            target: "harn::sandbox",
+            entry = %grant.entry.display(),
+            root = %grant.root.display(),
+            "sandbox granted a PATH entry's install root read and execute"
+        );
+    }
+    grants
 }
 
 pub(crate) fn normalized_process_roots(roots: &[String]) -> Vec<PathBuf> {

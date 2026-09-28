@@ -509,6 +509,11 @@ fn landlock_profile(
     for root in developer_toolchain_system_read_roots(policy) {
         push_rule(&mut profile, root, read_only_access(), true)?;
     }
+    // Through `push_rule`, so the credential denylist is subtracted from these
+    // exactly as from every other grant.
+    for grant in super::process_sandbox_path_entry_grants(policy) {
+        push_rule(&mut profile, grant.root, read_only_access(), true)?;
+    }
     let workspace_access = workspace_access(policy);
     for root in process_sandbox_roots(policy) {
         push_rule(&mut profile, root, workspace_access, false)?;
