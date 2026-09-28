@@ -16,19 +16,21 @@ fn write_policy(root: &std::path::Path, limit: i64) {
     .unwrap();
 }
 
-async fn invoke(root: &std::path::Path) -> std::process::Output {
+async fn invoke(root: &std::path::Path, shorthand: bool) -> std::process::Output {
     let root = root.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        harn_e2e_command()
+        let mut command = harn_e2e_command();
+        command
             .current_dir(&root)
             .env("HARN_PROVIDERS_CONFIG", root.join("providers.toml"))
             .env("HARN_SECRET_PROVIDERS", "env")
             .env("HARN_SPEND_POLICY", root.join("policy.toml"))
             .env("PROBE_PROVIDER_KEY", "local-fixture-only")
-            .env_remove("HARN_LLM_CALLS_DISABLED")
-            .args(["run", "probe.harn"])
-            .output()
-            .unwrap()
+            .env_remove("HARN_LLM_CALLS_DISABLED");
+        if !shorthand {
+            command.arg("run");
+        }
+        command.arg("probe.harn").output().unwrap()
     })
     .await
     .unwrap()
@@ -72,7 +74,7 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
     )
     .unwrap();
     write_policy(root.path(), 2_000_000);
-    let first = invoke(root.path()).await;
+    let first = invoke(root.path(), false).await;
     assert!(
         first.status.success(),
         "{}",
@@ -95,7 +97,7 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
     policy.lifetime_limit_microusd = Some(receipt.lifetime_reserved_microusd);
     quota.update_policy(policy, "test-host").unwrap();
     write_policy(root.path(), receipt.lifetime_reserved_microusd);
-    let restarted = invoke(root.path()).await;
+    let restarted = invoke(root.path(), true).await;
     server.abort();
     assert!(!restarted.status.success());
     assert!(
