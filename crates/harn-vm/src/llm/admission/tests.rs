@@ -286,7 +286,19 @@ fn provider_contract_violation_is_accounted_and_stops_further_attempts() {
             .as_deref(),
         Some("provider")
     );
-    assert!(reserve(&opts, &request).is_err());
+    let refused = reserve(&opts, &request)
+        .err()
+        .expect("scope must refuse the next request");
+    let projected = crate::llm::call::build_llm_error_dict(&refused, "openai", "fixture");
+    assert_eq!(
+        projected
+            .as_dict()
+            .unwrap()
+            .get("origin")
+            .map(VmValue::display)
+            .as_deref(),
+        Some("local")
+    );
     let scope = SCOPE.with(|slot| slot.borrow().clone());
     let ledger = scope.ledger.lock().unwrap();
     assert!(ledger.settled_upper > Decimal::ZERO);

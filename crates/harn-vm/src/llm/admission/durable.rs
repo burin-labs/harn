@@ -357,8 +357,7 @@ impl DurableReservation {
             )
             .map_err(db_error)?;
             tx.commit().map_err(db_error)?;
-            return Err(error(
-                DenialKind::ProviderContractViolation,
+            return Err(provider_violation(
                 "provider usage exceeded the machine spend reservation",
             ));
         }

@@ -63,8 +63,15 @@ enum DenialKind {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AdmissionOrigin {
+    Local,
+    Provider,
+}
+
+#[derive(serde::Serialize)]
 struct AdmissionDenial<'a> {
-    origin: &'static str,
+    origin: AdmissionOrigin,
     category: &'static str,
     kind: &'static str,
     reason: &'static str,
@@ -73,22 +80,42 @@ struct AdmissionDenial<'a> {
 }
 
 fn error(admission_reason: DenialKind, message: &str) -> VmError {
-    denial(ErrorCategory::BudgetExceeded, admission_reason, message)
+    denial(
+        ErrorCategory::BudgetExceeded,
+        admission_reason,
+        message,
+        AdmissionOrigin::Local,
+    )
+}
+
+fn provider_violation(message: &str) -> VmError {
+    denial(
+        ErrorCategory::BudgetExceeded,
+        DenialKind::ProviderContractViolation,
+        message,
+        AdmissionOrigin::Provider,
+    )
 }
 
 /// The spend ledger could not be read or written. Admission still fails
 /// closed, but under the category of what went wrong, not as a spent budget.
 fn unavailable(category: ErrorCategory, message: &str) -> VmError {
-    denial(category, DenialKind::ScopeUnavailable, message)
+    denial(
+        category,
+        DenialKind::ScopeUnavailable,
+        message,
+        AdmissionOrigin::Local,
+    )
 }
 
-fn denial(category: ErrorCategory, admission_reason: DenialKind, message: &str) -> VmError {
+fn denial(
+    category: ErrorCategory,
+    admission_reason: DenialKind,
+    message: &str,
+    origin: AdmissionOrigin,
+) -> VmError {
     let denial = AdmissionDenial {
-        origin: if matches!(admission_reason, DenialKind::ProviderContractViolation) {
-            "provider"
-        } else {
-            "local"
-        },
+        origin,
         category: category.as_str(),
         kind: "terminal",
         reason: category.as_str(),
@@ -152,8 +179,7 @@ impl AttemptReservation {
             if let Some(durable) = &self.money.durable {
                 durable.invalidate()?;
             }
-            return Err(error(
-                DenialKind::ProviderContractViolation,
+            return Err(provider_violation(
                 "provider reported an unadmitted premium serving tier",
             ));
         }
@@ -168,8 +194,7 @@ impl AttemptReservation {
                 if let Some(durable) = &self.money.durable {
                     durable.invalidate()?;
                 }
-                return Err(error(
-                    DenialKind::ProviderContractViolation,
+                return Err(provider_violation(
                     "partial provider usage or route violated the admitted contract",
                 ));
             }
@@ -229,8 +254,7 @@ impl MonetaryReservation {
             if let Some(durable) = &self.durable {
                 durable.invalidate()?;
             }
-            return Err(error(
-                DenialKind::ProviderContractViolation,
+            return Err(provider_violation(
                 "provider usage exceeded an admitted token or cost bound",
             ));
         }
