@@ -18,7 +18,7 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::FsAccess;
 use crate::orchestration::CapabilityPolicy;
@@ -60,9 +60,16 @@ impl MemoKey {
 }
 
 thread_local! {
-    static MEMO: RefCell<Option<(MemoKey, Instant, Rc<ScopeRoots>)>> = const { RefCell::new(None) };
+    /// The memo and when it was derived, in the runtime clock's milliseconds.
+    static MEMO: RefCell<Option<(MemoKey, i128, Rc<ScopeRoots>)>> = const { RefCell::new(None) };
     #[cfg(test)]
     static DERIVATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Monotonic milliseconds from the runtime clock, which tests can mock.
+fn now_ms() -> i128 {
+    // Monotonic time since process start never approaches i128::MAX.
+    crate::clock_mock::instant_now().as_millis() as i128
 }
 
 fn derive(policy: &CapabilityPolicy) -> Rc<ScopeRoots> {
@@ -88,14 +95,16 @@ pub(super) fn scope_roots(policy: &CapabilityPolicy, access: FsAccess) -> Rc<Sco
     let reused = MEMO.with(|memo| {
         memo.borrow()
             .as_ref()
-            .filter(|(memo_key, at, _)| *memo_key == key && at.elapsed() < MEMO_TTL)
+            .filter(|(memo_key, at, _)| {
+                *memo_key == key && now_ms() - *at < MEMO_TTL.as_millis() as i128
+            })
             .map(|(_, _, roots)| Rc::clone(roots))
     });
     if let Some(roots) = reused {
         return roots;
     }
     let roots = derive(policy);
-    MEMO.with(|memo| *memo.borrow_mut() = Some((key, Instant::now(), Rc::clone(&roots))));
+    MEMO.with(|memo| *memo.borrow_mut() = Some((key, now_ms(), Rc::clone(&roots))));
     roots
 }
 
@@ -109,7 +118,7 @@ pub(super) fn derivations() -> usize {
 pub(super) fn age(by: Duration) {
     MEMO.with(|memo| {
         if let Some((_, at, _)) = memo.borrow_mut().as_mut() {
-            *at = at.checked_sub(by).expect("backdated instant");
+            *at -= by.as_millis() as i128;
         }
     });
 }
