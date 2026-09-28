@@ -1,6 +1,7 @@
 import { help_requested } from "std/cli/argparse"
 pub import {
   provider_tool_probe_campaign_behaviors,
+  provider_tool_probe_campaign_bind_routes,
   provider_tool_probe_campaign_catalog_routes,
   provider_tool_probe_campaign_catalog_snapshot,
   provider_tool_probe_campaign_default_routes,
@@ -169,7 +170,11 @@ fn main(harness: Harness) {
     provider_tool_probe_campaign_routes(route_specs)
   }
   const routes = provider_tool_probe_campaign_filter_routes(
-    unfiltered_routes,
+    if catalog_receipt.status == "verified" {
+      provider_tool_probe_campaign_bind_routes(unfiltered_routes, target.catalog_payload)
+    } else {
+      unfiltered_routes
+    },
     __as_string_list(parsed?.provider),
     parsed?.exclude_local ?? false,
   )

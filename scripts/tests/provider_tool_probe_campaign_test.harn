@@ -1568,6 +1568,29 @@ pipeline test_campaign_expired_deadline_refuses_dispatch(harness: Harness) {
 }
 
 @test
+pipeline test_explicit_probe_routes_use_catalog_auth_and_classification() {
+  const parsed = provider_tool_probe_campaign_routes(["ollama:custom-model"])
+  const hosted = {
+    providers: [{id: "ollama", classification: "hosted", auth: {env: ["ALIAS_ONE", "ALIAS_TWO"]}}],
+    models: [],
+  }
+  const routes = provider_tool_probe_campaign_bind_routes(parsed, hosted)
+  const route = unwrap(routes[0])
+  assert_false(route.local)
+  assert_eq(provider_tool_probe_campaign_missing_env_keys(route, {}), ["ALIAS_ONE", "ALIAS_TWO"])
+  assert_eq(provider_tool_probe_campaign_missing_env_keys(route, {ALIAS_TWO: "fixture-only"}), [])
+  const with_route_key = provider_tool_probe_campaign_bind_routes(
+    [route + {metadata: route.metadata + {route_secret_env: "ROUTE_KEY"}}],
+    hosted,
+  )
+  assert_true(unwrap(with_route_key[0]).env_keys.contains("ROUTE_KEY"))
+  const unknown = try {
+    provider_tool_probe_campaign_bind_routes(parsed, {providers: [], models: []})
+  }
+  assert_true(is_err(unknown))
+}
+
+@test
 pipeline test_campaign_reports_the_charged_figure_apart_from_the_priced_one(
   harness: Harness,
   task: unknown,

@@ -457,8 +457,8 @@ pub fn __provider_meta_by_id(catalog: dict) -> dict {
 
 pub fn __route_is_local(provider: string, meta: dict) -> bool {
   const classification = to_string(meta.classification ?? "")
-  if classification == "local" {
-    return true
+  if classification != "" {
+    return classification == "local"
   }
   return provider == "local" || provider == "ollama" || provider == "llamacpp" || provider == "mlx"
 }
@@ -571,6 +571,31 @@ pub fn __catalog_route_from_routing_row(
       route_secret_env: route.secret_env,
     },
   }
+}
+
+/** Bind explicit and curated routes to the same provider facts as catalog routes. */
+pub fn provider_tool_probe_campaign_bind_routes(
+  routes: list<ProviderToolProbeRoute>,
+  catalog: dict,
+) -> list<ProviderToolProbeRoute> {
+  const providers = __provider_meta_by_id(catalog)
+  const models = __catalog_models_by_route(catalog)
+  let bound: list<ProviderToolProbeRoute> = []
+  for route in routes {
+    require providers[route.provider] != nil,
+      "provider catalog has no authentication facts for "
+      + route.provider
+    const facts = unwrap(
+      __catalog_route_from_routing_row(
+        route + {secret_env: route.metadata?.route_secret_env},
+        providers,
+        models,
+        true,
+      ),
+    )
+    bound = bound + [facts + {id: route.id, metadata: facts.metadata + route.metadata}]
+  }
+  return bound
 }
 
 pub fn __catalog_routes_from_routing_table(
