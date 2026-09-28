@@ -125,8 +125,15 @@ pub(crate) fn effective_tool_api_mode(
 /// Provider probes use this boundary so they cannot drift into a second set of
 /// endpoint, auth, request, streaming, and response rules.
 pub(crate) async fn probe_llm_request(request: &LlmRequestPayload) -> Result<LlmResult, VmError> {
-    super::admission::check_auxiliary(None, "provider conformance probes")?;
-    vm_call_llm_api(request, None).await
+    let reservation = super::admission::reserve_probe(request)?;
+    let result = vm_call_llm_api(request, None).await?;
+    let admission_result = reservation
+        .map(|reservation| reservation.settle(&result))
+        .transpose();
+    let usage_result = super::cost::record_llm_usage(&result);
+    admission_result?;
+    usage_result?;
+    Ok(result)
 }
 
 #[derive(Debug, Clone)]

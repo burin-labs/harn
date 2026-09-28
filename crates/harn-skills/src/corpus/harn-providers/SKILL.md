@@ -148,9 +148,14 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
    Each run extracts one change; split multi-change announcements into focused
    notice records and track every residual fact.
    Keep `--apply` off until the candidate is independently verified.
-3. For each new chat route with available credentials, run
-   `harn provider tool-probe <provider> --model <id> --tool-format native --mode non-streaming --json true`
-   and save its JSON report. Validate it with
+3. For each new chat route with available credentials, run:
+
+   ```bash
+   harn provider tool-probe <provider> --model <id> --tool-format native \
+     --mode non-streaming --timeout-secs 30 --max-cost-usd <ceiling> --json true
+   ```
+
+   Save its JSON report. Validate it with
    `harn provider tool-scorecard --tool-probe-report <report> --json`.
    Require live provider-adapter provenance and `native_tool_probe` in the exact
    route's `passed_probes` before advertising native tools; saved responses,
@@ -160,6 +165,8 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
    `usage.cost_usd` and keep an inaccessible route
    explicitly unverified instead of treating an aggregator mirror as proof of
    its direct adapter.
+   Preserve the conservative `admission` receipt. Unsupported billing or
+   unknown pricing remains incomplete; do not drop the cap to obtain a result.
 4. Change the owning catalog fragments. Record `deprecated` and
    `superseded_by`, preserve aliases, and move defaults off deprecated rows.
    Pin curated support recommendations before generating projections. Check

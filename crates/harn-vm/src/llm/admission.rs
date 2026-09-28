@@ -296,15 +296,31 @@ pub(crate) fn reserve(
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
 ) -> Result<Option<AttemptReservation>, VmError> {
+    reserve_request(opts.budget.as_ref(), request, || {
+        super::cost::check_llm_preflight_budget(opts).map(|_| ())
+    })
+}
+
+pub(crate) fn reserve_probe(
+    request: &LlmRequestPayload,
+) -> Result<Option<AttemptReservation>, VmError> {
+    reserve_request(None, request, || Ok(()))
+}
+
+fn reserve_request(
+    budget: Option<&super::cost::LlmBudgetEnvelope>,
+    request: &LlmRequestPayload,
+    preflight: impl FnOnce() -> Result<(), VmError>,
+) -> Result<Option<AttemptReservation>, VmError> {
     let scope = SCOPE.with(|slot| slot.borrow().clone());
     let mut ledger = scope
         .ledger
         .lock()
         .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
-    activate(&mut ledger, opts.budget.as_ref())?;
+    activate(&mut ledger, budget)?;
     // Latch the execution ceiling even when the adaptive preflight refuses.
     // Such a refusal precedes transport, so it consumes no reservation.
-    super::cost::check_llm_preflight_budget(opts)?;
+    preflight()?;
     // The provider registry marks a self-hosted runtime as a known-zero
     // billing route. It consumes neither the machine allowance nor an
     // uncertain reservation; an unknown paid route still fails closed below.
@@ -332,7 +348,7 @@ pub(crate) fn reserve(
         &scope,
         &mut ledger,
         bound.total(),
-        opts.budget.as_ref().and_then(|b| b.max_cost_usd),
+        budget.and_then(|b| b.max_cost_usd),
     )?;
     Ok(Some(AttemptReservation { money: hold, bound }))
 }
@@ -448,7 +464,7 @@ pub(crate) fn charged_upper_usd() -> Option<f64> {
 }
 
 /// Upper accounting is deliberately named apart from the actual-usage ledger.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AdmissionReceipt {
     pub mode: AdmissionMode,
     pub ceiling_usd: Decimal,
@@ -475,12 +491,13 @@ impl AdmissionScope {
 }
 
 pub(crate) fn receipt() -> Option<VmValue> {
-    SCOPE.with(|slot| {
-        let receipt = slot.borrow().receipt()?;
-        Some(crate::schema::json_to_vm_value(
-            &serde_json::to_value(receipt).ok()?,
-        ))
-    })
+    Some(crate::schema::json_to_vm_value(
+        &serde_json::to_value(typed_receipt()?).ok()?,
+    ))
+}
+
+pub(crate) fn typed_receipt() -> Option<AdmissionReceipt> {
+    SCOPE.with(|slot| slot.borrow().receipt())
 }
 
 pub(crate) fn machine_receipt() -> Result<Option<VmValue>, VmError> {

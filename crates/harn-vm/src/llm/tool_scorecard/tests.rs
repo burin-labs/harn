@@ -944,6 +944,7 @@ fn report_with_probe_case(
         marker: "marker".to_string(),
         expected_value: "marker".to_string(),
         cases,
+        admission: None,
         tool_calling: ToolCallingConformanceSummary {
             native: ToolProbeStatus::Unknown,
             text: ToolProbeStatus::Unknown,

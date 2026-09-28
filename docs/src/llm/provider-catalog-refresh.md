@@ -224,13 +224,22 @@ provider adapter, request builder, stream parser, and response normalizer as
 harn provider tool-probe openai --model gpt-6-sol --dry-run-request
 
 # Check non-streaming and streaming native tool calls.
-harn provider tool-probe openai --model gpt-6-sol --mode both
+harn provider tool-probe openai --model gpt-6-sol --mode both \
+  --timeout-secs 30 --max-cost-usd 5
 ```
 
 The probe reads the provider's normal API-key environment variable. Pass
 `--base-url` only to test a raw compatible endpoint; that override bypasses the
 provider adapter. Each JSON result records the observed tool-call shape,
 latency, token use, and catalog-priced cost.
+
+`--max-cost-usd` installs Harn's conservative allowance for the whole probe,
+including all modes and repetitions. The `admission` receipt distinguishes
+settled upper cost from uncertain spend; missing usage retains the reservation.
+The shared admission contract refuses unsupported billing shapes and unknown
+pricing before transport. A raw endpoint or saved response cannot use this
+allowance. Each adapter case also obeys `--timeout-secs`, including its entire
+asynchronous request; a timeout leaves any outstanding reservation uncertain.
 
 Use the spend-capped campaign to measure several routes or repeat a stochastic
 claim. Dry-run mode performs request and credential readiness checks without

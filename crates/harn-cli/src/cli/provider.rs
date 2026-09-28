@@ -372,8 +372,11 @@ pub(crate) struct ProviderToolProbeArgs {
     #[arg(long = "dry-run-request")]
     pub dry_run_request: bool,
     /// Request timeout in seconds for each live probe case.
-    #[arg(long, default_value_t = 120)]
+    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..))]
     pub timeout_secs: u64,
+    /// Conservative dollar ceiling shared by all modes and repetitions.
+    #[arg(long, conflicts_with_all = ["base_url", "response_fixture", "dry_run_request"])]
+    pub max_cost_usd: Option<f64>,
     /// Emit JSON. Defaults to true because evals and setup scripts consume
     /// the structured conformance report.
     #[arg(
@@ -640,6 +643,7 @@ impl ProviderToolProbeArgs {
         options.marker = self.marker.clone();
         options.repeat = usize::from(self.repeat);
         options.timeout_secs = self.timeout_secs;
+        options.max_cost_usd = self.max_cost_usd;
         options
     }
 }

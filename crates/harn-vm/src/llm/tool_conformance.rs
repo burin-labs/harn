@@ -16,6 +16,8 @@ mod request;
 mod request_contract;
 #[path = "tool_conformance_response.rs"]
 mod response;
+#[path = "tool_conformance_run.rs"]
+mod run;
 #[path = "tool_conformance_parse.rs"]
 mod text_parse;
 #[path = "tool_conformance_types.rs"]
@@ -33,6 +35,7 @@ use response::{
     content_sample, extract_content, extract_native_tool_calls, first_non_empty,
     has_raw_model_tool_tag, sample_content, sample_failure,
 };
+pub use run::run_tool_conformance_probe;
 pub use types::{
     ToolConformanceRequestAuditFailure, ToolConformanceRequestAuditNotApplicable,
     ToolConformanceRequestAuditReport, ToolConformanceRequestAuditRoute,
@@ -59,6 +62,7 @@ pub struct ToolConformanceProbeOptions {
     pub marker: String,
     pub repeat: usize,
     pub timeout_secs: u64,
+    pub max_cost_usd: Option<f64>,
 }
 
 impl ToolConformanceProbeOptions {
@@ -74,6 +78,7 @@ impl ToolConformanceProbeOptions {
             marker: DEFAULT_TOOL_PROBE_MARKER.to_string(),
             repeat: 1,
             timeout_secs: 120,
+            max_cost_usd: None,
         }
     }
 }
@@ -245,6 +250,8 @@ pub struct ToolConformanceReport {
     pub expected_value: String,
     pub cases: Vec<ToolConformanceCase>,
     pub tool_calling: ToolCallingConformanceSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission: Option<super::AdmissionReceipt>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -407,58 +414,6 @@ fn classify_http_failure(status: u16, body: &str) -> ToolProbeClassification {
     } else {
         ToolProbeClassification::HttpError
     }
-}
-
-pub async fn run_tool_conformance_probe(
-    options: ToolConformanceProbeOptions,
-) -> ToolConformanceReport {
-    let model = llm_config::resolve_model_info(&options.model);
-    let provider = if options.provider.trim().is_empty() {
-        model.provider.clone()
-    } else {
-        options.provider.clone()
-    };
-    let model_id = resolved_probe_model_id(&model.id);
-    let base_url = options.base_url.clone().or_else(|| {
-        llm_config::provider_config(&provider).map(|def| llm_config::resolve_base_url(&def))
-    });
-    let mut cases = Vec::new();
-    let modes = normalized_modes(&options.modes);
-    let expected_value = options.probe_case.expected_value(&options.marker);
-    for _ in 0..options.repeat.max(1) {
-        for mode in &modes {
-            cases.push(
-                execute_live_probe_case(
-                    &provider,
-                    &model_id,
-                    options.base_url.as_deref(),
-                    *mode,
-                    ToolProbeFormatPolicy {
-                        format: options.tool_format,
-                        strict: options.strict_tool_format,
-                    },
-                    options.probe_case,
-                    &expected_value,
-                    options.timeout_secs,
-                )
-                .await,
-            );
-        }
-    }
-    report_from_cases(
-        provider,
-        model_id,
-        base_url,
-        if options.base_url.is_some() {
-            ToolProbeEvidenceSource::LiveRawEndpoint
-        } else {
-            ToolProbeEvidenceSource::LiveRequest
-        },
-        options.tool_format,
-        options.probe_case,
-        options.marker,
-        cases,
-    )
 }
 
 fn resolved_probe_model_id(selector: &str) -> String {
@@ -924,6 +879,7 @@ fn report_from_cases(
         expected_value,
         cases,
         tool_calling: summary,
+        admission: None,
     }
 }
 
@@ -1030,14 +986,18 @@ async fn execute_live_probe_case(
     marker: &str,
     timeout_secs: u64,
 ) -> ToolConformanceCase {
-    if let Err(error) = super::admission::check_auxiliary(None, "provider conformance probes") {
-        return ToolConformanceCase::transport_error(mode, error.to_string(), None);
+    if timeout_secs == 0 {
+        return ToolConformanceCase::transport_error(
+            mode,
+            "provider probe timeout must be positive".into(),
+            Some(0),
+        );
     }
 
     let clock = harn_clock::RealClock::arc();
     let started_ms = clock.monotonic_ms();
     if base_url.is_none() {
-        let request = match probe_request_payload_for_format(
+        let mut request = match probe_request_payload_for_format(
             provider,
             model,
             mode,
@@ -1055,14 +1015,28 @@ async fn execute_live_probe_case(
                 );
             }
         };
-        let result = match crate::llm::api::probe_llm_request(&request).await {
-            Ok(result) => result,
-            Err(error) => {
+        let deadline = std::time::Duration::from_secs(timeout_secs);
+        request.timeout = Some(deadline);
+        let result = match tokio::time::timeout(
+            deadline,
+            crate::llm::api::probe_llm_request(&request),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => {
                 return ToolConformanceCase::transport_error(
                     mode,
                     error.to_string(),
                     Some(elapsed_ms(&*clock, started_ms)),
                 );
+            }
+            Err(_) => {
+                return ToolConformanceCase::transport_error(
+                    mode,
+                    format!("provider probe timed out after {timeout_secs}s"),
+                    Some(elapsed_ms(&*clock, started_ms)),
+                )
             }
         };
         let usage = Some(ToolProbeUsage::from_llm_result(&result));
@@ -1081,6 +1055,9 @@ async fn execute_live_probe_case(
             usage,
         )
         .await;
+    }
+    if let Err(error) = super::admission::check_auxiliary(None, "raw endpoint conformance probes") {
+        return ToolConformanceCase::transport_error(mode, error.to_string(), None);
     }
     let Some(def) = llm_config::provider_config(provider) else {
         return ToolConformanceCase::transport_error(

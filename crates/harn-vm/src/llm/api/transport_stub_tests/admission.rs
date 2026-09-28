@@ -212,7 +212,7 @@ fn machine_quota_survives_retry_and_process_style_reopen_on_real_transport() {
 }
 
 #[test]
-fn conservative_admission_refuses_auxiliary_completion_and_probe_before_http() {
+fn conservative_admission_refuses_auxiliaries_but_admits_adapter_probes() {
     let _env = env_guard();
     let _transport = allow_stubbed_llm_transport();
     let _cleanup = Cleanup;
@@ -238,18 +238,69 @@ fn conservative_admission_refuses_auxiliary_completion_and_probe_before_http() {
                 .is_err()
         );
         let request = crate::llm::api::LlmRequestPayload::from(&opts);
-        assert!(crate::llm::api::probe_llm_request(&request).await.is_err());
         let health = crate::llm::run_provider_healthcheck("openai").await;
         assert!(!health.valid);
         assert!(health.message.contains("unsupported_billing_shape"));
         assert_eq!(count.load(Ordering::SeqCst), 0);
+        let probe = crate::llm::api::probe_llm_request(&request).await.unwrap();
+        assert_eq!(probe.text, "hello");
+        assert_eq!(count.load(Ordering::SeqCst), 1);
         // Refusing the unsupported first operation still latched the ceiling;
         // omitting the option on a supported call retains conservative receipt.
         let result = vm_call_llm_full(&omitted).await.unwrap();
         assert_eq!(result.text, "hello");
         assert!(crate::llm::admission::receipt().is_some());
-        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(count.load(Ordering::SeqCst), 2);
     });
+}
+
+#[test]
+fn probe_modes_and_repetitions_share_uncertain_spend() {
+    use crate::llm::tool_conformance::{
+        run_tool_conformance_probe, ToolConformanceProbeOptions, ToolProbeCase,
+    };
+
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    crate::llm::cost::reset_cost_state();
+    let count = Arc::new(AtomicUsize::new(0));
+    let observed = count.clone();
+    let server = spawn_llm_stub("probe without usage", move |stream| {
+        use std::io::{Read, Write};
+        let mut bytes = [0u8; 16_384];
+        assert!(stream.read(&mut bytes).unwrap() > 0);
+        observed.fetch_add(1, Ordering::SeqCst);
+        let body = serde_json::json!({
+            "model": "gpt-5.6-luna",
+            "choices": [{"message": {"role": "assistant", "content": "direct_answer:harn_tool_probe_marker"}, "finish_reason": "stop"}]
+        }).to_string();
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    install(server.addr());
+    let mut options = ToolConformanceProbeOptions::new("openai", "gpt-5.6-luna");
+    options.probe_case = ToolProbeCase::NoToolAnswerOrRefusal;
+    options.repeat = 2;
+    options.max_cost_usd = Some(0.6);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let report = runtime.block_on(run_tool_conformance_probe(options));
+
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "only the first case reaches HTTP"
+    );
+    assert_eq!(report.cases.len(), 4);
+    assert!(report.cases[0].ok, "the first case must run: {report:?}");
+    assert!(report.cases[1..].iter().all(|case| !case.ok));
+    let receipt = report.admission.expect("measured allowance");
+    assert!(receipt.uncertain_usd > rust_decimal::Decimal::ZERO);
+    assert_eq!(receipt.settled_upper_usd, rust_decimal::Decimal::ZERO);
+    assert_eq!(receipt.in_flight_usd, rust_decimal::Decimal::ZERO);
+    assert_eq!(receipt.denied_attempts, 3);
 }
 
 #[test]
