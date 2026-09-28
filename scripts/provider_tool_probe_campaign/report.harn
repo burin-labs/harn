@@ -4,41 +4,17 @@ import "./plan"
 import "./support"
 import "./types"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v11"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v12"
 
-/**
- * What one live case is charged against the cap when the runtime priced none
- * of its usage.
- *
- * A live case that produced no runtime price is an accounting gap, not a
- * spend of zero and not a reason to abandon the campaign. Charging a declared
- * figure keeps the cap a true upper bound while the remaining units still get
- * measured. The figure is deliberately far above what a probe of this shape
- * can cost: these cases cap the response at a handful of tokens, and the most
- * expensive catalogued route is orders of magnitude below this per call. It
- * is an upper bound on purpose, so an unpriced run reaches the cap early
- * rather than overrunning it.
- */
-const UNPRICED_LIVE_CASE_FALLBACK_USD = 0.05
-
-/**
- * Spend charged against the cap: what the runtime priced, plus the declared
- * figure for every case it did not.
- */
+/** Producer-owned reservations include unpriced and interrupted requests. */
 pub fn provider_tool_probe_campaign_charged_usd(spend: dict) -> float {
-  return to_float(spend?.actual_usd ?? 0.0)
-    + to_float(spend?.unpriced_case_count ?? 0) * UNPRICED_LIVE_CASE_FALLBACK_USD
+  return to_float(spend?.conservative_upper_usd ?? 0.0)
 }
 
-/**
- * Whether the campaign may execute another live probe.
- *
- * The cap is the only thing that can say no. This is the loop's own
- * decision, named so it can be stated directly rather than inferred from a
- * campaign that did or did not keep going.
- */
+/** Missing or broken admission receipts stop dispatch, even below the cap. */
 pub fn provider_tool_probe_campaign_may_execute(spend: dict, max_cost_usd: float) -> bool {
-  return provider_tool_probe_campaign_charged_usd(spend) < max_cost_usd
+  return (spend?.unaccounted_probe_count ?? 0) == 0
+    && provider_tool_probe_campaign_charged_usd(spend) < max_cost_usd
 }
 
 pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbeCell>) -> dict {
@@ -47,6 +23,9 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
   let unpriced_case_count = 0
   let request_attempt_count = 0
   let retry_count = 0
+  let request_attempt_count_unknown = 0
+  let conservative_upper_usd = 0.0
+  let unaccounted_probe_count = 0
   for cell in cells {
     const telemetry = cell.observed?.telemetry ?? {}
     actual_usd = actual_usd + (telemetry?.actual_usd ?? 0.0)
@@ -54,6 +33,21 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
     unpriced_case_count = unpriced_case_count + (telemetry?.unpriced_case_count ?? 0)
     request_attempt_count = request_attempt_count + (telemetry?.request_attempt_count ?? 0)
     retry_count = retry_count + (telemetry?.retry_count ?? 0)
+    request_attempt_count_unknown = request_attempt_count_unknown
+      + (telemetry?.request_attempt_count_unknown ?? 0)
+    if contains(["pass", "fail", "error"], cell.status) {
+      const admission = cell.observed?.admission
+      if admission?.mode != "conservative" || admission?.contract_broken != false
+        || admission?.settled_upper_usd == nil || admission?.in_flight_usd == nil
+        || admission?.uncertain_usd == nil {
+        unaccounted_probe_count = unaccounted_probe_count + 1
+      } else {
+        conservative_upper_usd = conservative_upper_usd
+          + to_float(admission.settled_upper_usd)
+          + to_float(admission.in_flight_usd)
+          + to_float(admission.uncertain_usd)
+      }
+    }
   }
   return {
     actual_usd: actual_usd,
@@ -61,6 +55,9 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
     unpriced_case_count: unpriced_case_count,
     request_attempt_count: request_attempt_count,
     retry_count: retry_count,
+    request_attempt_count_unknown: request_attempt_count_unknown,
+    conservative_upper_usd: conservative_upper_usd,
+    unaccounted_probe_count: unaccounted_probe_count,
   }
 }
 
@@ -135,10 +132,8 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
         for trial in range(1, repeat + 1) {
           for format in behavior.tool_formats {
             const spend = provider_tool_probe_campaign_observed_spend(cells)
-            // The cap is the only reason to stop. A case the runtime did not
-            // price is charged the declared figure and counted here, so an
-            // unpriced run still bounds its own spend instead of abandoning
-            // every remaining unit on the first one.
+            // Each child inherits only the remaining allowance and reserves
+            // at the same admission boundary as ordinary inference.
             if budget_stopped || !provider_tool_probe_campaign_may_execute(spend, max_cost_usd) {
               budget_stopped = true
               probe_executions_excluded_by_budget = probe_executions_excluded_by_budget + 1
@@ -161,6 +156,7 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
                   timeout_secs,
                   output_dir,
                   trial,
+                  max_cost_usd - provider_tool_probe_campaign_charged_usd(spend),
                 )
               } else {
                 __run_option_probe(
@@ -173,6 +169,7 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
                   env,
                   output_dir,
                   trial,
+                  max_cost_usd - provider_tool_probe_campaign_charged_usd(spend),
                 )
               }
             probe_executions_selected = probe_executions_selected + 1
@@ -337,7 +334,7 @@ pub fn __estimated_spend(
   }
   if live {
     const observed = provider_tool_probe_campaign_observed_spend(cells)
-    const unaccounted_probe_count = executable_probe_count - observed.request_attempt_count
+    const unaccounted_probe_count = observed.unaccounted_probe_count
     const accounting_complete = observed.unpriced_case_count == 0 && unaccounted_probe_count == 0
     const charged_usd = provider_tool_probe_campaign_charged_usd(observed)
     return base
@@ -345,26 +342,16 @@ pub fn __estimated_spend(
       + {
         unaccounted_probe_count: unaccounted_probe_count,
         actual_usd_known: accounting_complete,
-        // What the cap was actually measured against, and the declared figure
-        // it was built from, so a charged estimate is never read back as a
-        // priced measurement.
         charged_usd: charged_usd,
-        unpriced_case_fallback_usd: UNPRICED_LIVE_CASE_FALLBACK_USD,
-        unpriced_charged_usd: charged_usd - observed.actual_usd,
         accounting: if accounting_complete {
           "summed from runtime-priced per-case usage receipts"
         } else {
-          "runtime-priced receipts plus a declared figure for ${to_string(observed.unpriced_case_count)} case(s) the runtime did not price; the campaign continued"
+          "actual spend remains incomplete; the cap uses producer-owned conservative reservations"
         },
-        // Two different gaps reach this branch: a case the runtime did not
-        // price, and an executable probe that reported no attempt at all.
-        // Neither stops the campaign any more, so the status says the
-        // accounting is incomplete rather than claiming a stop that did not
-        // happen.
-        budget_status: if charged_usd >= max_cost_usd {
-          "exhausted"
-        } else if !accounting_complete {
+        budget_status: if unaccounted_probe_count > 0 {
           "accounting_incomplete"
+        } else if charged_usd >= max_cost_usd {
+          "exhausted"
         } else {
           "within_cap"
         },

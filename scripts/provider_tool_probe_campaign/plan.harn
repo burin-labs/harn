@@ -27,8 +27,9 @@ pub fn __option_probe_command(
   harn_bin: string,
   route: ProviderToolProbeRoute,
   option: ProviderPortableProbeOption,
+  max_cost_usd: float? = nil,
 ) -> list<string> {
-  return [
+  const command = [
     harn_bin,
     "provider",
     "option-probe",
@@ -42,6 +43,9 @@ pub fn __option_probe_command(
     "--fail-on-drift",
     "--json",
   ]
+  return command + if max_cost_usd != nil {
+    ["--max-cost-usd", to_string(max_cost_usd)]
+  } else { [] }
 }
 
 pub type ProviderToolProbeCommandRequest = {
@@ -52,6 +56,7 @@ pub type ProviderToolProbeCommandRequest = {
   format: string,
   repeat: int,
   timeout_secs: int,
+  max_cost_usd?: float,
 }
 
 pub fn __tool_probe_command(request: ProviderToolProbeCommandRequest) -> list<string> {
@@ -62,7 +67,7 @@ pub fn __tool_probe_command(request: ProviderToolProbeCommandRequest) -> list<st
   const format = request.format
   const repeat = request.repeat
   const timeout_secs = request.timeout_secs
-  return [
+  const command = [
     harn_bin,
     "provider",
     "tool-probe",
@@ -81,6 +86,11 @@ pub fn __tool_probe_command(request: ProviderToolProbeCommandRequest) -> list<st
     to_string(timeout_secs),
     "--json",
   ]
+  return command + if request.max_cost_usd != nil {
+    ["--max-cost-usd", to_string(request.max_cost_usd)]
+  } else {
+    []
+  }
 }
 
 pub fn __cell_id(

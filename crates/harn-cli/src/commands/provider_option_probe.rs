@@ -17,12 +17,32 @@ pub(crate) async fn run(mut args: ProviderOptionProbeArgs) -> i32 {
             }
         };
     let argv = option_probe_argv(&args);
+    let ceiling = args.max_cost_usd;
     let dispatch =
         crate::dispatch::dispatch_to_embedded_script("providers/option_probe", argv, args.json);
-    if args.gated {
-        dispatch.await
-    } else {
-        harn_vm::llm::with_portable_option_probe(args.option.portable_option(), dispatch).await
+    let run = async {
+        if args.gated {
+            dispatch.await
+        } else {
+            harn_vm::llm::with_portable_option_probe(args.option.portable_option(), dispatch).await
+        }
+    };
+    let Some(ceiling) = ceiling else {
+        return run.await;
+    };
+    let budget = match harn_vm::llm::ConservativeLlmBudget::new(ceiling) {
+        Ok(budget) => budget,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    match budget.scope(run).await {
+        Ok(exit) => exit,
+        Err(error) => {
+            eprintln!("{error}");
+            2
+        }
     }
 }
 
@@ -61,6 +81,7 @@ mod tests {
             model: "claude-sonnet-5".to_string(),
             option: ProviderPortableOptionArg::TopP,
             max_tokens: 8,
+            max_cost_usd: None,
             plan: true,
             fail_on_drift: true,
             gated: false,

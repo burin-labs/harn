@@ -772,6 +772,9 @@ pub(crate) struct ProviderOptionProbeArgs {
     /// Response cap for the minimal probe call.
     #[arg(long = "max-tokens", default_value_t = 8)]
     pub max_tokens: i64,
+    /// Conservative allowance reserved before the provider request.
+    #[arg(long)]
+    pub max_cost_usd: Option<f64>,
     /// Print the typed request plan without making a provider call.
     #[arg(long)]
     pub plan: bool,

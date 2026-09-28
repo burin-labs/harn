@@ -23,6 +23,7 @@ pub type ProviderOptionProbeAttempt = {
 
 pub type ProviderOptionProbeReport = {
   schema_version: "harn.provider_option_probe.v1",
+  admission?: dict,
   endpoint: {provider: string, model: string, route: string},
   option: ProviderPortableProbeOption,
   catalog: {field: string, claimed_supported: bool},
