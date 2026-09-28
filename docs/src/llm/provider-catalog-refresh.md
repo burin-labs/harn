@@ -246,7 +246,7 @@ claim. Dry-run mode performs request and credential readiness checks without
 provider calls:
 
 ```bash
-harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- \
+harn run scripts/provider_tool_probe_campaign.harn -- \
   --route openai:gpt-4.1-nano \
   --behavior provider_tool_probe \
   --repeat 3 \
@@ -259,6 +259,10 @@ Add `--live` only after reviewing that plan. Live campaigns require
 [CLI reference](../cli-reference.md#durable-provider-allowance). The campaign
 forwards that path to every child, which draws from the same durable lifetime
 allowance. Keep the policy and ledger outside the agent's writable roots.
+The subprocess path also requires `--allow-process-network`. That grant retains
+filesystem confinement; private-ledger access outside child write roots is not
+yet verified for this campaign. Do not disable the sandbox or expose the ledger
+as a general write root to work around that gap.
 Each child also receives the remaining
 `--max-cost-usd` allowance before dispatch. Tool and option probes use Harn's
 shared conservative admission boundary. The campaign sums settled, in-flight,
@@ -277,6 +281,15 @@ Harn atomically inserts that window, so concurrent starts share the first deadli
 Resuming it includes downtime and preserves the original deadline; changing
 its duration or reading malformed saved state fails. Use a new output directory
 for a new campaign, with a separately authorized allowance.
+
+Completed cells reuse Harn's keyed checkpoints. Retention requires a pass or fail
+result, an accounted admission receipt, and an existing artifact. Reuse checks
+the artifact's bytes before any new provider call. Changed or missing artifacts
+fail closed. Skips, errors, and unaccounted results remain unretained.
+Completed cells can still be read after admission closes; unfinished cells
+cannot start. Cell identity includes the canonical output directory, runtime
+content, catalog, producer sources, provider configuration, and credential
+fingerprint. Checkpoints retain only the credential fingerprint.
 
 Each live output directory contains:
 
@@ -359,7 +372,7 @@ The existing spend-capped campaign executes every portable option without a
 second orchestration path:
 
 ```bash
-harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- \
+harn run scripts/provider_tool_probe_campaign.harn -- \
   --catalog-routes \
   --exclude-local \
   --behavior provider_option_probe \
