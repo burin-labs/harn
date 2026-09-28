@@ -587,6 +587,7 @@ pub fn provider_tool_probe_campaign_source_receipt(fs: HarnessFs) -> dict {
     "scripts/provider_tool_probe_campaign/resume.harn",
     "scripts/provider_tool_probe_campaign/support.harn",
     "scripts/provider_tool_probe_campaign/types.harn",
+    "crates/harn-stdlib/src/stdlib/stdlib_checkpoint.harn",
   ]
   let files: list<dict> = []
   for path in paths {
