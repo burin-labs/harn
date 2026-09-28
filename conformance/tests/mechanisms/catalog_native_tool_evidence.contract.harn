@@ -18,7 +18,6 @@ pipeline default(harness: Harness) {
     passed_probes: ["native_tool_probe"],
   }
   for evidence in [
-    nil,
     {routes: []},
     {routes: [route + {provider: "different"}]},
     {routes: [route + {model: "different"}]},
@@ -28,7 +27,13 @@ pipeline default(harness: Harness) {
     assert_eq(plan.receipt.disposition, "incomplete_capability")
     assert(plan.receipt.unresolved_verification.count > 0)
   }
-  contract_effect(harness.stdio, "native_tool_missing_evidence_is_incomplete", true)
+  const missing = plan_notice(harness, input.notice, extraction, catalog)
+  contract_effect(
+    harness.stdio,
+    "native_tool_missing_evidence_is_incomplete",
+    missing.receipt.disposition == "incomplete_capability"
+      && missing.receipt.unresolved_verification.count > 0,
+  )
   const accepted = plan_notice(harness, input.notice, extraction, catalog, {routes: [route]})
   contract_negative(
     harness.stdio,

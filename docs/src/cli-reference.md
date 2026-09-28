@@ -2246,9 +2246,11 @@ harn provider tool-probe openai --model gpt-5.4-mini --tool-format json
 Use `--response-fixture` to classify a saved provider response without making a
 network request. Use `--repeat` for live reliability checks; repeated summaries
 only pass when every attempted probe for that mode succeeds. JSON reports label
-their `evidence_source` as `live_request` or `saved_response`. Only live reports
-can satisfy `harn local switch --probe-result` or route-fitness gates. Saved
-responses remain useful for parser checks. `--tool-format native|json|text`
+their `evidence_source` as `live_request`, `live_raw_endpoint`, or
+`saved_response`. Only `live_request` reports from the provider adapter can
+satisfy `harn local switch --probe-result`, route-fitness, or catalog promotion
+gates. Saved responses remain useful for parser checks; raw endpoint overrides
+measure that endpoint without certifying the provider route. `--tool-format native|json|text`
 forces the live emission contract and exact parser; it does not enable the
 permissive `adaptive` parser. Probes preserve route generation defaults and
 raise only the minimum output budget when necessary to leave visible tool-call
@@ -2295,7 +2297,7 @@ harn provider tool-scorecard --tool-probe-report ./probe.json --markdown > score
 ```
 
 Use `--plan-from-catalog` to render the fixed micro-case matrix for catalogued
-routes before probing. Plan output remains `schema_version: 1`.
+routes before probing. Plan output uses a separate versioned schema.
 
 ```bash
 harn provider tool-scorecard --plan-from-catalog --route anthropic:claude-sonnet-5
