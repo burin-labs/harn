@@ -851,7 +851,9 @@ This selects OpenAI Chat Completions SSE decoding while mapping request values
 to fields the Ollama `/v1` server consumes. The adapter rejects Ollama-only
 sampling options it cannot carry. `/v1` does not carry `num_ctx` or
 `keep_alive`; use an Ollama Modelfile for context sizing and native `/api/chat`
-when those runtime controls are needed.
+when those runtime controls are needed. These fields follow
+[Ollama 0.34's compatibility handler](https://github.com/ollama/ollama/blob/v0.34.0/openai/openai.go).
+
 Set `chat_api_adapter = "model_default"` with `/api/chat` to override an
 inherited compatible adapter and restore native Ollama request and response handling.
 
