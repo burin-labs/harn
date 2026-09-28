@@ -47,13 +47,18 @@ fn refused_report(
 }
 
 async fn run_inner(options: ToolConformanceProbeOptions) -> ToolConformanceReport {
-    let model = llm_config::resolve_model_info(&options.model);
-    let provider = if options.provider.trim().is_empty() {
-        model.provider.clone()
-    } else {
-        options.provider.clone()
-    };
-    let model_id = resolved_probe_model_id(&model.id);
+    let resolution =
+        match llm_config::resolve_model_request(&options.model, Some(&options.provider)) {
+            Ok(resolution) => resolution,
+            Err(error) => {
+                return refused_report(
+                    &options,
+                    crate::value::VmError::TypeError(error.to_string()),
+                );
+            }
+        };
+    let provider = resolution.resolved_provider;
+    let model_id = resolved_probe_model_id(&resolution.resolved_model);
     let base_url = options.base_url.clone().or_else(|| {
         llm_config::provider_config(&provider).map(|def| llm_config::resolve_base_url(&def))
     });

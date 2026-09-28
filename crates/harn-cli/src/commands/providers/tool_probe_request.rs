@@ -22,17 +22,9 @@ pub(crate) fn render(args: &ProviderToolProbeArgs) -> i32 {
     }
 }
 pub(crate) fn resolve_probe_wire_model(provider: &str, selector: &str) -> Result<String, String> {
-    let resolved = harn_vm::llm_config::resolve_model_info(selector);
-    if (resolved.alias.is_some()
-        || harn_vm::llm_config::model_catalog_entry(&resolved.id).is_some())
-        && resolved.provider != provider
-    {
-        return Err(format!(
-            "error: model selector `{selector}` resolves to provider `{}`, not requested provider `{provider}`",
-            resolved.provider
-        ));
-    }
-    Ok(harn_vm::llm_config::wire_model_id(&resolved.id))
+    let resolved = harn_vm::llm_config::resolve_model_request(selector, Some(provider))
+        .map_err(|error| error.to_string())?;
+    Ok(harn_vm::llm_config::wire_model_id(&resolved.resolved_model))
 }
 
 #[cfg(test)]

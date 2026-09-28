@@ -29,6 +29,8 @@ async fn llm_tool_probe_builtin(
             "tool_probe requires a model, positive repeat, and positive timeout_secs".into(),
         ));
     }
+    crate::llm_config::resolve_model_request(&options.model, Some(&options.provider))
+        .map_err(|error| VmError::TypeError(format!("tool_probe: {error}")))?;
     let report = run_tool_conformance_probe(options).await;
     let value = serde_json::to_value(report)
         .map_err(|error| VmError::Runtime(format!("tool_probe: {error}")))?;
