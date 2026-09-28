@@ -58,12 +58,7 @@ impl CheckpointState {
     }
 
     fn save(&self) -> Result<(), String> {
-        let obj: serde_json::Map<String, serde_json::Value> = self
-            .data
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let json = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
+        let json = serde_json::to_string_pretty(&self.data)
             .map_err(|e| format!("checkpoint save error: {e}"))?;
         crate::atomic_io::atomic_write(&self.path, json.as_bytes())
             .map_err(|e| format!("checkpoint write error: {e}"))?;
