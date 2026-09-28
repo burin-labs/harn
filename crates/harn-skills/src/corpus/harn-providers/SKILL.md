@@ -50,6 +50,9 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 
 - Model capabilities should be data-driven.
 - Avoid hardcoding provider quirks in caller code.
+- Read provider identity, `classification` (`local` or `hosted`), and nested
+  `auth` from `harness.llm.provider_catalog().providers`. These are projections
+  of the authoritative catalog artifact; do not infer them from provider names.
 - Resolve `message_wire_format` and `live_endpoint_family` as one dialect for
   request, stream, response, and error handling. Do not choose a builder or
   parser independently from provider strings or response headers.
