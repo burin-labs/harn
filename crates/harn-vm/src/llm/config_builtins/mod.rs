@@ -1,4 +1,4 @@
-//! Config-facing LLM builtins: the read-only surface a `.harn` script uses to
+//! Config-facing LLM builtins: the surface a `.harn` script uses to
 //! ask what providers and models exist, how a selector resolves, what a route
 //! is capable of, and what operational limits apply.
 //!
@@ -6,7 +6,8 @@
 //! (what exists), [`selection_builtins`] (what should I use, with what
 //! options), [`rate_limit_builtins`] and [`healthcheck_builtins`] (can I use
 //! it right now) — and each shares the `*_projection` modules that render a
-//! config row as a `VmValue`.
+//! config row as a `VmValue`. [`tool_probe`] runs the canonical admitted
+//! conformance producer inside the host's inference and durable budget scope.
 
 mod batch_projection;
 mod cache_report;

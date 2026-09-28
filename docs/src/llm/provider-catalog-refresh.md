@@ -302,6 +302,36 @@ Each live output directory contains:
   `harn provider tool-scorecard`;
 - `scorecard-receipt.json`, which hashes the inputs and both projections.
 
+### Script tool probes
+
+`harness.llm.tool_probe(options)` returns the same structured conformance report
+as `harn provider tool-probe`, using the running host's loaded providers,
+credentials, inference policy, and durable allowance. It does not spawn another
+CLI or require the agent to write the host's budget ledger.
+
+```harn
+fn main(harness: Harness) {
+  const report = harness.llm.tool_probe({
+    provider: argv[0],
+    model: argv[1],
+    modes: ["non_streaming"],
+    max_cost_usd: 1.0,
+    timeout_secs: 30,
+  })
+  harness.stdio.println(json_stringify(report))
+}
+```
+
+The options use the canonical producer's defaults: native tools, one repeat,
+and both streaming modes when `modes` is omitted. Unknown option keys and
+nonfinite numbers fail before dispatch. The shared model resolver rejects
+contradictory provider/model selectors. Read `cases` and `admission` to determine
+the outcome; a returned report can describe a provider failure or local refusal.
+
+The campaign above still uses child CLI producers. Its runtime, credential,
+timeout, and resume contracts must be bound to the running host before it can
+consume this in-process interface.
+
 The tool probe deliberately performs no automatic retries, so `retry_count` is
 zero and `request_attempt_count` is the physical request count. A 429 is
 recorded separately as a rate-limited case. Suggested catalog changes in the
