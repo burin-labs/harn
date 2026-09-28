@@ -193,6 +193,8 @@ pub enum ProviderClassification {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatApiAdapter {
+    /// Explicitly restore the model's ordinary contract over an inherited adapter.
+    ModelDefault,
     OllamaOpenAiCompat,
 }
 

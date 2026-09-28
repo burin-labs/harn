@@ -54,7 +54,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> (String, serde_json::V
     (headers, body)
 }
 
-fn install_ollama_openai_compat(addr: std::net::SocketAddr) {
+fn install_ollama_route(addr: std::net::SocketAddr, adapter: crate::llm_config::ChatApiAdapter) {
     let mut providers = crate::llm_config::ProvidersConfig::default();
     providers.providers.insert(
         "ollama".to_string(),
@@ -67,6 +67,15 @@ fn install_ollama_openai_compat(addr: std::net::SocketAddr) {
             ..Default::default()
         },
     );
+    if adapter == crate::llm_config::ChatApiAdapter::ModelDefault {
+        providers.providers.get_mut("ollama").unwrap().merge_from(
+            &crate::llm_config::ProviderDef {
+                chat_endpoint: "/api/chat".to_string(),
+                chat_api_adapter: Some(adapter),
+                ..Default::default()
+            },
+        );
+    }
     // Catalog export/import must retain the adapter, or the same route falls
     // back to native NDJSON when a downstream host consumes its projection.
     let catalog = crate::provider_catalog::artifact_embedded(Some(&providers), None);
@@ -149,7 +158,10 @@ fn ollama_openai_compat_maps_supported_fields_and_reads_terminal_usage() {
         .expect("write captured Ollama SSE response");
         },
     );
-    install_ollama_openai_compat(server.addr());
+    install_ollama_route(
+        server.addr(),
+        crate::llm_config::ChatApiAdapter::OllamaOpenAiCompat,
+    );
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -239,7 +251,10 @@ fn ollama_openai_compat_refuses_native_only_generation_options_before_http() {
             count_server.fetch_add(1, Ordering::SeqCst);
         },
     );
-    install_ollama_openai_compat(server.addr());
+    install_ollama_route(
+        server.addr(),
+        crate::llm_config::ChatApiAdapter::OllamaOpenAiCompat,
+    );
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -292,5 +307,31 @@ fn ollama_openai_compat_refuses_native_only_generation_options_before_http() {
                 "refused before HTTP"
             );
         }
+    });
+}
+
+#[test]
+fn native_ollama_override_preserves_ndjson_text_and_usage() {
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    let server = spawn_ollama_stub();
+    install_ollama_route(
+        server.addr(),
+        crate::llm_config::ChatApiAdapter::ModelDefault,
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let mut options = base_opts("ollama");
+        options.model = "devstral-small-2:24b".to_string();
+        let result = vm_call_llm_full(&options)
+            .await
+            .expect("native NDJSON call");
+        assert_eq!(result.text, "hello world");
+        assert_eq!(result.input_tokens, 3);
+        assert_eq!(result.output_tokens, 2);
     });
 }

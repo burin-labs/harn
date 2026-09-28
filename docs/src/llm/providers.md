@@ -852,6 +852,8 @@ to fields the Ollama `/v1` server consumes. The adapter rejects Ollama-only
 sampling options it cannot carry. `/v1` does not carry `num_ctx` or
 `keep_alive`; use an Ollama Modelfile for context sizing and native `/api/chat`
 when those runtime controls are needed.
+Set `chat_api_adapter = "model_default"` with `/api/chat` to override an
+inherited compatible adapter and restore native Ollama request and response handling.
 
 ### Managed provider supply
 
