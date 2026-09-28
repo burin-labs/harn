@@ -253,6 +253,7 @@ pub enum ToolProbeEvidenceSource {
     #[default]
     Unknown,
     LiveRequest,
+    LiveRawEndpoint,
     SavedResponse,
 }
 
@@ -270,7 +271,7 @@ impl ToolConformanceReport {
         .collect()
     }
 
-    /// Only a current report from a live request can certify route behavior.
+    /// Only a current report from a live provider-adapter request certifies its route.
     pub fn require_live_evidence(&self) -> Result<(), String> {
         if self.schema_version != TOOL_CONFORMANCE_SCHEMA_VERSION {
             return Err(format!(
@@ -448,7 +449,11 @@ pub async fn run_tool_conformance_probe(
         provider,
         model_id,
         base_url,
-        ToolProbeEvidenceSource::LiveRequest,
+        if options.base_url.is_some() {
+            ToolProbeEvidenceSource::LiveRawEndpoint
+        } else {
+            ToolProbeEvidenceSource::LiveRequest
+        },
         options.tool_format,
         options.probe_case,
         options.marker,

@@ -14,7 +14,8 @@ public email, webhook, or document-store adapter writes one neutral
   otherwise the workflow uses that provider's catalog default.
 - `HARN_PROVIDER_NOTICE_TOOL_PROBE_REPORT`: optional live Harn tool-probe
   report for the notice's exact provider and model. Enabling native tools
-  requires this evidence; saved responses cannot satisfy it.
+  requires this evidence; saved responses and raw endpoint overrides cannot
+  satisfy it.
 
 The handler invokes `scripts/provider_catalog_notice.harn --apply --open-pr`.
 That workflow validates provenance and current catalog state, applies only a

@@ -87,6 +87,14 @@ fn saved_response_cannot_become_route_fitness() {
     assert!(live.routes[0]
         .passed_probes
         .contains(&"native_tool_probe".into()));
+    let mut raw_endpoint = saved.clone();
+    raw_endpoint.evidence_source =
+        crate::llm::tool_conformance::ToolProbeEvidenceSource::LiveRawEndpoint;
+    assert!(raw_endpoint.passed_probes().is_empty());
+    assert_eq!(
+        scorecard_from_tool_reports(vec![raw_endpoint]).route_count,
+        0
+    );
     saved.evidence_source = crate::llm::tool_conformance::ToolProbeEvidenceSource::SavedResponse;
     assert!(fitness_store_from_tool_reports(&[saved.clone()])
         .records
