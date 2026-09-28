@@ -64,6 +64,7 @@ enum DenialKind {
 
 #[derive(serde::Serialize)]
 struct AdmissionDenial<'a> {
+    origin: &'static str,
     category: &'static str,
     kind: &'static str,
     reason: &'static str,
@@ -83,6 +84,11 @@ fn unavailable(category: ErrorCategory, message: &str) -> VmError {
 
 fn denial(category: ErrorCategory, admission_reason: DenialKind, message: &str) -> VmError {
     let denial = AdmissionDenial {
+        origin: if matches!(admission_reason, DenialKind::ProviderContractViolation) {
+            "provider"
+        } else {
+            "local"
+        },
         category: category.as_str(),
         kind: "terminal",
         reason: category.as_str(),

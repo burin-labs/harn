@@ -499,6 +499,7 @@ fn exhausted(period: &str, limit: i64, used: i64, reset_unix_ms: i64) -> VmError
     };
     VmError::Thrown(crate::schema::json_to_vm_value(&serde_json::json!({
         "category": "budget_exceeded",
+        "origin": "local",
         "kind": "terminal",
         "reason": "budget_exceeded",
         "admission_reason": "insufficient_allowance",
