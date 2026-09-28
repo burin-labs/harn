@@ -184,7 +184,16 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
             &serde_json::to_value(expected).expect("serializable provider"),
         );
         for field in ["classification", "auth", "endpoint"] {
-            assert_eq!(projected.get(field), expected.as_dict().unwrap().get(field));
+            assert_eq!(
+                projected
+                    .get(field)
+                    .map(crate::llm::helpers::vm_value_to_json),
+                expected
+                    .as_dict()
+                    .unwrap()
+                    .get(field)
+                    .map(crate::llm::helpers::vm_value_to_json)
+            );
         }
     }
 
