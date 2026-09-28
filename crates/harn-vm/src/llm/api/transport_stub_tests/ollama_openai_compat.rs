@@ -252,6 +252,16 @@ fn ollama_openai_compat_refuses_native_only_generation_options_before_http() {
         assert!(error
             .to_string()
             .contains("does not support the `top_k` request option"));
+        let projected = crate::llm::call::build_llm_error_dict(&error, "ollama", &options.model);
+        assert_eq!(
+            projected
+                .as_dict()
+                .unwrap()
+                .get("origin")
+                .map(crate::value::VmValue::display)
+                .as_deref(),
+            Some("local")
+        );
         assert_eq!(
             request_count.load(Ordering::SeqCst),
             0,

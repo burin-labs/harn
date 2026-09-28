@@ -54,7 +54,8 @@ Ollama's `/v1/chat/completions` request type consumes standard top-level fields
 such as `max_tokens`, `temperature`, `top_p`, `seed`, `stop`, and
 `response_format`. The adapter projects Harn's request into those fields and
 filters fields Ollama ignores, such as native `options`, `keep_alive`, and
-`think`. It does not promise `/v1` support for context-window or model-lifetime
+`think`, from catalog defaults. Explicit unsupported options or provider
+overrides are refused locally before HTTP. It does not promise `/v1` support for context-window or model-lifetime
 controls; configure context in the Ollama model and use native `/api/chat` when
 those Ollama-only controls are required. Native `/api/chat` remains the
 default Ollama contract and retains its NDJSON response and runtime options.

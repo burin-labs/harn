@@ -84,8 +84,11 @@ impl DialectContract {
 
     /// Validate adapter/model compatibility before a request can leave Harn.
     pub(crate) fn validate_request(self, request: &LlmRequestPayload) -> Result<(), VmError> {
+        let refusal = |message: String| {
+            crate::llm::call::invalid_request_error(message, &request.provider, &request.model)
+        };
         if self.is_ollama_openai_compat() && self.wire != WireDialect::Ollama {
-            return Err(VmError::Runtime(
+            return Err(refusal(
                 "chat_api_adapter = ollama_openai_compat requires message_wire_format = ollama"
                     .to_string(),
             ));
@@ -100,7 +103,7 @@ impl DialectContract {
                     .keys()
                     .find(|field| !Self::ollama_openai_request_field(field))
                 {
-                    return Err(VmError::Runtime(format!(
+                    return Err(refusal(format!(
                         "Ollama OpenAI-compatible chat does not support the `{field}` provider override"
                     )));
                 }
@@ -119,7 +122,7 @@ impl DialectContract {
                         | PortableOption::ParallelToolCalls
                 )
             }) {
-                return Err(VmError::Runtime(format!(
+                return Err(refusal(format!(
                     "Ollama OpenAI-compatible chat does not support the `{}` request option",
                     option.name()
                 )));
@@ -144,7 +147,7 @@ impl DialectContract {
                 ),
             ];
             if let Some((_, field)) = unsupported.into_iter().find(|(present, _)| *present) {
-                return Err(VmError::Runtime(format!(
+                return Err(refusal(format!(
                     "Ollama OpenAI-compatible chat does not support the `{field}` request option"
                 )));
             }
