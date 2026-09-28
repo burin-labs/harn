@@ -42,6 +42,34 @@ impl AcpServer {
         Ok(session.admission.clone())
     }
 
+    /// What `session_id` has spent on LLM calls across its whole life. A
+    /// session's ceiling covers every turn, in this process and in any earlier
+    /// one that ran it, so the first read in a process comes from the canonical
+    /// store and later turns carry the total forward in memory.
+    pub(super) async fn session_llm_spend_usd(&self, session_id: &str) -> Result<f64, String> {
+        let Some(session) = self.sessions.get(session_id) else {
+            return Ok(0.0);
+        };
+        let llm_spend = session.concurrent_control.llm_spend.clone();
+        let project_root = session.project_root.clone();
+        let known = llm_spend
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .spent_usd;
+        if let Some(spent) = known {
+            return Ok(spent);
+        }
+        let spent =
+            harn_vm::agent_session_spend::load_session_llm_spend_usd(&project_root, session_id)
+                .await
+                .map_err(|error| error.to_string())?;
+        llm_spend
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .spent_usd = Some(spent);
+        Ok(spent)
+    }
+
     pub(super) async fn handle_session_prompt(
         &mut self,
         id: &serde_json::Value,
@@ -96,24 +124,31 @@ impl AcpServer {
         };
         let prompt_text = prompt.text.clone();
 
-        let (cancellation, current_mode_id, inject_state, tool_call_cancellations, session_budget) =
-            match self.sessions.get_mut(&session_id) {
-                Some(s) => {
-                    s.cancellation.begin_prompt();
-                    s.host_bridge = None;
-                    (
-                        s.cancellation.clone(),
-                        s.current_mode_id.clone(),
-                        s.inject_state.clone(),
-                        s.concurrent_control.tool_call_cancellations.clone(),
-                        s.budget.clone(),
-                    )
-                }
-                None => {
-                    self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
-                    return;
-                }
-            };
+        let (
+            cancellation,
+            current_mode_id,
+            inject_state,
+            tool_call_cancellations,
+            session_budget,
+            llm_spend,
+        ) = match self.sessions.get_mut(&session_id) {
+            Some(s) => {
+                s.cancellation.begin_prompt();
+                s.host_bridge = None;
+                (
+                    s.cancellation.clone(),
+                    s.current_mode_id.clone(),
+                    s.inject_state.clone(),
+                    s.concurrent_control.tool_call_cancellations.clone(),
+                    s.budget.clone(),
+                    s.concurrent_control.llm_spend.clone(),
+                )
+            }
+            None => {
+                self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
+                return;
+            }
+        };
         let prompt_budget = match session_budget {
             SessionBudget::Inherit => self.default_budget.clone(),
             SessionBudget::Unlimited => None,
@@ -142,6 +177,19 @@ impl AcpServer {
                 return;
             }
         };
+        // Fail closed: a turn whose earlier spend is unknown cannot be held to
+        // the session's ceiling.
+        let llm_spent_usd = match self.session_llm_spend_usd(&session_id).await {
+            Ok(spent) => spent,
+            Err(message) => {
+                self.send_prompt_error(id, &message);
+                return;
+            }
+        };
+        let turn_budget = llm_spend
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .turn_budget(prompt_budget);
         #[cfg(feature = "hostlib")]
         harn_hostlib::fs::configure_session_root(&session_id, &project_root);
         let before_turn_transcript = harn_vm::agent_sessions::transcript(&session_id)
@@ -346,7 +394,8 @@ impl AcpServer {
         let host_bridge_for_response = host_bridge.clone();
         let result = mode_policy
             .run(Box::pin(async {
-                let _budget_guard = prompt_budget.as_ref().and_then(BudgetSpec::install);
+                let _budget_guard = turn_budget.install_session_turn(llm_spent_usd);
+                let _spend_recorder = SessionSpendRecorder(llm_spend.clone());
                 execute::execute_chunk(
                     chunk,
                     bridge.clone(),
@@ -373,6 +422,24 @@ impl AcpServer {
             .await;
         self.finish_profile_turn(&session_id, profile_turn);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
+        let turn_spent_usd = llm_spend
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .spent_usd
+            .unwrap_or(llm_spent_usd);
+        if let Err(error) = harn_vm::agent_session_spend::record_session_llm_spend_usd(
+            &project_root,
+            &session_id,
+            turn_spent_usd,
+        )
+        .await
+        {
+            bridge.send_log(
+                "warn",
+                &format!("Session spend was not persisted; a resumed session may under-count it: {error}"),
+                None,
+            );
+        }
 
         match result {
             Ok(output) => {
