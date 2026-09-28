@@ -148,6 +148,7 @@ fn require_list(map: &harn_vm::value::DictMap, key: &str) -> Vec<VmValue> {
 
 const OWNER_DEATH_SUPERVISOR_ENV: &str = "HARN_TEST_OWNER_DEATH_SUPERVISOR";
 const OWNER_DEATH_REPORT_FD_ENV: &str = "HARN_TEST_OWNER_DEATH_REPORT_FD";
+const OWNER_DEATH_LEAK_LIVENESS_ENV: &str = "HARN_TEST_OWNER_DEATH_LEAK_LIVENESS";
 const SESSION_REPORT_ENV: &str = "HARN_TEST_SESSION_REPORT";
 
 #[test]
@@ -243,12 +244,45 @@ fn owner_death_supervisor_fixture() {
         format!("owner-death-supervisor-{}", std::process::id()),
     )
     .expect("spawn managed background payload");
+    // A sibling forked without exec keeps every descriptor this process holds,
+    // including the write end of the guardian's liveness pipe. It stands in
+    // for a process another thread spawned while that pipe was still
+    // inheritable, which is how the owner-closed EOF went missing.
+    let leaked_liveness_holder = if std::env::var_os(OWNER_DEATH_LEAK_LIVENESS_ENV).is_some() {
+        // The holder must not keep the payload report open, or the test could
+        // not observe the payload's descriptors closing.
+        let report_fd = std::env::var(OWNER_DEATH_REPORT_FD_ENV)
+            .ok()
+            .and_then(|value| value.parse::<RawFd>().ok())
+            .expect("payload report descriptor");
+        match unsafe { libc::fork() } {
+            0 => unsafe {
+                libc::setpgid(0, 0);
+                libc::close(report_fd);
+                loop {
+                    libc::pause();
+                }
+            },
+            pid if pid > 0 => {
+                // Both sides set the group so the holder is outside the
+                // supervisor's group before the test SIGKILLs that group.
+                unsafe {
+                    libc::setpgid(pid, pid);
+                }
+                pid
+            }
+            _ => panic!("fork liveness holder: {}", std::io::Error::last_os_error()),
+        }
+    } else {
+        0
+    };
     println!(
-        "supervisor={} supervisor_pgid={} worker={} worker_pgid={}",
+        "supervisor={} supervisor_pgid={} worker={} worker_pgid={} holder={}",
         std::process::id(),
         unsafe { libc::getpgrp() },
         info.pid,
-        info.process_group_id.expect("worker process group")
+        info.process_group_id.expect("worker process group"),
+        leaked_liveness_holder,
     );
     std::io::stdout().flush().expect("flush supervisor report");
     loop {
@@ -277,6 +311,20 @@ impl Drop for ProcessGroupCleanup {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
+    assert_managed_background_group_dies_with_supervisor(false);
+}
+
+/// The liveness pipe's EOF is not the only owner-death signal: a leaked copy
+/// of its write end keeps the pipe open after the owner is gone, and the
+/// background group must still die.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn managed_background_group_dies_when_a_sibling_holds_the_liveness_pipe() {
+    assert_managed_background_group_dies_with_supervisor(true);
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn assert_managed_background_group_dies_with_supervisor(leak_liveness_pipe: bool) {
     let mut report_pipe = [0_i32; 2];
     assert_eq!(unsafe { libc::pipe(report_pipe.as_mut_ptr()) }, 0);
     let read_fd = report_pipe[0];
@@ -302,6 +350,9 @@ fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .process_group(0);
+    if leak_liveness_pipe {
+        supervisor.env(OWNER_DEATH_LEAK_LIVENESS_ENV, "1");
+    }
     let mut supervisor = supervisor.spawn().expect("spawn isolated supervisor");
     unsafe {
         libc::close(write_fd);
@@ -327,6 +378,10 @@ fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
     assert_eq!(worker_pid, worker_pgid);
     assert_ne!(worker_pgid, supervisor_pgid);
     cleanup.groups.push(worker_pgid);
+    if leak_liveness_pipe {
+        assert!(fields["holder"] > 0, "liveness holder was not forked");
+        cleanup.groups.push(fields["holder"]);
+    }
 
     let mut report_file = unsafe { std::fs::File::from_raw_fd(read_fd) };
     let mut payload_report = String::new();
@@ -390,7 +445,10 @@ fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
         std::io::Error::last_os_error().raw_os_error(),
         Some(libc::ESRCH)
     );
-    cleanup.groups.clear();
+    // Only the liveness holder is still expected to be alive.
+    cleanup
+        .groups
+        .retain(|pgid| leak_liveness_pipe && *pgid == fields["holder"]);
 }
 
 fn parse_pid_fields(line: &str) -> std::collections::BTreeMap<&str, i32> {
