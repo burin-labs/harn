@@ -48,8 +48,13 @@ impl CheckpointState {
             return Ok(());
         }
         self.data = match std::fs::read_to_string(&self.path) {
-            Ok(contents) => serde_json::from_str(&contents)
-                .map_err(|e| format!("checkpoint decode error: {e}"))?,
+            Ok(contents) => serde_json::from_str(&contents).map_err(|e| {
+                format!(
+                    "checkpoint decode error at line {}, column {}",
+                    e.line(),
+                    e.column()
+                )
+            })?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(e) => return Err(format!("checkpoint read error: {e}")),
         };
