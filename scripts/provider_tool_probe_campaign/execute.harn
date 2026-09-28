@@ -590,10 +590,7 @@ pub fn provider_tool_probe_campaign_source_receipt(fs: HarnessFs) -> dict {
   ]
   let files: list<dict> = []
   for path in paths {
-    if fs.exists(path) {
-      files = files
-        + [{path: path, sha256: "sha256:" + sha256(fs.read_bytes(path))}]
-    }
+    files = files + [{path: path, sha256: "sha256:" + sha256(fs.read_bytes(path))}]
   }
   return {files: files, source_sha256: "sha256:" + sha256(json_stringify(files))}
 }

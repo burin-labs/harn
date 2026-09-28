@@ -1542,6 +1542,8 @@ pipeline test_campaign_unpriced_requests_need_conservative_admission_receipts() 
 @test
 pipeline test_campaign_expired_deadline_refuses_dispatch(harness: Harness) {
   const request = {
+    runtime: harness.runtime,
+    resume_identity: {fixture: "expired-deadline"},
     llm: harness.llm,
     clock: harness.clock,
     fs: harness.fs,

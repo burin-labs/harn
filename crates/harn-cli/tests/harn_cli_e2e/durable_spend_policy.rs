@@ -121,6 +121,7 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
         root.path(),
         false,
         vec![
+            "--allow-process-network".into(),
             "parent.harn".into(),
             "--".into(),
             harn_e2e_binary().to_string_lossy().into_owned(),

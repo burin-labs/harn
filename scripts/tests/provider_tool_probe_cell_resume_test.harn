@@ -1,0 +1,91 @@
+import { assert_eq, assert_throws, with_temp_dir } from "std/testing"
+import { provider_probe_campaign_cell } from "../provider_tool_probe_campaign/resume"
+import { ProviderToolProbeCell } from "../provider_tool_probe_campaign/types"
+
+pipeline test_complete_cells_reuse_without_admission_and_refuse_changed_artifacts(
+  harness: Harness,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const identity = {campaign: root, source: "one"}
+      const key = "provider-probe-campaign/cell/" + sha256(json_stringify(identity))
+      const artifact = root + "/probe.json"
+      harness.fs.write_text(artifact, "observed provider result")
+      const cell: ProviderToolProbeCell = {
+        id: "receipt",
+        provider: "openai",
+        model: "fixture",
+        route_id: "fixture",
+        behavior: "tool",
+        category: "tools",
+        mode: "native",
+        tool_format: "json",
+        runner: "provider_tool_probe",
+        status: "pass",
+        reason: "",
+        artifact_path: artifact,
+        observed: {},
+        catalog: {},
+      }
+      const first = provider_probe_campaign_cell(
+        harness.runtime,
+        harness.fs,
+        identity,
+        true,
+        { -> [cell] },
+        { _ -> true },
+      )
+      assert_eq(first, {decision: "executed", cells: [cell]})
+      const cached = provider_probe_campaign_cell(
+        harness.runtime,
+        harness.fs,
+        identity,
+        false,
+        { ->
+          throw "completed cell called provider again after admission closed"
+        },
+        { _ -> true },
+      )
+      assert_eq(cached, {decision: "reused", cells: [cell]})
+      harness.fs.write_text(artifact, "changed result")
+      assert_throws(
+        { ->
+          provider_probe_campaign_cell(
+            harness.runtime,
+            harness.fs,
+            identity,
+            true,
+            { ->
+              throw "damaged receipt retried provider"
+            },
+            { _ -> true },
+          )
+        },
+      )
+      harness.runtime.checkpoint_delete(key)
+      const blocked = provider_probe_campaign_cell(
+        harness.runtime,
+        harness.fs,
+        identity,
+        false,
+        { ->
+          throw "uncompleted cell executed after admission closed"
+        },
+        { _ -> true },
+      )
+      assert_eq(blocked, {decision: "executed", cells: []})
+      assert(!harness.runtime.checkpoint_exists(key))
+      const partial = provider_probe_campaign_cell(
+        harness.runtime,
+        harness.fs,
+        identity,
+        true,
+        { -> [cell] },
+        { _ -> false },
+      )
+      assert_eq(partial.decision, "executed")
+      assert(!harness.runtime.checkpoint_exists(key))
+    },
+  )
+}

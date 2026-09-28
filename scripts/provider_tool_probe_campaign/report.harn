@@ -1,6 +1,7 @@
 import "./catalog"
 import "./execute"
 import "./plan"
+import { provider_probe_campaign_cell } from "./resume"
 import "./support"
 import "./types"
 
@@ -68,6 +69,8 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
 }
 
 pub type ProviderToolProbeLiveCellsRequest = {
+  runtime: HarnessRuntime,
+  resume_identity: unknown,
   llm: HarnessLlm,
   clock: HarnessClock,
   fs: HarnessFs,
@@ -112,6 +115,7 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
   let probe_units_excluded_by_cap = 0
   let executable_units_selected = 0
   let probe_executions_selected = 0
+  let probe_executions_reused = 0
   let probe_executions_excluded_by_budget = 0
   let budget_stopped = false
   let deadline_stopped = false
@@ -146,55 +150,81 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
         for trial in range(1, repeat + 1) {
           for format in behavior.tool_formats {
             const remaining_ms = deadline_ms - clock.monotonic_ms()
-            if remaining_ms <= 0 {
-              deadline_stopped = true
-              probe_executions_excluded_by_deadline = probe_executions_excluded_by_deadline + 1
-              continue
-            }
             const spend = provider_tool_probe_campaign_observed_spend(cells)
             // Each child inherits only the remaining allowance and reserves
             // at the same admission boundary as ordinary inference.
-            if budget_stopped || !provider_tool_probe_campaign_may_execute(spend, max_cost_usd) {
-              budget_stopped = true
-              probe_executions_excluded_by_budget = probe_executions_excluded_by_budget + 1
-              continue
-            }
+            const may_execute = remaining_ms > 0 && !budget_stopped
+              && provider_tool_probe_campaign_may_execute(spend, max_cost_usd)
             const one_format_behavior: ProviderToolProbeBehavior = behavior
               + {tool_formats: [format]}
-            cells = cells
-              + if behavior.runner == "provider_tool_probe" {
-                __run_tool_probe(
-                  llm,
-                  fs,
-                  process,
-                  route,
-                  one_format_behavior,
-                  mode,
-                  harn_bin,
-                  env,
-                  1,
-                  timeout_secs,
-                  output_dir,
-                  trial,
-                  max_cost_usd - provider_tool_probe_campaign_charged_usd(spend),
-                  remaining_ms,
-                )
+            const resumed = provider_probe_campaign_cell(
+              request.runtime,
+              fs,
+              {
+                campaign: request.resume_identity,
+                route: route,
+                behavior: one_format_behavior,
+                mode: mode,
+                trial: trial,
+                timeout_secs: timeout_secs,
+                max_cost_usd: max_cost_usd,
+              },
+              may_execute,
+              { ->
+                if behavior.runner == "provider_tool_probe" {
+                  __run_tool_probe(
+                    llm,
+                    fs,
+                    process,
+                    route,
+                    one_format_behavior,
+                    mode,
+                    harn_bin,
+                    env,
+                    1,
+                    timeout_secs,
+                    output_dir,
+                    trial,
+                    max_cost_usd - provider_tool_probe_campaign_charged_usd(spend),
+                    remaining_ms,
+                  )
+                } else {
+                  __run_option_probe(
+                    llm,
+                    fs,
+                    process,
+                    route,
+                    one_format_behavior,
+                    harn_bin,
+                    env,
+                    output_dir,
+                    trial,
+                    max_cost_usd - provider_tool_probe_campaign_charged_usd(spend),
+                    remaining_ms,
+                  )
+                }
+              },
+              { saved_cells ->
+                provider_tool_probe_campaign_observed_spend(saved_cells).unaccounted_probe_count
+                  == 0
+              },
+            )
+            if resumed.decision == "executed" && len(resumed.cells) == 0 && !may_execute {
+              if remaining_ms <= 0 {
+                deadline_stopped = true
+                probe_executions_excluded_by_deadline = probe_executions_excluded_by_deadline + 1
               } else {
-                __run_option_probe(
-                  llm,
-                  fs,
-                  process,
-                  route,
-                  one_format_behavior,
-                  harn_bin,
-                  env,
-                  output_dir,
-                  trial,
-                  max_cost_usd - provider_tool_probe_campaign_charged_usd(spend),
-                  remaining_ms,
-                )
+                budget_stopped = true
+                probe_executions_excluded_by_budget = probe_executions_excluded_by_budget + 1
               }
-            probe_executions_selected = probe_executions_selected + 1
+              continue
+            }
+            cells = cells + resumed.cells
+            if resumed.decision == "reused" {
+              probe_executions_reused = probe_executions_reused + 1
+            } else {
+              probe_executions_selected = probe_executions_selected + 1
+            }
           }
         }
       }
@@ -216,6 +246,7 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
     )
       + {
         probe_executions_selected: probe_executions_selected,
+        probe_executions_reused: probe_executions_reused,
         probe_executions_excluded_by_budget: probe_executions_excluded_by_budget,
         budget_stopped: budget_stopped
           || provider_tool_probe_campaign_observed_spend(cells).admission_denied_attempts > 0,

@@ -84,7 +84,10 @@ pub fn provider_tool_probe_campaign_failed(report: ProviderToolProbeCampaignRepo
     || (report.spend?.unaccounted_probe_count ?? 0) > 0
     || (report.campaign_slice?.budget_stopped ?? false)
     || (report.campaign_slice?.deadline_stopped ?? false)
-    || (report.live && report.campaign_slice?.probe_executions_selected == 0)
+    || (report.live
+      && (report.campaign_slice?.probe_executions_selected ?? 0)
+        + (report.campaign_slice?.probe_executions_reused ?? 0)
+        == 0)
     || (tool_scorecard_required && report.artifacts?.scorecard_status != "complete")
     || report.claim_controls.status == "incomplete"
 }
@@ -210,6 +213,23 @@ fn main(harness: Harness) {
   const cell_plan = if live {
     __live_cells(
       {
+        runtime: harness.runtime,
+        resume_identity: {
+          output_identity: harness.fs.canonicalize_existing(output_dir),
+          runtime: {
+            version: runtime.version,
+            source_revision: runtime.source_revision,
+            runtime_content_fingerprint: runtime.runtime_content_fingerprint,
+          },
+          catalog_sha256: catalog_receipt.catalog_sha256,
+          source: provider_tool_probe_campaign_source_receipt(harness.fs),
+          provider_config_sha256: if providers_config == "" {
+            nil
+          } else {
+            "sha256:" + sha256(harness.fs.read_bytes(providers_config))
+          },
+          auth_fingerprint: "sha256:" + sha256(json_stringify(auth_env)),
+        },
         llm: harness.llm,
         clock: harness.clock,
         fs: harness.fs,

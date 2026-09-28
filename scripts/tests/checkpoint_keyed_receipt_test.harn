@@ -1,0 +1,41 @@
+import { assert_eq, assert_false, assert_true } from "std/testing"
+import {
+  checkpoint_stage_keyed,
+  checkpoint_stage_keyed_receipt,
+} from "../../crates/harn-stdlib/src/stdlib/stdlib_checkpoint"
+
+pipeline test_keyed_receipt_reports_retention_and_does_not_reexecute_cached_work(harness: Harness) {
+  const key = "catalog-fixture/keyed-retention"
+  harness.runtime.checkpoint_delete(key)
+  const partial = checkpoint_stage_keyed_receipt(
+    harness.runtime,
+    key,
+    {version: 1},
+    { -> 0 },
+    { value -> value > 0 },
+  )
+  assert_eq(partial, {decision: "executed", retained: false, value: 0})
+  assert_false(harness.runtime.checkpoint_exists(key))
+  const complete = checkpoint_stage_keyed_receipt(
+    harness.runtime,
+    key,
+    {version: 1},
+    { -> 7 },
+    { value -> value > 0 },
+  )
+  assert_eq(complete, {decision: "executed", retained: true, value: 7})
+  assert_true(harness.runtime.checkpoint_exists(key))
+  const reused = checkpoint_stage_keyed_receipt(
+    harness.runtime,
+    key,
+    {version: 1},
+    { ->
+      throw "cached stage executed again"
+    },
+  )
+  assert_eq(reused, {decision: "reused", retained: true, value: 7})
+  const changed = checkpoint_stage_keyed_receipt(harness.runtime, key, {version: 2}, { -> 9 })
+  assert_eq(changed, {decision: "executed", retained: true, value: 9})
+  assert_eq(checkpoint_stage_keyed(harness.runtime, key, {version: 2}, { -> 99 }), 9)
+  harness.runtime.checkpoint_delete(key)
+}

@@ -96,14 +96,35 @@ pub fn checkpoint_stage_keyed(
   identity: unknown,
   f: unknown,
 ) -> unknown {
+  return checkpoint_stage_keyed_receipt(runtime, name, identity, f).value
+}
+
+/**
+ * Report whether a keyed stage executed or reused its retained result.
+ * A fresh result is persisted only when retain_if accepts it; rejected
+ * results are returned normally so callers can report partial work.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn checkpoint_stage_keyed_receipt(
+  runtime: HarnessRuntime,
+  name: string,
+  identity: unknown,
+  f: unknown,
+  retain_if: unknown = nil,
+) -> {decision: "executed" | "reused", retained: bool, value: unknown} {
   const fingerprint = __checkpoint_stage_fingerprint(identity)
   const cached = __checkpoint_stage_keyed_record(runtime, name, fingerprint)
   if cached != nil {
-    return cached.value
+    return {decision: "reused", retained: true, value: cached.value}
   }
   const result = f()
-  __checkpoint_stage_keyed_save(runtime, name, fingerprint, result)
-  return result
+  const retained = retain_if == nil || retain_if(result)
+  if retained {
+    __checkpoint_stage_keyed_save(runtime, name, fingerprint, result)
+  }
+  return {decision: "executed", retained: retained, value: result}
 }
 
 // checkpoint_stage_retry(name, max_retries, fn) -> value

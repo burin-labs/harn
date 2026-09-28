@@ -1,4 +1,67 @@
 import { get_typed_value } from "std/schema"
+import {
+  checkpoint_stage_keyed_receipt,
+} from "../../crates/harn-stdlib/src/stdlib/stdlib_checkpoint"
+import { ProviderToolProbeCell } from "./types"
+
+type ProviderProbeCellCheckpoint = {
+  schema_version: "harn.provider_probe_cell_checkpoint.v1",
+  cells: list<ProviderToolProbeCell>,
+  artifacts: list<{path: string, sha256: string}>,
+}
+
+/** Retain complete producer receipts and verify their artifacts before reuse. */
+pub fn provider_probe_campaign_cell(
+  runtime: HarnessRuntime,
+  fs: HarnessFs,
+  identity: unknown,
+  may_execute: bool,
+  produce: unknown,
+  accounted: unknown,
+) -> {decision: "executed" | "reused", cells: list<ProviderToolProbeCell>} {
+  const receipt = checkpoint_stage_keyed_receipt(
+    runtime,
+    "provider-probe-campaign/cell/" + sha256(json_stringify(identity)),
+    identity,
+    { ->
+      if !may_execute {
+        return {schema_version: "harn.provider_probe_cell_checkpoint.v1", cells: [], artifacts: []}
+      }
+      const cells = produce()
+      let artifacts: list<{path: string, sha256: string}> = []
+      for cell in cells {
+        const path = cell.artifact_path ?? ""
+        if path != "" && fs.exists(path) {
+          artifacts = artifacts + [{path: path, sha256: "sha256:" + sha256(fs.read_bytes(path))}]
+        }
+      }
+      return {
+        schema_version: "harn.provider_probe_cell_checkpoint.v1",
+        cells: cells,
+        artifacts: artifacts,
+      }
+    },
+    { value ->
+      const saved = get_typed_value(value, schema_of(ProviderProbeCellCheckpoint))
+      if len(saved.cells) == 0 || len(saved.artifacts) != len(saved.cells) {
+        return false
+      }
+      for cell in saved.cells {
+        if !contains(["pass", "fail"], cell.status) {
+          return false
+        }
+      }
+      return accounted(saved.cells)
+    },
+  )
+  const saved = get_typed_value(receipt.value, schema_of(ProviderProbeCellCheckpoint))
+  for artifact in saved.artifacts {
+    guard "sha256:" + sha256(fs.read_bytes(artifact.path)) == artifact.sha256 else {
+      throw "retained provider probe artifact changed: " + artifact.path
+    }
+  }
+  return {decision: receipt.decision, cells: saved.cells}
+}
 
 pub type ProviderProbeCampaignWindow = {
   schema_version: "harn.provider_probe_campaign_window.v1",
