@@ -37,6 +37,7 @@ fn main(harness: Harness) {
     receipt: __flag_value(argv, "--receipt", ""),
     corpus: __flag_value(argv, "--corpus", CORPUS_PATH),
     verbose: contains(argv ?? [], "--verbose"),
+    diagnostics: contains(argv ?? [], "--diagnostics"),
     // Build provenance, supplied by the caller that actually probed the binary.
     // A receipt that does not say WHICH build answered cannot be checked later,
     // and the stdlib is include_str!'d, so a stale binary silently runs old
@@ -129,6 +130,7 @@ fn main(harness: Harness) {
           corpus_path: to_string(args.corpus),
           policy_path: policy_path == "" ? "bundled:approval_review" : policy_path,
           policy_sha256: "sha256:" + sha256(json_stringify(policy)),
+          reviewer_trace: args.diagnostics ? harness.obs.agent_trace() : nil,
         },
     )
     harness.stdio.println("")
