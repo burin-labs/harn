@@ -18,6 +18,7 @@
 use std::path::Path;
 
 use crate::agent_events::{AgentEvent, ToolCallStatus, ToolMutationStatus};
+use crate::agent_sessions::event_facts as facts;
 use crate::orchestration::AgentSessionReplayEvent;
 use crate::value::VmError;
 use harn_session_store::{ReadRange, SessionEventKind, SessionStore, StoreError, StoredEvent};
@@ -150,29 +151,36 @@ fn replay_event_from_stored(
             parsing: None,
             audit: None,
         },
-        (SessionEventKind::ToolResult, _) => AgentEvent::ToolCallUpdate {
-            session_id: session_id.to_string(),
-            tool_call_id: tool_call_id(stored, transcript)?,
-            tool_name: tool_name(transcript, raw_message),
-            status: if result_failed(raw_message) {
-                ToolCallStatus::Failed
-            } else {
-                ToolCallStatus::Completed
-            },
-            raw_output: Some(serde_json::Value::String(text.to_string())),
-            error: result_failed(raw_message).then(|| text.to_string()),
-            duration_ms: None,
-            execution_duration_ms: None,
-            error_category: None,
-            mutation_status: ToolMutationStatus::Unknown,
-            changed_paths: None,
-            data: None,
-            executor: None,
-            parsing: None,
-            raw_input: None,
-            raw_input_partial: None,
-            audit: None,
-        },
+        (SessionEventKind::ToolResult, _) => {
+            let failed = facts::bool_at_any(&stored.payload, &facts::TOOL_IS_ERROR_ANY);
+            let data = stored
+                .payload
+                .pointer(facts::TOOL_RESULT_DATA)
+                .filter(|data| data.is_object());
+            AgentEvent::ToolCallUpdate {
+                session_id: session_id.to_string(),
+                tool_call_id: tool_call_id(stored, transcript)?,
+                tool_name: tool_name(transcript, raw_message),
+                status: if failed {
+                    ToolCallStatus::Failed
+                } else {
+                    ToolCallStatus::Completed
+                },
+                raw_output: Some(serde_json::Value::String(text.to_string())),
+                error: failed.then(|| text.to_string()),
+                duration_ms: None,
+                execution_duration_ms: None,
+                error_category: None,
+                mutation_status: mutation_status(data),
+                changed_paths: changed_paths(data),
+                data: data.cloned(),
+                executor: None,
+                parsing: None,
+                raw_input: None,
+                raw_input_partial: None,
+                audit: None,
+            }
+        }
         _ => return None,
     };
 
@@ -231,13 +239,28 @@ fn tool_name(transcript: &serde_json::Value, raw_message: Option<&serde_json::Va
         .to_string()
 }
 
-/// Whether the stored tool result was an error, read from the provider message
-/// the journal keeps beside it.
-fn result_failed(raw_message: Option<&serde_json::Value>) -> bool {
-    raw_message
-        .and_then(|message| message.get("is_error"))
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
+/// The mutation outcome the producer declared, which the live path projects
+/// onto the same update. An undeclared or unrecognized value stays unknown.
+fn mutation_status(data: Option<&serde_json::Value>) -> ToolMutationStatus {
+    let declared = data
+        .and_then(|data| data.get("mutation_status"))
+        .and_then(serde_json::Value::as_str);
+    ToolMutationStatus::ALL
+        .into_iter()
+        .find(|status| Some(status.as_str()) == declared)
+        .unwrap_or(ToolMutationStatus::Unknown)
+}
+
+fn changed_paths(data: Option<&serde_json::Value>) -> Option<Vec<String>> {
+    let paths = data?.get("changed_paths")?.as_array()?;
+    Some(
+        paths
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|path| !path.trim().is_empty())
+            .map(str::to_string)
+            .collect(),
+    )
 }
 
 fn stored_kind_label(kind: &SessionEventKind) -> String {

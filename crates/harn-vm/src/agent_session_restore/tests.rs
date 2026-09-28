@@ -324,3 +324,99 @@ async fn journal_shaped_tool_rows_replay_and_internal_prose_stays_hidden() {
         "every stored tool row replays, named and with its input; internal prose does not"
     );
 }
+
+/// A rejected edit is not a dispatch failure: the producer returns an ordinary
+/// envelope whose typed facts say nothing was written, so the provider
+/// message's `is_error` is false. The live path projects those facts onto the
+/// tool update; replay flattened them away, so a resumed session showed the
+/// rejection with no mutation outcome and no data for a client to read.
+#[tokio::test]
+async fn a_replayed_not_applied_edit_keeps_its_typed_result_facts() {
+    let session_id = "rejected-edit";
+    let store = store_with_session(session_id).await;
+    let text = "Error: content_hash is required for this text-anchored edit to calc.py.";
+    let data = serde_json::json!({
+        "mutation_status": "not_applied",
+        "edit_outcome": {"edit_status": "rejected_not_applied", "mutation_status": "not_applied"},
+    });
+    let result = |id: &str, is_error: bool, outcome: &str, data: serde_json::Value| {
+        let mut event = AppendEvent::new(
+            SessionEventKind::ToolResult,
+            serde_json::json!({
+                "transcript_event": {
+                    "id": format!("result-{id}"),
+                    "kind": "tool_result",
+                    "role": "tool_result",
+                    "visibility": "internal",
+                    "text": text,
+                },
+                "raw_message": {
+                    "content": text,
+                    "is_error": is_error,
+                    "name": "edit",
+                    "role": "tool_result",
+                    "tool_call_id": id,
+                    "_harn": {
+                        "kind": "tool_result",
+                        "tool_call_id": id,
+                        "tool_name": "edit",
+                        "outcome": outcome,
+                        "origin": "dispatched",
+                        "data": data,
+                    },
+                },
+            }),
+        );
+        event
+            .headers
+            .insert("tool_call_id".to_string(), id.to_string());
+        event
+    };
+    let audit_marked_error = {
+        let mut event = result("edit-2", false, "ok", serde_json::Value::Null);
+        event.payload["transcript_event"]["metadata"] = serde_json::json!({"is_error": true});
+        event
+    };
+    for event in [
+        result("edit-1", false, "ok", data.clone()),
+        audit_marked_error,
+    ] {
+        store.append(session_id, event).await.expect("append row");
+    }
+
+    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+        .await
+        .expect("restore should not error")
+        .expect("the store knows this session");
+    let updates: Vec<_> = restored
+        .iter()
+        .map(|entry| match &entry.event {
+            AgentEvent::ToolCallUpdate {
+                status,
+                mutation_status,
+                data,
+                error,
+                ..
+            } => (*status, *mutation_status, data.clone(), error.is_some()),
+            other => panic!("expected a replayed tool result, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        updates,
+        [
+            (
+                ToolCallStatus::Completed,
+                ToolMutationStatus::NotApplied,
+                Some(data),
+                false
+            ),
+            (
+                ToolCallStatus::Failed,
+                ToolMutationStatus::Unknown,
+                None,
+                true
+            ),
+        ],
+        "replay restores the typed outcome the live path emitted"
+    );
+}
