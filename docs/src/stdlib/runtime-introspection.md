@@ -94,6 +94,29 @@ harness.stdio.log("harn=" + to_string(snap.harn_version))
 All fields are `nil` until at least one `harness.llm.call` has run on the
 thread; `harn_version` and `harness` are always populated.
 
+## `harness.runtime.content_fingerprint()`
+
+Returns the content identity of the VM executing the script, before any model
+call. The VM computes this receipt from its compiled version, embedded standard
+library, compatibility versions, build features, and optional source revision.
+Environment variables and another CLI executable cannot replace these facts.
+
+Use the typed projection when persisting or comparing runtime identities:
+
+```harn
+import { runtime_content_fingerprint } from "std/runtime/content_fingerprint"
+
+fn main(harness: Harness) {
+  const identity = runtime_content_fingerprint(harness.runtime)
+  harness.stdio.println(identity.content_sha256)
+}
+```
+
+The receipt is the same `runtime_content_fingerprint` value published by
+[`harn version --json`](../cli-json-contract.md#version).
+It identifies runtime content, not the host's provider configuration or
+credential view. Those inputs need their own binding in measurement receipts.
+
 ## Configuring the harness identity
 
 `current_harness()` reports the value of the `HARN_HARNESS` environment
