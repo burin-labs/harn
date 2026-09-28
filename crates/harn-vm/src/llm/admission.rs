@@ -426,9 +426,8 @@ fn reserve_money(
         .as_ref()
         .map(|machine| machine.reserve(bound))
         .transpose()
-        .map_err(|error| {
+        .inspect_err(|_| {
             ledger.denied += 1;
-            error
         })?;
     ledger.in_flight += bound;
     ledger.attempts_started = ledger.attempts_started.saturating_add(1);
