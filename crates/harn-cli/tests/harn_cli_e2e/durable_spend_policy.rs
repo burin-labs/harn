@@ -214,7 +214,7 @@ async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
     let report: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
     assert_eq!(report["evidence_source"], "live_request");
     assert_eq!(report["cases"].as_array().unwrap().len(), 1);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "{report}");
     let quota = MachineSpendQuota::open(
         &ledger,
         "catalog",
