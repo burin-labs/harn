@@ -104,6 +104,16 @@ pub(super) fn derivations() -> usize {
     DERIVATIONS.with(std::cell::Cell::get)
 }
 
+/// Backdate the memo by `by`, so a test can cross [`MEMO_TTL`] without sleeping.
+#[cfg(test)]
+pub(super) fn age(by: Duration) {
+    MEMO.with(|memo| {
+        if let Some((_, at, _)) = memo.borrow_mut().as_mut() {
+            *at = at.checked_sub(by).expect("backdated instant");
+        }
+    });
+}
+
 #[cfg(test)]
 pub(super) fn clear() {
     MEMO.with(|memo| memo.borrow_mut().take());

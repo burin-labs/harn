@@ -50,7 +50,7 @@ fn a_memo_older_than_the_bound_is_derived_again() {
         let file = workspace.path().join("a.txt");
         assert!(check_fs_path_scope(&file, FsAccess::Read).is_ok());
         let before = scope_memo::derivations();
-        std::thread::sleep(scope_memo::MEMO_TTL + std::time::Duration::from_millis(50));
+        scope_memo::age(scope_memo::MEMO_TTL + std::time::Duration::from_millis(1));
         assert!(check_fs_path_scope(&file, FsAccess::Read).is_ok());
         assert_eq!(scope_memo::derivations() - before, 1);
     });
