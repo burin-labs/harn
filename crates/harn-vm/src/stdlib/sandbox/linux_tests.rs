@@ -1570,7 +1570,7 @@ fn a_tool_on_path_runs_confined_while_one_off_path_and_credentials_stay_denied()
     );
     let credential_read = run(
         format!("{}:/usr/bin:/bin", cargo_bin.display()),
-        format!("cat {}", credentials.display()),
+        format!("cat {}; echo CREDENTIAL-PROBE-RAN", credentials.display()),
     );
     match previous_path {
         Some(value) => std::env::set_var("PATH", value),
@@ -1600,9 +1600,19 @@ fn a_tool_on_path_runs_confined_while_one_off_path_and_credentials_stay_denied()
             "the same file off PATH must stay refused, or case 1 proves nothing: {output:?}"
         ),
     }
-    let credential_read = credential_read.expect("the credential spawn is prepared");
-    assert!(
-        !String::from_utf8_lossy(&credential_read.stdout).contains("PATH-GRANT-SECRET"),
-        "~/.cargo/bin on PATH must not open ~/.cargo/credentials.toml: {credential_read:?}"
-    );
+    // The refused read surfaces as a typed error that names the denylist; an
+    // output is acceptable only if the probe ran and the secret never printed.
+    match credential_read {
+        Err(error) => assert!(
+            format!("{error:?}").contains("is on the credential denylist"),
+            "the credential read failed for a reason other than the denylist: {error:?}"
+        ),
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                stdout.contains("CREDENTIAL-PROBE-RAN") && !stdout.contains("PATH-GRANT-SECRET"),
+                "~/.cargo/bin on PATH must not open ~/.cargo/credentials.toml: {output:?}"
+            );
+        }
+    }
 }
