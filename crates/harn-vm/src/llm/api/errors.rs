@@ -306,6 +306,11 @@ fn provider_http_error_value(
 fn category_owned_by_llm_reason(reason: LlmErrorReason) -> Option<ErrorCategory> {
     match reason {
         LlmErrorReason::InvalidRequest => Some(ErrorCategory::InvalidRequest),
+        // A billing stop arrives as HTTP 429. Taking the status's category
+        // (`rate_limit`) made every retry layer back off and resend into the
+        // same refusal. `reason: billing_limit` names it; `generic` is the
+        // category nothing retries.
+        LlmErrorReason::BillingLimit => Some(ErrorCategory::Generic),
         _ => None,
     }
 }
@@ -671,6 +676,8 @@ pub(crate) fn classify_llm_error(category: ErrorCategory, message: &str) -> LlmE
 /// same condition as prose.
 const BILLING_STOP_CODES: &[&str] = &[
     "insufficient_quota",
+    "billing_limit",
+    "credit_balance_exhausted",
     "billing_hard_limit_reached",
     "billing_not_active",
     "account_deactivated",
