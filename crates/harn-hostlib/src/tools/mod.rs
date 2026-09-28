@@ -66,7 +66,7 @@ impl HostlibCapability for ToolsCapability {
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
         // Register the session-cleanup hook once per process so long-running
-        // tool handles are killed when the agent-loop session ends.
+        // tool handles are killed when their session closes.
         long_running::register_cleanup_hook();
 
         registry.register_fn("tools", "hostlib_tools_search", "search", search::run);
