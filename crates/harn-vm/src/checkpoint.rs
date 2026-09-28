@@ -304,3 +304,6 @@ fn checkpoint_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     })?;
     Ok(VmValue::Nil)
 }
+
+#[cfg(test)]
+mod tests;
