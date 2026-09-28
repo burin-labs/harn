@@ -197,6 +197,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // working directory shows the refusal a script author would see; an in-process
   // call would assert the gate function rather than the shipped path.
   "crates/harn-cli/tests/harn_cli_e2e/decision_route_admission.rs",
+  // Retained spend admission must survive a fresh CLI process and refuse
+  // before HTTP; an in-process call misses startup and VM scope installation.
+  "crates/harn-cli/tests/harn_cli_e2e/durable_spend_policy.rs",
   // Cancellation poisoning crosses the async hostlib/VM/CLI boundary. A real
   // CLI process proves a caught launch error leaves the parent execution live.
   "crates/harn-cli/tests/harn_cli_e2e/command_probe_parent_liveness.rs",
