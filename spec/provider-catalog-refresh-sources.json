@@ -13,6 +13,7 @@
     "api.parasail.io", "api.atlascloud.ai", "ai-gateway.vercel.sh"
   ],
   "sources": [
+    {"id": "openrouter-models-api", "provider": "openrouter", "source_url": "https://openrouter.ai/api/v1/models", "mapper": "openrouter", "source_owner": "aggregator", "requires_key": false, "confidence": "medium", "terms_notes": "OpenRouter public /models index; secondary triangulation source."},
     {"id": "fireworks-models-api", "provider": "fireworks", "source_url": "https://api.fireworks.ai/inference/v1/models", "mapper": "fireworks", "terms_notes": "Uses the standard /models endpoint with catalog-declared credentials."},
     {"id": "anthropic-models-api", "provider": "anthropic", "source_url": "https://api.anthropic.com/v1/models", "mapper": "generic", "extra_headers": {"anthropic-version": "2023-06-01"}, "terms_notes": "Provider-owned /v1/models endpoint."},
     {"id": "openai-models-api", "provider": "openai", "source_url": "https://api.openai.com/v1/models", "mapper": "generic", "terms_notes": "Provider-owned /v1/models endpoint."},
@@ -39,6 +40,6 @@
     {"id": "siliconflow-models-api", "provider": "siliconflow", "source_url": "https://api.siliconflow.com/v1/models", "mapper": "generic", "terms_notes": "SiliconFlow OpenAI-compatible /models endpoint; override SILICONFLOW_BASE_URL for regional endpoints."},
     {"id": "parasail-models-api", "provider": "parasail", "source_url": "https://api.parasail.io/v1/models", "mapper": "generic", "terms_notes": "Parasail OpenAI-compatible /models endpoint."},
     {"id": "atlas-models-api", "provider": "atlas", "source_url": "https://api.atlascloud.ai/v1/models", "mapper": "generic", "terms_notes": "Atlas Cloud OpenAI-compatible /models endpoint."},
-    {"id": "vercel-ai-gateway-models-api", "provider": "vercel_ai_gateway", "source_url": "https://ai-gateway.vercel.sh/v1/models", "mapper": "generic", "confidence": "medium", "terms_notes": "Vercel AI Gateway public /v1/models index; aggregator source."}
+    {"id": "vercel-ai-gateway-models-api", "provider": "vercel_ai_gateway", "source_url": "https://ai-gateway.vercel.sh/v1/models", "mapper": "generic", "source_owner": "aggregator", "confidence": "medium", "terms_notes": "Vercel AI Gateway public /v1/models index; aggregator source."}
   ]
 }

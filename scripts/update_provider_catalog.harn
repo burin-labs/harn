@@ -40,8 +40,10 @@ pub type ModelIndexSource = {
   id: string,
   provider: string,
   source_url: string,
-  mapper: "generic" | "gemini" | "xai" | "together" | "cerebras" | "fireworks",
+  mapper: "generic" | "gemini" | "xai" | "together" | "cerebras" | "fireworks" | "openrouter",
   terms_notes: string,
+  source_owner?: "provider" | "aggregator",
+  requires_key?: bool,
   confidence?: "high" | "medium" | "low",
   extra_headers?: dict<string, string>,
 }
@@ -386,7 +388,7 @@ fn __fireworks_adapter(harness: Harness, env: dict) {
   return json_api_adapter(harness, env, config)
 }
 
-fn __keyed_models_spec(
+fn __models_spec(
   id: string,
   provider: string,
   source_url: string,
@@ -397,7 +399,7 @@ fn __keyed_models_spec(
     id: id,
     kind: "json",
     provider: provider,
-    source_owner: "provider",
+    source_owner: options?.source_owner ?? "provider",
     source_url: source_url,
     key_envs: key_envs,
     confidence: options?.confidence ?? "high",
@@ -407,35 +409,22 @@ fn __keyed_models_spec(
     extra_headers: options?.extra_headers,
     mapper: options?.mapper ?? __generic_models_mapper,
   }
+  const adapter = { harness, env ->
+    json_api_adapter(
+      harness,
+      env,
+      pick(
+        config,
+        ["id", "provider", "source_url", "source_owner", "confidence", "terms_notes", "mapper"],
+      ),
+    )
+  }
+  if options?.requires_key == false {
+    return {key_envs: [], run_fn: adapter}
+  }
   return {
     key_envs: config.key_envs,
-    run_fn: { harness, env ->
-      key_required_adapter(
-        harness,
-        env,
-        config
-          + {
-            adapter: { adapter_harness, adapter_env ->
-              json_api_adapter(
-                adapter_harness,
-                adapter_env,
-                pick(
-                  config,
-                  [
-                    "id",
-                    "provider",
-                    "source_url",
-                    "source_owner",
-                    "confidence",
-                    "terms_notes",
-                    "mapper",
-                  ],
-                ),
-              )
-            },
-          },
-      )
-    },
+    run_fn: { harness, env -> key_required_adapter(harness, env, config + {adapter: adapter}) },
   }
 }
 
@@ -504,10 +493,7 @@ fn __fireworks_spec() {
   }
 }
 
-fn __adapter_specs(live: any) {
-  if live {
-    return [__openrouter_spec()]
-  }
+fn __fixture_adapter_specs() {
   return [__anthropic_spec(), __openai_spec(), __openrouter_spec(), __fireworks_spec()]
 }
 
@@ -523,6 +509,7 @@ pub fn prepare_model_index_sources(configuration: unknown, catalog: dict) -> Pre
     together: __together_models_mapper,
     cerebras: __cerebras_models_mapper,
     fireworks: __fireworks_mapper,
+    openrouter: __openrouter_mapper,
   }
   let specs = []
   let seen = []
@@ -538,7 +525,7 @@ pub fn prepare_model_index_sources(configuration: unknown, catalog: dict) -> Pre
     const header_auth = provider.auth.style == "header"
     specs = specs
       + [
-        __keyed_models_spec(
+        __models_spec(
           source.id,
           source.provider,
           source.source_url,
@@ -546,6 +533,8 @@ pub fn prepare_model_index_sources(configuration: unknown, catalog: dict) -> Pre
           {
             confidence: source.confidence,
             terms_notes: source.terms_notes,
+            source_owner: source.source_owner,
+            requires_key: source.requires_key,
             extra_headers: source.extra_headers,
             auth_header: if header_auth {
               provider.auth.header
@@ -712,9 +701,9 @@ pipeline main(harness: Harness, task: unknown) {
     provider_catalog,
   )
   const specs = if live {
-    __adapter_specs(live) + model_sources.specs
+    model_sources.specs
   } else {
-    __adapter_specs(live)
+    __fixture_adapter_specs()
   }
   const observed_at = if live {
     harness.clock.date_iso()

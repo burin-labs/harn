@@ -663,6 +663,23 @@ pipeline test_key_required_adapter_runs_with_key(harness: Harness, task: unknown
   assert_eq(calls.count, 1)
   assert_eq(calls[0].headers["x-registry-key"], "fixture-secret")
   assert_eq(calls[0].headers.authorization, nil)
+  const public = prepare_model_index_sources(
+    configuration + {sources: [source + {requires_key: false, source_owner: "aggregator"}]},
+    catalog,
+  )
+  const public_spec = public.specs[0]
+  if public_spec == nil {
+    throw "public fixture source was not prepared"
+  }
+  const public_result = public_spec.run_fn(harness, make_env({}))
+  assert_eq(public_result.run.status, "ok")
+  assert_eq(public_spec.key_envs, [])
+  assert_eq(public_result.observations.count, 1)
+  assert_eq(public_result.observations[0].source_owner, "aggregator")
+  const public_calls = harness.testing.http_mock_calls({include_sensitive: true})
+  assert_eq(public_calls.count, 2)
+  assert_eq(public_calls[1].headers["x-registry-key"], nil)
+  assert_eq(public_calls[1].headers.authorization, nil)
   for invalid_sources in [[], [source, source], [source + {provider: "unknown"}]] {
     let refused = false
     try {
@@ -671,6 +688,6 @@ pipeline test_key_required_adapter_runs_with_key(harness: Harness, task: unknown
       refused = true
     }
     assert(refused, "invalid source registry must refuse before a request")
-    assert_eq(harness.testing.http_mock_calls().count, 1)
+    assert_eq(harness.testing.http_mock_calls().count, 2)
   }
 }

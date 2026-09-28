@@ -853,8 +853,9 @@ Each adapter is a function `adapter(env, config) -> {run, observations}`.
 Fixture mode replays Anthropic and OpenAI pricing pages, the OpenRouter
 public index, and a key-gated Fireworks source. Live mode reads model-index
 sources and its network allowlist from
-`spec/provider-catalog-refresh-sources.json`, then adds the public OpenRouter
-index. Each source selects an existing mapper by a closed, typed name.
+`spec/provider-catalog-refresh-sources.json`, including the public OpenRouter
+index. Each source selects an existing mapper by a closed, typed name and
+declares whether its index requires a key and who owns its observations.
 
 The provider catalog supplies credential environment names and authentication
 style. The source registry carries no duplicate credential aliases. Harn's VM
