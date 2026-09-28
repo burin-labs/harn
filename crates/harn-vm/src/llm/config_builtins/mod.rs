@@ -20,6 +20,7 @@ mod option_registry;
 mod provider_projection;
 mod rate_limit_builtins;
 mod selection_builtins;
+mod tool_probe;
 
 #[cfg(test)]
 mod tests;
@@ -58,6 +59,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
 }
 
 const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
+    &tool_probe::LLM_TOOL_PROBE_BUILTIN_DEF,
     &cache_report::LLM_CACHE_CONFORMANCE_BUILTIN_DEF,
     &PROVIDER_CAPABILITIES_BUILTIN_DEF,
     &PROBE_PROVIDER_CAPABILITIES_BUILTIN_DEF,

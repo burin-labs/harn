@@ -40,9 +40,7 @@ async fn invoke(
     .unwrap()
 }
 
-#[tokio::test]
-async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
-    let root = tempfile::tempdir().unwrap();
+async fn local_provider(root: &std::path::Path) -> (Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -66,9 +64,16 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
         }),
     );
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    std::fs::write(root.path().join("providers.toml"), format!(
+    std::fs::write(root.join("providers.toml"), format!(
         "[providers.openai]\nbase_url = \"http://{address}/v1\"\nauth_env = \"PROBE_PROVIDER_KEY\"\n"
     )).unwrap();
+    (calls, server)
+}
+
+#[tokio::test]
+async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
+    let root = tempfile::tempdir().unwrap();
+    let (calls, server) = local_provider(root.path()).await;
     std::fs::write(
         root.path().join("probe.harn"),
         r#"fn main(harness: Harness) {
@@ -160,4 +165,74 @@ async fn restarted_cli_retains_unknown_usage_and_refuses_before_http() {
         quota.receipt().unwrap().lifetime_reserved_microusd,
         child_receipt.lifetime_reserved_microusd
     );
+}
+
+#[tokio::test]
+async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
+    let workspace = tempfile::tempdir().unwrap();
+    let authority = tempfile::tempdir().unwrap();
+    let (calls, server) = local_provider(workspace.path()).await;
+    write_policy(authority.path(), 2_000_000);
+    let ledger = authority.path().join("spend.sqlite");
+    let policy = authority.path().join("policy.toml");
+    std::fs::write(
+        workspace.path().join("probe.harn"),
+        r#"
+      fn main(harness: Harness) {
+        const report = harness.llm.tool_probe({
+          provider: "openai", model: "gpt-5.6-luna", modes: ["non_streaming"],
+          max_cost_usd: 0.01, timeout_secs: 10
+        })
+        const tamper = try { harness.fs.write_text(argv[0], "corruption") }
+        guard is_err(tamper) else { throw "agent could overwrite the host budget ledger" }
+        harness.stdio.println(json_stringify(report))
+      }
+    "#,
+    )
+    .unwrap();
+    let args = vec![
+        "--spend-policy".into(),
+        policy.to_string_lossy().into_owned(),
+        "probe.harn".into(),
+        "--".into(),
+        ledger.to_string_lossy().into_owned(),
+    ];
+    let first = invoke(workspace.path(), false, args.clone()).await;
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(report["evidence_source"], "live_request");
+    assert_eq!(report["cases"].as_array().unwrap().len(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let quota = MachineSpendQuota::open(
+        &ledger,
+        "catalog",
+        MachineSpendPolicy {
+            daily_limit_microusd: None,
+            monthly_limit_microusd: None,
+            lifetime_limit_microusd: Some(2_000_000),
+        },
+    )
+    .unwrap();
+    let charged = quota.receipt().unwrap();
+    assert!(charged.lifetime_reserved_microusd > 0);
+    assert_eq!(charged.lifetime_usage_unknown_attempts, 1);
+    write_policy(authority.path(), charged.lifetime_reserved_microusd);
+    let denied = invoke(workspace.path(), false, args).await;
+    assert!(
+        denied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&denied.stdout).unwrap();
+    assert_eq!(report["admission"]["denied_attempts"], 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        quota.receipt().unwrap().lifetime_reserved_microusd,
+        charged.lifetime_reserved_microusd
+    );
+    server.abort();
 }

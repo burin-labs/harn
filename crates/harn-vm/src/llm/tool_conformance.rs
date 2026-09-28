@@ -50,7 +50,8 @@ pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 5;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
 pub const DEFAULT_TOOL_PROBE_MARKER: &str = "harn_tool_probe_marker";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct ToolConformanceProbeOptions {
     pub provider: String,
     pub model: String,
@@ -63,6 +64,12 @@ pub struct ToolConformanceProbeOptions {
     pub repeat: usize,
     pub timeout_secs: u64,
     pub max_cost_usd: Option<f64>,
+}
+
+impl Default for ToolConformanceProbeOptions {
+    fn default() -> Self {
+        Self::new("", "")
+    }
 }
 
 impl ToolConformanceProbeOptions {
