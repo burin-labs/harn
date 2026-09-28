@@ -272,6 +272,7 @@ process teardown. Each child gets the remaining monotonic time as its process
 timeout; Harn's process owner terminates the child tree. Reaching either limit
 leaves an explicitly partial report and exits nonzero. Dry runs show both caps.
 The output directory identifies the campaign's retained wall-time window.
+Harn atomically inserts that window, so concurrent starts share the first deadline.
 Resuming it includes downtime and preserves the original deadline; changing
 its duration or reading malformed saved state fails. Use a new output directory
 for a new campaign, with a separately authorized allowance.
