@@ -423,8 +423,10 @@ pipeline test_completion_judge_keeps_declared_execute_observation_without_guessi
       ],
     },
   )
-  assert_eq(projected.stats.included_action_count, 0)
-  assert_eq(projected.stats.included_fallback_observation_count, 1)
+  // A declared process observation is an action of its own now, not only the
+  // fallback when nothing else was kept: its output can be the work itself.
+  assert_eq(projected.stats.included_action_count, 1)
+  assert_eq(projected.stats.included_fallback_observation_count, 0)
   assert(contains(projected.serialized, "artifact evidence"))
 }
 
