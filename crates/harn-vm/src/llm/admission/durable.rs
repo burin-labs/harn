@@ -169,6 +169,7 @@ impl MachineSpendQuota {
         let mut admission = super::SCOPE.with(|slot| slot.borrow().clone());
         let parent_ledger = admission.ledger.clone();
         admission.machine = Some(self.clone());
+        admission.host_owned = true;
         let mut ambient = crate::orchestration::AmbientExecutionScope::capture_for_inline_subtask();
         ambient.set_llm_admission(admission);
         let mut inner = std::pin::pin!(crate::orchestration::scope_ambient(ambient, inner));
