@@ -9,6 +9,54 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.148
+
+### Fixed
+
+- **Approval review reuses answered identical requests within a session (#8320).**
+  Repeated requests avoid another model call and report zero additional cost.
+  Changed targets or permission context still require review, and unavailable
+  reviews are retried. Each reviewer retains at most 64 decisions.
+- Filesystem scope checks no longer re-derive every sandbox root on each
+  `harness.fs` call. The canonicalized workspace, read-only and credential-deny
+  roots are reused for up to 500 ms per policy, and a write or delete always
+  re-derives them, so a host that makes thousands of filesystem calls before
+  its first model call no longer spends seconds there (#8963).
+- **A sandboxed child can run the tools on its own `PATH` (#8998).** A tool
+  installed outside the preset toolchain homes, such as a CI tool cache or a
+  custom package prefix, was refused with exit 126 even when it was first on
+  `PATH`. Each absolute `PATH` entry now grants read and execute on its install
+  prefix outside the home directory, and on the entry alone inside it. The
+  credential denylist still wins. The CI enforcement receipt lists each grant
+  with the entry that produced it.
+- **A managed background command now dies when its owner exits even if another process inherited
+  the owner's liveness pipe.** The guardian's reaper relays that pipe and closes it once its parent
+  process is gone, so a leaked write end can no longer keep the command running.
+- **A background command handle now lives as long as its session, not the agent-loop run that
+  started it.** A host that runs one loop per turn can poll, wait on, or kill a command an earlier
+  turn started; closing the session or stopping its run still cancels its handles. Embedders can
+  register their own cleanup with `agent_sessions::reclaim_hooks::register_session_reclaim_hook`.
+- A restored session now replays each tool result with the mutation outcome, changed paths, and producer data
+  the live session emitted, and reads its failure from the audit marker as well as the provider message.
+  A rejected edit no longer comes back with an unknown outcome and no data.
+- OpenAI Responses-API routes stream their visible text to delta listeners as
+  the model writes, instead of handing it over once at the end. The final
+  response is parsed by the same code as a non-streamed reply.
+- The command workspace-effect classifier now reads a line-addressed `sed`
+  print (`sed -n '1,105p' file`, `sed 3q file`) as a read. It stays
+  unrecognized with an in-place flag, a script file, a `w`/`e` command, a
+  substitution, or a regex address, so any `sed` that can write or execute is
+  still kept out of the observation phase.
+- The step judge no longer withholds a step it cannot explain: a `revise`
+  with neither a critique nor reasoning stands as no objection, and the step
+  dispatches. It also no longer judges a step whose every tool call is a
+  declared read, since vetoing a read only withholds the facts the next step
+  needs.
+- The agent loop's main request streams its visible text to an ACP host as
+  `call_progress` deltas while the model writes, instead of arriving only as one
+  message at the end. A `harness.llm.call` that reaches `llm_call` without the
+  bridge-registered builtin now uses the host bridge the ACP server installed.
+
 ## v0.10.147
 
 ### Breaking
