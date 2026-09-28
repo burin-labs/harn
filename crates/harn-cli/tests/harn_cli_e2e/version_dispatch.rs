@@ -75,7 +75,7 @@ fn script_identity_uses_the_linked_vm_despite_spoofed_environment() {
         "#,
     )
     .expect("script");
-    let output = crate::test_util::harn_e2e_command()
+    let output = crate::test_util::process::harn_e2e_command()
         .current_dir(root.path())
         .args(["run", "identity.harn"])
         .env(
