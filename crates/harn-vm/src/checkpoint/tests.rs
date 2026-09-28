@@ -6,6 +6,63 @@ fn vm(root: &Path) -> Vm {
     vm
 }
 
+#[test]
+fn independent_vms_merge_checkpoint_writes_after_both_cache_empty_store() {
+    let root = tempfile::tempdir().unwrap();
+    let ready = std::sync::Arc::new(std::sync::Barrier::new(2));
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = ["first", "second"]
+            .into_iter()
+            .map(|key| {
+                let ready = ready.clone();
+                let root = root.path();
+                scope.spawn(move || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap();
+                    let mut vm = vm(root);
+                    runtime.block_on(async {
+                        assert!(matches!(
+                            vm.call_named_builtin("checkpoint_get", vec![VmValue::string(key)])
+                                .await
+                                .unwrap(),
+                            VmValue::Nil
+                        ));
+                        ready.wait();
+                        vm.call_named_builtin(
+                            "checkpoint",
+                            vec![VmValue::string(key), VmValue::Int(7)],
+                        )
+                        .await
+                        .unwrap();
+                    });
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut reloaded = vm(root.path());
+    for key in ["first", "second"] {
+        assert!(
+            matches!(
+                runtime
+                    .block_on(
+                        reloaded.call_named_builtin("checkpoint_get", vec![VmValue::string(key)])
+                    )
+                    .unwrap(),
+                VmValue::Int(7)
+            ),
+            "checkpoint {key} was overwritten by an independent VM"
+        );
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn damaged_store_refuses_reads_and_mutations_until_explicit_recovery() {
     for bytes in ["{", "[]", "null", r#""synthetic-checkpoint-secret""#] {
