@@ -726,6 +726,12 @@ statics = ["WARNED_KEYS"]
 category = "thread_private"
 plan = "thread_private_cache"
 
+[[thread_local]]
+path = "src/stdlib/sandbox/scope_memo.rs"
+statics = ["MEMO", "DERIVATIONS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
 # A re-entrancy guard set and cleared around the wrapper probe's own
 # synchronous `cargo` spawn on the same thread; nothing else reads it.
 [[thread_local]]
