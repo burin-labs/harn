@@ -43,20 +43,18 @@ impl CheckpointState {
         }
     }
 
-    fn ensure_loaded(&mut self) {
+    fn ensure_loaded(&mut self) -> Result<(), String> {
         if self.loaded {
-            return;
+            return Ok(());
         }
+        self.data = match std::fs::read_to_string(&self.path) {
+            Ok(contents) => serde_json::from_str(&contents)
+                .map_err(|e| format!("checkpoint decode error: {e}"))?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(format!("checkpoint read error: {e}")),
+        };
         self.loaded = true;
-        if let Ok(contents) = std::fs::read_to_string(&self.path) {
-            if let Ok(serde_json::Value::Object(map)) =
-                serde_json::from_str::<serde_json::Value>(&contents)
-            {
-                for (k, v) in map {
-                    self.data.insert(k, v);
-                }
-            }
-        }
+        Ok(())
     }
 
     fn save(&self) -> Result<(), String> {
@@ -72,42 +70,56 @@ impl CheckpointState {
         Ok(())
     }
 
-    fn get(&mut self, key: &str) -> VmValue {
-        self.ensure_loaded();
-        match self.data.get(key) {
+    fn get(&mut self, key: &str) -> Result<VmValue, String> {
+        self.ensure_loaded()?;
+        Ok(match self.data.get(key) {
             Some(v) => json_to_vm(v),
             None => VmValue::Nil,
-        }
+        })
     }
 
     fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), String> {
-        self.ensure_loaded();
+        self.ensure_loaded()?;
         self.data.insert(key, value);
-        self.save()
+        self.persist()
     }
 
     fn clear(&mut self) -> Result<(), String> {
-        self.data.clear();
-        if self.path.exists() {
-            std::fs::remove_file(&self.path).map_err(|e| format!("checkpoint clear error: {e}"))?;
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => (),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(format!("checkpoint clear error: {e}")),
         }
+        self.data.clear();
+        self.loaded = true;
         Ok(())
     }
 
-    fn list(&mut self) -> Vec<String> {
-        self.ensure_loaded();
-        self.data.keys().cloned().collect()
+    fn list(&mut self) -> Result<Vec<String>, String> {
+        self.ensure_loaded()?;
+        Ok(self.data.keys().cloned().collect())
     }
 
-    fn exists(&mut self, key: &str) -> bool {
-        self.ensure_loaded();
-        self.data.contains_key(key)
+    fn exists(&mut self, key: &str) -> Result<bool, String> {
+        self.ensure_loaded()?;
+        Ok(self.data.contains_key(key))
     }
 
     fn delete(&mut self, key: &str) -> Result<(), String> {
-        self.ensure_loaded();
+        self.ensure_loaded()?;
         self.data.remove(key);
-        self.save()
+        self.persist()
+    }
+
+    fn persist(&mut self) -> Result<(), String> {
+        let result = self.save();
+        if result.is_err() {
+            // A failed write is not a successful in-memory checkpoint.
+            // Reload the durable owner before accepting another operation.
+            self.data.clear();
+            self.loaded = false;
+        }
+        result
     }
 }
 
@@ -241,7 +253,9 @@ fn checkpoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn checkpoint_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = args.first().map(|a| a.display()).unwrap_or_default();
-    with_state("checkpoint_get", |state| Ok(state.get(&key)))
+    with_state("checkpoint_get", |state| {
+        state.get(&key).map_err(VmError::Runtime)
+    })
 }
 
 #[harn_builtin(
@@ -267,7 +281,7 @@ fn checkpoint_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 )]
 fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("checkpoint_list", |state| {
-        let keys = state.list();
+        let keys = state.list().map_err(VmError::Runtime)?;
         Ok(VmValue::List(std::sync::Arc::new(
             keys.into_iter()
                 .map(|k| VmValue::String(arcstr::ArcStr::from(k)))
@@ -286,7 +300,10 @@ fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 fn checkpoint_exists_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = args.first().map(|a| a.display()).unwrap_or_default();
     with_state("checkpoint_exists", |state| {
-        Ok(VmValue::Bool(state.exists(&key)))
+        state
+            .exists(&key)
+            .map(VmValue::Bool)
+            .map_err(VmError::Runtime)
     })
 }
 
