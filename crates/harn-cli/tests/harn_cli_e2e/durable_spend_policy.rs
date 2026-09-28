@@ -229,6 +229,19 @@ async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
     assert!(charged.lifetime_reserved_microusd > 0);
     assert_eq!(charged.lifetime_usage_unknown_attempts, 1);
     write_policy(authority.path(), charged.lifetime_reserved_microusd);
+    let unauthorized = invoke(workspace.path(), false, args.clone()).await;
+    assert!(!unauthorized.status.success());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    quota
+        .update_policy(
+            MachineSpendPolicy {
+                daily_limit_microusd: None,
+                monthly_limit_microusd: None,
+                lifetime_limit_microusd: Some(charged.lifetime_reserved_microusd),
+            },
+            "test-host",
+        )
+        .unwrap();
     let denied = invoke(workspace.path(), false, args).await;
     assert!(
         denied.status.success(),
