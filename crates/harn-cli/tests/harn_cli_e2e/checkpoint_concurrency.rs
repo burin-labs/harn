@@ -23,7 +23,7 @@ fn concurrent_processes_retain_one_checkpoint_candidate() {
         r#"fn main(harness: Harness) {
           const identity = harness.fs.canonicalize_existing(argv[1])
           const receipt = harness.runtime.checkpoint_insert(sha256(identity), json_parse(argv[0]))
-          harness.stdio.println(json_stringify(receipt))
+          harness.stdio.println(json_stringify(receipt + {identity: identity}))
         }"#,
     )
     .unwrap();
@@ -60,6 +60,10 @@ fn concurrent_processes_retain_one_checkpoint_candidate() {
             .collect::<Vec<_>>()
     });
     assert_eq!(receipts.len(), 8);
+    let identity = std::fs::canonicalize(&directory).unwrap();
+    assert!(receipts
+        .iter()
+        .all(|receipt| receipt["identity"] == identity.to_string_lossy().as_ref()));
     assert_eq!(receipts.iter().filter(|r| r["inserted"] == true).count(), 1);
     let retained = &receipts[0]["value"];
     assert!(retained
