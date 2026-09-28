@@ -1,0 +1,43 @@
+{
+  "schema": "harn.provider_catalog_refresh_sources.v1",
+  "egress_hosts": [
+    "www.anthropic.com", "anthropic.com", "claude.com", "platform.openai.com",
+    "developers.openai.com", "openai.com", "openrouter.ai", "api.anthropic.com",
+    "api.openai.com", "router.huggingface.co", "generativelanguage.googleapis.com",
+    "api.mistral.ai", "api.cohere.ai", "api.x.ai", "api.together.xyz", "api.groq.com",
+    "api.cerebras.ai", "api.deepseek.com", "api.fireworks.ai",
+    "dashscope-intl.aliyuncs.com", "api.minimax.io", "api.z.ai", "api.moonshot.ai",
+    "inference.baseten.co", "api.deepinfra.com", "api.sambanova.ai",
+    "integrate.api.nvidia.com", "api.tokenfactory.nebius.com", "tokens.flex.ai",
+    "api.hyperbolic.xyz", "api.siliconflow.com", "api.siliconflow.cn",
+    "api.parasail.io", "api.atlascloud.ai", "ai-gateway.vercel.sh"
+  ],
+  "sources": [
+    {"id": "anthropic-models-api", "provider": "anthropic", "source_url": "https://api.anthropic.com/v1/models", "mapper": "generic", "extra_headers": {"anthropic-version": "2023-06-01"}, "terms_notes": "Provider-owned /v1/models endpoint."},
+    {"id": "openai-models-api", "provider": "openai", "source_url": "https://api.openai.com/v1/models", "mapper": "generic", "terms_notes": "Provider-owned /v1/models endpoint."},
+    {"id": "huggingface-router-models-api", "provider": "huggingface", "source_url": "https://router.huggingface.co/v1/models", "mapper": "generic", "terms_notes": "Hugging Face Router /v1/models endpoint."},
+    {"id": "gemini-models-api", "provider": "gemini", "source_url": "https://generativelanguage.googleapis.com/v1beta/models", "mapper": "gemini", "terms_notes": "Gemini API model index."},
+    {"id": "mistral-models-api", "provider": "mistral", "source_url": "https://api.mistral.ai/v1/models", "mapper": "generic", "terms_notes": "Provider-owned /v1/models endpoint."},
+    {"id": "cohere-models-api", "provider": "cohere", "source_url": "https://api.cohere.ai/compatibility/v1/models", "mapper": "generic", "terms_notes": "Cohere OpenAI-compatible /models endpoint."},
+    {"id": "xai-models-api", "provider": "xai", "source_url": "https://api.x.ai/v1/models", "mapper": "xai", "terms_notes": "Provider-owned /v1/models endpoint; rates are 1e-4 USD per MTok."},
+    {"id": "together-models-api", "provider": "together", "source_url": "https://api.together.xyz/v1/models", "mapper": "together", "terms_notes": "Provider-owned /v1/models endpoint; prices are already per million tokens."},
+    {"id": "groq-models-api", "provider": "groq", "source_url": "https://api.groq.com/openai/v1/models", "mapper": "generic", "terms_notes": "Groq OpenAI-compatible /models endpoint."},
+    {"id": "cerebras-models-api", "provider": "cerebras", "source_url": "https://api.cerebras.ai/public/v1/models", "mapper": "cerebras", "terms_notes": "Provider-owned public model index. /v1/models returns bare ids; /public/v1/models adds pricing, limits and a deprecated flag."},
+    {"id": "deepseek-models-api", "provider": "deepseek", "source_url": "https://api.deepseek.com/v1/models", "mapper": "generic", "terms_notes": "Provider-owned /v1/models endpoint."},
+    {"id": "dashscope-models-api", "provider": "dashscope", "source_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models", "mapper": "generic", "terms_notes": "DashScope OpenAI-compatible /models endpoint."},
+    {"id": "minimax-models-api", "provider": "minimax", "source_url": "https://api.minimax.io/v1/models", "mapper": "generic", "terms_notes": "Provider-owned /v1/models endpoint."},
+    {"id": "zai-models-api", "provider": "zai", "source_url": "https://api.z.ai/api/paas/v4/models", "mapper": "generic", "terms_notes": "Z.AI OpenAI-compatible /models endpoint."},
+    {"id": "moonshot-models-api", "provider": "moonshot", "source_url": "https://api.moonshot.ai/v1/models", "mapper": "generic", "terms_notes": "Provider-owned /v1/models endpoint."},
+    {"id": "deepinfra-models-api", "provider": "deepinfra", "source_url": "https://api.deepinfra.com/v1/openai/models", "mapper": "generic", "terms_notes": "DeepInfra OpenAI-compatible /models endpoint."},
+    {"id": "sambanova-models-api", "provider": "sambanova", "source_url": "https://api.sambanova.ai/v1/models", "mapper": "generic", "terms_notes": "Provider-owned /v1/models endpoint."},
+    {"id": "nvidia-nim-models-api", "provider": "nvidia", "source_url": "https://integrate.api.nvidia.com/v1/models", "mapper": "generic", "terms_notes": "NVIDIA NIM API Catalog OpenAI-compatible /models endpoint."},
+    {"id": "baseten-models-api", "provider": "baseten", "source_url": "https://inference.baseten.co/v1/models", "mapper": "generic", "terms_notes": "Baseten Model APIs OpenAI-compatible /models endpoint."},
+    {"id": "nebius-token-factory-models-api", "provider": "nebius", "source_url": "https://api.tokenfactory.nebius.com/v1/models", "mapper": "generic", "terms_notes": "Nebius Token Factory OpenAI-compatible /models endpoint."},
+    {"id": "flexai-model-discovery-api", "provider": "flexai", "source_url": "https://tokens.flex.ai/api/models", "mapper": "generic", "terms_notes": "FlexAI detailed model-discovery endpoint with context, pricing, support, and health metadata."},
+    {"id": "hyperbolic-models-api", "provider": "hyperbolic", "source_url": "https://api.hyperbolic.xyz/v1/models", "mapper": "generic", "terms_notes": "Hyperbolic OpenAI-compatible /models endpoint."},
+    {"id": "siliconflow-models-api", "provider": "siliconflow", "source_url": "https://api.siliconflow.com/v1/models", "mapper": "generic", "terms_notes": "SiliconFlow OpenAI-compatible /models endpoint; override SILICONFLOW_BASE_URL for regional endpoints."},
+    {"id": "parasail-models-api", "provider": "parasail", "source_url": "https://api.parasail.io/v1/models", "mapper": "generic", "terms_notes": "Parasail OpenAI-compatible /models endpoint."},
+    {"id": "atlas-models-api", "provider": "atlas", "source_url": "https://api.atlascloud.ai/v1/models", "mapper": "generic", "terms_notes": "Atlas Cloud OpenAI-compatible /models endpoint."},
+    {"id": "vercel-ai-gateway-models-api", "provider": "vercel_ai_gateway", "source_url": "https://ai-gateway.vercel.sh/v1/models", "mapper": "generic", "confidence": "medium", "terms_notes": "Vercel AI Gateway public /v1/models index; aggregator source."}
+  ]
+}
