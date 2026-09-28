@@ -167,10 +167,16 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
    its direct adapter.
    Preserve the conservative `admission` receipt. Unsupported billing or
    unknown pricing remains incomplete; do not drop the cap to obtain a result.
+   If the model is not cataloged yet, stage its independently verified provider
+   list prices in a temporary `HARN_PROVIDERS_CONFIG` overlay before probing.
+   Keep native-tool support unconfirmed until the exact adapter passes; the
+   temporary pricing declaration is not evidence of tool support.
    For several routes, use the existing provider tool-probe campaign. It passes
    the remaining allowance to each tool or option probe and sums the admission
-   receipts. Missing receipts stop dispatch; unpriced usage keeps its reserved
+   receipts. Missing receipts or admission denials stop dispatch; unpriced usage keeps its reserved
    upper bound. Do not replace that accounting with a fixed per-case estimate.
+   Set `--max-duration-secs` for the campaign's total wall time, including child
+   process timeouts; a deadline stop is incomplete coverage and a failing result.
 4. Change the owning catalog fragments. Record `deprecated` and
    `superseded_by`, preserve aliases, and move defaults off deprecated rows.
    Pin curated support recommendations before generating projections. Check
