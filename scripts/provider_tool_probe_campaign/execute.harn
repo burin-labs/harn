@@ -326,6 +326,7 @@ pub fn __run_tool_probe(
   output_dir: string,
   trial: int = 1,
   max_cost_usd: float? = nil,
+  process_timeout_ms: int? = nil,
 ) -> list<ProviderToolProbeCell> {
   const missing = __missing_env_keys(route, env)
   if len(missing) > 0 {
@@ -353,7 +354,9 @@ pub fn __run_tool_probe(
       output_dir,
       trial,
     )
-    const child = process.run({program: harn_bin, args: command[1:len(command)], env: env})
+    const child = process.run(
+      {program: harn_bin, args: command[1:len(command)], env: env, timeout_ms: process_timeout_ms},
+    )
     const stdout = child.stdout ?? ""
     if trim(stdout) != "" {
       fs.write_text(artifact_path, stdout)
@@ -416,6 +419,7 @@ pub fn __run_option_probe(
   output_dir: string,
   trial: int = 1,
   max_cost_usd: float? = nil,
+  process_timeout_ms: int? = nil,
 ) -> list<ProviderToolProbeCell> {
   const missing = __missing_env_keys(route, env)
   if len(missing) > 0 {
@@ -435,7 +439,9 @@ pub fn __run_option_probe(
     output_dir,
     trial,
   )
-  const child = process.run({program: harn_bin, args: command[1:len(command)], env: env})
+  const child = process.run(
+    {program: harn_bin, args: command[1:len(command)], env: env, timeout_ms: process_timeout_ms},
+  )
   const stdout = child.stdout ?? ""
   if trim(stdout) != "" {
     fs.write_text(artifact_path, stdout)

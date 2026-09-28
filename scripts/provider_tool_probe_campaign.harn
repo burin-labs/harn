@@ -73,13 +73,16 @@ const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
  * reaches the cap reports "exhausted", which would otherwise hide an unpriced
  * or unreported case behind a budget outcome.
  */
-fn __campaign_failed(report: ProviderToolProbeCampaignReport) -> bool {
+pub fn provider_tool_probe_campaign_failed(report: ProviderToolProbeCampaignReport) -> bool {
   const summary = report.summary
   const tool_scorecard_required = (report.runner_summary?.provider_tool_probe?.total ?? 0) > 0
   return (summary.fail ?? 0) > 0
     || (summary.error ?? 0) > 0
     || (report.spend?.unpriced_case_count ?? 0) > 0
     || (report.spend?.unaccounted_probe_count ?? 0) > 0
+    || (report.campaign_slice?.budget_stopped ?? false)
+    || (report.campaign_slice?.deadline_stopped ?? false)
+    || (report.live && report.campaign_slice?.probe_executions_selected == 0)
     || (tool_scorecard_required && report.artifacts?.scorecard_status != "complete")
     || report.claim_controls.status == "incomplete"
 }
@@ -87,7 +90,7 @@ fn __campaign_failed(report: ProviderToolProbeCampaignReport) -> bool {
 fn main(harness: Harness) {
   if help_requested(argv) {
     harness.stdio.println(
-      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--require-runtime-revision REVISION] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--repeat N] [--shard-count N --shard-index I] [--max-probes N] [--max-cost-usd USD] [--include-expensive] [--live] [--markdown]",
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--require-runtime-revision REVISION] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--repeat N] [--shard-count N --shard-index I] [--max-probes N] [--max-cost-usd USD] [--max-duration-secs N] [--include-expensive] [--live] [--markdown]",
     )
     return nil
   }
@@ -120,6 +123,7 @@ fn main(harness: Harness) {
   const live = parsed?.live ?? false
   const repeat = parsed?.repeat ?? 1
   const timeout_secs = parsed?.timeout_secs ?? 60
+  const max_duration_secs = parsed.max_duration_secs
   const shard_count = parsed?.shard_count ?? 1
   const shard_index = parsed?.shard_index ?? 0
   const max_probes = parsed?.max_probes ?? 0
@@ -130,6 +134,10 @@ fn main(harness: Harness) {
   }
   if timeout_secs <= 0 {
     harness.stdio.eprintln("--timeout-secs must be >= 1")
+    harness.runtime.exit(2)
+  }
+  if max_duration_secs <= 0 {
+    harness.stdio.eprintln("--max-duration-secs must be >= 1")
     harness.runtime.exit(2)
   }
   if shard_count <= 0 {
@@ -186,6 +194,7 @@ fn main(harness: Harness) {
     __live_cells(
       {
         llm: harness.llm,
+        clock: harness.clock,
         fs: harness.fs,
         process: harness.process,
         routes: routes,
@@ -199,6 +208,7 @@ fn main(harness: Harness) {
         shard_index: shard_index,
         max_probes: max_probes,
         max_cost_usd: max_cost_usd,
+        max_duration_secs: max_duration_secs,
       },
     )
   } else {
@@ -242,7 +252,7 @@ fn main(harness: Harness) {
     {
       env: auth_env,
       env_source: (env_load.source ?? {}) + {ambient_key_count: len(ambient_env.keys())},
-      campaign_slice: cell_plan.slice ?? {},
+      campaign_slice: (cell_plan.slice ?? {}) + {max_duration_secs: max_duration_secs},
       scorecard_artifacts: scorecard_artifacts,
     },
     runtime,
@@ -259,7 +269,7 @@ fn main(harness: Harness) {
   } else {
     harness.stdio.println(json_stringify_pretty(report))
   }
-  if live && __campaign_failed(report) {
+  if live && provider_tool_probe_campaign_failed(report) {
     harness.runtime.exit(1)
   }
   return nil

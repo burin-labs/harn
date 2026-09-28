@@ -64,6 +64,7 @@ pub fn provider_tool_probe_campaign_observed_spend(cells: list<ProviderToolProbe
 
 pub type ProviderToolProbeLiveCellsRequest = {
   llm: HarnessLlm,
+  clock: HarnessClock,
   fs: HarnessFs,
   process: HarnessProcess,
   routes: list<ProviderToolProbeRoute>,
@@ -77,10 +78,13 @@ pub type ProviderToolProbeLiveCellsRequest = {
   shard_index: int,
   max_probes: int,
   max_cost_usd?: float,
+  max_duration_secs: int,
 }
 
 pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
   const llm = request.llm
+  const clock = request.clock
+  const deadline_ms = clock.monotonic_ms() + request.max_duration_secs * 1000
   const fs = request.fs
   const process = request.process
   const routes = request.routes
@@ -103,6 +107,8 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
   let probe_executions_selected = 0
   let probe_executions_excluded_by_budget = 0
   let budget_stopped = false
+  let deadline_stopped = false
+  let probe_executions_excluded_by_deadline = 0
   for route in routes {
     for behavior in behaviors {
       for mode in behavior.modes {
@@ -132,6 +138,12 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
         }
         for trial in range(1, repeat + 1) {
           for format in behavior.tool_formats {
+            const remaining_ms = deadline_ms - clock.monotonic_ms()
+            if remaining_ms <= 0 {
+              deadline_stopped = true
+              probe_executions_excluded_by_deadline = probe_executions_excluded_by_deadline + 1
+              continue
+            }
             const spend = provider_tool_probe_campaign_observed_spend(cells)
             // Each child inherits only the remaining allowance and reserves
             // at the same admission boundary as ordinary inference.
@@ -158,6 +170,7 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
                   output_dir,
                   trial,
                   max_cost_usd - provider_tool_probe_campaign_charged_usd(spend),
+                  remaining_ms,
                 )
               } else {
                 __run_option_probe(
@@ -171,6 +184,7 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
                   output_dir,
                   trial,
                   max_cost_usd - provider_tool_probe_campaign_charged_usd(spend),
+                  remaining_ms,
                 )
               }
             probe_executions_selected = probe_executions_selected + 1
@@ -197,6 +211,9 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
         probe_executions_selected: probe_executions_selected,
         probe_executions_excluded_by_budget: probe_executions_excluded_by_budget,
         budget_stopped: budget_stopped,
+        max_duration_secs: request.max_duration_secs,
+        deadline_stopped: deadline_stopped,
+        probe_executions_excluded_by_deadline: probe_executions_excluded_by_deadline,
       },
   }
 }

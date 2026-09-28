@@ -3,6 +3,7 @@ import {
   RuntimeContentFingerprint,
 } from "../../crates/harn-stdlib/src/stdlib/runtime/content_fingerprint"
 import "../provider_tool_probe_campaign.harn"
+import { __live_cells } from "../provider_tool_probe_campaign/report"
 
 fn runtime_content_fingerprint() -> RuntimeContentFingerprint {
   return {
@@ -1091,6 +1092,23 @@ pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(
   assert_eq(report.spend.actual_usd, 0.003)
   assert_eq(report.spend.cap_usd, 0.01)
   assert_eq(report.spend.budget_status, "within_cap")
+  const measured = report
+    + {
+      artifacts: report.artifacts + {scorecard_status: "complete"},
+      campaign_slice: {probe_executions_selected: 2},
+    }
+  assert_false(provider_tool_probe_campaign_failed(measured))
+  assert_true(
+    provider_tool_probe_campaign_failed(measured + {campaign_slice: {deadline_stopped: true}}),
+  )
+  assert_true(
+    provider_tool_probe_campaign_failed(measured + {campaign_slice: {budget_stopped: true}}),
+  )
+  assert_true(
+    provider_tool_probe_campaign_failed(
+      measured + {campaign_slice: {probe_executions_selected: 0}},
+    ),
+  )
 }
 
 @test
@@ -1511,6 +1529,42 @@ pipeline test_campaign_unpriced_requests_need_conservative_admission_receipts() 
   assert_false(
     provider_tool_probe_campaign_may_execute(bounded + {unaccounted_probe_count: 1}, 5.0),
   )
+}
+
+@test
+pipeline test_campaign_expired_deadline_refuses_dispatch(harness: Harness) {
+  const request = {
+    llm: harness.llm,
+    clock: harness.clock,
+    fs: harness.fs,
+    process: harness.process,
+    routes: [
+      unwrap(provider_tool_probe_campaign_routes(["openai:gpt-5.6-luna"])[0])
+        + {env_keys: ["CAMPAIGN_TEST_KEY"]},
+    ],
+    behaviors: provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"]),
+    harn_bin: "unservable-probe-command",
+    env: {},
+    repeat: 1,
+    timeout_secs: 60,
+    output_dir: ".out",
+    shard_count: 1,
+    shard_index: 0,
+    max_probes: 1,
+    max_cost_usd: 1.0,
+    max_duration_secs: 0,
+  }
+  const expired = __live_cells(request)
+  assert_true(expired.slice.deadline_stopped)
+  assert_true(expired.slice.probe_executions_excluded_by_deadline > 0)
+  assert_eq(expired.slice.probe_executions_selected, 0)
+  assert_eq(len(expired.cells), 0)
+  // A live allowance reaches credential readiness and emits explicit skips.
+  const ready = __live_cells(request + {max_duration_secs: 60})
+  assert_false(ready.slice.deadline_stopped)
+  assert_true(ready.slice.probe_executions_selected > 0)
+  assert_true(len(ready.cells) > 0)
+  assert_eq(ready.cells[0]?.status, "skip")
 }
 
 @test

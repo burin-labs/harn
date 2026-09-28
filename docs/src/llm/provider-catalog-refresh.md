@@ -262,6 +262,10 @@ admission receipt. Actual priced usage remains separate from that upper bound.
 Case counts do not imply physical request counts, since admission can refuse
 before transport. `--max-probes`
 limits selected route/behavior/mode units independently of the dollar cap.
+`--max-duration-secs` bounds the live probe phase, including child startup and
+process teardown. Each child gets the remaining monotonic time as its process
+timeout; Harn's process owner terminates the child tree. Reaching either limit
+leaves an explicitly partial report and exits nonzero. Dry runs show both caps.
 
 Each live output directory contains:
 
