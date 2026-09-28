@@ -275,7 +275,17 @@ fn provider_contract_violation_is_accounted_and_stops_further_attempts() {
     let opts = opts(10.0);
     let request = LlmRequestPayload::from(&opts);
     let reservation = reserve(&opts, &request).unwrap().unwrap();
-    assert!(reservation.settle(&result(2_000_000, 100)).is_err());
+    let violation = reservation.settle(&result(2_000_000, 100)).unwrap_err();
+    let projected = crate::llm::call::build_llm_error_dict(&violation, "openai", "fixture");
+    assert_eq!(
+        projected
+            .as_dict()
+            .unwrap()
+            .get("origin")
+            .map(VmValue::display)
+            .as_deref(),
+        Some("provider")
+    );
     assert!(reserve(&opts, &request).is_err());
     let scope = SCOPE.with(|slot| slot.borrow().clone());
     let ledger = scope.ledger.lock().unwrap();
