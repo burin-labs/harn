@@ -13,6 +13,7 @@
     "api.parasail.io", "api.atlascloud.ai", "ai-gateway.vercel.sh"
   ],
   "sources": [
+    {"id": "fireworks-models-api", "provider": "fireworks", "source_url": "https://api.fireworks.ai/inference/v1/models", "mapper": "fireworks", "terms_notes": "Uses the standard /models endpoint with catalog-declared credentials."},
     {"id": "anthropic-models-api", "provider": "anthropic", "source_url": "https://api.anthropic.com/v1/models", "mapper": "generic", "extra_headers": {"anthropic-version": "2023-06-01"}, "terms_notes": "Provider-owned /v1/models endpoint."},
     {"id": "openai-models-api", "provider": "openai", "source_url": "https://api.openai.com/v1/models", "mapper": "generic", "terms_notes": "Provider-owned /v1/models endpoint."},
     {"id": "huggingface-router-models-api", "provider": "huggingface", "source_url": "https://router.huggingface.co/v1/models", "mapper": "generic", "terms_notes": "Hugging Face Router /v1/models endpoint."},

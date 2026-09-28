@@ -40,7 +40,7 @@ pub type ModelIndexSource = {
   id: string,
   provider: string,
   source_url: string,
-  mapper: "generic" | "gemini" | "xai" | "together" | "cerebras",
+  mapper: "generic" | "gemini" | "xai" | "together" | "cerebras" | "fireworks",
   terms_notes: string,
   confidence?: "high" | "medium" | "low",
   extra_headers?: dict<string, string>,
@@ -506,7 +506,7 @@ fn __fireworks_spec() {
 
 fn __adapter_specs(live: any) {
   if live {
-    return [__openrouter_spec(), __fireworks_spec()]
+    return [__openrouter_spec()]
   }
   return [__anthropic_spec(), __openai_spec(), __openrouter_spec(), __fireworks_spec()]
 }
@@ -522,6 +522,7 @@ pub fn prepare_model_index_sources(configuration: unknown, catalog: dict) -> Pre
     xai: __xai_models_mapper,
     together: __together_models_mapper,
     cerebras: __cerebras_models_mapper,
+    fireworks: __fireworks_mapper,
   }
   let specs = []
   let seen = []
@@ -706,14 +707,10 @@ pipeline main(harness: Harness, task: unknown) {
   const update = argv.contains("--update")
   const json = argv.contains("--json")
   const provider_catalog = harness.llm.provider_catalog()
-  const model_sources = if live {
-    prepare_model_index_sources(
-      json_parse(harness.fs.read_text("spec/provider-catalog-refresh-sources.json")),
-      provider_catalog,
-    )
-  } else {
-    {specs: [], egress_hosts: []}
-  }
+  const model_sources = prepare_model_index_sources(
+    json_parse(harness.fs.read_text("spec/provider-catalog-refresh-sources.json")),
+    provider_catalog,
+  )
   const specs = if live {
     __adapter_specs(live) + model_sources.specs
   } else {

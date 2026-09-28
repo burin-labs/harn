@@ -167,6 +167,27 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
     let catalog = provider_catalog_to_vm_value();
     let catalog = catalog.as_dict().expect("provider catalog dict");
 
+    let providers = match catalog.get("providers") {
+        Some(VmValue::List(providers)) => providers,
+        other => panic!("expected providers list, got {other:?}"),
+    };
+    let artifact = crate::provider_catalog::artifact();
+    assert!(!artifact.providers.is_empty());
+    assert_eq!(providers.len(), artifact.providers.len());
+    for expected in artifact.providers {
+        let projected = providers
+            .iter()
+            .filter_map(VmValue::as_dict)
+            .find(|provider| provider.get("id").map(VmValue::display) == Some(expected.id.clone()))
+            .expect("catalog provider reaches the VM");
+        let expected = crate::stdlib::json_to_vm_value(
+            &serde_json::to_value(expected).expect("serializable provider"),
+        );
+        for field in ["classification", "auth", "endpoint"] {
+            assert_eq!(projected.get(field), expected.as_dict().unwrap().get(field));
+        }
+    }
+
     let families = match catalog.get("families") {
         Some(VmValue::List(families)) => families,
         other => panic!("expected families list, got {other:?}"),
