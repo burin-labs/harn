@@ -189,7 +189,7 @@ async fn script_tool_probe_keeps_budget_ledger_outside_agent_write_roots() {
       fn main(harness: Harness) {
         const report = harness.llm.tool_probe({
           provider: "openai", model: "gpt-5.6-luna", modes: ["non_streaming"],
-          max_cost_usd: 0.01, timeout_secs: 10
+          max_cost_usd: 0.1, timeout_secs: 10
         })
         const tamper = try { harness.fs.write_text(argv[0], "corruption") }
         guard is_err(tamper) else { throw "agent could overwrite the host budget ledger" }
