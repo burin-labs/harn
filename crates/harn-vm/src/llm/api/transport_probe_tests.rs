@@ -2,6 +2,63 @@ use super::*;
 use crate::llm::api::{probe_llm_request, LlmRequestPayload, OutputFormat};
 
 #[test]
+fn adapter_probe_honors_the_configured_case_deadline() {
+    use crate::llm::tool_conformance::{
+        run_tool_conformance_probe, ToolConformanceProbeOptions, ToolProbeCase, ToolProbeMode,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    let _guard = env_guard();
+    let _allow_llm_transport = allow_stubbed_llm_transport();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    let server = spawn_llm_stub("delayed adapter probe", move |stream| {
+        use std::io::{Read, Write};
+        let mut request = vec![0u8; 16_384];
+        assert!(stream.read(&mut request).expect("read request") > 0);
+        observed.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_secs(2));
+        let body = r#"{"choices":[{"message":{"role":"assistant","content":"direct_answer:harn_tool_probe_marker"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(), body
+        );
+        // A correctly timed-out client can close before the stub replies.
+        let _ = stream.write_all(response.as_bytes());
+    });
+    install_openai_stub_provider("probe-deadline", server.addr());
+    let mut options = ToolConformanceProbeOptions::new("probe-deadline", "probe-model");
+    options.modes = vec![ToolProbeMode::NonStreaming];
+    options.probe_case = ToolProbeCase::NoToolAnswerOrRefusal;
+    options.timeout_secs = 1;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let started = Instant::now();
+    let report = runtime.block_on(run_tool_conformance_probe(options));
+    let elapsed = started.elapsed();
+    crate::llm_config::clear_user_overrides();
+    drop(server);
+
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the adapter must be reached"
+    );
+    assert_eq!(report.cases.len(), 1);
+    assert!(
+        !report.cases[0].ok,
+        "a late response cannot pass: {report:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(1500),
+        "elapsed: {elapsed:?}"
+    );
+}
+
+#[test]
 fn probe_stream_request_uses_stream_transport_without_a_delta_receiver() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();
