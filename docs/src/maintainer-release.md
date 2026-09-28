@@ -5,49 +5,62 @@ lives in [CLI reference](./cli-reference.md).
 
 ## Standard flow
 
-Live releases run from the protected hosted workflow owned by
-`burin-labs/harn-bump-fleet`. Start from an up-to-date Harn checkout, freeze the
-exact remote source SHA, and dispatch the Fleet workflow:
+Harn owns release preparation, candidate certification, and promotion through
+its repository workflows. Confirm the required changes have landed on main,
+then ask the current release owner to dispatch the same opener used by the
+daily schedule:
 
 ```bash
-git fetch origin main
-HARN_RELEASE_SHA="$(git rev-parse origin/main)"
-gh workflow run hosted-release.yml \
-  --repo burin-labs/harn-bump-fleet \
-  -f bump=patch \
-  -f mode=ship-pr \
-  -f at_sha="${HARN_RELEASE_SHA}"
+gh workflow run bump-release.yml --repo burin-labs/harn --ref main
 ```
 
-Approve the run's protected `release` environment, then follow the exact run
-until it hands off the immutable tag and release PR. Once the tag is known,
-resume Fleet's durable post-tag watcher from a `harn-bump-fleet` checkout:
+The [opener](https://github.com/burin-labs/harn/blob/main/.github/workflows/bump-release.yml) has no dispatch inputs.
+It reads main's development version and pending changelog fragments, prepares
+the `Release vX.Y.Z` PR, and arms auto-merge. A stable version or no pending
+fragments produces a measured no-op. Inspect its decision before retrying.
+Follow the current release owner's merge authority. Never push to an armed or
+queued PR, or refold an explicitly frozen candidate to absorb later changes.
 
-```bash
-scripts/watch_harn_release.sh \
-  --tag vX.Y.Z \
-  --repo ../harn \
-  --yes-live-release
-```
+The [candidate build](https://github.com/burin-labs/harn/blob/main/.github/workflows/build-release-binaries.yml)
+builds, signs, notarizes, packages, attests, and checks the five-target matrix
+at the release's exact merge queue commit. A pull-request run builds no release
+files; its successful verdict is not archive proof. The main push reuses a
+successful queue candidate at that same commit, or builds it when none exists.
 
-The hosted workflow owns source freezing, audits, hosted platform
-certification, the GitHub-signed release commit, immutable tag, release PR, and
-auto-merge. The watcher is resumable by exact receipt and owns missing-asset
-recovery, PR re-arming, release finalization, and transient ref cleanup. Pass
-`--warm-cache` to request the five-target cache warm; otherwise its receipt stays
-`not_requested`. A visible tag or prerelease is an intermediate state, not release
-completion.
+[Promotion](https://github.com/burin-labs/harn/blob/main/.github/workflows/promote-release.yml) finds the successful
+candidate run for that main commit. It verifies the manifest, file hashes, and
+attestations, then publishes those same files and creates the tag. Nothing in
+promotion rebuilds a release file. The tag starts crate publication; promotion
+also starts the registered fleet repin, container packaging, and next
+development-version PR.
 
-The hosted workflow's `converge_fleet` input controls downstream updates. Setting
-it to `false` leaves that work for a later explicit request or the regular fleet
-schedule. The crate publisher does not start a second update controller.
+Do not create tags by hand or invoke `scripts/release_ship.sh`, the local
+`release_harn.harn` harness, or the retired Fleet `hosted-release.yml` launcher
+as a parallel normal publisher. Read the current workflow inputs before a
+recovery dispatch. The build workflow accepts warm-cache and benchmark inputs;
+the retired `candidate_only`, `source_ref`, and `source_sha` inputs are not a
+release entry point.
 
-Do not invoke `scripts/release_ship.sh` or the local `release_harn.harn` harness
-for a normal live release. They are implementation and development surfaces;
-the hosted workflow is the authority boundary for release credentials,
-signatures, and protected-environment approval. If a run stops after the tag is
-published, rerun the watcher first: it reuses the immutable attempt and avoids
-duplicating accepted builds or publication work.
+## Verify publication and recover
+
+Record the release PR, its landed commit, successful candidate run, and
+promotion run. Check that the tag resolves to the certified commit and that
+the published files agree with `candidate-manifest.json`, including every
+required archive and its attestation. Missing files, pending jobs, skipped
+proof, and cancelled runs are not success.
+
+Check crate publication and container packaging separately. Read the generated
+fleet repin receipts to identify converged, failed, and still-pending consumers.
+A published tag alone proves neither complete publication nor downstream
+convergence.
+
+Recover at the workflow that failed. Fix a source defect before rebuilding;
+reuse a successful candidate at the exact commit for promotion recovery. Read
+the failed job and its retained artifact before retrying, and retry only the
+failed work once its prerequisite is available. An existing tag at a different
+commit is a conflict for the release owner, not permission to replace the tag.
+
+## Document a new preflight requirement
 
 Before cutting a release that adds a new hard preflight requirement, verify its
 user-facing documentation includes an equivalent migration note: the exact
@@ -71,57 +84,33 @@ fixtures. It creates no remote tags or releases. Missing staged dependencies,
 copied or duplicated staging steps, and an unreported cutover must fail.
 
 CI runs this rehearsal for release-related pull requests and every main push.
-Its verdict is required by `CI status`. This fixture proof does not replace the
-hosted platform certification or prove that live publication credentials work.
+Its verdict is an owning CI check. This fixture proof does not replace candidate
+archive certification or prove that live publication credentials work.
 
-## Hosted platform certification
+## Inspect platform evidence
 
-Release preparation is fail-closed on the frozen remote source SHA. Before the
-version/changelog commit is created, the release harness dispatches
-`.github/workflows/windows-nightly.yml` and
-`.github/workflows/macos-nightly.yml` for the frozen source branch while the
-local source audit runs. GitHub must return an exact run ID for each dispatch.
-The macOS run and its full-workspace job must complete successfully with the
-expected workflow path, event, SHA, URL, and unique job identity.
+Read each target's build, signing, packaging, attestation, and release-check
+results in the candidate run. They must refer to the same candidate commit and
+the files promotion will publish. A successful build alone does not prove that
+the archive's release checks ran.
 
-Windows is advisory. Harn builds and runs on Windows without OS sandbox
-confinement, so the Windows nightly never decides whether a release certifies.
-The receipt carries the Windows proof when it succeeded and otherwise one
-`advisories` entry (`failure`, `missing`, or `abandoned`, with its run URL when
-one exists). Every accepted receipt prints a
-`WINDOWS_NIGHTLY_ADVISORY state=... run=...` line. A receipt that accounts for
-Windows neither way is refused.
+Record native workspace test results separately, with their workflow path,
+tested commit, run and job identity, and actual verdict. Windows workspace
+tests are advisory under
+[their workflow policy](https://github.com/burin-labs/harn/blob/main/.github/workflows/windows-nightly.yml).
+A failed Windows run or cancelled macOS run is not native passing evidence,
+even when the release's required candidate checks pass. Use the owning
+workflow policy to decide which checks gate publication.
 
-Windows certification stays off the contended Actions cache namespace.
-Successful `main` `windows-nightly` runs publish a short-retention
-`workspace-windows-warm` workflow artifact; `release-certify/<sha>` consumers
-restore that artifact read-only into a larger Dynamic Dev Drive ceiling and
-fall cold when no compatible generation exists. Cargo still owns exact-source
-invalidation after the restore. Artifact name, retention, size budget, and Dev Drive ceilings are owned by
-`.github/cache-policy.json` (`windows_workspace_warm`); the workspace
-`cargo-nextest` pin is the top-level `nextest_version` in the same document.
-`scripts/check_ci_cache_policy.harn` locks both surfaces, and CI scripts load
-them through `scripts/ci/cache_policy.sh`.
-
-The resulting `harn.release_audit_receipt.v2` records the certified source SHA,
-run/job URLs and IDs, per-lane timings, and critical path. The harness re-reads
-the remote branch after the join; movement invalidates the whole receipt. The
-release harness runs the residual checks affected by release metadata, creates
-the synthetic release commit, and then proves that commit has exactly the
-certified SHA as its sole parent.
-
-If a hosted run fails or is cancelled, fix the source or runner problem and
-restart the release from the still-unmodified source branch. If a valid exact
-run is already recorded, reuse its receipt; do not dispatch a blind duplicate.
-If the branch moved, discard both platform receipts and freeze the new SHA.
+Cache warming also has a distinct verdict. A successful warm-only build creates
+no certified archives and must not be reported as a published candidate.
 
 ### Diagnose a source audit failure
 
-Open the failed hosted release artifact and read `release-audit.json`. Find the
-`hosted-platform-certification` step. Its output ends with `RELEASE AUDIT
-FAILURE RECAP`, the failed lane, its exit status, and the last 40 log lines.
-Use that cause to choose the narrowest local check. Do not rerun a release only
-because the workflow page shows a generic `harn-audit failed` message.
+Read the failed named job and its retained artifacts. Distinguish an assertion
+failure from an unavailable prerequisite: a consumer waiting for a queued CLI
+producer did not execute its source audit. Use the actual failure to choose the
+narrowest check, then reuse the prerequisite once it is available.
 
 For a Harn conformance failure, rerun the named file with the frozen candidate
 binary and the release network environment cleared:

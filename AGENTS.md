@@ -248,20 +248,13 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Release
 
-- Run live releases from `burin-labs/harn-bump-fleet` through its canonical
-  `release_harn.harn` harness, pinned to an exact current `origin/main` SHA.
-  Follow the owning [release how-to](https://github.com/burin-labs/harn-bump-fleet/blob/main/docs/how-to/release-harn.md).
-  Do not invoke `scripts/release_ship.sh` directly for a normal live release.
-- After the tag exists, resume durable post-tag proof from `harn-bump-fleet`
-  with
-  `scripts/watch_harn_release.sh --tag vX.Y.Z --repo <harn-checkout> --yes-live-release`.
-- Run the watcher from the `harn-bump-fleet` checkout so its pinned runtime,
-  environment loader, release lease, and cleanup authority stay canonical.
-  Completion requires the release PR, complete asset manifest, and transient-ref
-  cleanup. Cache warming is explicit: pass `--warm-cache` when required, and
-  otherwise retain its `not_requested` receipt instead of claiming it passed.
-  Downstream convergence belongs to the generated fleet bump orchestration;
-  the crate publisher does not start a second update controller.
+- Follow the [maintainer release workflow](docs/src/maintainer-release.md).
+  Harn's `bump-release.yml` opens the release PR; `build-release-binaries.yml`
+  certifies its exact merge queue commit; `promote-release.yml` publishes those
+  certified files and starts the generated fleet repin.
+- Keep release authority with the current release owner. Do not create tags by
+  hand, revive the retired hosted launcher, or run a parallel local publisher.
+  A tag alone is not terminal publication or downstream convergence proof.
 - Dry-run the full release gate with
   `./scripts/release_gate.sh full --bump patch --dry-run`.
 - Dry-run crate publishing with `./scripts/publish.sh --dry-run`.

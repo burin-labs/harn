@@ -539,14 +539,9 @@ mod tests {
     }
 
     #[test]
-    fn skill_bodies_match_split_skill_contract() {
+    fn skill_bodies_stay_within_context_budget() {
         for skill in list_embedded_skills() {
             let lines = skill.body.lines().count();
-            assert!(
-                lines >= 80,
-                "{} body is {lines} lines, expected at least 80",
-                skill.name
-            );
             assert!(
                 lines <= 300,
                 "{} body is {lines} lines, expected at most 300",

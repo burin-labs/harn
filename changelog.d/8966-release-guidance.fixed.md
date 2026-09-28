@@ -1,1 +1,1 @@
-Release guidance now points to the owning release harness and current proof contract after retirement of the hosted launcher.
+Release guidance now follows Harn's release PR, certified build, and promotion workflows instead of the retired hosted launcher.
