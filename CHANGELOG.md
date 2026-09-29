@@ -9,6 +9,21 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.149
+
+### Fixed
+
+- The done sentinel never shows in visible assistant text. It is stripped wherever the model put it,
+  including mid-reply with text after it; a sentinel shown as code (a fenced block or an inline span)
+  is kept as written.
+- The completion judge now sees each distinct command a run executed when that tool declares the `observation`
+  role, so a task whose deliverable is a command's output is no longer sent back to run it again.
+- **An ACP session's LLM cost ceiling now covers the whole session.** Each `session/prompt` used to start its
+  cost scope at $0, so a session past its cap was admitted again on the next prompt and after every resume.
+  The session carries its spend across prompts, persists it as the row's `usage_cost_usd_micros`
+  (which `session/list` reports), and seeds it on `session/load`; older rows are backfilled from their recorded
+  `llm_call` costs. A `session/set_budget` re-arm now also applies to later turns of that session.
+
 ## v0.10.148
 
 ### Fixed
