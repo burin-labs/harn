@@ -364,11 +364,30 @@ fn __patch_descriptor(candidate: dict) -> dict {
   }
 }
 
+/**
+ * Evidence comes from Harn's validating scorecard command, separately from model-extracted facts.
+ */
+fn __missing_native_tool_evidence(candidate: dict, tool_evidence: dict?) -> bool {
+  if candidate.kind != "capability"
+    || candidate.capability != "native_tools"
+    || !candidate.new_value {
+    return false
+  }
+  return !(tool_evidence?.routes ?? []).any(
+    { route ->
+      route?.provider == candidate.provider
+        && route?.model == candidate.model_id
+        && (route?.passed_probes ?? []).contains("native_tool_probe")
+    },
+  )
+}
+
 pub fn plan_notice(
   harness: Harness,
   notice_raw: dict,
   extraction: dict,
   catalog: dict,
+  tool_evidence: dict? = nil,
 ) -> NoticePlan {
   const validated = validate_notice(harness, notice_raw)
   if is_err(validated) {
@@ -411,21 +430,10 @@ pub fn plan_notice(
     return {receipt: __base_receipt(harness, notice, "rejected", "malformed extraction result")}
   }
   const candidate = extraction.candidate
-  const common_error = __candidate_common_error(notice, candidate)
-  const variant_error = if common_error == nil {
-    __candidate_variant_error(candidate)
-  } else {
-    nil
-  }
-  if common_error != nil || variant_error != nil {
-    return {
-      receipt: __base_receipt(
-        harness,
-        notice,
-        "rejected",
-        common_error ?? variant_error ?? "invalid candidate",
-      ),
-    }
+  const candidate_error = __candidate_common_error(notice, candidate)
+    ?? __candidate_variant_error(candidate)
+  if candidate_error != nil {
+    return {receipt: __base_receipt(harness, notice, "rejected", candidate_error)}
   }
   const providers = __provider_rows(catalog, candidate.provider)
   if len(providers) == 0 {
@@ -560,9 +568,27 @@ pub fn plan_notice(
       candidate: candidate,
     }
   }
+  if __missing_native_tool_evidence(candidate, tool_evidence) {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "incomplete_capability",
+        "native tools require a passing live probe of this exact provider and model",
+      )
+        + {
+          model_id: candidate.model_id,
+          change_kind: candidate.kind,
+          tool_evidence: tool_evidence,
+          unresolved_verification: ["passing live native_tool_probe for the exact catalog route"],
+        },
+      candidate: candidate,
+    }
+  }
   return {
     receipt: __base_receipt(harness, notice, "patch", "validated against one current catalog row")
       + {
+        tool_evidence: tool_evidence,
         model_id: candidate.model_id,
         change_kind: candidate.kind,
         effective_date: candidate.effective_date,

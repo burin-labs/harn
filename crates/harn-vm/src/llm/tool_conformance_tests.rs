@@ -1328,13 +1328,24 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
 
 #[test]
 fn report_satisfies_tool_probe_when_text_fallback_passes() {
-    let report = classify_tool_conformance_fixture(
+    let mut report = classify_tool_conformance_fixture(
         "llamacpp",
         "qwen",
         ToolProbeMode::NonStreaming,
         DEFAULT_TOOL_PROBE_MARKER,
         r#"{"content":"echo_marker({ value: \"harn_tool_probe_marker\" })"}"#,
     );
+    assert_eq!(
+        report.evidence_source,
+        ToolProbeEvidenceSource::SavedResponse
+    );
+    assert!(!report_satisfies_required_probe(&report, "tool_probe"));
+    let mut legacy = serde_json::to_value(&report).unwrap();
+    legacy.as_object_mut().unwrap().remove("evidence_source");
+    legacy["schema_version"] = serde_json::json!(1);
+    let legacy: ToolConformanceReport = serde_json::from_value(legacy).unwrap();
+    assert!(!report_satisfies_required_probe(&legacy, "tool_probe"));
+    report.evidence_source = ToolProbeEvidenceSource::LiveRequest;
     assert!(report_satisfies_required_probe(&report, "tool_probe"));
     assert!(!report_satisfies_required_probe(
         &report,
