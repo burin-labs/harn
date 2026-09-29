@@ -5,6 +5,9 @@
 use super::*;
 use crate::stdlib::sandbox::{effective_fallback, handler_sandbox_test_guard};
 
+#[path = "linux_bwrap_proof.rs"]
+mod bwrap_proof;
+
 const WRITE_BITS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
     | LANDLOCK_ACCESS_FS_REMOVE_DIR
     | LANDLOCK_ACCESS_FS_REMOVE_FILE
