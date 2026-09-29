@@ -9,6 +9,35 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.150
+
+### Added
+
+- **Inference destination boundaries (#8943).** Embedders can cap live model
+  calls at local, hosted open-weight, or any hosted routes, keep training
+  discounts off by default, and inspect the governing rule and catalog facts
+  on allowed calls. The ceiling follows spawned workers and is checked again
+  at transport after routing or failover.
+
+### Fixed
+
+- **Provider tool-probe evidence records its source (#8847).** Saved responses
+  remain useful for parser checks but cannot certify route fitness or unlock a
+  local runtime profile. Scheduled catalog notices accept an explicit extraction
+  provider and model.
+- Native-tool catalog promotions require passing live adapter evidence for
+  the exact route. Runtime admission and scorecards share passed-probe rules;
+  missing evidence produces an incomplete proposal.
+- Live refresh sources use a typed data registry and catalog-owned credential
+  metadata. The VM provider catalog includes authoritative authentication and
+  local or hosted facts for workflow and host consumers.
+- Ollama's OpenAI-compatible chat endpoint now uses its declared SSE adapter,
+  maps supported generation and structured-output fields, and refuses native-only
+  sampling controls before sending a request.
+- Reviewer calibration reports missing safety-floor coverage as unmeasured,
+  excludes unanswered reviews from judgment-quality rates, and distinguishes
+  measured floor refusals from reviewer failures.
+
 ## v0.10.149
 
 ### Fixed
