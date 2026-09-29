@@ -76,16 +76,15 @@ async fn stream_and_non_stream_send_paths_share_one_classifier() {
 }
 
 #[test]
-fn stream_usage_requested_for_openai_compatible_endpoints() {
+fn stream_usage_requires_an_openai_compatible_contract() {
     let openai = DialectContract::new(WireDialect::OpenAiCompat, None);
     let ollama = DialectContract::new(WireDialect::Ollama, None);
     let anthropic = DialectContract::new(WireDialect::Anthropic, None);
-    assert!(openai.requests_stream_usage("openai", "/chat/completions"));
-    assert!(openai.requests_stream_usage("openrouter", "/chat/completions"));
-    assert!(openai.requests_stream_usage("together", "/chat/completions"));
-    assert!(ollama.requests_stream_usage("ollama", "/v1/chat/completions"));
-    assert!(!ollama.requests_stream_usage("ollama", "/api/chat"));
-    assert!(!anthropic.requests_stream_usage("anthropic", "/messages"));
+    assert!(openai.requests_stream_usage("openai"));
+    assert!(openai.requests_stream_usage("openrouter"));
+    assert!(openai.requests_stream_usage("together"));
+    assert!(!ollama.requests_stream_usage("ollama"));
+    assert!(!anthropic.requests_stream_usage("anthropic"));
 }
 
 #[test]
