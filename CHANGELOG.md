@@ -9,6 +9,14 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.151
+
+### Fixed
+
+- The Windows workspace test suite no longer fails on a compound shell read
+  (git, a line-range sed print, and rg piped to head). That case now runs only
+  on POSIX hosts, where the command classifier covers it.
+
 ## v0.10.150
 
 ### Added
