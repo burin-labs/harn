@@ -85,6 +85,7 @@ mod process_config;
 mod process_output;
 mod read_roots;
 mod refusal;
+mod scope_memo;
 use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
@@ -287,15 +288,14 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
         return Ok(());
     }
     let candidate = normalize_for_policy(path);
-    let roots = normalized_workspace_roots(&policy);
+    let scope = scope_memo::scope_roots(&policy, access);
+    let roots = scope.workspace.clone();
     // The denylist is checked BEFORE any grant, because it must beat all of
     // them. A workspace root, a read-only root, and a preset are each a reason
     // to allow; this is the one reason to refuse, and a subtraction that ran
     // after the grants would never fire on the paths that matter (a credential
     // under a preset-granted `~/.config` is exactly that case).
-    if access == FsAccess::Read
-        && path_is_denied(&candidate, &process_sandbox_read_deny_roots(&policy))
-    {
+    if access == FsAccess::Read && path_is_denied(&candidate, &scope.read_deny) {
         return Err(SandboxViolation {
             attempted: candidate,
             roots,
@@ -306,8 +306,8 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     if roots.iter().any(|root| path_is_within(&candidate, root)) {
         return Ok(());
     }
-    let read_only_roots = normalized_read_only_roots(&policy);
-    let within_read_only = read_only_roots
+    let within_read_only = scope
+        .read_only
         .iter()
         .any(|root| path_is_within(&candidate, root));
     if within_read_only && access == FsAccess::Read {

@@ -30,11 +30,13 @@ pub(crate) enum StreamProtocol {
 pub(crate) struct DialectContract {
     wire: WireDialect,
     live_endpoint: Option<LiveEndpointFamily>,
+    chat_api_adapter: Option<crate::llm_config::ChatApiAdapter>,
 }
 
 impl DialectContract {
     fn provider_reports_stream_usage(provider: &str) -> bool {
-        crate::llm_config::provider_config(provider)
+        crate::llm::helpers::ResolvedProvider::resolve(provider)
+            .pdef
             .is_some_and(|definition| definition.stream_usage_accounting == Some(true))
     }
 
@@ -42,8 +44,18 @@ impl DialectContract {
     /// request. Gemini's endpoint family is part of the contract because its
     /// two live APIs use different request, event, and response envelopes.
     pub(crate) fn for_request(request: &LlmRequestPayload) -> Self {
-        let caps = crate::llm::capabilities::lookup(&request.provider, &request.model);
-        Self::new(caps.message_wire_format, caps.live_endpoint_family)
+        Self::for_route(&request.provider, &request.model)
+    }
+
+    pub(crate) fn for_route(provider: &str, model: &str) -> Self {
+        let caps = crate::llm::capabilities::lookup(provider, model);
+        let resolved = crate::llm::helpers::ResolvedProvider::resolve(provider);
+        let mut contract = Self::new(caps.message_wire_format, caps.live_endpoint_family);
+        contract.chat_api_adapter = resolved
+            .pdef
+            .as_ref()
+            .and_then(|definition| definition.chat_api_adapter);
+        contract
     }
 
     pub(crate) fn new(wire: WireDialect, live_endpoint: Option<LiveEndpointFamily>) -> Self {
@@ -56,6 +68,7 @@ impl DialectContract {
         Self {
             wire,
             live_endpoint,
+            chat_api_adapter: None,
         }
     }
 
@@ -63,7 +76,89 @@ impl DialectContract {
         self.wire
     }
 
+    /// Whether this route keeps Ollama request semantics while speaking an
+    /// OpenAI-compatible chat endpoint.
+    pub(crate) fn is_ollama_openai_compat(self) -> bool {
+        self.chat_api_adapter == Some(crate::llm_config::ChatApiAdapter::OllamaOpenAiCompat)
+    }
+
+    /// Validate adapter/model compatibility before a request can leave Harn.
+    pub(crate) fn validate_request(self, request: &LlmRequestPayload) -> Result<(), VmError> {
+        let refusal = |message: String| {
+            crate::llm::call::invalid_request_error(message, &request.provider, &request.model)
+        };
+        if self.is_ollama_openai_compat() && self.wire != WireDialect::Ollama {
+            return Err(refusal(
+                "chat_api_adapter = ollama_openai_compat requires message_wire_format = ollama"
+                    .to_string(),
+            ));
+        }
+        if self.is_ollama_openai_compat() {
+            if let Some(overrides) = request
+                .provider_overrides
+                .as_ref()
+                .and_then(serde_json::Value::as_object)
+            {
+                if let Some(field) = overrides
+                    .keys()
+                    .find(|field| !Self::ollama_openai_request_field(field))
+                {
+                    return Err(refusal(format!(
+                        "Ollama OpenAI-compatible chat does not support the `{field}` provider override"
+                    )));
+                }
+            }
+            use crate::llm::capabilities::PortableOption;
+            if let Some(option) = request.portable_option_intent.iter().find(|option| {
+                matches!(
+                    option,
+                    PortableOption::TopK
+                        | PortableOption::MinP
+                        | PortableOption::RepetitionPenalty
+                        | PortableOption::Mirostat
+                        | PortableOption::LogitBias
+                        | PortableOption::Prediction
+                        | PortableOption::Verbosity
+                        | PortableOption::ParallelToolCalls
+                )
+            }) {
+                return Err(refusal(format!(
+                    "Ollama OpenAI-compatible chat does not support the `{}` request option",
+                    option.name()
+                )));
+            }
+            let unsupported = [
+                (
+                    request.tool_choice.as_ref().is_some_and(|choice| {
+                        choice.as_str() != Some("auto")
+                            && choice.get("type").and_then(serde_json::Value::as_str)
+                                != Some("auto")
+                    }),
+                    "tool_choice",
+                ),
+                (
+                    matches!(
+                        &request.thinking,
+                        crate::llm::api::ThinkingConfig::Enabled {
+                            budget_tokens: Some(_)
+                        }
+                    ),
+                    "thinking budget_tokens",
+                ),
+            ];
+            if let Some((_, field)) = unsupported.into_iter().find(|(present, _)| *present) {
+                return Err(refusal(format!(
+                    "Ollama OpenAI-compatible chat does not support the `{field}` request option"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn stream_protocol(self) -> StreamProtocol {
+        if self.is_ollama_openai_compat() {
+            return StreamProtocol::OpenAiSse;
+        }
         match (self.wire, self.live_endpoint) {
             (WireDialect::Anthropic, _) => StreamProtocol::AnthropicSse,
             (WireDialect::OpenAiCompat, _) => StreamProtocol::OpenAiSse,
@@ -78,6 +173,9 @@ impl DialectContract {
     /// Stable label for this contract's wire dialect, used on observability
     /// records so a reader names the same dialect the builder selected.
     pub(crate) fn dialect_label(self) -> &'static str {
+        if self.is_ollama_openai_compat() {
+            return "ollama_openai_compat";
+        }
         match self.stream_protocol() {
             StreamProtocol::AnthropicSse => "anthropic",
             StreamProtocol::OpenAiSse => "openai_compat",
@@ -95,6 +193,9 @@ impl DialectContract {
     /// An empty slice means the dialect declares none, which the receipt
     /// reports as `unreported` rather than as a silent absence.
     pub(crate) fn reasoning_fields(self) -> &'static [&'static str] {
+        if self.is_ollama_openai_compat() {
+            return &["reasoning_effort"];
+        }
         match self.stream_protocol() {
             // `output_config.effort` carries the rung; `thinking` carries the
             // mode Anthropic sends when the rung is dropped.
@@ -131,7 +232,9 @@ impl DialectContract {
         request: &LlmRequestPayload,
         caps: &crate::llm::capabilities::Capabilities,
     ) -> serde_json::Value {
-        let body = if self.stream_protocol() == StreamProtocol::OpenAiSse {
+        let body = if self.is_ollama_openai_compat() {
+            Self::build_ollama_openai_compat_body(request, caps)
+        } else if self.stream_protocol() == StreamProtocol::OpenAiSse {
             crate::llm::providers::OpenAiCompatibleProvider::build_request_body_with_caps(
                 request, caps,
             )
@@ -140,6 +243,77 @@ impl DialectContract {
         };
         self.record_request_body(request, &body);
         body
+    }
+
+    fn build_ollama_openai_compat_body(
+        request: &LlmRequestPayload,
+        caps: &crate::llm::capabilities::Capabilities,
+    ) -> serde_json::Value {
+        let mut body =
+            crate::llm::providers::OpenAiCompatibleProvider::build_request_body_with_caps(
+                request, caps,
+            );
+        Self::project_ollama_openai_request(&mut body);
+        if let Some(object) = body.as_object_mut() {
+            if request.max_tokens > 0 {
+                object.insert(
+                    "max_tokens".to_string(),
+                    serde_json::json!(request.max_tokens),
+                );
+            }
+            match &request.thinking {
+                crate::llm::api::ThinkingConfig::Disabled => {
+                    object.insert("reasoning_effort".to_string(), serde_json::json!("none"));
+                }
+                crate::llm::api::ThinkingConfig::Enabled { .. }
+                | crate::llm::api::ThinkingConfig::Adaptive => {
+                    object.insert("reasoning_effort".to_string(), serde_json::json!("medium"));
+                }
+                crate::llm::api::ThinkingConfig::Effort { level } => {
+                    object.insert(
+                        "reasoning_effort".to_string(),
+                        serde_json::json!(level.as_str()),
+                    );
+                }
+            }
+        }
+        body
+    }
+
+    pub(crate) fn project_ollama_openai_request(body: &mut serde_json::Value) {
+        // Ollama's OpenAI-compatible endpoint decodes a finite OpenAI request
+        // type. Keep only fields that its pinned server contract consumes;
+        // in particular, native Ollama `options`, `keep_alive`, and `think`
+        // fields are ignored by `/v1`.
+        if let Some(object) = body.as_object_mut() {
+            if let Some(max_completion_tokens) = object.remove("max_completion_tokens") {
+                object.insert("max_tokens".to_string(), max_completion_tokens);
+            }
+            object.retain(|field, _| Self::ollama_openai_request_field(field));
+        }
+    }
+
+    fn ollama_openai_request_field(field: &str) -> bool {
+        matches!(
+            field,
+            "model"
+                | "messages"
+                | "stream"
+                | "stream_options"
+                | "max_tokens"
+                | "seed"
+                | "stop"
+                | "temperature"
+                | "frequency_penalty"
+                | "presence_penalty"
+                | "top_p"
+                | "response_format"
+                | "tools"
+                | "reasoning"
+                | "reasoning_effort"
+                | "logprobs"
+                | "top_logprobs"
+        )
     }
 
     fn record_request_body(self, request: &LlmRequestPayload, body: &serde_json::Value) {
@@ -154,22 +328,30 @@ impl DialectContract {
     }
 
     fn lower_request_body(self, request: &LlmRequestPayload) -> serde_json::Value {
-        match self.stream_protocol() {
-            StreamProtocol::AnthropicSse => {
+        match self.wire {
+            WireDialect::Anthropic => {
                 crate::llm::providers::AnthropicProvider::build_request_body(request)
             }
-            StreamProtocol::OpenAiSse => {
+            WireDialect::OpenAiCompat => {
                 crate::llm::providers::OpenAiCompatibleProvider::build_request_body(request)
             }
-            StreamProtocol::OllamaNdjson => {
-                crate::llm::providers::OllamaProvider::build_request_body(request)
+            WireDialect::Ollama => {
+                if self.is_ollama_openai_compat() {
+                    let caps = crate::llm::managed_supply::capabilities_for(
+                        &request.provider,
+                        &request.model,
+                    );
+                    Self::build_ollama_openai_compat_body(request, &caps)
+                } else {
+                    crate::llm::providers::OllamaProvider::build_request_body(request)
+                }
             }
-            StreamProtocol::GeminiJson => {
-                crate::llm::providers::GeminiProvider::build_request_body(request)
-            }
-            StreamProtocol::GeminiInteractionsSse => {
-                crate::llm::providers::GeminiInteractions::build_request_body(request)
-            }
+            WireDialect::Gemini => match self.stream_protocol() {
+                StreamProtocol::GeminiInteractionsSse => {
+                    crate::llm::providers::GeminiInteractions::build_request_body(request)
+                }
+                _ => crate::llm::providers::GeminiProvider::build_request_body(request),
+            },
         }
     }
 
@@ -210,6 +392,14 @@ impl DialectContract {
         retry_after: Option<&str>,
         body: &str,
     ) -> LlmErrorInfo {
+        if self.is_ollama_openai_compat() {
+            return super::errors::classify_provider_http_error(
+                "ollama",
+                status,
+                retry_after,
+                body,
+            );
+        }
         let error_owner = match self.stream_protocol() {
             StreamProtocol::AnthropicSse => "anthropic",
             StreamProtocol::OllamaNdjson => "ollama",
@@ -219,10 +409,13 @@ impl DialectContract {
         super::errors::classify_provider_http_error(error_owner, status, retry_after, body)
     }
 
-    pub(crate) fn requests_stream_usage(self, provider: &str, endpoint: &str) -> bool {
+    pub(crate) fn requests_stream_usage(self, provider: &str) -> bool {
+        if self.is_ollama_openai_compat() {
+            return true;
+        }
         match self.stream_protocol() {
             StreamProtocol::AnthropicSse => false,
-            StreamProtocol::OllamaNdjson => endpoint.contains("/v1/"),
+            StreamProtocol::OllamaNdjson => false,
             StreamProtocol::OpenAiSse => Self::provider_reports_stream_usage(provider),
             StreamProtocol::GeminiJson | StreamProtocol::GeminiInteractionsSse => false,
         }
@@ -236,7 +429,6 @@ impl DialectContract {
         self,
         body: &mut serde_json::Value,
         provider: &str,
-        endpoint: &str,
         streaming: bool,
     ) {
         // GenerateContent chooses SSE with `:streamGenerateContent`; its body
@@ -246,7 +438,7 @@ impl DialectContract {
             return;
         }
         body["stream"] = serde_json::json!(true);
-        if self.requests_stream_usage(provider, endpoint) {
+        if self.requests_stream_usage(provider) {
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
     }
@@ -254,8 +446,9 @@ impl DialectContract {
     /// Whether a finish-reason frame is only content-terminal and the parser
     /// must continue through the provider's trailing accounting frame.
     pub(crate) fn awaits_stream_usage(self, provider: &str) -> bool {
-        self.stream_protocol() == StreamProtocol::OpenAiSse
-            && Self::provider_reports_stream_usage(provider)
+        self.is_ollama_openai_compat()
+            || (self.stream_protocol() == StreamProtocol::OpenAiSse
+                && Self::provider_reports_stream_usage(provider))
     }
 }
 
@@ -498,7 +691,7 @@ mod tests {
     #[test]
     fn nvidia_requests_and_awaits_its_trailing_usage_frame() {
         let contract = DialectContract::new(WireDialect::OpenAiCompat, None);
-        assert!(contract.requests_stream_usage("nvidia", "/chat/completions"));
+        assert!(contract.requests_stream_usage("nvidia"));
         assert!(contract.awaits_stream_usage("nvidia"));
     }
 }

@@ -243,6 +243,7 @@ impl CodeIndexCapability {
             .name("harn-code-index-warm".to_string())
             .spawn(move || {
                 let _flight = flight;
+                lower_to_background_priority();
                 let started = Instant::now();
                 let (mut state, outcome) = IndexState::build_from_root(&thread_root);
                 state.relink_harn_references(resolver.as_ref());
@@ -288,6 +289,33 @@ impl CodeIndexCapability {
         }
     }
 }
+
+/// Run the rest of the calling thread at background priority.
+///
+/// The warm build is throughput work no caller waits on, and at normal
+/// priority it competed for the CPU with the engine thread that is preparing
+/// the session's first model call. Best effort: a refusal leaves the thread at
+/// its current priority.
+fn lower_to_background_priority() {
+    #[cfg(target_os = "macos")]
+    // SAFETY: sets the QoS class of the calling thread only; no memory is read
+    // or written through the call.
+    unsafe {
+        let _ = libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
+    }
+    #[cfg(target_os = "linux")]
+    // SAFETY: on Linux a thread id names exactly the calling thread, so this
+    // raises only its own nice value.
+    unsafe {
+        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
+        let _ = libc::setpriority(libc::PRIO_PROCESS, tid, BACKGROUND_NICE);
+    }
+}
+
+/// Nice value for the warm thread on Linux: below every interactive thread,
+/// above nothing a user would notice.
+#[cfg(target_os = "linux")]
+const BACKGROUND_NICE: libc::c_int = 10;
 
 fn live_stats_for_root(
     index: &SharedIndex,
@@ -518,6 +546,22 @@ pub(super) fn run_rebuild_single_flight(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_warm_thread_runs_below_normal_priority() {
+        let nice = std::thread::spawn(|| {
+            super::lower_to_background_priority();
+            // SAFETY: reads the calling thread's own nice value.
+            unsafe {
+                let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
+                libc::getpriority(libc::PRIO_PROCESS, tid)
+            }
+        })
+        .join()
+        .expect("priority thread");
+        assert_eq!(nice, super::BACKGROUND_NICE);
+    }
+
     use super::*;
     use std::fs;
     use std::time::Duration;

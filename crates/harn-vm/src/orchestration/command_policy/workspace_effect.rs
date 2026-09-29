@@ -169,6 +169,7 @@ fn standalone_program_is_read_only(program: &str, args: &[String]) -> bool {
         "tree" => !args
             .iter()
             .any(|arg| arg == "-o" || arg.starts_with("--output=")),
+        "sed" => sed_invocation_is_read_only(args),
         "yq" => !args.iter().any(|arg| {
             arg == "-i"
                 || arg == "--inplace"
@@ -179,6 +180,77 @@ fn standalone_program_is_read_only(program: &str, args: &[String]) -> bool {
         }),
         _ => READ_ONLY_PROGRAMS.contains(&program),
     }
+}
+
+/// `sed -n '1,105p' file` reads; `sed -i`, a `w file` command, or an `e`
+/// command writes or executes. Only a script of line-addressed print, delete,
+/// quit, line-number, and list commands is a read, and only without an
+/// in-place flag or a script file. Everything else stays unrecognized.
+fn sed_invocation_is_read_only(args: &[String]) -> bool {
+    let mut scripts: Vec<&str> = Vec::new();
+    let mut expect_script = false;
+    let mut first_operand_is_script = true;
+    for arg in args {
+        if expect_script {
+            scripts.push(arg);
+            expect_script = false;
+            continue;
+        }
+        match arg.as_str() {
+            "-n" | "--quiet" | "--silent" | "-E" | "-r" | "--regexp-extended" | "-s"
+            | "--separate" | "-u" | "--unbuffered" | "-z" | "--null-data" | "--posix" => {}
+            "-e" | "--expression" => {
+                expect_script = true;
+                first_operand_is_script = false;
+            }
+            value if value.starts_with("--expression=") => {
+                scripts.push(value.strip_prefix("--expression=").unwrap_or_default());
+                first_operand_is_script = false;
+            }
+            value if value.starts_with('-') && value.len() > 1 => return false,
+            value => {
+                if first_operand_is_script {
+                    scripts.push(value);
+                    first_operand_is_script = false;
+                }
+            }
+        }
+    }
+    !expect_script
+        && !scripts.is_empty()
+        && scripts.iter().all(|script| sed_script_is_read_only(script))
+}
+
+/// One sed script, `;`- or newline-separated, of `[addr[,addr]]cmd` pieces
+/// where each address is a line number or `$` and `cmd` is `p`, `d`, `q`, `=`,
+/// or `l` with no argument.
+fn sed_script_is_read_only(script: &str) -> bool {
+    let address = |text: &str| -> bool {
+        let text = text.trim();
+        text == "$" || (!text.is_empty() && text.chars().all(|c| c.is_ascii_digit()))
+    };
+    let mut saw_command = false;
+    for piece in script.split([';', '\n']) {
+        let piece = piece.trim();
+        if piece.is_empty() {
+            continue;
+        }
+        let Some(command) = piece.chars().last() else {
+            return false;
+        };
+        if !matches!(command, 'p' | 'd' | 'q' | '=' | 'l') {
+            return false;
+        }
+        let addresses = piece.strip_suffix(command).unwrap_or_default().trim();
+        if !addresses.is_empty() && !addresses.split(',').all(address) {
+            return false;
+        }
+        if addresses.split(',').count() > 2 {
+            return false;
+        }
+        saw_command = true;
+    }
+    saw_command
 }
 
 fn program_basename(argv0: &str) -> &str {
@@ -338,6 +410,43 @@ mod tests {
     fn established_writes_are_write_effect() {
         for command in ["echo hi > file", "tee out.txt"] {
             assert_eq!(effect(command), "write_effect", "{command}");
+        }
+    }
+
+    /// A line-range `sed` print is how agents page a file. Kenneth's GPT-6 Sol
+    /// session ran exactly the first command after a write, and it read as
+    /// unknown, so a completion gate counted the look-around as verification.
+    #[test]
+    fn a_line_addressed_sed_print_is_a_read() {
+        for command in [
+            "git status --short && sed -n '1,105p' scripts/lib/eval-trial-record.harn && rg -n 'raw_tool_calls|tool_calls' scripts/lib/eval-*.harn | head -90",
+            "sed -n '1,105p' src/lib.rs",
+            "sed -n -e 10p -e '$p' notes.md",
+            "sed -n '5,$p;$=' a.txt",
+            "sed 3q README.md",
+        ] {
+            assert_eq!(effect(command), "read_effect", "{command}");
+        }
+    }
+
+    /// Negative control: every way `sed` can write or run something stays out
+    /// of the observation phase.
+    #[test]
+    fn a_sed_that_can_write_or_execute_is_not_a_read() {
+        for command in [
+            "sed -i s/a/b/ file",
+            "sed -i.bak -n '1,5p' file",
+            "sed --in-place -n 1p file",
+            "sed -I '' -n 1p file",
+            "sed -n '1,5w out.txt' in.txt",
+            "sed -n '1w out.txt' in.txt",
+            "sed 's/a/b/w out.txt' in.txt",
+            "sed '1e date' in.txt",
+            "sed -f script.sed in.txt",
+            "sed 's/a/b/' in.txt",
+            "sed -n '/needle/p' in.txt",
+        ] {
+            assert_ne!(effect(command), "read_effect", "{command}");
         }
     }
 

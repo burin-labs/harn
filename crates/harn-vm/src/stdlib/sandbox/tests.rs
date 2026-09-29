@@ -6,6 +6,7 @@ mod path_contracts;
 mod process_axis;
 mod runtime_roots;
 mod rustc_wrapper_policy;
+mod scope_memo;
 
 #[test]
 fn missing_create_path_normalizes_against_existing_parent() {

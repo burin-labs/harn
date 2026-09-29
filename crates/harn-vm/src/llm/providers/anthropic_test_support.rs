@@ -33,6 +33,7 @@ pub(super) fn base_payload() -> LlmRequestPayload {
         presence_penalty: None,
         parallel_tool_calls: None,
         provider_contract_probe: None,
+        portable_option_intent: Default::default(),
         fast: false,
         reasoning_mode: None,
         output_format: crate::llm::api::OutputFormat::Text,

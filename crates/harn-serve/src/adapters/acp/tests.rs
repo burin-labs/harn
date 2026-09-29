@@ -1490,6 +1490,7 @@ mod served_json_tool_fence;
 mod session_environment;
 mod session_recap;
 mod session_restore;
+mod session_spend;
 mod sessions;
 #[cfg(feature = "hostlib")]
 mod staged_writes;

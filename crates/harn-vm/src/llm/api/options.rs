@@ -896,6 +896,10 @@ pub(crate) struct LlmRequestPayload {
     /// See [`LlmCallOptions::provider_contract_probe`].
     #[serde(skip_serializing)]
     pub(crate) provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
+    /// Preserve caller intent through transport without confusing catalog defaults with requests.
+    #[serde(skip_serializing)]
+    pub(crate) portable_option_intent:
+        std::collections::BTreeSet<crate::llm::capabilities::PortableOption>,
     /// See [`LlmCallOptions::fast`]. Forwarded to provider body builders so
     /// they can inject the catalog's fast-mode knob, and to cost recording
     /// so confirmed-fast responses bill at the premium tier.
@@ -1085,6 +1089,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             presence_penalty: opts.presence_penalty,
             parallel_tool_calls: opts.parallel_tool_calls,
             provider_contract_probe: opts.provider_contract_probe,
+            portable_option_intent: opts.portable_option_intent.clone(),
             fast: opts.fast,
             reasoning_mode: opts.reasoning_mode.clone(),
             output_format,

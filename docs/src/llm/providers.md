@@ -837,6 +837,26 @@ The provider files in steps 2-4 are overlays, so a starter file can set
 definition. Project manifests can therefore configure provider adapters and
 model aliases without editing Rust-side registration code.
 
+For Ollama's OpenAI-compatible chat endpoint, declare the response adapter
+alongside the endpoint. Keep the route's `message_wire_format = "ollama"` in
+the model capability row:
+
+```toml
+[llm.providers.ollama]
+chat_endpoint = "/v1/chat/completions"
+chat_api_adapter = "ollama_openai_compat"
+```
+
+This selects OpenAI Chat Completions SSE decoding while mapping request values
+to fields the Ollama `/v1` server consumes. The adapter rejects Ollama-only
+sampling options it cannot carry. `/v1` does not carry `num_ctx` or
+`keep_alive`; use an Ollama Modelfile for context sizing and native `/api/chat`
+when those runtime controls are needed. These fields follow
+[Ollama 0.34's compatibility handler](https://github.com/ollama/ollama/blob/v0.34.0/openai/openai.go).
+
+Set `chat_api_adapter = "model_default"` with `/api/chat` to override an
+inherited compatible adapter and restore native Ollama request and response handling.
+
 ### Managed provider supply
 
 A product or hosted gateway that supplies provider credentials can declare an

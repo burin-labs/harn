@@ -295,6 +295,10 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
     crate::llm::agent_runtime::fire_session_close_hooks(session_id);
     if owns_session {
         crate::agent_sessions::close(session_id);
+    } else {
+        // A stop reclaims what the stopped run's session started even when
+        // the session itself stays open for its host; closing it already did.
+        crate::agent_sessions::reclaim_hooks::fire(session_id);
     }
     Ok(())
 }

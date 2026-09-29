@@ -49,8 +49,8 @@ fn internal_block_patterns() -> &'static [Regex] {
             r"(?s)<done>.*?</done>",
             r"(?s)<tool_result[^>]*>.*?</tool_result>",
             r"(?s)\[result of [^\]]+\].*?\[end of [^\]]+\]",
-            r"(?m)^\s*(##DONE##|DONE|PLAN_READY)\s*$",
-            r"(?s)\s*(##DONE##|PLAN_READY)\s*$",
+            r"(?m)^\s*(DONE|PLAN_READY)\s*$",
+            r"(?s)\s*PLAN_READY\s*$",
         ]
         .into_iter()
         .map(|pattern| Regex::new(pattern).expect("valid assistant sanitization regex"))
@@ -627,6 +627,83 @@ fn strip_partial_marker_suffix(text: &str) -> String {
     text.to_string()
 }
 
+/// The completion sentinel. It is a protocol signal, never prose.
+const DONE_SENTINEL: &str = "##DONE##";
+
+/// Is `offset` inside an inline code span on its own line (an odd number of
+/// backticks between the line start and `offset`)?
+#[expect(
+    clippy::string_slice,
+    reason = "offset is a match offset of an ASCII sentinel, so a char boundary"
+)]
+fn inside_inline_code(text: &str, offset: usize) -> bool {
+    let line_start = text[..offset].rfind('\n').map_or(0, |at| at + 1);
+    text[line_start..offset].matches('`').count() % 2 == 1
+}
+
+/// Is `offset` inside markdown code, fenced or inline?
+fn inside_code(index: &TextIndex, text: &str, offset: usize) -> bool {
+    index.inside_markdown_fence(offset) || inside_inline_code(text, offset)
+}
+
+/// Remove every done sentinel from visible text, wherever it sits, except where
+/// the reply shows it as code (a fenced block or an inline span the user asked
+/// to see). The model can write text after the sentinel ("x. ##DONE## More."),
+/// and the old rule, which stripped it only alone on a line or at the very end,
+/// showed it mid-reply. Completion is decided on the raw text, so this changes
+/// only what a person sees. A streamed partial also drops a trailing prefix of
+/// the sentinel (`##`, `##DO`) outside code, so it does not flash mid-line.
+#[expect(
+    clippy::string_slice,
+    reason = "cursor and match offsets come from find on an ASCII sentinel, so they are char \
+              boundaries"
+)]
+fn strip_done_sentinels(text: &str, partial: bool) -> String {
+    if !text.contains('#') {
+        return text.to_string();
+    }
+    let index = TextIndex::build(text);
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while let Some(found) = text[cursor..].find(DONE_SENTINEL) {
+        let at = cursor + found;
+        let end = at + DONE_SENTINEL.len();
+        if inside_code(&index, text, at) {
+            out.push_str(&text[cursor..end]);
+            cursor = end;
+            continue;
+        }
+        out.push_str(&text[cursor..at]);
+        let rest = &text[end..];
+        let rest_trimmed = rest.trim_start_matches([' ', '\t']);
+        let joined_by_space = out.ends_with([' ', '\t']);
+        // Keep exactly one space between the words the sentinel separated.
+        if !joined_by_space
+            && !out.is_empty()
+            && !out.ends_with('\n')
+            && !rest_trimmed.is_empty()
+            && !rest_trimmed.starts_with('\n')
+        {
+            out.push(' ');
+        }
+        cursor = end + (rest.len() - rest_trimmed.len());
+    }
+    out.push_str(&text[cursor..]);
+    if partial {
+        for len in (2..DONE_SENTINEL.len()).rev() {
+            let prefix = &DONE_SENTINEL[..len];
+            if let Some(stripped) = out.strip_suffix(prefix) {
+                let stripped_len = stripped.len();
+                if !inside_code(&TextIndex::build(&out), &out, stripped_len) {
+                    out.truncate(stripped_len);
+                }
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn normalize_visible_whitespace(text: &str) -> String {
     text.replace("\r\n", "\n")
         .replace("\n\n\n", "\n\n")
@@ -670,6 +747,7 @@ fn sanitize_inner(text: &str, partial: bool, superseded: Option<&mut String>) ->
     for pattern in internal_block_patterns() {
         sanitized = pattern.replace_all(&sanitized, "").to_string();
     }
+    sanitized = strip_done_sentinels(&sanitized, partial);
     // After runtime tags are stripped, surface only the explicit
     // user-facing response when one exists; otherwise unwrap
     // <assistant_prose> into plain narration.
@@ -697,6 +775,40 @@ mod tests {
     use super::{
         project_visible_assistant_text, sanitize_visible_assistant_text, VisibleTextState,
     };
+
+    /// The done sentinel is a protocol signal and never reaches visible text,
+    /// wherever the model put it. Falsifier (burin dogfood, 2026-09-28): the
+    /// model wrote "I then read a.txt; it contains x. ##DONE## The river bends
+    /// toward the quiet sea.", and the TUI showed the literal marker mid-reply.
+    #[test]
+    fn a_done_sentinel_with_text_after_it_is_not_shown() {
+        let raw =
+            "I then read a.txt; it contains x. ##DONE## The river bends toward the quiet sea.";
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "I then read a.txt; it contains x. The river bends toward the quiet sea."
+        );
+        // Every occurrence, not only the first; no space left doubled.
+        assert_eq!(
+            sanitize_visible_assistant_text("One.##DONE##Two. ##DONE## Three.\n##DONE##", false),
+            "One. Two. Three."
+        );
+        // Streaming: a trailing prefix mid-line does not flash.
+        assert_eq!(
+            sanitize_visible_assistant_text("It contains x. ##DO", true),
+            "It contains x."
+        );
+    }
+
+    /// Controls: a sentinel the user asked to see, in a code block or an inline
+    /// code span, stays exactly as written.
+    #[test]
+    fn a_done_sentinel_shown_as_code_is_kept() {
+        let fenced = "The loop stops on this line:\n```text\n##DONE##\n```";
+        assert_eq!(sanitize_visible_assistant_text(fenced, false), fenced);
+        let inline = "The marker is `##DONE##`, written alone.";
+        assert_eq!(sanitize_visible_assistant_text(inline, false), inline);
+    }
     use crate::agent_events::AgentEvent;
     use crate::boundary::tests::CapturedEvents;
     use crate::boundary::{BoundaryFailureKind, BoundaryId};
