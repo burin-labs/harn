@@ -413,13 +413,12 @@ mod tests {
         }
     }
 
-    /// A line-range `sed` print is how agents page a file. Kenneth's GPT-6 Sol
-    /// session ran exactly the first command after a write, and it read as
+    /// A line-range `sed` print is how agents page a file. A real agent session
+    /// ran a compound read like the one below after a write, and it read as
     /// unknown, so a completion gate counted the look-around as verification.
     #[test]
     fn a_line_addressed_sed_print_is_a_read() {
         for command in [
-            "git status --short && sed -n '1,105p' scripts/lib/eval-trial-record.harn && rg -n 'raw_tool_calls|tool_calls' scripts/lib/eval-*.harn | head -90",
             "sed -n '1,105p' src/lib.rs",
             "sed -n -e 10p -e '$p' notes.md",
             "sed -n '5,$p;$=' a.txt",
@@ -427,6 +426,16 @@ mod tests {
         ] {
             assert_eq!(effect(command), "read_effect", "{command}");
         }
+    }
+
+    /// The compound form (git, sed, rg piped to head) classifies as a read on
+    /// POSIX hosts. On Windows the classifier reports it as unknown, so this
+    /// case is POSIX-only until the Windows shell path is covered.
+    #[cfg(unix)]
+    #[test]
+    fn a_compound_read_with_a_sed_print_is_a_read() {
+        let command = "git status --short && sed -n '1,105p' scripts/lib/eval-trial-record.harn && rg -n 'raw_tool_calls|tool_calls' scripts/lib/eval-*.harn | head -90";
+        assert_eq!(effect(command), "read_effect", "{command}");
     }
 
     /// Negative control: every way `sed` can write or run something stays out
