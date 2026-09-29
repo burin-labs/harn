@@ -354,20 +354,35 @@ pub(crate) async fn vm_call_llm_api_with_body(
     // to stop it, cannot satisfy the strict posture. Refuse before the request
     // is built rather than sending it and reporting `no_control_available`,
     // which would read as a successful strict call.
-    if let Some(refusal) = crate::llm::api::data_controls::training_refusal(
-        &opts.provider,
-        &opts.model,
-        opts.data_controls,
-    ) {
-        return Err(VmError::Runtime(refusal));
-    }
     let data_controls = crate::llm::api::data_controls::resolve(
         &opts.provider,
         &opts.model,
         crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
         opts.data_controls,
     );
-    let data_controls_receipt = data_controls.receipt.clone();
+    if let Some(refusal) = crate::llm::api::data_controls::training_refusal(
+        &opts.provider,
+        &opts.model,
+        opts.data_controls,
+        &data_controls.receipt,
+    ) {
+        return Err(VmError::Runtime(refusal));
+    }
+    let mut data_controls_receipt = data_controls.receipt.clone();
+    if let Some(boundary) = super::inference_boundary::effective(opts.inference_boundary) {
+        let rule = super::inference_boundary::governing_rule(
+            boundary,
+            &opts.provider,
+            &opts.model,
+            &data_controls_receipt,
+        )
+        .map_err(VmError::Runtime)?;
+        data_controls_receipt.inference_boundary_rule = Some(rule.to_string());
+        data_controls_receipt.inference_catalog_evidence = Some(
+            super::inference_boundary::catalog_evidence(&opts.provider, &opts.model)
+                .map_err(VmError::Runtime)?,
+        );
+    }
     let mut result = vm_call_llm_api_with_body_inner(
         opts,
         delta_tx,

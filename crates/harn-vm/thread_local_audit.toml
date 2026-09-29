@@ -48,6 +48,7 @@ captured = [
   "SCOPE",
   "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
   "LLM_CAPABILITY_OVERRIDES_CONTEXT",
+  "AMBIENT_BOUNDARY",
   "LLM_MOCK_CONTEXT",
   "EGRESS_POLICY_CONTEXT",
   "ACTIVE_EXECUTION_SCOPE_STACK",
@@ -260,6 +261,12 @@ plan = "thread_private_cache"
 [[thread_local]]
 path = "src/llm/admission.rs"
 statics = ["SCOPE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/api/inference_boundary.rs"
+statics = ["AMBIENT_BOUNDARY"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

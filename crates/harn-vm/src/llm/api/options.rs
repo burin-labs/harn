@@ -604,6 +604,8 @@ pub(crate) struct LlmCallOptions {
     /// default so an embedder chooses the default once, in config, instead of
     /// it being chosen by omission inside the runtime.
     pub data_controls: Option<DataPosture>,
+    /// Optional destination and training ceiling supplied by the embedder.
+    pub inference_boundary: Option<super::InferenceBoundary>,
     /// OpenAI Responses background execution flag.
     pub background: Option<bool>,
     /// OpenAI Responses truncation/compaction policy.
@@ -716,6 +718,7 @@ impl Default for LlmCallOptions {
             previous_response_id: None,
             store: None,
             data_controls: None,
+            inference_boundary: None,
             background: None,
             truncation: None,
             compact: None,
@@ -932,6 +935,8 @@ pub(crate) struct LlmRequestPayload {
     /// Resolved posture for this request. Already merged with the catalog
     /// policy default, so the transport never re-resolves it.
     pub data_controls: DataPosture,
+    #[serde(skip_serializing)]
+    pub inference_boundary: Option<super::InferenceBoundary>,
     pub background: Option<bool>,
     pub truncation: Option<String>,
     pub compact: Option<bool>,
@@ -1105,6 +1110,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             previous_response_id: opts.previous_response_id.clone(),
             store: opts.store,
             data_controls: opts.resolved_data_posture(),
+            inference_boundary: opts.inference_boundary,
             background: opts.background,
             truncation: opts.truncation.clone(),
             compact: opts.compact,

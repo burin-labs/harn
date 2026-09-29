@@ -696,6 +696,7 @@ mod tests {
     fn gemini_image_content_maps_to_inline_data() {
         let payload = LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -771,6 +772,7 @@ mod tests {
     fn gemini_image_url_content_maps_to_file_data() {
         let mut payload = LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -850,6 +852,7 @@ mod tests {
     fn gemini_pdf_and_audio_content_maps_to_parts() {
         let payload = LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,

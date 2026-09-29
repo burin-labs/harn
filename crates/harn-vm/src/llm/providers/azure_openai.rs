@@ -226,6 +226,7 @@ mod tests {
     fn base_request() -> LlmRequestPayload {
         LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "azure_openai".to_string(),
             model: "gpt-4o-prod".to_string(),
             region: None,

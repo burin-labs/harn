@@ -11,6 +11,7 @@ use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
 pub(super) fn gemini_payload(model: &str, thinking: ThinkingConfig) -> LlmRequestPayload {
     LlmRequestPayload {
         data_controls: crate::llm_config::DataPosture::Default,
+        inference_boundary: None,
         provider: "gemini".to_string(),
         model: model.to_string(),
         region: None,

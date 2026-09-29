@@ -1304,6 +1304,27 @@ that wants it everywhere sets it once in provider config:
 default_posture = "strictest_available"
 ```
 
+## Inference destination boundaries
+
+An embedder may set `HARN_INFERENCE_BOUNDARY_JSON` in the Harn session's
+granted environment. Its value is a JSON object with `reach` and
+`allow_training_discounts`, for example
+`{"reach":"local_only","allow_training_discounts":false}`. A call or agent
+may supply the same typed `inference_boundary` option to narrow that ceiling;
+workers inherit it and cannot widen it. Without a host ceiling or call option,
+standalone Harn keeps its existing routing behavior. A malformed supplied
+ceiling refuses the call.
+
+`local_only` admits only cataloged local runtimes whose resolved endpoint is
+loopback (`localhost`, `127.0.0.0/8`, or `::1`). A provider marked local with
+a remote base URL is refused. `hosted_open_weight` also admits hosted routes
+whose model row explicitly declares `open_weight = true`; `any_hosted` admits
+other hosted routes. Hosted routes still need a cataloged no-training default,
+an applied per-request no-training control, or explicit permission for a
+cataloged training route. Unknown training behavior is refused under a supplied
+boundary. Every allowed live call includes the governing rule and the catalog
+locality and open-weight declarations in its data-controls receipt.
+
 ## Provider resolution order
 
 When you call `harness.llm.call()` or start an `agent_loop(harness, ...)`, Harn resolves the
