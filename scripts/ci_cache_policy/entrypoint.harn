@@ -87,6 +87,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
     ci_workflow_concurrency_errors(workflows["ci.yml"]),
     minimal_pr_capacity_errors(workflows["ci.yml"], workflows["publish-release.yml"]),
     e2e_elastic_capacity_errors(workflows["e2e.yml"]),
+    consumer_canary_errors(workflows["ci.yml"]),
     e2e_workflow_concurrency_errors(workflows["e2e.yml"]),
     ci_linux_lane_policy_errors(workflows["ci.yml"]),
     cache_refresh_workflow_errors(workflows["rust-cache-refresh.yml"]),
