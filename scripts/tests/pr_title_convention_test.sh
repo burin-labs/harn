@@ -53,8 +53,9 @@ if [[ "$template_text" != *"$template_areas"* ]]; then
 fi
 
 # Subjects the action exempts by name. `Release vX.Y.Z` is matched verbatim by
-# publish-release.yml before it tags, so it must not gain a bracket.
-exempt_pattern='^Release v[0-9]'
+# the tag verification in publish-release.yml, so it must not gain a bracket.
+# The release opener builds it from the version, `Release v$version`.
+exempt_pattern='^Release v([0-9]|\$version$)'
 
 status=0
 found=0

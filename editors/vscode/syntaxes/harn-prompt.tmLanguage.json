@@ -152,7 +152,7 @@
           "name": "support.constant.section.harn.prompt"
         }
       },
-      "match": "(\\bsection\\b)(\\s*)(\"(?:thinking_scaffold|chain_of_thought|system_framing|output_format|examples|tools|task)\"|'(?:thinking_scaffold|chain_of_thought|system_framing|output_format|examples|tools|task)')"
+      "match": "(\\bsection\\b)(\\s*)(\"(?:system_framing|output_format|examples|tools|task)\"|'(?:system_framing|output_format|examples|tools|task)')"
     }
   },
   "scopeName": "text.harn.prompt"

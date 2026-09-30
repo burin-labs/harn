@@ -256,3 +256,100 @@ fn parse_approval_policy(value: Option<&VmValue>) -> Result<Option<ToolApprovalP
             ))
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SESSION_POLICY_OPTION_KEYS;
+    use std::collections::BTreeSet;
+
+    /// Every public `agent_loop` option the tool-dispatch path reads: the
+    /// session policy keys above, plus what the dispatch primitive and the
+    /// stdlib tool envelope read directly. The loop hands dispatch a dict it
+    /// builds from an explicit list, and only those keys arrive. A key read
+    /// here but not forwarded there is an option `agent_loop` accepts and
+    /// never applies, which is how `approval_reviewer`, then `tool_precheck`
+    /// and the tool-retry options, went dead on the loop path.
+    const DISPATCH_READ_KEYS: [&str; 8] = [
+        "session_id",
+        "tool_format",
+        "reminders",
+        "tool_retries",
+        "tool_backoff_ms",
+        "model",
+        "provider",
+        "run_id",
+    ];
+
+    fn dispatch_read_keys() -> BTreeSet<&'static str> {
+        SESSION_POLICY_OPTION_KEYS
+            .iter()
+            .chain(DISPATCH_READ_KEYS.iter())
+            .copied()
+            .collect()
+    }
+
+    fn stdlib(module: &str) -> &'static str {
+        harn_stdlib::get_stdlib_source(module).expect("stdlib module is embedded")
+    }
+
+    /// The top-level keys of the dispatch options literal the loop builds.
+    fn forwarded_keys() -> BTreeSet<String> {
+        let source = stdlib("agent/loop_dispatch_options");
+        let literal = source
+            .split("pub fn __loop_dispatch_options(")
+            .nth(1)
+            .and_then(|rest| rest.split("  return {").nth(1))
+            .and_then(|rest| rest.split("\n  }\n").next())
+            .expect("the loop dispatch options literal is present");
+        let key = regex::Regex::new(r"(?m)^    ([a-z_]+):").expect("key pattern");
+        key.captures_iter(literal)
+            .map(|capture| capture[1].to_string())
+            .collect()
+    }
+
+    #[test]
+    fn the_loop_forwards_every_option_dispatch_reads() {
+        let forwarded = forwarded_keys();
+        let missing: Vec<&str> = dispatch_read_keys()
+            .into_iter()
+            .filter(|key| !forwarded.contains(*key))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "options dispatch reads that the loop never forwards to it: {missing:?}"
+        );
+    }
+
+    /// Keeps `DISPATCH_READ_KEYS` honest: a new public option read in the
+    /// dispatch primitive or the tool envelope must be listed, and so forwarded.
+    #[test]
+    fn every_public_option_dispatch_reads_is_listed() {
+        let rust = include_str!("../agent_host_primitives.rs");
+        let rust_read =
+            regex::Regex::new(r#"agent_primitive_option_[a-z]+\(\s*options,\s*"([a-z][a-z_]*)""#)
+                .expect("rust read pattern");
+        let envelope = stdlib("agent/loop_tool_calls")
+            .split("fn __tool_envelope(")
+            .nth(1)
+            .and_then(|rest| rest.split("\n}\n").next())
+            .expect("the tool envelope is present");
+        let harn_read = regex::Regex::new(r"options\?\.([a-z][a-z_]*)").expect("harn read pattern");
+        // Resolved by the loop into `_max_concurrent_tools` before dispatch.
+        let resolved_by_loop = ["max_concurrent_tools"];
+        let listed = dispatch_read_keys();
+        let mut unlisted: BTreeSet<String> = BTreeSet::new();
+        for capture in rust_read
+            .captures_iter(rust)
+            .chain(harn_read.captures_iter(envelope))
+        {
+            let key = &capture[1];
+            if !listed.contains(key) && !resolved_by_loop.contains(&key) {
+                unlisted.insert(key.to_string());
+            }
+        }
+        assert!(
+            unlisted.is_empty(),
+            "dispatch reads options DISPATCH_READ_KEYS does not list: {unlisted:?}"
+        );
+    }
+}

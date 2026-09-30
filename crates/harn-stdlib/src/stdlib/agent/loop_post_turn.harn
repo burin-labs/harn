@@ -23,6 +23,7 @@ import { agent_feedback_emit } from "std/agent/feedback"
 import { agent_evaluate_completion } from "std/agent/judge"
 import { AgentToolDispatch, __tool_names_by_status } from "std/agent/loop_result_status"
 import { __agent_loop_with_llm_render_context } from "std/agent/loop_support"
+import { __agent_loop_terminal_verification_from_directive } from "std/agent/loop_terminal"
 import {
   AGENT_LOOP_REJECTED_TURN_MARKER,
   __agent_loop_pop_rejected_assistant_turn,
@@ -123,6 +124,7 @@ pub type AgentLoopPostTurnState = {
   opts: dict,
   stall_state: AgentStallState,
   stop_reason: string?,
+  terminal_verification: dict?,
   terminal_write_unverified: bool,
   turns_since_loop_progress: int,
   turns_since_progress: int,
@@ -271,6 +273,9 @@ pub fn agent_loop_post_turn_transition(
 ) -> AgentLoopPostTurnResult {
   let next = state
   const tool_count = len(context.tool_calls)
+  if tool_count > 0 {
+    next = next + {terminal_verification: nil}
+  }
   next = next
     + {
       consecutive_text_only: __next_text_only_count(tool_count, next.consecutive_text_only),
@@ -450,6 +455,8 @@ pub fn agent_loop_post_turn_transition(
     )
     verdict_record = reverdict
     next = next
+      + {terminal_verification: __agent_loop_terminal_verification_from_directive(reverdict)}
+    next = next
       + {
         feedback_history: reverdict.feedback_history ?? next.feedback_history,
         verify_completion_judge_invocations: next.verify_completion_judge_invocations
@@ -512,6 +519,8 @@ pub fn agent_loop_post_turn_transition(
         context.raw_text,
       )
       verdict_record = verdict
+      next = next
+        + {terminal_verification: __agent_loop_terminal_verification_from_directive(verdict)}
       next = next
         + {
           feedback_history: verdict.feedback_history ?? next.feedback_history,

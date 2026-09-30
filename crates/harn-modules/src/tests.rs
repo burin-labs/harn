@@ -308,6 +308,77 @@ fn private_selective_import_is_classified_when_module_has_pub() {
 }
 
 #[test]
+fn sibling_export_is_visible_only_to_modules_in_its_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join("helpers")).unwrap();
+    let library = write_file(
+        root,
+        "helpers/format.harn",
+        "@sibling\nfn format_name() -> string { return \"ok\" }\n",
+    );
+    let sibling = write_file(
+        root,
+        "helpers/use.harn",
+        "import { format_name } from \"./format\"\n",
+    );
+    let outsider = write_file(
+        root,
+        "use.harn",
+        "import { format_name } from \"./helpers/format\"\n",
+    );
+
+    let graph = build(&[sibling.clone(), outsider.clone()]);
+    assert!(graph.exports_for_module(&library).is_empty());
+    assert_eq!(graph.selective_import_issues(&sibling), Vec::new());
+    assert!(graph
+        .imported_names_for_file(&sibling)
+        .expect("sibling imports should resolve")
+        .contains("format_name"));
+    assert_eq!(graph.selective_import_issues(&outsider).len(), 1);
+    assert_eq!(
+        graph.selective_import_issues(&outsider)[0].kind,
+        SelectiveImportIssueKind::Private
+    );
+
+    let sibling_namespace = write_file(
+        root,
+        "helpers/namespace.harn",
+        "import * as helpers from \"./format\"\n",
+    );
+    let outsider_namespace = write_file(
+        root,
+        "namespace.harn",
+        "import * as helpers from \"./helpers/format\"\n",
+    );
+    let namespace_graph = build(&[sibling_namespace.clone(), outsider_namespace.clone()]);
+    assert!(namespace_graph
+        .namespace_imports_for_file(&sibling_namespace)
+        .unwrap()[0]
+        .member_names
+        .contains(&"format_name".to_string()));
+    assert!(!namespace_graph
+        .namespace_imports_for_file(&outsider_namespace)
+        .unwrap()[0]
+        .member_names
+        .contains(&"format_name".to_string()));
+    let reexport = write_file(
+        root,
+        "helpers/reexport.harn",
+        "pub import { format_name } from \"./format\"\n",
+    );
+    let reexport_graph = build(std::slice::from_ref(&reexport));
+    assert_eq!(reexport_graph.selective_import_issues(&reexport).len(), 1);
+
+    let moved = root.join("helpers/moved.harn");
+    fs::rename(&library, &moved).unwrap();
+    fs::write(&sibling, "import { format_name } from \"./moved\"\n").unwrap();
+    let moved_graph = build(std::slice::from_ref(&sibling));
+    assert!(moved_graph.exports_for_module(&moved).is_empty());
+    assert_eq!(moved_graph.selective_import_issues(&sibling), Vec::new());
+}
+
+#[test]
 fn selective_import_from_zero_pub_module_is_flagged() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

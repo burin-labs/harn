@@ -1,5 +1,12 @@
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 
+struct RunOutcome {
+  success: bool
+  status: string
+  stdout: string
+  exit_code: int
+}
+
 // Deterministic pre-approval tool-deny seam (harn pre-approval deny seam).
 //
 // Regression for the 2026-07-18 Burin dogfood repro: a `run` command that the
@@ -16,7 +23,9 @@ fn run_tools() {
     "run",
     "Run a shell command",
     {
-      handler: { _ -> {status: "completed", stdout: "", exit_code: 0} },
+      handler: { _ ->
+        RunOutcome {success: true, status: "completed", stdout: "", exit_code: 0}
+      },
       parameters: {command: {type: "string", description: "The command to run"}},
       returns: {type: "object"},
     },

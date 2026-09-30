@@ -1,3 +1,4 @@
+use super::oauth_migration::legacy_registration_missing_redirect;
 use super::store::load_connect_index;
 use super::*;
 use crate::cli::ConnectGithubArgs;
@@ -271,6 +272,60 @@ async fn legacy_oauth_migration_recovers_registration_without_token_material() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn authentic_old_token_requires_the_registered_redirect_again() {
+    use harn_vm::secrets::{MemorySecretProvider, SecretId};
+
+    // This is the StoredConnectorToken shape written before the namespace
+    // change. That writer did not persist its authorization or redirect URI.
+    let id = SecretId::new("acme", "oauth-token");
+    let legacy = MemorySecretProvider::new("harn/legacy-workspace").with_secret(
+        id.clone(),
+        br#"{
+            "provider":"acme",
+            "access_token":"old-token",
+            "token_endpoint":"https://auth.example.com/token",
+            "client_id":"legacy-client",
+            "token_endpoint_auth_method":"none",
+            "resource":"https://api.example.com/",
+            "connected_at_unix":1
+        }"#,
+    );
+    let registration = load_legacy_oauth_registration_from(&legacy, &id)
+        .await
+        .expect("old keyring entry is readable")
+        .expect("registration fields exist");
+    let request = OAuthConnectRequest {
+        provider: "acme".to_string(),
+        resource: "https://api.example.com/".to_string(),
+        authorization_endpoint: None,
+        token_endpoint: None,
+        registration_endpoint: None,
+        client_id: None,
+        client_secret: None,
+        scopes: None,
+        redirect_uri: DEFAULT_OAUTH_REDIRECT_URI.to_string(),
+        token_auth_method: None,
+        no_open: true,
+        json: false,
+    };
+    assert!(legacy_registration_missing_redirect(
+        &request,
+        &registration
+    ));
+    let explicitly_set = OAuthConnectRequest {
+        redirect_uri: "http://127.0.0.1:48765/oauth/callback".to_string(),
+        ..request.clone()
+    };
+    assert!(!legacy_registration_missing_redirect(
+        &explicitly_set,
+        &registration
+    ));
+    let merged = oauth_request_with_legacy_registration(request, registration);
+    assert_eq!(merged.client_id.as_deref(), Some("legacy-client"));
+    assert_eq!(merged.redirect_uri, DEFAULT_OAUTH_REDIRECT_URI);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn absent_legacy_oauth_record_is_not_invented() {
     use harn_vm::secrets::{MemorySecretProvider, SecretId};
 
@@ -482,7 +537,7 @@ async fn status_reports_missing_auth_for_missing_required_secret_chain() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn status_health_requires_only_outbound_credentials() {
+async fn status_separates_inbound_readiness_from_outbound_usability() {
     let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty().with_secret(
         harn_vm::secrets::SecretId::new("github", "access-token"),
         "token",
@@ -506,8 +561,113 @@ async fn status_health_requires_only_outbound_credentials() {
         ["github/webhook-secret", "github/access-token"]
     );
     assert!(status.missing_secrets.is_empty());
-    assert_eq!(status.health_checks.len(), 1);
+    assert_eq!(status.inbound.status, "missing_auth");
+    assert_eq!(status.inbound.missing_secrets, ["github/webhook-secret"]);
+    assert_eq!(status.health_checks.len(), 2);
     assert_eq!(status.health_checks[0].id, "secret:github/access-token");
+    assert_eq!(status.health_checks[1].id, "secret:github/webhook-secret");
+
+    let no_secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
+    let neither = connector_status(
+        "github",
+        Some(&config),
+        &no_secrets,
+        &index,
+        100,
+        false,
+        None,
+    )
+    .await;
+    assert!(!neither.usable);
+    assert_eq!(neither.inbound.status, "missing_auth");
+    assert_ne!(
+        serde_json::to_value(&status).unwrap(),
+        serde_json::to_value(&neither).unwrap()
+    );
+
+    let inbound_only = harn_vm::connectors::testkit::MemorySecretProvider::empty().with_secret(
+        harn_vm::secrets::SecretId::new("github", "webhook-secret"),
+        "verification-token",
+    );
+    let inbound = connector_status(
+        "github",
+        Some(&config),
+        &inbound_only,
+        &index,
+        100,
+        false,
+        None,
+    )
+    .await;
+    assert!(!inbound.usable);
+    assert_eq!(inbound.inbound.status, "ready");
+    assert_ne!(
+        serde_json::to_value(&inbound).unwrap(),
+        serde_json::to_value(&neither).unwrap()
+    );
+
+    let both = inbound_only.with_secret(
+        harn_vm::secrets::SecretId::new("github", "access-token"),
+        "api-token",
+    );
+    let ready = connector_status("github", Some(&config), &both, &index, 100, false, None).await;
+    assert!(ready.usable);
+    assert_eq!(ready.inbound.status, "ready");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn declared_inbound_secret_health_check_runs() {
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
+    let index = ConnectIndex::default();
+    let mut setup = oauth_setup();
+    setup.auth_type = Some("none".to_string());
+    setup.required_scopes = Vec::new();
+    setup.required_secrets = vec![package::ConnectorRequiredSecretManifest::inbound(
+        "github/webhook-secret",
+    )];
+    setup.health_checks = vec![package::ConnectorHealthCheckManifest {
+        id: "webhook-verification".to_string(),
+        kind: "secret".to_string(),
+        secret: Some("github/webhook-secret".to_string()),
+        ..Default::default()
+    }];
+    let config = status_config(setup);
+
+    let missing =
+        connector_status("github", Some(&config), &secrets, &index, 100, true, None).await;
+    assert!(missing.usable);
+    assert_eq!(missing.inbound.status, "missing_auth");
+    assert_eq!(missing.health_checks[1].id, "webhook-verification");
+    assert_eq!(missing.health_checks[1].status, "fail");
+
+    let present = secrets.with_secret(
+        harn_vm::secrets::SecretId::new("github", "webhook-secret"),
+        "verification-token",
+    );
+    let ready = connector_status("github", Some(&config), &present, &index, 100, true, None).await;
+    assert!(ready.usable);
+    assert_eq!(ready.inbound.status, "ready");
+    assert_eq!(ready.health_checks[1].status, "pass");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn secret_health_check_without_target_is_refused() {
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
+    let index = ConnectIndex::default();
+    let mut setup = oauth_setup();
+    setup.auth_type = Some("none".to_string());
+    setup.required_scopes = Vec::new();
+    setup.health_checks = vec![package::ConnectorHealthCheckManifest {
+        id: "missing-target".to_string(),
+        kind: "secret".to_string(),
+        ..Default::default()
+    }];
+    let config = status_config(setup);
+
+    let report = connector_status("github", Some(&config), &secrets, &index, 100, true, None).await;
+    assert!(!report.usable);
+    assert_eq!(report.status, "invalid_manifest");
+    assert_eq!(report.health_checks[0].status, "invalid_manifest");
 }
 
 #[tokio::test(flavor = "current_thread")]

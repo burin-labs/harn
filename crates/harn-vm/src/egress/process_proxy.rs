@@ -136,7 +136,10 @@ pub struct ProcessEgressProxy {
 impl ProcessEgressProxy {
     /// Start a proxy from the current Harn egress policy. `Ok(None)` preserves
     /// the legacy unrestricted child-network grant when no policy was
-    /// configured; a configured policy always becomes a managed boundary.
+    /// configured outside an explicit-policy host scope. Inside that scope the
+    /// process-network grant is itself the child's destination policy: public
+    /// hosts are reachable and private ranges stay behind the SSRF overlay
+    /// until a configured policy narrows it.
     pub fn start_from_current_policy(
         default_block_private: bool,
     ) -> Result<Option<Self>, ProcessEgressProxyError> {
@@ -149,7 +152,6 @@ impl ProcessEgressProxy {
         Self::start(ProcessPolicySource::Live {
             context: current_policy_context(),
             default_block_private,
-            require_explicit,
         })
         .map(Some)
     }
@@ -270,8 +272,26 @@ enum ProcessPolicySource {
     Live {
         context: Option<EgressPolicyContext>,
         default_block_private: bool,
-        require_explicit: bool,
     },
+}
+
+/// Destination policy for a granted child network with no configured egress
+/// policy: every public host, no loopback, private ranges per the SSRF default.
+fn process_network_grant_policy(default_block_private: bool) -> ConfiguredPolicy {
+    ConfiguredPolicy::single(
+        "process_network_grant",
+        EgressPolicy {
+            allow: Vec::new(),
+            deny: Vec::new(),
+            default: DefaultAction::Allow,
+            block_private: Some(if default_block_private {
+                SsrfMode::BlockPrivate
+            } else {
+                SsrfMode::Off
+            }),
+            allow_loopback: false,
+        },
+    )
 }
 
 impl ProcessPolicySource {
@@ -294,17 +314,11 @@ impl ProcessPolicySource {
         };
         if let Self::Live {
             default_block_private,
-            require_explicit,
             ..
         } = self
         {
-            let Some(configured) = configured.as_mut() else {
-                return Err(if *require_explicit {
-                    "no egress policy configured".to_string()
-                } else {
-                    "managed egress policy is unavailable".to_string()
-                });
-            };
+            let configured = configured
+                .get_or_insert_with(|| process_network_grant_policy(*default_block_private));
             if configured.policy.block_private.is_none() && *default_block_private {
                 configured.policy.block_private = Some(SsrfMode::BlockPrivate);
             }
@@ -834,19 +848,25 @@ mod tests {
     }
 
     #[test]
-    fn live_policy_source_denies_missing_then_observes_runtime_configuration() {
+    fn live_policy_source_grants_public_hosts_then_observes_runtime_configuration() {
         let context = EgressPolicyContext(Arc::new(std::sync::RwLock::new(
             super::super::EgressState::default(),
         )));
         let source = ProcessPolicySource::Live {
             context: Some(context.clone()),
             default_block_private: true,
-            require_explicit: true,
         };
+        let granted = source.configured().unwrap();
+        assert_eq!(granted.sources, vec!["process_network_grant"]);
         assert_eq!(
-            source.configured().unwrap_err(),
-            "no egress policy configured"
+            resolve_allowed("140.82.112.3", 443, &granted).unwrap(),
+            vec!["140.82.112.3:443".parse::<SocketAddr>().unwrap()],
+            "a granted child network reaches public hosts without HARN_EGRESS_*"
         );
+        for private in ["127.0.0.1", "10.0.0.5", "169.254.169.254"] {
+            let reason = resolve_allowed(private, 443, &granted).unwrap_err();
+            assert!(reason.contains("private"), "{private}: {reason}");
+        }
 
         context.0.write().unwrap().policy = Some(ConfiguredPolicy::single(
             "stdlib",

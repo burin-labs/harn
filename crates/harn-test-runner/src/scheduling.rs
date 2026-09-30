@@ -97,6 +97,7 @@ where
                             name: "<worker error>".to_string(),
                             file: String::new(),
                             passed: false,
+                            skip_reason: None,
                             error: Some(error),
                             captured_output: None,
                             timeout: None,
@@ -126,7 +127,7 @@ where
                         },
                     );
                     let result = execute(&mut worker, case);
-                    if fail_fast && !result.passed {
+                    if fail_fast && !result.passed && result.skip_reason.is_none() {
                         cancelled.store(true, Ordering::Release);
                     }
                     emit_progress(&progress, TestRunEvent::TestFinished(result.clone()));
@@ -366,6 +367,7 @@ mod tests {
                 name: case.name.clone(),
                 file: case.file.display().to_string(),
                 passed: false,
+                skip_reason: None,
                 error: Some("deterministic failure".to_string()),
                 captured_output: None,
                 timeout: None,

@@ -172,26 +172,63 @@ pub(crate) const OPERATOR_STEER_TAG: &str = "operator_steer";
 ///     carries rather than the checkpoint it drained at: the two are a
 ///     bijection today, but the checkpoint is a delivery detail and a future
 ///     mapping change would silently stop arming steers.
-fn operator_steer_directive(message: &crate::bridge::QueuedUserMessage) -> Option<SystemReminder> {
+///
+/// A steer that carried a [`harn_session_store::ControlGoal`] retargets the
+/// run, and its directive says so: the objective is replaced and the
+/// acceptance items frozen under the previous one are retired, so neither the
+/// model nor a later corrective can re-derive the abandoned objective from
+/// the opening task.
+fn operator_steer_directive(
+    message: &crate::bridge::QueuedUserMessage,
+    goal: Option<&harn_session_store::ControlGoal>,
+) -> Option<SystemReminder> {
     if message.mode == crate::bridge::QueuedUserMessageMode::AuditOnly {
         return None;
     }
-    let mut reminder = SystemReminder::new(
-        format!(
+    let body = match goal {
+        None => format!(
             "The operator redirected this run mid-turn. Follow this instruction for the \
              remainder of the run, in preference to any earlier instruction it contradicts:\n\
              {}",
             message.content
         ),
-        ReminderSource::Bridge,
-        0,
-    );
+        Some(goal) => format!(
+            "The operator replaced this run's objective mid-turn. The objective is now:\n{}\n\
+             Every acceptance item and success criterion set under the previous objective \
+             is retired: it is no longer owed.\n\
+             The operator's instruction:\n{}",
+            goal.objective, message.content
+        ),
+    };
+    let mut reminder = SystemReminder::new(body, ReminderSource::Bridge, 0);
     reminder.tags = vec![OPERATOR_STEER_TAG.to_string()];
     reminder.dedupe_key = Some(format!("{OPERATOR_STEER_TAG}/{}", message.message_id));
     reminder.authority = DirectiveAuthority::Contract;
     reminder.ttl_turns = None;
     reminder.preserve_on_compact = true;
     Some(reminder)
+}
+
+/// The retarget recorded when the steer that created `message_id` was
+/// accepted, if it carried one.
+///
+/// Read from the typed control row rather than carried on the queued message:
+/// the row is the replay record of the transition, so the directive the model
+/// sees and the obligations the completion authorities read come from the same
+/// fact. Both acceptance paths (`session/inject` and the in-VM push) enqueue
+/// and record on the session's own thread without yielding in between, so the
+/// row exists before the drain can run. Were it ever missing, the directive
+/// would fall back to the plain steer wording while the completion
+/// authorities still read the retarget from the row.
+fn accepted_steer_goal(
+    session_id: &str,
+    message_id: &str,
+) -> Option<harn_session_store::ControlGoal> {
+    crate::agent_sessions::control_events(session_id)
+        .into_iter()
+        .rev()
+        .find(|event| event.message_id.as_deref() == Some(message_id))
+        .and_then(|event| event.goal)
 }
 
 async fn drain_bridge_injections_for_checkpoint(
@@ -226,7 +263,8 @@ async fn drain_bridge_injections_for_checkpoint(
                     })),
                 )
                 .map_err(VmError::Runtime)?;
-                if let Some(directive) = operator_steer_directive(&message) {
+                let goal = accepted_steer_goal(session_id, &message.message_id);
+                if let Some(directive) = operator_steer_directive(&message, goal.as_ref()) {
                     crate::agent_sessions::inject_reminder(session_id, directive)
                         .map_err(VmError::Runtime)?;
                 }
@@ -390,12 +428,48 @@ async fn host_agent_session_push_user_message(
         .and_then(|value| value.as_str())
         .unwrap_or("finish_step")
         .to_string();
+    let delivery_mode = crate::bridge::QueuedUserMessageMode::from_str(&mode);
+    let goal = match params.get("goal").filter(|value| !value.is_null()) {
+        None => None,
+        Some(_) if delivery_mode == crate::bridge::QueuedUserMessageMode::AuditOnly => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_PUSH_USER_MESSAGE}: options.goal needs a steer or interrupt mode; \
+                 a queued note never reaches the model"
+            )));
+        }
+        Some(raw) => Some(
+            harn_session_store::ControlGoal::parse(raw).map_err(|message| {
+                VmError::Runtime(format!(
+                    "{HOST_SESSION_PUSH_USER_MESSAGE}: options.{message}"
+                ))
+            })?,
+        ),
+    };
     let Some(bridge) = host_bridge_for_session(&session_id, HOST_SESSION_PUSH_USER_MESSAGE) else {
         return Err(VmError::Runtime(format!(
             "{HOST_SESSION_PUSH_USER_MESSAGE}: no host bridge attached to session `{session_id}`"
         )));
     };
-    let message_id = bridge.push_queued_user_message(content, &mode).await;
+    let message_id = bridge
+        .push_queued_user_message(content.clone(), &mode)
+        .await;
+    // Accepted here, so recorded here, exactly as `session/inject` records it:
+    // the typed control row is what the completion authorities and replay read.
+    // A session this thread does not own has no stream to land in; the push
+    // still stands and the obligations fall back to the delivered message.
+    let _ = crate::agent_sessions::record_control_event(
+        &session_id,
+        &harn_session_store::ControlEvent::injection(
+            "agent_session_push_user_message",
+            format!("ctl-{message_id}"),
+            "accepted",
+            mode,
+            delivery_mode.as_str(),
+            message_id.clone(),
+            content,
+        )
+        .with_goal(goal),
+    );
     Ok(VmValue::String(arcstr::ArcStr::from(message_id)))
 }
 
@@ -624,7 +698,7 @@ mod operator_steer_tests {
     /// feedback, so it is registered at the authority the operator holds.
     #[test]
     fn a_delivered_steer_becomes_a_standing_contract_directive() {
-        let directive = operator_steer_directive(&queued(QueuedUserMessageMode::FinishStep))
+        let directive = operator_steer_directive(&queued(QueuedUserMessageMode::FinishStep), None)
             .expect("a steer delivered mid-turn registers a directive");
 
         assert_eq!(directive.authority, DirectiveAuthority::Contract);
@@ -651,7 +725,7 @@ mod operator_steer_tests {
     #[test]
     fn an_interrupt_carries_the_same_authority_as_a_steer() {
         let directive =
-            operator_steer_directive(&queued(QueuedUserMessageMode::InterruptImmediate))
+            operator_steer_directive(&queued(QueuedUserMessageMode::InterruptImmediate), None)
                 .expect("an interrupt delivered mid-turn registers a directive");
         assert_eq!(directive.authority, DirectiveAuthority::Contract);
     }
@@ -662,6 +736,40 @@ mod operator_steer_tests {
     /// model that was explicitly promised not to see it.
     #[test]
     fn an_audit_only_message_never_becomes_a_directive() {
-        assert!(operator_steer_directive(&queued(QueuedUserMessageMode::AuditOnly)).is_none());
+        assert!(
+            operator_steer_directive(&queued(QueuedUserMessageMode::AuditOnly), None).is_none()
+        );
+        let goal = harn_session_store::ControlGoal {
+            objective: "reply BRAVO".to_string(),
+        };
+        assert!(
+            operator_steer_directive(&queued(QueuedUserMessageMode::AuditOnly), Some(&goal))
+                .is_none(),
+            "a goal must not smuggle a queued note in front of the model"
+        );
+    }
+
+    /// A retargeting steer says the objective changed and the old acceptance
+    /// items are retired, at the same standing authority as a plain steer.
+    #[test]
+    fn a_retargeting_steer_names_the_new_objective_and_retires_the_old_items() {
+        let goal = harn_session_store::ControlGoal {
+            objective: "reply with the single word BRAVO".to_string(),
+        };
+        let directive =
+            operator_steer_directive(&queued(QueuedUserMessageMode::FinishStep), Some(&goal))
+                .expect("a retargeting steer registers a directive");
+        assert_eq!(directive.authority, DirectiveAuthority::Contract);
+        assert!(directive
+            .body
+            .contains("The objective is now:\nreply with the single word BRAVO"));
+        assert!(directive.body.contains("is retired"));
+        assert!(directive.body.contains("final reply must be exactly BRAVO"));
+        let plain = operator_steer_directive(&queued(QueuedUserMessageMode::FinishStep), None)
+            .expect("plain steer");
+        assert!(
+            !plain.body.contains("retired"),
+            "a plain steer amends the objective and must not retire anything"
+        );
     }
 }

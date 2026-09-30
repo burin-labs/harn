@@ -22,6 +22,9 @@ pub(crate) struct ProviderUsageReceipt {
     pub(super) cache_supported: bool,
     pub(super) provider_cost_usd: Option<f64>,
     pub(super) served_fast: bool,
+    pub(super) started_at_ms: Option<i64>,
+    pub(super) prompt_cache_ttl: Option<crate::llm::api::PromptCacheTtl>,
+    pub(super) billing: Option<Box<super::BillingUsage>>,
 }
 
 impl ProviderUsageReceipt {
@@ -42,6 +45,9 @@ impl ProviderUsageReceipt {
             cache_supported: true,
             provider_cost_usd: provider_cost_usd.filter(|cost| cost.is_finite() && *cost >= 0.0),
             served_fast,
+            started_at_ms: None,
+            prompt_cache_ttl: None,
+            billing: None,
         }
     }
 
@@ -58,12 +64,20 @@ impl ProviderUsageReceipt {
             optional_non_negative_json_int(usage, &["total_tokens"]).ok()?;
         Some(
             Self::new(input_tokens, output_tokens, None, false)
-                .with_reported_total(reported_total_tokens),
+                .with_reported_total(reported_total_tokens)
+                .with_billing(super::BillingUsage::from_openai(
+                    &serde_json::json!({"usage": usage}),
+                )),
         )
     }
 
     pub(crate) fn with_reported_total(mut self, total_tokens: Option<i64>) -> Self {
         self.reported_total_tokens = total_tokens.filter(|tokens| *tokens >= 0);
+        self
+    }
+
+    pub(crate) fn with_billing(mut self, billing: Option<Box<super::BillingUsage>>) -> Self {
+        self.billing = billing;
         self
     }
 
@@ -128,6 +142,23 @@ impl ProviderUsageReceipt {
     /// provider-accounting vocabulary.
     pub(crate) fn to_vm_value(&self) -> VmValue {
         VmValue::dict(crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("billing"),
+                self.billing.as_ref().map_or(VmValue::Nil, |billing| {
+                    crate::schema::json_to_vm_value(
+                        &serde_json::to_value(billing).expect("billing serializes"),
+                    )
+                }),
+            ),
+            (
+                crate::value::intern_key("started_at_ms"),
+                self.started_at_ms.map_or(VmValue::Nil, VmValue::Int),
+            ),
+            (
+                crate::value::intern_key("prompt_cache_ttl"),
+                self.prompt_cache_ttl
+                    .map_or(VmValue::Nil, |ttl| VmValue::String(ttl.as_str().into())),
+            ),
             (
                 crate::value::intern_key("input_tokens"),
                 self.input_tokens.map_or(VmValue::Nil, VmValue::Int),
@@ -218,6 +249,17 @@ impl ProviderUsageReceipt {
             cache_supported: *cache_supported,
             provider_cost_usd,
             served_fast: *served_fast,
+            started_at_ms: optional_non_negative_int_if_present(fields, "started_at_ms").ok()?,
+            prompt_cache_ttl: fields
+                .get("prompt_cache_ttl")
+                .and_then(|value| match value {
+                    VmValue::String(value) => crate::llm::api::PromptCacheTtl::parse(value),
+                    _ => None,
+                }),
+            billing: fields.get("billing").and_then(|value| {
+                let json = crate::stdlib::json::vm_value_to_data_value(value);
+                serde_json::from_value(json).ok()
+            }),
         })
     }
 

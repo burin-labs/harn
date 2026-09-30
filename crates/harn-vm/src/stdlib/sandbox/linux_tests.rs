@@ -132,7 +132,7 @@ fn landlock_gate(state: LiveLandlock, required: bool, test: &str, lsm: &str) -> 
 /// only the negative half notices, and it reported the absence as a product
 /// defect (harn#8215).
 #[must_use]
-fn live_landlock_available(test: &str) -> bool {
+pub(super) fn live_landlock_available(test: &str) -> bool {
     let lsm = active_lsm_list();
     match landlock_gate(LiveLandlock::probe(), live_landlock_required(), test, &lsm) {
         LandlockGate::Proceed => {

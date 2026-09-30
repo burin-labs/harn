@@ -106,6 +106,15 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
             );
         }
         validate_extra_headers(provider, &mut result);
+        if provider
+            .platform_fee_percent
+            .is_some_and(|fee| !fee.is_finite() || fee < 0.0)
+        {
+            result.errors.push(format!(
+                "provider {} platform_fee_percent must be finite and nonnegative",
+                provider.id
+            ));
+        }
         if let Some(healthcheck) = &provider.healthcheck {
             validate_provider_healthcheck(provider, healthcheck, &mut result);
         }

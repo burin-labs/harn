@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc;
+mod provider_default_tests;
 fn acp_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -1329,7 +1330,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
     // Pin only the provider routing invariant + that the resolved
     // model is a registered catalog entry. The specific OpenAI default
     // moves as the catalog tracks model deprecations.
-    let (provider, model) = configured_llm_route_for_capabilities();
+    let (provider, model) = configured_llm_route_for_capabilities().expect("catalog default");
     assert_eq!(provider, "openai");
     assert!(
         harn_vm::llm_config::model_catalog_entry(&model).is_some(),
@@ -1419,7 +1420,7 @@ fn acp_prompt_capabilities_follow_configured_model_aliases() {
     // model; pinning a specific id here would force a test churn every
     // time the catalog tracks an Anthropic refresh. Pin only the
     // routing invariant (provider) plus the model's catalog presence.
-    let (provider, model) = configured_llm_route_for_capabilities();
+    let (provider, model) = configured_llm_route_for_capabilities().expect("explicit alias");
     assert_eq!(provider, "anthropic");
     assert!(
         harn_vm::llm_config::model_catalog_entry(&model)
@@ -1485,9 +1486,11 @@ mod oauth_redirect;
 mod prompt_errors;
 mod runtime_overrides;
 mod served_agent_turn;
+mod served_json_tool_fence;
 mod session_environment;
 mod session_recap;
 mod session_restore;
+mod session_spend;
 mod sessions;
 #[cfg(feature = "hostlib")]
 mod staged_writes;

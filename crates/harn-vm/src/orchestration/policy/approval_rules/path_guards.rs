@@ -15,6 +15,8 @@ pub const SOURCE_DEFAULT_SENSITIVE_PATH: &str = "default_sensitive_path";
 pub const SOURCE_DEFAULT_PATH_GUARD: &str = "default_path_guard";
 /// The workspace path boundary refusing a path outside every admitted root.
 pub const SOURCE_DEFAULT_EXTERNAL_PATH: &str = "default_external_path";
+/// The prepared-run network policy, evaluated before endpoint health.
+pub const SOURCE_NET_POLICY: &str = "harn.net_policy";
 
 /// Which refusing mechanism a deciding rule belongs to.
 ///
@@ -33,6 +35,7 @@ pub fn denial_gate_for_source(source: Option<&str>) -> crate::agent_events::Deni
     use crate::agent_events::DenialGate;
     match source {
         Some(SOURCE_DEFAULT_SENSITIVE_PATH) => DenialGate::SensitivePath,
+        Some(SOURCE_NET_POLICY) => DenialGate::NetworkPolicy,
         Some(SOURCE_DEFAULT_PATH_GUARD) | Some(SOURCE_DEFAULT_EXTERNAL_PATH) => {
             DenialGate::WorkspaceBoundary
         }
@@ -53,6 +56,7 @@ pub(super) fn default_guard(
             let path = sensitive_paths::bounded_evidence(&path);
             return Some(Candidate {
                 source: SOURCE_DEFAULT_SENSITIVE_PATH.to_string(),
+                source_rank: PolicyRuleSource::Policy,
                 index: None,
                 id: Some("sensitive_path".to_string()),
                 action: PolicyAction::Deny,
@@ -69,6 +73,7 @@ pub(super) fn default_guard(
             if matches!(entry.kind, WorkspacePathKind::Invalid) {
                 return Some(Candidate {
                     source: SOURCE_DEFAULT_PATH_GUARD.to_string(),
+                    source_rank: PolicyRuleSource::Policy,
                     index: None,
                     id: Some("invalid_path".to_string()),
                     action: PolicyAction::Deny,
@@ -89,6 +94,7 @@ pub(super) fn default_guard(
             {
                 return Some(Candidate {
                     source: SOURCE_DEFAULT_EXTERNAL_PATH.to_string(),
+                    source_rank: PolicyRuleSource::Policy,
                     index: None,
                     id: Some("external_path".to_string()),
                     action: PolicyAction::Deny,
@@ -136,6 +142,7 @@ impl PolicyEvaluation {
             self.reason.clone(),
         );
         denial.denied_paths = self.denied_paths.clone();
+        denial.denied_network_targets = self.denied_network_targets.clone();
         denial
     }
 }

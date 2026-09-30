@@ -784,6 +784,7 @@
     "skill_who_signed",
     "skills_activation_evidence",
     "skills_catalog_entries",
+    "skip",
     "sleep",
     "sleep_ms",
     "snake_to_camel",

@@ -40,6 +40,7 @@ import {
   __completion_arbitration_converts,
   __completion_contradiction_arbitration_converts,
 } from "std/agent/judge_internals"
+import { CompletionJudgeGapItem } from "std/agent/judge_verdict"
 
 /** Which adjudicators actually ran at one completion boundary. */
 pub type CompletionJudgeInvocations = {
@@ -69,6 +70,8 @@ pub type CompletionStageVerdict = {
   trigger?: string?,
   reason?: string?,
   gap_class?: CompletionJudgeGapClass?,
+  gaps?: list<CompletionJudgeGapItem>,
+  repeated_verified_criteria?: list<string>,
   // Set when a `done` reply that named a gap was re-asked once with the
   // contradiction spelled out. Present so the contradiction arbitration can
   // tell a first self-contradiction from one that survived being pointed out.

@@ -243,6 +243,22 @@ impl AcpServer {
                     return;
                 }
             };
+        let goal = match session_inject_goal(params, mode) {
+            Ok(goal) => goal,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/inject",
+                    "rejected",
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id}),
+                    Some("invalid_goal"),
+                );
+                return;
+            }
+        };
         // The caller's word, before `bridge_mode_for_session_inject`
         // normalized it onto a delivery checkpoint.
         let requested_mode = params
@@ -275,6 +291,7 @@ impl AcpServer {
                 message_id.clone(),
                 recorded_text,
             )
+            .with_goal(goal)
             .with_actor(actor.clone()),
         );
         self.send_response(

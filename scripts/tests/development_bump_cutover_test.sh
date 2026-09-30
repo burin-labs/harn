@@ -2,7 +2,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-workflow="$repo_root/.github/workflows/build-release-binaries.yml"
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/workspace"
@@ -21,7 +20,7 @@ name = "example"
 version.workspace = true
 EOF
 printf '# initial lock\n' > "$fixture/Cargo.lock"
-git -C "$fixture" init --quiet
+git -C "$fixture" init -b main --quiet
 git -C "$fixture" config user.name "Development Cutover Test"
 git -C "$fixture" config user.email "development-cutover-test@example.com"
 git -C "$fixture" config commit.gpgsign false
@@ -31,13 +30,9 @@ git -C "$fixture" commit --quiet -m initial
 # The opener re-reads origin/main before it opens anything, so the fixture needs
 # a real remote rather than a detached working copy.
 origin="$tmp_root/origin.git"
-git init --quiet --bare "$origin"
+git init -b main --quiet --bare "$origin"
 git -C "$fixture" remote add origin "$origin"
 git -C "$fixture" push --quiet origin HEAD:refs/heads/main
-# The bare repository's HEAD follows whatever init.defaultBranch the host is
-# configured with, so name the branch this fixture actually pushed. Without it a
-# host defaulting to master clones an empty working tree.
-git -C "$origin" symbolic-ref HEAD refs/heads/main
 git -C "$fixture" fetch --quiet origin main
 
 cat > "$bin_dir/harn" <<'EOF'
@@ -57,7 +52,7 @@ case "$*" in
   *"/sync_protocol_fixture_runtime_versions.harn "*) ;;
   *"/sync_grammar_fitness_receipt.harn") ;;
   "dump-protocol-artifacts") ;;
-  "run --no-sandbox "*"/publish_development_bump.harn") ;;
+  "run --no-sandbox "*"/publish_branch_commit.harn") ;;
   *) echo "unexpected fake Harn invocation: $*" >&2; exit 2 ;;
 esac
 EOF
@@ -192,12 +187,6 @@ PATH="$bin_dir:$PATH" \
   "$repo_root/scripts/validate_development_bump.sh"
 grep -Fq $'gh\tpr merge https://example.invalid/pull/42 --auto --squash' "$record"
 
-open_line="$(grep -nF './scripts/open_development_bump.sh' "$workflow" | cut -d: -f1)"
-validate_line="$(grep -nF './scripts/validate_development_bump.sh' "$workflow" | cut -d: -f1)"
-[[ -n "$open_line" && -n "$validate_line" && "$open_line" -lt "$validate_line" ]] || {
-  echo "publish workflow does not open the development bump before validation" >&2
-  exit 1
-}
 if grep -Fq 'resolved_grammars_pass_the_versioned_fitness_corpus' \
   "$repo_root/scripts/open_development_bump.sh"; then
   echo "development bump opener is still gated on the grammar corpus" >&2

@@ -253,14 +253,27 @@ fi
 # before merge; this one has no such lane, so a version that skipped by default
 # would prove nothing. It costs about three minutes, and only on a push that
 # touches one of the files the registry records a read in.
+#
+# The census imports `std/dev/agent_gates` from the binary that runs it, so only
+# this worktree's own build can check this worktree's registry. A release on
+# PATH or a stale build fails on its own stdlib (a missing module, a registry
+# schema error), which is not a census verdict. The registry selector reuses a
+# proven-fresh worktree binary and builds one when the push changed a binary
+# input, which a moved stdlib reader always is.
 if ! hook_agent_gate_sources_changed "$changed" "$(git rev-parse --show-toplevel)"; then
   echo "=== Pre-push: skipping agent gate census (no recorded reader sources changed) ==="
 else
   echo "=== Pre-push: checking the agent gate census ==="
-  agent_gate_harn=$(hook_find_existing_harn_bin || true)
+  if ! hook_export_registry_harn_bin "$changed"; then
+    echo "    UNMEASURED: no verified runtime for the branch's agent gate census." >&2
+    echo "    Run 'make build' after any existing lane build finishes, or supply a verified HARN_BIN." >&2
+    exit 1
+  fi
+  agent_gate_harn=$HARN_BIN
   if [ -z "$agent_gate_harn" ]; then
-    echo "    SKIPPED: no harn binary on this machine (run 'make build' or install a release)." >&2
-    echo "    This is a skip, not a pass; the census still runs on the next push to main." >&2
+    echo "    UNMEASURED: no verified runtime for the branch's agent gate census." >&2
+    echo "    Run 'make build' after any existing lane build finishes, or supply a verified HARN_BIN." >&2
+    exit 1
   elif ! hook_run_agent_gate_census "$agent_gate_harn"; then
     exit 1
   else
@@ -349,12 +362,12 @@ else
   echo "=== Pre-push: skipping session bundle schema check (no session-bundle schema changes) ==="
 fi
 
-# Generated-mirror drift guard. The `harn-generated` merge driver
-# silently keeps the current side during merge/rebase (see
-# scripts/configure_merge_drivers.sh) and the post-rewrite hook
-# auto-folds the regen into single-commit rebases, but neither covers
-# every case (multi-commit rebases, hooks disabled, etc.). Run the
-# same check CI runs so any drift fails the push instead of the PR.
+# Generated-mirror drift guard. The mirrors are marked `-merge`, so a
+# merge or rebase conflicts on them and whoever resolves it keeps one
+# side; the post-rewrite hook auto-folds the regen into single-commit
+# rebases, but neither covers every case (multi-commit rebases, hooks
+# disabled, etc.). Run the same check CI runs so any drift fails the push
+# instead of the PR.
 if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
   echo "=== Pre-push: checking docs/src/language-spec.md mirror ==="
   if ! make -s check-language-spec >/tmp/harn-prepush-langspec.log 2>&1; then
@@ -362,8 +375,8 @@ if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
     rm -f /tmp/harn-prepush-langspec.log
     echo "" >&2
     echo "  This can happen after rebasing onto a branch that also touched" >&2
-    echo "  the spec — the merge driver intentionally keeps the current" >&2
-    echo "  mirror without regenerating from the merged source." >&2
+    echo "  the spec: resolving the mirror's conflict keeps one side" >&2
+    echo "  without regenerating from the merged source." >&2
     echo "" >&2
     echo "  Fix:" >&2
     echo "    make sync-language-spec" >&2

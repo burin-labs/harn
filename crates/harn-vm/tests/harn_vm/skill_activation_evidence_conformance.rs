@@ -177,7 +177,9 @@ fn budget_pressure_moves_cards_from_shown_to_omitted() {
     let registry = discovered_registry();
     // A tight budget shows a card or two and forces the rest into budget
     // omission (five model-invocable cards cannot all fit).
-    let payload = evidence(registry, "{budget: 320}");
+    // The budget is the catalog header plus room for one card.
+    let budget = harn_vm::skills::evidence::CATALOG_HEADER.len() + 169;
+    let payload = evidence(registry, &format!("{{budget: {budget}}}"));
     let cards = cards(&payload);
     let shown = match payload.get("shown") {
         Some(VmValue::List(list)) => list.len(),

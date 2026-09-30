@@ -38,7 +38,8 @@ pub mod wal_watch;
 
 pub use change::{SessionChangeObserver, SharedSessionChangeObserver};
 pub use control::{
-    ControlAction, ControlEvent, ControlProvenance, CONTROL_EVENT_KIND, CONTROL_EVENT_SCHEMA,
+    ControlAction, ControlEvent, ControlGoal, ControlProvenance, CONTROL_EVENT_KIND,
+    CONTROL_EVENT_SCHEMA,
 };
 pub use event::{
     canonical_event_bytes, canonical_json_bytes, AppendEvent, EventId, EventSignature,

@@ -39,7 +39,7 @@ fn mock_style_native_tool_calls_reach_assistant_envelope() {
     // does not know as native-tools ("fixture"). This must still surface the
     // tool call to the assistant envelope, or a downstream native-tool mock
     // test sees zero tool-call events and stops with end_turn.
-    use super::super::super::api::{vm_build_llm_result, LlmResult, ProviderTelemetry};
+    use super::super::super::api::{vm_build_llm_result, LlmResult};
     let result = LlmResult {
         attempts: Default::default(),
         text_projection: None,
@@ -64,7 +64,7 @@ fn mock_style_native_tool_calls_reach_assistant_envelope() {
         stop_reason: Some("tool_use".to_string()),
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
     };
     let vm_result = vm_build_llm_result(
         &result,

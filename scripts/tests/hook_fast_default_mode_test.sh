@@ -60,7 +60,7 @@ cp "$repo_root/.githooks/pre-push" "$work/.githooks/pre-push"
 chmod +x "$work/.githooks/pre-commit"
 chmod +x "$work/.githooks/pre-push"
 
-git -C "$work" init --quiet
+git -C "$work" init -b main --quiet
 git -C "$work" config user.email "test@example.com"
 git -C "$work" config user.name "Test User"
 git -C "$work" config commit.gpgsign false

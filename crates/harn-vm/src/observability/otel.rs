@@ -257,10 +257,13 @@ struct OrchestratorLogLineWriter {
 
 impl Write for OrchestratorLogLineWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self.format {
-            LogFormat::Json => io::stdout().write_all(buf)?,
-            LogFormat::Text | LogFormat::Pretty => io::stderr().write_all(buf)?,
-        }
+        // The log exporter is a diagnostic, so a host that owns the terminal
+        // owns it too.
+        let stream = match self.format {
+            LogFormat::Json => crate::host_stdio::HostStdioStream::Stdout,
+            LogFormat::Text | LogFormat::Pretty => crate::host_stdio::HostStdioStream::Stderr,
+        };
+        crate::host_stdio::write_bytes(stream, buf);
         if let Some(file) = self.file.as_ref() {
             file.lock()
                 .expect("orchestrator log file poisoned")

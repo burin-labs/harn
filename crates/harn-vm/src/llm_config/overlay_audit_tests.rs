@@ -379,6 +379,8 @@ fn every_config_section_is_auditable() {
     let populated = overlay(EVERY_SECTION);
     let ProvidersConfig {
         default_provider,
+        fallback_model,
+        provider_defaults,
         providers,
         aliases,
         alias_tool_calling,
@@ -398,6 +400,8 @@ fn every_config_section_is_auditable() {
         data_controls_policy,
     } = &populated;
     assert!(default_provider.is_some());
+    assert!(fallback_model.is_some());
+    assert!(!provider_defaults.is_empty());
     assert!(!providers.is_empty());
     assert!(!aliases.is_empty());
     assert!(!alias_tool_calling.is_empty());
@@ -427,6 +431,11 @@ fn every_config_section_is_auditable() {
 /// An overlay that exercises every section [`ProvidersConfig`] carries.
 const EVERY_SECTION: &str = r#"
 default_provider = "demo"
+fallback_model = "demo-slow"
+
+[provider_defaults.demo]
+runtime = "demo-slow"
+portal = "demo-slow"
 
 [data_controls_policy]
 default_posture = "strictest_available"

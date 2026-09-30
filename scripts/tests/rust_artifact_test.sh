@@ -226,4 +226,78 @@ MAX_BYTES_OVERRIDE=1 \
   expect_failure "build-tests accepted an over-budget bundle" \
   run_artifact build-tests "$tmpdir/out/build-over-budget.tar.zst" "$commit"
 
+# restore-candidate: a release candidate archive, checked against the candidate
+# manifest the build wrote at the same commit.
+candidate_target=x86_64-unknown-linux-gnu
+candidate_file="harn-${candidate_target}.tar.gz"
+mkdir -p "$tmpdir/candidate-src" "$tmpdir/candidate"
+printf '#!/usr/bin/env bash\necho candidate-harn\n' > "$tmpdir/candidate-src/harn"
+chmod +x "$tmpdir/candidate-src/harn"
+ln -s harn "$tmpdir/candidate-src/harn-lsp"
+tar -czf "$tmpdir/candidate/$candidate_file" -C "$tmpdir/candidate-src" harn harn-lsp
+candidate_sha="$(sha256sum "$tmpdir/candidate/$candidate_file" | cut -d ' ' -f 1)"
+write_candidate_manifest() {
+  local output=$1 source_commit=$2 digest=$3
+  jq -n --arg commit "$source_commit" --arg sha "$digest" \
+    --arg target "$candidate_target" --arg file "$candidate_file" '{
+      schemaVersion: "burin-labs.candidate_manifest.v1",
+      repository: "burin-labs/harn",
+      sourceCommit: $commit,
+      runId: "1",
+      runAttempt: "1",
+      artifacts: [{
+        kind: "archive", target: $target, artifact: ("harn-" + $target), file: $file,
+        sha256: $sha,
+        attestationPredicateType: "https://harnlang.com/attestations/release-archive/v1",
+        signingStatus: "not_applicable", notarizationStatus: "not_applicable"
+      }]
+    }' > "$output"
+}
+write_candidate_manifest "$tmpdir/candidate/manifest.json" "$commit" "$candidate_sha"
+
+candidate_env="$tmpdir/candidate-github-env"
+run_artifact restore-candidate "$tmpdir/candidate/$candidate_file" \
+  "$tmpdir/candidate/manifest.json" "$candidate_target" "$tmpdir/restored-candidate" \
+  "$commit" "$candidate_env"
+restored_candidate="$(cd "$tmpdir/restored-candidate" && pwd -P)"
+"$restored_candidate/harn" | grep -Fxq candidate-harn
+test -L "$restored_candidate/harn-lsp"
+grep -Fxq "HARN_BIN=$restored_candidate/harn" "$candidate_env"
+grep -Fxq "SOURCE_GATE_CI_BINARY_COMMIT=$commit" "$candidate_env"
+grep -Fxq "SOURCE_GATE_CI_BINARY_SHA256=$(sha256sum "$restored_candidate/harn" | cut -d ' ' -f 1)" \
+  "$candidate_env"
+grep -Fxq "SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID=$candidate_sha" "$candidate_env"
+
+# Negative control: the checkout is not the commit the caller asked for.
+FAKE_COMMIT_OVERRIDE=fedcba9876543210fedcba9876543210fedcba98 \
+  expect_failure "restore-candidate accepted a checkout at another commit" \
+  run_artifact restore-candidate "$tmpdir/candidate/$candidate_file" \
+  "$tmpdir/candidate/manifest.json" "$candidate_target" "$tmpdir/candidate-wrong-head" "$commit"
+test ! -e "$tmpdir/candidate-wrong-head"
+
+# Negative control: the archive's bytes are not the bytes the manifest records.
+cp "$tmpdir/candidate/$candidate_file" "$tmpdir/candidate/substituted.tar.gz"
+printf 'substituted\n' >> "$tmpdir/candidate/substituted.tar.gz"
+mkdir -p "$tmpdir/candidate-substituted"
+mv "$tmpdir/candidate/substituted.tar.gz" "$tmpdir/candidate-substituted/$candidate_file"
+expect_failure "restore-candidate accepted an archive whose digest differs from the manifest" \
+  run_artifact restore-candidate "$tmpdir/candidate-substituted/$candidate_file" \
+  "$tmpdir/candidate/manifest.json" "$candidate_target" "$tmpdir/candidate-bad-digest" "$commit"
+test ! -e "$tmpdir/candidate-bad-digest"
+
+# Negative control: a manifest another commit's build wrote, even with matching bytes.
+write_candidate_manifest "$tmpdir/candidate/other-commit.json" \
+  fedcba9876543210fedcba9876543210fedcba98 "$candidate_sha"
+expect_failure "restore-candidate accepted a manifest from another commit" \
+  run_artifact restore-candidate "$tmpdir/candidate/$candidate_file" \
+  "$tmpdir/candidate/other-commit.json" "$candidate_target" "$tmpdir/candidate-other-commit" "$commit"
+test ! -e "$tmpdir/candidate-other-commit"
+
+expect_failure "restore-candidate accepted a target the manifest does not list" \
+  run_artifact restore-candidate "$tmpdir/candidate/$candidate_file" \
+  "$tmpdir/candidate/manifest.json" aarch64-apple-darwin "$tmpdir/candidate-other-target" "$commit"
+expect_failure "restore-candidate overwrote an existing destination" \
+  run_artifact restore-candidate "$tmpdir/candidate/$candidate_file" \
+  "$tmpdir/candidate/manifest.json" "$candidate_target" "$tmpdir/restored-candidate" "$commit"
+
 echo "rust_artifact_test: ok"

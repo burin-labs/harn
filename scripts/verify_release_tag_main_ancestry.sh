@@ -3,21 +3,30 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/verify_release_tag_main_ancestry.sh --tag vX.Y.Z[-PRERELEASE] [--repo PATH]
+Usage: scripts/verify_release_tag_main_ancestry.sh --tag vX.Y.Z[-PRERELEASE] [--repo PATH] [--expect-commit SHA]
 
 Verify that an immutable remote release tag selects a genuine matching release
 on main or a trusted signed release candidate based on main. The command is read-only with respect to
 the remote and does not trust ambient local tag refs.
+
+--expect-commit also refuses a tag that selects any other commit. This script is
+the one reader of which commit a release tag selects, lightweight or annotated;
+callers pass the commit they hold instead of reading the tag again.
 EOF
   exit 2
 }
 
 tag=""
 repo="."
+expect_commit=""
 while (($# > 0)); do
   case "$1" in
     --tag)
       tag="${2:-}"
+      shift 2
+      ;;
+    --expect-commit)
+      expect_commit="${2:-}"
       shift 2
       ;;
     --repo)
@@ -38,6 +47,10 @@ if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]
   echo "error: expected canonical release tag, got '${tag:-<empty>}'" >&2
   exit 2
 fi
+if [[ -n "$expect_commit" && ! "$expect_commit" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "error: --expect-commit takes one full commit sha, got '$expect_commit'" >&2
+  exit 2
+fi
 if [[ ! -d "$repo/.git" && ! -f "$repo/.git" ]]; then
   echo "error: not a git worktree: $repo" >&2
   exit 2
@@ -48,15 +61,34 @@ remote_rows="$(
 )"
 tag_object="$(awk -v ref="refs/tags/$tag" '$2 == ref {print $1}' <<<"$remote_rows")"
 tag_target="$(awk -v ref="refs/tags/$tag^{}" '$2 == ref {print $1}' <<<"$remote_rows")"
+# Promotion publishes through the Releases API, which creates a lightweight tag:
+# the ref names the release commit itself and has no peeled row.
+lightweight=false
+if [[ "$tag_object" =~ ^[0-9a-f]{40}$ && -z "$tag_target" ]]; then
+  tag_target="$tag_object"
+  lightweight=true
+fi
 if [[ ! "$tag_object" =~ ^[0-9a-f]{40}$ || ! "$tag_target" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "error: origin/$tag is missing or is not an annotated tag resolving to one exact commit" >&2
+  echo "error: origin/$tag is missing or does not resolve to one exact commit" >&2
+  exit 1
+fi
+if [[ -n "$expect_commit" && "$tag_target" != "$expect_commit" ]]; then
+  echo "error: origin/$tag selects $tag_target, not the expected commit $expect_commit" >&2
   exit 1
 fi
 
 git -C "$repo" fetch --quiet --no-tags origin main "$tag_object"
+if [[ "$lightweight" == true && "$(git -C "$repo" cat-file -t "$tag_target")" != commit ]]; then
+  echo "error: origin/$tag is a lightweight tag that does not name a commit" >&2
+  exit 1
+fi
 main_head="$(git -C "$repo" rev-parse --verify 'origin/main^{commit}')"
 candidate=false
 if ! git -C "$repo" merge-base --is-ancestor "$tag_target" "$main_head"; then
+  if [[ "$lightweight" == true ]]; then
+    echo "error: origin/$tag is not reachable from origin/main, and a lightweight tag carries no candidate signature" >&2
+    exit 1
+  fi
   # Trust policy comes from main, never from the unmerged candidate being judged.
   # Verify the remote tag object itself so an ambient local tag cannot supply
   # a signature for different bytes. The signed marker is durable certification

@@ -433,13 +433,15 @@ pub enum AgentEvent {
         skipped: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-        /// True when this `verdict: "pass"` is the result of the step-judge
-        /// model itself erroring and `fail_open` swallowing the error — the
-        /// turn proceeded, but the adversarial-review surface was UNAVAILABLE
-        /// (not a genuine approval). Lets telemetry tell an inert reviewer
-        /// apart from a real pass. Mirrors `reason: "judge_unavailable"`.
+        /// The judge could not review the turn; it proceeded as `unavailable`, not a pass.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         judge_error: bool,
+        /// Closed-set cause when `judge_error`: schema_unsupported, model_unconfigured, ...
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unavailable_reason: Option<String>,
+        /// Unavailable decisions so far in this loop, including this one.
+        #[serde(default, skip_serializing_if = "is_zero_usize")]
+        unavailable_count: usize,
         on_veto: String,
         input_tokens: u64,
         output_tokens: u64,
@@ -1086,6 +1088,14 @@ pub enum AgentEvent {
         catalog_parity: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         override_reason: Option<String>,
+        /// Format actually sent after explicit-route steering. Absence keeps
+        /// older records distinct from a route that made no change.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        applied_format: Option<String>,
+        /// Whether the requested format was changed for this route. Preserve
+        /// explicit false rather than inferring it from a missing field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        steered: Option<bool>,
     },
     /// Emitted when a `tool_caller` middleware (see std/llm/tool_middleware)
     /// attaches structured audit metadata to a tool call — typically a

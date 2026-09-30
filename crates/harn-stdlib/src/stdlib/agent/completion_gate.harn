@@ -18,7 +18,11 @@ import {
   __completion_gate_feedback_keys,
   __completion_gate_ladder,
 } from "std/agent/judge_internals"
-import { CompletionObligations, completion_obligations_from_messages } from "std/agent/obligations"
+import {
+  CompletionObligations,
+  completion_obligations_from_messages,
+  completion_obligations_requirements,
+} from "std/agent/obligations"
 import { CompletionRequirementContract, JudgeConfig } from "std/agent/options_types"
 
 /**
@@ -358,8 +362,10 @@ fn __completion_gate_evaluate(
     nil
   }
   const verify = __completion_gate_combine_verify(verify_raw)
+  // A retarget retires the rows declared under the replaced objective, exactly
+  // as it does for the judge; the gate must not veto on work the user withdrew.
   const requirement_report = completion_requirement_report(
-    opts?.requirement_contract,
+    completion_obligations_requirements(opts?.requirement_contract, ctx.obligations).contract,
     raw?.requirement_assessments,
     {requirement_evidence: raw?.requirement_evidence ?? []},
   )

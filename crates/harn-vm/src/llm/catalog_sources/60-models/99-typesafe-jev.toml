@@ -123,3 +123,25 @@ strengths = ["speed", "cheap"]
 row_kind = "snapshot"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
+
+# OpenRouter moving selector. On 2026-09-26 a boolean question sent to
+# `~typesafe/jev-latest` on /api/alpha/decisions came back from
+# typesafe/jev-1.13-20260917. https://openrouter.ai/api/v1/models/~typesafe/jev-latest/endpoints
+[models."openrouter/typesafe/jev-latest"]
+name = "Jev Latest (OpenRouter)"
+blurb = "Follows TypeSafe's current Jev release through OpenRouter's alpha decisions endpoint."
+provider = "openrouter"
+wire_model = "~typesafe/jev-latest"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+served_variant = "openrouter"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap"]
+row_kind = "selector"
+current_snapshot = "openrouter/typesafe/jev-1.13"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"

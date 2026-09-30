@@ -10,6 +10,8 @@ mod context_window;
 pub mod data_controls;
 mod dialect;
 pub(crate) mod errors;
+pub(crate) mod inference_boundary;
+mod isolated_request;
 mod ollama;
 mod openai_normalize;
 pub(crate) mod options;
@@ -20,6 +22,7 @@ mod schema_stream;
 mod telemetry;
 mod thinking;
 mod transport;
+pub(crate) use transport::reqwest_send_error;
 
 use crate::value::{ErrorCategory, VmError, VmValue};
 
@@ -47,20 +50,23 @@ pub(crate) use errors::{
 /// envelope. Public so the protocol-artifact generator can project them into
 /// every host binding rather than leaving `kind`/`reason` as bare strings.
 pub use errors::{LlmErrorKind, LlmErrorReason};
+pub(crate) use inference_boundary::InferenceBoundary;
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;
 pub use ollama::{
-    normalize_ollama_keep_alive, ollama_readiness, ollama_runtime_settings_from_env,
-    warm_ollama_model, warm_ollama_model_with_settings, OllamaReadinessOptions,
-    OllamaReadinessResult, OllamaRuntimeSettings, OllamaWarmupResult, HARN_OLLAMA_KEEP_ALIVE_ENV,
-    HARN_OLLAMA_NUM_CTX_ENV, OLLAMA_DEFAULT_KEEP_ALIVE, OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
+    normalize_ollama_keep_alive, ollama_readiness, ollama_readiness_for_provider,
+    ollama_runtime_settings_from_env, warm_ollama_model, warm_ollama_model_with_settings,
+    OllamaReadinessOptions, OllamaReadinessResult, OllamaRuntimeSettings, OllamaWarmupResult,
+    HARN_OLLAMA_KEEP_ALIVE_ENV, HARN_OLLAMA_NUM_CTX_ENV, OLLAMA_DEFAULT_KEEP_ALIVE,
+    OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
 };
 pub(crate) use openai_normalize::normalize_openai_style_messages;
 pub(crate) use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmApiMode, LlmCallOptions, LlmRequestPayload,
     LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, LogprobsConfig,
     MirostatConfig, OutputFormat, PromptCacheTtl, ReasoningEffort, ReminderLifecycleEmission,
-    ThinkingConfig, TokenBias, ToolSearchConfig, ToolSearchMode, ToolSearchVariant, Verbosity,
+    ResolvedSetting, ThinkingConfig, TokenBias, ToolSearchConfig, ToolSearchMode,
+    ToolSearchVariant, Verbosity,
 };
 #[cfg(test)]
 pub(crate) use response::empty_generation_error;
@@ -450,9 +456,10 @@ async fn vm_call_llm_full_inner_request(
         // Bypass fixture/replay so the script-driven fake never collides
         // with HARN_LLM_REPLAY/RECORD being set from an outer harness.
         request.emit_reminder_lifecycle();
-        let result = crate::llm::fake::FakeLlmProvider
+        let mut result = crate::llm::fake::FakeLlmProvider
             .chat_impl(request, delta_tx)
             .await?;
+        super::mock::mark_live_after_mock_prefix(request, &mut result);
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(request, &result);
         return Ok(result);
@@ -473,13 +480,16 @@ async fn vm_call_llm_full_inner_request(
     }
 
     super::ensure_real_llm_allowed(&request.provider)?;
+    let boundary_rule = inference_boundary::preflight_chat(request).map_err(VmError::Runtime)?;
     request.emit_reminder_lifecycle();
     observed.record_provider_dispatch();
 
     // Provider/model failover is owned by `routing::execute_with_routing`.
     // This layer executes exactly one route so no attempt can bypass the
     // canonical ledger, quarantine, or exhaustion contract.
-    let result = vm_call_llm_api(request, delta_tx).await?;
+    let mut result = vm_call_llm_api(request, delta_tx).await?;
+    result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
+    super::mock::mark_live_after_mock_prefix(request, &mut result);
 
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
@@ -510,10 +520,11 @@ async fn vm_call_llm_full_inner_offthread(
 
     if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
         observed.record_provider_dispatch();
-        let result = crate::llm::fake::FakeLlmProvider
+        let mut result = crate::llm::fake::FakeLlmProvider
             .chat_impl(request, delta_tx)
             .await
             .map_err(OffthreadLlmError::from_vm_error)?;
+        super::mock::mark_live_after_mock_prefix(request, &mut result);
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(request, &result);
         return Ok(result);
@@ -535,13 +546,17 @@ async fn vm_call_llm_full_inner_offthread(
     }
 
     super::ensure_real_llm_allowed(&request.provider).map_err(OffthreadLlmError::from_vm_error)?;
+    let boundary_rule = inference_boundary::preflight_chat(request)
+        .map_err(OffthreadLlmError::from_display_message)?;
     observed.record_provider_dispatch();
 
     // Keep the off-thread transport primitive single-route as well. The caller
     // routing executor owns all retries across provider/model alternatives.
-    let result = vm_call_llm_api(request, delta_tx)
+    let mut result = vm_call_llm_api(request, delta_tx)
         .await
         .map_err(OffthreadLlmError::from_vm_error)?;
+    result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
+    super::mock::mark_live_after_mock_prefix(request, &mut result);
 
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);

@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use crate::event_log::{AnyEventLog, EventId, EventLog, LogError};
 use crate::provenance::event_record_hash_from_headers;
 use crate::redact::{current_policy, RedactionPolicy};
+use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use super::super::ArtifactRecord;
 use super::{
@@ -717,6 +718,13 @@ fn build_approval_view(
 
 fn provider_summary(run: &RunRecord) -> Vec<RunViewProvider> {
     let mut providers = BTreeMap::<(String, String), RunViewProvider>::new();
+    // Re-pricing a recorded run must use the card that was in force while the
+    // run executed, not today's. `span.start_ms` is relative to the collector's
+    // epoch, so the run's own RFC 3339 start is what anchors it to a date; a
+    // run whose start does not parse falls back to the base card at the epoch
+    // rather than silently adopting a current promotion.
+    let run_started_at =
+        OffsetDateTime::parse(&run.started_at, &Rfc3339).unwrap_or(OffsetDateTime::UNIX_EPOCH);
     for span in run
         .evidence
         .trace_spans
@@ -747,6 +755,7 @@ fn provider_summary(run: &RunRecord) -> Vec<RunViewProvider> {
                     &model,
                     input_tokens,
                     output_tokens,
+                    run_started_at + Duration::milliseconds(span.start_ms as i64),
                 )
             });
         let entry = providers

@@ -343,6 +343,7 @@ catalog source data and pass only the stable ladder name from policy code.
 | `prefill` | string | Assistant prefill where the route supports it. |
 | `previous_response_id` | string | OpenAI Responses conversation-state link. |
 | `data_controls` | string | Requested provider retention/training posture: `"default"` or `"strictest_available"`. See [Provider data controls](providers.md#provider-data-controls). |
+| `inference_boundary` | dict | Optional ceiling with `reach` (`local_only`, `hosted_open_weight`, or `any_hosted`) and `allow_training_discounts` (bool). Harn checks the resolved route before live transport and records the governing rule plus catalog evidence in the data-controls receipt. See [Inference destination boundaries](providers.md#inference-destination-boundaries). |
 
 Each system fragment has `{content, title?, position?: "before"|"after",
 enabled?}`. Use `system_before`, `system_after`, and `with_system_fragments`
@@ -969,7 +970,7 @@ const bounded: LlmBudget = {
 }
 const answer = try {
   harness.llm.call("Return one word", nil, {
-    provider: "openai", model: "gpt-5.6-luna",
+    provider: "openai", model: "gpt-6-luna",
     max_tokens: 64, budget: bounded,
   })
 }
@@ -1048,7 +1049,45 @@ Configure this before the first prompt: cold-restored sessions cannot prove
 their prior reservation state and refuse conservative admission. Start a new
 independently allocated run instead. Durable worker declarations currently
 refuse this mode before module execution; their persisted grant lifecycle is
-not yet supported. These host scopes still do not allocate across processes.
+not yet supported. These host scopes still do not allocate across processes
+unless the host installs a machine spend quota.
+
+### Machine spend quota for native hosts
+
+`harn_vm::MachineSpendQuota` provides a durable UTC daily and calendar-month
+ceiling across processes. The host opens the same private SQLite path and
+billing-scope ID for every session belonging to one person. Policy amounts are
+integer micro-USD, so `1_000_000` is one dollar. A host wraps the whole model
+execution tree in `quota.scope(future)` before its first provider attempt. A
+`ConservativeLlmBudget` created within that scope may impose a tighter
+per-session ceiling. Retries, fallbacks, streaming, and spawned calls use the
+same pre-transport reservation boundary. Unsupported billing shapes and
+unknown prices fail closed. The provider registry's self-hosted runtimes are
+known-zero and consume no monetary allowance.
+
+The quota reserves the catalog upper bound atomically before transport. A
+process crash, cancellation, or missing usage leaves that bound reserved; only
+complete provider usage can release a proven unused portion. The receipt keeps
+priced observed usage and the count of attempts without confirmed usage
+separate from the reserved allowance; neither is a provider invoice. An
+observed provider contract violation latches a durable refusal, including
+after restart, so later calls cannot rely on an invalid cost bound. A quota
+exhaustion error reports the limiting day or month,
+remaining allowance, and the UTC reset instant. Sessions in separate projects
+must use the same path and billing-scope ID to share one ceiling.
+While the scope is active, `harness.llm.session_cost().machine_spend` carries
+the same typed receipt; it is absent when no machine quota is installed.
+`harness.llm.budget_remaining()` reports the tightest remaining session,
+execution, or machine allowance that is set.
+
+The first opener records the policy. A later opener with a different policy is
+refused. An authorized host administrator can call `update_policy` with a
+nonempty approval reference; the change and previous limits are recorded in
+the same database transaction. `session/set_budget` remains a per-session
+control and cannot silently raise the durable machine ceiling. The host owns
+authentication of the administrator and the database path; scripts running in
+the VM have no direct policy-update operation. Reservations protect cataloged
+provider charges, not external connector, tool, or platform fees.
 
 | Function | Description |
 |---|---|

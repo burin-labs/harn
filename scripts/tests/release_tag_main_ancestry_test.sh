@@ -6,7 +6,7 @@ verifier="$root/scripts/verify_release_tag_main_ancestry.sh"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-release-main-tag-test.XXXXXX")"
 trap 'rm -rf "$tmp_root"' EXIT
 
-git init --bare -q "$tmp_root/origin.git"
+git init -b main --bare -q "$tmp_root/origin.git"
 git init -q -b main "$tmp_root/work"
 git -C "$tmp_root/work" config user.name Test
 git -C "$tmp_root/work" config user.email test@example.com
@@ -33,15 +33,47 @@ output="$($verifier --repo "$tmp_root/work" --tag v1.2.3)"
   echo "FAIL: canonical merged-main release tag was not accepted" >&2
   exit 1
 }
+bootstrap_commit="$(git -C "$tmp_root/work" rev-parse HEAD^)"
+
+# Finalization passes the commit it checked out; the verifier alone decides
+# whether the tag selects it.
+expect_selects() {
+  local kind="$1"
+  "$verifier" --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$release_commit" >/dev/null || {
+    echo "FAIL: $kind tag on the expected Release commit was refused" >&2
+    exit 1
+  }
+  if "$verifier" --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$bootstrap_commit" \
+    >"$tmp_root/elsewhere.out" 2>&1; then
+    echo "FAIL: $kind tag selecting a different commit than the checkout was accepted" >&2
+    exit 1
+  fi
+  grep -Fq "selects $release_commit, not the expected commit $bootstrap_commit" "$tmp_root/elsewhere.out" || {
+    echo "FAIL: $kind mismatch refusal did not name both commits: $(cat "$tmp_root/elsewhere.out")" >&2
+    exit 1
+  }
+}
+expect_selects annotated
 
 if "$verifier" --repo "$tmp_root/work" --tag v9.9.9 >"$tmp_root/missing.out" 2>&1; then
   echo "FAIL: missing release tag was accepted" >&2
   exit 1
 fi
-grep -q 'missing or is not an annotated tag' "$tmp_root/missing.out" || {
+grep -q 'missing or does not resolve to one exact commit' "$tmp_root/missing.out" || {
   echo "FAIL: missing-tag rejection did not name the remote tag invariant" >&2
   exit 1
 }
+
+# Promotion publishes through the Releases API, which tags the release commit
+# with a lightweight ref. The same merged Release commit is accepted that way.
+git -C "$tmp_root/origin.git" update-ref refs/tags/v1.2.3 "$release_commit"
+lw_output="$($verifier --repo "$tmp_root/work" --tag v1.2.3)"
+[[ "$lw_output" == *"$release_commit"*"trusted candidate=false"* ]] || {
+  echo "FAIL: lightweight tag on the merged Release commit was not accepted: $lw_output" >&2
+  exit 1
+}
+expect_selects lightweight
+git -C "$tmp_root/work" push -q --force origin refs/tags/v1.2.3
 
 if "$verifier" --repo "$tmp_root/work" --tag release-1.2.3 \
   >"$tmp_root/malformed.out" 2>&1; then
@@ -68,6 +100,17 @@ grep -q 'not reachable from origin/main' "$tmp_root/orphan.out" || {
   exit 1
 }
 
+# A lightweight tag carries no signature, so off main it has no way in.
+git -C "$tmp_root/origin.git" update-ref refs/tags/v1.2.4 "$(git -C "$tmp_root/work" rev-parse HEAD)"
+if "$verifier" --repo "$tmp_root/work" --tag v1.2.4 >"$tmp_root/orphan-lw.out" 2>&1; then
+  echo "FAIL: lightweight tag on an off-main commit was accepted" >&2
+  exit 1
+fi
+grep -q 'a lightweight tag carries no candidate signature' "$tmp_root/orphan-lw.out" || {
+  echo "FAIL: off-main lightweight rejection did not say why: $(cat "$tmp_root/orphan-lw.out")" >&2
+  exit 1
+}
+
 # Real cryptographic controls: the same off-main commit becomes admissible only
 # through the trusted release signer's exact candidate endorsement.
 candidate_commit="$(git -C "$tmp_root/work" rev-parse HEAD)"
@@ -84,6 +127,14 @@ grep -q 'trusted candidate=true' "$tmp_root/candidate.out"
 "$tmp_root/release-tools/verify_release_tag_main_ancestry.sh" \
   --repo "$tmp_root/work" --tag v1.2.4 >/dev/null
 grep -Fq '"$SCRIPT_DIR/verify_release_tag_main_ancestry.sh"' "$tmp_root/release-tools/release_ship.sh"
+grep -Fq -- '--expect-commit "$(git rev-parse HEAD)"' "$tmp_root/release-tools/release_ship.sh" || {
+  echo "FAIL: release_ship.sh does not hand its checkout to the tag verifier" >&2
+  exit 1
+}
+if grep -n 'ls-remote' "$tmp_root/release-tools/release_ship.sh"; then
+  echo "FAIL: release_ship.sh reads a remote ref itself; the tag verifier owns that read" >&2
+  exit 1
+fi
 
 # Terminal cleanup may remove the certify ref; the signed endorsement remains.
 git -C "$tmp_root/work" push -q origin "$candidate_commit:refs/heads/release-certify/$candidate_commit"

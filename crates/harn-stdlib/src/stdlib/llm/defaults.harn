@@ -31,33 +31,22 @@ fn __has_key(d: dict, key: any) {
 // -------------------------------------------------------------------------------------------------
 
 /**
- * Per-task defaults; tunable, NOT a published vendor recommendation.
- * Only fills fields that effort/thinking layers haven't already set.
+ * Per-task output-shape defaults. Sampling (temperature, top_p) is not set
+ * here: current reasoning models reject or ignore it, and publisher-endorsed
+ * sampling lives in the catalog's `model_defaults`, which `resolved_options`
+ * already applied. Only fills fields that earlier layers haven't set.
  * task ∈ {"chat","agent","refine","judge","summarize","code","json"}.
  */
 fn __task_overlay(task: string) {
-  if task == "chat" {
-    return {temperature: 0.7, top_p: 0.95, schema_retries: 0, output: "text"}
-  }
-  if task == "agent" {
-    return {temperature: 0.5, top_p: 0.95, schema_retries: 0, output: "text"}
+  if task == "judge" || task == "json" {
+    return {schema_retries: 2, output: "json"}
   }
   if task == "refine" {
-    return {temperature: 0.4, top_p: 0.9, schema_retries: 1, output: "text"}
+    return {schema_retries: 1, output: "text"}
   }
-  if task == "judge" {
-    return {temperature: 0.0, top_p: 1.0, schema_retries: 2, output: "json"}
+  if contains(["chat", "agent", "summarize", "code"], task) {
+    return {schema_retries: 0, output: "text"}
   }
-  if task == "summarize" {
-    return {temperature: 0.3, top_p: 0.9, schema_retries: 0, output: "text"}
-  }
-  if task == "code" {
-    return {temperature: 0.2, top_p: 0.95, schema_retries: 0, output: "text"}
-  }
-  if task == "json" {
-    return {temperature: 0.1, top_p: 1.0, schema_retries: 2, output: "json"}
-  }
-  // unknown task → no overlay
   return {}
 }
 

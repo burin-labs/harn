@@ -12,14 +12,30 @@ use super::question::QuestionSet;
 
 pub const EVALUATION_RECEIPT_SCHEMA: &str = "harn.evaluation.receipt.v1";
 
+/// Execution-owned evaluation state inherited by child VMs.
+#[derive(Clone, Default)]
+pub(crate) struct EvaluationExecutionState {
+    pub journal: std::sync::Arc<parking_lot::Mutex<EvaluationJournal>>,
+    pub replay: Option<super::replay::EvaluationReplayScope>,
+}
+
 /// Bounded execution-owned journal shared by a VM and its children.
 #[derive(Default)]
 pub(crate) struct EvaluationJournal {
     receipts: Vec<EvaluationReceipt>,
     dropped: usize,
+    next_invocation: u64,
 }
 
 impl EvaluationJournal {
+    pub(crate) fn invocation_id(&mut self, execution_id: &str) -> String {
+        let sequence = self.next_invocation;
+        self.next_invocation = sequence
+            .checked_add(1)
+            .expect("evaluation sequence exhausted");
+        format!("{execution_id}/evaluation/{sequence}")
+    }
+
     pub(crate) fn record(&mut self, receipt: EvaluationReceipt) {
         if self.receipts.len() < 1024 {
             self.receipts.push(receipt);
@@ -108,6 +124,13 @@ pub struct EvaluationQuestionReceipt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EvaluationReceipt {
+    /// Execution occurrence, distinct from the stable request evaluation_id.
+    /// Historical receipts did not record an occurrence identifier.
+    #[serde(default)]
+    pub invocation_id: Option<String>,
+    /// Original provider accounting retained as provenance on reuse only.
+    #[serde(default)]
+    pub reused_from: Option<Box<EvaluationReceipt>>,
     /// Present for completed calls. Adaptive estimates can be exceeded by the
     /// actual bill; conservative admission reserves a supported upper bound.
     #[serde(default)]
@@ -124,8 +147,9 @@ pub struct EvaluationReceipt {
     pub identity: EvaluationIdentity,
     pub requested_provider: String,
     pub requested_model: String,
-    /// The identity the provider served, exactly as it returned it. Absent
-    /// when nothing was dispatched or the provider named nothing.
+    /// Provider-reported model that produced the answer. On reuse this is
+    /// answer provenance; reused_from names the original call. Absent when
+    /// the original evaluation never dispatched or the provider named nothing.
     pub served_model: Option<String>,
     pub questions: Vec<EvaluationQuestionReceipt>,
     pub outcome_kind: String,
@@ -149,6 +173,11 @@ pub struct EvaluationReceipt {
     /// Present when the provider explained a refusal the evaluator mapped onto
     /// an arm, such as the reported reason behind `state_too_large`.
     pub provider_reason: Option<String>,
+    /// The spend admission refusal behind an `admission_refused` or
+    /// `budget_cut` arm, in the `admission_reason` vocabulary chat calls
+    /// throw, such as `late_activation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_reason: Option<String>,
     pub estimated_state_tokens: Option<usize>,
     pub estimated_longest_question_tokens: Option<usize>,
     pub estimated_request_tokens: Option<usize>,
@@ -170,6 +199,8 @@ impl EvaluationReceipt {
         elapsed_ms: u64,
     ) -> Self {
         Self {
+            invocation_id: None,
+            reused_from: None,
             cost_admission: None,
             usage: None,
             native_transport: None,
@@ -200,6 +231,7 @@ impl EvaluationReceipt {
             source: EvaluationSource::Live,
             elapsed_ms,
             provider_reason: None,
+            admission_reason: None,
             estimated_state_tokens: None,
             estimated_longest_question_tokens: None,
             estimated_request_tokens: None,
@@ -232,6 +264,9 @@ impl EvaluationReceipt {
     /// The opaque handle a caller receives. The journal owns the contents; a
     /// caller can correlate but cannot read the evaluation out of the string.
     pub fn reference(&self) -> String {
-        self.evaluation_id.clone()
+        self.invocation_id
+            .as_ref()
+            .unwrap_or(&self.evaluation_id)
+            .clone()
     }
 }

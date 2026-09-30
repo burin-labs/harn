@@ -395,37 +395,37 @@ fn resolve_model(
                 model: resolved.id,
             })
         }
-        (Some(provider), None) => Some(ResolvedModel {
-            model: harn_vm::llm_config::default_model_for_provider(&provider),
-            provider,
-        }),
-        (None, None) => Some(resolve_default_model()),
+        (Some(provider), None) => harn_vm::llm_config::default_model_for_provider(&provider)
+            .ok()
+            .map(|model| ResolvedModel { provider, model }),
+        (None, None) => resolve_default_model(),
     }
 }
 
-fn resolve_default_model() -> ResolvedModel {
+fn resolve_default_model() -> Option<ResolvedModel> {
     if let Ok(provider) = std::env::var("HARN_LLM_PROVIDER") {
         let provider = provider.trim().to_string();
         if !provider.is_empty() && !provider.eq_ignore_ascii_case("auto") {
-            let model = std::env::var("HARN_LLM_MODEL")
-                .ok()
-                .map(|raw| harn_vm::llm_config::resolve_model(&raw).0)
-                .unwrap_or_else(|| harn_vm::llm_config::default_model_for_provider(&provider));
-            return ResolvedModel { provider, model };
+            let model = if let Ok(raw) = std::env::var("HARN_LLM_MODEL") {
+                harn_vm::llm_config::resolve_model(&raw).0
+            } else {
+                harn_vm::llm_config::default_model_for_provider(&provider).ok()?
+            };
+            return Some(ResolvedModel { provider, model });
         }
     }
 
     if let Ok(raw_model) = std::env::var("HARN_LLM_MODEL") {
         let resolved = harn_vm::llm_config::resolve_model_info(&raw_model);
-        return ResolvedModel {
+        return Some(ResolvedModel {
             provider: resolved.provider,
             model: resolved.id,
-        };
+        });
     }
 
     let provider = harn_vm::llm_config::default_provider();
-    let model = harn_vm::llm_config::default_model_for_provider(&provider);
-    ResolvedModel { provider, model }
+    let model = harn_vm::llm_config::default_model_for_provider(&provider).ok()?;
+    Some(ResolvedModel { provider, model })
 }
 
 fn estimate_input_tokens(
@@ -518,6 +518,7 @@ fn estimate_cost(model: &ResolvedModel, input_tokens: i64) -> (Option<f64>, Cost
         &model.model,
         input_tokens.max(0),
         0,
+        harn_vm::llm_config::pricing_clock_now(),
     ) {
         Some(cost) => (Some(cost), CostCell::Amount),
         None => (None, CostCell::Unpriced),

@@ -157,6 +157,46 @@ fn openai_gpt_6_astra_narrows_effort_and_forbids_sampling() {
     assert!(!routed.temperature_supported);
 }
 
+/// GPT-6 Sol and Luna accept effort `none`; Astra does not. All three reject
+/// `max` and a non-default temperature while reasoning (live API,
+/// 2026-09-22). Astra is the control: if the Sol/Luna wildcard captured it,
+/// the Astra assertions would flip.
+#[test]
+fn openai_gpt_6_sol_and_luna_accept_effort_none() {
+    reset();
+    for (provider, model) in [
+        ("openai", "gpt-6-sol"),
+        ("openai", "gpt-6-luna"),
+        ("openrouter", "openai/gpt-6-sol"),
+        ("openrouter", "openai/gpt-6-luna-pro"),
+    ] {
+        let caps = lookup(provider, model);
+        assert!(caps.reasoning_none_supported, "{model}");
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            vec!["none", "low", "medium", "high", "xhigh"],
+            "{model}"
+        );
+        assert!(!caps.temperature_supported, "{model}");
+        assert!(!caps.top_p_supported, "{model}");
+    }
+    for model in ["gpt-6-sol", "gpt-6-luna"] {
+        let caps = lookup("openai", model);
+        assert!(caps.responses_api, "{model}");
+        assert!(caps.prompt_caching, "{model}");
+        assert!(
+            caps.reasoning_tools_require_responses,
+            "{model} cannot carry function tools on /v1/chat/completions while reasoning"
+        );
+    }
+    for (provider, model) in [
+        ("openai", "gpt-6-astra"),
+        ("openrouter", "openai/gpt-6-astra-pro"),
+    ] {
+        assert!(!lookup(provider, model).reasoning_none_supported, "{model}");
+    }
+}
+
 /// Direction control for the row above: the sibling family it sits next to
 /// must keep its own, wider ladder. A row that accidentally widened Astra's
 /// match glob would pass the assertions above by making every GPT model look

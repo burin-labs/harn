@@ -57,6 +57,11 @@ if [[ "${1:-}" = '--print' ]]; then
   printf '%s\n' "$CATALOG_FAKE_HARN"
   exit 0
 fi
+if [[ "${1:-}" = '--print-build-freshness' ]]; then
+  [[ "${HARN_BIN:-}" = "$CATALOG_FAKE_HARN" ]]
+  printf '%064d\n' 0
+  exit 0
+fi
 [[ "${1:-}" = '--' ]] && shift
 exec "$CATALOG_FAKE_HARN" "$@"
 SH
@@ -72,6 +77,7 @@ run_sync() {
     CATALOG_BINARY_RECORD="$tmp_root/binary.log" \
       "$@" make --no-print-directory -f "$repo_root/Makefile" \
         HARN_BIN_PRINT_CMD="$fixture/bin/resolve-harn --print" \
+        HARN_BIN_CMD="$fixture/bin/resolve-harn" \
         HARN_CMD="$fixture/bin/resolve-harn --" \
         sync-diagnostics-catalog
   ) > "$output" 2>&1
@@ -86,6 +92,7 @@ run_check() {
     CATALOG_BINARY_RECORD="$tmp_root/binary.log" \
       make --no-print-directory -f "$repo_root/Makefile" \
         HARN_BIN_PRINT_CMD="$fixture/bin/resolve-harn --print" \
+        HARN_BIN_CMD="$fixture/bin/resolve-harn" \
         HARN_CMD="$fixture/bin/resolve-harn --" \
         check-diagnostics-catalog
   ) > "$output" 2>&1
@@ -95,8 +102,8 @@ run_check() {
 : > "$tmp_root/binary.log"
 run_sync "$tmp_root/success.log" env
 
-if [[ "$(wc -l < "$tmp_root/resolver.log" | tr -d ' ')" -ne 1 ]]; then
-  echo "catalog sync resolved the Harn binary more than once" >&2
+if [[ "$(wc -l < "$tmp_root/resolver.log" | tr -d ' ')" -ne 2 ]]; then
+  echo "catalog sync did not resolve and verify the Harn binary" >&2
   cat "$tmp_root/resolver.log" >&2
   exit 1
 fi
@@ -116,7 +123,7 @@ grep -Fxq '{"new":true}' "$fixture/docs/diagnostics-catalog.json"
 : > "$tmp_root/resolver.log"
 : > "$tmp_root/binary.log"
 run_check "$tmp_root/check.log"
-if [[ "$(wc -l < "$tmp_root/resolver.log" | tr -d ' ')" -ne 1 ]] || \
+if [[ "$(wc -l < "$tmp_root/resolver.log" | tr -d ' ')" -ne 2 ]] || \
    [[ "$(wc -l < "$tmp_root/binary.log" | tr -d ' ')" -ne 2 ]]; then
   echo "catalog drift check did not reuse one resolved binary" >&2
   cat "$tmp_root/resolver.log" "$tmp_root/binary.log" >&2

@@ -1,0 +1,53 @@
+import { boolean, choice } from "std/predicate"
+
+fn main(harness: Harness) {
+  const result = harness.llm.evaluate(
+    "decision.probes.v1",
+    {
+      tool: {name: "read_file", path: "README.md"},
+      message: "The project requires Python 3.12; retain that constraint.",
+      task: "Review a database migration for correctness.",
+      titles: ["Database review", "Stuff", "Untitled"],
+      completion: "The migration was reviewed but the failing test is unresolved.",
+    },
+    {
+      safety: boolean("Is the proposed tool read-only?"),
+      compaction: choice(
+        "How should this message be compacted?",
+        {keep: "Preserve as written", reword: "Shorten without losing meaning", drop: "Remove"},
+      ),
+      skill: choice(
+        "Which skill best fits the task?",
+        {review: "Code review", design: "Visual design", writing: "Copy editing"},
+      ),
+      title: choice(
+        "Choose the most descriptive title.",
+        {first: "Database review", second: "Stuff", third: "Untitled"},
+      ),
+      done: boolean("Is the work complete with no known failing checks?"),
+    },
+    {
+      backend: "native_decision",
+      provider: "vercel_ai_gateway",
+      model: "vercel/typesafe-ai/jev",
+      threshold: 0.5,
+      evaluation_cost_limit: 0.001,
+      run_cost_limit: 0.01,
+    },
+  )
+  harness.stdio.println(json_stringify(result))
+  const ceiling = harness.llm.evaluate(
+    "decision.ceiling.v1",
+    "state ".repeat(22000),
+    {safe: boolean("Is this state within the admitted context window?")},
+    {
+      backend: "native_decision",
+      provider: "vercel_ai_gateway",
+      model: "vercel/typesafe-ai/jev",
+      threshold: 0.5,
+      evaluation_cost_limit: 0.001,
+      run_cost_limit: 0.01,
+    },
+  )
+  harness.stdio.println(json_stringify(ceiling))
+}

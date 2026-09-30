@@ -11,10 +11,9 @@ The table is exercised on every release-relevant PR by the
 (`scripts/release_smoke.harn`). A regression on any row surfaces as a
 `::error::release-smoke (<platform>): <capability> failed` annotation
 that points at the specific (platform, capability) pair, not just
-"smoke matrix failed". Artifact smokes fire after `Build release binaries`
-finalizes a GitHub release; a published release is not declarable-ready
-until `./scripts/check_release_smoke.sh vX.Y.Z` reports a successful
-covering run.
+"smoke matrix failed". Artifact smokes run inside each release candidate's
+`Build release binaries` run, on that run's own archives, and a release is
+promoted only from a run where they passed.
 
 ## Capability matrix
 
@@ -26,7 +25,7 @@ covering run.
 | `harn package check` | Yes | Yes | Yes | Manifest parsing, exports resolution, path normalization. Smoke step 5. |
 | Generated artifacts (`harn provider catalog matrix`) | Yes | Yes | Yes | Deterministic-text emitter; line endings, sort order, and rounding are normalized in the writer. Smoke step 6. |
 | `harn run` | Yes | Yes | Yes | VM bootstrapping + stdlib startup. Smoke step 7. |
-| Process spawning (`std/command::command_run`) | Yes (sandbox-exec / Seatbelt) | Yes (Landlock + default-deny seccomp allowlist; `worktree` can fall back to warn under `HARN_HANDLER_SANDBOX=warn`) | Yes (AppContainer + Job Objects; `worktree` warn fallback applies the same way) | Sandbox backend differences are encapsulated in `crates/harn-vm/src/stdlib/sandbox/` (one file per OS) behind a shared `SandboxBackend` trait. Scripts pick argv via `harness.system.platform()`. Smoke step 9. |
+| Process spawning (`std/command::command_run`) | Yes (sandbox-exec / Seatbelt) | Yes (Landlock + default-deny seccomp allowlist; `worktree` can fall back to warn under `HARN_HANDLER_SANDBOX=warn`) | Yes, unconfined (no OS sandbox; `worktree` warns, `os_hardened` refuses) | Sandbox backend differences are encapsulated in `crates/harn-vm/src/stdlib/sandbox/` (one file per OS) behind a shared `SandboxBackend` trait. Scripts pick argv via `harness.system.platform()`. Smoke step 9. |
 | No-credentials workflow (`provider: "mock"`) | Yes | Yes | Yes | Drives `harness.llm.call` end-to-end through the in-memory mock provider with no API keys, network, or platform secret store. Smoke step 10. |
 | File watching (`harn watch`) | Yes (FSEvents) | Yes (inotify) | Yes (ReadDirectoryChangesW) | All three backends provided by the `notify` crate. Smoke step 12 boots the watcher, inspects its readiness banner, and cancels its process group through `std/command`. |
 | Graceful orchestrator shutdown (`SIGTERM` drain) | Yes | Yes | **Deferred** | Tests that depend on the orchestrator drain are gated `#![cfg(unix)]`. See [Windows test coverage](./windows-test-coverage.md) for the inventory. Release smoke uses the hostlib's native cross-platform process-group cancellation instead of asserting graceful signal handling. |
@@ -45,9 +44,9 @@ covering run.
   paths through `std::path::Path` before sandbox-policy enforcement,
   so a script written on macOS with `/`-separated paths runs unchanged
   on Windows.
-- Windows-only path normalization quirks (UNC, extended-length, drive
-  letters) are absorbed by `crates/harn-vm/src/stdlib/sandbox/windows.rs`
-  before policy enforcement.
+- Windows has no process sandbox backend (removed in #8867), so no
+  Windows-specific sandbox file normalizes UNC, extended-length, or
+  drive-letter paths. Children on Windows run without OS confinement.
 
 ### Line endings
 

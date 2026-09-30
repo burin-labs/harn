@@ -7,8 +7,9 @@
 //! provider-native tool shaping, [`defaults`] active-step/model-role defaults,
 //! [`system_prompt`] system-prompt assembly and context fragments,
 //! [`reminders`] system-reminder rendering, [`thinking`] reasoning/thinking
-//! options, [`tool_search`] tool-search options, and [`extract`] the
-//! `extract_llm_options` orchestrator that drives them.
+//! options, [`tool_search`] tool-search options, [`resolution`] the per-call
+//! resolution receipt, and [`extract`] the `extract_llm_options` orchestrator
+//! that drives them.
 
 mod defaults;
 mod directive_placement;
@@ -19,13 +20,16 @@ mod json;
 mod model_resolution;
 mod output;
 mod reminders;
+mod resolution;
 mod routing;
 mod system_prompt;
+mod text_channel_tools;
 mod thinking;
+mod tool_choice;
 mod tool_search;
 mod validate;
 
-pub(crate) use directive_placement::uncommitted_directives;
+pub(crate) use directive_placement::turn_boundary_directives;
 pub(crate) use reminders::{
     apply_rendered_reminder_messages, directive_envelope_message, has_directive_commit_metadata,
     pending_reminders_from_session, render_pending_reminders, DIRECTIVE_IDS_KEY,
@@ -34,6 +38,8 @@ pub(crate) use reminders::{
 pub(crate) use reminders::{strip_directive_commit_metadata, tracked_directive_envelope_message};
 pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 
+#[cfg(test)]
+mod cache_default_tests;
 #[cfg(test)]
 mod capability_admission_tests;
 #[cfg(test)]
@@ -59,7 +65,11 @@ mod routing_test_support;
 #[cfg(test)]
 mod routing_tests;
 #[cfg(test)]
+mod text_channel_tools_tests;
+#[cfg(test)]
 mod thinking_effort_tests;
+#[cfg(test)]
+mod tool_choice_tests;
 
 // Shared imports re-exported across the whole `options` subtree so each
 // submodule only needs `use super::*;`.
@@ -79,6 +89,7 @@ pub(crate) use extract::extract_llm_options;
 pub(crate) use generation::validate_options;
 pub(crate) use governance::project_agent_tools;
 pub(crate) use json::{expects_structured_output, extract_json};
+pub(crate) use model_resolution::model_resolution_error;
 pub(crate) use system_prompt::{
     assemble_system_prompt, compose_system_prompt, system_prompt_event_metadata,
     system_prompt_metadata,
@@ -124,7 +135,7 @@ async fn prepare_llm_options_result(
             defaults::apply_model_role_defaults(&mut options);
             defaults::apply_active_step_defaults(&mut options);
             let provider = vm_resolve_provider(&options);
-            let model = vm_resolve_model(&options, &provider);
+            let model = vm_resolve_model(&options, &provider)?;
             let (provider, model) = crate::llm::managed_supply::logical_route(&provider, &model)?;
             if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await {
                 extract_llm_options(args)

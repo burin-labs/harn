@@ -13,7 +13,7 @@ mkdir -p "$fake_repo/crates/harn-core/src" \
   "$fake_repo/crates/harn-tools/src" \
   "$fake_repo/docs"
 cd "$fake_repo"
-git init -q
+git init -b main -q
 git config user.email test@example.com
 git config user.name "Test User"
 git config commit.gpgsign false

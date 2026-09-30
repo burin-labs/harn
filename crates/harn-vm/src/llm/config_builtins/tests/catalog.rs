@@ -19,6 +19,10 @@ fn provider_status_reports_deferred_for_platform_managed_providers() {
     std::env::remove_var("VERTEX_AI_ACCESS_TOKEN");
     std::env::remove_var("GOOGLE_OAUTH_ACCESS_TOKEN");
     std::env::remove_var("GOOGLE_APPLICATION_CREDENTIALS");
+    let _region = crate::llm::test_env::ScopedEnvVar::set("AWS_REGION", "us-east-1");
+    let _key = crate::llm::test_env::ScopedEnvVar::set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+    let _secret =
+        crate::llm::test_env::ScopedEnvVar::set("AWS_SECRET_ACCESS_KEY", "example-secret");
     let status = llm_provider_status_value();
     assert_eq!(credential_status_for(&status, "bedrock"), "deferred");
     assert_eq!(credential_status_for(&status, "vertex"), "deferred");
@@ -163,6 +167,36 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
     let catalog = provider_catalog_to_vm_value();
     let catalog = catalog.as_dict().expect("provider catalog dict");
 
+    let providers = match catalog.get("providers") {
+        Some(VmValue::List(providers)) => providers,
+        other => panic!("expected providers list, got {other:?}"),
+    };
+    let artifact = crate::provider_catalog::artifact();
+    assert!(!artifact.providers.is_empty());
+    assert_eq!(providers.len(), artifact.providers.len());
+    for expected in artifact.providers {
+        let projected = providers
+            .iter()
+            .filter_map(VmValue::as_dict)
+            .find(|provider| provider.get("id").map(VmValue::display) == Some(expected.id.clone()))
+            .expect("catalog provider reaches the VM");
+        let expected = crate::stdlib::json_to_vm_value(
+            &serde_json::to_value(expected).expect("serializable provider"),
+        );
+        for field in ["classification", "auth", "endpoint"] {
+            assert_eq!(
+                projected
+                    .get(field)
+                    .map(crate::llm::helpers::vm_value_to_json),
+                expected
+                    .as_dict()
+                    .unwrap()
+                    .get(field)
+                    .map(crate::llm::helpers::vm_value_to_json)
+            );
+        }
+    }
+
     let families = match catalog.get("families") {
         Some(VmValue::List(families)) => families,
         other => panic!("expected families list, got {other:?}"),
@@ -170,8 +204,8 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
     let gpt_family = families
         .iter()
         .filter_map(VmValue::as_dict)
-        .find(|family| family.get("id").map(VmValue::display) == Some("openai-gpt-5-6".to_string()))
-        .expect("GPT-5.6 family");
+        .find(|family| family.get("id").map(VmValue::display) == Some("openai-gpt-6".to_string()))
+        .expect("GPT-6 family");
     assert_eq!(
         gpt_family.get("provider").map(VmValue::display).as_deref(),
         Some("openai")
@@ -184,8 +218,8 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
     let sol = models
         .iter()
         .filter_map(VmValue::as_dict)
-        .find(|model| model.get("id").map(VmValue::display) == Some("gpt-5.6-sol".to_string()))
-        .expect("GPT-5.6 Sol model");
+        .find(|model| model.get("id").map(VmValue::display) == Some("gpt-6-sol".to_string()))
+        .expect("GPT-6 Sol model");
     assert!(sol
         .get("blurb")
         .map(VmValue::display)
@@ -194,7 +228,7 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
         Some(VmValue::List(levels)) => levels.iter().map(VmValue::display).collect::<Vec<_>>(),
         other => panic!("expected reasoning_effort_levels list, got {other:?}"),
     };
-    assert_eq!(levels, ["none", "low", "medium", "high", "xhigh", "max"]);
+    assert_eq!(levels, ["none", "low", "medium", "high", "xhigh"]);
 
     // Together retired the DeepSeek V4 Pro preview this fixture used to read,
     // and its row is gone. OpenAI's o1 is the bundled route that now carries a
@@ -211,5 +245,35 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
             .map(VmValue::display)
             .as_deref(),
         Some("2026-10-23")
+    );
+}
+
+#[test]
+fn provider_catalog_builtin_preserves_non_chat_operations() {
+    let (id, _) = llm_config::model_catalog_entries()
+        .into_iter()
+        .find(|(_, model)| {
+            model.operations.as_ref().is_some_and(|operations| {
+                operations.contains(&llm_config::ModelOperation::Decision)
+            })
+        })
+        .expect("a bundled decision route");
+    let catalog = provider_catalog_to_vm_value();
+    let models = catalog
+        .as_dict()
+        .and_then(|catalog| catalog.get("models"))
+        .and_then(|models| match models {
+            VmValue::List(models) => Some(models),
+            _ => None,
+        })
+        .expect("projected model rows");
+    let model = models
+        .iter()
+        .filter_map(VmValue::as_dict)
+        .find(|model| model.get("id").map(VmValue::display).as_deref() == Some(id.as_str()))
+        .expect("projected decision route");
+    let operations = model.get("operations").expect("projected operation type");
+    assert!(
+        matches!(operations, VmValue::List(values) if values.iter().any(|value| value.display() == "decision"))
     );
 }

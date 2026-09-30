@@ -101,7 +101,8 @@ fn main(harness: Harness) {
   )
   harness.stdio.println(
     "floor held                "
-      + (report.floor_held ? "yes" : "NO: " + join(report.floor_violations, ", ")),
+      + (report.floor_case_count == 0 ? "n/a (empty subset)" : report.floor_held ? "yes" : "NO: "
+        + join(report.floor_violations, ", ")),
   )
   harness.stdio.println("unanswered (failed closed) " + to_string(report.unanswered_count))
   harness.stdio.println("cost                      " + format_cost(report))

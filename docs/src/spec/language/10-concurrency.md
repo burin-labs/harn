@@ -479,8 +479,17 @@ fields plus `rules`, a compact allow/ask/deny DSL. A rule may be written as
 `tool_kind`, `side_effect`, `path`, `command`, `command_identity`, `url`,
 `domain`, `method`, `mcp_server`, `mcp_tool`, `agent`, `persona`, `mode`,
 `capability`, and `repeat_count_gte`. Dimensions inside a rule are ANDed;
-string fields accept glob patterns. Deny beats ask, ask beats allow, and
-unmatched tools are approved.
+string fields accept glob patterns. Rules may declare `source: "mode"` for a
+mode default or `source: "user"` for an explicit remembered choice; omitted
+`source` means `policy`. Configured denials outrank remembered choices;
+remembered denials outrank configured approval requests; configured approval
+requests outrank remembered allows. Every remembered choice outranks a mode
+default. A configured allow remains permissive and cannot override a remembered
+deny. Within a tier, deny beats ask, ask beats allow, and the first matching
+rule wins an action tie. Legacy `auto_approve`, `auto_deny`, and
+`require_approval` entries retain policy source; a host must label mode rules
+explicitly. Write-path allowlists and repeat limits remain policy constraints.
+Unmatched tools are approved.
 
 When an approval policy is active, sensitive paths such as `.env`, private
 keys, and credential files are denied by default unless

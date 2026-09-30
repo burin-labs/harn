@@ -334,9 +334,12 @@ pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> St
     default
 }
 
-pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider: &str) -> String {
-    let selector = vm_resolve_model_selector(options, provider);
-    crate::llm_config::resolve_model(&selector).0
+pub(crate) fn vm_resolve_model(
+    options: &Option<crate::value::DictMap>,
+    provider: &str,
+) -> Result<String, crate::llm_config::ModelResolutionError> {
+    let selector = vm_resolve_model_selector(options, provider)?;
+    Ok(crate::llm_config::resolve_model(&selector).0)
 }
 
 /// Return the selector that won model precedence before alias normalization.
@@ -345,7 +348,7 @@ pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider
 pub(crate) fn vm_resolve_model_selector(
     options: &Option<crate::value::DictMap>,
     provider: &str,
-) -> String {
+) -> Result<String, crate::llm_config::ModelResolutionError> {
     use crate::llm_config;
 
     if let Some(raw) = options
@@ -353,7 +356,7 @@ pub(crate) fn vm_resolve_model_selector(
         .and_then(|o| o.get("model"))
         .map(|v| v.display())
     {
-        return raw;
+        return Ok(raw);
     }
     if let Some(tier) = options
         .as_ref()
@@ -361,7 +364,7 @@ pub(crate) fn vm_resolve_model_selector(
         .map(|v| v.display())
     {
         if let Some((resolved, _)) = resolve_tier_model_for_route(&tier, Some(provider)) {
-            return resolved;
+            return Ok(resolved);
         }
     }
     if let Some(pinned) = current_session_pinned_model() {
@@ -369,7 +372,7 @@ pub(crate) fn vm_resolve_model_selector(
         let inferred_provider =
             resolved_provider.unwrap_or_else(|| infer_provider_from_model_selector(&pinned, false));
         if inferred_provider == provider {
-            return pinned;
+            return Ok(pinned);
         }
     }
     if let Some(raw) = crate::stdlib::process::session_env_value("HARN_LLM_MODEL") {
@@ -378,19 +381,20 @@ pub(crate) fn vm_resolve_model_selector(
         if resolved_provider.as_deref() == Some(provider)
             || (resolved_provider.is_none() && env_provider.as_deref() == Some(provider))
         {
-            return raw;
+            return Ok(raw);
         }
     }
     if provider == "local" {
         if let Some(raw) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
-            return raw;
+            return Ok(raw);
         }
     }
     llm_config::default_model_for_provider(provider)
 }
 
 pub(crate) struct ResolvedProvider {
-    pub pdef: Option<crate::llm_config::ProviderDef>,
+    // Catalog growth must not enlarge every nested provider-probe future.
+    pub pdef: Option<Box<crate::llm_config::ProviderDef>>,
     pub base_url: String,
     pub endpoint: String,
 }
@@ -430,7 +434,7 @@ impl ResolvedProvider {
             .map(|p| p.chat_endpoint.clone())
             .unwrap_or_else(|| default_endpoint.to_string());
         ResolvedProvider {
-            pdef,
+            pdef: pdef.map(Box::new),
             base_url,
             endpoint,
         }
@@ -469,7 +473,7 @@ impl ResolvedProvider {
         mut req: reqwest::RequestBuilder,
         api_key: &str,
     ) -> reqwest::RequestBuilder {
-        req = crate::llm::api::apply_auth_headers(req, api_key, self.pdef.as_ref());
+        req = crate::llm::api::apply_auth_headers(req, api_key, self.pdef.as_deref());
         if let Some(p) = self.pdef.as_ref() {
             for (k, v) in &p.extra_headers {
                 req = req.header(k.as_str(), v.as_str());

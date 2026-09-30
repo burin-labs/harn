@@ -65,7 +65,7 @@ the "one-shot" call shape.
 
 | Function | Returns | Notes |
 |---|---|---|
-| `harness.agent.open(id?: string, opts?: dict)` | `string` | Idempotent. `nil` mints a UUIDv7. `opts` may include `workspace_anchor` and `workspace_policy: {default_mount_mode}`. |
+| `harness.agent.open(id?: string, opts?: dict)` | `string` | Idempotent. `nil` mints a UUIDv7. `opts` may include `workspace_anchor` and `workspace_policy: {default_mount_mode}`. `{parent, actor?}` opens a delegated child of an existing `parent` session; `actor` pushes an `act` hop onto the parent's actor chain (starting from origin `anonymous` when the parent has none), so the child's provider requests carry its lineage. `actor` without `parent` is refused. |
 | `harness.agent.exists(id)` | `bool` | Safe on unknown ids. |
 | `harness.agent.current_id()` | `string` or `nil` | Returns the innermost active session id for the current execution, or `nil` outside any active session. |
 | `harness.agent.length(id)` | `int` | Message count. Errors if `id` doesn't exist. |

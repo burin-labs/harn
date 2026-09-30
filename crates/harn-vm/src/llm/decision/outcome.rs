@@ -16,6 +16,42 @@ pub struct Outcome {
 }
 
 impl Outcome {
+    pub(super) fn from_recorded(value: VmValue) -> Result<Self, crate::VmError> {
+        if !harn_kernel::type_contract::matches_manifest_type(
+            &value,
+            &harn_builtin_meta::predicate::EVALUATION_OUTCOME,
+        ) {
+            return Err(crate::VmError::Runtime(
+                "evaluation tape outcome violates its closed contract".into(),
+            ));
+        }
+        let kind = match value
+            .as_dict()
+            .and_then(|fields| fields.get("kind"))
+            .and_then(|value| match value {
+                VmValue::String(text) => Some(text.as_str()),
+                _ => None,
+            }) {
+            Some("answered") => "answered",
+            Some("low_confidence") => "low_confidence",
+            Some("refused") => "refused",
+            Some("budget_cut") => "budget_cut",
+            Some("unavailable") => "unavailable",
+            Some("replay_mismatch") => "replay_mismatch",
+            Some("cancelled") => "cancelled",
+            Some("state_too_large") => "state_too_large",
+            Some("question_invalid") => "question_invalid",
+            Some("rate_limited") => "rate_limited",
+            Some("overloaded") => "overloaded",
+            _ => {
+                return Err(crate::VmError::Runtime(
+                    "unsupported evaluation tape outcome".into(),
+                ))
+            }
+        };
+        Ok(Self { kind, value })
+    }
+
     pub fn into_value(self) -> VmValue {
         self.value
     }

@@ -418,6 +418,7 @@ description = "Searches current travel offers and creates governed orders."
 id = "offers.search"
 capability = "travel.search"
 purpose = "Find current offers for the requested itinerary."
+kind = "modeled_action"
 effect = "read"
 environments = ["test", "live"]
 evidence = ["citation", "current_provider_state"]
@@ -444,6 +445,7 @@ allowed_values = ["economy", "premium_economy", "business", "first"]
 id = "orders.create"
 capability = "travel.booking"
 purpose = "Create the exact order reviewed by the user."
+kind = "modeled_action"
 effect = "consequential"
 environments = ["test"]
 evidence = ["fresh_quote", "user_confirmation"]
@@ -460,6 +462,14 @@ optional = ["contact_details", "loyalty_accounts", "accessibility_needs"]
 condition = "international_itinerary"
 field_classes = ["travel_documents"]
 ```
+
+`kind` is a closed classification: `modeled_action` may be offered to a model,
+while hosts must keep `raw_api` and `setup` off model-facing tool surfaces.
+This is separate from `effect`: a modeled action may read or change provider
+state.
+An older manifest without `kind` is treated as `raw_api`, so upgrading Harn
+does not silently expose an unclassified operation. Unknown values are rejected
+at the manifest boundary.
 
 The closed protected-profile classes are `legal_identity`, `birth_date`,
 `contact_details`, `accessibility_needs`, `loyalty_accounts`, and

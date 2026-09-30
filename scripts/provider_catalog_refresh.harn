@@ -18,6 +18,12 @@ const PRICING_KEYS = [
   "output_per_mtok",
   "cache_read_per_mtok",
   "cache_write_per_mtok",
+  "cache_write_1h_per_mtok",
+  "input_token_bands",
+  "promotions",
+  "schedules",
+  "hosted_tool_fees",
+  "modality_rates",
 ]
 
 const CAPABILITY_KEYS = [
@@ -32,6 +38,55 @@ const CAPABILITY_KEYS = [
   "interleaved_thinking_supported",
   "thinking_modes",
 ]
+
+pub type RefreshCoverage = {
+  status: "complete" | "partial" | "unmeasured",
+  adapters_total: int,
+  adapters_ok: int,
+  adapters_empty: int,
+  adapters_skipped: int,
+  adapters_error: int,
+  models_observed: int,
+}
+
+pub fn refresh_coverage(runs: list<dict>, observed: int) -> RefreshCoverage {
+  let ok = 0
+  let empty = 0
+  let skipped = 0
+  let errors = 0
+  for run in runs {
+    if run.status == "ok" {
+      if run.observation_count == 0 {
+        empty = empty + 1
+      } else {
+        ok = ok + 1
+      }
+    } else if run.status == "skipped" {
+      skipped = skipped + 1
+    } else {
+      errors = errors + 1
+    }
+  }
+  const status = if observed == 0 {
+    "unmeasured"
+  } else if skipped > 0 || errors > 0 || empty > 0 {
+    "partial"
+  } else {
+    "complete"
+  }
+  return schema_expect(
+    {
+      status: status,
+      adapters_total: len(runs),
+      adapters_ok: ok,
+      adapters_empty: empty,
+      adapters_skipped: skipped,
+      adapters_error: errors,
+      models_observed: observed,
+    },
+    schema_of(RefreshCoverage),
+  )
+}
 
 fn __confidence_rank(value: any) {
   return CONFIDENCE_RANK[value] ?? 0
@@ -77,7 +132,14 @@ fn __observation_key(obs: dict) {
   return obs.provider + ":" + obs.model_id
 }
 
-fn __merge_field(base: any, incoming: any, key: any, base_owner: string, incoming_owner: string) {
+fn __merge_field(
+  base: any,
+  incoming: any,
+  key: any,
+  base_owner: string,
+  incoming_owner: string,
+  rate: bool = false,
+) {
   const incoming_value = incoming[key]
   if incoming_value == nil {
     return {value: base[key], conflict: nil}
@@ -86,7 +148,8 @@ fn __merge_field(base: any, incoming: any, key: any, base_owner: string, incomin
   if base_value == nil {
     return {value: incoming_value, conflict: nil}
   }
-  if base_value == incoming_value {
+  if base_value == incoming_value
+    || (rate && __pricing_values_equal(base_value, incoming_value)) {
     return {value: base_value, conflict: nil}
   }
   if base_owner == "provider" && incoming_owner != "provider" {
@@ -113,6 +176,7 @@ fn __merge_keyed(base_obs: dict, incoming_obs: dict, field: string, keys_list: l
       key,
       base_obs.source_owner,
       incoming_obs.source_owner,
+      field == "pricing",
     )
     if outcome.value != nil {
       merged = merged + {[key]: outcome.value}
@@ -244,6 +308,49 @@ fn __catalog_model_by_route(catalog: dict) {
   return by_id
 }
 
+/**
+ * Rates are USD per million tokens. Source adapters publish six fractional
+ * digits, so compare both sides at that same 0.000001 USD/MTok precision.
+ * Decimal conversion alone preserves floating-point conversion noise.
+ */
+fn __normalized_rate(value: any) -> float {
+  return round(to_float(value) * 1000000.0) / 1000000.0
+}
+
+fn __pricing_values_equal(left: any, right: any) -> bool {
+  const lt = type_of(left)
+  const rt = type_of(right)
+  if contains(["int", "float", "decimal"], lt) && contains(["int", "float", "decimal"], rt) {
+    return __normalized_rate(left) == __normalized_rate(right)
+  }
+  if lt != rt {
+    return false
+  }
+  if lt == "dict" {
+    if keys(left).sorted() != keys(right).sorted() {
+      return false
+    }
+    for key in keys(left) {
+      if !__pricing_values_equal(left[key], right[key]) {
+        return false
+      }
+    }
+    return true
+  }
+  if lt == "list" {
+    if len(left) != len(right) {
+      return false
+    }
+    for i in range(len(left)) {
+      if !__pricing_values_equal(left[i], right[i]) {
+        return false
+      }
+    }
+    return true
+  }
+  return left == right
+}
+
 fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dict> {
   let changes: list<dict> = []
   for key in PRICING_KEYS {
@@ -254,7 +361,7 @@ fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dic
     }
     if cat == nil {
       changes = changes + [{key: key, from: nil, to: obs}]
-    } else if obs != nil && decimal(to_string(cat)) != decimal(to_string(obs)) {
+    } else if obs != nil && !__pricing_values_equal(cat, obs) {
       changes = changes + [{key: key, from: cat, to: obs}]
     }
   }
@@ -288,17 +395,6 @@ fn __effective_catalog_pricing(pricing: dict?, observed_at: string?) -> dict? {
   return effective
 }
 
-fn __dict_to_pairs(value: any) -> list<dict> {
-  if type_of(value) != "dict" {
-    return []
-  }
-  let pairs: list<dict> = []
-  for k in keys(value) {
-    pairs = pairs + [{key: k, value: value[k]}]
-  }
-  return pairs.sorted_by({ pair -> pair.key })
-}
-
 fn __values_equal(left: any, right: any) {
   const lt = type_of(left)
   const rt = type_of(right)
@@ -319,7 +415,15 @@ fn __values_equal(left: any, right: any) {
     return true
   }
   if lt == "dict" {
-    return __values_equal(__dict_to_pairs(left), __dict_to_pairs(right))
+    if keys(left).sorted() != keys(right).sorted() {
+      return false
+    }
+    for key in keys(left) {
+      if !__values_equal(left[key], right[key]) {
+        return false
+      }
+    }
+    return true
   }
   return left == right
 }
@@ -415,7 +519,10 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
   for model in catalog?.models ?? [] {
     const route = model.provider + ":" + model.id
     const deprecated = model?.deprecated ?? (model?.deprecation?.status == "deprecated")
-    if !deprecated && !seen[route] && observed_providers[model.provider] {
+    // A chat-model index cannot enumerate decision-only routes.
+    const operations = model?.operations
+    const chat_route = operations == nil || operations.contains("text_generation")
+    if chat_route && !deprecated && !seen[route] && observed_providers[model.provider] {
       removed = removed + [model]
     }
   }
@@ -437,6 +544,11 @@ fn __format_currency(value: float?) -> string {
 }
 
 fn __format_change_line(change: dict) -> string {
+  if type_of(change.from) == "dict" || type_of(change.from) == "list"
+    || type_of(change.to) == "dict"
+    || type_of(change.to) == "list" {
+    return __format_capability_change(change)
+  }
   return "  - " + change.key + ": " + __format_currency(change.from) + " → "
     + __format_currency(change.to)
 }
@@ -623,6 +735,25 @@ fn __toml_string(value: any) -> string {
   return "\"" + __toml_escape(to_string(value)) + "\""
 }
 
+fn __toml_pricing_value(value: any) -> string {
+  if type_of(value) == "string" {
+    return __toml_string(value)
+  }
+  if type_of(value) == "list" {
+    return "[" + join(value.map({ item -> __toml_pricing_value(item) }), ", ") + "]"
+  }
+  if type_of(value) == "dict" {
+    let fields = []
+    for key in keys(value).sorted() {
+      if value[key] != nil {
+        fields = fields + [__toml_string(key) + " = " + __toml_pricing_value(value[key])]
+      }
+    }
+    return "{ " + join(fields, ", ") + " }"
+  }
+  return to_string(value)
+}
+
 fn __toml_list_of_strings(items: string | bytes | list | dict | set | range | nil) -> string {
   if len(items) == 0 {
     return "[]"
@@ -654,7 +785,7 @@ fn __format_model_section(obs: dict) -> list<string> {
     for key in PRICING_KEYS {
       const value = obs.pricing?.[key]
       if value != nil {
-        lines = lines + [key + " = " + to_string(value)]
+        lines = lines + [key + " = " + __toml_pricing_value(value)]
       }
     }
   }

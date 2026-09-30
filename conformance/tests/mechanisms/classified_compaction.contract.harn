@@ -1,0 +1,92 @@
+import {
+  CompactionClassifyDecision,
+  CompactionClassifyItem,
+  CompactionFixtureInput,
+} from "std/agent/compaction_classify"
+// Trigger: the full agent loop crosses its compaction threshold.
+// Effect: typed low-confidence drops are recorded and applied as rewrites.
+// Negative: the same loop below the threshold emits no compaction event.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn low_drop(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  let out: list<CompactionClassifyDecision> = []
+  for item in input.items {
+    out = out
+      + [
+        {
+          index: item.index,
+          question_id: "message_" + to_string(item.index),
+          choice: "drop",
+          confidence: 0.2,
+          confidence_kind: "model_rationale",
+          evaluation_receipt: "fixture",
+        },
+      ]
+  }
+  return out
+}
+
+fn rewrite(items: list<CompactionClassifyItem>) -> list<{index: int, text: string}> {
+  return items.map(
+    fn(item) { return {index: item.index, text: "retained source " + to_string(item.index)} },
+  )
+    .to_list()
+}
+
+pipeline default(harness: Harness) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "observe",
+    "Return observed evidence.",
+    {handler: { _args -> "observation " + "x" * 240 }, parameters: {}, returns: {type: "string"}},
+  )
+  const policy = {
+    backend: "structured_llm",
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    temperature: 0.0,
+    threshold: 0.8,
+    evaluation_cost_limit: 1.0,
+  }
+  for threshold in [1, 1000000] {
+    const options: AgentSpec = {
+      provider: "mock",
+      model: "gpt-4",
+      tools: tools,
+      tool_format: "native",
+      max_iterations: 3,
+      compact_threshold: threshold,
+      compaction: {
+        strategy: "classify",
+        keep_last_n: 1,
+        classify: {policy: policy, fixture: low_drop, rewrite_fixture: rewrite},
+      },
+    }
+    const result = agent_loop(
+      harness,
+      "Observe evidence until the iteration budget ends.",
+      "You are a compacting test agent.",
+      options,
+    )
+    const events = transcript_events_by_kind(result.transcript, "compaction")
+    if threshold == 1 {
+      contract_effect(harness.stdio, "classified_strategy_fired", len(events) > 0)
+      const receipt = events[0]?.metadata?.receipt
+      contract_effect(
+        harness.stdio,
+        "confidence_floor_applied",
+        receipt?.classification?.decisions[0]?.applied == "reword",
+      )
+      contract_effect(
+        harness.stdio,
+        "raw_drop_recorded",
+        receipt?.classification?.decisions[0]?.choice == "drop",
+      )
+    } else {
+      contract_negative(harness.stdio, "below_threshold_does_not_compact", len(events) > 0)
+    }
+  }
+}

@@ -28,3 +28,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 # every Rust source change, so resolving the package on its own here puts the
 # check where its trigger scope covers what it reads.
 cargo clippy -p harn-lsp -- -D warnings
+
+# The freshness checker is a feature-gated binary, so the workspace sweep never
+# compiles it. `make lint` covers it and this lane must too: its 1 MiB stack
+# buffer tripped clippy's large_stack_arrays lint locally and overflowed the
+# Windows main thread in CI, where no lint had run on it (harn#8893).
+cargo clippy -p harn-cli --bin harn-freshness-check \
+  --features internal-freshness-checker -- -D warnings

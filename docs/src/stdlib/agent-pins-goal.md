@@ -119,3 +119,11 @@ const floor = goal_check(g, {ci_green: false})
   rather than wrapping `agent_loop` in a hand-written loop.
 - `goal_pin(goal)` bridges a goal into a self-replacing `std/agent/pins` pin so
   the objective also survives compaction.
+- `goal_under_obligations(goal, obligations?)` returns the goal as accepted
+  steering left it. A steer that carried a `goal` (see
+  [Retarget](../remote-session-control.md#retarget)) replaces the objective and
+  moves every success criterion to `retired_criteria`, which no longer gates
+  completion. `goal_reloop` applies it on every completion check. The
+  `with_goal` fragment and `goal_pin` render the goal as it was built; after a
+  retarget the model reads the new objective from the steer's standing
+  `contract` directive, which outranks them.

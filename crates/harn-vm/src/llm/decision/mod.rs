@@ -21,6 +21,7 @@ pub(crate) mod native;
 pub(crate) mod outcome;
 pub(crate) mod question;
 pub mod receipt;
+pub mod replay;
 pub(crate) mod structured;
 pub(crate) mod transport;
 
@@ -70,7 +71,7 @@ impl BackendKind {
 }
 
 impl EvaluationPolicy {
-    fn from_value(value: &VmValue) -> Result<Self, String> {
+    pub(crate) fn from_value(value: &VmValue) -> Result<Self, String> {
         let fields = value
             .as_dict()
             .ok_or_else(|| "evaluation policy must be a record".to_string())?;
@@ -401,14 +402,36 @@ async fn evaluate_internal(
     ctx: &crate::vm::AsyncBuiltinCtx,
     args: &[VmValue],
 ) -> Result<(Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt), VmError> {
-    let (
-        id,
-        Evaluation {
-            policy,
-            questions,
-            state,
-        },
-    ) = Evaluation::from_arguments(args)?;
+    // Normalize before recording or looking up anything. The raw request is
+    // retained, while matching uses the same canonical identity as live calls.
+    let (site_id, evaluation) = Evaluation::from_arguments(args)?;
+    if ctx.evaluation_replay().is_none() {
+        return evaluate_live(ctx, site_id, evaluation).await;
+    }
+    let request = identity::EvaluationRequest {
+        site_id: site_id.clone(),
+        state: crate::llm::helpers::vm_value_to_json(&args[1]),
+        questions: crate::llm::helpers::vm_value_to_json(&args[2]),
+        policy: crate::llm::helpers::vm_value_to_json(&args[3]),
+    };
+    if let Some(reused) = replay::lookup(ctx, &request)? {
+        return Ok(reused);
+    }
+    let result = evaluate_live(ctx, site_id, evaluation).await?;
+    replay::record(ctx, request, &result.0, &result.1, &result.3)?;
+    Ok(result)
+}
+
+async fn evaluate_live(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    id: String,
+    evaluation: Evaluation,
+) -> Result<(Outcome, Vec<Answer>, EvaluationPolicy, EvaluationReceipt), VmError> {
+    let Evaluation {
+        policy,
+        questions,
+        state,
+    } = evaluation;
     let started = decision_started();
     let publish = |receipt: &EvaluationReceipt| {
         ctx.record_evaluation_receipt(receipt.clone());
@@ -429,6 +452,7 @@ async fn evaluate_internal(
         "unavailable",
         0,
     );
+    receipt.invocation_id = Some(ctx.evaluation_invocation_id());
     let reference = receipt.reference();
 
     // --- Local refusals. Every one of these makes zero provider requests. ---
@@ -578,8 +602,9 @@ async fn evaluate_internal(
             policy.run_cost_limit,
         ) {
             Ok(hold) => Some(hold),
-            Err(_) => {
-                let outcome = refuse(&mut receipt, native_admission_failure(&reference, bound));
+            Err(error) => {
+                let outcome = native_admission_failure(&mut receipt, &reference, bound, &error);
+                let outcome = refuse(&mut receipt, outcome);
                 publish(&receipt);
                 return Ok((outcome, Vec::new(), policy, receipt));
             }
@@ -605,24 +630,25 @@ async fn evaluate_internal(
             .as_ref()
             .is_some_and(|transport| transport.provider_attempts_reported.is_some_and(|n| n > 1))
         {
-            hold.retain_contract_violation();
-        } else if hold.settle(settled).is_err() {
-            outcome = native_admission_failure(&reference, bound);
+            // A failed durable invalidation still fails this evaluation closed.
+            if let Err(error) = hold.retain_contract_violation() {
+                outcome = native_admission_failure(&mut receipt, &reference, bound, &error);
+            }
+        } else if let Err(error) = hold.settle(settled) {
+            outcome = native_admission_failure(&mut receipt, &reference, bound, &error);
         }
     }
     if evaluation.policy.backend == BackendKind::NativeDecision && receipt.physical_attempts > 0 {
         // Unknown usage keeps the admitted amount, never a free failed call.
         let charged = receipt.cost_usd.unwrap_or(bound);
         receipt.budget_charge_usd = Some(charged);
-        if crate::llm::cost::accumulate_llm_usage(
+        if let Err(error) = crate::llm::cost::accumulate_llm_usage(
             &evaluation.policy.model,
             receipt.input_tokens.unwrap_or(0).min(i64::MAX as u64) as i64,
             receipt.output_tokens.unwrap_or(0).min(i64::MAX as u64) as i64,
             charged,
-        )
-        .is_err()
-        {
-            outcome = native_admission_failure(&reference, charged);
+        ) {
+            outcome = native_admission_failure(&mut receipt, &reference, charged, &error);
         }
     }
     receipt.outcome_kind = outcome.kind.into();
@@ -635,10 +661,19 @@ async fn evaluate_internal(
     Ok((outcome, answers, evaluation.policy, receipt))
 }
 
-fn native_admission_failure(reference: &str, requested: f64) -> Outcome {
+/// Local spend admission refused before or after transport. With a measured
+/// allowance this is a run budget cut. Without one no ceiling exists to report,
+/// and no provider was asked, so it is never a provider `authority_denied`.
+fn native_admission_failure(
+    receipt: &mut EvaluationReceipt,
+    reference: &str,
+    requested: f64,
+    error: &VmError,
+) -> Outcome {
+    receipt.admission_reason = super::admission::denial_reason(error);
     match super::admission::remaining_allowance() {
         Some(remaining) => outcome::budget_cut(reference, "run_cost", requested, remaining),
-        None => outcome::unavailable(reference, "authority_denied"),
+        None => outcome::unavailable(reference, "admission_refused"),
     }
 }
 

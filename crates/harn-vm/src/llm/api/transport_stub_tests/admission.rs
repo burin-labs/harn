@@ -2,6 +2,7 @@
 use super::*;
 use crate::llm::admission::{swap_scope, AdmissionMode, AdmissionScope};
 use crate::llm::cost::LlmBudgetEnvelope;
+use crate::llm::{MachineSpendPolicy, MachineSpendQuota};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -154,6 +155,59 @@ fn conservative_admission_does_not_recycle_an_empty_attempt_for_retry() {
             1,
             "retry was denied before transport"
         );
+    });
+}
+
+#[test]
+fn machine_quota_survives_retry_and_process_style_reopen_on_real_transport() {
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    crate::llm::cost::reset_cost_state();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("person-spend.sqlite");
+        let policy = MachineSpendPolicy {
+            daily_limit_microusd: Some(600_000),
+            monthly_limit_microusd: Some(600_000),
+        };
+        let count = Arc::new(AtomicUsize::new(0));
+        let server = stub(count.clone(), false, true);
+        install(server.addr());
+        let mut opts = options(0.6, false);
+        opts.budget = None;
+        let quota = MachineSpendQuota::open(&path, "person", policy.clone()).unwrap();
+        let first = quota
+            .scope(vm_call_llm_full(&opts))
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(first.to_string().contains("budget_exceeded"), "{first}");
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        let receipt = quota.receipt().unwrap();
+        assert!(receipt.reserved_microusd > 300_000);
+        assert_eq!(receipt.actual_known_microusd, 0);
+        assert_eq!(receipt.usage_unknown_attempts, 1);
+        drop(quota);
+        crate::llm::cost::reset_cost_state();
+
+        // Reopening the same machine scope from a second host/process cannot
+        // grant the remainder already held by an uncertain attempt.
+        let restarted = MachineSpendQuota::open(&path, "person", policy).unwrap();
+        let second = restarted
+            .scope(vm_call_llm_full(&opts))
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            second.to_string().contains("machine spend quota"),
+            "{second}"
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 1);
     });
 }
 

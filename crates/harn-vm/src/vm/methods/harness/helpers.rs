@@ -1127,10 +1127,12 @@ fn secret_error_to_vm(error: crate::secrets::SecretError) -> VmError {
         SecretError::Unsupported { .. } | SecretError::InvalidInput(_) => {
             VmError::TypeError(error.to_string())
         }
-        SecretError::AccessDenied { .. } => VmError::CategorizedError {
-            message: error.to_string(),
-            category: ErrorCategory::Auth,
-        },
+        SecretError::AccessDenied { .. } | SecretError::NeedsUserApproval { .. } => {
+            VmError::CategorizedError {
+                message: error.to_string(),
+                category: ErrorCategory::Auth,
+            }
+        }
         SecretError::Backend { .. } | SecretError::InvalidConfig(_) | SecretError::All(_) => {
             VmError::CategorizedError {
                 message: error.to_string(),

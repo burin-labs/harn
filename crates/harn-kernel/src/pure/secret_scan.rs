@@ -32,6 +32,12 @@ pub struct CompiledSecretPattern {
     pub regex: Regex,
 }
 
+impl CompiledSecretPattern {
+    pub fn accepts_match(&self, input: &str, start: usize, end: usize) -> bool {
+        self.spec.accepts_match(input, start, end)
+    }
+}
+
 static DEFAULT_PATTERNS: OnceLock<Vec<CompiledSecretPattern>> = OnceLock::new();
 static HIGH_ENTROPY_ASSIGNMENT: OnceLock<Regex> = OnceLock::new();
 
@@ -72,6 +78,9 @@ pub fn scan_secrets(content: &str) -> Vec<SecretFinding> {
 
     for rule in compiled_secret_patterns() {
         for matched in rule.regex.find_iter(content) {
+            if !rule.accepts_match(content, matched.start(), matched.end()) {
+                continue;
+            }
             findings.push(build_finding(
                 content,
                 &line_starts,
@@ -255,5 +264,11 @@ mod tests {
     #[test]
     fn source_with_secretish_identifiers_remains_clean() {
         assert!(scan_secrets("pub const Token = struct { kind: u8 };\n").is_empty());
+    }
+
+    #[test]
+    fn source_expressions_do_not_become_secret_findings() {
+        let source = "const token = process.env.GITHUB_TOKEN ?? \"\";\nlet apiKey = readKey(path);\nlet accessToken = readKey2(path);\nconst password = credentials.current;";
+        assert!(scan_secrets(source).is_empty());
     }
 }

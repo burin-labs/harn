@@ -48,8 +48,10 @@ download() {
   else wget -q --tries=3 --timeout=120 "$1" -O "$2"; fi
 }
 digest() {
-  if command -v sha256sum >/dev/null 2>&1; then result=$(sha256sum "$1") || return
-  else result=$(shasum -a 256 "$1") || return; fi
+  # Hash standard input: with a file name, sha256sum escapes a Windows path and
+  # prefixes the digest with a backslash.
+  if command -v sha256sum >/dev/null 2>&1; then result=$(sha256sum < "$1") || return
+  else result=$(shasum -a 256 < "$1") || return; fi
   printf '%s\n' "${result%% *}"
 }
 if [ "$HARN_EXT_BOOTSTRAP_OFFLINE" != 1 ]; then

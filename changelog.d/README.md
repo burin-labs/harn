@@ -1,9 +1,10 @@
 # `changelog.d/` — changelog fragments
 
-Each non-trivial PR drops a single markdown file in this directory. At release
-time `release_harn.harn` (in `~/projects/harn-bump-fleet`) reads every fragment,
-groups them by category, folds them into the top `## Unreleased` block in
-`../CHANGELOG.md`, then deletes the fragments in the same release commit.
+Each non-trivial PR drops a single markdown file in this directory. The
+`Release vX.Y.Z` pull request folds them: `scripts/release_changelog_fold.harn`
+reads every fragment, groups them by category, merges them into the
+`## Unreleased` block of `../CHANGELOG.md`, renames that block `## vX.Y.Z`, and
+deletes the fragments in the same release commit.
 
 The pattern is a small adaptation of [towncrier](https://towncrier.readthedocs.io).
 It exists to remove `## Unreleased` as a merge-conflict hot spot. Two PRs that
@@ -44,7 +45,30 @@ Example: `changelog.d/2492.breaking.md`
   their declared return types across bare returns, fallthrough, nested
   returns, and exhaustive final matches, and top-level forward
   placeholders promote to their concrete binding types.
+
+  Migration: give each generic parameter the concrete type it holds, and
+  make every path of a typed function return its declared type.
 ```
+
+A `breaking` fragment must also say what a downstream consumer changes: a
+`Migration:` line followed by the change, preferably as a before-and-after
+snippet. The pull-request gate refuses a breaking fragment without one, and
+refuses a pull request labelled `breaking` that adds no such fragment. No
+bypass label waives either rule. The release fold keeps the snippet and puts
+`### Breaking` first in each release, where consumers' update tooling reads
+it.
+
+````markdown
+- **`harn run --foo` is removed (#2494).** Use `--bar`, which takes the
+  same value.
+
+  Migration: rename the flag.
+
+  ```sh
+  harn run --foo x   # before
+  harn run --bar x   # after
+  ```
+````
 
 Example: `changelog.d/2493.fixed.md`
 

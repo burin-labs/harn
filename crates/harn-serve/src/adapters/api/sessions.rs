@@ -67,7 +67,31 @@ pub(super) async fn create_session(
     if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
         return response;
     }
-    let input = parse_json_body(&body).unwrap_or_else(|_| json!({}));
+    let Ok(input) = parse_json_body(&body) else {
+        return invalid_json_response();
+    };
+    if !input.is_object() {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "session request must be a JSON object",
+        );
+    }
+    let mode_id = match input.get("mode_id") {
+        None | Some(Value::Null) => state.default_session_mode.as_str(),
+        Some(Value::String(mode_id))
+            if crate::adapters::acp::is_supported_session_mode(mode_id) =>
+        {
+            mode_id
+        }
+        _ => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_session_mode",
+                "mode_id must be one of ask, architect, code, or shadow",
+            )
+        }
+    };
     let model_policy = match parse_model_policy_change(&input, &state.provider_catalog) {
         Ok(ModelPolicyChange::Clear) => ModelPolicyChange::Unchanged,
         Ok(change) => change,
@@ -110,6 +134,22 @@ pub(super) async fn create_session(
         .map(str::to_string)
         .unwrap_or_else(|| format!("session_{}", Uuid::now_v7()));
     let now = now_rfc3339();
+    if mode_id != "ask" {
+        if let Err(message) = state
+            .acp
+            .call(
+                "session/set_mode",
+                json!({"sessionId": session_id, "modeId": mode_id}),
+            )
+            .await
+        {
+            let _ = state
+                .acp
+                .call("session/close", json!({"sessionId": session_id}))
+                .await;
+            return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
+        }
+    }
     if let Err(message) = apply_model_policy_change(&state, &session_id, &model_policy).await {
         return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
     }
@@ -121,6 +161,7 @@ pub(super) async fn create_session(
         "metadata": input.get("metadata").cloned().unwrap_or_else(|| json!({})),
         "workspace_id": workspace_id,
         "state": "IDLE",
+        "mode_id": mode_id,
         "transcript": {
             "source": "harn.acp",
             "session_id": session_id

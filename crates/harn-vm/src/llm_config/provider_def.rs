@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
+pub use harn_provider_catalog::ChatApiAdapter;
+
 /// Versioned managed-supply provider declaration.
 ///
 /// The empty-looking v1 payload is deliberate: catalog identity is derived
@@ -41,6 +43,10 @@ pub struct ProviderDef {
     pub auth_style: String,
     pub auth_header: Option<String>,
     pub auth_env: AuthEnv,
+    /// Explicit adapter for a chat endpoint whose request/response contract
+    /// differs from the model's default message wire format. Omitted keeps the
+    /// legacy provider/model dialect selection.
+    pub chat_api_adapter: Option<ChatApiAdapter>,
     /// How this provider's credentials are resolved. `"env"` (default) means
     /// the generic `auth_env` lookup is authoritative: missing env vars are a
     /// hard "missing API key" error. `"platform_managed"` means the provider's
@@ -98,6 +104,7 @@ pub struct ProviderDef {
     pub cost_per_1k_in: Option<f64>,
     /// Provider/catalog pricing in USD per 1k output tokens.
     pub cost_per_1k_out: Option<f64>,
+    pub platform_fee_percent: Option<f64>,
     /// Observed or configured p50 latency in milliseconds.
     pub latency_p50_ms: Option<u64>,
     /// Optional provider-level serving performance observations.
@@ -143,6 +150,8 @@ struct ProviderDefWire {
     auth_header: Option<String>,
     #[serde(default)]
     auth_env: AuthEnv,
+    #[serde(default)]
+    chat_api_adapter: Option<ChatApiAdapter>,
     #[serde(default)]
     credential_resolution: Option<String>,
     #[serde(default)]
@@ -190,6 +199,8 @@ struct ProviderDefWire {
     #[serde(default)]
     cost_per_1k_out: Option<f64>,
     #[serde(default)]
+    platform_fee_percent: Option<f64>,
+    #[serde(default)]
     latency_p50_ms: Option<u64>,
     #[serde(default)]
     performance: Option<ServingPerformanceDef>,
@@ -214,6 +225,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             auth_style: wire.auth_style.unwrap_or_else(default_bearer),
             auth_header: wire.auth_header,
             auth_env: wire.auth_env,
+            chat_api_adapter: wire.chat_api_adapter,
             credential_resolution: wire
                 .credential_resolution
                 .unwrap_or_else(default_credential_resolution),
@@ -239,6 +251,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             rate_limits: wire.rate_limits,
             cost_per_1k_in: wire.cost_per_1k_in,
             cost_per_1k_out: wire.cost_per_1k_out,
+            platform_fee_percent: wire.platform_fee_percent,
             latency_p50_ms: wire.latency_p50_ms,
             performance: wire.performance,
             auth_style_explicit,
@@ -260,6 +273,7 @@ impl Default for ProviderDef {
             auth_style: default_bearer(),
             auth_header: None,
             auth_env: AuthEnv::None,
+            chat_api_adapter: None,
             credential_resolution: default_credential_resolution(),
             extra_headers: BTreeMap::new(),
             chat_endpoint: String::new(),
@@ -283,6 +297,7 @@ impl Default for ProviderDef {
             rate_limits: None,
             cost_per_1k_in: None,
             cost_per_1k_out: None,
+            platform_fee_percent: None,
             latency_p50_ms: None,
             performance: None,
             auth_style_explicit: false,
@@ -313,6 +328,7 @@ impl ProviderDef {
         if !overlay.auth_env.is_none() {
             self.auth_env = overlay.auth_env.clone();
         }
+        merge_option(&mut self.chat_api_adapter, &overlay.chat_api_adapter);
         if overlay.credential_resolution != default_credential_resolution() {
             self.credential_resolution = overlay.credential_resolution.clone();
         }
@@ -344,6 +360,10 @@ impl ProviderDef {
         merge_option(&mut self.rate_limits, &overlay.rate_limits);
         merge_option(&mut self.cost_per_1k_in, &overlay.cost_per_1k_in);
         merge_option(&mut self.cost_per_1k_out, &overlay.cost_per_1k_out);
+        merge_option(
+            &mut self.platform_fee_percent,
+            &overlay.platform_fee_percent,
+        );
         merge_option(&mut self.latency_p50_ms, &overlay.latency_p50_ms);
         merge_option(&mut self.performance, &overlay.performance);
     }

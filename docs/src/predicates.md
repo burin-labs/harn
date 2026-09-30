@@ -50,7 +50,10 @@ but cannot be upgraded by applying a newer identity contract.
 Verification checks canonical input, normalized questions and rubric text,
 requested policy, site, route, evaluator contract, and stable request identity.
 JSON whitespace and object-key order do not change the binding. Stable identity
-does not distinguish repeated invocations. Cache or tape provenance is separate.
+does not distinguish repeated invocations: `evaluation_id` is the stable request
+identity, while `invocation_id` identifies each occurrence and its outcome handle.
+Cache or tape provenance is separate and retains the original receipt in
+`reused_from`; reused answers report zero current provider attempts and cost.
 This check does not authenticate a provider, validate answer quality, or certify
 accounting; consumers must evaluate those facts from the original receipt.
 
@@ -136,7 +139,10 @@ and `model`, and a floating-point `threshold`. Optional finite nonnegative
 them does not create budget authority: native calls require an existing
 conservative ledger ceiling and retain a finite per-call price bound. Install
 that authority before the first model call; earlier unreserved calls cannot be
-retroactively covered.
+retroactively covered. A native call refused this way returns `unavailable`
+with reason `admission_refused` before any request, and its receipt's
+`admission_reason` names the cause, such as `late_activation`.
+`authority_denied` is reserved for a provider or credential refusal.
 Checking validates this shape and the resolved `decision` operation. A route
 with a supported structured transport and text generation derives structured
 decision support at the catalog owner. An explicit unsupported schema override

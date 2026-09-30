@@ -99,6 +99,7 @@ pub(crate) fn config_from_artifact(
 
 fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::ProviderDef {
     llm_config::ProviderDef {
+        platform_fee_percent: provider.platform_fee_percent,
         display_name: Some(provider.display_name.clone()),
         icon: provider.icon.clone(),
         base_url: provider.endpoint.base_url.clone(),
@@ -131,6 +132,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
         },
         extra_headers: provider.extra_headers.clone(),
         chat_endpoint: provider.endpoint.chat_endpoint.clone(),
+        chat_api_adapter: provider.endpoint.chat_api_adapter,
         completion_endpoint: provider.endpoint.completion_endpoint.clone(),
         embeddings_endpoint: provider.endpoint.embeddings_endpoint.clone(),
         healthcheck: provider

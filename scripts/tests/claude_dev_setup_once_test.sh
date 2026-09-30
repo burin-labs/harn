@@ -15,7 +15,7 @@ real_harn_bin="$HARN_BIN"
 
 fake_repo="$tmp_root/repo with spaces"
 mkdir -p "$fake_repo/scripts"
-git -C "$fake_repo" init --quiet
+git -C "$fake_repo" init -b main --quiet
 fake_repo="$(cd "$fake_repo" && pwd -P)"
 
 # Records one line per invocation so the test can tell the blocking bootstrap

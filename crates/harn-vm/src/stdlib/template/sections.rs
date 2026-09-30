@@ -24,7 +24,6 @@ struct SectionProfile {
     text_tool_wire_format_supported: bool,
     prefers_role_developer: bool,
     structured_output_mode: String,
-    thinking_block_style: String,
 }
 
 pub(super) fn is_builtin_section(name: &str) -> bool {
@@ -46,8 +45,6 @@ pub(super) fn render_section(
         "system_framing" => Ok(render_system_framing(body, &profile)),
         "output_format" => render_output_format(body, args, &profile, line, col),
         "tools" => render_tools(body, args, &profile, line, col),
-        "thinking_scaffold" => Ok(render_thinking_scaffold(body, &profile)),
-        "chain_of_thought" => Ok(render_chain_of_thought(body, &profile)),
         _ => Err(TemplateError::new(
             line,
             col,
@@ -61,7 +58,6 @@ impl SectionProfile {
         let Some(VmValue::Dict(llm)) = llm else {
             return Self {
                 structured_output_mode: "none".to_string(),
-                thinking_block_style: "none".to_string(),
                 ..Self::default()
             };
         };
@@ -80,8 +76,6 @@ impl SectionProfile {
             text_tool_wire_format_supported: cap_bool(caps, "text_tool_wire_format_supported"),
             prefers_role_developer: cap_bool(caps, "prefers_role_developer"),
             structured_output_mode,
-            thinking_block_style: cap_string(caps, "thinking_block_style")
-                .unwrap_or_else(|| "none".to_string()),
         }
     }
 
@@ -317,47 +311,6 @@ fn render_tools(
     Ok(render)
 }
 
-fn render_thinking_scaffold(body: &str, profile: &SectionProfile) -> SectionRender {
-    match profile.thinking_block_style.as_str() {
-        "thinking_blocks" => render_body_or_default(
-            body,
-            "Think through the task before answering.",
-            "<thinking>\n",
-            "\n</thinking>",
-            "thinking_blocks",
-        ),
-        "reasoning_summary" => render_body_or_default(
-            body,
-            "Use internal reasoning and provide a concise answer.",
-            "## Reasoning\n",
-            "",
-            "reasoning_summary",
-        ),
-        "inline" => {
-            render_body_or_default(body, "Reason privately before answering.", "", "", "inline")
-        }
-        _ => empty_render(body, "none"),
-    }
-}
-
-fn render_chain_of_thought(body: &str, profile: &SectionProfile) -> SectionRender {
-    let default = "Reason privately step by step before answering.";
-    let scaffold = profile.scaffold();
-    match scaffold {
-        Scaffold::Xml => render_body_or_default(
-            body,
-            default,
-            "<reasoning>\n",
-            "\n</reasoning>",
-            scaffold.label(),
-        ),
-        Scaffold::Markdown => {
-            render_body_or_default(body, default, "## Reasoning\n", "", scaffold.label())
-        }
-        Scaffold::Plain => render_body_or_default(body, default, "", "", scaffold.label()),
-    }
-}
-
 fn wrap_body(body: &str, prefix: &str, suffix: &str, envelope: &'static str) -> SectionRender {
     let (content, source_start, source_end) = normalized_body(body);
     let body_output_start = (!content.is_empty()).then_some(prefix.len());
@@ -372,36 +325,6 @@ fn wrap_body(body: &str, prefix: &str, suffix: &str, envelope: &'static str) -> 
         body_source_end: source_end,
         envelope,
     }
-}
-
-fn render_body_or_default(
-    body: &str,
-    default: &str,
-    prefix: &str,
-    suffix: &str,
-    envelope: &'static str,
-) -> SectionRender {
-    let (content, source_start, source_end) = normalized_body(body);
-    if content.is_empty() {
-        return wrap_content_with_mapping(
-            default,
-            prefix,
-            suffix,
-            None,
-            source_start,
-            source_end,
-            envelope,
-        );
-    }
-    wrap_content_with_mapping(
-        content,
-        prefix,
-        suffix,
-        Some(0),
-        source_start,
-        source_end,
-        envelope,
-    )
 }
 
 fn wrap_content_with_mapping(

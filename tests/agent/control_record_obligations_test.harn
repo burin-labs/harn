@@ -14,7 +14,9 @@ import {
   completion_obligations_digest,
   completion_obligations_from_control_events,
   completion_obligations_from_messages,
+  completion_obligations_objective,
   completion_obligations_prompt,
+  completion_obligations_requirements,
 } from "std/agent/obligations"
 import { assert_contains, assert_not_nil } from "std/testing"
 
@@ -162,4 +164,60 @@ pipeline test_an_empty_control_list_does_not_claim_the_run_was_not_stopped(
   assert_eq(obligations.accepted_stop, nil)
   assert_eq(obligations.original_task, TASK)
   assert_eq(obligations.source, "control_record")
+}
+
+const RETARGET = "Reply with exactly the single word BRAVO."
+
+pipeline test_a_recorded_retarget_replaces_the_objective_and_retires_rows(
+  harness: Harness,
+  task: unknown,
+) {
+  const retarget_row = steer_row() + {goal: {objective: RETARGET}}
+  const retargeted = completion_obligations_from_control_events([retarget_row], TASK)
+  assert_eq(retargeted.retarget.objective, RETARGET)
+  assert_eq(retargeted.retarget.control_id, "ctl-steer-1")
+  assert_eq(retargeted.retarget.message_id, "msg_inj_1")
+  assert_eq(completion_obligations_objective(retargeted, TASK), RETARGET)
+  const contract = {
+    requirements: [
+      {requirement_id: "suite", name: "Run the suite.", evidence_roles: ["assistant_output"]},
+    ],
+  }
+  const under = completion_obligations_requirements(contract, retargeted)
+  assert_eq(under.contract, nil)
+  assert_eq(under.retired[0].requirement_id, "suite")
+  const prompt = completion_obligations_prompt(retargeted)
+  assert_contains(prompt, "REPLACED this run's objective")
+  assert_contains(prompt, "Original task, retired:\n" + TASK)
+  // A retarget changes what the run is held to, so it changes the evidence
+  // identity even though the steer list is the same.
+  const plain = completion_obligations_from_control_events([steer_row()], TASK)
+  assert(
+    completion_obligations_digest(retargeted) != completion_obligations_digest(plain),
+    "a retarget must not share an evidence identity with the same plain steer",
+  )
+  // Negative control: the same steer without a goal amends and retires nothing.
+  assert_eq(plain.retarget, nil)
+  assert_eq(completion_obligations_objective(plain, TASK), TASK)
+  assert_eq(completion_obligations_requirements(contract, plain).contract, contract)
+  assert_eq(len(completion_obligations_requirements(contract, plain).retired), 0)
+}
+
+pipeline test_a_guessed_or_queued_retarget_retires_nothing(harness: Harness, task: unknown) {
+  // A heuristic row may name a retarget nobody made, and a queued note never
+  // reached the model; neither may retire acceptance items.
+  const guessed = steer_row() + {goal: {objective: RETARGET}, provenance: "heuristic"}
+  assert_eq(completion_obligations_from_control_events([guessed], TASK).retarget, nil)
+  const queued = steer_row()
+    + {goal: {objective: RETARGET}, action: "queue", delivery_mode: "audit_only"}
+  assert_eq(completion_obligations_from_control_events([queued], TASK).retarget, nil)
+}
+
+pipeline test_the_latest_retarget_wins(harness: Harness, task: unknown) {
+  const first = steer_row() + {goal: {objective: "Reply ALPHA."}}
+  const second = steer_row()
+    + {control_id: "ctl-steer-2", message_id: "msg_inj_2", goal: {objective: RETARGET}}
+  const obligations = completion_obligations_from_control_events([first, second], TASK)
+  assert_eq(obligations.retarget.objective, RETARGET)
+  assert_eq(obligations.retarget.control_id, "ctl-steer-2")
 }

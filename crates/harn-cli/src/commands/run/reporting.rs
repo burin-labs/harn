@@ -17,7 +17,13 @@ use harn_vm::clock::{now_wall_ms, RealClock};
 use harn_vm::event_log::EventLog;
 use harn_vm::llm::usage::{summarize_usage_cost_certainty, UsageCostCertainty};
 
-use super::{RunAttestationOptions, RunProfileOptions};
+use super::RunProfileOptions;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RunAttestationOptions {
+    pub receipt_out: Option<PathBuf>,
+    pub agent_id: Option<String>,
+}
 
 /// JSON event-stream configuration for `--json` runs.
 #[derive(Clone, Default)]
@@ -52,7 +58,19 @@ pub struct RunAuxOptions {
 
 #[derive(Clone, Debug, Default)]
 pub struct RunControlOptions {
+    pub evaluation: super::EvaluationReplayOptions,
     pub timeout: Option<Duration>,
+    pub project_runtime: super::ProjectRuntimeMode,
+    pub flight_recorder: FlightRecorderOptions,
+}
+
+/// Complete in-process execution configuration. Embedded and headless hosts
+/// use this seam for a non-default runtime without forking CLI behavior.
+#[derive(Clone, Debug, Default)]
+pub struct RunExecutionOptions {
+    pub evaluation: super::EvaluationReplayOptions,
+    pub sandbox: super::RunSandboxOptions,
+    pub harnpack: super::HarnpackRunOptions,
     pub project_runtime: super::ProjectRuntimeMode,
     pub flight_recorder: FlightRecorderOptions,
 }
@@ -159,6 +177,10 @@ pub(crate) fn run_aux_options_from_args(args: &crate::cli::RunArgs) -> RunAuxOpt
 
 pub(crate) fn run_control_options_from_args(args: &crate::cli::RunArgs) -> RunControlOptions {
     RunControlOptions {
+        evaluation: super::EvaluationReplayOptions {
+            tape: args.evaluation_tape.clone(),
+            cache: args.evaluation_cache,
+        },
         timeout: args.timeout,
         flight_recorder: FlightRecorderOptions {
             enabled: args.flight_recorder,
@@ -666,6 +688,8 @@ mod trace_summary_pricing_tests {
                 unpriced_calls: i64::from(cost_usd.is_none()),
                 usage_unknown_calls: 0,
                 unpriced: None,
+                pricing: None,
+                billing: None,
             },
             duration_ms: 5,
         }

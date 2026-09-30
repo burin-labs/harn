@@ -424,11 +424,24 @@ pub(super) fn record_and_emit_control(session_id: &str, control: harn_session_st
             "messageId": control.message_id,
         }),
         reason: None,
-        metadata: serde_json::json!({
-            "action": control.action.as_str(),
-            "requestedMode": control.requested_mode,
-            "deliveryMode": control.delivery_mode,
-            "recorded": outcome.as_str(),
-        }),
+        metadata: control_outcome_metadata(&control, outcome),
     });
+}
+
+fn control_outcome_metadata(
+    control: &harn_session_store::ControlEvent,
+    outcome: harn_vm::agent_sessions::ControlRecordOutcome,
+) -> serde_json::Value {
+    let mut metadata = serde_json::json!({
+        "action": control.action.as_str(),
+        "requestedMode": control.requested_mode,
+        "deliveryMode": control.delivery_mode,
+        "recorded": outcome.as_str(),
+    });
+    // Present only on a retargeting steer, so a host can show that the run's
+    // objective changed without reading the store.
+    if let Some(goal) = &control.goal {
+        metadata["goal"] = serde_json::json!(goal);
+    }
+    metadata
 }

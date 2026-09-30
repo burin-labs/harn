@@ -178,12 +178,19 @@ pub(super) fn provider_catalog_to_vm_value() -> VmValue {
     let artifact = crate::provider_catalog::artifact();
 
     let mut providers = Vec::new();
-    for name in llm_config::provider_names() {
-        if let Some(pdef) = llm_config::provider_config(&name) {
-            let mut provider = match provider_def_to_vm_value(Some(&name), &pdef) {
+    for catalog_provider in &artifact.providers {
+        let name = &catalog_provider.id;
+        if let Some(pdef) = llm_config::provider_config(name) {
+            let mut provider = match provider_def_to_vm_value(Some(name), &pdef) {
                 VmValue::Dict(provider) => provider.as_ref().clone(),
                 _ => unreachable!("provider_def_to_vm_value returns a dict"),
             };
+            let facts = json_to_vm_value(
+                &serde_json::to_value(catalog_provider).expect("catalog provider is serializable"),
+            );
+            for (key, value) in facts.as_dict().expect("catalog provider dict").iter() {
+                provider.entry(key.clone()).or_insert_with(|| value.clone());
+            }
             provider.put_str("name", name.clone());
             providers.push(VmValue::dict(provider));
         }

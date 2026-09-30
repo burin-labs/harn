@@ -42,6 +42,9 @@ mod transport;
 mod types;
 
 use auth::acp_auth_request_for_method;
+pub fn is_supported_session_mode(mode_id: &str) -> bool {
+    modes::is_known(mode_id)
+}
 use bridge::AcpBridge;
 pub use bridge::AcpOutput;
 use live_clients::{
@@ -64,10 +67,10 @@ pub use sessions::{
     acp_persisted_session_item, resolve_acp_session_project_root, AcpSessionProjectRootError,
 };
 use sessions::{
-    apply_session_budget_rearm, cancel_session_command_handles, lookup_session_cancellation,
-    preempt_session_interruption, prepare_session_prompt, session_project_root_for_cwd,
-    ConcurrentSessionControl, ConcurrentSessionControls, Session, SessionBudget,
-    SessionCancellation, SessionInfo,
+    cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
+    prepare_session_prompt, session_project_root_for_cwd, ConcurrentSessionControl,
+    ConcurrentSessionControls, Session, SessionBudget, SessionCancellation, SessionInfo,
+    SessionSpendRecorder,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -441,6 +444,30 @@ fn bridge_mode_for_session_inject(params: &serde_json::Value) -> Result<&'static
         )),
         None => Err("session/inject requires mode".to_string()),
     }
+}
+
+/// The retarget a `session/inject` steer carries, validated once here.
+///
+/// A `queue` note is refused a goal: it lands after the last model call, so a
+/// retarget riding on it would retire acceptance items for an objective the
+/// model was never shown.
+fn session_inject_goal(
+    params: &serde_json::Value,
+    bridge_mode: &str,
+) -> Result<Option<harn_session_store::ControlGoal>, String> {
+    let Some(raw) = params.get("goal").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    if bridge_mode == "audit_only" {
+        return Err(
+            "session/inject: `goal` retargets the run and needs mode `steer` or \
+             `interrupt_immediate`; a `queue` note never reaches the model"
+                .to_string(),
+        );
+    }
+    harn_session_store::ControlGoal::parse(raw)
+        .map(Some)
+        .map_err(|message| format!("session/inject: {message}"))
 }
 
 fn normalize_session_inject_content(

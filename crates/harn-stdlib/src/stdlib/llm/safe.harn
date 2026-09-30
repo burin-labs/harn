@@ -793,13 +793,15 @@ fn __apply_judge_defaults(llm: HarnessLlm, schema: dict, options: any) {
  *
  * This only governs an option Harn itself supplies. An explicit caller value
  * stays untouched and reaches the canonical capability-admission gate, where
- * an unsupported request remains a typed error. Unknown and unresolved routes
- * preserve the historical open-world behavior.
+ * an unsupported request remains a typed error. A missing model or unresolved
+ * provider gives no evidence of support, so omit this optional default until
+ * the runtime resolves the route. Unknown custom routes with an identified
+ * provider remain open-world.
  */
 fn __temperature_default_supported(llm: HarnessLlm, options: dict) -> bool {
   const model = trim(to_string(options?.model ?? ""))
   if model == "" {
-    return true
+    return false
   }
   const info = try {
     llm.model_info(model)
@@ -811,7 +813,7 @@ fn __temperature_default_supported(llm: HarnessLlm, options: dict) -> bool {
     provider = trim(to_string(info?.provider ?? ""))
   }
   if provider == "" || provider == "auto" {
-    return true
+    return false
   }
   const capabilities = try {
     llm.provider_capabilities(provider, model)

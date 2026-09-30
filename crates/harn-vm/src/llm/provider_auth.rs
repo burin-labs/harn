@@ -11,6 +11,15 @@ pub enum ProviderCredentialStatus {
     Missing,
     NotRequired,
     Deferred,
+    /// The credential is in a store that would only answer through a system
+    /// dialog (a locked macOS Keychain) that this process does not show.
+    NeedsUserApproval,
+    /// A platform-managed provider needs a region and none resolves without
+    /// the network.
+    RegionUnconfigured,
+    /// A platform-managed provider has no credential source discoverable
+    /// without the network.
+    CredentialsUnconfigured,
 }
 
 impl ProviderCredentialStatus {
@@ -20,6 +29,18 @@ impl ProviderCredentialStatus {
             Self::Missing => "missing",
             Self::NotRequired => "not_required",
             Self::Deferred => "deferred",
+            Self::NeedsUserApproval => "needs_user_approval",
+            Self::RegionUnconfigured => "region_unconfigured",
+            Self::CredentialsUnconfigured => "credentials_unconfigured",
+        }
+    }
+}
+
+impl From<super::providers::PlatformPrerequisiteGap> for ProviderCredentialStatus {
+    fn from(gap: super::providers::PlatformPrerequisiteGap) -> Self {
+        match gap {
+            super::providers::PlatformPrerequisiteGap::Region => Self::RegionUnconfigured,
+            super::providers::PlatformPrerequisiteGap::Credentials => Self::CredentialsUnconfigured,
         }
     }
 }
@@ -67,17 +88,28 @@ impl ResolvedProviderAuth {
 #[derive(Debug)]
 enum ResolvedProviderCredential {
     Key(String),
+    /// Known to exist, value deliberately not read.
+    Present,
+    NeedsUserApproval,
     Missing,
     NotRequired,
     Deferred,
+    /// Platform-managed, and its client's offline prerequisites do not resolve.
+    PlatformUnconfigured(super::providers::PlatformPrerequisiteGap),
     ResolutionError(VmError),
 }
 
 /// Resolve one provider's usability through the exact credential path used by
 /// dispatch. The returned status never contains secret material.
+///
+/// A status is a presence question, so it is answered without reading any
+/// stored secret: a `secret_store` grant or a secret reference is checked for
+/// existence only. On macOS reading a value can raise a Keychain dialog, and a
+/// status walk visits every provider.
 pub fn provider_auth_status(provider: &str) -> ProviderAuthStatus {
     let definition = llm_config::provider_config(provider);
-    resolve_provider_auth_with_definition(provider, definition.as_ref()).status
+    resolve_provider_auth_with_definition(provider, definition.as_ref(), CredentialRead::Presence)
+        .status
 }
 
 /// Resolve all configured and runtime-registered providers in stable name order.
@@ -103,17 +135,26 @@ pub(crate) fn provider_auth_status_with_definition(
     provider: &str,
     definition: &ProviderDef,
 ) -> ProviderAuthStatus {
-    resolve_provider_auth_with_definition(provider, Some(definition)).status
+    resolve_provider_auth_with_definition(provider, Some(definition), CredentialRead::Presence)
+        .status
 }
 
 pub(crate) fn resolve_provider_auth(provider: &str) -> ResolvedProviderAuth {
     let definition = llm_config::provider_config(provider);
-    resolve_provider_auth_with_definition(provider, definition.as_ref())
+    resolve_provider_auth_with_definition(provider, definition.as_ref(), CredentialRead::Value)
+}
+
+/// Whether a resolution needs the credential itself or only whether it exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CredentialRead {
+    Value,
+    Presence,
 }
 
 fn resolve_provider_auth_with_definition(
     provider: &str,
     definition: Option<&ProviderDef>,
+    read: CredentialRead,
 ) -> ResolvedProviderAuth {
     let name = provider.to_string();
     let credential = if provider == "mock"
@@ -124,24 +165,33 @@ fn resolve_provider_auth_with_definition(
         ResolvedProviderCredential::NotRequired
     } else if let Some(definition) = definition {
         if definition.is_credential_resolution_platform_managed() {
-            ResolvedProviderCredential::Deferred
+            match super::providers::platform_offline_prerequisites(provider) {
+                Ok(()) => ResolvedProviderCredential::Deferred,
+                Err(gap) => ResolvedProviderCredential::PlatformUnconfigured(gap),
+            }
         } else if definition.auth_style == "none"
             || matches!(definition.auth_env, llm_config::AuthEnv::None)
         {
             ResolvedProviderCredential::NotRequired
         } else {
-            resolved_credential_from_probe(probe_api_key(Some(definition)))
+            probe_credential(Some(definition), read)
         }
     } else {
-        resolved_credential_from_probe(probe_api_key(None))
+        probe_credential(None, read)
     };
     let (available, credential_status) = match &credential {
-        ResolvedProviderCredential::Key(_) => (true, ProviderCredentialStatus::Ok),
+        ResolvedProviderCredential::Key(_) | ResolvedProviderCredential::Present => {
+            (true, ProviderCredentialStatus::Ok)
+        }
+        ResolvedProviderCredential::NeedsUserApproval => {
+            (false, ProviderCredentialStatus::NeedsUserApproval)
+        }
         ResolvedProviderCredential::Missing | ResolvedProviderCredential::ResolutionError(_) => {
             (false, ProviderCredentialStatus::Missing)
         }
         ResolvedProviderCredential::NotRequired => (true, ProviderCredentialStatus::NotRequired),
         ResolvedProviderCredential::Deferred => (true, ProviderCredentialStatus::Deferred),
+        ResolvedProviderCredential::PlatformUnconfigured(gap) => (false, (*gap).into()),
     };
     ResolvedProviderAuth {
         status: ProviderAuthStatus {
@@ -150,6 +200,55 @@ fn resolve_provider_auth_with_definition(
             credential_status,
         },
         credential,
+    }
+}
+
+fn probe_credential(
+    definition: Option<&ProviderDef>,
+    read: CredentialRead,
+) -> ResolvedProviderCredential {
+    match read {
+        CredentialRead::Value => resolved_credential_from_probe(probe_api_key(definition)),
+        CredentialRead::Presence => probe_credential_presence(definition),
+    }
+}
+
+/// [`probe_api_key`] without reading a stored secret.
+fn probe_credential_presence(definition: Option<&ProviderDef>) -> ResolvedProviderCredential {
+    let envs: Vec<&str> = match definition.map(|definition| &definition.auth_env) {
+        None => vec!["ANTHROPIC_API_KEY"],
+        Some(llm_config::AuthEnv::None) => return ResolvedProviderCredential::NotRequired,
+        Some(llm_config::AuthEnv::Single(env)) => vec![env.as_str()],
+        Some(llm_config::AuthEnv::Multiple(envs)) => envs.iter().map(String::as_str).collect(),
+    };
+    let mut needs_approval = false;
+    for env in envs {
+        let raw = match crate::stdlib::process::session_env_presence(env) {
+            Ok(Some(raw)) if !raw.is_empty() => raw,
+            // A policy error reads as unset, exactly as `session_auth_env`
+            // treats it on the value path.
+            Ok(_) | Err(crate::stdlib::process::SessionEnvPresenceError::Policy) => continue,
+            Err(crate::stdlib::process::SessionEnvPresenceError::NeedsUserApproval) => {
+                needs_approval = true;
+                continue;
+            }
+        };
+        // Matches `probe_api_key`: the first variable that is set decides.
+        return match crate::secrets::secret_ref_is_present(&raw) {
+            Ok(None) | Ok(Some(true)) => ResolvedProviderCredential::Present,
+            Ok(Some(false)) => ResolvedProviderCredential::Missing,
+            Err(error) if error.needs_user_approval() => {
+                ResolvedProviderCredential::NeedsUserApproval
+            }
+            Err(error) => ResolvedProviderCredential::ResolutionError(missing_key_error(format!(
+                "Failed to check API key secret reference from {env}: {error}"
+            ))),
+        };
+    }
+    if needs_approval {
+        ResolvedProviderCredential::NeedsUserApproval
+    } else {
+        ResolvedProviderCredential::Missing
     }
 }
 
@@ -186,12 +285,24 @@ fn resolve_api_key_with_definition(
 ) -> Result<String, VmError> {
     let selection_hint = provider_selection_hint(provider, source);
 
-    match resolve_provider_auth_with_definition(provider, definition).credential {
+    match resolve_provider_auth_with_definition(provider, definition, CredentialRead::Value)
+        .credential
+    {
         ResolvedProviderCredential::Key(api_key) => Ok(api_key),
-        ResolvedProviderCredential::NotRequired | ResolvedProviderCredential::Deferred => {
-            Ok(String::new())
-        }
+        // A platform-managed client still owns the live answer: its chain also
+        // reaches sources only the network can (instance metadata), and it
+        // raises its own typed error when nothing resolves. Availability is
+        // what reads the offline gap; an explicit dispatch is not refused here.
+        ResolvedProviderCredential::NotRequired
+        | ResolvedProviderCredential::Deferred
+        | ResolvedProviderCredential::PlatformUnconfigured(_) => Ok(String::new()),
         ResolvedProviderCredential::ResolutionError(error) => Err(error),
+        // Presence reads only; a value read never produces either.
+        ResolvedProviderCredential::Present | ResolvedProviderCredential::NeedsUserApproval => {
+            Err(missing_key_error(format!(
+                "{provider} credential was checked for presence where its value was needed"
+            )))
+        }
         ResolvedProviderCredential::Missing => {
             if let Some(definition) = definition {
                 let aggregate_hint = no_credentials_message();
@@ -477,6 +588,9 @@ mod tests {
         let _azure_key = ScopedEnv::unset("AZURE_OPENAI_API_KEY");
         let _azure_token = ScopedEnv::unset("AZURE_OPENAI_AD_TOKEN");
         let _azure_bearer = ScopedEnv::unset("AZURE_OPENAI_BEARER_TOKEN");
+        let _aws_region = ScopedEnv::set("AWS_REGION", "us-east-1");
+        let _aws_key = ScopedEnv::set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+        let _aws_secret = ScopedEnv::set("AWS_SECRET_ACCESS_KEY", "example-secret");
 
         assert_eq!(
             provider_auth_status("anthropic").credential_status,
@@ -497,6 +611,68 @@ mod tests {
         assert_eq!(resolve_api_key("bedrock").unwrap(), "");
         assert_eq!(resolve_api_key("vertex").unwrap(), "");
         assert!(resolve_api_key("azure_openai").is_err());
+    }
+
+    #[test]
+    fn bedrock_is_unavailable_until_its_offline_prerequisites_resolve() {
+        let _guard = crate::llm::env_guard();
+        let mut env = crate::llm::test_env::UnconfiguredProviderEnv::new();
+
+        let status = provider_auth_status("bedrock");
+        assert!(!status.available, "{status:?}");
+        assert_eq!(status.credential_status.as_str(), "region_unconfigured");
+
+        env.set("AWS_REGION", "us-east-1");
+        let status = provider_auth_status("bedrock");
+        assert!(!status.available, "{status:?}");
+        assert_eq!(
+            status.credential_status.as_str(),
+            "credentials_unconfigured"
+        );
+
+        // Negative control: a region and a key pair make it eligible again.
+        env.set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+        env.set("AWS_SECRET_ACCESS_KEY", "example-secret");
+        let status = provider_auth_status("bedrock");
+        assert!(status.available, "{status:?}");
+        assert_eq!(status.credential_status.as_str(), "deferred");
+    }
+
+    #[test]
+    fn bedrock_prerequisites_resolve_from_shared_files_and_container_env() {
+        let _guard = crate::llm::env_guard();
+        let mut env = crate::llm::test_env::UnconfiguredProviderEnv::new();
+        let dir = env.aws_dir().to_path_buf();
+        std::fs::write(
+            dir.join("config"),
+            "[profile work]\nregion = eu-west-1\n[default]\noutput = json\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("credentials"),
+            "[work]\naws_access_key_id = AKIDEXAMPLE\naws_secret_access_key = example\n",
+        )
+        .unwrap();
+
+        // The default profile has neither a region nor a credential.
+        assert_eq!(
+            provider_auth_status("bedrock").credential_status.as_str(),
+            "region_unconfigured"
+        );
+        env.set("AWS_PROFILE", "work");
+        assert!(provider_auth_status("bedrock").available);
+
+        // A container credential endpoint is a credential source on its own.
+        std::fs::write(dir.join("credentials"), "").unwrap();
+        assert_eq!(
+            provider_auth_status("bedrock").credential_status.as_str(),
+            "credentials_unconfigured"
+        );
+        env.set(
+            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+            "/v2/credentials/id",
+        );
+        assert!(provider_auth_status("bedrock").available);
     }
 
     #[test]
@@ -718,6 +894,7 @@ mod tests {
                 },
                 expose_as_env: Some("ANTHROPIC_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             }],
             &|name| std::env::var(name).ok(),
         )
@@ -729,6 +906,152 @@ mod tests {
             ProviderCredentialStatus::Ok
         );
         assert_eq!(resolve_api_key("anthropic").unwrap(), "sk-granted");
+    }
+
+    /// A secret store that counts value reads and answers presence from a
+    /// fixed verdict, standing in for a macOS Keychain where a value read is
+    /// the dialog and an attribute search is not.
+    struct ReadCountingStore {
+        reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        presence: fn(&crate::secrets::SecretId) -> Result<bool, crate::secrets::SecretError>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::secrets::SecretProvider for ReadCountingStore {
+        async fn get(
+            &self,
+            _id: &crate::secrets::SecretId,
+        ) -> Result<crate::secrets::SecretBytes, crate::secrets::SecretError> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(crate::secrets::SecretBytes::from("sk-stored"))
+        }
+        async fn contains(
+            &self,
+            id: &crate::secrets::SecretId,
+        ) -> Result<bool, crate::secrets::SecretError> {
+            (self.presence)(id)
+        }
+        async fn put(
+            &self,
+            _id: &crate::secrets::SecretId,
+            _value: crate::secrets::SecretBytes,
+        ) -> Result<(), crate::secrets::SecretError> {
+            unreachable!("status never writes")
+        }
+        async fn rotate(
+            &self,
+            _id: &crate::secrets::SecretId,
+        ) -> Result<crate::secrets::RotationHandle, crate::secrets::SecretError> {
+            unreachable!("status never rotates")
+        }
+        async fn list(
+            &self,
+            _prefix: &crate::secrets::SecretId,
+        ) -> Result<Vec<crate::secrets::SecretMeta>, crate::secrets::SecretError> {
+            Ok(Vec::new())
+        }
+        fn namespace(&self) -> &'static str {
+            "read-counting"
+        }
+        fn supports_versions(&self) -> bool {
+            false
+        }
+    }
+
+    fn secret_store_grant() -> crate::security::SessionEnvironment {
+        use crate::security::{
+            EnvironmentPolicyKind, GrantSourceSpec, GrantSpec, SessionEnvironment,
+        };
+        SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
+            vec![GrantSpec {
+                name: "anthropic".to_string(),
+                source: GrantSourceSpec::SecretStore {
+                    account: "burin.provider_auth".to_string(),
+                    key: "anthropic_api_key".to_string(),
+                },
+                expose_as_env: Some("ANTHROPIC_API_KEY".to_string()),
+                for_command: None,
+                expose_to: Default::default(),
+            }],
+            &|name| std::env::var(name).ok(),
+        )
+        .expect("granted policy launch")
+    }
+
+    fn with_store<T>(store: ReadCountingStore, check: impl FnOnce() -> T) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(crate::secrets::with_active_secret_provider(
+                Some(std::sync::Arc::new(store)),
+                async { check() },
+            ))
+    }
+
+    /// Status is a presence question and must not read the stored value.
+    ///
+    /// A status walk visits every provider, and on macOS each value read of a
+    /// Keychain item is an access dialog for any binary not on the item's
+    /// ACL, which is every freshly built one. The negative control is the
+    /// dispatch read in the same test: the store does count value reads, so a
+    /// status path that read the value could not report zero.
+    #[test]
+    fn status_of_a_stored_grant_reads_no_secret_and_dispatch_does() {
+        let _guard = crate::llm::env_guard();
+        let _absent = ScopedEnv::unset("ANTHROPIC_API_KEY");
+        let _environment = ScopedEnvironment::install(secret_store_grant());
+        let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let store = ReadCountingStore {
+            reads: std::sync::Arc::clone(&reads),
+            presence: |_| Ok(true),
+        };
+        with_store(store, || {
+            let status = provider_auth_status("anthropic");
+            assert_eq!(status.credential_status, ProviderCredentialStatus::Ok);
+            assert!(status.available);
+            let statuses = provider_auth_statuses();
+            assert!(statuses
+                .iter()
+                .any(|status| status.name == "anthropic" && status.available));
+            assert_eq!(
+                reads.load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "a status question read a stored secret"
+            );
+
+            assert_eq!(resolve_api_key("anthropic").unwrap(), "sk-stored");
+            assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+        });
+    }
+
+    /// A store that could only answer through a dialog this process will not
+    /// show reports a typed state, not "missing" and not a prompt.
+    #[test]
+    fn a_store_that_needs_approval_is_reported_as_such() {
+        let _guard = crate::llm::env_guard();
+        let _absent = ScopedEnv::unset("ANTHROPIC_API_KEY");
+        let _environment = ScopedEnvironment::install(secret_store_grant());
+        let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let store = ReadCountingStore {
+            reads: std::sync::Arc::clone(&reads),
+            presence: |id| {
+                Err(crate::secrets::SecretError::NeedsUserApproval {
+                    provider: "keyring".to_string(),
+                    id: id.clone(),
+                })
+            },
+        };
+        with_store(store, || {
+            let status = provider_auth_status("anthropic");
+            assert_eq!(
+                status.credential_status,
+                ProviderCredentialStatus::NeedsUserApproval
+            );
+            assert!(!status.available);
+            assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+        });
     }
 
     #[test]
@@ -769,6 +1092,9 @@ mod tests {
         let _vertex_token = ScopedEnv::unset("VERTEX_AI_ACCESS_TOKEN");
         let _google_token = ScopedEnv::unset("GOOGLE_OAUTH_ACCESS_TOKEN");
         let _google_credentials = ScopedEnv::unset("GOOGLE_APPLICATION_CREDENTIALS");
+        let _aws_region = ScopedEnv::set("AWS_REGION", "us-east-1");
+        let _aws_key = ScopedEnv::set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+        let _aws_secret = ScopedEnv::set("AWS_SECRET_ACCESS_KEY", "example-secret");
 
         let available = available_provider_names();
         assert!(available.iter().any(|name| name == "bedrock"));

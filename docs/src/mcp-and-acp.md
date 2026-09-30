@@ -705,7 +705,8 @@ of the base ACP specification. Omission means `inherited`.
       {
         "name": "provider_key",
         "source": {"env": {"var": "OPENAI_API_KEY"}},
-        "expose_as_env": "OPENAI_API_KEY"
+        "expose_as_env": "OPENAI_API_KEY",
+        "expose_to": "in_process"
       },
       {
         "name": "gh_token",
@@ -718,7 +719,10 @@ of the base ACP specification. Omission means `inherited`.
 }
 ```
 
-The environment is resolved once at `session/new`. A fork inherits that
+`expose_to: "in_process"` lets the session's own model calls authenticate with
+the key while no command, MCP stdio server, or ACP provider the session starts
+can read it. Omitting `expose_to` exposes the grant to the whole session. The
+environment is resolved once at `session/new`. A fork inherits that
 resolved environment unless it requests a narrower policy. A child cannot
 widen its parent; violations return structured JSON-RPC `error.data` with a
 stable code, `parentPolicy`, and `requestedPolicy`. See
@@ -1247,7 +1251,7 @@ the next model call:
   "projectionBasis": "observed",
   "headroomUsd": 0.56,
   "provider": "openai",
-  "model": "gpt-5.6-sol"
+  "model": "gpt-6-sol"
 }
 ```
 
@@ -1505,7 +1509,11 @@ standalone CLI reuse. Treat that as durable delegated access:
   OAuth/OIDC authorization-server metadata; Harn validates issuer binding before
   storing or refreshing tokens
 - use local environment variables or client-managed secrets for stdio MCP
-  servers; the HTTP OAuth discovery flow does not apply to local stdio launches
+  servers; the HTTP OAuth discovery flow does not apply to local stdio launches.
+  A stdio server starts with the session's resolved environment, so under an
+  `isolated` or `granted` policy it sees a credential only through the
+  server's own `env` configuration or a grant that reaches it (session-wide,
+  or `for_command` naming the server's executable)
 - review remote MCP capabilities before wiring them into autonomous workflows
 
 ### Safer write defaults

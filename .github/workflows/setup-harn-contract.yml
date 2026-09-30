@@ -20,6 +20,7 @@ jobs:
       - name: Verify the stage-zero seed boundary
         run: sh scripts/tests/bootstrap_harn_seed_test.sh
       - name: Run deterministic setup-action tests
+        # The pinned bootstrap release predates positional multi-target tests.
         run: sh scripts/bootstrap-harn.sh --seed-command test --test-path scripts/tests/runtime_install_test.harn
       - name: Install a published Harn release
         id: harn

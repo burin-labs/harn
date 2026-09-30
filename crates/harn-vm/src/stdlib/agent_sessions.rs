@@ -226,7 +226,8 @@ fn ok_result(fields: &[(&str, serde_json::Value)]) -> VmValue {
     crate::stdlib::json_to_vm_value(&serde_json::Value::Object(result))
 }
 
-const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor", "workspace_policy"];
+const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] =
+    &["workspace_anchor", "workspace_policy", "parent", "actor"];
 const AGENT_SESSION_ADD_ROOT_OPT_KEYS: &[&str] = &["mount_mode", "reason"];
 const AGENT_SESSION_ATTACH_OPT_KEYS: &[&str] = &[
     "mode",
@@ -243,7 +244,7 @@ const AGENT_SESSION_METADATA_OPT_KEYS: &[&str] = &["metadata"];
     effects = [],
     sig = "agent_session_open(id?: string, opts?: dict) -> string",
     category = "agent.session",
-    doc = "Open or create a first-class agent session. opts may carry workspace_anchor and workspace_policy."
+    doc = "Open or create a first-class agent session. opts may carry workspace_anchor, workspace_policy, and parent with an optional actor to open a delegated child whose actor chain gains that actor."
 )]
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_opt(args, 0, "agent_session_open", "id")?;
@@ -252,14 +253,7 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         Some(VmValue::Dict(opts)) => opts.as_ref().clone(),
         _ => return Err(err("agent_session_open: `opts` must be a dict or nil")),
     };
-    for key in opts.keys() {
-        if !AGENT_SESSION_OPEN_OPT_KEYS.contains(&key.as_str()) {
-            let expected = AGENT_SESSION_OPEN_OPT_KEYS.join(", ");
-            return Err(err(format!(
-                "agent_session_open: unknown option key '{key}' (expected one of: {expected})"
-            )));
-        }
-    }
+    reject_unknown_opts(&opts, "agent_session_open", AGENT_SESSION_OPEN_OPT_KEYS)?;
     let workspace_policy = match opts.get("workspace_policy") {
         None | Some(VmValue::Nil) => None,
         Some(value) => Some(
@@ -282,7 +276,9 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
             .map_err(|message| err(format!("agent_session_open: {message}")))?,
         ),
     };
-    let resolved = agent_sessions::open_or_create(id)
+    let parent = opt_string(&opts, "agent_session_open", "parent")?;
+    let actor = opt_string(&opts, "agent_session_open", "actor")?;
+    let resolved = agent_sessions::open_session(id, parent.as_deref(), actor.as_deref())
         .map_err(|error| err(format!("agent_session_open: {error}")))?;
     if let Some(policy) = workspace_policy {
         agent_sessions::set_workspace_policy(&resolved, policy)

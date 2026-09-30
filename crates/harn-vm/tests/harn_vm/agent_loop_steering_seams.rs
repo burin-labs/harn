@@ -1101,6 +1101,7 @@ fn accepted_stop_row() -> harn_session_store::ControlEvent {
         delivery_mode: None,
         message_id: None,
         text: None,
+        goal: None,
         actor: serde_json::Value::Null,
         provenance: harn_session_store::ControlProvenance::Recorded,
     }
@@ -1242,4 +1243,200 @@ fn a_run_with_no_control_row_renders_no_stop_block() {
         "with no row to read, the snapshot must report the weaker fallback \
          reading rather than claim the run was not stopped; lines: {lines:?}"
     );
+}
+
+/// One script, two variants: a steer that retargets the run (it carries a
+/// `goal`) and the same steer as a plain amendment. The task freezes two
+/// acceptance rows on the completion judge. The steer abandons both, the model
+/// complies, and the judge answers `done` without itemizing either row, which
+/// is only an honest answer if the rows were retired.
+///
+///   0. final status
+///   1. `goal_retargeted` iff the judge's stable goal names the steered
+///      objective, else `goal_frozen`
+///   2. `rows_retired` iff the judge prompt carries no requirement rows, else
+///      `rows_frozen`
+///   3. the retired requirement ids from the typed retirement checkpoint, or
+///      `no_retirement_record`
+///   4. `retarget_directive` iff a model request after the steer told the
+///      model the objective changed, else `no_retarget_directive`
+///   5. the retarget objective the `verify_completion` closure was shown
+fn steer_retarget_pipeline(session_id: &str, retarget: bool) -> String {
+    let goal = if retarget {
+        ", goal: {objective: OBJECTIVE}"
+    } else {
+        ""
+    };
+    format!(
+        r###"
+import {{ agent_capture_events }} from "std/agent/events"
+import {{ agent_session_push_user_message }} from "std/agent/state"
+import {{ llm_text, with_llm_script }} from "std/testing"
+
+const STEER = "CHANGE OF PLAN: abandon the file listing entirely. Do not run any more tools."
+const OBJECTIVE = "Reply with exactly the single word BRAVO."
+const DONE_VERDICT = "{{\"verdict\":\"done\",\"detail\":\"The run replied BRAVO as the operator asked.\"}}"
+
+pipeline main(harness: Harness, task: unknown) {{
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I will list changelog.d first."),
+      llm_text("BRAVO ##DONE##"),
+      {{text: DONE_VERDICT}},
+      {{text: DONE_VERDICT}},
+      llm_text("BRAVO ##DONE##"),
+      {{text: DONE_VERDICT}},
+      {{text: DONE_VERDICT}},
+      llm_text("BRAVO ##DONE##"),
+      {{text: DONE_VERDICT}},
+      {{text: DONE_VERDICT}},
+    ],
+    {{ ->
+      const session = "{session_id}"
+      const seen = harness.runtime.shared_cell(
+        {{scope: "task_group", key: "retarget-{session_id}", initial: "unset"}},
+      )
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() {{
+          return agent_loop(
+            harness,
+            "List changelog.d, read the first 5 lines of AGENTS.md, then reply exactly ALPHA.",
+            nil,
+            {{
+              provider: "mock",
+              session_id: session,
+              root: "__HARN_TEST_SESSION_STORE_ROOT__",
+              loop_until_done: true,
+              done_sentinel: "##DONE##",
+              max_iterations: 3,
+              verify_completion_judge: {{
+                provider: "mock",
+                max_invocations: 3,
+                requirement_contract: {{
+                  requirements: [
+                    {{requirement_id: "list_changelog", name: "List changelog.d."}},
+                    {{requirement_id: "reply_alpha", name: "Reply exactly ALPHA."}},
+                  ],
+                }},
+              }},
+              verify_completion: {{ info ->
+                harness.runtime.shared_set(
+                  seen,
+                  to_string(info?.obligations?.retarget?.objective ?? "none"),
+                )
+                return nil
+              }},
+              post_turn_callback: {{ info ->
+                if info.iteration == 0 {{
+                  agent_session_push_user_message(
+                    harness.agent,
+                    session,
+                    {{content: STEER, mode: "steer"{goal}}},
+                  )
+                }}
+                return nil
+              }},
+            }},
+          )
+        }},
+      )
+      harness.stdio.log(captured.result.status)
+
+      const calls = harness.llm.mock_calls()
+      const judged = calls
+        .filter({{ call -> contains(to_string(call?.system ?? ""), "Stable completion goal") }})
+        .to_list()
+      if len(judged) == 0 {{
+        // Absence must not read as success.
+        harness.stdio.log("no_judge_call")
+        harness.stdio.log("no_judge_call")
+      }} else {{
+        const prefix = to_string(judged[0].system)
+        harness.stdio.log(
+          contains(prefix, "Stable completion goal:\n" + OBJECTIVE) ? "goal_retargeted" : "goal_frozen",
+        )
+        harness.stdio.log(
+          contains(prefix, "Atomic completion requirements") ? "rows_frozen" : "rows_retired",
+        )
+      }}
+
+      const retired = captured.events
+        .filter({{ event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema == "harn.completion_requirements_retired.v1"
+        }})
+        .to_list()
+      if len(retired) == 0 {{
+        harness.stdio.log("no_retirement_record")
+      }} else {{
+        const ids = retired[0].checkpoint.retired.map({{ row -> row.requirement_id }}).to_list()
+        harness.stdio.log(join(ids, ","))
+      }}
+
+      const redirected = calls
+        .filter({{ call ->
+          const request = to_string(call?.system ?? "") + "\n" + to_string(call?.messages ?? "")
+          contains(request, "The objective is now:\n" + OBJECTIVE)
+        }})
+        .to_list()
+      harness.stdio.log(len(redirected) > 0 ? "retarget_directive" : "no_retarget_directive")
+      harness.stdio.log(harness.runtime.shared_snapshot(seen).value)
+    }},
+  )
+}}
+"###
+    )
+}
+
+/// The reach falsifier for the retarget half of harn#7580. RED ON MAIN: a
+/// steer could not carry a goal, so the judge kept measuring the frozen task
+/// and demanded an itemized report for both rows the steer abandoned.
+///
+/// The steer goes through the real in-VM `session/inject` twin, which records
+/// the typed control row, and the real `finish_step` drain delivers it. What is
+/// read back is what the authorities decided: the judge's own prompt, the typed
+/// retirement record, the next model request, and the run's terminal status.
+#[test]
+fn a_retargeting_steer_replaces_the_objective_and_retires_frozen_rows() {
+    let raw = run_with_bridge(&steer_retarget_pipeline(
+        &fresh_session_id("steer-retarget"),
+        true,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(
+        lines,
+        vec![
+            "done",
+            "goal_retargeted",
+            "rows_retired",
+            "list_changelog,reply_alpha",
+            "retarget_directive",
+            "Reply with exactly the single word BRAVO.",
+        ],
+        "a retargeting steer must replace the judged objective, retire every \
+         frozen row with a typed record, tell the model, and let the run finish"
+    );
+}
+
+/// NEGATIVE CONTROL: the same steer without a goal amends the run and retires
+/// nothing. The judge still reads the original task and its rows, no
+/// retirement is recorded, and the model is not told the objective changed.
+/// Without this, a change that retired rows on every steer would pass above.
+#[test]
+fn a_plain_steer_keeps_the_objective_and_its_rows() {
+    let raw = run_with_bridge(&steer_retarget_pipeline(
+        &fresh_session_id("steer-retarget-control"),
+        false,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[1], "goal_frozen", "lines: {lines:?}");
+    assert_eq!(lines[2], "rows_frozen", "lines: {lines:?}");
+    assert_eq!(lines[3], "no_retirement_record", "lines: {lines:?}");
+    assert_eq!(lines[4], "no_retarget_directive", "lines: {lines:?}");
+    assert_eq!(lines[5], "none", "lines: {lines:?}");
 }

@@ -303,6 +303,37 @@ fn zai_glm52_disabled_uses_thinking_disabled() {
 }
 
 #[test]
+fn zai_glm53_flash_implicit_disable_leaves_mandatory_thinking_to_the_provider() {
+    let mut payload = base_request_payload();
+    payload.provider = "zai".to_string();
+    payload.model = "glm-5.3-flash".to_string();
+    payload.thinking = ThinkingConfig::Disabled;
+
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+
+    assert!(
+        body.get("thinking").is_none(),
+        "GLM 5.3 Flash rejects thinking.type=disabled with HTTP 400 code 1210"
+    );
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
+fn zai_glm53_flash_explicit_none_is_not_silently_reinterpreted() {
+    let mut payload = base_request_payload();
+    payload.provider = "zai".to_string();
+    payload.model = "glm-5.3-flash".to_string();
+    payload.thinking = ThinkingConfig::Effort {
+        level: ReasoningEffort::None,
+    };
+
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+
+    assert_eq!(body["thinking"], json!({"type": "disabled"}));
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
 fn zai_glm52_none_effort_is_explicitly_supported() {
     let mut payload = base_request_payload();
     payload.provider = "zai".to_string();

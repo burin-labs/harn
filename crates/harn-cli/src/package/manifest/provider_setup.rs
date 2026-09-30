@@ -54,6 +54,10 @@ pub struct ConnectorOperationManifest {
     pub capability: String,
     /// Plain-language, action-specific reason shown before disclosure.
     pub purpose: String,
+    /// Whether a host may offer this operation as a model-facing tool.
+    /// Older manifests default to raw API access, which hosts must not project.
+    #[serde(default)]
+    pub kind: ConnectorOperationKind,
     pub effect: ConnectorOperationEffect,
     #[serde(default)]
     pub environments: Vec<ConnectorEnvironment>,
@@ -119,6 +123,15 @@ pub enum ConnectorParameterType {
     Boolean,
     Object,
     Array,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectorOperationKind {
+    ModeledAction,
+    #[default]
+    RawApi,
+    Setup,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -855,6 +868,7 @@ field_classes = ["travel_documents"]
                 id: "orders.create".to_string(),
                 capability: "travel.booking".to_string(),
                 purpose: "Create an order".to_string(),
+                kind: ConnectorOperationKind::ModeledAction,
                 effect: ConnectorOperationEffect::Consequential,
                 environments: vec![ConnectorEnvironment::Test],
                 evidence: Vec::new(),
@@ -933,6 +947,53 @@ environments = ["test"]
         // repositories cannot add the key until a release carrying it reaches
         // them, so this is the state every existing manifest is in.
         assert!(service.operations[1].parameters.is_empty());
+    }
+
+    #[test]
+    fn operation_kind_is_closed_and_old_manifests_are_not_model_facing() {
+        let old: ConnectorOperationManifest = toml::from_str(
+            r#"
+id = "api.request"
+capability = "api.read"
+purpose = "Send a raw request."
+effect = "read"
+"#,
+        )
+        .unwrap();
+        assert_eq!(old.kind, ConnectorOperationKind::RawApi);
+
+        let modeled: ConnectorOperationManifest = toml::from_str(
+            r#"
+id = "issues.list"
+capability = "issues.read"
+purpose = "List issues."
+kind = "modeled_action"
+effect = "read"
+"#,
+        )
+        .unwrap();
+        assert_eq!(modeled.kind, ConnectorOperationKind::ModeledAction);
+
+        let setup: ConnectorOperationManifest = toml::from_str(
+            r#"
+id = "auth.connect"
+capability = "auth.setup"
+purpose = "Connect an account."
+kind = "setup"
+effect = "consequential"
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup.kind, ConnectorOperationKind::Setup);
+
+        let future = r#"
+id = "api.request"
+capability = "api.read"
+purpose = "Send a raw request."
+kind = "unreviewed_future_kind"
+effect = "read"
+"#;
+        assert!(toml::from_str::<ConnectorOperationManifest>(future).is_err());
     }
 
     #[test]

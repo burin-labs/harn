@@ -55,7 +55,9 @@ release_harn.harn --mode ship-pr
   -> push branch
   -> push signed vX.Y.Z tag at the pinned commit
   -> open Release vX.Y.Z PR and enable auto-merge
-  -> tag push triggers publish-release and build-release-binaries
+  -> the version commit's push to main builds and checks the candidate
+     (build-release-binaries); promotion tags and publishes those files
+  -> the tag push triggers publish-release
   -> watch_harn_release.harn resumes the durable receipt to terminal health
 ```
 
@@ -100,14 +102,13 @@ Terminal proof requires all of these to be successful:
   assets resolve from that repo.
 - `~/projects/harn-bump-fleet/watch_harn_release.harn` owns terminal
   publication, asset, PR-merge, recovery, and cache-warm observation.
-- `scripts/release_ship.sh --prepare` is an implementation detail for the
-  release harness and refuses standalone use.
+- `scripts/open_release_pr.sh` opens the `Release vX.Y.Z` pull request. It
+  runs `scripts/release_ship.sh --prepare --materialize-candidate`, which folds
+  `changelog.d` fragments (`scripts/release_changelog_fold.harn`), bumps the
+  version, and regenerates derived files.
 - `scripts/release_ship.sh --finalize` is run by
   `.github/workflows/publish-release.yml` on a tag push. Run it locally only for
   recovery.
-- `scripts/release_ship.sh --bump <patch|minor|major>` and
-  `.github/workflows/bump-release.yml` are recovery paths for historical
-  two-step releases.
 - `scripts/release_gate.sh <audit|prepare|publish|notes|full>` provides local
   audit, dry-run, notes, and recovery helpers.
 
@@ -134,17 +135,16 @@ Terminal proof requires all of these to be successful:
   `./scripts/release_ship.sh --finalize` under the release App identity. Its
   `push: main` trigger is a guard; it does not tag `main` for you.
 - `.github/workflows/build-release-binaries.yml` ("Build release binaries")
-  fires on the tag push and produces binary tarballs plus the GHCR container.
-  Use `workflow_dispatch` with `tag=vX.Y.Z` to recover an existing tag.
-- `build-release-binaries.yml` is dispatched by two independent paths, so a
-  release normally shows two near-simultaneous runs on the same commit: a
-  warm-cache refresh and a candidate build. They are distinguishable by job
-  count rather than by title — the warm run builds a single target, the
-  candidate run builds the full five-target matrix. A red run in that pair
-  therefore means nothing until you read its jobs; the candidate-archive gate
-  refuses on the conclusion of the exact run it dispatched.
-- `.github/workflows/bump-release.yml` ("Open version bump PR (recovery)") is
-  manual-only recovery for accidental historical release states.
+  runs candidate mode on the push that changes the workspace version to a
+  stable `X.Y.Z`: it builds, signs, notarizes, and attests the five archives
+  at that commit, builds the release files, writes `candidate-manifest-<sha>`,
+  and runs the residual audit and release smoke on those files. Other main
+  pushes only warm caches. Promotion publishes a green candidate run's files.
+- `.github/workflows/bump-release.yml` ("Open release PR") runs
+  `scripts/open_release_pr.sh` daily and on dispatch. It opens the
+  `Release vX.Y.Z` pull request and arms auto-merge when main is on a
+  development version with unreleased fragments, names an already-open one,
+  and is otherwise a no-op.
 - `.github/workflows/release-pr-drift-check.yml` can ask you to rerun
   `release_harn.harn` when a release PR's pin diverges from `origin/main`.
 
@@ -152,17 +152,16 @@ Terminal proof requires all of these to be successful:
 
 - Finalize failed after the tag exists: rerun `publish-release.yml` from the
   Actions UI or with `gh workflow run publish-release.yml --ref main`.
-- Binary assets failed for an existing tag:
-  `gh workflow run build-release-binaries.yml --ref main -f tag=vX.Y.Z`.
-- Historical prepare landed without the consolidated bump:
-  `gh workflow run bump-release.yml`.
+- A candidate run failed: read the failing job's log. A transient
+  infrastructure failure can rerun its failed jobs in the same run; a real
+  defect is fixed forward with a new version commit.
 - Local recovery only: use `scripts/release_ship.sh --finalize` from the
   correct tag checkout or updated `main` after reading the script help.
 
 ## Rules
 
-- Do not hand-run `release_ship.sh --prepare` for the default release path; use
-  `release_harn.harn --mode ship-pr`.
+- Do not hand-run `release_ship.sh --prepare` for the default release path;
+  dispatch `bump-release.yml` ("Open release PR") instead.
 - Do not push to a PR already in the merge queue. The pre-push hook checks this
   because GitHub snapshots queued PRs.
 - Do not pass `--squash`, `--merge`, or `--rebase` to `gh pr merge --auto`;

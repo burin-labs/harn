@@ -66,6 +66,10 @@ const __TOOL_SHAPE_PROTOCOL_TAGS = [
   "user_response",
   "userresponse",
   "done",
+  // The purpose-label declaration (`std/agent/purpose_labels`,
+  // PURPOSE_LABEL_PATTERN). Its body is prose that often names functions, so
+  // without this a label next to a valid call read as a broken tool call.
+  "purpose",
 ]
 
 /**

@@ -21,6 +21,9 @@ pub(crate) struct LlmEvaluateArgs {
     /// Verify a saved receipt against --request without credentials or dispatch.
     #[arg(long, requires = "request")]
     pub verify_receipt: Option<PathBuf>,
+    /// Record to a new evaluation tape, or strictly replay an existing tape offline.
+    #[arg(long, conflicts_with = "verify_receipt")]
+    pub tape: Option<PathBuf>,
     /// Catalog model route, for example openrouter/typesafe/jev-1.13.
     #[arg(long, required_unless_present = "request")]
     pub model: Option<String>,

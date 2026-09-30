@@ -6,6 +6,7 @@
 // cross-source conflict resolution.
 import "../provider_catalog_refresh.harn"
 import "../provider_catalog_sources.harn"
+import { prepare_model_index_sources } from "../update_provider_catalog"
 
 const FIXTURE_BASE = {
   observed_at: "2026-05-11T00:00:00Z",
@@ -14,6 +15,22 @@ const FIXTURE_BASE = {
 
 fn make_env(secrets: dict?) {
   return FIXTURE_BASE + {secrets: secrets ?? {}}
+}
+
+@test
+pipeline test_refresh_coverage_does_not_accept_an_empty_source_as_complete() {
+  const nonempty = {status: "ok", observation_count: 2}
+  const empty = {status: "ok", observation_count: 0}
+  const complete = refresh_coverage([nonempty], 2)
+  assert_eq(complete.status, "complete")
+  assert_eq(complete.adapters_ok, 1)
+  const partial = refresh_coverage([nonempty, empty], 2)
+  assert_eq(partial.status, "partial")
+  assert_eq(partial.adapters_empty, 1)
+  assert_eq(partial.adapters_ok, 1)
+  assert_eq(partial.adapters_total, 2)
+  const unmeasured = refresh_coverage([empty], 0)
+  assert_eq(unmeasured.status, "unmeasured")
 }
 
 fn provider_obs(model_id: string, pricing: dict?, ctx: int?) {
@@ -75,6 +92,25 @@ const SAMPLE_CATALOG = {
       },
     },
   ],
+}
+
+@test
+pipeline test_price_conversion_noise_preserves_real_drift(harness: Harness, task: unknown) {
+  const model = SAMPLE_CATALOG.models[0]
+  assert(model != nil, "the price-noise control measures a real catalog row")
+  const catalog = {models: [model + {pricing: {cache_write_per_mtok: 0.083}}]}
+  const same = provider_obs(model.id, {cache_write_per_mtok: 0.08300000000000002}, 200000)
+  assert_eq(len(build_drift([same], catalog).changed), 0)
+  const sources = normalize_observations(
+    [same, aggregator_obs(model.id, {cache_write_per_mtok: 0.083})],
+  )
+  assert_eq(len(sources.conflicts), 0)
+  const changed = same + {pricing: {cache_write_per_mtok: 0.083001}}
+  const result = build_drift([changed], catalog)
+  assert_eq(len(result.changed), 1)
+  assert_eq(len(result.changed[0].pricing_changes), 1)
+  const context = same + {context_window: 65536}
+  assert_eq(len(build_drift([context], catalog).changed), 1)
 }
 
 @test
@@ -179,6 +215,33 @@ pipeline test_build_drift_reports_removal_when_provider_observed(harness: Harnes
   const drift = build_drift([only_one], SAMPLE_CATALOG)
   assert_eq(len(drift.removed), 1)
   assert_eq(drift.removed[0].id, "claude-opus-4-7-20260301")
+}
+
+@test
+pipeline test_chat_index_cannot_retire_a_decision_route() {
+  const catalog = {
+    models: [
+      {id: "served-chat", provider: "gateway", operations: ["text_generation"]},
+      {id: "missing-chat", provider: "gateway", operations: ["text_generation"]},
+      {id: "decision", provider: "gateway", operations: ["decision"]},
+    ],
+  }
+  const observed = [
+    observation(
+      "gateway",
+      "served-chat",
+      {},
+      {
+        source_url: "https://gateway.example/v1/models",
+        source_kind: "json",
+        source_owner: "provider",
+        observed_at: "2026-09-26T00:00:00Z",
+      },
+    ),
+  ]
+  const drift = build_drift(observed, catalog)
+  assert_eq(len(drift.removed), 1)
+  assert_eq(drift.removed[0].id, "missing-chat")
 }
 
 @test
@@ -564,33 +627,67 @@ pipeline test_key_required_adapter_runs_with_key(harness: Harness, task: unknown
       body: "{\"data\":[{\"id\":\"fireworks-x\",\"name\":\"Fireworks X\"}]}",
     },
   )
-  const env = make_env({FIREWORKS_API_KEY: "fixture-secret"})
-  const json_config = {
+  const env = make_env({REGISTRY_API_KEY: "fixture-secret"})
+  const source = {
     id: "fireworks-models-api",
     provider: "fireworks",
     source_url: "https://api.fireworks.ai/inference/v1/models",
-    source_owner: "provider",
-    confidence: "high",
-    mapper: { payload ->
-      let entries = []
-      for record in payload?.data ?? [] {
-        entries = entries + [{model_id: record.id, name: record?.name}]
-      }
-      return entries
-    },
+    mapper: "generic",
+    terms_notes: "Fixture model index.",
   }
-  const config = {
-    id: "fireworks-models-api",
-    kind: "json",
-    source_owner: "provider",
-    source_url: "https://api.fireworks.ai/inference/v1/models",
-    key_envs: ["FIREWORKS_API_KEY"],
-    adapter: { adapter_harness, e -> json_api_adapter(adapter_harness, e, json_config) },
+  const configuration = {
+    schema: "harn.provider_catalog_refresh_sources.v1",
+    egress_hosts: ["api.fireworks.ai"],
+    sources: [source],
   }
-  const result = key_required_adapter(harness, env, config)
+  const catalog = {
+    providers: [
+      {
+        id: "fireworks",
+        auth: {style: "header", header: "x-registry-key", env: ["REGISTRY_API_KEY"]},
+      },
+    ],
+  }
+  const prepared = prepare_model_index_sources(configuration, catalog)
+  const spec = prepared.specs[0]
+  if spec == nil {
+    throw "fixture source was not prepared"
+  }
+  const result = spec.run_fn(harness, env)
   assert_eq(result.run.status, "ok")
   assert_eq(result.run.requires_key, true)
-  assert_eq(result.run.key_envs, ["FIREWORKS_API_KEY"])
+  assert_eq(result.run.key_envs, ["REGISTRY_API_KEY"])
   assert_eq(len(result.observations), 1)
   assert_eq(result.observations[0].model_id, "fireworks-x")
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
+  assert_eq(calls.count, 1)
+  assert_eq(calls[0].headers["x-registry-key"], "fixture-secret")
+  assert_eq(calls[0].headers.authorization, nil)
+  const public = prepare_model_index_sources(
+    configuration + {sources: [source + {requires_key: false, source_owner: "aggregator"}]},
+    catalog,
+  )
+  const public_spec = public.specs[0]
+  if public_spec == nil {
+    throw "public fixture source was not prepared"
+  }
+  const public_result = public_spec.run_fn(harness, make_env({}))
+  assert_eq(public_result.run.status, "ok")
+  assert_eq(public_spec.key_envs, [])
+  assert_eq(public_result.observations.count, 1)
+  assert_eq(public_result.observations[0].source_owner, "aggregator")
+  const public_calls = harness.testing.http_mock_calls({include_sensitive: true})
+  assert_eq(public_calls.count, 2)
+  assert_eq(public_calls[1].headers["x-registry-key"], nil)
+  assert_eq(public_calls[1].headers.authorization, nil)
+  for invalid_sources in [[], [source, source], [source + {provider: "unknown"}]] {
+    let refused = false
+    try {
+      prepare_model_index_sources(configuration + {sources: invalid_sources}, catalog)
+    } catch (error) {
+      refused = true
+    }
+    assert(refused, "invalid source registry must refuse before a request")
+    assert_eq(harness.testing.http_mock_calls().count, 2)
+  }
 }

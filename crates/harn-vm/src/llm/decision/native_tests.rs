@@ -66,6 +66,50 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
         assert_eq!(endpoint(&base, contract.protocol).unwrap(), url);
         let body = request_body(&request).unwrap();
         assert_eq!(body["model"], contract.served_model_id);
+        let receipt = privacy_plan(&request).receipt;
+        assert_eq!(receipt.requested_posture, "strictest_available");
+        match contract.protocol {
+            DecisionProtocol::TypesafeSystemOne => {
+                assert_eq!(
+                    receipt.outcome,
+                    crate::llm::api::DataControlsOutcome::NoControlAvailable
+                );
+                assert_eq!(
+                    receipt.control_scope,
+                    Some(crate::llm_config::DataControlScope::Account)
+                );
+                assert_eq!(
+                    receipt.training_default,
+                    Some(crate::llm_config::TrainingDefault::DoesNotTrain)
+                );
+                assert!(receipt.applied.is_empty());
+                assert!(body.get("providerOptions").is_none());
+            }
+            DecisionProtocol::VercelEvaluate => {
+                assert_eq!(
+                    receipt.outcome,
+                    crate::llm::api::DataControlsOutcome::Applied
+                );
+                assert_eq!(receipt.applied.len(), 2);
+                assert_eq!(
+                    body["providerOptions"]["gateway"]["zeroDataRetention"],
+                    json!(true)
+                );
+                assert_eq!(
+                    body["providerOptions"]["gateway"]["disallowPromptTraining"],
+                    json!(true)
+                );
+            }
+            DecisionProtocol::OpenrouterDecisions => {
+                assert_eq!(
+                    receipt.outcome,
+                    crate::llm::api::DataControlsOutcome::NoControlAvailable
+                );
+                assert!(receipt.applied.is_empty());
+                assert_eq!(body["provider"], json!({"allow_fallbacks": false}));
+            }
+            DecisionProtocol::StructuredLlm => unreachable!(),
+        }
         assert_eq!(
             body["questions"]["risk"]["criteria"],
             json!(["none", "high"])
@@ -91,7 +135,7 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
             );
             tape = recorded["response"].clone();
         }
-        let response = read_response(&request, &tape).unwrap();
+        let response = read_response(&request, &tape, None).unwrap();
         assert_eq!(
             response.input_tokens,
             Some(if recorded.is_some() { 356 } else { 100 })
@@ -112,7 +156,7 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
         let mut contradictory = tape.clone();
         contradictory["answers"]["action"]["choice"] = json!("write");
         contradictory["answers"]["action"]["probabilities"] = json!({"read": 0.9, "write": 0.1});
-        let contradiction = read_response(&request, &contradictory).unwrap();
+        let contradiction = read_response(&request, &contradictory, None).unwrap();
         let refusal = Answer::project(
             &questions.questions[1],
             &contradiction.answers["action"],
@@ -122,7 +166,7 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
         assert!(refusal.diagnostic.contains("contradicts"));
         tape["answers"].as_object_mut().unwrap().remove("risk");
         assert!(matches!(
-            read_response(&request, &tape),
+            read_response(&request, &tape, None),
             Err(DecisionTransportError::Refused {
                 reason: RefusalReason::SchemaInvalid,
                 ..

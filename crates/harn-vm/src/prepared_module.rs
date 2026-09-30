@@ -42,6 +42,7 @@ pub(crate) struct PreparedModuleArtifact {
     pub(crate) init_chunk: Option<Arc<Chunk>>,
     pub(crate) functions: BTreeMap<String, Arc<CompiledFunction>>,
     pub(crate) public_exports: BTreeMap<String, DefKind>,
+    pub(crate) sibling_exports: BTreeMap<String, DefKind>,
     pub(crate) public_value_names: std::collections::HashSet<String>,
     pub(crate) public_type_names: std::collections::HashSet<String>,
 }
@@ -55,6 +56,7 @@ impl PreparedModuleArtifact {
             init_chunk,
             functions,
             public_exports,
+            sibling_exports,
             public_value_names,
             public_type_names,
         } = artifact;
@@ -74,6 +76,7 @@ impl PreparedModuleArtifact {
             init_chunk,
             functions,
             public_exports,
+            sibling_exports,
             public_value_names,
             public_type_names,
         }
@@ -854,6 +857,7 @@ mod tests {
             init_chunk: None,
             functions: BTreeMap::new(),
             public_exports: BTreeMap::new(),
+            sibling_exports: BTreeMap::new(),
             public_value_names: Default::default(),
             public_type_names: Default::default(),
         }))

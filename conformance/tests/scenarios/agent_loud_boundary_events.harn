@@ -110,8 +110,31 @@ pipeline test(harness: Harness, task: unknown) {
   //    and no event. This is the control that keeps the funnel from crying wolf.
   const good_session = "loud-boundary-good-" + harness.random.uuid()
   const good = observe_boundary(harness.agent, harness.runtime, good_session, "text_tool_parse")
+  const host_ingest = observe_boundary(
+    harness.agent,
+    harness.runtime,
+    good_session,
+    "host_event_ingest",
+  )
+  const accepted_host_events = harness.runtime.atomic(0)
+  harness.agent.subscribe(
+    good_session,
+    { ev ->
+      if ev?.type == "iteration_start" {
+        const _ = harness.runtime.atomic_add(accepted_host_events, 1)
+      }
+    },
+  )
   run_text_turn(harness, good_session, "<tool_call>\necho({ msg: \"hi\" })\n</tool_call>")
   assert(harness.runtime.atomic_get(good.seen) == 0, "a parsed turn must not emit boundary noise")
+  assert(
+    harness.runtime.atomic_get(accepted_host_events) >= 1,
+    "the normal agent loop must actually emit a host event",
+  )
+  assert(
+    harness.runtime.atomic_get(host_ingest.seen) == 0,
+    "a normal tool-calling agent turn must not lose any host-event payload keys",
+  )
   // 3. Plain prose is consumed by the parser too, but consuming narration is
   //    not a loss. Only the shape verdict can tell the two apart, which is why
   //    the event is emitted above the parser rather than inside it.

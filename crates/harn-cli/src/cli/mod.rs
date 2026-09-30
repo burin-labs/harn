@@ -65,6 +65,7 @@ pub(crate) mod run_source;
 pub(crate) mod runs;
 mod sandbox;
 mod scan;
+mod self_toolchain;
 mod serve;
 mod session;
 mod skill;
@@ -116,7 +117,7 @@ pub(crate) use dap::DapArgs;
 pub(crate) use demo::DemoArgs;
 pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
-pub(crate) use doctor::DoctorArgs;
+pub(crate) use doctor::{DoctorArgs, DoctorCommand};
 pub(crate) use dump::{
     ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs,
     DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs,
@@ -234,6 +235,7 @@ pub(crate) use runs::{
 };
 pub(crate) use sandbox::SandboxArgs;
 pub(crate) use scan::ScanArgs;
+pub(crate) use self_toolchain::{SelfArgs, SelfCommand};
 pub(crate) use serve::{
     A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeSurface, McpServeTransport,
     ServeAcpArgs, ServeArgs, ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs,
@@ -301,6 +303,10 @@ use clap::{Parser, Subcommand};
     arg_required_else_help = true
 )]
 pub(crate) struct Cli {
+    /// Emit the versioned argument tree used by the native CLI parser.
+    #[arg(long = "argument-schema", global = false)]
+    pub argument_schema: bool,
+
     /// Emit the JSON-schema catalog for every `harn` subcommand that
     /// exposes a structured `--json` envelope. Pair with
     /// `--command <name>` to print just one entry.
@@ -584,6 +590,9 @@ SCRIPTING
     /// `--version`). Verifies the archive against the release's
     /// `SHA256SUMS` manifest before installing.
     Upgrade(UpgradeArgs),
+    /// Cache and run checksum-verified Harn release binaries by version.
+    #[command(name = "self")]
+    SelfToolchain(SelfArgs),
     /// Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib sets.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

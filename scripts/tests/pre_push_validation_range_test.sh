@@ -9,8 +9,8 @@ trap 'rm -rf "$tmp_root"' EXIT
 origin="$tmp_root/origin.git"
 work="$tmp_root/work"
 
-git init --bare --quiet "$origin"
-git init --quiet "$work"
+git init -b main --bare --quiet "$origin"
+git init -b main --quiet "$work"
 git -C "$work" config user.email "test@example.com"
 git -C "$work" config user.name "Test User"
 git -C "$work" config commit.gpgsign false

@@ -300,7 +300,7 @@ where
         served_fast: false,
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 

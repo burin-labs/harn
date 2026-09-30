@@ -4,6 +4,7 @@ const READ_FIELDS: &[&str] = &[
     "/cache_read_input_tokens",
     "/prompt_tokens_details/cached_tokens",
     "/input_tokens_details/cached_tokens",
+    "/input_token_details/cached_tokens",
     "/cached_tokens",
     "/cache_read_tokens",
     "/cached_input_tokens",
@@ -64,6 +65,9 @@ fn reported_counter(
     let mut reported = None;
     for path in paths {
         if let Some(value) = value.pointer(path) {
+            if value.is_null() {
+                continue;
+            }
             let count = value.as_i64().ok_or("token counter is not an integer")?;
             if count < 0 {
                 return Err("negative token count");

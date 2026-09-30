@@ -627,7 +627,7 @@ mod tests {
             stop_reason: None,
             logprobs: Vec::new(),
             blocks: Vec::new(),
-            telemetry: crate::llm::api::ProviderTelemetry::default(),
+            telemetry: Box::default(),
         };
 
         let projection = futures::executor::block_on(crate::llm::api::build_llm_text_projection(

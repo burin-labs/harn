@@ -221,6 +221,9 @@ path = "/models"
 
 [providers.openrouter]
 display_name = "OpenRouter"
+# Credit-purchase fee allocated to usage, excluding the $0.80 minimum.
+# https://openrouter.ai/docs/faq#how-much-does-openrouter-cost
+platform_fee_percent = 5.5
 features = ["model_proxy"]
 cache_usage_accounting = true
 stream_usage_accounting = true

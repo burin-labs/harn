@@ -21,6 +21,7 @@ use crate::json_envelope::{self, JsonEnvelope};
 use crate::net;
 
 mod hook_runtime;
+pub(crate) mod toolchain;
 
 /// Schema version for `harn upgrade --json`.
 pub(crate) const UPGRADE_SCHEMA_VERSION: u32 = 1;

@@ -62,11 +62,23 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task: unkn
     "x86_64-pc-windows-msvc=windows-latest",
   ]
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
-  const primary = ["x86_64-apple-darwin=blacksmith-12vcpu-macos-15"]
-    + standard.slice(1, len(standard))
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), standard)
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode candidate")), standard)
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), standard)
+  const primary = [
+    "x86_64-apple-darwin=macos-15-xlarge",
+    "aarch64-apple-darwin=macos-15-xlarge",
+    "x86_64-unknown-linux-gnu=blacksmith-16vcpu-ubuntu-2204",
+    "aarch64-unknown-linux-gnu=blacksmith-16vcpu-ubuntu-2204",
+    "x86_64-pc-windows-msvc=windows-latest",
+  ]
+  const recovery = [
+    "x86_64-apple-darwin=macos-15-xlarge",
+    "aarch64-apple-darwin=macos-15-xlarge",
+    "x86_64-unknown-linux-gnu=ubuntu-16core-release",
+    "aarch64-unknown-linux-gnu=ubuntu-16core-release",
+    "x86_64-pc-windows-msvc=windows-latest",
+  ]
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), primary)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode candidate")), primary)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), recovery)
   assert_eq(
     runners(
       matrix_with_env(
@@ -114,7 +126,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(
       {
         target: "x86_64-apple-darwin",
         glibc_max: nil,
-        runner: "blacksmith-12vcpu-macos-15",
+        runner: "macos-15-xlarge",
         rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
         release_codegen_units: 16,
         use_sccache: "true",
@@ -204,10 +216,26 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
       harness.random,
       {
         ...policy,
+        runner_registry: {
+          ...policy.runner_registry,
+          "ubuntu-22.04": {...policy.runner_registry["ubuntu-22.04"], glibc_version: "2.39"},
+        },
+      },
+      "--mode primary",
+    ).success,
+    false,
+  )
+  assert_eq(
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
+      {
+        ...policy,
         targets: policy.targets.map(
           { target ->
             if target.target == "x86_64-unknown-linux-gnu" {
-              return {...target, runners: {...target.runners, primary: "ubuntu-latest"}}
+              return {...target, runners: {...target.runners, primary: "macos-15-xlarge"}}
             }
             return target
           },

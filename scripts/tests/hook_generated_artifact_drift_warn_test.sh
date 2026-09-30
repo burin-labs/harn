@@ -51,7 +51,7 @@ export HOOK_DRIFT_RECORD="$record"
 # Run from a fake repo root so the hook can stage the path list under .harn/tmp.
 wire_root="$tmp_root/wire-root"
 copy_drift_warner_fixture "$wire_root"
-git -C "$wire_root" init --quiet
+git -C "$wire_root" init -b main --quiet
 staged="$tmp_root/staged.txt"
 printf '%s\n' 'crates/harn-lexer/src/token.rs' > "$staged"
 : > "$record"
@@ -146,7 +146,7 @@ TOML
 printf 'pub fn token() {}\n' > "$work/crates/harn-lexer/src/lib.rs"
 printf 'pub const KEYWORDS: &[&str] = &["fn"];\n' > "$work/crates/harn-lexer/src/token.rs"
 
-git -C "$work" init --quiet
+git -C "$work" init -b main --quiet
 git -C "$work" config user.email "test@example.com"
 git -C "$work" config user.name "Test User"
 git -C "$work" config commit.gpgsign false

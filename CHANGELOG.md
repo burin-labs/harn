@@ -9,6 +9,1087 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.151
+
+### Fixed
+
+- The Windows workspace test suite no longer fails on a compound shell read
+  (git, a line-range sed print, and rg piped to head). That case now runs only
+  on POSIX hosts, where the command classifier covers it.
+
+## v0.10.150
+
+### Added
+
+- **Inference destination boundaries (#8943).** Embedders can cap live model
+  calls at local, hosted open-weight, or any hosted routes, keep training
+  discounts off by default, and inspect the governing rule and catalog facts
+  on allowed calls. The ceiling follows spawned workers and is checked again
+  at transport after routing or failover.
+
+### Fixed
+
+- **Provider tool-probe evidence records its source (#8847).** Saved responses
+  remain useful for parser checks but cannot certify route fitness or unlock a
+  local runtime profile. Scheduled catalog notices accept an explicit extraction
+  provider and model.
+- Native-tool catalog promotions require passing live adapter evidence for
+  the exact route. Runtime admission and scorecards share passed-probe rules;
+  missing evidence produces an incomplete proposal.
+- Live refresh sources use a typed data registry and catalog-owned credential
+  metadata. The VM provider catalog includes authoritative authentication and
+  local or hosted facts for workflow and host consumers.
+- Ollama's OpenAI-compatible chat endpoint now uses its declared SSE adapter,
+  maps supported generation and structured-output fields, and refuses native-only
+  sampling controls before sending a request.
+- Reviewer calibration reports missing safety-floor coverage as unmeasured,
+  excludes unanswered reviews from judgment-quality rates, and distinguishes
+  measured floor refusals from reviewer failures.
+
+## v0.10.149
+
+### Fixed
+
+- The done sentinel never shows in visible assistant text. It is stripped wherever the model put it,
+  including mid-reply with text after it; a sentinel shown as code (a fenced block or an inline span)
+  is kept as written.
+- The completion judge now sees each distinct command a run executed when that tool declares the `observation`
+  role, so a task whose deliverable is a command's output is no longer sent back to run it again.
+- **An ACP session's LLM cost ceiling now covers the whole session.** Each `session/prompt` used to start its
+  cost scope at $0, so a session past its cap was admitted again on the next prompt and after every resume.
+  The session carries its spend across prompts, persists it as the row's `usage_cost_usd_micros`
+  (which `session/list` reports), and seeds it on `session/load`; older rows are backfilled from their recorded
+  `llm_call` costs. A `session/set_budget` re-arm now also applies to later turns of that session.
+
+## v0.10.148
+
+### Fixed
+
+- **Approval review reuses answered identical requests within a session (#8320).**
+  Repeated requests avoid another model call and report zero additional cost.
+  Changed targets or permission context still require review, and unavailable
+  reviews are retried. Each reviewer retains at most 64 decisions.
+- Filesystem scope checks no longer re-derive every sandbox root on each
+  `harness.fs` call. The canonicalized workspace, read-only and credential-deny
+  roots are reused for up to 500 ms per policy, and a write or delete always
+  re-derives them, so a host that makes thousands of filesystem calls before
+  its first model call no longer spends seconds there (#8963).
+- **A sandboxed child can run the tools on its own `PATH` (#8998).** A tool
+  installed outside the preset toolchain homes, such as a CI tool cache or a
+  custom package prefix, was refused with exit 126 even when it was first on
+  `PATH`. Each absolute `PATH` entry now grants read and execute on its install
+  prefix outside the home directory, and on the entry alone inside it. The
+  credential denylist still wins. The CI enforcement receipt lists each grant
+  with the entry that produced it.
+- **A managed background command now dies when its owner exits even if another process inherited
+  the owner's liveness pipe.** The guardian's reaper relays that pipe and closes it once its parent
+  process is gone, so a leaked write end can no longer keep the command running.
+- **A background command handle now lives as long as its session, not the agent-loop run that
+  started it.** A host that runs one loop per turn can poll, wait on, or kill a command an earlier
+  turn started; closing the session or stopping its run still cancels its handles. Embedders can
+  register their own cleanup with `agent_sessions::reclaim_hooks::register_session_reclaim_hook`.
+- A restored session now replays each tool result with the mutation outcome, changed paths, and producer data
+  the live session emitted, and reads its failure from the audit marker as well as the provider message.
+  A rejected edit no longer comes back with an unknown outcome and no data.
+- OpenAI Responses-API routes stream their visible text to delta listeners as
+  the model writes, instead of handing it over once at the end. The final
+  response is parsed by the same code as a non-streamed reply.
+- The command workspace-effect classifier now reads a line-addressed `sed`
+  print (`sed -n '1,105p' file`, `sed 3q file`) as a read. It stays
+  unrecognized with an in-place flag, a script file, a `w`/`e` command, a
+  substitution, or a regex address, so any `sed` that can write or execute is
+  still kept out of the observation phase.
+- The step judge no longer withholds a step it cannot explain: a `revise`
+  with neither a critique nor reasoning stands as no objection, and the step
+  dispatches. It also no longer judges a step whose every tool call is a
+  declared read, since vetoing a read only withholds the facts the next step
+  needs.
+- The agent loop's main request streams its visible text to an ACP host as
+  `call_progress` deltas while the model writes, instead of arriving only as one
+  message at the end. A `harness.llm.call` that reaches `llm_call` without the
+  bridge-registered builtin now uses the host bridge the ACP server installed.
+
+## v0.10.147
+
+### Breaking
+
+- **A provider credential can now reach Harn's own model calls without
+  reaching any child process, and every child a session starts now gets the
+  session's environment (#8913).** A grant with `expose_to: "in_process"`
+  (`--grant NAME=SOURCE,expose=VAR,to=in_process` on the CLI) is visible to
+  provider authentication and configuration for `llm_call` and to
+  `harness.env`, and to no spawned command, as a value or as a secret
+  reference. It requires `expose_as_env` and rejects `for_command`. Its
+  receipt records `exposed_to: "in_process"`, and the run record's
+  `admitted_environment` omits it because no child could see it.
+
+  Before this change, MCP stdio servers, ACP provider transports, and the git,
+  `gh`, pager, verifier, and toolchain-resolver commands Harn runs itself
+  started with the engine's whole environment even under an `isolated` or
+  `granted` policy. They now start with the session's resolved environment:
+  the runtime essentials, the grants that reach that program, and the `env`
+  entries in the server's or provider's own configuration. Sessions under the
+  default `inherited` policy are unchanged. Rust embedders that build
+  `GrantSpec` or `GrantReceipt` with struct literals must set the new
+  `expose_to` / `exposed_to` field.
+
+  Migration: under `isolated` or `granted`, give an MCP server or ACP provider
+  that needs a variable either an `env` entry in its own configuration or a
+  grant that reaches it. Bind a credential to the server's executable to keep
+  it out of other children:
+
+  ```text
+  # before: the server inherited GITHUB_TOKEN from the engine
+  harn run --environment-policy granted agent.harn
+  # after
+  harn run --grant gh=env:GITHUB_TOKEN,expose=GITHUB_TOKEN,for=github-mcp-server agent.harn
+  ```
+
+  A host that grants a provider key only for model calls should declare it
+  in-process:
+
+  ```json
+  {"name": "provider_key", "source": {"env": {"var": "OPENAI_API_KEY"}},
+   "expose_as_env": "OPENAI_API_KEY", "expose_to": "in_process"}
+  ```
+
+  Rust: add `expose_to: GrantAudience::Session` (or `Default::default()`) to
+  each `GrantSpec { .. }` literal and `exposed_to` to each `GrantReceipt { .. }`
+  literal.
+
+### Added
+
+- **Complementary reviewers can use bounded catalog price caps (#8912).**
+  Callers can keep a useful independent reviewer available for low-cost actors
+  while limiting candidate input-plus-output list price for higher-cost actors.
+- **Request transcript rows say how each setting was resolved (#8949).** Every
+  `provider_call_request` row now carries a `resolution` list covering
+  `max_tokens`, `tool_format`, the tool wire, reasoning, cache, and stream.
+  Each entry gives the caller's raw value, the applied value, and the layer
+  that decided it: a caller option, a catalog default, a catalog steer (with
+  the steer's reason), a reasoning policy, or the default.
+
+### Changed
+
+- **Fireworks gpt-oss uses provider-native tool calls (#8947).**
+  `accounts/fireworks/models/gpt-oss-*` moves from the heredoc text tool
+  channel to native tool calls, which stops analysis-voice prose from leaking
+  into visible replies ahead of a tool call. Backslash-heavy file bodies can
+  still be altered on this channel; the measurement and the revert trigger are
+  recorded beside the catalog row.
+- **A direct `llm_call` with text-channel tools is refused (#8948).** A `json`
+  or `text` tool_format sends no tool schemas, and only `agent_loop` renders the
+  call contract into the prompt, so a direct call reached the model with no
+  tools and it answered without calling any. Such a call now fails with an
+  `invalid_request` error that names the route and the fix: drive the tools
+  through `agent_loop`, or pass `tool_format: "native"` on a route that
+  supports native tools. Empty tool sets and native tool-search tools are
+  unaffected.
+- The session code-index warm thread now runs at background priority (utility QoS
+  on macOS, nice 10 on Linux), so a rebuild no longer competes for the CPU with
+  the engine thread preparing the first model call.
+
+### Fixed
+
+- Portal setup lists active catalog models and skips unavailable providers; catalog generation rejects retired default routes.
+- **Provider defaults stay within the selected provider.** Harn asks for an explicit model when a provider has no catalog
+  default, instead of sending another provider's model to it (#8865).
+- An `unmeasured` rustc wrapper decision now quotes the wrapper-free build's error beside the with-wrapper one, so a
+  probe that failed both ways says whether the toolchain or the wrapper broke. The probe's Cargo builds now run with
+  `--color never`: under `CARGO_TERM_COLOR=always` every reader of Cargo's words missed its line, so the reason fell
+  back to the last stderr line and a wrapper's `Running` line was never recognized.
+- **Anthropic `thinking: true` without a budget no longer fails on small
+  output caps (#8945).** The default thinking budget was a fixed 10,000 tokens,
+  which Anthropic refuses with a 400 whenever `max_tokens` is 10,000 or less.
+  It now derives from the cap: `max_tokens - 1`, at least Anthropic's 1,024
+  minimum and at most 10,000. A budget the caller names passes through
+  unchanged.
+- **`effort` works on Claude Sonnet 4.6 (#8946).** The catalog now declares
+  adaptive thinking and the `effort` levels low, medium, high, and max for
+  `claude-sonnet-4-6` and its `anthropic/`-prefixed route, so the portable
+  `effort` option is no longer refused as unsupported there.
+- Stopping a turn while a tool runs no longer breaks the session. The
+  unanswered tool call gets a typed harness-repair result when the turn is
+  cancelled, and every provider request answers any call a stored transcript
+  left open, so a resumed or cleared session also recovers. Before, every
+  later OpenAI turn failed with "No tool output found for function call" and
+  Anthropic turns with "tool_use ids were found without tool_result blocks".
+- The shared target GC now refuses to remove an entry that holds a `.git` entry or a bare object store,
+  and keeps it as a pending candidate. It also no longer crashes under bash 3.2 when it keeps its first entry.
+- A native decision refused by local spend admission, such as one whose
+  `run_cost_limit` arrives after an earlier unbudgeted model call, now returns
+  `unavailable` with reason `admission_refused` instead of `authority_denied`.
+  Its receipt records the cause in `admission_reason`.
+- Workspace guidance discovery walks the subtree once through the ignore-aware
+  `fs.walk` instead of listing and stat-ing every entry, and reads only the
+  instruction files that walk saw. Directories the project ignore stack excludes
+  are no longer searched for `AGENTS.md` / `CLAUDE.md`.
+- An exhausted provider balance or hard spend limit (HTTP 429 with a billing
+  code such as `insufficient_quota`, `billing_limit`, or
+  `credit_balance_exhausted`) is no longer retried as a rate limit. Its thrown
+  category is `generic` rather than the status's `rate_limit`, the agent
+  loop's retry policy never retries `billing_limit`, and the agent terminal
+  outcome carries the new `provider_billing` class instead of `rate_limited`,
+  so embedders can tell a person the account needs attention instead of
+  "try again".
+- An unavailable step judge is now loud. Its `step_judge_decision` reports `verdict: "unavailable"`,
+  never `pass`, with a typed `unavailable_reason` and a running `unavailable_count`. A label-only
+  decision model configured as a judge is refused before dispatch instead of failing on every step.
+  A `replace` veto on a turn that parse repair already answered no longer crashes the loop: it
+  applies as `retain`. A purpose-label block next to a valid call is no longer reported as an
+  unparsed tool call.
+
+## v0.10.146
+
+### Added
+
+- Added a typed enforcement table saying what each process sandbox backend
+  confines: writes, reads, credential reads, network and process. Each cell is
+  `enforced`, `not_enforced` or `unmeasured`. `harn doctor` reports the active
+  backend's row, the sandboxing docs render the whole table, and an
+  `os_hardened` spawn is refused with `does_not_confine` when its policy requires
+  a dimension the backend does not hold. The sandbox conformance suite gains
+  cases for credential-denylist reads and loopback network connections, and it
+  judges every case against the table, so a cell that claims more or less than
+  the backend does fails a named case.
+- `harness.agent.open(id?, {parent, actor})` opens a delegated child session. `actor` pushes an `act` hop onto the
+  parent's actor chain, so every provider request the child makes carries its lineage instead of the parent's chain.
+  A parent with no chain starts from the `anonymous` origin, which also covers `sub_agent_run` children under an
+  unauthenticated parent. `open(nil)` and the existing options are unchanged.
+- LLM mock fixtures can replay a recorded prefix and then go live. A versioned
+  header with `"liveAfterCalls": K` serves the first K calls from the fixture,
+  then sends every later call to the configured provider through the normal
+  path. A call the prefix cannot serve fails closed instead of going live
+  early. Each call's `provider_telemetry.llm_mock_prefix` says whether the
+  fixture or the live provider answered it. Fixtures without the header field
+  behave as before.
+
+### Changed
+
+- `harn-cli` requires its `hostlib` feature. A `--no-default-features` build now fails first with an error that says so
+  instead of with over a hundred unresolved imports; build a lean embedding on `harn-serve` or `harn-vm`.
+
+### Removed
+
+- **`scripts/release_contract.json` no longer carries the `workflows` step-name
+  section (#8825).** Release orchestrators that read the contract get the
+  version, changelog, and tag policy only; job and step names of
+  `publish-release.yml` and `build-release-binaries.yml` are no longer part of it.
+- The Windows AppContainer process sandbox is removed. Windows now runs child
+  processes with no OS sandbox confinement, and says so: an `os_hardened` spawn
+  is refused as a typed `does_not_confine` refusal naming mechanism `none`, a
+  `worktree` spawn logs a one-time `handler_sandbox` warning and runs unconfined
+  (or refuses under `HARN_HANDLER_SANDBOX=enforce`), and `harn doctor` reports
+  `backend=unconfined filesystem_mechanism=none`. The `windows_app_container`
+  mechanism and the `entry_point_cannot_attach` availability no longer appear in
+  refusals, and `tools.run_command` reports sandbox kind `none` on Windows.
+
+### Fixed
+
+- `harn test conformance` warms the stdlib bytecode cache once before any case runs. A case that starts a
+  `harn run` child no longer spends its deadline compiling the stdlib alongside every sibling; on an unoptimized
+  build that child went from 10.7 s to 1.0 s.
+- A sandboxed `git` no longer fails with "unknown error occurred while reading the
+  configuration files" when `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM` names an
+  empty file outside the workspace. The sandbox now grants read access to the
+  files those variables name, whatever their content.
+- Bedrock no longer reports as available on a host with no AWS region or credential source. A platform-managed
+  provider is now available only when its client's offline prerequisites resolve: for Bedrock, a region from the
+  environment or the shared config file, and a credential from the environment key pair, a web identity token, a
+  container endpoint, the profile in the shared config or credentials file, or a prepared identity. Otherwise
+  `harness.llm.providers()` reports `available: false` with `credential_status` `region_unconfigured` or
+  `credentials_unconfigured`, so availability-based selection such as the different-family reviewer no longer picks a
+  route that fails on every call. Instance metadata is not probed; an explicit Bedrock call still resolves it. The
+  Bedrock region and credential lookups now honor `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`, and their
+  errors carry the `environment` and `auth` categories. A completion judge whose route fails on an `auth` or
+  `environment` error before any reply ends the run with `completion_judge_route_unavailable` instead of
+  `completion_judge_error`, and the error text is no longer added to the transcript as judge feedback.
+- Assistant text that hosts display no longer repeats `json`-format tool calls: a ```` ```tool ```` fence
+  holding one call object is hidden the same way a `<tool_call>` block is. Code fences, and ```` ```tool ````
+  fences that are not a call, stay visible.
+- The build freshness checker no longer overflows the Windows main thread's 1 MiB stack when it hashes the `harn`
+  binary. CI now lints that feature-gated binary.
+- A cold `harn check` over a large directory no longer peaks at several times the memory of a warm one. The predicate
+  census now scans imported modules through one shared parse instead of a private copy in every check worker.
+- Reopening a saved session replays each tool call under its real name. Replay now reads the name from the
+  event's `metadata.tool_name`, where tool lifecycle events store it, instead of labelling the call `tool`.
+- Allow plain calls to mandatory-thinking Z.AI GLM 5.3 models while rejecting explicit attempts to disable thinking.
+- The parallel scheduler fail-fast test no longer hangs its own two-worker runtime when both branches land on one worker.
+- Forward the scoped GitHub token to consumer refresh commands during automated Harn bumps.
+- Release pushes now wait for an in-progress exact merge-queue candidate before deciding to rebuild it.
+- Reopening a saved session replays its tool calls and results again. The journal stores tool rows as internal,
+  and replay dropped every internal row before checking its kind, so a resumed session showed no tool rows.
+- **Agent host reads honor configured byte limits (#8923).** File and command-output reads now cap both default and
+  explicit lengths at the host's read or tail budget. Agents can use offsets to page through larger content.
+
+## v0.10.145
+
+### Added
+
+- Add classified transcript compaction with per-message keep, reword, and drop
+  decisions, confidence-based preservation, protected prior recaps, bounded
+  evaluation windows, and typed receipts. Failed or cancelled compaction leaves
+  the original transcript intact.
+- The reusable Harn bump workflow accepts an exact source commit. It advances a consumer pinned to the same release tag
+  when that commit is newer, and refuses stale or divergent commit targets.
+
+### Changed
+
+- **The missing-tool-call classifier, the scope classifier, and the step judge
+  declare their label sets as schema enums (#8800).** Strict structured output
+  and the typed-output decoder now refuse an out-of-set label instead of
+  mapping it after the fact, and the refusal takes each classifier's existing
+  error path: `ambiguous` or `escalate` with an `error` original label, and a
+  `judge_unavailable` step-judge decision under the default `fail_open`.
+- An open release pull request now refolds itself when main gains changelog fragments
+  it did not fold. A push to main that changes `changelog.d/` prepares the release
+  again from current main with the same version and resets the release branch in
+  place, so a late fix rides the release without closing and reopening it.
+- A release is now built and checked while its release pull request waits in the
+  merge queue, at the exact commit that lands on main, and promotion publishes
+  those files as soon as the release merges instead of after a second build.
+- **Release candidates use measured larger runners for Apple and Linux artifacts
+  (#8881).** Both Apple targets now build on GitHub macOS XLarge, Linux targets
+  use a glibc-compatible Blacksmith 16-core image, and typed runner metadata
+  rejects incompatible operating systems and glibc floors before dispatch.
+
+### Fixed
+
+- `agent_loop` now forwards `tool_precheck`, `tool_retries`, `tool_backoff_ms`, `model`, `provider`, and
+  `run_id` to tool dispatch. Before, a precheck passed to the loop was never consulted, tool retries
+  never engaged, and tool audit receipts recorded model and provider as empty.
+- After a completion adjudicator withdraws a closing draft, the next model request always ends on a
+  user message carrying the rejection, even when a standing reminder already committed the same
+  text. Previously the request could end on the withdrawal placeholder, which OpenAI-compatible
+  servers read as a prefill and, after a second veto, refused with HTTP 400.
+- **Provider catalog notice safety (#8847).** Incomplete new-model notices now produce local proposals without a Git branch
+  or pull request. Validated notice edits regenerate every catalog projection and open signed draft pull requests with only
+  tracked changes staged; live extraction uses the provider's catalog default and accepts explicit cost and timeout limits.
+- A release pull request batched ahead of another merge-queue entry is no longer
+  silently left untagged. The queue now removes an entry queued behind a release
+  commit, so a release always lands as the last entry of its push, and a push
+  that still buries a release commit fails its build instead of running green as
+  a warm-cache build.
+- **Code index rename protects separate declarations (#8879).** Workspace symbol
+  renames now stop before writing when the index finds another declaration with
+  the same name in scope, and report the collision so an agent can use a
+  binding-aware rename.
+- **DeepInfra DeepSeek V4.1 Flash route and cache usage (#8882).** The catalog now includes the served DeepInfra route
+  with source-backed prices and a review date for its promotion. OpenAI-compatible cache counters reported as null
+  remain unmeasured instead of blocking an otherwise valid response. Harn verified one native tool call in both
+  streaming and non-streaming modes.
+
+### Security
+
+- **A macOS confined child with no preset, policy, or cache write roots can no
+  longer write outside its workspace (#8493).** The macOS sandbox profile
+  rendered an unfiltered `(allow file-write*)` rule when every aggregate
+  write-root list was empty, as with a process preset list of only
+  `system_runtime`. The aggregate rule is now emitted only when it names at
+  least one root, so such a child writes its workspace roots and nothing else.
+
+## v0.10.144
+
+### Added
+
+- Verify saved evaluation requests against their original receipts offline with
+  `harn llm evaluate --request ... --verify-receipt ... --json`, using the same
+  versioned normalization and identity contract as live evaluation.
+- Added `harness.llm.evaluate_request` for typed runtime tool and skill
+  vocabularies, sharing decision admission, budgets, and receipts. Routes with
+  native structured schemas now expose their mechanically derived structured
+  decision capability, including gateways.
+
+  Structured decisions preserve low-confidence named answers instead of
+  inverting them through a synthetic distribution. Classifier fixtures share a
+  closed verdict type, and invalid confidence no longer becomes certainty.
+- The LLM transcript now records each distinct structured-output schema as an `output_schema` definition, so the
+  `requested_schema_content_hash` and `sent_schema_content_hash` on a request resolve to the exact schema requested
+  and the one sent after provider projection. A structured call's full input can now be replayed from its transcript.
+- Decision evaluations can record and strictly replay existing tapes through
+  `harn llm evaluate --tape` and `harn run --evaluation-tape`. Replays retain the
+  original receipt separately, report zero current requests and charges, and fail
+  on missing, changed, or extra records. Optional `harn run --evaluation-cache`
+  reuses identical complete answers within the execution. Receipts distinguish
+  stable request identity from each invocation.
+
+### Changed
+
+- On macOS the `user_temp` process-sandbox preset no longer grants `/tmp`, `/var/tmp`, and `/var/folders`, so a
+  confined child can no longer read or overwrite other processes' temp files. It grants the session's own temp dir
+  and Foundation's atomic-replacement staging dir. Clang's module cache and xcrun's lookup cache move into the
+  workspace through the child's environment. Three cases join the sandbox conformance suite.
+- The catalog adds Fireworks GLM 5.3, GLM 5.3 Flash, DeepSeek V4.1 Flash, DeepSeek V4 Flash 0731,
+  DeepSeek V4 Pro 0813, Kimi K3 and Nemotron 3.5 Lightning, DeepSeek V4.1 Flash on OpenRouter and NVIDIA
+  NIM, and the OpenRouter Jev latest selector. It deprecates three routes their hosts no longer serve
+  and corrects stale Fireworks prices.
+- Provider catalog refresh now emits structured source coverage and drift evidence. Trusted notices
+  can classify new models as reviewable proposals without inventing a launch date.
+- **Provider catalog.** DeepSeek Flash now selects V4.1 Flash with current peak and off-peak prices.
+  The older V4 Flash ID remains a deprecated compatibility route (#8829).
+- The approval-review calibration corpus grows from 28 to 73 cases: 37 the goal does not authorize and 29 it plainly
+  does. Most unsafe cases have an authorized twin with the same command, so a reviewer that denies everything still
+  fails. New shapes include destructive workspace and data changes, publishing, persistence, remote execution, test
+  tampering, instructions injected through tool output, and agent tool calls written as the tool's JSON arguments.
+
+### Fixed
+
+- MCP resource, template, and prompt registration now refuses malformed metadata
+  and completion declarations instead of silently coercing or dropping them.
+  Prompt argument titles are included in discovery.
+- Session call and token totals no longer depend on enabling diagnostic traces.
+  Native evaluator calls now contribute their settled or explicitly unknown usage
+  to run summaries; retained budget reservations are not reported as measured cost.
+  Session `total_cost` is now null when any cost is unknown; callers that need the
+  admission charge must read `budget_charged_usd`. Native receipts likewise keep
+  unknown `cost_usd` null and expose retained charges as `budget_charge_usd`.
+  Completed responses remain charged when they exceed step or session token
+  budgets; the original budget failure still propagates.
+- The process sandbox no longer switches off every Cargo `rustc` wrapper. It builds a scratch crate under the same
+  profile, keeps a wrapper proven to work there, and switches off any other: one that cannot run, one that leaves a
+  confined long-lived process behind, and one the probe could not measure. Each decision is logged as
+  `process_sandbox_rustc_wrapper` with the wrapper, whether it was kept or disabled, and why. A known compiler-cache
+  wrapper has its server started outside the sandbox first. Only a process still in the probe build's own session is
+  ever stopped; one that left the session is reported as unmeasured and left running. Three wrapper cases join the
+  sandbox conformance suite.
+- The approval reviewer and the LLM missing-tool-call classifier now declare their call purpose, `agent.approval_review`
+  and `agent.missing_tool_call`. Transcripts attribute their calls instead of recording the generic role, and mock
+  fixtures serve them from their own scope. Both scopes join `llm_mock_known_scopes()`.
+- The completion judge is re-asked once when a refusal names the loop's done sentinel, which it
+  cannot observe, instead of vetoing a verified completion on it until the judge cap.
+- A provider stream that fails because the model generated a malformed channel (Fireworks "Invalid
+  channel") is now resampled within the retry budget instead of ending the turn, and the error left
+  after the budget runs out says in plain words that the model produced output the provider could not parse.
+- A confined `harn run` started inside another macOS sandbox, such as a sandboxed agent's command, no longer fails
+  every spawn with `sandbox_apply: Operation not permitted`. macOS refuses a second sandbox, so harn now checks the
+  one it is already in. If the outer sandbox is at least as strict as the run's policy on network access, writes and
+  credential reads, the child runs under it and a one-time `process_sandbox_nested` warning records that. If the outer
+  sandbox allows something the policy denies, the spawn is refused with a reason naming what could not be enforced,
+  instead of silently running with the wider access.
+- The CI artifact waiter no longer reads a GitHub API rate limit as an unmeasured producer. Each failed API read now
+  prints its error. A rate-limit reply waits for the reported reset, within a bounded total, instead of using up the
+  unmeasured-poll budget and failing a job whose producer had already succeeded.
+- `harn provider catalog refresh --live` runs again against OpenRouter's model index: prompt-size
+  price overrides become input token bands, and a time window that names no days applies every day.
+- Publishing a release tag builds and proves Harn with the tag's own tools, so
+  a change to the build-freshness protocol on main after a release commit no
+  longer breaks that release's crate publication.
+- Publishing from a lightweight release tag no longer fails after the tag
+  verifier accepts it: the verifier is the one reader of the commit a tag
+  selects, and publication compares that commit with its checkout.
+- Two harn processes opening the machine spend ledger at the same time no longer fail with `database is locked`.
+  The ledger now switches the file to write-ahead logging only inside its locked initializer, so a second process
+  waits for the first instead of racing it. A ledger that still cannot be opened reports `resource_busy` when another
+  process holds it and `environment` otherwise; it no longer reports `budget_exceeded`, which made a busy file look
+  like an exhausted budget.
+- Saved evaluation tapes spell confidence kinds, evidence kinds, and answer
+  types in the same snake-case labels as receipts and the stdlib types, so one
+  answer label has one spelling in every record.
+- Pushes to `main` run the Linux security proof again, and the process sandbox
+  no longer warns when Cargo has no rustc wrapper to switch off.
+
+## v0.10.143
+
+### Added
+
+- Connector service operations can declare whether they are modeled actions, raw API access, or setup steps.
+  Unclassified operations default to raw API access.
+- **Sibling module helpers.** `@sibling` shares a non-public function with source files in the same directory
+  while keeping it out of the public module surface (#7132).
+- Native Harn hosts can enforce one durable UTC daily and monthly model-spend ceiling across processes.
+  It has atomic pre-call reservations, typed exhaustion receipts, and audited policy updates.
+- Add `harn self install`, `run`, `list`, and `prune` to cache checksum-verified release binaries.
+  Run exact older versions without rebuilding them.
+- `harn doctor sandbox` runs every process-sandbox conformance case against the live backend and reports which
+  confinement this host actually enforces. A case the backend cannot enforce reads `not measured`, never `ok`, and
+  the command exits non-zero unless every applicable case was measured and holds.
+- **Testing.** User tests can call `skip(reason)` to report an unavailable precondition separately from passes and
+  failures. `harn test --fail-on-skip` lets CI require every case to run.
+- Native decision evaluations use the TypeSafe, Vercel, and OpenRouter decision
+  protocols, with one HTTP request, typed refusals, and probability receipts.
+  Omit temperature and effort for native routes; unsupported options refuse
+  before dispatch.
+- **Decision routes through gateways.** Curated GPT-5.4 Nano and Mini routes through OpenRouter, and GPT-5.4 Nano
+  through Vercel AI Gateway, now accept typed decision evaluations.
+- Add `std/eval/selective_risk` to certify conditional accepted-answer error over a prespecified threshold family,
+  using exact binomial upper bounds corrected across every threshold and question/backend group.
+- **Local Agents API sessions can select an ACP mode at creation.** `mode_id` chooses `ask`, `architect`,
+  `code`, or `shadow` for one session. `harn serve api --default-session-mode` sets the default for clients
+  that omit it. The existing read-only `ask` default remains unchanged.
+- **Standalone ACP asset grants (#8717).** `harn serve acp` accepts repeated
+  `--read-only-root <path>` arguments so a host can add exact external asset
+  roots to the session's read policy on stdio and WebSocket transports.
+
+### Changed
+
+- `harn test` now accepts multiple positional files and directories as one suite.
+  The redundant `--test-path` flag is removed.
+- Report provably untyped tool-handler results as errors instead of warnings.
+- **Batched decision evaluation guidance (#8764).** The language and testing
+  guides now show boolean, choice, and score questions over one shared state,
+  with typed answers and explicit refusal handling.
+
+### Fixed
+
+- Remembered user approval rules now take precedence over approval-mode defaults. Authored denials
+  and path guards still win; authored approval requests still outrank remembered allows. Decision
+  receipts name the winning rule source.
+- Prevent false channel deadlock errors when a send or receive becomes ready before its wait is registered.
+- No-build Harn commands restore a missing compiled executable link when a current source receipt proves its exact bytes.
+  Missing or outdated proof now explains why recovery is refused.
+- **Code-index snapshots now retain the symbol graph across runs (#8082).** A
+  restored workspace keeps graph-backed queries and reconciles commits and
+  uncommitted edits instead of rebuilding the entire index after each change
+  to Git HEAD.
+- Agent runs with an accepted, current verifier pass no longer report a policy failure when a later loop limit ends
+  the turn. The result retains the original stop and verifier evidence. Failed, missing, or invalidated verification
+  still stops normally.
+- **Provider capability decisions.** Parallel tool-call suppression and thinking-history wire controls now have
+  separate capability facts, so request options cannot silently override a route's declared wire behavior.
+- Reject registered agent events with unread payload keys, and report the rejected key without logging payload values.
+  Preserve the applied format and steering decision in tool-format override events.
+- `harn connect status` now reports inbound secret readiness separately from
+  outbound usability and evaluates declared secret health checks.
+- **Network-policy refusals identify the deciding gate and destination (#8466).**
+  Typed decisions and run receipts now distinguish a network-policy denial from
+  a configured approval denial and carry the declared URL that was refused.
+- **Provider catalog schema.** The serialized catalog fields are pinned to the schema version, so incompatible additions
+  fail verification until the version and schema are updated together.
+- Local Cargo gates select the installed pinned Rust toolchain when another compiler appears first on PATH.
+  Explicit compiler overrides still receive a mismatch diagnostic; gates never install a toolchain implicitly.
+- Calibration reports refuse nonfinite or out-of-range target errors, candidate thresholds, and row confidence
+  before computing recommendations. Valid report fields and inclusive threshold endpoints remain unchanged.
+- Test commands no longer queue a nextest version probe behind Rust compilation, and exact tests use one build admission
+  while still rejecting missing or ignored tests.
+- Model information resolves hosted context limits and catalog metadata through the selected provider, including wire
+  model names. Local server context discovery continues to take precedence over advertised model limits.
+- The agent gate census indexes classification batches once instead of rescanning and validating each full batch for every
+  source read. Source scans and refusal checks still run on every audit.
+- Ollama context reporting uses the same configured limit as generation and warm-up. Custom Ollama-compatible providers
+  resolve their own catalog settings and warm-up endpoint, including when model names overlap with another provider.
+- Approval resolvers can consult one shared never-grant decision before model evaluation
+  without manufacturing an operator authorization.
+- The pre-push agent gate census requires a fresh worktree runtime or an explicit
+  verified runtime. Missing or incompatible interpreters remain unmeasured and
+  refuse the push; only the completed audit recommends regenerating stale rows.
+- Preserve source expressions while scanning and redacting sensitive assignments.
+- Agent sessions now keep nonempty structured user content on later turns even when the plain message is blank.
+  A deliberate empty continuation records why no new user turn was added.
+- Embedded ACP channel shutdown now interrupts an active prompt waiting on a
+  host or MCP connection, so stalled child processes no longer hold the caller
+  open after a timeout.
+- **Confined Git commands honor external paths in global configuration
+  (#8740).** Git commits can execute hooks named outside the workspace, while
+  those config files and hook directories remain read-only to child processes.
+- **Agent deadlines now seal cleanly.** A loop whose configured deadline expires stops before another model
+  request, reports a deadline terminal, and runs its terminal callback instead of waiting for an external
+  timeout. (#8750)
+- **Linux security CI.** Wait for the archive producer to finish before starting the security artifact barrier.
+  A queued producer no longer causes an artifact timeout, and a completed producer with a missing archive
+  fails by name. (#8751)
+- **Target cache maintenance now follows the current collection policy
+  (#8768).** Daily host maintenance fetches the latest collector, protects
+  live builds, and reports measured bytes and the last successful sweep.
+  Failed setup sweeps are retried instead of being recorded as recent successes.
+- The completion-judge evidence packet now shows the call that resolves a backgrounded verifier's
+  handle as the verification, so the judge no longer refuses a verified change over a result that
+  only said "running".
+- A release candidate build no longer fails when a burst of repository activity
+  exhausts its API budget during attestation. A rate-limited attestation waits
+  for the budget to reset and runs once more; any other failure still fails the
+  build.
+- **Target cache maintenance installs as a user LaunchAgent on macOS
+  (#8778).** Linux retains cron; both schedules are read back, and legacy
+  macOS cron entries are removed after the LaunchAgent loads.
+- Crate publication accepts the lightweight release tag that promotion creates
+  through the Releases API, so a promoted release publishes its crates. The tag
+  must still name the merged `Release vX.Y.Z` commit on main.
+
+## v0.10.142
+
+### Breaking
+
+- The `thinking_scaffold` and `chain_of_thought` prompt-template sections are removed; a template
+  that names them now fails with an unknown-section error. They asked models to write their reasoning
+  into the response, which current models do natively and which Claude Opus 5.5 can decline as
+  reasoning extraction.
+
+### Added
+
+- Resolve call prices at request start, including recurring UTC windows,
+  one-hour cache writes, hosted search fees, and reported audio tokens. Receipts
+  identify the applied card, band, tier, unpriced units, and unapplied free
+  allowances. OpenRouter funding overhead is a separately named estimate;
+  provider-reported totals remain authoritative. Catalog schema 12 adds these
+  fields to generated consumer bindings. (#8557)
+- **An embedding host can own the runtime's diagnostic writes (#8622).** A host installs one stdio sink at session
+  start and receives the runtime's stdout and stderr text as data, with the stream named, instead of having it land on
+  the process's file descriptors and overwrite whatever the host had drawn there. A host that installs nothing keeps
+  the descriptors, so a command-line embedding is unchanged.
+- Claude Opus 5.5, GPT-6 Sol, GPT-6 Luna, and Grok 4.7 join the provider catalog on their direct and
+  OpenRouter routes, along with the missing OpenRouter routes for Claude Fable 5.1 and GPT-6 Astra.
+  The `opus` alias now names Claude Opus 5.5 (`opus5` pins Opus 5), `sol` and `luna` name the GPT-6
+  models, and the OpenAI tier aliases move to GPT-6 (Astra, Sol, Luna). GPT-5.6 models point at their
+  GPT-6 successors; GPT-5.6 Terra points at GPT-6 Sol because GPT-6 has no Terra.
+- Add `./scripts/release_gate.sh audit --residual-only`, which runs the residual release audit lanes on an
+  explicit HARN_BIN without a certification receipt, so a release harness can rehearse them before a cut.
+- Export a versioned native CLI argument tree with `harn --argument-schema` so hosts can project the parser's
+  nested commands and flags without copying its definitions.
+
+### Changed
+
+- A thinking-off request to a Claude model that always thinks (Opus 5.5, Fable, Mythos) now sends the
+  lowest effort instead of letting the model think at its default, and a forced tool choice sent to a
+  model that rejects it (Opus 5.5, Fable 5.1) becomes `auto` with a warning instead of a provider
+  error. `pack_for` task profiles no longer invent `temperature` and `top_p` values, and the agent
+  completion contract follows current model guidance: act on a reasonable reading of the request,
+  verify in proportion to risk, and delegate parallel work.
+- An approval reviewer whose policy names no model now keeps its loop's provider but runs on that provider's row of the
+  new `approval_reviewer` catalog ladder, instead of the loop's own model. Decisions record the choice in
+  `reviewer_route_source`. The reviewer's `effort` is now applied as a reasoning-policy level and defaults to `off`.
+  Before, it was dropped, and a reviewer on a route that refuses disabled thinking failed every call.
+- Releases are built and checked on the version commit's push to main. The run builds, signs,
+  notarizes, and attests the five archives at that commit, builds `SHA256SUMS`, `release-assets.json`,
+  and the release notes from them, writes a `burin-labs.candidate_manifest.v1` candidate manifest, and
+  runs the residual release audit and release smoke on those same files. Promotion publishes exactly
+  those files. A `v*` tag push no longer rebuilds binaries, and the manual tag recovery, promotion,
+  and candidate dispatch modes are gone.
+- Releases publish themselves once the version commit's candidate run succeeds. A new `promote-release.yml`
+  promotes that run's files into the tag and GitHub release through the organization's promotion workflow,
+  asks every registered consumer to repin, publishes the container image from the promoted Linux archives,
+  and opens the next development version. Nothing is rebuilt after the candidate run tested it.
+- The `Release vX.Y.Z` pull request is opened from main by the "Open release PR" workflow, daily and
+  on dispatch, when main has unreleased changelog fragments (#8712). It moves the workspace from
+  `X.Y.Z-dev` to `X.Y.Z` and folds the fragments into `CHANGELOG.md` with
+  `scripts/release_changelog_fold.harn`, now the fold's only implementation. The workflow arms
+  auto-merge when the pull request opens, and names an already-open release pull request instead of
+  duplicating it. `release_ship.sh --prepare` no longer requires an external release harness, and
+  the legacy `release_ship.sh --bump` mode is removed.
+
+### Fixed
+
+- A steer can now change what a run is for. `session/inject` in `steer` or
+  `interrupt_immediate` mode (and `agent_session_push_user_message`) accepts
+  `goal: {objective}`: the completion judge, the completion gate, and
+  `goal_reloop` then hold the run to the new objective, and every acceptance
+  item frozen under the old one is retired instead of demanded. The retarget is
+  kept on the typed control row, reaches the model as a standing `contract`
+  directive, and each completion decision that retired rows emits a
+  `harn.completion_requirements_retired.v1` checkpoint naming them. A plain steer
+  still amends the run and retires nothing. In-VM
+  `agent_session_push_user_message` now records the same typed control row
+  `session/inject` does.
+- Temporary package-verification pins for broken registry releases now expire
+  automatically. The verifier reports the selected version and expiry so a
+  transitive publish cannot silently become a permanent dependency policy.
+- Recovering an older OAuth connector asks for its registered redirect URI when
+  the old credential did not store it and offers an authorization URL prompt
+  when needed. Unattended setup reports the required `--redirect-uri` flag.
+- A Unix-socket root outside every writable root now takes a socket file. On Linux the grant was dropped when
+  the policy also permitted networking, and on macOS binding under such a root was always refused because the
+  socket file's creation was not granted. Regular files stay refused under a socket root on macOS.
+- Diagnostic catalog checks and regeneration now refuse an explicitly selected stale Harn binary
+  unless its exact input manifest proves it matches the worktree.
+- Provider catalog drift compares rates at the adapters' six-decimal USD-per-million-token precision,
+  eliminating conversion-noise changes while retaining real price and context-window changes.
+- A dropped or refused connection on a non-streaming provider call (OpenAI
+  Responses, completions, Azure OpenAI, Bedrock, Gemini, Ollama raw generate,
+  Vertex) is now a typed transient network error, so `agent_loop` retries it
+  instead of ending the run with a generic provider error.
+- Test commands no longer queue a nextest version probe behind Rust compilation, and exact tests use one build admission
+  while still rejecting missing or ignored tests.
+- On macOS, provider status (`harness.llm.providers()`, `harn doctor`, model
+  recommendations, routing) now checks whether a stored credential exists
+  without reading it, so it no longer raises a Keychain access dialog. A
+  process with no terminal, or one running under `CI`, never raises one: a
+  read that would need approval fails with a typed error naming the
+  credential, and provider status reports `needs_user_approval`.
+  `HARN_SECRET_INTERACTIVE=1` re-enables dialogs for a host that has a person
+  present. `harn test`, `make test`, and the script-test wrapper default to
+  `HARN_SECRET_PROVIDERS=env`.
+- Structured LLM calls defer their temperature default until a late-bound model route
+  establishes support, so temperature-rejecting models can answer judges and
+  repair attempts.
+- Inside `agent_loop`, an approval reviewer whose policy names no reviewer
+  model now runs on the loop's own provider and model instead of the bundled
+  reviewer model, so a loop that holds only its own route's credential no
+  longer gets a reviewer that fails authentication on every call. A refusal
+  receipt's `auto_review` entry now carries the reviewer's redacted error in
+  `unavailable_detail` beside `unavailable_reason`.
+- `harn run --allow-process-network` now lets child processes reach public hosts through the managed egress proxy
+  without any `HARN_EGRESS_*` setting. Private, link-local, and loopback addresses stay denied, and a configured egress
+  policy still narrows the default.
+- **Verified agent completions stop repeated judge objections before the cap (#8689).** When a declared
+  verifier has passed and the judge repeats the same attributed requirement without new task or tool evidence,
+  the loop records a verified stop instead of exhausting its review budget.
+- The release gate and `make all` no longer fail at `check-docs` on the snapshot copy of their Harn binary. A certified
+  snapshot keeps its source's freshness proof and is accepted only while its bytes and the checkout are unchanged.
+- A background or auto-backgrounded command spawned through the process-owner guardian now receives exactly the session's
+  resolved environment. It used to inherit the launcher's environment behind the explicit entries, so a name the session
+  never declared reached the child.
+- The runtime bump driver now reads a repin pull request back after arming
+  auto-merge and fails the run unless it is armed or already in the merge
+  queue. The error names the pull request and its `mergeable_state`, so a
+  pull request that nothing will land no longer passes as a successful bump.
+  The observed state is recorded in the receipt's `auto_merge`.
+- Release candidate and smoke checks on Windows now compare the bare sha256
+  digest of each archive. Hashing a file by its Windows path made `sha256sum`
+  prefix the line with a backslash, so the Windows release smoke refused a
+  matching archive as a digest mismatch.
+
+## v0.10.141
+
+### Breaking
+
+- The decision outcome unions gain four typed refusal arms: `state_too_large`, `question_invalid`, `rate_limited`, and
+  `overloaded`. The first two are decided against the route's declared window and limits before dispatch and make zero
+  provider requests; the last two map the provider's 429 and 529 without implicit retry. `PredicatePolicy` is now
+  `EvaluationPolicy` and its `backend` admits `native_decision` alongside `structured_llm`. The predicate site manifest is
+  schema `harn.predicate_sites.v2`: `question_sha256` is replaced by a length-delimited `question_set_sha256` plus a
+  per-question census of id, kind, instructions digest, and option count.
+- **`session/new` now requires `environmentPolicy` (#8566).** Omitting it is
+  refused with `environment_policy.missing`, which names the field and every
+  accepted `kind`. Omission used to select `inherited` and then, from 0.10.140,
+  the environment allowlist. A client that declared nothing therefore got a
+  different session than it had the day before, with nothing reporting the
+  change: the session opened, the run completed, and the only trace was work
+  that quietly stopped happening. No default fixes that, because the hazard is
+  that the meaning of silence belongs to the server and can move under a client
+  that never wrote it down. State `inherited`, `isolated` or `granted`.
+  `session/fork` is unchanged: a fork with no policy still inherits its
+  parent's.
+- **`AcpSessionNewParams::cwd` is replaced by `new` and `isolated` (#8566).**
+  The typed builder now takes the policy as a parameter, so a caller cannot
+  build the shape the server refuses and learn about it at runtime.
+
+### Added
+
+- Declared evaluations now execute. `harness.llm.evaluate` answers a whole question set in one physical request and
+  returns a closed outcome naming a receipt. The receipt lists every question id, the served model identity as the
+  provider returned it, the raw probabilities before conversion, usage, admitted cost, and the cache identity a later
+  reuse would key off. Refusals the route's own limits imply are decided locally and make zero provider requests, so a
+  state past the route's window or a question past its option ceiling costs nothing. The `structured_llm` backend answers
+  through one strict JSON schema generated from the question set, with no schema repair, no transport retry, and no
+  failover. `native_decision` dispatches through a backend trait whose concrete adapter is still to come.
+- **A session-environment grant can state a value, not only point at one
+  (#8527).** The new `literal` source carries the value in the declaration and
+  exposes it verbatim, including the empty string. That is the case it exists
+  for: several developer tools read an empty variable as an explicit "off"
+  that differs from the variable being absent, and a snapshot source cannot
+  express "off" for a name the launcher never set. Hosts previously had to
+  mutate their own process environment so a snapshot would pick the value up.
+  A literal is not a secret channel, so one stating a `harn-secret://`
+  reference is refused at launch; credentials stay in a `secret_store` source,
+  which remains a revocable pointer.
+- A Harn process that cannot bind the loopback listener a child's egress
+  proxy needs now fails with `HARN-CAP-202`, naming the listener, whether the
+  confinement is its own sandbox profile or inherited from a parent process
+  or the OS, and the remedy (`--allow-process-loopback` on the confining
+  `harn run`). The raw `Operation not permitted` used to read as a cache-path
+  or sandbox defect. Only `PermissionDenied` is classified; other bind
+  failures keep their shape. `ProcessEgressProxy::start_from_current_policy`
+  and `start_allowlist` return the typed `ProcessEgressProxyError` instead of
+  a string.
+- Run records now carry a reasoning receipt for every LLM call: the resolved
+  thinking mode and effort rung, and the reasoning value the provider's wire
+  dialect actually sent, read back out of the request body. A rung that a
+  dialect cannot carry, such as an effort level collapsed onto a coarser ladder
+  or dropped entirely, is now visible after the fact instead of only in a
+  configured transcript. A dialect that declares no reasoning field reports
+  `unreported` rather than silence, and an older record that predates the
+  receipt reads as absent rather than as agreement.
+- Register TypeSafe Jev as decision-only routes on the direct TypeSafe API, the
+  Vercel AI Gateway, and OpenRouter, with a typed per-route decision request
+  contract. A decision model is not a chat model, so these rows declare only the
+  `decision` operation and are refused as text drivers by name. `harn models
+  recommend --operation decision` lists the decision-capable routes with their
+  credential status.
+- `harness.llm.evaluate(id, state, questions, policy)` runs a batched probabilistic evaluation: a whole question set
+  answered over one shared state, in one request, under one receipt. Questions are built with `boolean`, `choice`, and
+  `score` from `std/predicate`, and each answer is typed from its own question, so a choice answer's `choice` is the
+  literal union of that question's criteria keys and a `match` on it is exhaustive. `harness.llm.evaluate_predicate` is
+  now the single-boolean projection of the same evaluator. An unreadable question set, or duplicate question ids or
+  labels, is `HARN-TYP-036`.
+- **A caller can fit the decision state ceiling by construction instead of
+  retrying after a refusal (#8540).** `evaluation_windows` in `std/predicate`
+  splits a list into windows that each fit a token budget, carrying index
+  ranges so per-item answers join back by index, an anchor repeated in every
+  window, and an overlap so a question needing local context does not lose it
+  at a seam. The windows are measured with `harness.llm.estimate_state_tokens`,
+  the evaluator's own estimator and the same call the ceiling compares against
+  the route's window. That shared ruler is the point: sizing a window with a
+  chars-per-token approximation produces windows that measure fine where they
+  are built and are refused where they are sent. An evaluation site that hands
+  a native decision route an input whose declared type has no finite size bound
+  is now reported at check time as `HARN-LNT-079`, because that route's
+  admission bounds encoded input and cannot establish a bound the type does
+  not have.
+- `std/eval/calibration` turns a labeled corpus plus a classifier's answers into a ten-bin
+  reliability curve, an expected calibration error, coverage and false-accept/false-reject rates at
+  each candidate threshold, cost and latency percentiles, and a conformal abstention threshold
+  derived on a held-out split. Every number carries the row count behind it, and a corpus that
+  cannot be measured returns a typed refusal instead of a report of zero error. `harn eval calibrate`
+  runs the report from a corpus JSONL and an answers JSONL.
+
+### Changed
+
+- **The bundled provider/model catalog is refreshed against live provider
+  endpoints read on 2026-09-20 (#8545).** Fifty-five rows carried a stale rate,
+  a missing cache rate or a stale context window, and fifteen routes the
+  providers no longer serve are removed: Cerebras's Gemma 4 31B, GLM 4.7 and
+  Llama 3.3 70B; Groq's Qwen3.6 27B; two SambaNova rows; three NVIDIA NIM
+  routes; Moonshot's Kimi K2.5; MiniMax Text 01; OpenAI's o1-mini; Together's
+  undated DeepSeek V4 Pro preview; and two OpenRouter routes. Eight rows are
+  added for Grok 4.6, GLM-5.3-FlashX, Cerebras Qwen 3.8 27B and NIM's Kimi K3
+  and GLM 5.3 routes. Two more are renames the providers made: NIM's Nemotron
+  Nano 3 and the Vercel gateway's Gemini 3.1 Flash Lite, which graduated out of
+  preview. Grok 4.5 gains the long-context band that was doubling its bill
+  above 200,000 input tokens without the catalog recording it, and OpenAI's o1
+  gains the typed retirement date its record publishes. Aliases, the Groq QC
+  default and both Groq escalation-ladder rungs follow the retirements.
+- **The catalog refresh workflow runs again, and sees three more sources
+  (#8545).** Its live mode died on the first provider record without a rate
+  card: two pricing helpers declared a non-nullable parameter, so the runtime
+  refused the nil before each one's own nil guard could run. With that fixed,
+  a live run reaches twenty provider endpoints. It also reads Cerebras's public
+  model index, which publishes pricing, limits and a deprecation flag the
+  key-scoped endpoint omits; it converts xAI's per-token rates instead of
+  dropping every xAI price; and it has a Vercel AI Gateway adapter, so
+  gateway-only changes are observable at all.
+- **The run/session view contracts now carry a reasoning receipt, without a
+  schema version bump (#8565).** Every LLM call records what the wire actually
+  carried for its reasoning request, and those receipts ride on the execution
+  evidence envelope that run-record persistence already writes. The envelope is
+  projected into both view contracts, so `reasoning_receipts` is now a field on
+  the run view and the session view: five run-view snapshots and four
+  session-view snapshots under `spec/run-view-fixtures/` moved with it.
+
+  Two consequences are worth checking before adopting this release. The field
+  was added without raising `schema_version`, which stays at `1`, so a consumer
+  that keys compatibility off the version number sees no change while the
+  payload gained a field. And because the new field sits inside the projected
+  payload, every projection hash and projection id in those contracts is
+  different from the previous release. A consumer that compares projection
+  hashes across this bump should expect all of them to differ; that is the new
+  field being projected, not a corrupted record.
+
+  A producer that never reported a reasoning request projects the field as
+  `null`, so absence stays distinguishable from a report of nothing sent.
+
+### Fixed
+
+- **The Make-owned build command rule no longer misses three bypass shapes
+  (#8513).** Its subcommand was the first argument not beginning with `-`,
+  which skips an option but not the option's value, so
+  `swift --package-path /tmp test` classified as the verb `/tmp` and no rule
+  matched. Any option with a value bypassed the rule, whatever the option was
+  called. The rule now asks whether the verb appears as an argument that is
+  neither an option nor a known option's value, so an option it does not
+  recognise leaves its value in the candidate set and refuses rather than
+  allows. The `HARN_ALLOW_RAW_SWIFT=1` and `HARN_ALLOW_RAW_CARGO=1` escapes
+  were substring searches over the whole command, so an unrelated earlier
+  stage that merely mentioned one released the guarded stage; each is now read
+  as an environment assignment on the stage that runs the tool.
+- A cancellation noticed inside a blocking operation now runs the interrupt
+  handlers registered for it, instead of running them only if the program
+  happened to keep executing after the throw. A replayed cancellation does not
+  re-run them, because they already ran when the run was live.
+- `provider_call_count` now has one owner across every call surface: a
+  task-local dispatch ledger recorded at the transport boundary. A bare
+  `llm_call` or `llm_call_structured_result` previously measured no dispatches
+  (only `agent_loop` counted), so the structured envelope assumed one attempt
+  for a call that never dispatched — a budget refusal or admission denial with
+  zero requests reported as one unpriced call. `LlmUsage::provider_call_count`
+  is now `Option<i64>`, distinguishing a measured zero (`Some(0)`) from a
+  pre-field ledger (`None`, reconstructed as one call), so a downstream meter
+  reserving spend per attempt no longer overcharges a call that made no request.
+- The ACP `transcript_compacted` extension block now carries every compaction
+  receipt field (`requestedStrategy`, `resolvedThresholdTokens`,
+  `thresholdSource`, `hardLimitTokens`, `sourceMeasurement`), projected from
+  the receipt itself instead of a hand-maintained key list. A downstream host
+  can now see from the update alone that a compaction ran a different engine
+  strategy than the one it requested, and how many summary bytes it produced.
+  The schema marks the always-emitted fields required so the generated typed
+  decoders preserve a `null` instead of dropping it on re-encode.
+- `resolve_workspace_guidance` now reports every file it followed. The resolution
+  carries a typed `dependencies` set naming each imported path and whether it was
+  read or refused, so a caller can tell a spliced import from one that was
+  skipped. Previously an imported file's body was spliced into the guidance text
+  while the file appeared in neither `sources` nor `omitted`.
+- An agent run whose closing turn was rejected by the completion adjudicator no
+  longer answers with the loop's own bookkeeping line. The veto retires the
+  model's draft and leaves a fixed placeholder in its slot, so the turn count
+  stays stable and the pending directive still lands on the next round; when
+  the loop then ended on that same round the placeholder was the trailing
+  assistant message, so `result.text`, `result.visible_text` and the last
+  assistant message in the transcript all reported it as the model's closing
+  report, once per veto round. The runtime now flags the turns it writes for
+  its own bookkeeping and the answer projection walks past them: a run with an
+  earlier accepted draft answers with that draft, and a run where nothing was
+  accepted answers with nothing and reports a typed `turn_withdrawn` stop
+  reason carrying the adjudicator's own words. The placeholder itself is
+  unchanged and still reaches the model, so the directive it exists to deliver
+  is not delayed.
+- A denied tool call's record now names the command it refused. A host that
+  rejects a call without saying why previously left a record carrying the gate,
+  the runtime's fallback sentence and nothing else, so a consumer reading it
+  could only report that a permission gate refused one command without saying
+  which; because such a refusal often ends the run, there was nowhere left to
+  recover the command from. `ToolDenial` gains `denied_commands`, filled at the
+  single boundary every denial from every gate already passes through, beside
+  the workspace paths it already enriched, so a bare refusal from any gate is
+  now actionable. The commands come from the approval rules' own extraction, so
+  a denial names the same command the policy reasoned about. The field is
+  omitted when a call declares no command, and older records without it still
+  decode.
+- **The agent-gate registry check now compares everything the generator writes
+  (#8572).** It compared readers by file and symbol only, so an entry shard
+  could differ from what `--write` would produce and still pass. The committed
+  shards had disagreed with their sources on `main` for some time with nothing
+  reporting it. The check now compares each shard's content against the text
+  the writer would emit, the same way the markdown projections were already
+  checked.
+- **A reader's line number is no longer persisted (#8572).** Nothing compared
+  it and no projection rendered it, so it went stale on every edit above a
+  reader. Dropping it is what lets the comparison be total without the gate
+  failing on line movement alone.
+- **Checking a project no longer refuses when one of its dependencies imports
+  its own dependency (#8573).** Import resolution consulted only the package
+  snapshots acquired for the files the caller named, and it keeps a snapshot
+  only for a file underneath that snapshot's project root. A path dependency is
+  installed as a symlink to its own source tree, so a module reached through one
+  lives outside the consumer's root, every acquired snapshot was filtered away,
+  and that module's own package imports resolved to nothing. The same file
+  checked on its own resolved fine, so the two resolvers disagreed about one
+  import. The census that refuses an unresolved import then refused the whole
+  consumer. Resolution now falls back to the importing file's own nearest
+  project root, which is the context that owns that module and the one the
+  single-file path has always used.
+- **A confined child now keeps a `CARGO_HOME` or `RUSTUP_HOME` that was
+  explicitly set (#8583).** The workspace toolchain environment derived both
+  names from the child's `HOME` unconditionally, so an admitted value was
+  overwritten and a child given a toolchain outside its home directory looked
+  for one that was not there. Each name is now derived from `HOME` only when it
+  is absent, and the resolution carries a typed source saying which of the two
+  it was.
+- **The shell guard's worktree rule now names an admission command that exists
+  for the repository a command targets (#8585).** The target was read from
+  `git -C` alone, so a command that reached another repository by changing
+  directory first was judged against the repository the guard is installed in
+  and sent to a path that is not there. An absolute `cd` now names the
+  repository and carries across the rest of the command, while a relative one
+  is still ignored because the hook payload has no working directory to resolve
+  it against. A repository carrying no admission command of its own was also
+  allowed through entirely; it is now refused with the command configured for
+  another measured repository, pointed at the target by the argument the policy
+  declares. Where no measured repository carries one there is nothing to name
+  and raw creation stays allowed, and an unreadable census still refuses.
+- **The shell guard keeps the directory a `cd` established across a nested
+  shell and past the option separator (#8590).** Two shapes defeated the
+  directory tracking and left the refusal naming an admission command the
+  operator cannot run, which is the defect that tracking exists to remove. A
+  creation launched through a nested shell was scanned from a fresh working
+  directory, so it was judged against the repository the guard is installed in;
+  the directory now travels into the recursion, while a `cd` inside the nested
+  payload still wins. And `cd -- <path>`, the standard spelling for a directory
+  that could be read as an option, took the separator as its argument and found
+  no target; the separator is now stepped over rather than read as the
+  directory.
+- **The shell guard reaches a verdict again on the runtime its consumers pin
+  (#8592).** A default parameter value compiles to an `__assert_schema` call at
+  the call site, and the guard runs under an allow list naming only its two
+  policy builtins. No runtime exempts that builtin from the list, so every
+  guarded command faulted before any rule was evaluated and the adapter turned
+  each one into the generic fail-closed denial. Commands were still refused,
+  but with a reason that named nothing, which made the directory-tracking
+  behaviour described for #8590 unreachable in practice. The parameter is now
+  required and the two outer call sites pass the empty string.
+- The agent shell guard's worktree rule now answers for the repository a
+  command targets, using only that repository's own configured admission
+  command. A target the wrapper measured but that configures no admission
+  command used to borrow another root's command and be refused with a remedy
+  the operator had no reason to trust and that nothing established would admit
+  that repository; it is now allowed, which is the answer the rule gave before
+  the borrowing existed. Separately, the directory tracking took the first word
+  after `cd` as the destination, so `cd -P /repo` read `-P` as the target,
+  found nothing absolute, and let the raw creation through in a repository that
+  does advertise an admission command. Option words are now stepped over and
+  the following operand is the destination, with `--` ending option processing
+  rather than being skipped, so a directory literally named `-P` is still
+  reachable.
+- A `cd` the shell never runs can no longer disarm the agent shell guard's
+  worktree rule. The directory tracking treated every scanned `cd` as
+  effective, so putting `true || cd <other-repository>` in front of a raw
+  worktree creation made the guard answer for a directory the shell never
+  entered: the right side of `||` does not run, the creation happened in the
+  repository that does advertise an admission command, and a refusal became an
+  allow. The fix is not a better model of the shell. A `cd` whose execution
+  depends on control flow, or whose failure is swallowed by a following `||`,
+  or which sits inside a pipeline, leaves the working directory ambiguous. The
+  rule is now asked about every directory the command could be running in and
+  the first refusal wins. An unconditional `cd` in a plain sequence still
+  carries, so a creation that really does land in another repository is still
+  judged there.
+- A raw worktree creation inside a nested shell is now judged against every
+  directory the command could be running in, not just the first one the scan
+  reached. The nested scan ran once per reachable directory and returned as
+  soon as one produced a match, carrying only that directory into the
+  decision. Whichever candidate came first ended the search, and a candidate
+  that allows is exactly the one that then hid every other reachable
+  directory that would have refused: wrapping a creation in a shell turned a
+  refusal into an allow while describing the same situation. The candidates
+  are scanned to the end now and their directories unioned, which is the rule
+  the unnested path already followed.
+- **A queued end-to-end run on the default branch is no longer cancelled by
+  the next push (#8608).** The suite shared one concurrency key across every
+  push to the default branch, and GitHub keeps at most one pending run per key,
+  so a run waiting behind an executing one was cancelled before any job
+  started. That left the commit with no executed result and no notification,
+  because the job that raises the unattended-failure alarm never ran. Each
+  push now gets its own key; pull-request and scheduled runs are unchanged.
+- **A shell list that can route around a `cd` no longer relaxes the raw
+  worktree-creation rule (#8613).** `cd <dir> extra && false || ...` ran the
+  creation in the original directory, because `cd` with two operands fails and
+  the `||` catches it, while the guard had already narrowed its answer to the
+  first operand. A `cd` now narrows only when it carries exactly one operand
+  and is not in a pipeline, is itself reached unconditionally, and is joined
+  to the command by an unbroken `&&` chain. Any `||` or `;` in between, or
+  before it, and both the directory before the `cd` and its target are asked
+  about, with the first refusal winning. A creation after `cd <dir>; ...` is
+  therefore refused where it was previously allowed, because `;` runs the
+  command whether or not the `cd` succeeded.
+- The generated Swift now refuses a `session/update` frame that omits a
+  required-nullable key, on every struct that has one. A required-nullable
+  field is `T?` in Swift whichever way it is declared, so Codable synthesis
+  decodes it with `decodeIfPresent` and reads an omitted key as `nil`; only a
+  custom `init(from:)` tells absent from null. That initializer was emitted
+  only when some other field in the same struct was a non-required JSON value,
+  so a struct kept its enforcement while an unrelated neighbour stayed
+  optional and lost it when that neighbour was tightened. The
+  transcript-compacted meta struct lost it exactly that way, and the artifact
+  and reminder structs never had it, so all three wrote every key while
+  accepting a frame that omitted one, disagreeing with the Rust projection of
+  the same schema. The initializer is now emitted whenever a struct has any
+  required-nullable field.
+- The agent shell guard can now name a worktree admission command that lives
+  outside the repository it admits, and its refusal states what to run rather
+  than where the command lives.
+- `harn provider option-probe --option` now accepts the canonical portable option
+  id. The vocabulary spells its ids with underscores and the capability field
+  name is built from that spelling, but the flag derived a second, kebab-case
+  rendering of the same list, so `top_p`, `top_k`, `frequency_penalty` and
+  `presence_penalty` were refused before any request was made. The accepted value
+  now comes from the canonical list, and the hyphenated spelling remains an alias.
+- The provider capability campaign no longer ends when one live case produces no
+  runtime-priced usage. A case the runtime did not price is an accounting gap
+  rather than a spend signal, and halting on the first one left the cap
+  unreached and almost every unit unmeasured. Such a case is now charged a
+  declared figure, set well above what a probe of this shape can cost, so the cap
+  stays a true upper bound while the rest of the campaign runs. The receipt
+  reports what was charged, the declared unit figure and what it added, and keeps
+  the priced total marked unknown, so an estimate is never read back as a
+  measurement.
+
 ## v0.10.140
 
 ### Breaking
