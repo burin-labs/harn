@@ -1457,3 +1457,7 @@ mod netns_tests;
 #[cfg(test)]
 #[path = "linux_socket_root_tests.rs"]
 mod socket_root_tests;
+
+#[cfg(test)]
+#[path = "linux_credential_denylist_tests.rs"]
+mod credential_denylist_tests;
