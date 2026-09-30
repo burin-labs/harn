@@ -3,6 +3,51 @@ use super::AnthropicProvider;
 use crate::llm::api::{LlmCallOptions, LlmRequestPayload};
 
 #[test]
+fn option_probe_emits_only_the_selected_unsupported_field() {
+    use crate::llm::capabilities::PortableOption;
+
+    let mut opts = base_payload();
+    opts.seed = Some(1);
+    opts.frequency_penalty = Some(0.1);
+    opts.presence_penalty = Some(0.2);
+    let fields = [
+        (PortableOption::Seed, "seed", serde_json::json!(1)),
+        (
+            PortableOption::FrequencyPenalty,
+            "frequency_penalty",
+            serde_json::json!(0.1),
+        ),
+        (
+            PortableOption::PresencePenalty,
+            "presence_penalty",
+            serde_json::json!(0.2),
+        ),
+    ];
+
+    for selected in [None, Some(PortableOption::Temperature)]
+        .into_iter()
+        .chain(fields.iter().map(|(option, _, _)| Some(*option)))
+    {
+        opts.provider_contract_probe = selected;
+        let mut body = AnthropicProvider::build_request_body(&opts);
+        super::anthropic::reconcile_request_body(
+            &mut body,
+            &opts.provider,
+            &opts.model,
+            &opts.thinking,
+            selected,
+        );
+        for (option, field, value) in &fields {
+            assert_eq!(
+                body.get(*field),
+                (selected == Some(*option)).then_some(value),
+                "probe {selected:?}, wire field {field}"
+            );
+        }
+    }
+}
+
+#[test]
 fn cache_control_message_key_survives_anthropic_egress() {
     let mut opts = base_payload();
     opts.messages = vec![serde_json::json!({
