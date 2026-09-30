@@ -65,6 +65,7 @@ spec/protocol-artifacts/schemas/harn-tools-v2.schema.json -merge
 spec/protocol-artifacts/schemas/plan-document-v1.schema.json -merge
 crates/harn-vm/src/triggers/event/schemas_generated.rs -merge
 crates/harn-parser/src/diagnostic/harness_migrations_generated.rs -merge
+spec/cli-surface.txt -merge
 spec/openapi.snapshot -merge
 crates/harn-serve/openapi.yaml -merge
 spec/schemas/session-bundle.v1.schema.json -merge
