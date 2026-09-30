@@ -42,19 +42,36 @@ pub type SourceCandidateDecision = {
   candidate_purpose: "source" | "none",
 }
 
+/**
+ * Which dispatch may build a signed source candidate. Only this repository's
+ * producer reads it, so it is not part of the projected cross-repository
+ * contract below.
+ */
+pub type SourceCandidatePolicy = {
+  event: "workflow_dispatch",
+  ref_type: "branch",
+  ref_name: "main",
+  runner_profile: "policy",
+  build_mode: "candidate",
+  purpose: "source",
+}
+
 pub type ReleaseContract = {
   schema_version: "harn.release_contract.v1",
   versions: ReleaseVersionContract,
   changelog: {published_heading: "top_version_heading", candidate_fragments: "must_be_folded"},
   tag: ReleaseTagContract,
-  source_candidate: {
+}
+
+pub fn source_candidate_policy() -> SourceCandidatePolicy {
+  return {
     event: "workflow_dispatch",
     ref_type: "branch",
     ref_name: "main",
     runner_profile: "policy",
     build_mode: "candidate",
     purpose: "source",
-  },
+  }
 }
 
 /** Harn's release semantics, projected for orchestrators and recovery tools. */
@@ -72,20 +89,12 @@ pub fn release_contract() -> ReleaseContract {
       release_subject_template: "Release v{version}",
       candidate_trailer: "Harn-Release-Candidate",
     },
-    source_candidate: {
-      event: "workflow_dispatch",
-      ref_type: "branch",
-      ref_name: "main",
-      runner_profile: "policy",
-      build_mode: "candidate",
-      purpose: "source",
-    },
   }
 }
 
 /** One request decision, shared by workflow and local producer callers. */
 pub fn source_candidate_decision(request: SourceCandidateRequest) -> SourceCandidateDecision {
-  const policy = release_contract().source_candidate
+  const policy = source_candidate_policy()
   let reason = "accepted"
   if request.event != policy.event {
     reason = "wrong_event"
@@ -169,16 +178,6 @@ pub fn release_contract_schema() {
           anchor: schema_literal("certified_candidate_commit"),
           release_subject_template: schema_literal("Release v{version}"),
           candidate_trailer: schema_literal("Harn-Release-Candidate"),
-        },
-      ),
-      source_candidate: schema_closed_object(
-        {
-          event: schema_literal("workflow_dispatch"),
-          ref_type: schema_literal("branch"),
-          ref_name: schema_literal("main"),
-          runner_profile: schema_literal("policy"),
-          build_mode: schema_literal("candidate"),
-          purpose: schema_literal("source"),
         },
       ),
     },

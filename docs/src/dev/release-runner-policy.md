@@ -30,9 +30,10 @@ Promotion accepts only stable version-changing main pushes, so this dispatch
 does not publish a tag or release. The request policy lives in
 `scripts/release_contract.harn`; the workflow passes a closed request to its
 decision function and records the typed admission or refusal receipt. The
-existing verified bootstrap supplies the decision interpreter. Source policy
-remains in the generated JSON contract;
-scheduled source production and downstream artifact consumption are separate
+existing verified bootstrap supplies the decision interpreter. Only this
+repository reads the source policy, so it is not projected into
+`scripts/release_contract.json`, the contract the release orchestrator checks.
+Scheduled source production and downstream artifact consumption are separate
 from this explicit producer input.
 
 ```bash
