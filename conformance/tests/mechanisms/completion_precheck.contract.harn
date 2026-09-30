@@ -1,0 +1,205 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_evaluate_completion } from "std/agent/judge"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn precheck_config(evaluation_extra: dict) -> dict {
+  return {
+    policy: {
+      evaluation: {
+        backend: "structured_llm",
+        provider: "openai",
+        model: "gpt-5.4-nano",
+        effort: "none",
+        temperature: 0.0,
+        threshold: 0.0,
+        evaluation_cost_limit: 1.0,
+        run_cost_limit: 1.0,
+      }
+        + evaluation_extra,
+      achieved_ceiling: 0.05,
+      missing_confidence_floor: 0.9,
+    },
+  }
+}
+
+fn evaluation_reply(achieved: bool, confidence: float, gap: string, gap_confidence: float) -> dict {
+  return llm_text(
+    json_stringify(
+      {
+        answers: {
+          achieved: {verdict: achieved, confidence: confidence, evidence: "fixture"},
+          missing: {choice: gap, confidence: gap_confidence, evidence: "fixture"},
+        },
+      },
+    ),
+  )
+    + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30}
+}
+
+fn run_boundary(harness: Harness, reply: dict, extra: dict, judge_extra: dict) -> dict {
+  const sid = "completion-precheck-" + harness.random.uuid()
+  harness.agent.open(sid)
+  const judge = {provider: "openai", model: "gpt-5.4-nano", precheck: precheck_config({})}
+    + judge_extra
+  return with_llm_script(
+    harness.llm,
+    [
+      reply,
+      llm_text(
+        json_stringify(
+          {verdict: "done", detail: "The full judge accepted the fixture.", gap_class: "none"},
+        ),
+      )
+        + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30},
+    ],
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        sid,
+        { ->
+          agent_evaluate_completion(
+            harness,
+            {session_id: sid, task: "Complete the requested work"},
+            {turn_end_condition: judge} + extra,
+            "sentinel",
+            "The work is complete",
+            0,
+          )
+        },
+      )
+      return {
+        directive: captured.result,
+        calls: len(harness.llm.mock_calls()),
+        started: len(captured.events.filter({ event -> event.type == "judge_started" }).to_list()),
+      }
+    },
+  )
+}
+
+pipeline test(harness: Harness) {
+  const missing = run_boundary(
+    harness,
+    evaluation_reply(false, 0.98, "pr", 0.95),
+    {},
+    {requirement_contract: {requirements: [{requirement_id: "pr", name: "Open the pull request"}]}},
+  )
+  assert_eq(missing.directive.action, "continue")
+  assert_eq(missing.started, 0)
+  assert_eq(missing.calls, 1)
+  assert_eq(missing.directive.receipt.outcome, "skipped_precheck")
+  assert_eq(missing.directive.receipt.precheck.gap_id, "pr")
+  assert_eq(missing.directive.receipt.requirements.required_count, 1)
+  assert(contains(missing.directive.feedback, "Open the pull request"))
+  assert_eq(missing.directive.receipt.invoked.turn_end_condition, false)
+  const exact_floor = run_boundary(
+    harness,
+    evaluation_reply(false, 0.95, "pr", 0.9),
+    {},
+    {requirement_contract: {requirements: [{requirement_id: "pr", name: "Open the pull request"}]}},
+  )
+  assert_eq(exact_floor.directive.action, "continue")
+  assert_eq(exact_floor.calls, 1)
+  assert_eq(exact_floor.started, 0)
+  assert_eq(exact_floor.directive.receipt.precheck.gap_id, "pr")
+  const positive = evaluation_reply(true, 0.99, "unverifiable_claim", 0.95)
+  const red = run_boundary(
+    harness,
+    positive,
+    {
+      verify_completion: { _ ->
+        {
+          confirm: false,
+          message: "Tests failed",
+          verification: {oracle_expected: true, command: "tests", observed: "failed"},
+        }
+      },
+    },
+    {},
+  )
+  assert_eq(red.directive.action, "continue")
+  assert_eq(red.directive.receipt.verification.observed, "failed")
+  assert_eq(red.calls, 0)
+  assert_eq(red.started, 0)
+  const without_gate = run_boundary(harness, positive, {}, {})
+  assert_eq(without_gate.directive.action, "accept")
+  assert_eq(without_gate.calls, 2)
+  assert_eq(without_gate.started, 1)
+  assert_eq(without_gate.directive.receipt.precheck.action, "full_judge")
+  const uncertain = run_boundary(
+    harness,
+    evaluation_reply(false, 0.98, "unverifiable_claim", 0.2),
+    {},
+    {},
+  )
+  assert_eq(uncertain.directive.action, "accept")
+  assert_eq(uncertain.calls, 2)
+  assert_eq(uncertain.started, 1)
+  const malformed = run_boundary(
+    harness,
+    llm_text("not JSON")
+      + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30},
+    {},
+    {},
+  )
+  assert_eq(malformed.directive.action, "accept")
+  assert_eq(malformed.calls, 2)
+  assert_eq(malformed.started, 1)
+  assert_eq(malformed.directive.receipt.precheck.action, "full_judge")
+  assert_eq(malformed.directive.receipt.precheck.evaluation.kind, "refused")
+  const capped = run_boundary(
+    harness,
+    positive,
+    {_turn_end_judge_invocations: 1},
+    {max_invocations: 1},
+  )
+  assert_eq(capped.directive.action, "stop_unverified")
+  assert_eq(capped.calls, 0)
+  assert_eq(capped.started, 0)
+  const done = llm_text(
+    json_stringify(
+      {verdict: "done", detail: "The full judge accepted the fixture.", gap_class: "none"},
+    ),
+  )
+    + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30}
+  const unavailable = run_boundary(
+    harness,
+    done,
+    {},
+    {precheck: precheck_config({model: "not-a-catalog-model"})},
+  )
+  assert_eq(unavailable.directive.action, "accept")
+  assert_eq(unavailable.calls, 1)
+  assert_eq(unavailable.started, 1)
+  assert_eq(unavailable.directive.receipt.precheck.evaluation.kind, "unavailable")
+  const oversized = run_boundary(
+    harness,
+    done,
+    {},
+    {
+      precheck: precheck_config({})
+        + {
+          facts: fn(_session: string, _evidence: string) { return {
+            commit: {observed: nil, evidence_refs: []},
+            pull_request: {observed: nil, evidence_refs: ["🐈".repeat(5000)]},
+          } },
+        },
+    },
+  )
+  assert_eq(oversized.directive.action, "accept")
+  assert_eq(oversized.calls, 1)
+  assert_eq(oversized.started, 1)
+  assert_eq(oversized.directive.receipt.precheck.reason, "input_too_large")
+  const exhausted = run_boundary(
+    harness,
+    positive,
+    {},
+    {precheck: precheck_config({run_cost_limit: 0.0})},
+  )
+  assert_eq(exhausted.directive.action, "stop_unverified")
+  assert_eq(exhausted.calls, 0)
+  assert_eq(exhausted.started, 0)
+  assert_eq(exhausted.directive.receipt.precheck.action, "control_stop")
+  harness.stdio.println(
+    "completion precheck: named gap skips judge; verifier controls completion; uncertainty retains judge",
+  )
+}
