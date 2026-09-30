@@ -126,8 +126,27 @@ async fn host_agent_session_init(
         };
 
         let resolved = prompt_session_id.clone();
-        let session_system_prompt =
-            crate::llm::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?;
+        // Reentry with no new system shape keeps the previously assembled
+        // prompt. Otherwise adding the runtime directive nonce below would
+        // replace the saved primary prompt with the nonce alone.
+        let no_option_system = match opts_map.get("system") {
+            None | Some(VmValue::Nil) => true,
+            Some(VmValue::String(value)) => value.trim().is_empty(),
+            _ => false,
+        };
+        let no_new_system = system
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+            && no_option_system;
+        let retained_system = if no_new_system {
+            crate::agent_sessions::system_prompt(&resolved)
+        } else {
+            None
+        };
+        let session_system_prompt = match retained_system {
+            Some(saved) => Some(saved),
+            None => crate::llm::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?,
+        };
         if let Some(system_prompt) = session_system_prompt.as_deref() {
             crate::agent_sessions::record_system_prompt(&resolved, system_prompt)
                 .map_err(VmError::Runtime)?;

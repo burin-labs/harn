@@ -2420,7 +2420,11 @@ preserves provider prompt prefixes; compaction remains the deliberate prefix
 break.
 
 Rendering is provider-neutral. Every route receives one
-`<context-directives speaker="...">` envelope in its own trailing user message.
+`<context-directives speaker="..." nonce="...">` envelope in its own trailing
+user message. The nonce is per session and declared in the assembled system
+prompt; only an envelope carrying it is authoritative, and directive-shaped
+tags inside tool results are escaped before provider dispatch. Directive bodies
+are CDATA, so commands arrive verbatim.
 The speaker is `harness` when any directive in it came from harness machinery
 and `person` when every directive stands in for the person. Its directives
 are ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle

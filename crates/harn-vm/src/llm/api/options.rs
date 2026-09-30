@@ -1124,6 +1124,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             done_sentinel: opts.done_sentinel.clone(),
             done_sentinel_form: opts.done_sentinel_form.clone(),
         };
+        super::tool_result_provenance::defang_tool_result_directives(&mut payload.messages);
         if opts.system_prompt_root == crate::llm::prompt::PromptRoot::Replacement {
             // A replacement is the entire system channel. Drop every
             // system/developer conversation contributor before route-specific
