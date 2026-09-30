@@ -96,7 +96,7 @@ Linux and macOS: admitted config/cache reads succeed, unlisted siblings fail,
 and explicit parent grants restore only the unlisted reads. macOS tool defaults
 under `~/Library` aren't changed by this narrowing.
 
-The [September 30 evidence](../evidence/9035-config-census.json) records 70
-terminal commands, zero pending commands, the expected refused reads, and the
+The [September 30 evidence](https://github.com/burin-labs/harn/blob/main/docs/evidence/9035-config-census.json)
+records 70 terminal commands, zero pending commands, the expected refused reads, and the
 .NET timeout. Corepack's readable baselines lacked a cached distribution;
 their traces still recorded `node/corepack/lastKnownGood.json` reads.
