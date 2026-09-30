@@ -56,6 +56,7 @@ echo "$run_url" > "$scratch/dispatch"
 echo "completed success" > "$scratch/run"
 canary
 grep -q "verdict=pass conclusion=success run=42 wall_seconds=" "$scratch/out"
+grep -q "consumer=configured secret=CONSUMER_CANARY_REPOSITORY" "$scratch/out"
 grep -q -- '--ref main ' "$scratch/dispatched"
 
 # Every other terminal state is red by name.
@@ -72,7 +73,7 @@ if PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/ \
   echo "an unset consumer repository reported green" >&2
   exit 1
 fi
-grep -q "reason=consumer_repository_unset" "$scratch/out"
+grep -q "reason=consumer_repository_unset secret=CONSUMER_CANARY_REPOSITORY" "$scratch/out"
 
 # A dispatch that names no run is not a pass.
 : > "$scratch/dispatch"

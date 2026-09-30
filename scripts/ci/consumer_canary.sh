@@ -77,8 +77,10 @@ canary_main() {
   local poll=${CANARY_POLL_SECONDS:-60} deadline=${CANARY_DEADLINE_SECONDS:-2400}
   # The job joins the owner and the secret's name, so an unset secret arrives
   # as "owner/" and must not reach the API as a half-formed repository.
-  [[ "$repo" =~ ^[^/]+/[^/]+$ ]] || canary_fail consumer_repository_unset
+  [[ "$repo" =~ ^[^/]+/[^/]+$ ]] \
+    || canary_fail consumer_repository_unset "secret=CONSUMER_CANARY_REPOSITORY"
   CANARY_SECRET_NAME=${repo#*/}
+  canary_say "CONSUMER_CANARY consumer=configured secret=CONSUMER_CANARY_REPOSITORY"
   [[ -n "$workflow" ]] || canary_fail consumer_workflow_unset
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || canary_fail source_revision_invalid
   # The consumer reads the target as a tag name, so a bare workspace version
