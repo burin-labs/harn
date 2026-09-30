@@ -802,3 +802,29 @@ mod embedded_catalog;
 mod overlays;
 mod provider_prefix;
 mod tool_protocol;
+
+/// Together still lists these models in `/v1/models`, but a chat call returns
+/// "Unable to access non-serverless model" (live sweep 2026-09-29). They must
+/// stay `dedicated` so hosts never offer them as one-click routes. MiniMax M3
+/// answered serverless the same day and is the control that keeps this from
+/// passing on a catalog that marked every Together row dedicated.
+#[test]
+fn together_routes_that_need_a_dedicated_endpoint_are_marked_dedicated() {
+    for id in [
+        "openai/gpt-oss-20b",
+        "moonshotai/Kimi-K2.7-Code",
+        "MiniMaxAI/MiniMax-M2.7",
+        "Qwen/Qwen2.5-7B-Instruct-Turbo",
+        "google/gemma-4-31B-it",
+        "Qwen/Qwen3.5-397B-A17B",
+        "together/nvidia/nemotron-3-ultra-550b-a55b",
+        "Qwen/Qwen3-Coder-Next-FP8",
+    ] {
+        let model = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+        assert_eq!(model.provider, "together", "{id}");
+        assert_eq!(model.availability, ModelAvailability::Dedicated, "{id}");
+    }
+    let control = model_catalog_entry("MiniMaxAI/MiniMax-M3").expect("Together MiniMax M3 row");
+    assert_eq!(control.provider, "together");
+    assert_ne!(control.availability, ModelAvailability::Dedicated);
+}
