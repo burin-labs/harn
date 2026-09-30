@@ -161,11 +161,12 @@ impl AgentSessionInitRollback {
         self.armed = false;
     }
 
-    pub(super) async fn fail(&mut self) {
+    pub(super) async fn fail(&mut self, ctx: Option<&crate::vm::AsyncBuiltinCtx>) {
         if let Err(error) = super::live_transcript_journal::flush_init_terminal(
             &self.session_id,
             "failed",
             "session_initialization_failed",
+            ctx,
         )
         .await
         {

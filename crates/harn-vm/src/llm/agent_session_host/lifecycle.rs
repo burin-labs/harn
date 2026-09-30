@@ -59,6 +59,7 @@ async fn host_agent_session_init(
         system.clone(),
         ctx.execution_id(),
         ctx.task_id(),
+        &ctx,
     )
     .await?;
     let has_canonical_history = initialized.has_canonical_history;
@@ -93,6 +94,7 @@ async fn host_agent_session_init(
                 &prompt_session_id,
                 "blocked",
                 "user_prompt_submit_blocked",
+                Some(&ctx),
             )
             .await?;
             let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
@@ -113,6 +115,7 @@ async fn host_agent_session_init(
                     &prompt_session_id,
                     "blocked",
                     "autonomy_budget_denied",
+                    Some(&ctx),
                 )
                 .await?;
                 return Ok(SessionInitOutcome::Admission(agent_init_control_done(
@@ -228,6 +231,7 @@ async fn host_agent_session_init(
                     &resolved,
                     "blocked",
                     "nested_policy_denied",
+                    Some(&ctx),
                 )
                 .await?;
                 return Ok(SessionInitOutcome::Admission(agent_init_control_done(
@@ -345,7 +349,7 @@ async fn host_agent_session_init(
             Ok(result)
         }
         Err(error) => {
-            init_rollback.fail().await;
+            init_rollback.fail(Some(&ctx)).await;
             Err(error)
         }
     }

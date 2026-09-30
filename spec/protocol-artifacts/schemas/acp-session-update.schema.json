@@ -250,13 +250,20 @@
       "required": ["phase"],
       "oneOf": [
         {
-          "properties": { "phase": { "const": "generating" } }
+          "properties": {
+            "phase": { "const": "generating" },
+            "candidate_reply": false,
+            "reply": false,
+            "outcome": false
+          }
         },
         {
           "required": ["candidate_reply"],
           "properties": {
             "phase": { "const": "verifying" },
-            "candidate_reply": { "type": "string" }
+            "candidate_reply": { "type": "string" },
+            "reply": false,
+            "outcome": false
           }
         },
         {
@@ -264,7 +271,8 @@
           "properties": {
             "phase": { "const": "terminal" },
             "reply": { "type": "string" },
-            "outcome": { "$ref": "#/$defs/AgentTerminalOutcome" }
+            "outcome": { "$ref": "#/$defs/AgentTerminalOutcome" },
+            "candidate_reply": false
           }
         }
       ]

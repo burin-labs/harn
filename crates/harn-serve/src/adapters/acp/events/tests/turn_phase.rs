@@ -56,6 +56,24 @@ fn wire_schema_refuses_unknown_phase_and_incomplete_replies() {
             validator.is_valid(&wire),
             "valid phase must satisfy owning schema: {wire}"
         );
+        let mut extended = wire.clone();
+        extended["params"]["replayed"] = serde_json::json!(true);
+        assert!(
+            validator.is_valid(&extended),
+            "transport metadata must remain valid"
+        );
+        for other in phases() {
+            for (field, value) in serde_json::to_value(other).unwrap().as_object().unwrap() {
+                if wire["params"].get(field).is_none() {
+                    let mut invalid = wire.clone();
+                    invalid["params"][field] = value.clone();
+                    assert!(
+                        !validator.is_valid(&invalid),
+                        "field from another phase cannot pass: {invalid}"
+                    );
+                }
+            }
+        }
         let mut invalid = wire.clone();
         invalid["params"]["phase"] = serde_json::json!("waiting");
         assert!(!validator.is_valid(&invalid), "unknown phase cannot pass");

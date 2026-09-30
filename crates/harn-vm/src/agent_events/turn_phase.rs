@@ -96,5 +96,16 @@ mod tests {
         assert!(matches!(candidate, AgentEvent::TurnPhaseChanged {
             phase: AgentTurnPhase::Verifying { candidate_reply }, ..
         } if candidate_reply == "draft"));
+        let invalid = AgentEvent::from_host_payload(
+            "s",
+            "turn_phase_changed",
+            &serde_json::json!({
+                "phase": "generating", "reply": "extraneous", "candidate_reply": "extraneous",
+            }),
+        );
+        assert!(
+            invalid.is_err(),
+            "fields from another phase must be rejected"
+        );
     }
 }

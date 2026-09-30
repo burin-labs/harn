@@ -208,6 +208,49 @@ pipeline test(harness: Harness) {
       assert_eq(judged_phase, "verifying", "a model judge must not reset the actor phase")
     }
   }
+  const denied_sid = "phase-denied-" + harness.random.uuid()
+  harness.agent.open(denied_sid)
+  harness.agent.subscribe(
+    denied_sid,
+    { event ->
+      if event.type == "turn_phase_changed" && event.phase == "terminal" {
+        assert_eq(event.reply, "")
+        assert_eq(event.outcome.kind, "policy_guardrail")
+        harness.stdio.println("subscriber: denied turn")
+      }
+    },
+  )
+  harness.agent.register_session_hook(
+    "user_prompt_submit",
+    { _hook_harness, _event -> return {block: true, reason: "deny before provider work"} },
+  )
+  const denied = agent_capture_events(
+    harness.agent,
+    denied_sid,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [llm_text("must not run")],
+        { ->
+          const result = agent_loop(
+            harness,
+            "Denied turn",
+            nil,
+            agent_options({provider: "mock", model: "denied", session_id: denied_sid}),
+          )
+          assert_eq(len(harness.llm.mock_calls()), 0)
+          return result
+        },
+      )
+    },
+  )
+  harness.agent.clear_session_hooks()
+  const denied_phases = denied.events.filter({ event -> event.type == "turn_phase_changed" })
+    .to_list()
+  assert_eq(denied_phases.map({ event -> event.phase }), ["terminal"])
+  assert_eq(denied_phases[0].reply, "")
+  assert_eq(denied_phases[0].outcome.kind, "policy_guardrail")
+  harness.agent.close(denied_sid)
   harness.stdio.println(
     "completion turn phase: provisional candidate, veto, re-ask, terminal reply",
   )

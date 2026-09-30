@@ -46,7 +46,7 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
     crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
     crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
     let mut rollback = super::AgentSessionInitRollback::new(session_id.to_string(), true);
-    rollback.fail().await;
+    rollback.fail(None).await;
 
     assert!(!crate::agent_sessions::exists(session_id));
     assert!(!crate::agent_sessions::has_journal(session_id));
@@ -61,11 +61,38 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
     let events = crate::stdlib::session_store::read_all_events(&store, session_id)
         .await
         .expect("read canonical events");
-    let terminals = events
+    let terminals: Vec<_> = events
         .iter()
-        .filter(|event| event.payload.to_string().contains("agent_run_terminal"))
-        .count();
-    assert_eq!(terminals, 1, "ordinary failure needs one durable terminal");
+        .filter(|event| {
+            event
+                .payload
+                .pointer("/transcript_event/kind")
+                .and_then(serde_json::Value::as_str)
+                == Some("agent_run_terminal")
+        })
+        .collect();
+    assert_eq!(
+        terminals.len(),
+        1,
+        "ordinary failure needs one durable terminal"
+    );
+    assert_eq!(
+        terminals[0]
+            .payload
+            .pointer("/transcript_event/metadata/visible_reply"),
+        Some(&json!(""))
+    );
+    let replay = crate::agent_session_restore::load_canonical_session_replay_events_from_store(
+        &*store, session_id,
+    )
+    .await
+    .expect("restore initialization failure")
+    .expect("known session");
+    assert!(replay.iter().any(
+        |event| matches!(&event.event, crate::agent_events::AgentEvent::TurnPhaseChanged {
+        phase: crate::agent_events::AgentTurnPhase::Terminal { reply, outcome }, ..
+    } if reply.is_empty() && outcome.kind == crate::agent_events::AgentTerminalKind::RuntimeError)
+    ));
     crate::agent_sessions::reset_session_store();
 }
 

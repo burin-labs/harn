@@ -197,6 +197,8 @@ Hosts should hold or de-emphasize assistant text until `terminal` supplies
 `reply`. Neither `iteration_end` nor a `done` judge verdict makes text terminal.
 `outcome.kind` distinguishes natural completion from cancellation, failure,
 policy stops, and suspension. A withdrawn candidate can leave `reply` empty.
+Admission denials and initialization failures emit `terminal` with an empty
+reply before any provider call.
 The phase events survive canonical session replay. Older recordings without
 these events don't establish reply finality through this contract.
 
