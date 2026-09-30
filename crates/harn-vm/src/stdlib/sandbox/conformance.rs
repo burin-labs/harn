@@ -100,6 +100,10 @@ pub enum ConformanceCase {
     /// control for the grant cases below: without it they would pass on a
     /// backend that let every child write its workspace regardless.
     ReadOnlyRoleWorkspaceWriteRefused,
+    /// The same role with no child write grant: a read under a root it was
+    /// granted read-only lands. Withholding writes must not withhold the
+    /// declared read roots with them.
+    ReadOnlyRoleReadOnlyRootReadAdmitted,
     /// The same role with `allow_child_workspace_write`: a write inside the
     /// workspace lands.
     ChildWriteGrantWorkspaceWriteAdmitted,
@@ -141,6 +145,7 @@ impl ConformanceCase {
         Self::RustcWrapperThatCannotRunIsSwitchedOff,
         Self::RustcWrapperThatDaemonizesIsSwitchedOff,
         Self::ReadOnlyRoleWorkspaceWriteRefused,
+        Self::ReadOnlyRoleReadOnlyRootReadAdmitted,
         Self::ChildWriteGrantWorkspaceWriteAdmitted,
         Self::ChildWriteGrantTempWriteAdmitted,
         Self::ChildWriteGrantReadOnlyRootWriteRefused,
@@ -175,6 +180,9 @@ impl ConformanceCase {
                 "rustc_wrapper.daemonizing_is_switched_off"
             }
             Self::ReadOnlyRoleWorkspaceWriteRefused => "read_only_role.workspace_write_refused",
+            Self::ReadOnlyRoleReadOnlyRootReadAdmitted => {
+                "read_only_role.read_only_root_read_admitted"
+            }
             Self::ChildWriteGrantWorkspaceWriteAdmitted => {
                 "child_write_grant.workspace_write_admitted"
             }
@@ -296,6 +304,7 @@ impl ConformanceCase {
             | Self::RustcWrapperThatDaemonizesIsSwitchedOff
             | Self::ChildWriteGrantWorkspaceWriteAdmitted
             | Self::ChildWriteGrantTempWriteAdmitted
+            | Self::ReadOnlyRoleReadOnlyRootReadAdmitted
             | Self::ChildWriteGrantReadOnlyRootReadAdmitted => {
                 Expectation::Observe(Observation::Admitted)
             }

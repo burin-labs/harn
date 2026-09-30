@@ -1978,6 +1978,7 @@ one line per case:
 | `unix_socket.bind_under_root_with_network` | the same, when the policy also permits networking |
 | `unix_socket.bind_outside_root_refused` | a socket file outside every socket root is refused |
 | `read_only_role.workspace_write_refused` | under a role whose `workspace` capability only reads, with no child write grant, a workspace write is refused |
+| `read_only_role.read_only_root_read_admitted` | the same role with no child write grant: a read under a read-only root lands |
 | `child_write_grant.workspace_write_admitted` | the same role with `allow_child_workspace_write`: a workspace write lands |
 | `child_write_grant.temp_write_admitted` | the same role with the grant: a write to the child's own `TMPDIR` lands |
 | `child_write_grant.read_only_root_write_refused` | the same role with the grant: a write under a read-only root is refused |

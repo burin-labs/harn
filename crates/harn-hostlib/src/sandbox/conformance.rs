@@ -348,7 +348,8 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
         ConformanceCase::NetworkConnectAdmitted => {
             policy.side_effect_level = Some("network".to_string());
         }
-        ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused => {
+        ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused
+        | ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted => {
             read_only_role(&mut policy, layout);
         }
         ConformanceCase::ChildWriteGrantWorkspaceWriteAdmitted
@@ -401,7 +402,8 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
             let target = layout.outside.join("grant-probe.txt");
             (write_argv(&target), target.display().to_string())
         }
-        ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
+        ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
             read_probe(&layout.read_only.join("secret.txt"))
         }
         ConformanceCase::OutsideWriteRefused | ConformanceCase::GuardianOutsideWriteRefused => {
@@ -678,6 +680,7 @@ fn observe(
         ConformanceCase::OutsideReadRefused
         | ConformanceCase::SiblingTempReadRefused
         | ConformanceCase::DeniedCredentialReadRefused
+        | ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted
         | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
             Ok(took_effect(child.stdout.contains(OUTSIDE_CONTENT)))
         }

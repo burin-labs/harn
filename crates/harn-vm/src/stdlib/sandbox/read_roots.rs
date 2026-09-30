@@ -17,8 +17,8 @@ use super::paths::normalize_for_policy;
 /// read-only: a build legitimately populates `~/.gradle/caches`,
 /// `~/.m2/repository`, `~/Library/Developer/Xcode/DerivedData`, etc. They are
 /// gated on the `DeveloperToolchains` preset and granted *write* only when the
-/// active policy already permits workspace writes (mirroring `UserTemp`); under
-/// a read-only policy they fall back to read access so dependency resolution
+/// active policy lets its children write (`CapabilityPolicy::children_may_write`,
+/// mirroring `UserTemp`); otherwise they fall back to read access so dependency resolution
 /// still works.
 // Cache *write* roots are only consumed by the macOS (seatbelt) and Linux
 // (Landlock) sandbox backends; the Windows backend deliberately does not grant
