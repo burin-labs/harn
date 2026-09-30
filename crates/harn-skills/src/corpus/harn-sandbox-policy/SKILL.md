@@ -54,9 +54,10 @@ before it.
 under `defaults.home_relative`, plus a line under `[reason]` saying why. It is
 data on purpose: nothing in the Rust module decides what belongs on the list.
 
-The denylist **beats every grant**, which is the point — `PackageManagerConfig`
-opens `~/.config`, `~/.cache`, and `~/.netrc` wholesale, so a denial that merely
-competed with presets would never fire on the paths it exists for. It is
+The denylist **beats every grant**. `PackageManagerConfig` admits measured
+tool roots, including credential-bearing `~/.config/composer`; unknown
+`~/.config` and `~/.cache` siblings stay closed. A host's explicit parent grant
+also loses to a denial. The denial is
 checked before any grant in `check_fs_path_scope`, and it unions rather than
 intersects as policies nest, because narrowing a denial would widen authority.
 

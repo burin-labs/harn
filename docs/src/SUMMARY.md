@@ -348,6 +348,7 @@
 - [Host boundary](./host-boundary.md)
 - [Process sandboxing](./sandboxing.md)
 - [Credential denylist reference](./sandbox-read-deny-reference.md)
+- [Toolchain config and cache reference](./sandbox-config-census.md)
 - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [LLM dialect ownership](./dev/llm-dialect-contract.md)
 - [Agent plane ownership](./dev/agent-loops.md)

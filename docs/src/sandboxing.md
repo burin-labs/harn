@@ -311,7 +311,10 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
   `~/.rustup`, `~/.cargo`, `~/.pyenv`, `~/.nvm`, `~/.volta`, and `~/go`.
 - `package_manager_config`: read-only per-user npm, pip, cargo, git, and CA
   config/cache roots under `$HOME`, such as `.npmrc`, `.gitconfig`, `.netrc`,
-  `.config`, `.cache`, and cargo config/registry paths.
+  `.config/git`, `.config/pip`, `.config/rustfmt`, `.cache/pip`, and cargo
+  config paths. It doesn't grant all of `.config` or `.cache`. See the
+  [measured toolchain paths](./sandbox-config-census.md) and
+  [credential denials](./sandbox-read-deny-reference.md).
 - `user_temp`: the session's own temp dir, `.harn-tmp` in the first
   workspace root, which the child's `TMPDIR`, `TMP`, and `TEMP` name. On macOS
   it also covers Foundation's atomic-replacement staging dir
@@ -390,14 +393,13 @@ the Unix desktop backends grant child processes read-only access to common
 home-scoped toolchain and package-manager roots under the first absolute
 `$HOME`. That includes user-managed runtimes such as `.local/share/uv`,
 `.cargo`, `.rustup`, `.pyenv`, `.nvm`, `.volta`, and `go`, plus
-package-manager config/cache paths such as `.npmrc`, `.gitconfig`, `.netrc`,
-`.yarnrc.yml`, `.config`, `.npm`, `.cache`, `.pip`, `.pypirc`, `.composer`,
-`Library/Preferences/pnpm`, `.cargo/config`, `.cargo/config.toml`,
-`.cargo/credentials`, `.cargo/credentials.toml`, `.cargo/registry`, and
-`.cargo/git`. These grants
-are process-only: Harn file builtins still need `workspace_roots` or
-`read_only_roots`, and the extra home-dir paths stay unwritable by the OS
-profile.
+package-manager config paths such as `.gitconfig`, `.yarnrc.yml`, `.pip`,
+`.composer`, and `.cargo/config.toml`. XDG grants cover only the
+[measured tool paths](./sandbox-config-census.md), and
+[credential denials](./sandbox-read-deny-reference.md) still win inside them.
+These grants are process-only: Harn file builtins still need `workspace_roots`
+or `read_only_roots`. Config roots stay read-only; developer-toolchain caches
+are writable when the policy permits child writes.
 
 For Git, the `package_manager_config` preset also asks the host's Git to
 resolve global and system config includes for each workspace. Included config

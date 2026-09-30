@@ -3,11 +3,10 @@
 # Data, not code: adding a path here is a reviewable one-line diff, and nothing
 # in the Rust module decides what belongs on this list.
 #
-# Every entry is home-relative, and every one of them sits under a directory
-# some preset already grants. `PackageManagerConfig` opens `~/.config`,
-# `~/.cache`, and `~/.netrc` wholesale; `DeveloperToolchains` opens the home
-# toolchain roots. Naming a parent readable is not consent to read the
-# credentials inside it, which is why this list beats the presets rather than
+# Every entry is home-relative. Presets grant some credential-bearing roots,
+# including `~/.config/composer` and the home toolchain directories. Explicit
+# host grants may cover other entries. Naming a parent readable isn't consent
+# to read the credentials inside it, which is why this list beats presets rather than
 # competing with them.
 #
 # A host may ADD denials through `ProcessSandboxPolicy::read_deny_roots`. It
@@ -53,26 +52,26 @@ home_relative = [
 ".gnupg" = "private keyring"
 ".netrc" = "plaintext machine credentials; granted by PackageManagerConfig"
 ".docker/config.json" = "registry auth tokens"
-".config/gh/hosts.yml" = "GitHub OAuth token; under preset-granted ~/.config"
-".config/gcloud" = "Google Cloud credentials; under preset-granted ~/.config"
+".config/gh/hosts.yml" = "GitHub OAuth token; defense against explicit parent grants"
+".config/gcloud" = "Google Cloud credentials; defense against explicit parent grants"
 ".kube/config" = "cluster credentials and client certs"
 ".npmrc" = "registry auth tokens"
 ".pypirc" = "package index upload credentials"
 ".cargo/credentials" = "crates.io API token"
 ".cargo/credentials.toml" = "crates.io API token"
 ".composer/auth.json" = "Packagist and GitHub OAuth tokens; under preset-granted ~/.composer"
-".config/composer/auth.json" = "the same tokens in Composer's XDG layout; under preset-granted ~/.config"
-".config/git/credentials" = "git credential-store tokens in the XDG layout; under preset-granted ~/.config"
-".config/glab-cli" = "GitLab CLI tokens (config.yml); under preset-granted ~/.config"
-".config/hub" = "hub CLI OAuth token; under preset-granted ~/.config"
-".config/github-copilot" = "Copilot OAuth tokens (hosts.json, apps.json); under preset-granted ~/.config"
-".config/rclone/rclone.conf" = "remote storage credentials; under preset-granted ~/.config"
-".config/doctl" = "DigitalOcean API token; under preset-granted ~/.config"
-".config/hcloud" = "Hetzner Cloud API tokens; under preset-granted ~/.config"
-".config/containers/auth.json" = "Podman and Buildah registry auth; under preset-granted ~/.config"
-".config/.wrangler" = "Cloudflare Wrangler OAuth tokens; under preset-granted ~/.config"
-".config/stripe" = "Stripe CLI API keys; under preset-granted ~/.config"
-".config/sops/age" = "age private keys for sops; under preset-granted ~/.config"
-".config/configstore/firebase-tools.json" = "Firebase CLI refresh token; under preset-granted ~/.config"
-".cache/huggingface/token" = "Hugging Face access token (HF_HOME default); under preset-granted ~/.cache"
-".cache/huggingface/stored_tokens" = "Hugging Face saved access tokens; under preset-granted ~/.cache"
+".config/composer/auth.json" = "the same tokens in Composer's XDG layout; under preset-granted ~/.config/composer"
+".config/git/credentials" = "git credential-store tokens in the XDG layout; under preset-granted ~/.config/git"
+".config/glab-cli" = "GitLab CLI tokens (config.yml)"
+".config/hub" = "hub CLI OAuth token"
+".config/github-copilot" = "Copilot OAuth tokens (hosts.json, apps.json)"
+".config/rclone/rclone.conf" = "remote storage credentials"
+".config/doctl" = "DigitalOcean API token"
+".config/hcloud" = "Hetzner Cloud API tokens"
+".config/containers/auth.json" = "Podman and Buildah registry auth"
+".config/.wrangler" = "Cloudflare Wrangler OAuth tokens"
+".config/stripe" = "Stripe CLI API keys"
+".config/sops/age" = "age private keys for sops"
+".config/configstore/firebase-tools.json" = "Firebase CLI refresh token"
+".cache/huggingface/token" = "Hugging Face access token (HF_HOME default)"
+".cache/huggingface/stored_tokens" = "Hugging Face saved access tokens"

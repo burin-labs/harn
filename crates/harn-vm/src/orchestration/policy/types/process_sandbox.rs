@@ -64,8 +64,8 @@ pub struct ProcessSandboxPolicy {
     /// This is the ONLY subtractive term in the policy. It composes
     /// most-restrictive over every additive source: a preset, a workspace root,
     /// a `read_only_root`, and an explicit `read_roots` entry all lose to it.
-    /// That ordering is the point — `PackageManagerConfig` grants `~/.config`,
-    /// `~/.cache`, and `~/.netrc` wholesale, so a denylist that merely competed
+    /// `PackageManagerConfig` grants credential-bearing roots such as
+    /// `~/.config/composer`, so a denylist that merely competed
     /// with presets would leave credentials readable by default.
     ///
     /// macOS renders it as a trailing `deny file-read*` (last-match-wins);

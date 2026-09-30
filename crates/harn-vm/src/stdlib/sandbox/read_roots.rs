@@ -182,9 +182,41 @@ pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<Pat
         ".gitconfig",
         ".netrc",
         ".yarnrc.yml",
-        ".config",
+        // Measured by scripts/sandbox_config_census.harn. Keep unknown XDG
+        // siblings closed; the credential denylist still wins inside these.
+        ".config/git",
+        ".config/pip",
+        ".config/go",
+        ".config/uv",
+        ".config/pnpm",
+        ".config/yarn",
+        ".config/composer",
+        ".config/rustfmt",
+        ".config/cmake",
+        ".config/gem",
+        ".config/mise",
+        ".config/ruff",
+        ".config/black",
+        ".config/sbt",
+        ".config/coursier/mirror.properties",
+        ".config/swiftpm/configuration",
         ".npm",
-        ".cache",
+        ".cache/pip",
+        ".cache/uv",
+        ".cache/node/corepack",
+        ".cache/yarn",
+        ".cache/composer",
+        ".cache/mise",
+        ".cache/black",
+        ".cache/sbt",
+        ".cache/coursier",
+        ".cache/JNA",
+        ".cache/clang",
+        ".cache/org.swift.swiftpm",
+        ".cache/org.swift.foundation.URLCache",
+        // .cache/go-build and .cache/harn are owned by the writable
+        // DeveloperToolchains roots. Repeating them here cancels that grant
+        // on macOS, where the read-only rules follow the write allows.
         ".pip",
         ".pypirc",
         // Composer's macOS home (`COMPOSER_HOME` default). `config.json` and
@@ -216,3 +248,42 @@ pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<Pat
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) mod path_grants;
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_manager_roots_do_not_admit_unknown_xdg_siblings() {
+        let home = tempfile::tempdir().unwrap();
+        let roots = package_manager_config_read_roots_for_home(home.path());
+        for relative in [".config/unlisted/token", ".cache/unlisted/token"] {
+            let target = normalize_for_policy(&home.path().join(relative));
+            assert!(
+                !roots.iter().any(|root| target.starts_with(root)),
+                "unknown XDG sibling is covered by a preset: {roots:?}"
+            );
+        }
+        for relative in [".config/git", ".config/rustfmt", ".cache/pip"] {
+            assert!(roots.contains(&normalize_for_policy(&home.path().join(relative))));
+        }
+    }
+
+    #[test]
+    fn read_only_xdg_roots_do_not_cancel_writable_toolchain_caches() {
+        let home = tempfile::tempdir().unwrap();
+        let reads = package_manager_config_read_roots_for_home(home.path());
+        let cache = normalize_for_policy(&home.path().join(".cache"));
+        let mut checked = 0;
+        for writable in developer_toolchain_cache_write_roots_for_home(home.path()) {
+            if writable.starts_with(&cache) {
+                checked += 1;
+                assert!(
+                    !reads.iter().any(|read| writable.starts_with(read)),
+                    "read-only {reads:?} would cancel writes to {writable:?} on macOS"
+                );
+            }
+        }
+        assert!(checked >= 2, "must check the Go and Harn writable caches");
+    }
+}

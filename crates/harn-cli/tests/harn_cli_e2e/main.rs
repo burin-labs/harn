@@ -83,6 +83,7 @@ mod orchestrator_cli_e2e;
 mod orchestrator_inbox_dedupe;
 mod package_cache_sandbox_cli;
 mod package_generation_concurrency_cli_e2e;
+mod package_manager_roots_cli;
 mod package_registry_verify_cli;
 mod package_verify_cli;
 mod parse_tokens_cli;
