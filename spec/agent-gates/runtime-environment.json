@@ -13,7 +13,7 @@
         "reader": "HOST_BOUNDARY_ENV"
       }
     ],
-    "reason": "Retain the host-owned session ceiling and review the environment seam after Burin projection proof.",
+    "reason": "Retain the host-owned session ceiling and review the environment seam after a downstream host projects it end to end.",
     "verdict": "KEEP-with-expiry"
   },
   {

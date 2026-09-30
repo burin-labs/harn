@@ -13,7 +13,7 @@
         "reader": "model-registry-key-domain"
       }
     ],
-    "reason": "Retain the explicit per-agent narrowing control and review its host adoption after the Burin integration lands.",
+    "reason": "Retain the explicit per-agent narrowing control and review its host adoption after the first downstream host integration lands.",
     "verdict": "KEEP-with-expiry"
   },
   {
