@@ -12,7 +12,7 @@ For how the process sandbox works overall, see
 | --- | --- |
 | Type | `Vec<String>` |
 | JSON field | `process_sandbox.read_deny_roots` |
-| Default | the fourteen home-relative paths below, resolved against `$HOME` |
+| Default | the home-relative paths below, resolved against `$HOME` |
 | Scope | child processes, and Harn's own file builtins via `check_fs_path_scope` |
 | Nesting | **unions**; every other field of the policy intersects |
 
@@ -59,7 +59,17 @@ the data instead of in a comment that drifts from it.
 `.ssh`, `.aws`, `.gnupg`, `.netrc`, `.docker/config.json`,
 `.config/gh/hosts.yml`, `.config/gcloud`, `.kube/config`, `.npmrc`, `.pypirc`,
 `.cargo/credentials`, `.cargo/credentials.toml`, `.composer/auth.json`,
-`.config/composer/auth.json`.
+`.config/composer/auth.json`, `.config/git/credentials`, `.config/glab-cli`,
+`.config/hub`, `.config/github-copilot`, `.config/rclone/rclone.conf`,
+`.config/doctl`, `.config/hcloud`, `.config/containers/auth.json`,
+`.config/.wrangler`, `.config/stripe`, `.config/sops/age`,
+`.config/configstore/firebase-tools.json`, `.cache/huggingface/token`,
+`.cache/huggingface/stored_tokens`.
+
+The list names the default credential locations of widely used CLIs. It is not
+exhaustive: a tool whose credentials sit elsewhere under the preset-granted
+`~/.config` or `~/.cache` stays readable until it is added here or a host adds
+it through `read_deny_roots`.
 
 A denied config file is not left for the tool to trip over. npm and pnpm read
 `~/.npmrc` at startup and exit on the `EPERM`, so a confined child instead gets

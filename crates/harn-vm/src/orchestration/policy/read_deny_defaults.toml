@@ -29,6 +29,20 @@ home_relative = [
   ".cargo/credentials.toml",
   ".composer/auth.json",
   ".config/composer/auth.json",
+  ".config/git/credentials",
+  ".config/glab-cli",
+  ".config/hub",
+  ".config/github-copilot",
+  ".config/rclone/rclone.conf",
+  ".config/doctl",
+  ".config/hcloud",
+  ".config/containers/auth.json",
+  ".config/.wrangler",
+  ".config/stripe",
+  ".config/sops/age",
+  ".config/configstore/firebase-tools.json",
+  ".cache/huggingface/token",
+  ".cache/huggingface/stored_tokens",
 ]
 
 # Why each entry is here, for review. Absent keys are not an error; this table
@@ -48,3 +62,17 @@ home_relative = [
 ".cargo/credentials.toml" = "crates.io API token"
 ".composer/auth.json" = "Packagist and GitHub OAuth tokens; under preset-granted ~/.composer"
 ".config/composer/auth.json" = "the same tokens in Composer's XDG layout; under preset-granted ~/.config"
+".config/git/credentials" = "git credential-store tokens in the XDG layout; under preset-granted ~/.config"
+".config/glab-cli" = "GitLab CLI tokens (config.yml); under preset-granted ~/.config"
+".config/hub" = "hub CLI OAuth token; under preset-granted ~/.config"
+".config/github-copilot" = "Copilot OAuth tokens (hosts.json, apps.json); under preset-granted ~/.config"
+".config/rclone/rclone.conf" = "remote storage credentials; under preset-granted ~/.config"
+".config/doctl" = "DigitalOcean API token; under preset-granted ~/.config"
+".config/hcloud" = "Hetzner Cloud API tokens; under preset-granted ~/.config"
+".config/containers/auth.json" = "Podman and Buildah registry auth; under preset-granted ~/.config"
+".config/.wrangler" = "Cloudflare Wrangler OAuth tokens; under preset-granted ~/.config"
+".config/stripe" = "Stripe CLI API keys; under preset-granted ~/.config"
+".config/sops/age" = "age private keys for sops; under preset-granted ~/.config"
+".config/configstore/firebase-tools.json" = "Firebase CLI refresh token; under preset-granted ~/.config"
+".cache/huggingface/token" = "Hugging Face access token (HF_HOME default); under preset-granted ~/.cache"
+".cache/huggingface/stored_tokens" = "Hugging Face saved access tokens; under preset-granted ~/.cache"
