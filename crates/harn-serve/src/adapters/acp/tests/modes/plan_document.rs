@@ -250,19 +250,22 @@ async fn acp_plan_mutations_conflict_receipt_reopen_and_replay() {
             "params": {"sessionId": session_id},
         }))
         .await;
-    let mut replayed_document = None;
-    loop {
-        let message = recv_json(&mut rx).await;
-        if message["method"] == "session/update"
-            && message["params"]["update"]["sessionUpdate"] == "plan"
-        {
-            replayed_document = Some(message["params"]["update"]["harnPlanDocument"].clone());
+    let replayed_document = harn_clock::test_support::within("plan replay response", async {
+        let mut replayed_document = None;
+        loop {
+            let line = rx.recv().await.expect("ACP response channel closed");
+            let message: serde_json::Value = serde_json::from_str(&line).expect("ACP JSON line");
+            if message["method"] == "session/update"
+                && message["params"]["update"]["sessionUpdate"] == "plan"
+            {
+                replayed_document = Some(message["params"]["update"]["harnPlanDocument"].clone());
+            }
+            if message["id"] == 8 {
+                return replayed_document.expect("replayed plan document");
+            }
         }
-        if message["id"] == 8 {
-            break;
-        }
-    }
-    let replayed_document = replayed_document.expect("replayed plan document");
+    })
+    .await;
     assert_eq!(
         replayed_document["current_revision"]["revision_id"],
         approved_revision
