@@ -152,6 +152,13 @@ fn wrap_with_sandbox_exec(
 fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> String {
     let mut developer_toolchain_read_roots = process_sandbox_developer_toolchain_read_roots(policy);
     developer_toolchain_read_roots.extend(toolchain_roots::go_read_root(policy, program));
+    // Rendered with the other toolchain reads, so the read denylist emitted at
+    // the end of the profile beats these grants too (last match wins).
+    developer_toolchain_read_roots.extend(
+        super::read_roots::path_grants::process_sandbox_path_entry_grants(policy)
+            .into_iter()
+            .map(|grant| grant.root),
+    );
     developer_toolchain_read_roots.sort_unstable();
     developer_toolchain_read_roots.dedup();
 

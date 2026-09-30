@@ -577,7 +577,7 @@ shadow the builtins.
 | `has_capability(model, capability)` | `(string, string) -> bool` | Capability ∈ `{"thinking", "tool_search", "interleaved_thinking", "prompt_caching", "vision", "audio", "pdf", "files_api", "reasoning_effort", "native_tools"}`. |
 | `family_of(model_id)` | `(string) -> string` | Returns the normalized review-diversity family such as `"anthropic-claude"`, `"openai-gpt"`, `"google-gemini"`, or `"qwen"`. Hosted aliases keep the underlying model family. |
 | `lineage_of(model_id)` | `(string) -> string` | Returns the narrower catalog lineage token. Use it for inspection and grouping; runtime capability data, not stdlib branches, owns route policy. |
-| `complementary_reviewer(opts)` | `(dict) -> dict` | Wraps `llm_complementary_reviewer`. Required: `opts.author_model`; optional: `author_provider`, `intent`, `max_price_multiplier`. |
+| `complementary_reviewer(opts)` | `(dict) -> dict` | Wraps `llm_complementary_reviewer`. Required: `opts.author_model`; optional: `author_provider`, `intent`, `max_price_multiplier`, `min_price_cap_per_mtok`, and `max_price_cap_per_mtok`. The price cap applies to the candidate's catalog input plus output price per million tokens; the floor raises a relative cap and the ceiling limits it. |
 
 ### Example
 

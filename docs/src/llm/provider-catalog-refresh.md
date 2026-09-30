@@ -481,6 +481,14 @@ fragments. Provider capability rules use the same pattern:
 `crates/harn-vm/src/llm/capability_sources/` generates
 `crates/harn-vm/src/llm/capabilities.toml`.
 
+The bare runtime fallback is `fallback_model` in `00-base.toml`.
+`40-defaults/provider-models.toml` records provider-specific `runtime` and
+`portal` choices; they may differ deliberately. Keep those routes in the
+catalog rather than in Rust match tables. Catalog generation rejects unknown,
+provider-mismatched, or deprecated choices there, in `qc_defaults`, the three
+tier aliases, and model ladders. Host environment overrides for local models
+remain runtime input, so the built-in catalog cannot validate their IDs.
+
 ```bash
 # Regenerate providers.toml, capabilities.toml, and all checked-in
 # provider catalog artifacts from source fragments in one hermetic pass.
@@ -842,10 +850,21 @@ Each adapter is a function `adapter(env, config) -> {run, observations}`.
 
 ### Entry script: `scripts/update_provider_catalog.harn`
 
-Wires four canonical adapters (Anthropic and OpenAI pricing pages,
-the OpenRouter public `/api/v1/models` index, and a key-gated
-Fireworks API stub). Each adapter spec is built by a small
-factory function so the manifest stays readable.
+Fixture mode replays Anthropic and OpenAI pricing pages, the OpenRouter
+public index, and a key-gated Fireworks source. Live mode reads model-index
+sources and its network allowlist from
+`spec/provider-catalog-refresh-sources.json`, including the public OpenRouter
+index. Each source selects an existing mapper by a closed, typed name and
+declares whether its index requires a key and who owns its observations.
+
+The provider catalog supplies credential environment names and authentication
+style. The source registry carries no duplicate credential aliases. Harn's VM
+catalog projects these facts from the same artifact used by catalog tooling
+and includes the provider's local or hosted classification.
+
+Both modes validate the source registry before running an adapter. Empty
+registries, duplicate source IDs, unknown providers, and malformed typed
+records fail the refresh, including the offline `--check` path.
 
 ## Provenance contract
 

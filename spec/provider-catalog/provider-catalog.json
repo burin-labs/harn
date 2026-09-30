@@ -4367,10 +4367,17 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "enabled",
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "max"
+        ],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -4427,6 +4434,7 @@
         "files",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output",
         "batch"
       ],
@@ -9275,10 +9283,10 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "parity_source": "derived",
         "tool_search": []
       },
@@ -32443,11 +32451,13 @@
       "capabilities": [
         "audio",
         "batch",
+        "extended_thinking",
         "files",
         "native_tools",
         "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -33357,6 +33367,7 @@
       "capabilities": [
         "batch",
         "extended_thinking",
+        "native_tools",
         "prefers_markdown_scaffolding",
         "reasoning_effort",
         "streaming",

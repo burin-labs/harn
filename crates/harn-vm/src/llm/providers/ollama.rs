@@ -117,8 +117,8 @@ impl OllamaProvider {
         }
         // Ollama templates (qwen3:30b-a3b etc.) gate `<think>` emission
         // on the top-level `think` field, NOT
-        // `chat_template_kwargs.enable_thinking`. The OpenAI-compat shim
-        // passes `think` through to the same template context. Default
+        // `chat_template_kwargs.enable_thinking`. The OpenAI-compatible
+        // adapter maps reasoning separately through `reasoning_effort`. Default
         // false for fast tool-call-shaped turns; callers who want
         // reasoning set `thinking` explicitly.
         body["think"] = serde_json::json!(opts.thinking.is_enabled());
@@ -558,6 +558,7 @@ mod tests {
     fn base_payload() -> LlmRequestPayload {
         LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "ollama".to_string(),
             model: "qwen3.5:35b-a3b-coding-nvfp4".to_string(),
             region: None,
@@ -583,6 +584,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::JsonSchema {

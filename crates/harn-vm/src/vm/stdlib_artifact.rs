@@ -131,6 +131,71 @@ pub(super) fn stdlib_module_artifact(
     })
 }
 
+/// What [`warm_embedded_stdlib`] prepared.
+#[derive(Debug, Default)]
+pub struct StdlibWarmReport {
+    /// Modules in this binary's stdlib catalog.
+    pub modules: usize,
+    /// Modules now prepared. Short of `modules` when a module failed or a warm
+    /// thread could not start.
+    pub warmed: usize,
+    /// Modules that did not compile on their own, with the reason. A failure
+    /// here only means that module stays lazy; importing it still reports the
+    /// real error in the importing process.
+    pub failed: Vec<(String, String)>,
+}
+
+/// Prepare every embedded stdlib module once, across `threads` threads, so the
+/// on-disk bytecode cache is warm before this binary fans out processes.
+///
+/// Without it, every child that imports a stdlib module the cache has not seen
+/// compiles that module itself, concurrently with its siblings. An unoptimized
+/// build spends about 20 s of CPU compiling the agent stack, and a test deadline
+/// then measures that stampede instead of the test (harn#8575).
+pub fn warm_embedded_stdlib(threads: usize) -> StdlibWarmReport {
+    let sources = harn_stdlib::STDLIB_SOURCES;
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let warmed = std::sync::atomic::AtomicUsize::new(0);
+    let failed = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        for _ in 0..threads.clamp(1, sources.len().max(1)) {
+            // Compiling recurses over program structure, so each warm thread
+            // needs the VM stack contract, not the 2 MiB default.
+            let builder = std::thread::Builder::new()
+                .name("harn-stdlib-warm".to_owned())
+                .stack_size(crate::RUNTIME_STACK_SIZE);
+            let spawned = builder.spawn_scoped(scope, || loop {
+                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(entry) = sources.get(index) else {
+                    break;
+                };
+                let synthetic = PathBuf::from(format!("<stdlib>/{}.harn", entry.module));
+                match stdlib_module_artifact(entry.module, &synthetic, entry.source, None) {
+                    Ok(_) => {
+                        warmed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Err(error) => failed
+                        .lock()
+                        .expect("stdlib warm failure list poisoned")
+                        .push((entry.module.to_string(), error.to_string())),
+                }
+            });
+            // Warming is an optimization: with fewer threads the remaining
+            // modules warm more slowly, and with none they stay lazy.
+            if spawned.is_err() {
+                break;
+            }
+        }
+    });
+    StdlibWarmReport {
+        modules: sources.len(),
+        warmed: warmed.into_inner(),
+        failed: failed
+            .into_inner()
+            .expect("stdlib warm failure list poisoned"),
+    }
+}
+
 pub(crate) fn prepare_stdlib_module_artifact(
     path: &Path,
     recorder: Option<&super::ModulePhaseRecorder>,

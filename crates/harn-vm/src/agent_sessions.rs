@@ -48,6 +48,7 @@ pub use changed_paths::{
     session_changed_paths, take_session_changed_paths,
 };
 mod journal;
+pub mod reclaim_hooks;
 mod subscribers;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
 pub(crate) use journal::{
@@ -379,6 +380,7 @@ pub enum LiveClientMode {
 }
 
 mod control_events;
+mod delegation;
 pub(crate) mod event_facts;
 mod host_injection;
 mod live_clients;
@@ -395,6 +397,7 @@ use text_tool_call_seq::{
 };
 
 pub use control_events::{control_events, record_control_event, ControlRecordOutcome};
+pub use delegation::open_session;
 pub use host_injection::*;
 pub use live_clients::*;
 pub use metadata::*;
@@ -869,10 +872,7 @@ pub fn open_child_session_with_actor(
     id: Option<String>,
     actor: Option<&str>,
 ) -> Result<String, SessionOpenError> {
-    let actor_chain = actor_chain(parent_id).map(|chain| match actor {
-        Some(actor) if !actor.trim().is_empty() => chain.pushed(actor.trim()),
-        _ => chain,
-    });
+    let actor_chain = ActorChain::delegated(actor_chain(parent_id), actor);
     let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     admit_linked_sessions(parent_id, &resolved, actor_chain, None)?;
     Ok(resolved)
@@ -1068,7 +1068,7 @@ pub fn close(id: &str) -> bool {
         return false;
     }
     if removed {
-        clear_session_changed_paths(id);
+        reclaim_hooks::release_closed_session(id);
     }
     // Cross-thread per-session state must be released too, otherwise
     // pending inbox entries can be delivered to a future session that
@@ -1117,7 +1117,7 @@ pub fn close_with_status(
     if !removed {
         return Ok(false);
     }
-    clear_session_changed_paths(id);
+    reclaim_hooks::release_closed_session(id);
     crate::orchestration::agent_inbox::clear_session(id);
     clear_unknown_host_event_warnings(id);
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::SessionClosed {

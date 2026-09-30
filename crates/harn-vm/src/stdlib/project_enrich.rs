@@ -1090,7 +1090,8 @@ fn probe_github_policy(root: &Path) -> Option<GithubPolicyProbe> {
 }
 
 fn probe_github_policy_with_gh(root: &Path, gh: &str) -> Option<GithubPolicyProbe> {
-    let status = Command::new(gh)
+    let status = crate::process_sandbox::session_std_command(gh)
+        .ok()?
         .args(["auth", "status"])
         .current_dir(root)
         .stdout(Stdio::null())
@@ -1198,7 +1199,7 @@ fn gh_command_path() -> String {
 }
 
 fn run_command(root: &Path, cmd: &str, args: &[&str]) -> Option<String> {
-    let mut command = Command::new(cmd);
+    let mut command = crate::process_sandbox::session_std_command(cmd).ok()?;
     command.args(args).current_dir(root);
     if cmd == "git" {
         clear_git_env(&mut command);
@@ -1759,8 +1760,7 @@ fn value_as_bool(value: &VmValue) -> Option<bool> {
     }
 }
 
-// The integration tests below shell out to `git`/`gh` via a mocked POSIX
-// shell script, so they're Unix-only. On Windows, skip the entire module.
+// Git/gh integration tests use a mocked POSIX shell and run only on Unix.
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;

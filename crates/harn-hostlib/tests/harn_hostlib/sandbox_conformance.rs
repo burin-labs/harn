@@ -67,14 +67,12 @@ impl Drop for UndeclaredName {
 ///
 /// The run must fail exactly these: a new failure is a regression, and a case
 /// that starts holding means the fix landed and its entry must go. Windows
-/// runs the command tool's children outside the AppContainer today (#8738),
-/// so every filesystem refusal escapes and the backend's own socket refusal
-/// never happens.
+/// runs with no OS sandbox confinement (#8838). The enforcement table declares
+/// its filesystem and network dimensions not enforced, so those cases must be
+/// observed escaping and are not listed here; the socket cases have no
+/// dimension and stay gaps.
 const KNOWN_GAPS: &[&str] = if cfg!(windows) {
     &[
-        "fs.outside_write_refused",
-        "fs.outside_read_refused",
-        "fs.sibling_temp_read_refused",
         "unix_socket.bind_under_root",
         "unix_socket.bind_under_root_with_network",
         "unix_socket.bind_outside_root_refused",

@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::Command;
 
 /// Git data needed by the scanner.
 pub trait GitCapabilities {
@@ -27,7 +26,7 @@ impl GitCapabilities for CliGitCapabilities {
             return None;
         }
 
-        let mut cmd = Command::new("git");
+        let mut cmd = harn_vm::process_sandbox::session_std_command("git").ok()?;
         super::strip_ambient_git_env(&mut cmd);
         // `-c core.quotepath=false` keeps non-ASCII paths as literal UTF-8
         // instead of C-quoted (`"src/caf\303\251.rs"`); `-z` NUL-delimits the
@@ -67,7 +66,9 @@ impl GitCapabilities for CliGitCapabilities {
             return BTreeMap::new();
         }
 
-        let mut cmd = Command::new("git");
+        let Ok(mut cmd) = harn_vm::process_sandbox::session_std_command("git") else {
+            return BTreeMap::new();
+        };
         super::strip_ambient_git_env(&mut cmd);
         // `-c core.quotepath=false` keeps non-ASCII paths literal so they match
         // the tracked-file paths instead of coming back C-quoted. `--name-only`
@@ -126,6 +127,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
+    use std::process::Command;
     use tempfile::tempdir;
 
     fn tempdir_outside_ambient_repo() -> tempfile::TempDir {

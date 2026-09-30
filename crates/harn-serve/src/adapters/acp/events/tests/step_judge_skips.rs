@@ -20,6 +20,8 @@ async fn step_judge_decision_agent_event_marks_skipped_reason() {
         skipped: true,
         reason: Some("low_iteration_budget".to_string()),
         judge_error: false,
+        unavailable_reason: None,
+        unavailable_count: 0,
         on_veto: "replace".to_string(),
         input_tokens: 0,
         output_tokens: 0,
@@ -37,19 +39,20 @@ async fn step_judge_decision_agent_event_marks_skipped_reason() {
     assert_eq!(params["skipped"], true);
     assert_eq!(params["reason"], "low_iteration_budget");
     assert_eq!(params["vetoed"], false);
-    // A genuine budget skip is NOT a swallowed judge error.
+    // A genuine budget skip is NOT an unavailable judge.
     assert_eq!(params["judgeError"], false);
+    assert!(params["unavailableReason"].is_null());
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn step_judge_decision_agent_event_surfaces_judge_unavailable() {
-    // When the step-judge model errors and fail-open lets the turn through,
-    // the decision must carry the distinct `judgeError` marker so a
-    // fail-open swallow is observable, not indistinguishable from a real pass.
+    // When the step judge cannot review a turn, the turn proceeds but the
+    // decision says `unavailable` with a typed reason and a running count,
+    // so no surface can read it as a pass.
     let actual = collect_notifications(vec![AgentEvent::StepJudgeDecision {
         session_id: "session-1".to_string(),
         iteration: 1,
-        verdict: "pass".to_string(),
+        verdict: "unavailable".to_string(),
         reasoning: "judge backend 503".to_string(),
         critique: String::new(),
         confidence: 0.0,
@@ -58,6 +61,8 @@ async fn step_judge_decision_agent_event_surfaces_judge_unavailable() {
         skipped: true,
         reason: Some("judge_unavailable".to_string()),
         judge_error: true,
+        unavailable_reason: Some("provider_error".to_string()),
+        unavailable_count: 2,
         on_veto: "replace".to_string(),
         input_tokens: 0,
         output_tokens: 0,
@@ -69,7 +74,9 @@ async fn step_judge_decision_agent_event_surfaces_judge_unavailable() {
 
     let params = &actual[0]["params"];
     assert_eq!(params["kind"], "step_judge_decision");
-    assert_eq!(params["verdict"], "pass");
+    assert_eq!(params["verdict"], "unavailable");
     assert_eq!(params["reason"], "judge_unavailable");
     assert_eq!(params["judgeError"], true);
+    assert_eq!(params["unavailableReason"], "provider_error");
+    assert_eq!(params["unavailableCount"], 2);
 }

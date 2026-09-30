@@ -1186,6 +1186,14 @@
         "name": "opts"
       },
       {
+        "function": "__should_skip",
+        "name": "opts"
+      },
+      {
+        "function": "__step_is_read_only",
+        "name": "opts"
+      },
+      {
         "function": "agent_compute_terminal_callback",
         "name": "opts"
       }

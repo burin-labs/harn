@@ -1,6 +1,7 @@
 import { __judge_classify_verdict, __judge_run_checkpoint } from "std/agent/judge_internals"
 import { step_judge_system_prompt, step_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
+import { agent_tool_is_read_only } from "std/agent/tool_annotations"
 import { estimate_call_cost } from "std/llm/economics"
 
 fn __step_judge_schema() {
@@ -47,8 +48,66 @@ fn __payload(agent: HarnessAgent, session: dict, llm_result: dict?, iteration: i
   }
 }
 
+/**
+ * `replace` removes the vetoed assistant turn, so it only applies while that
+ * turn is still the last message. Parse repair can append a paired
+ * `tool_result` after it before the judge runs; removing the assistant turn
+ * then would orphan that result, and the removal refuses. Such a veto is
+ * applied as `retain` instead: the turn and its pairing stay, and the critique
+ * follows them.
+ */
+fn __effective_on_veto(
+  agent: HarnessAgent,
+  session_id: any,
+  on_veto: string,
+  vetoed: bool,
+) -> string {
+  if !vetoed || on_veto != "replace" {
+    return on_veto
+  }
+  const messages = agent_session_messages(agent, session_id)
+  if len(messages) == 0 || messages[len(messages) - 1]?.role != "assistant" {
+    return "retain"
+  }
+  return on_veto
+}
+
+fn __registry_entries(registry: any) -> list {
+  if type_of(registry) == "dict" {
+    return registry?.tools ?? []
+  }
+  if type_of(registry) == "list" {
+    return registry
+  }
+  return []
+}
+
+/**
+ * Whether every tool call in the step is read-only by its tool's declared
+ * annotation. A read changes nothing, so vetoing it only withholds the facts the
+ * next step needs; an unannotated tool counts as mutating.
+ */
+fn __step_is_read_only(opts: dict, llm_result: dict) -> bool {
+  const calls = llm_result?.tool_calls ?? []
+  if len(calls) == 0 {
+    return false
+  }
+  const entries = __registry_entries(opts?.tools)
+  for call in calls {
+    const name = to_string(call?.name ?? call?.function?.name ?? "")
+    const entry = entries.find(
+      { candidate -> to_string(candidate?.function?.name ?? candidate?.name ?? "") == name },
+    )
+    if entry == nil || !agent_tool_is_read_only(entry, opts?.policy, name) {
+      return false
+    }
+  }
+  return true
+}
+
 fn __should_skip(
   judge_cfg: dict,
+  opts: dict,
   llm_result: dict,
   attempts: int,
   stall_warning: any,
@@ -72,7 +131,62 @@ fn __should_skip(
   if skip_stalled && stall_warning != nil {
     return {skip: true, reason: "stall_already_detected"}
   }
+  if __step_is_read_only(opts, llm_result) {
+    return {skip: true, reason: "read_only_step"}
+  }
   return {skip: false}
+}
+
+/**
+ * Why a configured step judge could not review a turn. A closed set, so a host
+ * can say the reason in its own words instead of parsing error text:
+ * `schema_unsupported` (the model cannot return the verdict schema, e.g. a
+ * label-only decision model), `model_unconfigured`, `admission_refused`, and
+ * `provider_error` (the call was made and failed).
+ */
+type StepJudgeUnavailableReason = "schema_unsupported" \
+  | "model_unconfigured" \
+  | "admission_refused" \
+  | "provider_error"
+
+fn __unavailable_reason_for(checkpoint: dict) -> StepJudgeUnavailableReason {
+  const status = to_string(checkpoint?.status ?? "")
+  if status == "model_unconfigured" {
+    return "model_unconfigured"
+  }
+  if status == "schema_unsupported" {
+    return "schema_unsupported"
+  }
+  if status == "admission_refused" {
+    return "admission_refused"
+  }
+  return "provider_error"
+}
+
+/**
+ * The unavailable record. The turn still proceeds (a reviewer outage must not
+ * block the agent), but the verdict is `unavailable`, never `pass`: an inert
+ * reviewer must not read as an approval anywhere downstream.
+ */
+fn __unavailable(
+  reason: StepJudgeUnavailableReason,
+  detail: string,
+  duration_ms: int | float,
+  checkpoint: dict?,
+) {
+  return {
+    vetoed: false,
+    skipped: true,
+    judge_error: true,
+    reason: "judge_unavailable",
+    unavailable_reason: reason,
+    verdict: "unavailable",
+    critique: "",
+    reasoning: detail,
+    confidence: 0,
+    judge_duration_ms: duration_ms,
+    typed_checkpoint: checkpoint,
+  }
 }
 
 fn __invoke(harness: Harness, judge_cfg: dict, opts: dict, payload: any) {
@@ -96,25 +210,14 @@ fn __invoke(harness: Harness, judge_cfg: dict, opts: dict, payload: any) {
   if !checkpoint.ok {
     const fail_open = judge_cfg?.fail_open_on_error ?? true
     if fail_open {
-      // Fail-open: the turn PROCEEDS (we deliberately do not block on the
-      // judge's own flakiness). But the swallow must be OBSERVABLE — a
-      // `verdict: "pass"` here means "the adversarial reviewer was
-      // UNAVAILABLE", not "the reviewer approved this turn". Carry a
-      // distinct `judge_error` flag and a `judge_unavailable` reason so
-      // telemetry (the emitted `step_judge_decision` event) can tell an
-      // inert review surface apart from a genuine pass.
-      return {
-        vetoed: false,
-        skipped: true,
-        judge_error: true,
-        reason: "judge_unavailable",
-        verdict: "pass",
-        critique: "",
-        reasoning: checkpoint.error,
-        confidence: 0,
-        judge_duration_ms: duration_ms,
-        typed_checkpoint: checkpoint,
-      }
+      // The turn PROCEEDS (we deliberately do not block on the judge's own
+      // flakiness), but as `unavailable`, never as a pass.
+      return __unavailable(
+        __unavailable_reason_for(checkpoint),
+        to_string(checkpoint.error),
+        duration_ms,
+        checkpoint,
+      )
     }
     return {
       vetoed: true,
@@ -137,6 +240,22 @@ fn __invoke(harness: Harness, judge_cfg: dict, opts: dict, payload: any) {
     [critique, reasoning],
     feedback_default,
   )
+  // A veto the judge cannot explain gives the agent nothing to change: the
+  // fallback sentence is all it would read, and the step it withheld never
+  // runs. It stands as no objection, and the decision records why.
+  if outcome.vetoed && trim(to_string(critique)) == "" && trim(to_string(reasoning)) == "" {
+    return outcome
+      + {
+        vetoed: false,
+        verdict: "pass",
+        reason: "veto_without_critique",
+        reasoning: "",
+        critique: "",
+        confidence: confidence,
+        judge_duration_ms: duration_ms,
+        typed_checkpoint: checkpoint,
+      }
+  }
   return outcome
     + {
       reasoning: reasoning,
@@ -191,6 +310,8 @@ fn __emit_decision(
       skipped: verdict?.skipped ?? false,
       reason: verdict?.reason,
       judge_error: verdict?.judge_error ?? false,
+      unavailable_reason: verdict?.unavailable_reason,
+      unavailable_count: verdict?.unavailable_count ?? 0,
       input_tokens: usage?.input_tokens ?? 0,
       output_tokens: usage?.output_tokens ?? 0,
       cost_usd: cost_est?.cost_usd ?? 0,
@@ -213,11 +334,13 @@ fn __emit_decision(
  * Skip-path returns `{vetoed: false, skipped: true, reason: ...}` so
  * the caller can treat skip and pass uniformly. Reasons:
  * `not_configured`, `max_attempts_reached`, `low_iteration_budget`,
- * `empty_response`, `stall_already_detected`, `judge_unavailable` (when
- * the judge model errored and `fail_open` swallowed it). The
- * `judge_unavailable` skip ALSO carries `judge_error: true` so a
- * fail-open swallow is distinguishable from a genuine pass in telemetry —
- * the turn still proceeds, but the adversarial-review surface was inert.
+ * `empty_response`, `stall_already_detected`, `judge_unavailable` (the
+ * judge could not review the turn). An unavailable judge lets the turn
+ * proceed but reports `verdict: "unavailable"`, `judge_error: true`, a typed
+ * `unavailable_reason` (`schema_unsupported`, `model_unconfigured`,
+ * `admission_refused`, `provider_error`) and the session's running
+ * `unavailable_count`, so a host can show the outage instead of a silent pass.
+ * The caller passes the count it has seen so far as `unavailable_count`.
  * `skip_when_iterations_remaining` defaults to `1`, so a configured step
  * judge does not veto a turn when no regeneration turn remains. Configured
  * skip paths emit `step_judge_decision` with `skipped: true`.
@@ -235,13 +358,21 @@ pub fn agent_step_judge(
   stall_warning: any = nil,
   attempts: int = 0,
   remaining_iterations: any = nil,
+  unavailable_count: int = 0,
 ) {
   const judge_cfg = opts?.step_judge
   if judge_cfg == nil {
     return {vetoed: false, skipped: true, reason: "not_configured"}
   }
   const on_veto = judge_cfg?.on_veto ?? "replace"
-  const skip = __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations)
+  const skip = __should_skip(
+    judge_cfg,
+    opts,
+    llm_result,
+    attempts,
+    stall_warning,
+    remaining_iterations,
+  )
   if skip.skip {
     const verdict = {
       vetoed: false,
@@ -257,7 +388,18 @@ pub fn agent_step_judge(
     return verdict + {on_veto: on_veto, attempts: attempts}
   }
   const payload = __payload(harness.agent, session, llm_result, iteration)
-  const verdict = __invoke(harness, judge_cfg, opts, payload)
-  __emit_decision(harness.agent, session.session_id, iteration, on_veto, verdict)
-  return verdict + {on_veto: on_veto, attempts: attempts + 1}
+  const invoked = __invoke(harness, judge_cfg, opts, payload)
+  const verdict = if invoked?.judge_error ?? false {
+    invoked + {unavailable_count: unavailable_count + 1}
+  } else {
+    invoked + {unavailable_count: unavailable_count}
+  }
+  const applied_on_veto = __effective_on_veto(
+    harness.agent,
+    session.session_id,
+    on_veto,
+    verdict?.vetoed ?? false,
+  )
+  __emit_decision(harness.agent, session.session_id, iteration, applied_on_veto, verdict)
+  return verdict + {on_veto: applied_on_veto, attempts: attempts + 1}
 }

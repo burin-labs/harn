@@ -132,6 +132,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
         },
         extra_headers: provider.extra_headers.clone(),
         chat_endpoint: provider.endpoint.chat_endpoint.clone(),
+        chat_api_adapter: provider.endpoint.chat_api_adapter,
         completion_endpoint: provider.endpoint.completion_endpoint.clone(),
         embeddings_endpoint: provider.endpoint.embeddings_endpoint.clone(),
         healthcheck: provider

@@ -41,8 +41,11 @@ fn package_test_receipt(fs: HarnessFs, env: HarnessEnv) -> string? {
 pipeline main(harness: Harness) {
   const repo = env_or(harness.env, "GITHUB_REPOSITORY", "")
   const token = harness.env.get_or("HARN_BUMP_TOKEN", "")
-  if trim(repo) == "" || trim(token) == "" {
-    harness.stdio.eprintln("bump_harn_runtime: GITHUB_REPOSITORY and HARN_BUMP_TOKEN are required")
+  const refresh_token = harness.env.get_or("GH_TOKEN", "")
+  if trim(repo) == "" || trim(token) == "" || trim(refresh_token) == "" {
+    harness.stdio.eprintln(
+      "bump_harn_runtime: GITHUB_REPOSITORY, HARN_BUMP_TOKEN, and GH_TOKEN are required",
+    )
     return 2
   }
   const release_repo = env_or(harness.env, "HARN_BUMP_RELEASE_REPO", "burin-labs/harn")
@@ -79,6 +82,9 @@ pipeline main(harness: Harness) {
         "HARN_BUMP_REFRESH",
         "harn install --locked || harn install",
       ),
+      // Child commands receive only explicit environment. Expose the scoped
+      // GitHub token only to the caller-owned refresh process.
+      refresh_environment: {GH_TOKEN: refresh_token},
       readiness_max_attempts: env_int(harness.env, "HARN_BUMP_READINESS_ATTEMPTS", 1),
       readiness_interval_ms: env_int(harness.env, "HARN_BUMP_READINESS_INTERVAL_MS", 20000),
       readiness_timeout_ms: env_int(harness.env, "HARN_BUMP_READINESS_TIMEOUT_MS", 20000),

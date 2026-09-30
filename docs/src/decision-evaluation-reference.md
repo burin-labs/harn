@@ -36,7 +36,7 @@ arm-specific fields.
 | `low_confidence` | `candidates`, `threshold`, `question_ids` | Answers exist, but the named questions fell below the threshold. |
 | `refused` | `reason`, `diagnostic` | Provider refusal, invalid response schema, or truncated output. |
 | `budget_cut` | `limit`, `requested`, `remaining` | A request, token, deadline, cost, or parent budget stopped dispatch. |
-| `unavailable` | `reason` | Route, authority, transport, producer, or cache failure. |
+| `unavailable` | `reason` | Route, authority, spend admission, transport, producer, or cache failure. |
 | `replay_mismatch` | `expected_identity`, `actual_identity`, `occurrence` | The request differs from the offline record. |
 | `cancelled` | `control_event` | A stop or cancellation was accepted. |
 | `state_too_large` | `limit_tokens`, `estimated_tokens` | The supplied state exceeds the route's declared window. |

@@ -1949,14 +1949,14 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.model_info(model)` | model: string | dict | Return resolved model/provider metadata plus normalized `family`/`lineage`, catalog entry, capabilities, API-key availability, and QC default |
 | `harness.llm.model_ladder(name)` | name: string | dict/nil | Return one named catalog `[model_ladders.<name>]` row with its label and ordered route steps; unknown names return `nil` |
 | `harness.llm.pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
-| `harness.llm.complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost |
+| `harness.llm.complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?, min_price_cap_per_mtok?, max_price_cap_per_mtok?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost. The selector applies the relative price cap, raises it to the optional floor, then limits it to the optional ceiling; candidates without catalog pricing cannot pass a cap. |
 | `harness.llm.infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `harness.llm.model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `harness.llm.healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
 | `harness.llm.apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to a `harness.llm.call` option dict, preserving caller-supplied `thinking` or `effort` |
 | `harness.llm.rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool/dict | Set (`{rpm: N, tpm: N, input_tpm: N, output_tpm: N, concurrency: N}`), query legacy RPM, query rich details with `{details: true}`, or clear (`{rpm: 0}`) per-provider rate limits |
 | `harness.llm.providers()` | — | list | List all configured provider names |
-| `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"`, `"needs_user_approval"` (a stored credential that only a system dialog this process does not show could release) |
+| `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"`, `"needs_user_approval"` (a stored credential that only a system dialog this process does not show could release), `"region_unconfigured"`, or `"credentials_unconfigured"` (a platform-managed provider such as Bedrock whose region or credential source does not resolve without the network; `available` is then false) |
 | `harness.llm.available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
 | `harness.llm.known_models()` | — | list | List configured model alias names |
 | `harness.llm.qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
@@ -2796,8 +2796,12 @@ and a bare path string also means `read`. Under a `read` root:
   (side effect `workspace_write` or stronger, or a non-read tool kind) with
   the refusal id `external_root_read_only`, whose reason names the path, the
   root, and its mode. This holds even with `allow_external_paths: true`.
-- the `harness.fs.*` builtins treat the root as a read-only root.
-- a confined child process gets the root as a read root, never a write root.
+
+An approval-policy root does not by itself grant filesystem access. The
+`harness.fs.*` builtins and confined child processes read only the capability
+policy's `read_only_roots`, so a caller-authored approval policy cannot widen
+the parent's filesystem ceiling. A host that wants a `read` root readable by
+those builtins and children projects it into `read_only_roots` as well.
 
 When roots nest, the deepest root containing a path decides its mode. Each
 decision receipt lists the roots that governed its declared paths, with their

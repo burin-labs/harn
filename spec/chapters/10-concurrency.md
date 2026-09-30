@@ -502,8 +502,10 @@ string or `{path, access}` with `access` one of `read` (the default) or
 `read_write`; a path string means `read`. The deepest root containing a path
 decides its mode. Under a `read` root, a call not known to be read-only is
 denied with id `external_root_read_only`, even when `allow_external_paths` is
-set; the file builtins treat the root as read-only, and a confined child
-receives it as a read root. Intersecting two approval policies keeps the
+set. An approval-policy root does not by itself grant filesystem access: the
+file builtins and confined children read only the capability policy's
+`read_only_roots`, so a host projects a `read` root there to make it readable
+by them. Intersecting two approval policies keeps the
 narrower mode for a root both name. `ask` decisions call the host via
 `session/request_permission` and fail closed when no host bridge is attached.
 Each approval decision produces a `harn.permission_policy_decision.v1` receipt

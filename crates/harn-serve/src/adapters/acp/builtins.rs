@@ -615,7 +615,8 @@ fn local_shell_exec(cmd: &str, shell: &harn_vm::VmValue) -> std::io::Result<std:
                 format!("invalid shell invocation: {error}"),
             )
         })?;
-    std::process::Command::new(invocation.program)
+    harn_vm::process_sandbox::session_std_command(invocation.program)
+        .map_err(|error| std::io::Error::other(format!("session environment: {error:?}")))?
         .args(invocation.args)
         .output()
 }

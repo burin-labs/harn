@@ -292,15 +292,9 @@ fn aggregate_tool_scorecard(
                         path.display()
                     )
                 })?;
-        if report.schema_version != harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_SCHEMA_VERSION
-        {
-            return Err(format!(
-                "error: unsupported tool-probe report schema_version {} in {}; expected {}",
-                report.schema_version,
-                path.display(),
-                harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_SCHEMA_VERSION
-            ));
-        }
+        report
+            .require_live_evidence()
+            .map_err(|error| format!("error: tool-probe report {}: {error}", path.display()))?;
         reports.push(report);
     }
     Ok(harn_vm::llm::tool_scorecard::scorecard_from_tool_reports(

@@ -366,6 +366,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"context_overflow",
 	"provider_misconfigured",
 	"provider_unavailable",
+	"provider_billing",
 	"rate_limited",
 	"timeout",
 	"resource_busy",

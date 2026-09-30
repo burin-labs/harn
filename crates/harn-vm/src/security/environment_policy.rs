@@ -332,9 +332,10 @@ pub fn resolve_env_for_command(
     Ok(env)
 }
 
-/// The policy-governed value of a single environment variable — the same
-/// answer [`resolve_env`] would put in the map under `name`, without building
-/// the map.
+/// The policy-governed value of a single environment variable as Harn's own
+/// process reads it — the same answer [`resolve_env`] would put in the map
+/// under `name`, without building the map, except for an `in_process` grant,
+/// which this reader sees and no child environment ever contains.
 ///
 /// Grants win over the allowlist (matching `resolve_env`'s overlay order), so a
 /// granted policy that grants `FIREWORKS_API_KEY` sees the granted value here even though
@@ -601,6 +602,7 @@ mod tests {
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "gh".to_string(),
@@ -610,6 +612,7 @@ mod tests {
                 },
                 expose_as_env: Some("GH_TOKEN".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
         ];
         let environment =
@@ -653,6 +656,7 @@ mod tests {
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "log".to_string(),
@@ -661,6 +665,7 @@ mod tests {
                 },
                 expose_as_env: Some("RUST_LOG".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "gh".to_string(),
@@ -670,6 +675,7 @@ mod tests {
                 },
                 expose_as_env: Some("GH_TOKEN".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
         ];
         let resolve_secret = |account: &str, key: &str| {
@@ -702,6 +708,42 @@ mod tests {
     }
 
     #[test]
+    fn an_in_process_grant_is_the_one_name_the_two_readers_disagree_on() {
+        // The equivalence above holds for every grant a child may see. An
+        // in-process grant is the deliberate exception: Harn's own reader
+        // resolves it and the child resolvers leave it out, both the one that
+        // knows the program and the one that does not.
+        let parent = env_from(&[("PATH", "/usr/bin"), ("LAUNCHER_KEY", "provider-value")]);
+        let environment = SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
+            vec![GrantSpec {
+                name: "provider".to_string(),
+                source: GrantSourceSpec::Env {
+                    var: "LAUNCHER_KEY".to_string(),
+                },
+                expose_as_env: Some("PROVIDER_API_KEY".to_string()),
+                for_command: None,
+                expose_to: crate::security::GrantAudience::InProcess,
+            }],
+            &parent,
+        )
+        .unwrap();
+        let never_secret = |_: &str, _: &str| None;
+        assert_eq!(
+            lookup_env(&environment, "PROVIDER_API_KEY", &parent, &never_secret).unwrap(),
+            Some("provider-value".to_string())
+        );
+        let spawn = resolve_env(&environment, &parent, &never_secret).unwrap();
+        let for_program =
+            resolve_env_for_command(&environment, "/usr/bin/env", &parent, &never_secret).unwrap();
+        for child in [&spawn, &for_program] {
+            assert!(!child.contains_key("PROVIDER_API_KEY"));
+            // Direction control: the child environment is not simply empty.
+            assert_eq!(child.get("PATH").map(String::as_str), Some("/usr/bin"));
+        }
+    }
+
+    #[test]
     fn a_single_name_lookup_touches_only_its_own_grant() {
         // Resolving one variable must not drag every other secret_store grant
         // through the secret store: probing an unrelated name would otherwise
@@ -716,6 +758,7 @@ mod tests {
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "broken".to_string(),
@@ -725,6 +768,7 @@ mod tests {
                 },
                 expose_as_env: Some("OTHER_TOKEN".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
         ];
         let environment =
@@ -802,6 +846,7 @@ mod tests {
             },
             expose_as_env: Some("RUST_LOG".to_string()),
             for_command: None,
+            expose_to: Default::default(),
         }];
         let environment =
             SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &parent).unwrap();

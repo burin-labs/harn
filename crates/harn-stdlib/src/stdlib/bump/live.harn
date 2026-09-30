@@ -35,6 +35,7 @@ pub type LiveBumpConfig = {
   revision_file: string,
   source_repo_dir: string,
   refresh_command: string,
+  refresh_environment: dict,
   validation_command: string,
   readiness_max_attempts: int,
   readiness_interval_ms: int,
@@ -90,6 +91,7 @@ pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
     revision_file: to_string(o.revision_file ?? ".harn-revision"),
     source_repo_dir: to_string(o.source_repo_dir ?? ""),
     refresh_command: to_string(o.refresh_command ?? "harn install --locked || harn install"),
+    refresh_environment: o.refresh_environment ?? {},
     validation_command: to_string(o.validation_command ?? ""),
     readiness_max_attempts: to_int(o.readiness_max_attempts ?? 1) ?? 1,
     readiness_interval_ms: to_int(o.readiness_interval_ms ?? 20000) ?? 20000,
@@ -101,8 +103,8 @@ fn __git(tools: HarnessTools, repo_dir: string, argv: list<string>) {
   return command_run(tools, ["git", "-C", repo_dir] + argv)
 }
 
-fn __shell(tools: HarnessTools, repo_dir: string, command: string) {
-  return command_run(tools, {mode: "shell", command: command, cwd: repo_dir})
+fn __shell(tools: HarnessTools, repo_dir: string, command: string, environment: dict) {
+  return command_run(tools, {mode: "shell", command: command, cwd: repo_dir, env: environment})
 }
 
 fn __lines(text: string?) -> list<string> {
@@ -232,7 +234,7 @@ fn __apply_version(
     {ok: true, detail: ""}
   }
   const refresh = if version_write.ok && revision_write.ok {
-    __shell(tools, cfg.repo_dir, cfg.refresh_command)
+    __shell(tools, cfg.repo_dir, cfg.refresh_command, cfg.refresh_environment)
   } else {
     nil
   }
@@ -483,7 +485,7 @@ pub fn live_bump_adapter(
       if trim(cfg.validation_command) == "" {
         return {ok: true, steps: [], detail: "no validation command declared"}
       }
-      const result = __shell(tools, cfg.repo_dir, cfg.validation_command)
+      const result = __shell(tools, cfg.repo_dir, cfg.validation_command, {})
       const ok = result.success ?? false
       return {
         ok: ok,

@@ -380,6 +380,26 @@ impl ReminderLifecycleEmission {
     }
 }
 
+/// One applied request setting, the value it resolved to, and the
+/// configuration layer that decided it.
+///
+/// A provider quirk costs hours when a value silently came from somewhere the
+/// author did not look (a catalog default, a steer away from the requested
+/// tool channel, an ambient reasoning policy). Every call records these rows
+/// on its `provider_call_request` transcript event under `resolution`.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub(crate) struct ResolvedSetting {
+    pub setting: &'static str,
+    /// The caller's raw value, when the caller set one.
+    pub requested: Option<String>,
+    pub applied: String,
+    /// `caller.<option>`, `catalog.<field>`, `catalog.steer`,
+    /// `reasoning_policy`, `default`, or `derived`.
+    pub source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 /// All options for an LLM API call, extracted once from user-facing args.
 #[derive(Clone, Debug)]
 pub(crate) struct LlmCallOptions {
@@ -561,6 +581,9 @@ pub(crate) struct LlmCallOptions {
     pub cache: bool,
     pub prompt_cache_ttl: Option<PromptCacheTtl>,
 
+    /// How each request setting was decided; see [`ResolvedSetting`].
+    pub(crate) resolution: Vec<ResolvedSetting>,
+
     // --- Transport ---
     pub timeout: Option<u64>,
     /// Per-chunk idle timeout for streaming responses (seconds).
@@ -581,6 +604,8 @@ pub(crate) struct LlmCallOptions {
     /// default so an embedder chooses the default once, in config, instead of
     /// it being chosen by omission inside the runtime.
     pub data_controls: Option<DataPosture>,
+    /// Optional destination and training ceiling supplied by the embedder.
+    pub inference_boundary: Option<super::InferenceBoundary>,
     /// OpenAI Responses background execution flag.
     pub background: Option<bool>,
     /// OpenAI Responses truncation/compaction policy.
@@ -684,6 +709,7 @@ impl Default for LlmCallOptions {
             tool_choice: None,
             tool_search: None,
             cache: false,
+            resolution: Vec::new(),
             prompt_cache_ttl: None,
             timeout: None,
             idle_timeout: None,
@@ -692,6 +718,7 @@ impl Default for LlmCallOptions {
             previous_response_id: None,
             store: None,
             data_controls: None,
+            inference_boundary: None,
             background: None,
             truncation: None,
             compact: None,
@@ -869,6 +896,10 @@ pub(crate) struct LlmRequestPayload {
     /// See [`LlmCallOptions::provider_contract_probe`].
     #[serde(skip_serializing)]
     pub(crate) provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
+    /// Preserve caller intent through transport without confusing catalog defaults with requests.
+    #[serde(skip_serializing)]
+    pub(crate) portable_option_intent:
+        std::collections::BTreeSet<crate::llm::capabilities::PortableOption>,
     /// See [`LlmCallOptions::fast`]. Forwarded to provider body builders so
     /// they can inject the catalog's fast-mode knob, and to cost recording
     /// so confirmed-fast responses bill at the premium tier.
@@ -904,6 +935,8 @@ pub(crate) struct LlmRequestPayload {
     /// Resolved posture for this request. Already merged with the catalog
     /// policy default, so the transport never re-resolves it.
     pub data_controls: DataPosture,
+    #[serde(skip_serializing)]
+    pub inference_boundary: Option<super::InferenceBoundary>,
     pub background: Option<bool>,
     pub truncation: Option<String>,
     pub compact: Option<bool>,
@@ -1034,7 +1067,10 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             region: opts.region.clone(),
             api_key: opts.api_key.clone(),
             api_mode: opts.api_mode,
-            messages: opts.messages.clone(),
+            // A call left unanswered by a stopped turn is answered here, so no
+            // provider sees an invalid history (harn#8951).
+            messages: crate::llm::agent_session_host::answer_unanswered_tool_calls(&opts.messages)
+                .unwrap_or_else(|| opts.messages.clone()),
             system: opts.system.clone(),
             max_tokens: opts.max_tokens,
             temperature: opts.temperature,
@@ -1053,6 +1089,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             presence_penalty: opts.presence_penalty,
             parallel_tool_calls: opts.parallel_tool_calls,
             provider_contract_probe: opts.provider_contract_probe,
+            portable_option_intent: opts.portable_option_intent.clone(),
             fast: opts.fast,
             reasoning_mode: opts.reasoning_mode.clone(),
             output_format,
@@ -1073,6 +1110,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             previous_response_id: opts.previous_response_id.clone(),
             store: opts.store,
             data_controls: opts.resolved_data_posture(),
+            inference_boundary: opts.inference_boundary,
             background: opts.background,
             truncation: opts.truncation.clone(),
             compact: opts.compact,
@@ -1353,6 +1391,7 @@ mod tests {
                 },
                 expose_as_env: Some("HARN_LLM_TIMEOUT".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             }],
             &|name| std::env::var(name).ok(),
         )

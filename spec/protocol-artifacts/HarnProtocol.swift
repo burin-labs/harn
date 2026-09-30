@@ -1656,6 +1656,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let contextOverflow = Self(rawValue: "context_overflow")
     public static let providerMisconfigured = Self(rawValue: "provider_misconfigured")
     public static let providerUnavailable = Self(rawValue: "provider_unavailable")
+    public static let providerBilling = Self(rawValue: "provider_billing")
     public static let rateLimited = Self(rawValue: "rate_limited")
     public static let timeout = Self(rawValue: "timeout")
     public static let resourceBusy = Self(rawValue: "resource_busy")
@@ -1671,6 +1672,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "context_overflow",
         "provider_misconfigured",
         "provider_unavailable",
+        "provider_billing",
         "rate_limited",
         "timeout",
         "resource_busy",

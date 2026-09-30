@@ -3,7 +3,7 @@
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Write};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -265,7 +265,8 @@ fn run_pager(content: &str) -> Result<(), PagerError> {
             "pager command is empty".to_string(),
         ));
     };
-    let mut child = Command::new(program)
+    let mut child = crate::process_sandbox::session_std_command(program)
+        .map_err(|error| PagerError::Failed(format!("pager environment: {error}")))?
         .args(args)
         .stdin(Stdio::piped())
         .spawn()

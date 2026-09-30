@@ -144,7 +144,7 @@ jobs:
             echo "Warm artifact unavailable; continuing through rust-cache or cold."
           fi
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           # Pinned by .github/cache-policy.json; scripts/check_ci_cache_policy.harn
           # rejects any workflow that installs a different version.
@@ -159,15 +159,14 @@ jobs:
           NEXTEST_FILTER: ${{ inputs.filter }}
           NEXTEST_SCOPE: ${{ inputs.scope }}
           NEXTEST_SUCCESS_OUTPUT: ${{ inputs.success_output }}
-          # Same deterministic secret store, offline posture, sandbox tracing,
-          # and 16 MiB runtime stack the gating Windows job uses. The stack size
+          # Same deterministic secret store, offline posture, and 16 MiB
+          # runtime stack the gating Windows job uses. The stack size
           # is required by scripts/check_rust_test_lane_policy.harn: Rust's
           # default 2 MiB spawned-thread stack overflows on tests that drive the
           # Harn VM, and the abort is indistinguishable from the defect under
           # investigation.
           HARN_SECRET_STORE_BACKEND: file
           HARN_LLM_CALLS_DISABLED: "1"
-          HARN_WINDOWS_SANDBOX_TRACE: "1"
           RUST_MIN_STACK: "16777216"
         run: |
           set -o pipefail

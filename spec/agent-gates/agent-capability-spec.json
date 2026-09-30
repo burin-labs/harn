@@ -166,6 +166,10 @@
         "reader": "agent_stance_apply"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "reader": "__step_is_read_only"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_annotations.harn",
         "reader": "agent_collapse_duplicate_read_calls"
       },

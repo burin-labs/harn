@@ -533,7 +533,7 @@
   {
     "scope": "StepJudgeOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-    "expression": "__should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations)",
+    "expression": "__should_skip(\n    judge_cfg,\n    opts,\n    llm_result,\n    attempts,\n    stall_warning,\n    remaining_iterations,\n  )",
     "owner": "__should_skip",
     "evidence": "Consumer __should_skip has an explicit parameter origin for StepJudgeOptions at the recorded nested path; its literal reads are audited independently.",
     "consumers": [
@@ -541,6 +541,34 @@
         "scope": "StepJudgeOptions",
         "function": "__should_skip",
         "parameter": "judge_cfg"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+    "expression": "__should_skip(\n    judge_cfg,\n    opts,\n    llm_result,\n    attempts,\n    stall_warning,\n    remaining_iterations,\n  )",
+    "owner": "__should_skip",
+    "evidence": "Consumer __should_skip reads the loop options only to find each called tool's declared annotations (tools, policy), so a step of declared reads is not judged.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__should_skip",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+    "expression": "__step_is_read_only(opts, llm_result)",
+    "owner": "__step_is_read_only",
+    "evidence": "Consumer __step_is_read_only reads tools and policy only to resolve each called tool's declared annotations; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__step_is_read_only",
+        "parameter": "opts"
       }
     ]
   },

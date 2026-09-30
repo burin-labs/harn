@@ -1,5 +1,22 @@
 [
   {
+    "default": "absent in standalone Harn; malformed supplied grant refuses inference",
+    "evidence": "The source-built mechanism contract and route tests exercise a supplied host grant, including malformed input and pre-dispatch refusal.",
+    "expiry": "2026-12-31",
+    "kind": "environment input",
+    "layer": "runner",
+    "name": "HARN_INFERENCE_BOUNDARY_JSON",
+    "reachability": "yes",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/api/inference_boundary.rs",
+        "reader": "HOST_BOUNDARY_ENV"
+      }
+    ],
+    "reason": "Retain the host-owned session ceiling and review the environment seam after Burin projection proof.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "false",
     "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/agent_observe.rs:156; canonical headless use is not observed by a source scan.",
     "expiry": "2026-09-13",

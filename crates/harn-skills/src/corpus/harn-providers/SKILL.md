@@ -50,6 +50,9 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 
 - Model capabilities should be data-driven.
 - Avoid hardcoding provider quirks in caller code.
+- Read provider identity, `classification` (`local` or `hosted`), and nested
+  `auth` from `harness.llm.provider_catalog().providers`. These are projections
+  of the authoritative catalog artifact; do not infer them from provider names.
 - Resolve `message_wire_format` and `live_endpoint_family` as one dialect for
   request, stream, response, and error handling. Do not choose a builder or
   parser independently from provider strings or response headers.
@@ -146,9 +149,15 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
    notice records and track every residual fact.
    Keep `--apply` off until the candidate is independently verified.
 3. For each new chat route with available credentials, run
-   `harn provider tool-probe <provider> --model <id> --mode non-streaming --json true`.
-   Require `classification = structured_native_tool_call` before advertising
-   native tool use and record `usage.cost_usd`. Keep an inaccessible route
+   `harn provider tool-probe <provider> --model <id> --tool-format native --mode non-streaming --json true`
+   and save its JSON report. Validate it with
+   `harn provider tool-scorecard --tool-probe-report <report> --json`.
+   Require live provider-adapter provenance and `native_tool_probe` in the exact
+   route's `passed_probes` before advertising native tools; saved responses,
+   legacy reports, and explicit `--base-url` overrides cannot certify that route.
+   Pass the report to the notice workflow with `--tool-probe-report <report>`;
+   missing or mismatched evidence leaves an incomplete proposal. Record
+   `usage.cost_usd` and keep an inaccessible route
    explicitly unverified instead of treating an aggregator mirror as proof of
    its direct adapter.
 4. Change the owning catalog fragments. Record `deprecated` and

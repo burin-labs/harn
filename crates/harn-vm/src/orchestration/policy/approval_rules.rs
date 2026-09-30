@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 use std::thread_local;
 
 use serde::de::{Error as DeError, MapAccess, Visitor};
@@ -1417,27 +1416,6 @@ fn normalize_patterns_upper(patterns: &[String]) -> Vec<String> {
 
 fn collapse_whitespace(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-pub(super) fn normalize_path(path: &Path) -> PathBuf {
-    let raw = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        crate::stdlib::process::execution_root_path().join(path)
-    };
-    let mut out = PathBuf::new();
-    for component in raw.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::Prefix(prefix) => out.push(prefix.as_os_str()),
-            std::path::Component::RootDir => out.push(component.as_os_str()),
-            std::path::Component::Normal(part) => out.push(part),
-        }
-    }
-    out
 }
 
 fn tool_kind_string(kind: crate::tool_annotations::ToolKind) -> &'static str {

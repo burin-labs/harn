@@ -9,6 +9,385 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.151
+
+### Fixed
+
+- The Windows workspace test suite no longer fails on a compound shell read
+  (git, a line-range sed print, and rg piped to head). That case now runs only
+  on POSIX hosts, where the command classifier covers it.
+
+## v0.10.150
+
+### Added
+
+- **Inference destination boundaries (#8943).** Embedders can cap live model
+  calls at local, hosted open-weight, or any hosted routes, keep training
+  discounts off by default, and inspect the governing rule and catalog facts
+  on allowed calls. The ceiling follows spawned workers and is checked again
+  at transport after routing or failover.
+
+### Fixed
+
+- **Provider tool-probe evidence records its source (#8847).** Saved responses
+  remain useful for parser checks but cannot certify route fitness or unlock a
+  local runtime profile. Scheduled catalog notices accept an explicit extraction
+  provider and model.
+- Native-tool catalog promotions require passing live adapter evidence for
+  the exact route. Runtime admission and scorecards share passed-probe rules;
+  missing evidence produces an incomplete proposal.
+- Live refresh sources use a typed data registry and catalog-owned credential
+  metadata. The VM provider catalog includes authoritative authentication and
+  local or hosted facts for workflow and host consumers.
+- Ollama's OpenAI-compatible chat endpoint now uses its declared SSE adapter,
+  maps supported generation and structured-output fields, and refuses native-only
+  sampling controls before sending a request.
+- Reviewer calibration reports missing safety-floor coverage as unmeasured,
+  excludes unanswered reviews from judgment-quality rates, and distinguishes
+  measured floor refusals from reviewer failures.
+
+## v0.10.149
+
+### Fixed
+
+- The done sentinel never shows in visible assistant text. It is stripped wherever the model put it,
+  including mid-reply with text after it; a sentinel shown as code (a fenced block or an inline span)
+  is kept as written.
+- The completion judge now sees each distinct command a run executed when that tool declares the `observation`
+  role, so a task whose deliverable is a command's output is no longer sent back to run it again.
+- **An ACP session's LLM cost ceiling now covers the whole session.** Each `session/prompt` used to start its
+  cost scope at $0, so a session past its cap was admitted again on the next prompt and after every resume.
+  The session carries its spend across prompts, persists it as the row's `usage_cost_usd_micros`
+  (which `session/list` reports), and seeds it on `session/load`; older rows are backfilled from their recorded
+  `llm_call` costs. A `session/set_budget` re-arm now also applies to later turns of that session.
+
+## v0.10.148
+
+### Fixed
+
+- **Approval review reuses answered identical requests within a session (#8320).**
+  Repeated requests avoid another model call and report zero additional cost.
+  Changed targets or permission context still require review, and unavailable
+  reviews are retried. Each reviewer retains at most 64 decisions.
+- Filesystem scope checks no longer re-derive every sandbox root on each
+  `harness.fs` call. The canonicalized workspace, read-only and credential-deny
+  roots are reused for up to 500 ms per policy, and a write or delete always
+  re-derives them, so a host that makes thousands of filesystem calls before
+  its first model call no longer spends seconds there (#8963).
+- **A sandboxed child can run the tools on its own `PATH` (#8998).** A tool
+  installed outside the preset toolchain homes, such as a CI tool cache or a
+  custom package prefix, was refused with exit 126 even when it was first on
+  `PATH`. Each absolute `PATH` entry now grants read and execute on its install
+  prefix outside the home directory, and on the entry alone inside it. The
+  credential denylist still wins. The CI enforcement receipt lists each grant
+  with the entry that produced it.
+- **A managed background command now dies when its owner exits even if another process inherited
+  the owner's liveness pipe.** The guardian's reaper relays that pipe and closes it once its parent
+  process is gone, so a leaked write end can no longer keep the command running.
+- **A background command handle now lives as long as its session, not the agent-loop run that
+  started it.** A host that runs one loop per turn can poll, wait on, or kill a command an earlier
+  turn started; closing the session or stopping its run still cancels its handles. Embedders can
+  register their own cleanup with `agent_sessions::reclaim_hooks::register_session_reclaim_hook`.
+- A restored session now replays each tool result with the mutation outcome, changed paths, and producer data
+  the live session emitted, and reads its failure from the audit marker as well as the provider message.
+  A rejected edit no longer comes back with an unknown outcome and no data.
+- OpenAI Responses-API routes stream their visible text to delta listeners as
+  the model writes, instead of handing it over once at the end. The final
+  response is parsed by the same code as a non-streamed reply.
+- The command workspace-effect classifier now reads a line-addressed `sed`
+  print (`sed -n '1,105p' file`, `sed 3q file`) as a read. It stays
+  unrecognized with an in-place flag, a script file, a `w`/`e` command, a
+  substitution, or a regex address, so any `sed` that can write or execute is
+  still kept out of the observation phase.
+- The step judge no longer withholds a step it cannot explain: a `revise`
+  with neither a critique nor reasoning stands as no objection, and the step
+  dispatches. It also no longer judges a step whose every tool call is a
+  declared read, since vetoing a read only withholds the facts the next step
+  needs.
+- The agent loop's main request streams its visible text to an ACP host as
+  `call_progress` deltas while the model writes, instead of arriving only as one
+  message at the end. A `harness.llm.call` that reaches `llm_call` without the
+  bridge-registered builtin now uses the host bridge the ACP server installed.
+
+## v0.10.147
+
+### Breaking
+
+- **A provider credential can now reach Harn's own model calls without
+  reaching any child process, and every child a session starts now gets the
+  session's environment (#8913).** A grant with `expose_to: "in_process"`
+  (`--grant NAME=SOURCE,expose=VAR,to=in_process` on the CLI) is visible to
+  provider authentication and configuration for `llm_call` and to
+  `harness.env`, and to no spawned command, as a value or as a secret
+  reference. It requires `expose_as_env` and rejects `for_command`. Its
+  receipt records `exposed_to: "in_process"`, and the run record's
+  `admitted_environment` omits it because no child could see it.
+
+  Before this change, MCP stdio servers, ACP provider transports, and the git,
+  `gh`, pager, verifier, and toolchain-resolver commands Harn runs itself
+  started with the engine's whole environment even under an `isolated` or
+  `granted` policy. They now start with the session's resolved environment:
+  the runtime essentials, the grants that reach that program, and the `env`
+  entries in the server's or provider's own configuration. Sessions under the
+  default `inherited` policy are unchanged. Rust embedders that build
+  `GrantSpec` or `GrantReceipt` with struct literals must set the new
+  `expose_to` / `exposed_to` field.
+
+  Migration: under `isolated` or `granted`, give an MCP server or ACP provider
+  that needs a variable either an `env` entry in its own configuration or a
+  grant that reaches it. Bind a credential to the server's executable to keep
+  it out of other children:
+
+  ```text
+  # before: the server inherited GITHUB_TOKEN from the engine
+  harn run --environment-policy granted agent.harn
+  # after
+  harn run --grant gh=env:GITHUB_TOKEN,expose=GITHUB_TOKEN,for=github-mcp-server agent.harn
+  ```
+
+  A host that grants a provider key only for model calls should declare it
+  in-process:
+
+  ```json
+  {"name": "provider_key", "source": {"env": {"var": "OPENAI_API_KEY"}},
+   "expose_as_env": "OPENAI_API_KEY", "expose_to": "in_process"}
+  ```
+
+  Rust: add `expose_to: GrantAudience::Session` (or `Default::default()`) to
+  each `GrantSpec { .. }` literal and `exposed_to` to each `GrantReceipt { .. }`
+  literal.
+
+### Added
+
+- **Complementary reviewers can use bounded catalog price caps (#8912).**
+  Callers can keep a useful independent reviewer available for low-cost actors
+  while limiting candidate input-plus-output list price for higher-cost actors.
+- **Request transcript rows say how each setting was resolved (#8949).** Every
+  `provider_call_request` row now carries a `resolution` list covering
+  `max_tokens`, `tool_format`, the tool wire, reasoning, cache, and stream.
+  Each entry gives the caller's raw value, the applied value, and the layer
+  that decided it: a caller option, a catalog default, a catalog steer (with
+  the steer's reason), a reasoning policy, or the default.
+
+### Changed
+
+- **Fireworks gpt-oss uses provider-native tool calls (#8947).**
+  `accounts/fireworks/models/gpt-oss-*` moves from the heredoc text tool
+  channel to native tool calls, which stops analysis-voice prose from leaking
+  into visible replies ahead of a tool call. Backslash-heavy file bodies can
+  still be altered on this channel; the measurement and the revert trigger are
+  recorded beside the catalog row.
+- **A direct `llm_call` with text-channel tools is refused (#8948).** A `json`
+  or `text` tool_format sends no tool schemas, and only `agent_loop` renders the
+  call contract into the prompt, so a direct call reached the model with no
+  tools and it answered without calling any. Such a call now fails with an
+  `invalid_request` error that names the route and the fix: drive the tools
+  through `agent_loop`, or pass `tool_format: "native"` on a route that
+  supports native tools. Empty tool sets and native tool-search tools are
+  unaffected.
+- The session code-index warm thread now runs at background priority (utility QoS
+  on macOS, nice 10 on Linux), so a rebuild no longer competes for the CPU with
+  the engine thread preparing the first model call.
+
+### Fixed
+
+- Portal setup lists active catalog models and skips unavailable providers; catalog generation rejects retired default routes.
+- **Provider defaults stay within the selected provider.** Harn asks for an explicit model when a provider has no catalog
+  default, instead of sending another provider's model to it (#8865).
+- An `unmeasured` rustc wrapper decision now quotes the wrapper-free build's error beside the with-wrapper one, so a
+  probe that failed both ways says whether the toolchain or the wrapper broke. The probe's Cargo builds now run with
+  `--color never`: under `CARGO_TERM_COLOR=always` every reader of Cargo's words missed its line, so the reason fell
+  back to the last stderr line and a wrapper's `Running` line was never recognized.
+- **Anthropic `thinking: true` without a budget no longer fails on small
+  output caps (#8945).** The default thinking budget was a fixed 10,000 tokens,
+  which Anthropic refuses with a 400 whenever `max_tokens` is 10,000 or less.
+  It now derives from the cap: `max_tokens - 1`, at least Anthropic's 1,024
+  minimum and at most 10,000. A budget the caller names passes through
+  unchanged.
+- **`effort` works on Claude Sonnet 4.6 (#8946).** The catalog now declares
+  adaptive thinking and the `effort` levels low, medium, high, and max for
+  `claude-sonnet-4-6` and its `anthropic/`-prefixed route, so the portable
+  `effort` option is no longer refused as unsupported there.
+- Stopping a turn while a tool runs no longer breaks the session. The
+  unanswered tool call gets a typed harness-repair result when the turn is
+  cancelled, and every provider request answers any call a stored transcript
+  left open, so a resumed or cleared session also recovers. Before, every
+  later OpenAI turn failed with "No tool output found for function call" and
+  Anthropic turns with "tool_use ids were found without tool_result blocks".
+- The shared target GC now refuses to remove an entry that holds a `.git` entry or a bare object store,
+  and keeps it as a pending candidate. It also no longer crashes under bash 3.2 when it keeps its first entry.
+- A native decision refused by local spend admission, such as one whose
+  `run_cost_limit` arrives after an earlier unbudgeted model call, now returns
+  `unavailable` with reason `admission_refused` instead of `authority_denied`.
+  Its receipt records the cause in `admission_reason`.
+- Workspace guidance discovery walks the subtree once through the ignore-aware
+  `fs.walk` instead of listing and stat-ing every entry, and reads only the
+  instruction files that walk saw. Directories the project ignore stack excludes
+  are no longer searched for `AGENTS.md` / `CLAUDE.md`.
+- An exhausted provider balance or hard spend limit (HTTP 429 with a billing
+  code such as `insufficient_quota`, `billing_limit`, or
+  `credit_balance_exhausted`) is no longer retried as a rate limit. Its thrown
+  category is `generic` rather than the status's `rate_limit`, the agent
+  loop's retry policy never retries `billing_limit`, and the agent terminal
+  outcome carries the new `provider_billing` class instead of `rate_limited`,
+  so embedders can tell a person the account needs attention instead of
+  "try again".
+- An unavailable step judge is now loud. Its `step_judge_decision` reports `verdict: "unavailable"`,
+  never `pass`, with a typed `unavailable_reason` and a running `unavailable_count`. A label-only
+  decision model configured as a judge is refused before dispatch instead of failing on every step.
+  A `replace` veto on a turn that parse repair already answered no longer crashes the loop: it
+  applies as `retain`. A purpose-label block next to a valid call is no longer reported as an
+  unparsed tool call.
+
+## v0.10.146
+
+### Added
+
+- Added a typed enforcement table saying what each process sandbox backend
+  confines: writes, reads, credential reads, network and process. Each cell is
+  `enforced`, `not_enforced` or `unmeasured`. `harn doctor` reports the active
+  backend's row, the sandboxing docs render the whole table, and an
+  `os_hardened` spawn is refused with `does_not_confine` when its policy requires
+  a dimension the backend does not hold. The sandbox conformance suite gains
+  cases for credential-denylist reads and loopback network connections, and it
+  judges every case against the table, so a cell that claims more or less than
+  the backend does fails a named case.
+- `harness.agent.open(id?, {parent, actor})` opens a delegated child session. `actor` pushes an `act` hop onto the
+  parent's actor chain, so every provider request the child makes carries its lineage instead of the parent's chain.
+  A parent with no chain starts from the `anonymous` origin, which also covers `sub_agent_run` children under an
+  unauthenticated parent. `open(nil)` and the existing options are unchanged.
+- LLM mock fixtures can replay a recorded prefix and then go live. A versioned
+  header with `"liveAfterCalls": K` serves the first K calls from the fixture,
+  then sends every later call to the configured provider through the normal
+  path. A call the prefix cannot serve fails closed instead of going live
+  early. Each call's `provider_telemetry.llm_mock_prefix` says whether the
+  fixture or the live provider answered it. Fixtures without the header field
+  behave as before.
+
+### Changed
+
+- `harn-cli` requires its `hostlib` feature. A `--no-default-features` build now fails first with an error that says so
+  instead of with over a hundred unresolved imports; build a lean embedding on `harn-serve` or `harn-vm`.
+
+### Removed
+
+- **`scripts/release_contract.json` no longer carries the `workflows` step-name
+  section (#8825).** Release orchestrators that read the contract get the
+  version, changelog, and tag policy only; job and step names of
+  `publish-release.yml` and `build-release-binaries.yml` are no longer part of it.
+- The Windows AppContainer process sandbox is removed. Windows now runs child
+  processes with no OS sandbox confinement, and says so: an `os_hardened` spawn
+  is refused as a typed `does_not_confine` refusal naming mechanism `none`, a
+  `worktree` spawn logs a one-time `handler_sandbox` warning and runs unconfined
+  (or refuses under `HARN_HANDLER_SANDBOX=enforce`), and `harn doctor` reports
+  `backend=unconfined filesystem_mechanism=none`. The `windows_app_container`
+  mechanism and the `entry_point_cannot_attach` availability no longer appear in
+  refusals, and `tools.run_command` reports sandbox kind `none` on Windows.
+
+### Fixed
+
+- `harn test conformance` warms the stdlib bytecode cache once before any case runs. A case that starts a
+  `harn run` child no longer spends its deadline compiling the stdlib alongside every sibling; on an unoptimized
+  build that child went from 10.7 s to 1.0 s.
+- A sandboxed `git` no longer fails with "unknown error occurred while reading the
+  configuration files" when `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM` names an
+  empty file outside the workspace. The sandbox now grants read access to the
+  files those variables name, whatever their content.
+- Bedrock no longer reports as available on a host with no AWS region or credential source. A platform-managed
+  provider is now available only when its client's offline prerequisites resolve: for Bedrock, a region from the
+  environment or the shared config file, and a credential from the environment key pair, a web identity token, a
+  container endpoint, the profile in the shared config or credentials file, or a prepared identity. Otherwise
+  `harness.llm.providers()` reports `available: false` with `credential_status` `region_unconfigured` or
+  `credentials_unconfigured`, so availability-based selection such as the different-family reviewer no longer picks a
+  route that fails on every call. Instance metadata is not probed; an explicit Bedrock call still resolves it. The
+  Bedrock region and credential lookups now honor `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`, and their
+  errors carry the `environment` and `auth` categories. A completion judge whose route fails on an `auth` or
+  `environment` error before any reply ends the run with `completion_judge_route_unavailable` instead of
+  `completion_judge_error`, and the error text is no longer added to the transcript as judge feedback.
+- Assistant text that hosts display no longer repeats `json`-format tool calls: a ```` ```tool ```` fence
+  holding one call object is hidden the same way a `<tool_call>` block is. Code fences, and ```` ```tool ````
+  fences that are not a call, stay visible.
+- The build freshness checker no longer overflows the Windows main thread's 1 MiB stack when it hashes the `harn`
+  binary. CI now lints that feature-gated binary.
+- A cold `harn check` over a large directory no longer peaks at several times the memory of a warm one. The predicate
+  census now scans imported modules through one shared parse instead of a private copy in every check worker.
+- Reopening a saved session replays each tool call under its real name. Replay now reads the name from the
+  event's `metadata.tool_name`, where tool lifecycle events store it, instead of labelling the call `tool`.
+- Allow plain calls to mandatory-thinking Z.AI GLM 5.3 models while rejecting explicit attempts to disable thinking.
+- The parallel scheduler fail-fast test no longer hangs its own two-worker runtime when both branches land on one worker.
+- Forward the scoped GitHub token to consumer refresh commands during automated Harn bumps.
+- Release pushes now wait for an in-progress exact merge-queue candidate before deciding to rebuild it.
+- Reopening a saved session replays its tool calls and results again. The journal stores tool rows as internal,
+  and replay dropped every internal row before checking its kind, so a resumed session showed no tool rows.
+- **Agent host reads honor configured byte limits (#8923).** File and command-output reads now cap both default and
+  explicit lengths at the host's read or tail budget. Agents can use offsets to page through larger content.
+
+## v0.10.145
+
+### Added
+
+- Add classified transcript compaction with per-message keep, reword, and drop
+  decisions, confidence-based preservation, protected prior recaps, bounded
+  evaluation windows, and typed receipts. Failed or cancelled compaction leaves
+  the original transcript intact.
+- The reusable Harn bump workflow accepts an exact source commit. It advances a consumer pinned to the same release tag
+  when that commit is newer, and refuses stale or divergent commit targets.
+
+### Changed
+
+- **The missing-tool-call classifier, the scope classifier, and the step judge
+  declare their label sets as schema enums (#8800).** Strict structured output
+  and the typed-output decoder now refuse an out-of-set label instead of
+  mapping it after the fact, and the refusal takes each classifier's existing
+  error path: `ambiguous` or `escalate` with an `error` original label, and a
+  `judge_unavailable` step-judge decision under the default `fail_open`.
+- An open release pull request now refolds itself when main gains changelog fragments
+  it did not fold. A push to main that changes `changelog.d/` prepares the release
+  again from current main with the same version and resets the release branch in
+  place, so a late fix rides the release without closing and reopening it.
+- A release is now built and checked while its release pull request waits in the
+  merge queue, at the exact commit that lands on main, and promotion publishes
+  those files as soon as the release merges instead of after a second build.
+- **Release candidates use measured larger runners for Apple and Linux artifacts
+  (#8881).** Both Apple targets now build on GitHub macOS XLarge, Linux targets
+  use a glibc-compatible Blacksmith 16-core image, and typed runner metadata
+  rejects incompatible operating systems and glibc floors before dispatch.
+
+### Fixed
+
+- `agent_loop` now forwards `tool_precheck`, `tool_retries`, `tool_backoff_ms`, `model`, `provider`, and
+  `run_id` to tool dispatch. Before, a precheck passed to the loop was never consulted, tool retries
+  never engaged, and tool audit receipts recorded model and provider as empty.
+- After a completion adjudicator withdraws a closing draft, the next model request always ends on a
+  user message carrying the rejection, even when a standing reminder already committed the same
+  text. Previously the request could end on the withdrawal placeholder, which OpenAI-compatible
+  servers read as a prefill and, after a second veto, refused with HTTP 400.
+- **Provider catalog notice safety (#8847).** Incomplete new-model notices now produce local proposals without a Git branch
+  or pull request. Validated notice edits regenerate every catalog projection and open signed draft pull requests with only
+  tracked changes staged; live extraction uses the provider's catalog default and accepts explicit cost and timeout limits.
+- A release pull request batched ahead of another merge-queue entry is no longer
+  silently left untagged. The queue now removes an entry queued behind a release
+  commit, so a release always lands as the last entry of its push, and a push
+  that still buries a release commit fails its build instead of running green as
+  a warm-cache build.
+- **Code index rename protects separate declarations (#8879).** Workspace symbol
+  renames now stop before writing when the index finds another declaration with
+  the same name in scope, and report the collision so an agent can use a
+  binding-aware rename.
+- **DeepInfra DeepSeek V4.1 Flash route and cache usage (#8882).** The catalog now includes the served DeepInfra route
+  with source-backed prices and a review date for its promotion. OpenAI-compatible cache counters reported as null
+  remain unmeasured instead of blocking an otherwise valid response. Harn verified one native tool call in both
+  streaming and non-streaming modes.
+
+### Security
+
+- **A macOS confined child with no preset, policy, or cache write roots can no
+  longer write outside its workspace (#8493).** The macOS sandbox profile
+  rendered an unfiltered `(allow file-write*)` rule when every aggregate
+  write-root list was empty, as with a process preset list of only
+  `system_runtime`. The aggregate rule is now emitted only when it names at
+  least one root, so such a child writes its workspace roots and nothing else.
+
 ## v0.10.144
 
 ### Added

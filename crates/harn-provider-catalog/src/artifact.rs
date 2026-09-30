@@ -189,6 +189,20 @@ pub enum ProviderClassification {
     Local,
 }
 
+/// Complete request/response contract for a provider's alternate chat API.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatApiAdapter {
+    /// Explicitly restore the model's ordinary contract over an inherited adapter.
+    ModelDefault,
+    #[serde(rename = "ollama_openai_compat")]
+    OllamaOpenAiCompat,
+}
+
+impl ChatApiAdapter {
+    pub const ALL: [Self; 2] = [Self::ModelDefault, Self::OllamaOpenAiCompat];
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderEndpoint {
     pub base_url: String,
@@ -199,6 +213,8 @@ pub struct ProviderEndpoint {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub regions: BTreeMap<String, ProviderEndpointRegion>,
     pub chat_endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_api_adapter: Option<ChatApiAdapter>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completion_endpoint: Option<String>,
     /// Provider embeddings route, when one exists. Absent means this

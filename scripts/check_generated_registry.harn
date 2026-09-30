@@ -309,6 +309,51 @@ pub fn artifact_lifecycle_errors(art: dict) -> list {
   return ["[${aid}] unsupported lifecycle `${lifecycle}`; expected `source` or `release-package`."]
 }
 
+/**
+ * Every tracked output of a `gen-*` artifact must carry a merge attribute in
+ * `.gitattributes`: `-merge`, or a named `merge=` driver. Two pull requests that
+ * each regenerate the same output otherwise merge line by line into a file no
+ * generator produced, and the stale result only shows up on main (#8817).
+ * Matching is by exact pattern: a file output needs a line naming that path,
+ * and a directory output (trailing slash) needs one naming the directory
+ * followed by a double-star glob.
+ */
+pub fn merge_attribute_errors(artifacts: list, gitattributes: string) -> list {
+  let merge_patterns = []
+  for line in gitattributes.split("\n") {
+    const fields = line.trim().split(" ").filter({ field -> field != "" })
+    if fields.count < 2 || starts_with(fields[0], "#") {
+      continue
+    }
+    for attr in fields.slice(1) {
+      if attr == "-merge" || starts_with(attr, "merge=") {
+        merge_patterns = merge_patterns + [fields[0]]
+      }
+    }
+  }
+  let errors = []
+  for art in artifacts {
+    const lifecycle = art?.lifecycle ?? "source"
+    if lifecycle != "source" || !starts_with(art?.gen ?? "", "gen-") {
+      continue
+    }
+    for out in art?.outputs ?? [] {
+      const pattern = if ends_with(out, "/") {
+        out + "**"
+      } else {
+        out
+      }
+      if !merge_patterns.contains(pattern) {
+        errors = errors
+          + [
+            "[${art.id}] generated output `${out}` has no merge attribute; add `${pattern} -merge` to .gitattributes so two regenerations conflict instead of merging into a stale file.",
+          ]
+      }
+    }
+  }
+  return errors
+}
+
 pub type GeneratedRegistryCompletenessRequest = {
   targets: list,
   registered_gens: list,
@@ -584,6 +629,7 @@ pipeline main(harness: Harness, task: unknown) {
     },
   )
     + preflight_dispatch_errors(targets, dispatch)
+    + merge_attribute_errors(artifacts, harness.fs.read_text(".gitattributes"))
   if errors.count > 0 {
     harness.stdio.eprintln("error: generated-artifact registry is out of sync:\n")
     for e in errors {

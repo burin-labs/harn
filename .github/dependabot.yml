@@ -1,6 +1,23 @@
 version: 2
 
+# This file is the source projected into repositories that use GitHub Actions.
+# Cooldown gives a compromised release time to be yanked or flagged before an
+# automated PR proposes it.
 updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"
+
   - package-ecosystem: "cargo"
     directories:
       - "/"
@@ -94,19 +111,14 @@ updates:
     # Move this type package only with a deliberate engines review.
     ignore:
       - dependency-name: "@types/vscode"
+      # react-intl 12 types each message's placeholder values from a type
+      # argument to `defineMessages`. The portal's descriptors do not declare
+      # them yet, so every `formatMessage(message, values)` call fails to
+      # type-check (TS2769 across seven portal files in #8910), and holding
+      # the one package keeps the other npm bumps from waiting on it. Remove
+      # this entry in the pull request that declares the portal's message
+      # value types.
+      - dependency-name: "react-intl"
+        update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 7
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "America/Los_Angeles"
-    cooldown:
-      default-days: 7
-    groups:
-      actions:
-        patterns:
-          - "*"

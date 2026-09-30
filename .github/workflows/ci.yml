@@ -28,9 +28,15 @@ env:
   CARGO_TERM_COLOR: always
   # A cold merge-group producer can take more than 15 minutes to publish its
   # exact-run artifacts. Every live consumer shares this bounded wait policy;
-  # the barrier jobs add scheduling and API headroom above it.
-  HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
-  HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
+  # the barrier jobs add scheduling and API headroom above it. The waits share
+  # the workflow token's API budget with every job in the repository, so each
+  # backs off from 10s to 60s between reads, and a producer still queued after
+  # 30 minutes fails the wait by name, inside the shortest waiter's 45-minute
+  # job timeout, instead of polling until that timeout.
+  HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
+  HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
+  HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS: "60"
+  HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS: "1800"
   HARN_EXT_ARTIFACT_PRODUCER_JOB: "Rust workspace tests"
   # Incremental fights the within-job sccache wrapper. Cross-run reuse is
   # owned by each lane's persistent compiler-object cache. Do not persist a
@@ -502,7 +508,7 @@ jobs:
       # deliberate change to which release semantics this repository is
       # checked against.
       ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
-      ORCHESTRATOR_REF: 0eb9ccd5efdd2f94b0037999a8a70f97c5ea0c5e
+      ORCHESTRATOR_REF: 058dbde5e3f2548e30e3d08f2a9428189502c18a
     steps:
       - name: Check out this repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -675,7 +681,7 @@ jobs:
         with:
           components: clippy
       - name: Install cargo-machete
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: cargo-machete@0.9.2
       - uses: ./.github/actions/rust-cache
@@ -718,22 +724,29 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-  # Say where the producer is about to land, and refuse when that cannot be
-  # measured. The routing expression below can only choose; it cannot report,
-  # and it reads an unreadable census exactly like a census that reported no
-  # capacity. Both fall through to a hosted runner and silently downgrade the
-  # tier, leaving nothing to attribute the downgrade to.
+  # Say where the producer is about to land, and name a hosted fallback when
+  # the census cannot be read. The routing expression below reads this job's
+  # route output instead of the census, so a census outage routes the producer
+  # hosted by name rather than skipping it or failing the expression.
+  # `!cancelled()` because a failed census probe must still reach a decision:
+  # skipping here would skip the required producer behind it.
   rust-producer-capacity:
     name: Name the Rust producer runner capacity decision
     needs: runner-availability
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      route: ${{ steps.decision.outputs.route }}
+      fallback: ${{ steps.decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
       - name: Decide where the Rust workspace producer lands
+        id: decision
         run: bash scripts/ci/runner_capacity.sh
         env:
           CAPACITY_LABEL: RUST_PRODUCER_CAPACITY
@@ -783,22 +796,14 @@ jobs:
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 'blacksmith-8vcpu-ubuntu-2404')
-        || (github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository
-        && needs.runner-availability.outputs.selfhosted_disabled == ''
-        && needs.runner-availability.outputs.capacity != ''
-        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        || (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || 'ubuntu-8core' }}
     timeout-minutes: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 20)
-        || (github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository
-        && needs.runner-availability.outputs.selfhosted_disabled == ''
-        && needs.runner-availability.outputs.capacity != ''
-        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        || (needs.rust-producer-capacity.outputs.route == 'owned'
         && 76)
         || 70 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
@@ -826,11 +831,7 @@ jobs:
         ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
           && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
           && 'blacksmith')
-          || (github.event_name == 'pull_request'
-          && github.event.pull_request.head.repo.full_name == github.repository
-          && needs.runner-availability.outputs.selfhosted_disabled == ''
-          && needs.runner-availability.outputs.capacity != ''
-          && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+          || (needs.rust-producer-capacity.outputs.route == 'owned'
           && 'self-hosted')
           || 'github-hosted' }}
     steps:
@@ -891,7 +892,7 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
@@ -1050,7 +1051,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # After producer completion, only unreadable job metadata can spend
           # this budget. A genuinely missing archive fails on the first read.
-          HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "6"
+          HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "6"
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
@@ -1102,7 +1103,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: nextest@0.9.132
       - name: Start workspace test archive download timer
@@ -1191,7 +1192,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: nextest@0.9.132
       - name: Download security test archive
@@ -1239,19 +1240,29 @@ jobs:
         run: |
           set -euo pipefail
           receipt="$HARN_SANDBOX_ENFORCEMENT_RECEIPT"
-          if [[ ! -f "$receipt" ]] || [[ "$(wc -l < "$receipt")" -ne 1 ]]; then
-            echo "sandbox enforcement probe produced no single-line receipt" >&2
+          if [[ ! -f "$receipt" ]] || [[ "$(wc -l < "$receipt")" -lt 1 ]]; then
+            echo "sandbox enforcement probe produced no receipt" >&2
             exit 1
           fi
+          # Line one is the enforcement marker; every later line is one
+          # PATH-derived read-and-execute grant with its source entry.
           IFS= read -r marker < "$receipt"
           case "$marker" in
             harn.sandbox_enforcement*) ;;
             *) echo "sandbox enforcement probe produced an invalid receipt" >&2; exit 1 ;;
           esac
+          if ! awk 'NR > 1 && !/^harn\.sandbox_path_grant / { bad = 1 } END { exit bad }' "$receipt"; then
+            echo "sandbox enforcement receipt carries an unrecognized line" >&2
+            exit 1
+          fi
           {
             echo "### Process filesystem confinement"
             echo
             echo "\`$marker\`"
+            echo
+            tail -n +2 "$receipt" | while IFS= read -r grant; do
+              echo "- \`$grant\`"
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
   harn-audit:
@@ -1902,7 +1913,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
       - name: Install pinned cross CLI
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: cross@0.2.5
           fallback: none
@@ -2471,11 +2482,10 @@ jobs:
           fi
 
           # The capacity decision is fail-closed on the runs that can make it.
-          # It refuses by name when the fleet census cannot be read, and a
-          # refusal that only warned would let the producer fall through to a
-          # hosted runner with nothing to attribute the downgrade to. It is
-          # skipped on fork pull requests and on every non-pull-request event,
-          # which is not a failure.
+          # A census it cannot read is a named hosted fallback, not a failure,
+          # so only a decision that did not complete is red. It is skipped on
+          # fork pull requests and on every non-pull-request event, which is
+          # not a failure.
           rust_producer_capacity_result="${{ needs['rust-producer-capacity'].result }}"
           echo "Rust producer capacity decision: $rust_producer_capacity_result"
           if [ "$rust_producer_capacity_result" != "success" ] \

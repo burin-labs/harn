@@ -159,7 +159,7 @@ fn git_tracks_file(cwd: &Path, target: &Path) -> Option<bool> {
     let Ok(relative) = absolute_target.strip_prefix(&root) else {
         return Some(false);
     };
-    let output = git_command(&root)
+    let output = git_command(&root)?
         .args(["ls-files", "--error-unmatch", "--"])
         .arg(relative)
         .output()
@@ -168,7 +168,7 @@ fn git_tracks_file(cwd: &Path, target: &Path) -> Option<bool> {
 }
 
 fn git_root(cwd: &Path) -> Option<PathBuf> {
-    let root_output = git_command(cwd)
+    let root_output = git_command(cwd)?
         .args(["rev-parse", "--show-toplevel"])
         .output()
         .ok()?;
@@ -188,8 +188,10 @@ fn canonical_target(target: &Path) -> Option<PathBuf> {
     Some(parent.join(target.file_name()?))
 }
 
-fn git_command(cwd: &Path) -> Command {
-    let mut command = Command::new("git");
+/// `None` when the session policy cannot produce a child environment; the
+/// callers are best-effort probes that already read `None` as "unknown".
+fn git_command(cwd: &Path) -> Option<Command> {
+    let mut command = crate::process_sandbox::session_std_command("git").ok()?;
     command
         .arg("--literal-pathspecs")
         .arg("-C")
@@ -200,7 +202,7 @@ fn git_command(cwd: &Path) -> Command {
         .env_remove("GIT_COMMON_DIR")
         .env_remove("GIT_INDEX_FILE")
         .env_remove("GIT_PREFIX");
-    command
+    Some(command)
 }
 
 #[cfg(test)]
@@ -373,7 +375,7 @@ mod tests {
     }
 
     fn git(root: &Path, args: &[&str]) {
-        let status = git_command(root).args(args).status().unwrap();
+        let status = git_command(root).unwrap().args(args).status().unwrap();
         assert!(status.success(), "git {args:?} failed");
     }
 }

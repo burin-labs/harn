@@ -1,34 +1,21 @@
 //! Process sandbox dispatch and per-platform OS confinement.
 //!
-//! The runtime exposes one stable surface — [`command_output`],
-//! [`std_command_for`], [`tokio_command_for`], plus the
-//! `enforce_*` helpers — and dispatches into a per-OS
-//! [`SandboxBackend`] selected at compile time. The backend chooses
-//! how to attach the active capability ceiling to the spawn:
+//! The runtime exposes [`command_output`], [`std_command_for`],
+//! [`tokio_command_for`], and the `enforce_*` helpers. A per-OS
+//! [`SandboxBackend`] attaches the active capability ceiling:
 //!
 //! * **Linux** ([`linux::Backend`]): Landlock LSM filesystem scoping
 //!   plus a default-deny seccomp-bpf syscall allowlist installed via
 //!   `pre_exec`, gated behind `PR_SET_NO_NEW_PRIVS`.
 //! * **macOS** ([`macos::Backend`]): a `sandbox-exec` profile rendered
 //!   from the active capability set wraps the spawn.
-//! * **Windows** ([`windows::Backend`]): an AppContainer plus a Job
-//!   Object, launched directly through `CreateProcessW` with a
-//!   `SECURITY_CAPABILITIES` attribute. There is no restricted token
-//!   and no explicit integrity label: the AppContainer's own access
-//!   check is what confines the child. A read or a write succeeds only
-//!   where the object's DACL grants it to the container's package SID,
-//!   one of its capability SIDs, or `ALL APPLICATION PACKAGES` — a user
-//!   or group SID in the token never helps. That makes this the one
-//!   backend that is read-*closed* by construction, so the read roots
-//!   the other backends get for free have to be granted here with an
-//!   explicit `icacls` ACE. Writes are confined by the same implicit
-//!   deny rather than by a token restriction: every root this backend
-//!   grants outside the workspace is granted read and execute only.
 //! * **OpenBSD** ([`openbsd::Backend`]): pledge/unveil applied via
 //!   `pre_exec` on top of the standard `Command` plumbing.
+//! * **Windows and every other platform** ([`backend::UnconfinedBackend`]):
+//!   no OS sandbox. Children run unconfined; `os_hardened` refuses and the
+//!   other confining profiles warn. See [`enforcement`].
 //!
-//! The [`SandboxProfile`] selected by the active [`CapabilityPolicy`]
-//! controls how strictly the backend is required:
+//! [`SandboxProfile`] sets how strictly [`CapabilityPolicy`] requires the backend:
 //!
 //! * `Unrestricted` — bypass everything (path enforcement and OS
 //!   confinement).
@@ -73,7 +60,12 @@ mod backend;
 mod build_command;
 pub(crate) use build_command::{build_std_command, build_tokio_command};
 mod command_for;
-pub use command_for::{std_command_for, std_command_for_with_env_state, tokio_command_for};
+pub use command_for::{
+    session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
+    tokio_command_for,
+};
+pub mod enforcement;
+use enforcement::ensure_spawn_enforceable;
 #[cfg(all(test, target_os = "linux"))]
 mod enforcement_report;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -94,6 +86,7 @@ mod process_config;
 mod process_output;
 mod read_roots;
 mod refusal;
+mod scope_memo;
 use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
@@ -104,8 +97,6 @@ use process_config::apply_rustc_wrapper_decision;
 pub use process_config::{apply_active_rustc_wrapper_policy, rustc_wrapper};
 pub use process_config::{ProcessCommandConfig, ProcessStdin};
 use process_output::apply_process_config;
-#[cfg(target_os = "windows")]
-pub(crate) use process_output::windows_command_output;
 pub use process_output::{deterministic_message_locale_env, MESSAGE_LOCALE_OVERRIDE_ENV};
 pub(crate) mod process_cwd;
 use process_cwd::enforce_process_cwd_for_policy;
@@ -136,7 +127,6 @@ mod replace;
 pub use linux::{decode_seccomp_hex, transferable_confinement, TransferableConfinement};
 #[cfg(target_os = "linux")]
 pub(crate) use refusal::mechanism_skipped_warning;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use refusal::unavailable;
 pub use refusal::{
     infer_process_sandbox_mechanism, is_process_sandbox_signal, process_violation_error,
@@ -148,8 +138,6 @@ pub use refusal::{
 pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod toolchain_cache;
-#[cfg(target_os = "windows")]
-mod windows;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use toolchain_cache::process_roots as process_sandbox_developer_toolchain_cache_roots;
 pub(crate) mod workspace_env;
@@ -301,15 +289,14 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
         return Ok(());
     }
     let candidate = normalize_for_policy(path);
-    let roots = normalized_workspace_roots(&policy);
+    let scope = scope_memo::scope_roots(&policy, access);
+    let roots = scope.workspace.clone();
     // The denylist is checked BEFORE any grant, because it must beat all of
     // them. A workspace root, a read-only root, and a preset are each a reason
     // to allow; this is the one reason to refuse, and a subtraction that ran
     // after the grants would never fire on the paths that matter (a credential
     // under a preset-granted `~/.config` is exactly that case).
-    if access == FsAccess::Read
-        && path_is_denied(&candidate, &process_sandbox_read_deny_roots(&policy))
-    {
+    if access == FsAccess::Read && path_is_denied(&candidate, &scope.read_deny) {
         return Err(SandboxViolation {
             attempted: candidate,
             roots,
@@ -320,8 +307,8 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     if roots.iter().any(|root| path_is_within(&candidate, root)) {
         return Ok(());
     }
-    let read_only_roots = normalized_read_only_roots(&policy);
-    let within_read_only = read_only_roots
+    let within_read_only = scope
+        .read_only
         .iter()
         .any(|root| path_is_within(&candidate, root));
     if within_read_only && access == FsAccess::Read {
@@ -1216,7 +1203,7 @@ pub fn command_output(
 
     let output = match active_sandbox_policy() {
         Some((policy, profile)) => {
-            ensure_managed_process_egress_supported::<ActiveBackend>(&policy)?;
+            ensure_spawn_enforceable::<ActiveBackend>(&policy)?;
             let config = sandboxed_process_config(config, &policy)?;
             ActiveBackend::run_to_output(program, args, &config, &policy, profile)?
         }
@@ -1269,26 +1256,6 @@ fn sandboxed_process_config(
             .any(|removed| key.eq_ignore_ascii_case(removed))
     });
     Ok(resolved)
-}
-
-fn ensure_managed_process_egress_supported<B: SandboxBackend + ?Sized>(
-    policy: &CapabilityPolicy,
-) -> Result<(), VmError> {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = (std::marker::PhantomData::<B>, policy);
-        Ok(())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if policy.process_network_proxy.is_some() {
-            return Err(sandbox_rejection(format!(
-                "managed child-process egress is not enforceable by the {} process sandbox",
-                B::name()
-            )));
-        }
-        Ok(())
-    }
 }
 
 pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {
@@ -1431,10 +1398,6 @@ fn coverage_jail_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     roots.extend(process_sandbox_package_manager_config_read_roots(policy));
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     roots.extend(process_sandbox_developer_toolchain_cache_roots(policy));
-    // The Windows backend grants an ACE on every `PATH` directory, so a path
-    // under one of them is inside the jail and must not be refused here.
-    #[cfg(target_os = "windows")]
-    roots.extend(process_sandbox_path_read_roots(policy));
     roots
 }
 
@@ -1651,45 +1614,6 @@ pub(crate) fn process_sandbox_developer_toolchain_read_roots(
     developer_toolchain_read_roots_for_home(&home)
 }
 
-/// Windows-only: every directory on this process's own `PATH`, gated on the
-/// same `DeveloperToolchains` preset as the home-relative roots above.
-///
-/// This backend's AppContainer is read-closed by construction, so nothing
-/// outside an explicit `icacls` grant is visible to the child, and
-/// [`developer_toolchain_read_roots_for_home`] covers only *home-relative*
-/// installs (`~/.cargo`, `~/.nvm`, …). A global install on `PATH` — the
-/// official Node.js installer's `C:\Program Files\nodejs` is the case that
-/// exposed this — stays invisible, and `cmd.exe` reports the unreadable
-/// executable as "not recognized" rather than as a permission error. A `PATH`
-/// entry is, definitionally, a toolchain location.
-///
-/// This lives here rather than in the backend because two consumers need the
-/// same answer. The backend renders an `icacls` ACE per root, and
-/// [`coverage_jail_roots`] answers whether a path is inside the jail when a
-/// denial is being classified. While only the backend knew about these roots,
-/// the two views disagreed: a path under a `PATH` directory was granted by the
-/// backend and simultaneously reported as outside the jail, which is exactly
-/// the drift the read-root helpers say cannot happen because "backends render
-/// from it". Note what this does *not* reach: `check_fs_path_scope`, the check
-/// that actually refuses a builtin's path access, consults only the workspace
-/// and read-only roots and has never consulted any preset read root on any
-/// platform. Widening that is a cross-platform decision, not a Windows one.
-///
-/// Existence filtering stays with the backend's grant loop, which already
-/// skips a root that is not on disk, so a stray `PATH` entry costs nothing
-/// here either.
-#[cfg(target_os = "windows")]
-pub(crate) fn process_sandbox_path_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains) {
-        return Vec::new();
-    }
-    std::env::var_os("PATH")
-        .iter()
-        .flat_map(std::env::split_paths)
-        .map(|dir| normalize_for_policy(&dir))
-        .collect()
-}
-
 pub(crate) fn normalized_process_roots(roots: &[String]) -> Vec<PathBuf> {
     roots
         .iter()
@@ -1715,23 +1639,13 @@ pub fn render_policy_root(path: &str) -> PathBuf {
     normalize_for_policy(&resolve_policy_path(path))
 }
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
 pub(crate) fn policy_allows_workspace_write(policy: &CapabilityPolicy) -> bool {
     !policy.capabilities_are_restricted()
         || policy_allows_capability(policy, "workspace", &["write_text", "delete"])
 }
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
 pub(crate) fn policy_allows_capability(
     policy: &CapabilityPolicy,
     capability: &str,

@@ -19,6 +19,10 @@ fn provider_status_reports_deferred_for_platform_managed_providers() {
     std::env::remove_var("VERTEX_AI_ACCESS_TOKEN");
     std::env::remove_var("GOOGLE_OAUTH_ACCESS_TOKEN");
     std::env::remove_var("GOOGLE_APPLICATION_CREDENTIALS");
+    let _region = crate::llm::test_env::ScopedEnvVar::set("AWS_REGION", "us-east-1");
+    let _key = crate::llm::test_env::ScopedEnvVar::set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+    let _secret =
+        crate::llm::test_env::ScopedEnvVar::set("AWS_SECRET_ACCESS_KEY", "example-secret");
     let status = llm_provider_status_value();
     assert_eq!(credential_status_for(&status, "bedrock"), "deferred");
     assert_eq!(credential_status_for(&status, "vertex"), "deferred");
@@ -162,6 +166,36 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
     crate::llm::capabilities::clear_user_overrides();
     let catalog = provider_catalog_to_vm_value();
     let catalog = catalog.as_dict().expect("provider catalog dict");
+
+    let providers = match catalog.get("providers") {
+        Some(VmValue::List(providers)) => providers,
+        other => panic!("expected providers list, got {other:?}"),
+    };
+    let artifact = crate::provider_catalog::artifact();
+    assert!(!artifact.providers.is_empty());
+    assert_eq!(providers.len(), artifact.providers.len());
+    for expected in artifact.providers {
+        let projected = providers
+            .iter()
+            .filter_map(VmValue::as_dict)
+            .find(|provider| provider.get("id").map(VmValue::display) == Some(expected.id.clone()))
+            .expect("catalog provider reaches the VM");
+        let expected = crate::stdlib::json_to_vm_value(
+            &serde_json::to_value(expected).expect("serializable provider"),
+        );
+        for field in ["classification", "auth", "endpoint"] {
+            assert_eq!(
+                projected
+                    .get(field)
+                    .map(crate::llm::helpers::vm_value_to_json),
+                expected
+                    .as_dict()
+                    .unwrap()
+                    .get(field)
+                    .map(crate::llm::helpers::vm_value_to_json)
+            );
+        }
+    }
 
     let families = match catalog.get("families") {
         Some(VmValue::List(families)) => families,

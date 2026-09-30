@@ -79,6 +79,7 @@ pub mod decision;
 pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod first_token;
+mod hash_replay;
 pub(crate) mod helpers;
 pub mod introspection;
 pub mod jsonl;
@@ -445,9 +446,10 @@ pub(crate) use self::call::{
     structured_safe_envelope_ok, SchemaLoopOutcome,
 };
 pub use self::cost::{
-    calculate_cost_for_provider, install_llm_cost_budget, install_llm_token_budget,
-    peek_llm_cost_budget, peek_llm_token_budget, peek_total_cost, peek_total_tokens,
-    set_llm_cost_budget, set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard,
+    calculate_cost_for_provider, install_llm_cost_budget, install_llm_cost_budget_seeded,
+    install_llm_token_budget, peek_llm_cost_budget, peek_llm_token_budget, peek_total_cost,
+    peek_total_tokens, set_llm_cost_budget, set_llm_token_budget, LlmBudgetGuard,
+    LlmTokenBudgetGuard,
 };
 pub use self::healthcheck::{
     build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,

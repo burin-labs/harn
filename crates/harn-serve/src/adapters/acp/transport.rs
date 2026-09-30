@@ -485,7 +485,7 @@ async fn run_acp_channel_server_inner(
                     {
                         continue;
                     }
-                    if apply_session_budget_rearm(&msg) {
+                    if concurrent_controls.apply_budget_rearm(&msg) {
                         continue;
                     }
 
@@ -623,7 +623,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                     {
                         continue;
                     }
-                    if apply_session_budget_rearm(&msg) {
+                    if concurrent_controls.apply_budget_rearm(&msg) {
                         continue;
                     }
 

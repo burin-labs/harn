@@ -343,6 +343,7 @@ catalog source data and pass only the stable ladder name from policy code.
 | `prefill` | string | Assistant prefill where the route supports it. |
 | `previous_response_id` | string | OpenAI Responses conversation-state link. |
 | `data_controls` | string | Requested provider retention/training posture: `"default"` or `"strictest_available"`. See [Provider data controls](providers.md#provider-data-controls). |
+| `inference_boundary` | dict | Optional ceiling with `reach` (`local_only`, `hosted_open_weight`, or `any_hosted`) and `allow_training_discounts` (bool). Harn checks the resolved route before live transport and records the governing rule plus catalog evidence in the data-controls receipt. See [Inference destination boundaries](providers.md#inference-destination-boundaries). |
 
 Each system fragment has `{content, title?, position?: "before"|"after",
 enabled?}`. Use `system_before`, `system_after`, and `with_system_fragments`
