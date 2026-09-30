@@ -734,6 +734,28 @@ impl AnthropicProvider {
         if let Some(ref stop) = opts.stop {
             body["stop_sequences"] = serde_json::json!(stop);
         }
+        // These fields have no Anthropic lowering in normal calls. A negative
+        // contract probe must send its selected field so an unrelated successful
+        // request cannot masquerade as provider acceptance of that option.
+        use crate::llm::capabilities::PortableOption;
+        match opts.provider_contract_probe {
+            Some(PortableOption::Seed) => {
+                if let Some(value) = opts.seed {
+                    body["seed"] = serde_json::json!(value);
+                }
+            }
+            Some(PortableOption::FrequencyPenalty) => {
+                if let Some(value) = opts.frequency_penalty {
+                    body["frequency_penalty"] = serde_json::json!(value);
+                }
+            }
+            Some(PortableOption::PresencePenalty) => {
+                if let Some(value) = opts.presence_penalty {
+                    body["presence_penalty"] = serde_json::json!(value);
+                }
+            }
+            _ => {}
+        }
         crate::llm::prompt_cache::apply_prompt_cache_breakpoint(
             &mut body,
             opts.cache,
