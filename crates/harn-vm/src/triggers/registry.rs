@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::{cell::RefCell, path::PathBuf};
 
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -398,6 +397,7 @@ pub enum TriggerDispatchOutcome {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum TriggerRegistryError {
     DuplicateId(String),
     InvalidSpec(String),

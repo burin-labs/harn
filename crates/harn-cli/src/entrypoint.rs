@@ -1039,6 +1039,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         | Command::DumpPortableBenchmarkSchema(_)
         | Command::DumpPromptGrammar(_)
         | Command::DumpTriggerQuickref(_)
+        | Command::DumpCliSurface(_)
         | Command::DumpConnectorMatrix(_)
         | Command::DumpProtocolArtifacts(_)
         | Command::ConnectorSchemaCodegen(_)

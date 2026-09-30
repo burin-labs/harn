@@ -6,6 +6,7 @@ pub const EXECUTION_EVIDENCE_SCHEMA_VERSION: u32 = 1;
 
 /// A structural violation at an execution-evidence trust boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum ExecutionEvidenceValidationError {
     #[error("execution evidence must use schema version {EXECUTION_EVIDENCE_SCHEMA_VERSION}")]
     UnsupportedSchema,

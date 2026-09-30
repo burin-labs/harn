@@ -72,6 +72,7 @@ const VAR_LENGTH_MAX_DEPTH: u32 = 4;
 /// variant carries a free-text message identifying the offending token
 /// or position.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum CypherError {
     /// Tokenizer reached an unexpected character.
     LexError(String),

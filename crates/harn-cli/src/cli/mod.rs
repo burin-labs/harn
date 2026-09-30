@@ -119,9 +119,9 @@ pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
 pub(crate) use doctor::{DoctorArgs, DoctorCommand};
 pub(crate) use dump::{
-    ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs,
-    DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs,
-    DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
+    ConnectorSchemaCodegenArgs, DumpCliSurfaceArgs, DumpConnectorMatrixArgs,
+    DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs,
+    DumpPromptGrammarArgs, DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
@@ -619,6 +619,12 @@ SCRIPTING
     /// `make gen-trigger-quickref` target.
     #[command(hide = true, name = "dump-trigger-quickref")]
     DumpTriggerQuickref(DumpTriggerQuickrefArgs),
+    /// Regenerate spec/cli-surface.txt from the live Clap parser.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via the `make gen-cli-surface`
+    /// target.
+    #[command(hide = true, name = "dump-cli-surface")]
+    DumpCliSurface(DumpCliSurfaceArgs),
     /// Regenerate docs/src/connectors/parity-matrix.md from connector package manifests.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

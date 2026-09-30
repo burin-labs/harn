@@ -1,3 +1,4 @@
+import { CompletionPrecheckConfig } from "std/agent/completion_precheck"
 import { AgentStallCheckpoint } from "std/agent/stall_types"
 // Canonical declarations for the typed agent-loop option surface.
 // `std/agent/options` is the public facade and re-exports these aliases.
@@ -273,6 +274,7 @@ pub type JudgeConfig = {
   operation_timeout_ms?: int,
   deadline_reserve_ms?: int,
   requirement_contract?: CompletionRequirementContract,
+  precheck?: CompletionPrecheckConfig,
   cadence?: {every?: int, when?: any, max_invocations?: int, min_iterations_before_first?: int},
 }
 

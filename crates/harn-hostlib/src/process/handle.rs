@@ -276,6 +276,7 @@ pub trait ProcessSpawner: Send + Sync {
 /// `HostlibError::InvalidParameter` at the call site so the script-side
 /// surface stays unchanged.
 #[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ProcessError {
     /// `argv` was empty or otherwise malformed.
     #[error("invalid argv: {0}")]

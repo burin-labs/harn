@@ -474,6 +474,7 @@ impl PartialEq for PackageExecutionGuard {
 impl Eq for PackageExecutionGuard {}
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PackageExecutionError {
     Io {
         operation: &'static str,

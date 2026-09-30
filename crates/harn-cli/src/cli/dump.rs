@@ -59,6 +59,18 @@ pub(crate) struct DumpTriggerQuickrefArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct DumpCliSurfaceArgs {
+    /// Path to the generated CLI surface listing (relative to the repo root).
+    #[arg(long, default_value = "spec/cli-surface.txt")]
+    pub output: String,
+    /// Verify the on-disk listing matches the live parser; exit non-zero if
+    /// stale. Used by CI so a removed or renamed command, flag, or alias is
+    /// visible in the diff that removes it.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct DumpConnectorMatrixArgs {
     /// Path to the generated connector parity matrix page (relative to the repo root).
     #[arg(long, default_value = "docs/src/connectors/parity-matrix.md")]

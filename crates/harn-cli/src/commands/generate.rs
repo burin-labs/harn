@@ -36,6 +36,9 @@ pub(crate) fn dispatch(command: Command) {
         Command::DumpTriggerQuickref(args) => {
             commands::dump_trigger_quickref::run(&args.output, args.check);
         }
+        Command::DumpCliSurface(args) => {
+            commands::argument_schema::dump_surface(&args.output, args.check);
+        }
         Command::DumpConnectorMatrix(args) => {
             commands::check::connector_matrix::run_docs(&args.output, &args.sources, args.check);
         }

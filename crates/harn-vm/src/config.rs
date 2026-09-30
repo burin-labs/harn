@@ -490,6 +490,7 @@ pub struct ResolvedConfig {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ConfigError {
     ParseToml { source: String, message: String },
     ParseJson { source: String, message: String },

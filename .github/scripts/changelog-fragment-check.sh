@@ -37,36 +37,14 @@ changed_files=$(git diff --name-only --no-renames "$merge_base" "$HEAD_SHA")
 
 # Breaking changes carry their migration. Downstream consumers read the
 # folded Breaking section to learn what they must change, so a breaking
-# fragment has to say it: a `Migration:` line followed by what a consumer
-# changes, preferably a before-and-after snippet. No bypass label waives
-# this, and a PR labelled `breaking` must carry such a fragment.
-has_migration() {
-  awk '
-    found { if ($0 ~ /[^[:space:]]/) { body = 1 } next }
-    /^[[:space:]]*(-[[:space:]]+)?(\*\*)?Migration:(\*\*)?/ {
-      found = 1
-      rest = $0
-      sub(/^[[:space:]]*(-[[:space:]]+)?(\*\*)?Migration:(\*\*)?/, "", rest)
-      if (rest ~ /[^[:space:]]/) { body = 1 }
-    }
-    END { exit body ? 0 : 1 }
-  '
-}
-breaking_fragments=$(printf '%s\n' "$changed_files" \
-  | grep -E '^changelog\.d/[A-Za-z0-9_-]+\.breaking\.md$' || true)
-breaking_with_migration=0
-for fragment in $breaking_fragments; do
-  # A fragment deleted by this PR has nothing to check.
-  if ! body=$(git show "$HEAD_SHA:$fragment" 2>/dev/null); then
-    continue
-  fi
-  if ! printf '%s\n' "$body" | has_migration; then
-    echo "::error title=Changelog fragment gate::$fragment is a breaking change with no \`Migration:\` section. Say what a downstream consumer changes, preferably as a before-and-after snippet." >&2
-    exit 1
-  fi
-  breaking_with_migration=$((breaking_with_migration + 1))
-done
-if [ "$BREAKING_LABELLED" = "true" ] && [ "$breaking_with_migration" -eq 0 ]; then
+# fragment has to say it (see lib/breaking-fragments.sh, which owns the rule).
+# No bypass label waives this, and a PR labelled `breaking` must carry such a
+# fragment.
+# shellcheck source=.github/scripts/lib/breaking-fragments.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/breaking-fragments.sh"
+declared=$(BREAKING_FRAGMENT_GATE_TITLE="Changelog fragment gate" \
+  declared_breaking_fragments "$merge_base" "$HEAD_SHA")
+if [ "$BREAKING_LABELLED" = "true" ] && [ -z "$declared" ]; then
   echo "::error title=Changelog fragment gate::This PR is labelled \`breaking\` but adds no \`changelog.d/<id>.breaking.md\` fragment with a \`Migration:\` section." >&2
   exit 1
 fi

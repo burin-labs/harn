@@ -271,6 +271,7 @@ struct CanonicalPolicy {
 
 /// Failure surfaced by [`PermissionPolicy::lint`].
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PolicyLintError {
     EmptyPattern { axis: &'static str },
     InvalidGlob { axis: &'static str, pattern: String },

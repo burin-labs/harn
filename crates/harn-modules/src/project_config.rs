@@ -143,6 +143,7 @@ struct RawManifest {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ConfigError {
     Parse {
         path: PathBuf,
