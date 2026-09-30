@@ -290,7 +290,14 @@ pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
         "<directive authority=\"{}\"{}><![CDATA[\n{}\n]]></directive>",
         reminder.authority.as_str(),
         lifetime,
-        reminder.body.replace("]]>", "]]]]><![CDATA[>")
+        // CDATA keeps commands verbatim. Only the envelope's own tags are
+        // escaped, so quoted text inside a body cannot close the real
+        // envelope early or open a second one.
+        reminder
+            .body
+            .replace("]]>", "]]]]><![CDATA[>")
+            .replace("<context-directives", "&lt;context-directives")
+            .replace("</context-directives", "&lt;/context-directives")
     )
 }
 

@@ -2,6 +2,7 @@ fn defang_directive_sentinels(text: &str) -> String {
     text.replace("<context-directives", "&lt;context-directives")
         .replace("</context-directives", "&lt;/context-directives")
         .replace("<directive", "&lt;directive")
+        .replace("</directive", "&lt;/directive")
 }
 
 fn defang_tool_result_value(value: &mut serde_json::Value) {

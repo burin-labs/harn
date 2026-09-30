@@ -341,9 +341,9 @@ reminders and runtime feedback:
 1. explicit `dedupe_key` collisions collapse by authority, then recency;
 2. whitespace-normalized duplicate bodies collapse by authority, then recency;
 3. survivors are ordered `contract`, `corrective`, then `advisory`;
-4. every survivor renders as `<directive authority="...">...</directive>` in
-   one `<context-directives speaker="...">` envelope; finite directives also
-   render their `ttl_turns` contract on that element;
+4. every survivor renders as `<directive authority="..."><![CDATA[...]]></directive>`
+   in one `<context-directives speaker="..." nonce="...">` envelope; finite
+   directives also render their `ttl_turns` contract on that element;
 5. the envelope becomes one new trailing user turn and never edits an existing
    message.
 
@@ -355,6 +355,18 @@ is the exception because a durable historical message must tell the model when
 its instruction stopped applying. The envelope's `speaker` attribute is the
 other: it says whether harness machinery or the person wrote the block, so the
 model can act on a harness directive without answering it back to the reader.
+
+The `nonce` attribute authenticates the envelope. Each agent session gets one
+nonce, stored in its transcript metadata, and the assembled system prompt
+declares it, including when the caller replaces the system prompt. Only an
+envelope carrying that nonce is authoritative. Tool output cannot reach the
+system prompt, so a copied envelope in a file or command result cannot learn
+the value. Before any provider request, Harn also escapes `<context-directives`,
+`</context-directives`, `<directive`, and `</directive` inside tool results, so
+a forged block never looks structural. Durable history keeps the original tool
+bytes. Directive bodies are CDATA, so a command such as `make build && make
+test` reaches the model verbatim; only the envelope's own tags are escaped
+inside a body.
 `role_hint` selects that speaker (`user_block` means the person, every other
 hint means the harness) but does not create a second rendering path.
 
