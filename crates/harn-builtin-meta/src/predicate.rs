@@ -41,9 +41,13 @@ const EVIDENCE_KIND: Ty = Ty::Union(&[
 
 // -- Questions ---------------------------------------------------------------
 
+pub const BOOLEAN_CRITERIA: Ty =
+    Ty::Shape(&[Field::new("true", STRING), Field::new("false", STRING)]);
+
 pub const BOOLEAN_QUESTION: Ty = Ty::Shape(&[
     Field::new("kind", Ty::LitString("boolean")),
     Field::new("instructions", STRING),
+    Field::optional("criteria", BOOLEAN_CRITERIA),
 ]);
 
 pub const CHOICE_QUESTION: Ty = Ty::Shape(&[

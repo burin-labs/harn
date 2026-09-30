@@ -97,6 +97,43 @@ fn question_identity_includes_rubric_descriptions() {
     );
 }
 
+#[test]
+fn boolean_criteria_are_closed_and_change_the_cache_identity() {
+    let plain = questions_value();
+    let make = |criteria| {
+        VmValue::dict(vec![(
+            "safe",
+            VmValue::dict(vec![
+                ("kind", VmValue::string("boolean")),
+                ("instructions", VmValue::string("Is this safe to run?")),
+                ("criteria", criteria),
+            ]),
+        )])
+    };
+    let rubric = make(VmValue::dict(vec![
+        ("true", VmValue::string("Only reads")),
+        ("false", VmValue::string("Mutates files")),
+    ]));
+    let plain = QuestionSet::from_value(&plain).unwrap();
+    let rubric = QuestionSet::from_value(&rubric).unwrap();
+    assert_ne!(
+        super::question_set_digest(&plain),
+        super::question_set_digest(&rubric)
+    );
+    assert!(
+        matches!(&rubric.questions[0].body, QuestionBody::BooleanWithCriteria(criteria) if criteria.yes == "Only reads" && criteria.no == "Mutates files")
+    );
+    for criteria in [
+        VmValue::dict(vec![("true", VmValue::string("Only reads"))]),
+        VmValue::dict(vec![
+            ("true", VmValue::string("Only reads")),
+            ("false", VmValue::Int(1)),
+        ]),
+    ] {
+        assert!(QuestionSet::from_value(&make(criteria)).is_err());
+    }
+}
+
 fn distribution(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
     pairs
         .iter()
@@ -671,6 +708,53 @@ fn an_answer_below_the_threshold_is_low_confidence_not_a_verdict() {
     );
     assert_eq!(kind, "low_confidence");
     assert_eq!(requests, 1);
+}
+
+#[test]
+fn a_thirteen_question_limit_refuses_fourteen_before_dispatch() {
+    for count in [13, 14] {
+        let questions = VmValue::dict(
+            (0..count)
+                .map(|index| {
+                    (
+                        format!("m{index}"),
+                        VmValue::dict(vec![
+                            ("kind", VmValue::string("boolean")),
+                            (
+                                "instructions",
+                                VmValue::string(format!("Keep message {index}?")),
+                            ),
+                        ]),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        let mut response = answering(0.95);
+        let answer = response.answers.remove("safe").unwrap();
+        response.answers = (0..count)
+            .map(|index| (format!("m{index}"), answer.clone()))
+            .collect();
+        let (outcome, receipt, requests) = run_on(
+            contract(4096, Some(13)),
+            VmValue::string("shared state"),
+            questions,
+            policy_value(0.5, 1.0),
+            vec![Ok(response)],
+        );
+        assert_eq!(receipt.questions.len(), count);
+        if count == 13 {
+            assert_eq!(outcome.kind, "answered");
+            assert_eq!(
+                requests, 1,
+                "positive control reaches the same dispatch counter"
+            );
+        } else {
+            assert_eq!(outcome.kind, "question_invalid");
+            assert_eq!(field(&outcome.into_value(), "reason"), "too_many_questions");
+            assert_eq!(requests, 0);
+            assert_eq!(receipt.physical_attempts, 0);
+        }
+    }
 }
 
 #[test]

@@ -74,7 +74,7 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
     for question in &request.questions.questions {
         let mut value = json!({"instructions": question.instructions});
         match &question.body {
-            QuestionBody::Boolean => {
+            QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_) => {
                 value["type"] = json!(if request.contract.protocol
                     == DecisionProtocol::VercelEvaluate
                 {
@@ -82,6 +82,9 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
                 } else {
                     "noul"
                 });
+                if let QuestionBody::BooleanWithCriteria(criteria) = &question.body {
+                    value["criteria"] = json!(criteria);
+                }
             }
             QuestionBody::Choice(criteria) => {
                 value["type"] = json!("choice");
@@ -238,7 +241,7 @@ pub(super) fn read_response(
         };
         let kind = value.get("type").and_then(Value::as_str);
         let raw = match &question.body {
-            QuestionBody::Boolean => {
+            QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_) => {
                 let vercel = request.contract.protocol == DecisionProtocol::VercelEvaluate;
                 if kind != Some(if vercel { "boolean" } else { "noul" }) {
                     return Err(malformed("boolean answer kind mismatch"));

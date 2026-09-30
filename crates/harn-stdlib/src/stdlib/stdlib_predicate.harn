@@ -28,7 +28,9 @@
  * A model answer never outranks a deterministic rule, and `confidence` is
  * uncalibrated until a calibration report says otherwise.
  */
-pub type BooleanQuestion = {kind: "boolean", instructions: string}
+pub type BooleanCriteria = {true: string, false: string}
+
+pub type BooleanQuestion = {kind: "boolean", instructions: string, criteria?: BooleanCriteria}
 
 pub type ChoiceQuestion = {kind: "choice", instructions: string, criteria: dict<string, string>}
 
@@ -223,7 +225,10 @@ pub type EvaluationOutcome = {
  * @effects: []
  * @errors: []
  */
-pub fn boolean(instructions: string) -> BooleanQuestion {
+pub fn boolean(instructions: string, criteria: BooleanCriteria? = nil) -> BooleanQuestion {
+  if criteria != nil {
+    return {kind: "boolean", instructions: instructions, criteria: criteria}
+  }
   return {kind: "boolean", instructions: instructions}
 }
 

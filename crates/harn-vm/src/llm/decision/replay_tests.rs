@@ -130,22 +130,49 @@ fn typed_fixture_receipt_reports_no_dispatch_or_invented_live_source() {
     let backend = Arc::new(MockDecisionBackend::scripted(vec![]));
     let _backend = install_backend(backend.clone());
     let _route = install_route("mock", "fixture", contract(4096, None));
-    let arguments = args("state");
-    let fixture = EvaluationFixture {
+    let mut arguments = args("state");
+    arguments[2] = VmValue::dict(
+        (0..13)
+            .map(|index| {
+                (
+                    format!("m{index}"),
+                    VmValue::dict(vec![
+                        ("kind", VmValue::string("boolean")),
+                        (
+                            "instructions",
+                            VmValue::string(format!("Keep message {index}?")),
+                        ),
+                    ]),
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+    let fixture = || EvaluationFixture {
         site_id: "replay.site".into(),
         state: crate::llm::helpers::vm_value_to_json(&arguments[1]),
         questions: crate::llm::helpers::vm_value_to_json(&arguments[2]),
         policy: crate::llm::helpers::vm_value_to_json(&arguments[3]),
-        answers: BTreeMap::from([(
-            "safe".into(),
-            FixtureAnswer::Boolean {
-                verdict: true,
-                confidence: 0.95,
-                evidence: "declared by the test".into(),
-            },
-        )]),
+        answers: (0..13)
+            .map(|index| {
+                (
+                    format!("m{index}"),
+                    FixtureAnswer::Boolean {
+                        verdict: true,
+                        confidence: 0.95,
+                        evidence: "declared by the test".into(),
+                    },
+                )
+            })
+            .collect(),
     };
-    let scope = EvaluationReplayScope::fixtures(vec![fixture]).unwrap();
+    let mut incomplete = fixture();
+    incomplete.answers.remove("m12");
+    let mismatch = EvaluationReplayScope::fixtures(vec![incomplete])
+        .err()
+        .expect("12 answers cannot serve 13 declared questions");
+    assert!(mismatch.to_string().contains("evaluation replay mismatch"));
+    assert!(mismatch.to_string().contains("12 answers for 13 questions"));
+    let scope = EvaluationReplayScope::fixtures(vec![fixture()]).unwrap();
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -161,6 +188,7 @@ fn typed_fixture_receipt_reports_no_dispatch_or_invented_live_source() {
             .unwrap();
             scope.finish().unwrap();
             assert_eq!(result.0.kind, "answered");
+            assert_eq!(result.3.questions.len(), 13);
             assert_eq!(result.3.source, EvaluationSource::Fixture);
             assert!(result.3.reused_from.is_none());
             assert_eq!(result.3.physical_attempts, 0);

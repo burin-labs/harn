@@ -2,7 +2,7 @@ use super::*;
 use crate::llm::decision::{
     answer::Answer,
     contract::decision_contract_for_route,
-    question::{Question, QuestionSet},
+    question::{BooleanCriteria, Question, QuestionSet},
 };
 
 #[test]
@@ -135,6 +135,20 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
             );
             tape = recorded["response"].clone();
         }
+        let mut rubric_questions = questions.clone();
+        rubric_questions.questions[0].body = QuestionBody::BooleanWithCriteria(BooleanCriteria {
+            yes: "Only reads".into(),
+            no: "Mutates files".into(),
+        });
+        let rubric_request = DecisionRequest {
+            questions: &rubric_questions,
+            ..request
+        };
+        let rubric_body = request_body(&rubric_request).unwrap();
+        assert_eq!(
+            rubric_body["questions"]["safe"]["criteria"],
+            json!({"true":"Only reads", "false":"Mutates files"})
+        );
         let response = read_response(&request, &tape, None).unwrap();
         assert_eq!(
             response.input_tokens,
