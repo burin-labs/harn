@@ -363,8 +363,98 @@ pub fn command_workspace_effect_value(ctx: &VmValue) -> Result<VmValue, VmError>
 mod tests {
     use super::*;
 
+    #[test]
+    fn powershell_sed_reads_resolve() {
+        for command in [
+            "sed -n '1,105p' src/lib.rs",
+            "sed -n -e 10p -e '$p' notes.md",
+            "sed -n '5,$p;$=' a.txt",
+            "sed 3q README.md",
+            "git status --short; sed -n '1,105p' src/lib.rs; rg -n 'raw_tool_calls|tool_calls' src/*.rs | head -90",
+        ] {
+            let ctx = serde_json::json!({"request": {
+                "command": command,
+                "shell": {"platform": "windows"},
+            }});
+            let analysis = security_command_analysis(&ctx);
+            let scan = command_risk_scan_json(&ctx, None);
+            assert!(!analysis.unresolved, "{command}: {analysis:?}");
+            assert_eq!(scan["recommended_action"], "allow", "{command}: {scan}");
+            assert_eq!(command_workspace_effect_json(&ctx)["effect"], "read_effect", "{command}");
+        }
+    }
+
+    #[test]
+    fn powershell_sed_writers_and_dynamic_scripts_are_not_reads() {
+        for command in [
+            "sed -i -n '1,105p' src/lib.rs",
+            "sed -n '1w out.txt' src/lib.rs",
+            "sed '1e date' src/lib.rs",
+            "sed -n $script src/lib.rs",
+            "sed -n '1,105p' src/lib.rs > out.txt",
+            "sed -n '1,105p' src/lib.rs; some-unknown-tool",
+        ] {
+            let ctx = serde_json::json!({"request": {
+                "command": command,
+                "shell": {"platform": "windows"},
+            }});
+            assert_ne!(
+                command_workspace_effect_json(&ctx)["effect"],
+                "read_effect",
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn cmd_preserves_single_quotes_in_sed_scripts() {
+        let ctx = |command| {
+            serde_json::json!({"request": {
+                "command": command,
+                "shell": {"id": "cmd", "platform": "windows"},
+            }})
+        };
+        let quoted = ctx("sed -n '1,105p' src/lib.rs");
+        let analysis = security_command_analysis(&quoted);
+        assert!(!analysis.unresolved);
+        assert_eq!(analysis.stages[0].argv[2], "'1,105p'");
+        assert_eq!(
+            command_risk_scan_json(&quoted, None)["recommended_action"],
+            "allow"
+        );
+        assert_eq!(command_workspace_effect_json(&quoted)["effect"], "unknown");
+        assert_eq!(
+            command_workspace_effect_json(&ctx("sed -n \"1,105p\" src/lib.rs"))["effect"],
+            "read_effect"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_powershell_pipeline_chaining_stays_unresolved() {
+        // The inbox PowerShell 5.1 parser rejects && with InvalidEndOfLine.
+        // Tree-sitter accepts it, but must not override the native refusal.
+        let ctx = serde_json::json!({"request": {
+            "command": "git status --short && sed -n '1,105p' src/lib.rs",
+            "shell": {"id": "powershell", "platform": "windows"},
+        }});
+        assert!(security_command_analysis(&ctx).unresolved);
+        let scan = command_risk_scan_json(&ctx, None);
+        assert_eq!(scan["recommended_action"], "require_approval");
+        assert_eq!(
+            scan["risk_labels"],
+            serde_json::json!(["execution_semantics_unresolved"])
+        );
+        assert_eq!(command_workspace_effect_json(&ctx)["effect"], "unknown");
+    }
+
     fn effect(command: &str) -> String {
-        let ctx = serde_json::json!({ "request": { "command": command } });
+        // These fixtures use POSIX quoting and operators. The Windows host
+        // default can be cmd via COMSPEC, which preserves single quotes.
+        let ctx = serde_json::json!({ "request": {
+            "command": command,
+            "shell": {"id": "sh", "platform": "unix"},
+        } });
         command_workspace_effect_json(&ctx)["effect"]
             .as_str()
             .unwrap()
@@ -428,10 +518,7 @@ mod tests {
         }
     }
 
-    /// The compound form (git, sed, rg piped to head) classifies as a read on
-    /// POSIX hosts. On Windows the classifier reports it as unknown, so this
-    /// case is POSIX-only until the Windows shell path is covered.
-    #[cfg(unix)]
+    /// POSIX compound syntax is analyzed identically on every host.
     #[test]
     fn a_compound_read_with_a_sed_print_is_a_read() {
         let command = "git status --short && sed -n '1,105p' scripts/lib/eval-trial-record.harn && rg -n 'raw_tool_calls|tool_calls' scripts/lib/eval-*.harn | head -90";
