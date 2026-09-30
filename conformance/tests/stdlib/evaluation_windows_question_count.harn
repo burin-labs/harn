@@ -1,0 +1,31 @@
+import { evaluation_windows } from "std/predicate"
+
+pipeline test(harness: Harness) {
+  const items = [0, 1, 2, 3, 4, 5, 6]
+  const unlimited = evaluation_windows(harness.llm, items, {budget_tokens: 10000})
+  assert_eq(len(unlimited.windows), 1)
+  const bounded = evaluation_windows(
+    harness.llm,
+    items,
+    {budget_tokens: 10000, max_items: 3, overlap_items: 1},
+  )
+  assert_eq(len(bounded.windows), 3)
+  let next = 0
+  for window in bounded.windows {
+    assert(window.item_count <= 3, "route question ceiling applies even to tiny messages")
+    assert_eq(window.primary_first_index, next)
+    next = window.last_index + 1
+  }
+  assert_eq(next, len(items))
+  for limit in [0, -1, 1] {
+    const invalid = try {
+      evaluation_windows(
+        harness.llm,
+        items,
+        {budget_tokens: 10000, max_items: limit, overlap_items: 1},
+      )
+    }
+    assert(is_err(invalid), "invalid question count or non-progressing overlap refuses")
+  }
+  harness.stdio.println("bounded question windows ok")
+}

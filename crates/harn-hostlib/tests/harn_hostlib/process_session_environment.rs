@@ -120,6 +120,7 @@ fn env_grant(name: &str) -> GrantSpec {
         },
         expose_as_env: Some(name.to_string()),
         for_command: None,
+        expose_to: Default::default(),
     }
 }
 

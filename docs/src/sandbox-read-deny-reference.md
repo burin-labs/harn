@@ -77,10 +77,12 @@ A host may add to this list through `read_deny_roots`. It cannot remove from it.
 | --- | --- | --- |
 | macOS | `(deny file-read* (subpath …))` emitted after every allow | yes |
 | Linux | Landlock grants the siblings that do not lead to the denial | yes |
-| Windows | AppContainer | not yet |
+| Windows | none: Windows runs with no OS sandbox confinement | no |
 | OpenBSD | `unveil` | not yet |
 
-Windows and OpenBSD do not refuse the spawn either. The default denylist is
+Only an `os_hardened` spawn refuses on Windows, as it does for every
+dimension the enforcement table marks not enforced there. Other profiles on
+Windows and OpenBSD do not refuse the spawn. The default denylist is
 never empty, so refusing on an unsupporting backend would refuse every spawn on
 that platform. The term is simply unenforced there, and saying so is worth more
 than a claim the code does not honor.
@@ -138,6 +140,6 @@ agent-handler denial shape (`gate: "process_sandbox"`, `retryable: false`). Its
 `sandbox.denial_reporting` field is always present. `inferred_only` means a
 null `denial` is not evidence that every child operation was allowed;
 `backend_unavailable` and `not_enforced` name the other two coverage states.
-Current Landlock, seatbelt, and AppContainer integrations cannot report a
+Current Landlock and seatbelt integrations cannot report a
 resource or operation directly, so inferred records use `resource: null` and
 `operation: "unknown"` rather than parsing tool- or locale-specific prose.

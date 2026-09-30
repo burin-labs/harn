@@ -1,6 +1,13 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "type_of(opts?.compaction)",
+    "owner": "__compact_options",
+    "evidence": "Shape guard on the already registered compaction option before reading its registered classify field; no additional policy value."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "opts?._turn_end_judge_due",
     "owner": "__completion_policy_plan",
@@ -127,23 +134,23 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
     "expression": "turn_opts?._iteration",
-    "owner": "__dispatch_tool_calls",
+    "owner": "__loop_dispatch_options",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
     "expression": "turn_opts?._stop_reason",
-    "owner": "__dispatch_tool_calls",
+    "owner": "__loop_dispatch_options",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
     "expression": "turn_opts?._tool_batch_dependency_state",
-    "owner": "__dispatch_tool_calls",
+    "owner": "__loop_dispatch_options",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
   },
   {

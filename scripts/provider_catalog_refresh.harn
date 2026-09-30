@@ -39,6 +39,55 @@ const CAPABILITY_KEYS = [
   "thinking_modes",
 ]
 
+pub type RefreshCoverage = {
+  status: "complete" | "partial" | "unmeasured",
+  adapters_total: int,
+  adapters_ok: int,
+  adapters_empty: int,
+  adapters_skipped: int,
+  adapters_error: int,
+  models_observed: int,
+}
+
+pub fn refresh_coverage(runs: list<dict>, observed: int) -> RefreshCoverage {
+  let ok = 0
+  let empty = 0
+  let skipped = 0
+  let errors = 0
+  for run in runs {
+    if run.status == "ok" {
+      if run.observation_count == 0 {
+        empty = empty + 1
+      } else {
+        ok = ok + 1
+      }
+    } else if run.status == "skipped" {
+      skipped = skipped + 1
+    } else {
+      errors = errors + 1
+    }
+  }
+  const status = if observed == 0 {
+    "unmeasured"
+  } else if skipped > 0 || errors > 0 || empty > 0 {
+    "partial"
+  } else {
+    "complete"
+  }
+  return schema_expect(
+    {
+      status: status,
+      adapters_total: len(runs),
+      adapters_ok: ok,
+      adapters_empty: empty,
+      adapters_skipped: skipped,
+      adapters_error: errors,
+      models_observed: observed,
+    },
+    schema_of(RefreshCoverage),
+  )
+}
+
 fn __confidence_rank(value: any) {
   return CONFIDENCE_RANK[value] ?? 0
 }
@@ -470,7 +519,10 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
   for model in catalog?.models ?? [] {
     const route = model.provider + ":" + model.id
     const deprecated = model?.deprecated ?? (model?.deprecation?.status == "deprecated")
-    if !deprecated && !seen[route] && observed_providers[model.provider] {
+    // A chat-model index cannot enumerate decision-only routes.
+    const operations = model?.operations
+    const chat_route = operations == nil || operations.contains("text_generation")
+    if chat_route && !deprecated && !seen[route] && observed_providers[model.provider] {
       removed = removed + [model]
     }
   }

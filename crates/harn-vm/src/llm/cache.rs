@@ -252,7 +252,7 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let options = super::cost_route::merge_context_options(explicit_options);
 
     let provider = super::helpers::vm_resolve_provider(&options);
-    let model = super::helpers::vm_resolve_model(&options, &provider);
+    let model = super::helpers::vm_resolve_model(&options, &provider)?;
     let model_defaults = crate::llm_config::model_params_for_route(&provider, &model);
     let default_float =
         |key: &str| -> Option<f64> { model_defaults.get(key).and_then(|v| v.as_float()) };

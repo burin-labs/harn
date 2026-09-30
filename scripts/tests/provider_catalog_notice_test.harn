@@ -192,6 +192,70 @@ pipeline test_carried_update_prepares_patch(harness: Harness, task: unknown) {
 }
 
 @test
+pipeline test_live_extraction_uses_provider_catalog_identity(harness: Harness, task: unknown) {
+  const input = fixture(harness.fs, "carried-update")
+  const rows = catalog_model_context(BASE_CATALOG, input.notice)
+  assert_eq(len(rows), 1)
+  assert_eq(rows[0].id, input.extraction.candidate.model_id)
+  assert_eq(rows[0].pricing.input_per_mtok, input.extraction.candidate.old_value)
+}
+
+@test
+pipeline test_unresolved_existing_model_cannot_become_addition(harness: Harness, task: unknown) {
+  const input = fixture(harness.fs, "carried-update")
+  const candidate = input.extraction.candidate + {model_id: "Claude Haiku"}
+  const plan = plan_notice(
+    harness,
+    input.notice,
+    {classification: "candidate", candidate: candidate},
+    BASE_CATALOG,
+  )
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert_eq(plan.receipt.change_kind, "price")
+  assert_eq(plan.patch, nil)
+}
+
+@test
+pipeline test_existing_new_price_on_wrong_model_cannot_hide_identity_error(
+  harness: Harness,
+  task: unknown,
+) {
+  const input = fixture(harness.fs, "carried-update")
+  const catalog = BASE_CATALOG
+    + {
+      models: BASE_CATALOG.models
+        + [
+          {
+            provider: "anthropic",
+            id: "claude-3-5-haiku-20241022",
+            name: "Claude Haiku 3.5",
+            pricing: {input_per_mtok: 0.8, output_per_mtok: 4.0},
+          },
+        ],
+    }
+  const candidate = input.extraction.candidate + {model_id: "claude-3-5-haiku-20241022"}
+  const plan = plan_notice(
+    harness,
+    input.notice,
+    {classification: "candidate", candidate: candidate},
+    catalog,
+  )
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert_eq(plan.patch, nil)
+  const exact_notice = input.notice
+    + {text: input.notice.text + " Model id claude-3-5-haiku-20241022."}
+  assert_eq(
+    plan_notice(
+      harness,
+      exact_notice,
+      {classification: "candidate", candidate: candidate},
+      catalog,
+    ).receipt.disposition,
+    "no_op",
+  )
+}
+
+@test
 pipeline test_irrelevant_notice_records_no_op(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "irrelevant")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
@@ -205,6 +269,30 @@ pipeline test_new_model_on_supported_provider_is_incomplete_add(harness: Harness
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "incomplete_add")
   assert_eq(len(plan.receipt.unresolved_verification), 4)
+}
+
+@test
+pipeline test_model_addition_notice_is_reviewable_without_a_release_date(
+  harness: Harness,
+  task: unknown,
+) {
+  const notice = fixture(harness.fs, "new-model").notice
+  const candidate = {
+    kind: "addition",
+    provider: "anthropic",
+    model_id: "claude-haiku-next",
+    evidence: "Claude Haiku Next launches.",
+  }
+  const extraction = {classification: "candidate", candidate: candidate}
+  const planned = plan_notice(harness, notice, extraction, BASE_CATALOG)
+  assert_eq(planned.receipt.disposition, "incomplete_add")
+  assert_eq(planned.receipt.model_id, candidate.model_id)
+  assert_eq(planned.receipt.effective_date, nil)
+  const existing = BASE_CATALOG
+    + {models: BASE_CATALOG.models + [{provider: "anthropic", id: candidate.model_id}]}
+  const replay = plan_notice(harness, notice, extraction, existing)
+  assert_eq(replay.receipt.disposition, "no_op")
+  assert_eq(replay.receipt.reason, "model is already in the catalog")
 }
 
 @test

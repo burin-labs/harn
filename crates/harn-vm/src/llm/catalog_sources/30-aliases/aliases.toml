@@ -630,13 +630,13 @@ provider = "openrouter"
 id = "z-ai/glm-5.3-flash"
 provider = "openrouter"
 
-# DeepSeek V4 direct API aliases.
+# DeepSeek direct API aliases. The legacy V4 Flash ID now serves V4.1 Flash.
 [aliases.deepseek]
-id = "deepseek-v4-flash"
+id = "deepseek-flash"
 provider = "deepseek"
 
 [aliases."deepseek-flash"]
-id = "deepseek-v4-flash"
+id = "deepseek-flash"
 provider = "deepseek"
 
 [aliases."deepseek-pro"]

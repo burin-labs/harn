@@ -610,7 +610,7 @@ prune_root() {
 # trip that check and report a correct run as an error.
 forget_kept_path() {
   local drop="$1" keptp rebuilt=()
-  for keptp in "${kept_paths[@]}"; do
+  for keptp in ${kept_paths[@]+"${kept_paths[@]}"}; do
     [ "$keptp" = "$drop" ] && continue
     rebuilt+=("$keptp")
   done
@@ -621,7 +621,9 @@ forget_kept_path() {
 
 remember_kept_path() {
   local path="$1" keptp
-  for keptp in "${kept_paths[@]}"; do
+  # Bash 3.2 treats an empty "${array[@]}" as unbound under `set -u`, and the
+  # first kept path of a run arrives here with the array still empty.
+  for keptp in ${kept_paths[@]+"${kept_paths[@]}"}; do
     [ "$keptp" = "$path" ] && return 0
   done
   kept=$((kept + 1))
@@ -693,6 +695,15 @@ enforce_size_ceiling() {
   fi
 }
 
+entry_holds_git_repository() {
+  local hit status
+  hit="$(find "$1" \( -name .git -o \( -type d -path '*/objects/pack' \) \) -print -quit 2>/dev/null)"
+  status=$?
+  [ -n "$hit" ] && return 0
+  [ "$status" -eq 0 ] || return 0
+  return 1
+}
+
 # Remove one entry, or report what would happen under --dry-run. Both passes
 # route through here so the path validation and the read-back are written once
 # and cannot drift apart.
@@ -706,6 +717,18 @@ remove_entry() {
       unmeasured_entries=$((unmeasured_entries + 1))
       kib=""
     fi
+  fi
+  # Entries are Cargo build output, which never holds a git repository. A clone
+  # other clones borrow objects from (`git clone --reference`) breaks all of
+  # them when it is deleted, which happened on a fleet host on 2026-09-27, so
+  # an entry holding a `.git` or a bare object store is refused whatever rule
+  # selected it. An entry the census cannot fully read is refused too: the
+  # absence of a repository is then unproven.
+  if entry_holds_git_repository "$d"; then
+    echo "refusing to remove $reason: $name holds a git repository or could not be fully read" >&2
+    remember_kept_path "$d"
+    pending_candidates=$((pending_candidates + 1))
+    return 0
   fi
   if [ "$dry_run" -eq 1 ]; then
     echo "would remove $reason: $name (${sz:-?})"

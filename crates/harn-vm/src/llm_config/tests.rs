@@ -45,11 +45,22 @@ fn auto_select_prefers_local_provider_without_cloud_credentials() {
     // regardless of ambient cloud API keys: no preferred/credentialed cloud
     // provider is present, so the local fallback wins deterministically.
     let config = parse_config_toml(
-            "[providers.ollama]\nbase_url = \"http://localhost:11434\"\nchat_endpoint = \"/v1/chat/completions\"\n",
+            "[providers.ollama]\nbase_url = \"http://localhost:11434\"\nchat_endpoint = \"/v1/chat/completions\"\nchat_api_adapter = \"ollama_openai_compat\"\n",
         )
         .expect("config parses");
     assert!(provider_is_local(config.providers.get("ollama").unwrap()));
+    assert_eq!(
+        config.providers["ollama"].chat_api_adapter,
+        Some(ChatApiAdapter::OllamaOpenAiCompat)
+    );
     assert_eq!(auto_select_provider(&config), "ollama");
+}
+
+#[test]
+fn chat_api_adapter_rejects_unknown_variant() {
+    let error = parse_config_toml("[providers.ollama]\nchat_api_adapter = \"ollama_v2\"\n")
+        .expect_err("chat adapter variants are closed");
+    assert!(error.to_string().contains("ollama_v2"));
 }
 
 #[test]
@@ -534,6 +545,21 @@ fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
     assert!(capabilities.reasoning_none_supported);
     assert!(capabilities.presence_penalty_supported);
     assert!(!capabilities.top_k_supported);
+}
+
+#[test]
+fn deepinfra_v41_flash_resolves_to_the_served_route() {
+    let id = "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash";
+    let row = model_catalog_entry(id).expect("the observed DeepInfra route is catalogued");
+    assert_eq!(row.provider, "deepinfra");
+    assert_eq!(
+        row.wire_model.as_deref(),
+        Some("deepseek-ai/DeepSeek-V4.1-Flash")
+    );
+    let selected = resolve_model_request(id, None).expect("the route resolves");
+    assert_eq!(selected.resolved_provider, "deepinfra");
+    assert_eq!(selected.resolved_model, id);
+    assert!(model_catalog_entry("deepinfra/deepseek-ai/DeepSeek-V4.2-Flash").is_none());
 }
 
 #[test]

@@ -875,9 +875,15 @@ mod scheduler_tests {
         let lower_signal = Arc::clone(&lower_started);
         let lower: Branch = Box::pin(async move {
             lower_signal.store(true, std::sync::atomic::Ordering::SeqCst);
-            while !lower_token.load(std::sync::atomic::Ordering::SeqCst) {
-                std::hint::spin_loop();
-            }
+            // Stay mid-poll, so abort cannot preempt the cleanup error, but
+            // hand this worker's queue to another thread first. A bare spin
+            // can strand the higher branch in this worker's local queue while
+            // the other worker stays parked, and the test hangs (harn#8903).
+            tokio::task::block_in_place(|| {
+                while !lower_token.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::hint::spin_loop();
+                }
+            });
             Err(crate::cancellation::cancelled_error(
                 crate::cancellation::HandlerDispatch::Dispatched,
             ))

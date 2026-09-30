@@ -9,7 +9,9 @@ fn main(harness: Harness) {
   for entry in entries {
     const s = entry.credential_status
     if s != "ok" && s != "missing" && s != "not_required" && s != "deferred"
-      && s != "needs_user_approval" {
+      && s != "needs_user_approval"
+      && s != "region_unconfigured"
+      && s != "credentials_unconfigured" {
       all_valid = false
     }
   }

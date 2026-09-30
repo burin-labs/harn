@@ -134,52 +134,6 @@ pub(super) async fn dispatch_process_exec_after_policy(
         )?),
         None => None,
     };
-    #[cfg(target_os = "windows")]
-    if let Some((policy, profile)) = crate::stdlib::sandbox::active_sandbox_policy() {
-        let launch = ProcessExecLaunch::from_params(params, "process.exec")?;
-        // The resolved policy/profile are owned snapshots. Drop the thread-
-        // local, non-Send override guard before the blocking worker await; the
-        // Windows backend receives the snapshot explicitly.
-        drop(profile_guard);
-        let output = crate::stdlib::sandbox::windows_command_output(
-            tape_program,
-            tape_args,
-            launch.into_process_config(stdin.clone()),
-            policy,
-            profile,
-        )
-        .await
-        .map_err(|error| contextualize_process_error("process.exec", "sandbox", error))?;
-        let exit_code = output.status.code().unwrap_or(-1);
-        if let Some(recording) = tape_recording {
-            recording.finish(&output);
-        }
-        let stdout_utf8_valid = std::str::from_utf8(&output.stdout).is_ok();
-        let stderr_utf8_valid = std::str::from_utf8(&output.stderr).is_ok();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let response = process_exec_response(ProcessExecResponse {
-            pid: None,
-            started_at,
-            started,
-            stdout: &stdout,
-            stderr: &stderr,
-            exit_code,
-            status: "completed",
-            success: output.status.success(),
-            timed_out: false,
-            stdout_utf8_valid,
-            stderr_utf8_valid,
-        });
-        return crate::orchestration::run_command_policy_postflight_with_ctx(
-            ctx,
-            params,
-            response,
-            command_policy_context,
-            command_policy_decisions,
-        )
-        .await;
-    }
     let mut cmd = build_sandboxed_command(params, "process.exec")?;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
     let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
@@ -441,10 +395,8 @@ async fn terminate_process_exec_child(
 /// env/env_mode/env_remove handling.
 ///
 /// The platform-independent normalization lives in [`ProcessExecLaunch`].
-/// This function projects it onto Tokio for `process.spawn` and for
-/// `process.exec` on platforms whose sandbox can decorate a Tokio command.
-/// Windows exec projects the same launch onto `ProcessCommandConfig` because
-/// AppContainer requires the custom output backend.
+/// This function projects it onto Tokio for `process.spawn` and
+/// `process.exec`.
 pub(crate) fn build_sandboxed_command(
     params: &crate::value::DictMap,
     label: &str,
@@ -476,8 +428,8 @@ pub(crate) fn build_sandboxed_command(
 ///
 /// Parsing, cwd confinement, execution-context overlays, caller overrides,
 /// removals, workspace-local paths, and deterministic locale policy happen
-/// once here. Platform launchers are deliberately boring projections of this
-/// value so Windows AppContainer and Tokio-backed hosts cannot drift.
+/// once here, and the Tokio launcher is a deliberately boring projection of
+/// this value.
 struct ProcessExecLaunch {
     program: String,
     args: Vec<String>,
@@ -554,20 +506,6 @@ impl ProcessExecLaunch {
             env_remove,
             closed_env,
         })
-    }
-
-    #[cfg(target_os = "windows")]
-    fn into_process_config(
-        self,
-        stdin: crate::stdlib::sandbox::ProcessStdin,
-    ) -> crate::stdlib::sandbox::ProcessCommandConfig {
-        crate::stdlib::sandbox::ProcessCommandConfig {
-            cwd: self.cwd,
-            env: self.env,
-            env_remove: self.env_remove,
-            stdin,
-            closed_env: self.closed_env,
-        }
     }
 }
 

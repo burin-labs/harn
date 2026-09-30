@@ -11,13 +11,8 @@ pub(crate) fn apply_stream_transport_fields(
     streaming: bool,
     body: &mut Value,
 ) {
-    let caps = crate::llm::capabilities::lookup(provider, model);
-    let dialect =
-        crate::llm::api::DialectContract::new(caps.message_wire_format, caps.live_endpoint_family);
-    let endpoint = crate::llm_config::provider_config(provider)
-        .map(|definition| definition.chat_endpoint)
-        .unwrap_or_default();
-    dialect.apply_stream_transport_fields(body, provider, &endpoint, streaming);
+    crate::llm::api::DialectContract::for_route(provider, model)
+        .apply_stream_transport_fields(body, provider, streaming);
 }
 
 pub(crate) fn aggregate_stream_text(text: &str, _provider: &str) -> Value {

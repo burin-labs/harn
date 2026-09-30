@@ -81,6 +81,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let verify_completion_judge_vetoes = 0
     let feedback_history = {}
     let step_judge_attempts = 0
+    let step_judge_unavailable_count = 0
     let structural_validator_attempts = 0
     let last_turn_parse_dropped = false
     let consecutive_text_only = 0
@@ -783,7 +784,10 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             stall_warning,
             step_judge_attempts,
             remaining_iterations,
+            step_judge_unavailable_count,
           )
+          step_judge_unavailable_count = step_verdict?.unavailable_count
+            ?? step_judge_unavailable_count
           if step_verdict.vetoed {
             step_judge_attempts = step_judge_attempts + 1
             const on_veto = step_verdict?.on_veto ?? "replace"

@@ -1,0 +1,28 @@
+// Default selection must stop before dispatch when the chosen provider has no
+// authored default. A different provider's fallback cannot be sent on its wire.
+// This tests the public Harn selector, which is the pre-dispatch part of routing.
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  // TRIGGER: Mistral is known to the catalog but has no authored default.
+  const missing = try {
+    harness.llm.resolved_options({provider: "mistral"})
+  }
+  contract_effect(harness.stdio, "provider_without_default_refuses_route", is_err(missing))
+  const reason = if is_err(missing) {
+    to_string(unwrap_err(missing))
+  } else {
+    ""
+  }
+  contract_effect(
+    harness.stdio,
+    "refusal_names_provider_and_remedy",
+    contains(reason, "provider 'mistral' has no configured default model")
+      && contains(reason, "pass an explicit model"),
+  )
+  // NEGATIVE: the synthetic mock provider has its own valid default.
+  const mock = try {
+    harness.llm.resolved_options({provider: "mock"})
+  }
+  contract_negative(harness.stdio, "provider_with_default_still_resolves", is_err(mock))
+}

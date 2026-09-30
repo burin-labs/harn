@@ -132,6 +132,10 @@ pub type LlmCallOptions = {
   // happened, because all three look identical on the wire, and carries the
   // route's own training posture.
   data_controls?: "default" | "strictest_available",
+  inference_boundary?: {
+    reach: "local_only" | "hosted_open_weight" | "any_hosted",
+    allow_training_discounts: bool,
+  },
   // Generation.
   max_tokens?: int,
   temperature?: float,

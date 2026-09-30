@@ -100,10 +100,10 @@ pipeline test(harness: Harness, task: unknown) {
     "fireworks",
     "accounts/fireworks/models/gpt-oss-120b",
   )
-  assert(!fireworks_gpt_oss.native_tools, "Fireworks GPT-OSS disables native tools")
+  assert(fireworks_gpt_oss.native_tools, "Fireworks GPT-OSS uses native tools")
   assert(
-    fireworks_gpt_oss.preferred_tool_format == "text",
-    "Fireworks GPT-OSS defaults to heredoc text tools",
+    fireworks_gpt_oss.preferred_tool_format == "native",
+    "Fireworks GPT-OSS defaults to native tools",
   )
   assert(
     fireworks_gpt_oss.text_tool_wire_format_supported,
@@ -115,7 +115,7 @@ pipeline test(harness: Harness, task: unknown) {
   const deepinfra_gpt_oss = harness.llm.provider_capabilities("deepinfra", "openai/gpt-oss-120b")
   // DeepInfra's gpt-oss native (Harmony) channel drops tool calls into the
   // private reasoning channel — pinned to the TEXT channel as a footgun fix
-  // (mirrors the Fireworks/OpenRouter gpt-oss rows above).
+  // (mirrors the OpenRouter gpt-oss row above).
   assert(!deepinfra_gpt_oss.native_tools, "DeepInfra GPT-OSS disables native tools")
   assert(
     deepinfra_gpt_oss.preferred_tool_format == "text",

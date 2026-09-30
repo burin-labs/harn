@@ -102,8 +102,6 @@
       "audit-scripts": { "budget_ms": 390000 },
       "fast-policy-gates": { "budget_ms": 240000 },
       "stack-frames": { "budget_ms": 600000 },
-      "windows-plan": { "budget_ms": 30000 },
-      "windows": { "budget_ms": 600000 },
       "windows-cross-check": { "budget_ms": 360000 },
       "macos-plan": { "budget_ms": 30000 },
       "macos": { "budget_ms": 600000 },

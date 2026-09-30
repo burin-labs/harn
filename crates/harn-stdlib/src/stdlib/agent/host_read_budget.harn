@@ -1,0 +1,68 @@
+// Normalize host read budgets once for file and command readers.
+pub fn agent_host_bounded_length(requested: any, configured: any, fallback: int) -> int {
+  const cap = max(0, to_int(configured) ?? fallback)
+  const length = to_int(requested)
+  return if length == nil {
+    cap
+  } else {
+    max(0, min(length, cap))
+  }
+}
+
+pub fn agent_host_file_read_request(path: string, args: dict, configured_read_bytes: any) -> dict {
+  let req = {
+    path: path,
+    limit_bytes: agent_host_bounded_length(args?.limit_bytes, configured_read_bytes, 65536),
+  }
+  if args?.offset != nil {
+    req = req + {offset: args.offset}
+  }
+  if args?.encoding != nil {
+    req = req + {encoding: args.encoding}
+  }
+  return req
+}
+
+pub fn agent_host_file_tail_request(
+  fs: HarnessFs,
+  path: string,
+  args: dict,
+  configured_tail_bytes: any,
+) -> dict {
+  const length = agent_host_bounded_length(args?.length, configured_tail_bytes, 12000)
+  const info = fs.stat(path)
+  const offset = if info.size > length {
+    info.size - length
+  } else {
+    0
+  }
+  return {path: path, offset: offset, limit_bytes: length}
+}
+
+pub fn agent_host_command_read_request(
+  locator: dict,
+  args: dict,
+  configured_read_bytes: any,
+) -> dict {
+  return locator
+    + {
+      offset: args?.offset ?? 0,
+      length: agent_host_bounded_length(args?.length, configured_read_bytes, 65536),
+    }
+}
+
+pub fn agent_host_command_tail_request(
+  tools: HarnessTools,
+  locator: dict,
+  args: dict,
+  configured_tail_bytes: any,
+) -> dict {
+  const length = agent_host_bounded_length(args?.length, configured_tail_bytes, 12000)
+  const meta = tools.read_command_output(locator + {offset: 0, length: 0})
+  const offset = if meta.total_bytes > length {
+    meta.total_bytes - length
+  } else {
+    0
+  }
+  return locator + {offset: offset, length: length}
+}

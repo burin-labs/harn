@@ -1,4 +1,10 @@
 import { command_capture_annotate, command_capture_plan_request } from "std/agent/command_capture"
+import {
+  agent_host_command_read_request,
+  agent_host_command_tail_request,
+  agent_host_file_read_request,
+  agent_host_file_tail_request,
+} from "std/agent/host_read_budget"
 import { agent_tool_handler_result_normalize } from "std/agent/tool_lifecycle"
 
 fn __agent_host_options(options: dict?) {
@@ -180,17 +186,11 @@ fn __agent_host_render(value: any, options: dict?, key: string) {
 }
 
 fn __agent_host_read_file_request(args: dict, options: dict?) {
-  let req = {path: __agent_host_resolve_path(args.path, options)}
-  if args?.offset != nil {
-    req = req + {offset: args.offset}
-  }
-  if args?.limit_bytes != nil {
-    req = req + {limit_bytes: args.limit_bytes}
-  }
-  if args?.encoding != nil {
-    req = req + {encoding: args.encoding}
-  }
-  return req
+  return agent_host_file_read_request(
+    __agent_host_resolve_path(args.path, options),
+    args,
+    __agent_host_options(options)?.read_bytes,
+  )
 }
 
 fn __agent_host_list_directory_request(args: dict, options: dict?) {
@@ -607,37 +607,20 @@ fn __agent_host_reader_locator(args: dict) {
 }
 
 fn __agent_host_read_command_request(args: dict, options: dict?) {
-  let req = __agent_host_reader_locator(args)
-  req = req
-    + {
-      offset: args?.offset ?? 0,
-      length: args?.length ?? __agent_host_options(options)?.read_bytes ?? 65536,
-    }
-  return req
+  return agent_host_command_read_request(
+    __agent_host_reader_locator(args),
+    args,
+    __agent_host_options(options)?.read_bytes,
+  )
 }
 
 fn __agent_host_tail_command_request(tool_runtime: HarnessTools, args: dict, options: dict?) {
-  const locator = __agent_host_reader_locator(args)
-  const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
-  const meta = tool_runtime.read_command_output(locator + {offset: 0, length: 0})
-  const offset = if meta.total_bytes > length {
-    meta.total_bytes - length
-  } else {
-    0
-  }
-  return locator + {offset: offset, length: length}
-}
-
-fn __agent_host_tail_file_request(fs: HarnessFs, args: dict, options: dict?) {
-  const path = __agent_host_resolve_path(args.path, options)
-  const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
-  const info = fs.stat(path)
-  const offset = if info.size > length {
-    info.size - length
-  } else {
-    0
-  }
-  return {path: path, offset: offset, limit_bytes: length}
+  return agent_host_command_tail_request(
+    tool_runtime,
+    __agent_host_reader_locator(args),
+    args,
+    __agent_host_options(options)?.tail_bytes,
+  )
 }
 
 fn __agent_host_command_result_readers(options: dict?, read_name: any, tail_name: any) {
@@ -767,7 +750,14 @@ pub fn agent_read_tools(
           ),
           handler: { args ->
             __agent_host_render(
-              tool_runtime.read_file(__agent_host_tail_file_request(fs, args, opts)),
+              tool_runtime.read_file(
+                agent_host_file_tail_request(
+                  fs,
+                  __agent_host_resolve_path(args.path, opts),
+                  args,
+                  opts?.tail_bytes,
+                ),
+              ),
               opts,
               key,
             )

@@ -121,13 +121,13 @@ fn shell_command(command: &str) -> Result<Command, VmError> {
     }
     #[cfg(windows)]
     {
-        let mut cmd = Command::new("cmd");
+        let mut cmd = crate::process_sandbox::session_std_command("cmd")?;
         cmd.args(["/C", command]);
         Ok(cmd)
     }
     #[cfg(not(windows))]
     {
-        let mut cmd = Command::new("/bin/sh");
+        let mut cmd = crate::process_sandbox::session_std_command("/bin/sh")?;
         cmd.args(["-c", command]);
         Ok(cmd)
     }
@@ -144,7 +144,7 @@ fn argv_command(argv: &[String]) -> Result<Command, VmError> {
             "eval pack argv command program must not be empty".to_string(),
         ));
     }
-    let mut command = Command::new(program);
+    let mut command = crate::process_sandbox::session_std_command(program)?;
     command.args(args);
     Ok(command)
 }

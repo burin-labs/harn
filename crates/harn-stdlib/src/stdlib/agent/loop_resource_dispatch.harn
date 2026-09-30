@@ -1,53 +1,11 @@
-import { approval_reviewer_on_route } from "std/agent/approval_review"
+import {
+  __loop_dispatch_options,
+  __resolve_max_concurrent_tools,
+} from "std/agent/loop_dispatch_options"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
-
-pub fn __resolve_max_concurrent_tools(turn_opts: any) {
-  const raw = turn_opts?.max_concurrent_tools
-  if type_of(raw) == "int" && raw > 1 {
-    return raw
-  }
-  return 1
-}
-
-/**
- * Resolve the intra-turn failing-fan-out cap K (#A4). When a single model
- * response fans out a large batch of byte-identical FAILING tool calls, every
- * call is dispatched synchronously with no LLM call or progress check between
- * them, so the cross-turn loop-detector / no-progress terminator fire a whole
- * turn too late — after all N drain, having burned turn/wall budget and flooded
- * context with N identical errors (observed: 127 identical `edit` rejections in
- * ~2.7s on swift-feat). This cap is the intra-turn analog of the cross-turn
- * no-progress terminator: after the Kth consecutive byte-identical failing
- * result within ONE batch, the remaining identical calls are skipped and
- * collapsed into a single synthetic result.
- *
- * Default OFF: returns `0` (no cap) unless `intra_turn_failure_fanout_cap` is
- * set to a positive int. A value of e.g. `3` collapses after 3 identical
- * failures. Reachability is exercised by the `agent_loop_intra_turn_*`
- * conformance tests, which prove that flipping the flag changes dispatch
- * behavior end-to-end.
- *
- * @effects: []
- * @errors: []
- */
-pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts: any) {
-  const raw = turn_opts?.intra_turn_failure_fanout_cap
-  if type_of(raw) == "int" && raw > 0 {
-    return raw
-  }
-  return 0
-}
-
-pub fn __resolve_intra_turn_resource_fail_fast(turn_opts: any) -> bool {
-  const raw = turn_opts?.intra_turn_resource_fail_fast
-  if type_of(raw) == "bool" {
-    return raw
-  }
-  return true
-}
 
 const __TOOL_BATCH_OBSERVATION_KINDS = ["read", "search", "think", "fetch", "inspect", "list"]
 
@@ -1256,31 +1214,7 @@ pub fn __dispatch_tool_calls(harness: Harness, session_id: any, tool_calls: any,
   // to cause-name empty-args tool calls: finish_reason=length means the
   // arguments were TRUNCATED by the output cap, anything else means the
   // provider dropped them (an IDE host bug report).
-  const dispatch_options = {
-    session_id: session_id,
-    tool_format: turn_opts.tool_format,
-    policy: turn_opts?.policy,
-    approval_policy: turn_opts?.approval_policy,
-    // The AutoReview answerer, on this loop's route. This list is an allowlist:
-    // an option not named here never reaches dispatch, which is how the seam
-    // once worked when called directly and did nothing through the loop.
-    approval_reviewer: approval_reviewer_on_route(
-      turn_opts?.approval_reviewer,
-      {provider: turn_opts?.provider, model: turn_opts?.model},
-    ),
-    command_policy: turn_opts?.command_policy,
-    permissions: turn_opts?.permissions,
-    reminders: turn_opts?.reminders,
-    _iteration: turn_opts?._iteration ?? 0,
-    _tool_caller: turn_opts?._tool_caller,
-    _max_concurrent_tools: cap,
-    _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
-    _stop_reason: turn_opts?._stop_reason ?? "",
-    _intra_turn_failure_fanout_cap: __resolve_intra_turn_failure_fanout_cap(turn_opts),
-    _intra_turn_resource_fail_fast: __resolve_intra_turn_resource_fail_fast(turn_opts),
-    _stop_after_successful_tools: turn_opts?.stop_after_successful_tools ?? [],
-    _tool_batch_dependency_state: turn_opts?._tool_batch_dependency_state,
-  }
+  const dispatch_options = __loop_dispatch_options(turn_opts, session_id, cap)
   const phased = __tool_batch_dispatch(harness, tool_calls, tools, dispatch_options, cap)
   const raw_dispatch = phased.results
   const audit_flushes = __collect_audit_flushes(raw_dispatch)

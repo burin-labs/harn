@@ -36,14 +36,11 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
     let resolved = resolved.unwrap();
     let env: std::collections::BTreeMap<_, _> = resolved.env.into_iter().collect();
     let decision = rustc_wrapper::rustc_wrapper_decision(&policy, &cwd, &config.env);
-    // Cargo does not yet build inside the Windows container at all, so there
-    // the probe cannot tell, and an unproven wrapper is switched off too.
-    let expected = if cfg!(windows) {
-        rustc_wrapper::RustcWrapperDisposition::Unmeasured
-    } else {
-        rustc_wrapper::RustcWrapperDisposition::Disabled
-    };
-    assert_eq!(decision.disposition, expected, "{decision:?}");
+    assert_eq!(
+        decision.disposition,
+        rustc_wrapper::RustcWrapperDisposition::Disabled,
+        "{decision:?}"
+    );
     assert!(decision.disables(), "{decision:?}");
     assert!(
         decision.wrapper.as_deref().is_some_and(|wrapper| wrapper
@@ -113,4 +110,50 @@ fn only_a_dropped_configured_wrapper_is_a_warning() {
     assert!(!decision(RustcWrapperDisposition::Kept).drops_configured_wrapper());
     assert!(decision(RustcWrapperDisposition::Disabled).drops_configured_wrapper());
     assert!(decision(RustcWrapperDisposition::Unmeasured).drops_configured_wrapper());
+}
+
+/// When the wrapper-free build fails too, the reason says why. Without it an
+/// `unmeasured` decision cannot tell a broken toolchain from a broken wrapper.
+#[test]
+fn an_unmeasured_decision_carries_the_wrapper_free_build_error() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let cwd = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
+    // A compiler Cargo cannot run fails both builds, and only the second
+    // build's error names it without the wrapper in front of it.
+    std::fs::create_dir_all(cwd.join(".cargo")).expect("cargo config dir");
+    std::fs::write(
+        cwd.join(".cargo").join("config.toml"),
+        "[build]\nrustc = \"/definitely/missing/rustc\"\n",
+    )
+    .expect("cargo config");
+    let policy = CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![cwd.to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    };
+    let env = vec![(
+        "RUSTC_WRAPPER".to_string(),
+        "/definitely/missing/wrapper".to_string(),
+    )];
+
+    crate::orchestration::push_execution_policy(policy.clone());
+    let decision = rustc_wrapper::rustc_wrapper_decision(&policy, &cwd, &env);
+    crate::orchestration::pop_execution_policy();
+    assert_eq!(
+        decision.disposition,
+        rustc_wrapper::RustcWrapperDisposition::Unmeasured,
+        "{decision:?}"
+    );
+    let without = decision
+        .reason
+        .split_once("without it: ")
+        .map(|(_, without)| without)
+        .unwrap_or_else(|| panic!("the reason must carry the wrapper-free error: {decision:?}"));
+    assert!(
+        without.contains("/definitely/missing/rustc") && !without.contains("missing/wrapper"),
+        "{decision:?}"
+    );
 }

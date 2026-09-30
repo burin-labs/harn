@@ -7,8 +7,8 @@ anthropic = "claude-haiku-4-5-20251001"
 openai = "gpt-6-luna"
 openrouter = "google/gemini-2.5-flash"
 ollama = "llama3.2"
-# `local` previously pointed at gpt-4o — a hosted (and now sunset)
-# OpenAI model that no local OpenAI-compat server would serve. Use the
+# `local` previously pointed at gpt-4o, a hosted OpenAI model that the
+# bundled local server does not serve. Use the
 # bundled vLLM Gemma 4 route instead.
 local = "gemma-4-26b-a4b-it"
 mistral = "mistral-small-2603"
@@ -23,5 +23,5 @@ groq = "qwen/qwen3.8-27b"
 minimax = "MiniMax-M2.5-highspeed"
 # GLM-4.6 is Z.AI's cheap coding route, confirmed serving at paas/v4.
 zai = "glm-4.6"
-deepseek = "deepseek-v4-flash"
+deepseek = "deepseek-flash"
 gemini = "gemini-3.5-flash-lite"

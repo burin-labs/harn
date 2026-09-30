@@ -438,7 +438,7 @@ fn env_string(keys: &[&str]) -> Option<String> {
 }
 
 fn git_output(base_dir: Option<&Path>, args: &[&str]) -> Option<String> {
-    let mut command = std::process::Command::new("git");
+    let mut command = crate::process_sandbox::session_std_command("git").ok()?;
     if let Some(base_dir) = base_dir {
         command.arg("-C").arg(base_dir);
     }
