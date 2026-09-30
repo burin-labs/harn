@@ -10,7 +10,7 @@
     { "name": "Run Linux sandbox tests", "match": "exact" },
     { "name": "Run Harn conformance tests", "match": "exact" },
     { "name": "Check Harn sources and generated files", "match": "exact" },
-    { "name": "Check repository policies", "match": "exact" }
+    { "name": "Check fast repository policies", "match": "exact" }
   ],
   "observed_baseline": {
     "schema_version": 2,
