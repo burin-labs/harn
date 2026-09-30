@@ -132,3 +132,18 @@
   prose="```rust\nlet p = Point{ x: 1, y: 2 };\n```"
   answer=null
   done=null
+# struct literal at line start
+  calls=0 errors=0 violations=0 stray=0
+  prose="Point{ x: 1, y: 2 }"
+  answer=null
+  done=null
+# known tool called mid-sentence in code shape
+  calls=0 errors=0 violations=0 stray=0
+  prose="You can run({ command: \"ls\" }) to see the files."
+  answer=null
+  done=null
+# map literal in a fence
+  calls=0 errors=0 violations=0 stray=0
+  prose="```go\nm := map[string]int{\"a\": 1}\n```"
+  answer=null
+  done=null
