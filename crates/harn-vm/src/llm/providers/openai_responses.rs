@@ -48,6 +48,12 @@ impl OpenAiResponsesProvider {
             &mut body,
             request.provider_overrides.as_ref(),
         );
+        // Stream when a caller is listening for deltas, so visible text reaches
+        // it as the model writes instead of in one piece at the end.
+        let stream_text = delta_tx.is_some() && request.stream && !compact;
+        if stream_text {
+            body["stream"] = serde_json::Value::Bool(true);
+        }
 
         let mut resolved = crate::llm::helpers::ResolvedProvider::resolve(&request.provider);
         resolved.endpoint = if compact {
@@ -64,23 +70,25 @@ impl OpenAiResponsesProvider {
             .json(&body);
         let req = resolved.apply_headers(req, &request.api_key);
         let response = req.send().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "{} Responses API error: {}",
-                request.provider,
-                crate::egress::redact_reqwest_error(&error)
-            ))))
+            crate::llm::api::reqwest_send_error(&request.provider, "Responses", error)
         })?;
 
         if !response.status().is_success() {
             return Err(crate::llm::api::err_for_non_success(&request.provider, response).await);
         }
 
-        let json: serde_json::Value = response.json().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "{} Responses API response parse error: {error}",
-                request.provider
-            ))))
-        })?;
+        let (json, streamed_text) = match delta_tx.as_ref().filter(|_| stream_text) {
+            Some(tx) => read_responses_stream(response, &request.provider, tx).await?,
+            None => {
+                let json: serde_json::Value = response.json().await.map_err(|error| {
+                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                        "{} Responses API response parse error: {error}",
+                        request.provider
+                    ))))
+                })?;
+                (json, false)
+            }
+        };
 
         let mut result = crate::llm::api::parse_openai_responses_response(
             &json,
@@ -94,7 +102,9 @@ impl OpenAiResponsesProvider {
             result.telemetry.source = crate::llm::api::telemetry_source::UNKNOWN.to_string();
         }
         if let Some(tx) = delta_tx {
-            if !result.text.is_empty() {
+            // A stream that produced no text deltas (or no stream at all) still
+            // hands the listener the visible text once, as before.
+            if !streamed_text && !result.text.is_empty() {
                 let _ = tx.send(result.text.clone());
             }
         }
@@ -234,6 +244,89 @@ impl OpenAiResponsesProvider {
         }
         body
     }
+}
+
+/// Read a streamed Responses reply: forward each `response.output_text.delta`
+/// to `delta_tx` as it arrives, and return the final response object the
+/// `response.completed` event carries, which the non-streaming parser reads
+/// unchanged. The `bool` says whether any text delta was forwarded.
+async fn read_responses_stream(
+    response: reqwest::Response,
+    provider: &str,
+    delta_tx: &DeltaSender,
+) -> Result<(serde_json::Value, bool), VmError> {
+    use tokio_stream::StreamExt as _;
+
+    let stream = response
+        .bytes_stream()
+        .map(|chunk| chunk.map_err(std::io::Error::other));
+    let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(stream));
+    read_responses_events(reader, provider, delta_tx).await
+}
+
+/// The event loop behind [`read_responses_stream`], over any line reader so a
+/// test can drive it with a recorded stream.
+async fn read_responses_events<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: R,
+    provider: &str,
+    delta_tx: &DeltaSender,
+) -> Result<(serde_json::Value, bool), VmError> {
+    use tokio::io::AsyncBufReadExt as _;
+
+    let interrupted = |detail: String| VmError::CategorizedError {
+        message: format!("{provider} Responses stream {detail}"),
+        category: crate::value::ErrorCategory::TransientNetwork,
+    };
+    let mut lines = reader.lines();
+    let mut streamed_text = false;
+    while let Some(line) = lines
+        .next_line()
+        .await
+        .map_err(|error| interrupted(format!("read failed: {error}")))?
+    {
+        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+            continue;
+        };
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        let event: serde_json::Value = serde_json::from_str(data).map_err(|error| {
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                "{provider} Responses stream event parse error: {error}"
+            ))))
+        })?;
+        match event.get("type").and_then(serde_json::Value::as_str) {
+            Some("response.output_text.delta") => {
+                let delta = event
+                    .get("delta")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                if !delta.is_empty() {
+                    streamed_text = true;
+                    let _ = delta_tx.send(delta.to_string());
+                }
+            }
+            Some("response.completed" | "response.incomplete") => {
+                let response = event.get("response").cloned().unwrap_or_default();
+                return Ok((response, streamed_text));
+            }
+            Some("response.failed" | "error") => {
+                let message = event
+                    .pointer("/response/error/message")
+                    .or_else(|| event.pointer("/error/message"))
+                    .or_else(|| event.get("message"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("the provider reported a failed response");
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    format!("{provider} Responses API error: {message}"),
+                ))));
+            }
+            _ => {}
+        }
+    }
+    Err(interrupted(
+        "ended before the provider sent response.completed".to_string(),
+    ))
 }
 
 fn responses_tool_choice(choice: &serde_json::Value) -> serde_json::Value {
@@ -603,6 +696,137 @@ fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
 mod tests {
     use super::*;
     use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
+
+    /// Send one Responses request to `endpoint` and return its error.
+    ///
+    /// The endpoint goes through the host-verified runtime override, which is
+    /// the supported way to point a provider somewhere for one execution. An
+    /// environment variable is not: the catalog decides whether a provider
+    /// reads one, and a test that guesses wrong sends a real request to the
+    /// real API.
+    async fn responses_send_error(endpoint: std::net::SocketAddr) -> VmError {
+        let _allow = crate::llm::test_env::ScopedEnvVar::remove(crate::llm::LLM_CALLS_DISABLED_ENV);
+        let overrides = crate::llm_config::RuntimeProviderEndpointOverrides::single(
+            "openai",
+            format!("http://{endpoint}/v1"),
+        )
+        .expect("a localhost endpoint is a valid override");
+        crate::llm_config::set_runtime_provider_endpoint_overrides(overrides);
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.stream = false;
+        let result = OpenAiResponsesProvider::call(&LlmRequestPayload::from(&opts), None).await;
+        crate::llm_config::clear_runtime_provider_endpoint_overrides();
+        result.expect_err("a failed transport cannot succeed")
+    }
+
+    /// A recorded Responses stream: two text deltas, a reasoning item the
+    /// listener must not see, and the completed response the parser reads.
+    const RECORDED_RESPONSES_STREAM: &str = concat!(
+        "event: response.created\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+        "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello, \"}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"world.\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",",
+        "\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",",
+        "\"content\":[{\"type\":\"output_text\",\"text\":\"Hello, world.\"}]}]}}\n\n",
+    );
+
+    #[tokio::test]
+    async fn a_streamed_reply_forwards_each_text_delta_before_the_final_response() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let reader = tokio::io::BufReader::new(RECORDED_RESPONSES_STREAM.as_bytes());
+        let (response, streamed) = read_responses_events(reader, "openai", &tx)
+            .await
+            .expect("a completed stream parses");
+        let mut deltas = Vec::new();
+        while let Ok(delta) = rx.try_recv() {
+            deltas.push(delta);
+        }
+        assert_eq!(deltas, vec!["Hello, ".to_string(), "world.".to_string()]);
+        assert!(streamed);
+        assert_eq!(response["status"], "completed");
+        let parsed = crate::llm::api::parse_openai_responses_response(&response, "openai", "gpt")
+            .expect("the completed response parses like a non-streamed one");
+        assert_eq!(parsed.text, "Hello, world.");
+    }
+
+    #[tokio::test]
+    async fn a_stream_cut_before_completion_is_a_transient_error() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let cut = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n";
+        let reader = tokio::io::BufReader::new(cut.as_bytes());
+        let error = read_responses_events(reader, "openai", &tx)
+            .await
+            .expect_err("a stream without response.completed cannot succeed");
+        assert_transient_network(&error);
+    }
+
+    #[tokio::test]
+    async fn a_failed_response_event_is_an_error_naming_the_provider_message() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let failed = "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"quota\"}}}\n\n";
+        let reader = tokio::io::BufReader::new(failed.as_bytes());
+        let error = read_responses_events(reader, "openai", &tx)
+            .await
+            .expect_err("a failed response cannot succeed");
+        assert!(error.to_string().contains("quota"), "got {error}");
+    }
+
+    fn assert_transient_network(error: &VmError) {
+        match error {
+            VmError::CategorizedError { category, message } => assert_eq!(
+                *category,
+                crate::value::ErrorCategory::TransientNetwork,
+                "expected a transient category, got {category:?} for {message}"
+            ),
+            other => panic!("expected a typed CategorizedError, got {other:?}"),
+        }
+    }
+
+    /// A refused connection on the real Responses path must arrive as a typed
+    /// `CategorizedError` carrying `TransientNetwork`, because that is what the
+    /// agent loop's retry predicate reads. The negative control is the path
+    /// this replaced, which built a bare string from `redact_reqwest_error` and
+    /// classified as `Generic`.
+    ///
+    /// The port is bound and then dropped, so the address is real and nothing
+    /// is listening: the connect is refused immediately.
+    #[tokio::test]
+    async fn responses_refused_connect_is_typed_transient() {
+        let closed = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let addr = listener.local_addr().expect("addr");
+            drop(listener);
+            addr
+        };
+        assert_transient_network(&responses_send_error(closed).await);
+    }
+
+    /// A server that accepts the connection and closes it before answering.
+    /// reqwest reports this as a request-kind error that is not a connect
+    /// error, with the same `error sending request for url (...)` text the
+    /// production failure carried. The classifier used to file every
+    /// request-kind error as a malformed request build and leave it untyped;
+    /// a malformed build is reqwest's builder kind, so this is the transport.
+    #[tokio::test]
+    async fn responses_connection_closed_before_reply_is_typed_transient() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buffer = [0_u8; 1024];
+            let _ = std::io::Read::read(&mut stream, &mut buffer);
+            drop(stream);
+        });
+        let error = responses_send_error(addr).await;
+        server.join().expect("stub thread");
+        assert!(
+            error.to_string().contains("(send)"),
+            "expected the request-kind send branch, got {error}"
+        );
+        assert_transient_network(&error);
+    }
 
     /// The canonical product path for pro mode: the real Responses body
     /// builder must emit `reasoning.mode` BESIDE the caller's effort, not

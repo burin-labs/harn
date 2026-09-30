@@ -41,12 +41,17 @@ fn __goal_callable(value: any) {
  */
 pub type GoalCriterion = {id?: string, description: string, check?: any}
 
-/** GoalSpec is the normalized shape returned by `goal(spec)`. */
+/**
+ * GoalSpec is the normalized shape returned by `goal(spec)`. `retired_criteria`
+ * is set only by `goal_under_obligations`: the criteria an operator retarget
+ * retired, kept so a reader can tell them from criteria that were met.
+ */
 pub type GoalSpec = {
   objective: string,
   success_criteria?: list<GoalCriterion>,
   constraints?: list<string>,
   budget?: dict,
+  retired_criteria?: list<GoalCriterion>,
 }
 
 pub type GoalJudgeOptions = {
@@ -137,6 +142,13 @@ fn __render_goal_text(g: any) {
       lines = lines.appending("- " + crit.description)
     }
   }
+  const retired = g.retired_criteria ?? []
+  if len(retired) > 0 {
+    lines = lines.appending("Retired by the operator's retarget (no longer owed, not met):")
+    for crit in retired {
+      lines = lines.appending("- " + crit.description)
+    }
+  }
   if len(g.constraints) > 0 {
     lines = lines.appending("Constraints:")
     for c in g.constraints {
@@ -215,6 +227,32 @@ pub fn with_goal(agent_options: any, g: GoalSpec) {
  */
 pub fn goal_pin(random: HarnessRandom, g: dict) {
   return pin(random, "goal", __render_goal_text(g), {dedupe_key: "pin/goal"})
+}
+
+/**
+ * goal_under_obligations(goal, obligations?) returns the goal as a run's
+ * completion obligations leave it. An accepted steer that retargeted the run
+ * (`obligations.retarget`, read from the recorded control row) replaces the
+ * objective, and every success criterion set under the previous objective moves
+ * to `retired_criteria`: no longer owed, and not met either. Constraints and
+ * budget stand. Without a retarget the goal is returned unchanged.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: goal_under_obligations(g, payload?.obligations)
+ */
+pub fn goal_under_obligations(g: GoalSpec, obligations: any = nil) -> GoalSpec {
+  const objective = trim(to_string(obligations?.retarget?.objective ?? ""))
+  if objective == "" {
+    return g
+  }
+  return g
+    + {
+      objective: objective,
+      success_criteria: [],
+      retired_criteria: (g.retired_criteria ?? []) + (g.success_criteria ?? []),
+    }
 }
 
 /**
@@ -353,16 +391,19 @@ pub fn goal_reloop(g: any, opts: any = nil) {
     throw "goal_reloop: `facts_fn` must be a callable or nil; got " + type_of(facts_fn)
   }
   const verify_completion = { payload ->
+    // Held to the goal as accepted steering left it: a retarget retires the
+    // frozen criteria, and the reminder names the objective now in force.
+    const current = goal_under_obligations(g, payload?.obligations)
     const facts = if __goal_callable(facts_fn) {
       facts_fn(payload)
     } else {
       {}
     }
-    const check = goal_check(g, facts)
+    const check = goal_check(current, facts)
     if check.done {
       return {confirm: true}
     }
-    return {confirm: false, feedback: __goal_unmet_feedback(g, check.unmet)}
+    return {confirm: false, feedback: __goal_unmet_feedback(current, check.unmet)}
   }
   let base = {
     done_sentinel: o?.done_sentinel ?? __GOAL_DONE_MARKER,

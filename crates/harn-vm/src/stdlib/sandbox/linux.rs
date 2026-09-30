@@ -509,6 +509,11 @@ fn landlock_profile(
     for root in developer_toolchain_system_read_roots(policy) {
         push_rule(&mut profile, root, read_only_access(), true)?;
     }
+    // Through `push_rule`, so the credential denylist is subtracted from these
+    // exactly as from every other grant.
+    for grant in super::read_roots::path_grants::process_sandbox_path_entry_grants(policy) {
+        push_rule(&mut profile, grant.root, read_only_access(), true)?;
+    }
     let workspace_access = workspace_access(policy);
     for root in process_sandbox_roots(policy) {
         push_rule(&mut profile, root, workspace_access, false)?;
@@ -540,12 +545,16 @@ fn landlock_profile(
             push_rule(&mut profile, root, workspace_access, false)?;
         }
     }
-    if scope_abstract_unix {
-        // The path half of the serve-only grant. seccomp decides that the
-        // child may create a Unix socket at all; this decides where it may
-        // put one. A socket file outside every named root is refused even
-        // though the syscall was admitted, which is what makes the roots mean
-        // something rather than decorate the policy.
+    // The path half of the grant. seccomp decides that the child may create a
+    // Unix socket at all; this decides where it may put one. A socket file
+    // outside every named root is refused even though the syscall was
+    // admitted, which is what makes the roots mean something rather than
+    // decorate the policy. It is installed whether or not the policy also
+    // permits networking: the network arm widens the syscall half, and it
+    // holds no filesystem authority, so tying this rule to the serve-only
+    // case left a root outside every writable root unable to take a socket
+    // file on exactly the policy that was otherwise wider.
+    if !policy.process_sandbox.unix_socket_roots.is_empty() {
         for root in super::process_sandbox_unix_socket_roots(policy) {
             push_rule(
                 &mut profile,
@@ -1435,5 +1444,13 @@ use netns::{namespaced_loopback_grant, namespaced_outcome, resolve_netns_launche
 mod tests;
 
 #[cfg(test)]
+#[path = "linux_path_grant_tests.rs"]
+mod path_grant_tests;
+
+#[cfg(test)]
 #[path = "netns_tests.rs"]
 mod netns_tests;
+
+#[cfg(test)]
+#[path = "linux_socket_root_tests.rs"]
+mod socket_root_tests;

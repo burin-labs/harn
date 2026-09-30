@@ -18,6 +18,8 @@
 
 use std::path::Path;
 
+use harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_SCHEMA_VERSION;
+
 use crate::test_util;
 
 use test_util::process::run_harn_e2e as run;
@@ -794,13 +796,20 @@ fn provider_tool_scorecard_json_is_structurally_identical_across_runs() {
     let failing = dir.path().join("failing.json");
     write_tool_probe_report_fixture(
         &passing,
-        1,
+        TOOL_CONFORMANCE_SCHEMA_VERSION,
         "anthropic",
         "claude",
         "structured_native_tool_call",
         true,
     );
-    write_tool_probe_report_fixture(&failing, 1, "fireworks", "gpt-oss", "empty_silent", false);
+    write_tool_probe_report_fixture(
+        &failing,
+        TOOL_CONFORMANCE_SCHEMA_VERSION,
+        "fireworks",
+        "gpt-oss",
+        "empty_silent",
+        false,
+    );
     let passing_path = passing.to_string_lossy().into_owned();
     let failing_path = failing.to_string_lossy().into_owned();
     let argv = [
@@ -1184,7 +1193,7 @@ fn provider_tool_scorecard_json_reports_catalog_mismatches() {
     let (provider, model) = native_preferred_text_supported_scorecard_route();
     write_tool_probe_report_fixture(
         &fixture,
-        1,
+        TOOL_CONFORMANCE_SCHEMA_VERSION,
         &provider,
         &model,
         "parseable_harn_text_tool_call",
@@ -1230,7 +1239,7 @@ pub(crate) fn provider_tool_scorecard_human_reports_catalog_mismatch_codes() {
     let (provider, model) = native_preferred_text_supported_scorecard_route();
     write_tool_probe_report_fixture(
         &fixture,
-        1,
+        TOOL_CONFORMANCE_SCHEMA_VERSION,
         &provider,
         &model,
         "parseable_harn_text_tool_call",
@@ -1264,7 +1273,7 @@ fn provider_tool_scorecard_markdown_reports_catalog_mismatch_codes() {
     let (provider, model) = native_preferred_text_supported_scorecard_route();
     write_tool_probe_report_fixture(
         &fixture,
-        1,
+        TOOL_CONFORMANCE_SCHEMA_VERSION,
         &provider,
         &model,
         "parseable_harn_text_tool_call",
@@ -1301,7 +1310,7 @@ fn provider_tool_scorecard_json_reports_unknown_catalog_route() {
     let fixture = dir.path().join("unknown-route.json");
     write_tool_probe_report_fixture(
         &fixture,
-        1,
+        TOOL_CONFORMANCE_SCHEMA_VERSION,
         "unknown-provider",
         "unknown-model",
         "structured_native_tool_call",
@@ -1342,7 +1351,7 @@ fn provider_tool_scorecard_human_is_byte_identical_across_runs() {
     let fixture = dir.path().join("passing.json");
     write_tool_probe_report_fixture(
         &fixture,
-        1,
+        TOOL_CONFORMANCE_SCHEMA_VERSION,
         "anthropic",
         "claude-sonnet-5",
         "structured_native_tool_call",
@@ -1433,6 +1442,7 @@ fn write_tool_probe_report_fixture(
     };
     let body = serde_json::json!({
         "schema_version": schema_version,
+        "evidence_source": "live_request",
         "provider": provider,
         "model": model,
         "tool_name": "echo_marker",

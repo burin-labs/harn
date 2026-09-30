@@ -1,0 +1,5 @@
+repeated_stops_before_cap=true
+new_criterion_stops_early=true
+new_evidence_stops_early=true
+pending_requirement_stops_verified=true
+unverified_stops_verified=true

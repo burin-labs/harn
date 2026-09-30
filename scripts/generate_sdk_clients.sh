@@ -88,7 +88,7 @@ write_manifest() {
     echo "harn_version=$(harn_version)"
     echo "sdk_version=$(sdk_version)"
     echo "openapi_spec=spec/openapi.yaml"
-    echo "openapi_sha256=$(shasum -a 256 "$SPEC_PATH" | awk '{print $1}')"
+    echo "openapi_sha256=$(shasum -a 256 < "$SPEC_PATH" | awk '{print $1}')"
     case "$language" in
       python) echo "generator=openapi-python-client@${PYTHON_GENERATOR_VERSION}" ;;
       typescript)

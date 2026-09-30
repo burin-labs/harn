@@ -902,6 +902,247 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_interrupts_prompt_waiting_for_host_response() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pipeline = dir.path().join("waiting-for-host.harn");
+        std::fs::write(
+            &pipeline,
+            "pipeline default(harness: Harness, task: unknown) {\n  harness.workspace.project_root({})\n}\n",
+        )
+        .expect("write pipeline");
+        let agent = EmbeddedAgent::spawn(AcpServerConfig::for_pipeline(
+            pipeline.to_string_lossy().to_string(),
+        ));
+        let (requests, responses, handle) = agent.into_parts();
+        let mut responses = responses.expect("responses receiver");
+        block_on(handle.wait_ready());
+
+        requests
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {
+                    "cwd": dir.path(),
+                    "environmentPolicy": {"kind": "isolated", "grants": []}
+                }
+            }))
+            .expect("send session/new");
+        let created = block_on(recv_json(&mut responses));
+        let session_id = created["result"]["sessionId"].as_str().expect("session id");
+
+        requests
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/set_mode",
+                "params": {"sessionId": session_id, "modeId": "code"}
+            }))
+            .expect("send session/set_mode");
+        block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    if recv_json(&mut responses).await["id"] == 2 {
+                        break;
+                    }
+                }
+            })
+            .await
+            .expect("mode response");
+        });
+
+        requests
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": "wait for host"}]
+                }
+            }))
+            .expect("send session/prompt");
+
+        // Observe the prompt's host-capability request before shutting down.
+        // A test that only sends a prompt could pass while dispatch was idle.
+        block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let message = recv_json(&mut responses).await;
+                    if message["method"] == "host/capabilities" {
+                        break;
+                    }
+                    assert_ne!(
+                        message["id"], 3,
+                        "prompt finished before host call: {message}"
+                    );
+                }
+            })
+            .await
+            .expect("prompt reached host capability request");
+        });
+        assert!(!handle.is_terminated());
+
+        handle.shutdown();
+        block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), handle.wait_terminated())
+                .await
+                .expect("shutdown must interrupt the active dispatch");
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_releases_child_during_mcp_initialization() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pid_file = dir.path().join("mcp.pid");
+        let script = dir.path().join("stalled-mcp.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec /bin/sleep 20\n",
+                pid_file.display()
+            ),
+        )
+        .expect("write MCP child");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))
+            .expect("make MCP child executable");
+        let pipeline = dir.path().join("stalled-mcp.harn");
+        let script_literal = serde_json::to_string(&script.to_string_lossy())
+            .expect("encode script path as Harn string");
+        std::fs::write(
+            &pipeline,
+            format!(
+                "pipeline default(harness: Harness, task: unknown) {{\n  harness.tools.mcp_connect({script_literal}, [])\n}}\n"
+            ),
+        )
+        .expect("write pipeline");
+
+        let agent = EmbeddedAgent::spawn(AcpServerConfig::for_pipeline(
+            pipeline.to_string_lossy().to_string(),
+        ));
+        let (requests, responses, handle) = agent.into_parts();
+        let mut responses = responses.expect("responses receiver");
+        block_on(handle.wait_ready());
+        requests
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {
+                    "cwd": dir.path(),
+                    "environmentPolicy": {"kind": "isolated", "grants": []}
+                }
+            }))
+            .expect("send session/new");
+        let created = block_on(recv_json(&mut responses));
+        let session_id = created["result"]["sessionId"].as_str().expect("session id");
+        requests
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/set_mode",
+                "params": {"sessionId": session_id, "modeId": "code"}
+            }))
+            .expect("send session/set_mode");
+        block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if recv_json(&mut responses).await["id"] == 2 {
+                        break;
+                    }
+                }
+            })
+            .await
+            .expect("mode response");
+        });
+        requests
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": "connect MCP"}]
+                }
+            }))
+            .expect("send session/prompt");
+
+        block_on(async {
+            // The PID file and process state are external OS events. Polling
+            // them is bounded by named timeouts; the interval is only a probe
+            // cadence, never a delay used to order Harn tasks.
+            let mut probe = tokio::time::interval(Duration::from_millis(20));
+            probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tokio::time::timeout(Duration::from_secs(30), async {
+                while !pid_file.exists() {
+                    tokio::select! {
+                        line = responses.recv() => {
+                            let line = line.expect("ACP response channel closed");
+                            let message: serde_json::Value =
+                                serde_json::from_str(&line).expect("valid ACP JSON");
+                            if message["method"] == "host/capabilities" {
+                                requests.send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"],
+                                    "result": {}
+                                })).expect("answer host capabilities");
+                            }
+                            assert_ne!(message["id"], 3, "prompt finished before MCP child: {message}");
+                        }
+                        _ = probe.tick() => {}
+                    }
+                }
+            })
+            .await
+            .expect("MCP child started");
+        });
+        let pid: u32 = std::fs::read_to_string(&pid_file)
+            .expect("MCP child PID")
+            .parse()
+            .expect("numeric child PID");
+        let process_state = || {
+            std::process::Command::new("ps")
+                .args(["-p", &pid.to_string(), "-o", "state="])
+                .output()
+                .expect("inspect MCP child")
+        };
+        assert!(
+            process_state().status.success(),
+            "MCP child was not running"
+        );
+
+        handle.shutdown();
+        block_on(async {
+            tokio::time::timeout(Duration::from_secs(2), handle.wait_terminated())
+                .await
+                .expect("shutdown must interrupt MCP initialization");
+        });
+        block_on(async {
+            let mut probe = tokio::time::interval(Duration::from_millis(20));
+            probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let state = process_state();
+                    if !state.status.success()
+                        || String::from_utf8_lossy(&state.stdout)
+                            .trim_start()
+                            .starts_with('Z')
+                    {
+                        break;
+                    }
+                    probe.tick().await;
+                }
+            })
+            .await
+            .expect("MCP child must stop after shutdown");
+        });
+    }
+
+    #[test]
     fn dropping_request_sender_terminates_agent() {
         // `into_parts` detaches the worker thread and hands over the *only*
         // request sender, so dropping it closes `request_rx`. That must stop

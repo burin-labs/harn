@@ -330,6 +330,8 @@ mod telemetry_tests {
             unpriced_calls: 0,
             usage_unknown_calls: 0,
             unpriced: None,
+            pricing: None,
+            billing: None,
         };
 
         let payload = llm_telemetry_payload("call-1", "model-1", &usage, 42, 3);

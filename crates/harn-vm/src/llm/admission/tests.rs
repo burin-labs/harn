@@ -53,7 +53,8 @@ fn native_downstream_retry_retains_cost_and_closes_shared_admission() {
     let previous = swap_scope(scope.clone());
     reserve_decision(0.1, Some(1.0), Some(1.0))
         .unwrap()
-        .retain_contract_violation();
+        .retain_contract_violation()
+        .unwrap();
     let receipt = scope.receipt().unwrap();
     assert_eq!(receipt.uncertain_usd, money(0.1).unwrap());
     assert!(reserve_decision(0.1, Some(1.0), Some(1.0)).is_err());
@@ -548,4 +549,145 @@ fn host_allowance_suspended_future_cannot_replace_a_parent() {
         !resumed.get(),
         "a suspended future replaced the parent allowance"
     );
+}
+
+#[test]
+fn host_session_budget_inherits_machine_scope_without_replacing_it() {
+    swap_scope(AdmissionScope::default());
+    let temp = tempfile::tempdir().unwrap();
+    let machine = MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        MachineSpendPolicy {
+            daily_limit_microusd: Some(1_000_000),
+            monthly_limit_microusd: Some(1_000_000),
+        },
+    )
+    .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            machine
+                .scope(async {
+                    let session = ConservativeLlmBudget::new(0.6).unwrap();
+                    session
+                        .scope(async {
+                            let options = opts(0.6);
+                            let request = LlmRequestPayload::from(&options);
+                            let reservation = reserve(&options, &request).unwrap().unwrap();
+                            assert!(machine_receipt().unwrap().is_some());
+                            drop(reservation);
+                            tokio::task::yield_now().await;
+                            assert!(machine_receipt().unwrap().is_some());
+                        })
+                        .await
+                        .unwrap();
+                })
+                .await
+                .unwrap();
+        });
+    assert!(machine.receipt().unwrap().reserved_microusd > 0);
+    assert!(machine_receipt().unwrap().is_none());
+}
+
+#[test]
+fn registered_self_hosted_route_is_known_zero_under_machine_quota() {
+    swap_scope(AdmissionScope::default());
+    let temp = tempfile::tempdir().unwrap();
+    let machine = MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        MachineSpendPolicy {
+            daily_limit_microusd: Some(0),
+            monthly_limit_microusd: Some(0),
+        },
+    )
+    .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            machine
+                .scope(async {
+                    let mut options = base_opts("ollama");
+                    options.provider = "ollama".into();
+                    options.model = "any-locally-served-model".into();
+                    let request = LlmRequestPayload::from(&options);
+                    assert!(reserve(&options, &request).unwrap().is_none());
+                })
+                .await
+                .unwrap();
+        });
+    assert_eq!(machine.receipt().unwrap().reserved_microusd, 0);
+}
+
+#[test]
+fn machine_quota_refuses_late_activation_after_provider_admission() {
+    swap_scope(AdmissionScope::default());
+    let options = opts(0.6);
+    let request = LlmRequestPayload::from(&options);
+    drop(reserve(&options, &request).unwrap().unwrap());
+    let temp = tempfile::tempdir().unwrap();
+    let machine = MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        MachineSpendPolicy {
+            daily_limit_microusd: Some(1_000_000),
+            monthly_limit_microusd: Some(1_000_000),
+        },
+    )
+    .unwrap();
+    let outcome = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(machine.scope(async {}));
+    assert!(outcome.is_err(), "prior attempt escaped machine accounting");
+    swap_scope(AdmissionScope::default());
+}
+
+#[test]
+fn native_decisions_draw_on_and_are_refused_by_the_machine_quota() {
+    swap_scope(AdmissionScope::default());
+    let temp = tempfile::tempdir().unwrap();
+    let machine = MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        MachineSpendPolicy {
+            daily_limit_microusd: Some(500_000),
+            monthly_limit_microusd: Some(500_000),
+        },
+    )
+    .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            machine
+                .scope(async {
+                    // The execution ceiling allows 0.6, but the durable
+                    // machine allowance of 0.5 refuses it before transport.
+                    assert!(reserve_decision(0.6, Some(1.0), Some(1.0)).is_err());
+                    let hold = reserve_decision(0.4, Some(1.0), Some(1.0)).unwrap();
+                    assert_eq!(machine.receipt().unwrap().reserved_microusd, 400_000);
+                    // Complete usage releases only the proven-unused amount.
+                    hold.settle(Some(0.1)).unwrap();
+                    let receipt = machine.receipt().unwrap();
+                    assert_eq!(receipt.reserved_microusd, 100_000);
+                    assert_eq!(receipt.actual_known_microusd, 100_000);
+                    // A downstream contract violation closes the durable scope.
+                    reserve_decision(0.1, Some(1.0), Some(1.0))
+                        .unwrap()
+                        .retain_contract_violation()
+                        .unwrap();
+                })
+                .await
+                .unwrap();
+        });
+    assert!(machine.receipt().unwrap().contract_broken);
+    swap_scope(AdmissionScope::default());
 }

@@ -207,6 +207,29 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
     .await
 }
 
+#[tokio::test]
+async fn imported_testing_skip_is_typed_and_stops_the_case() {
+    let temp = TempTestDir::new();
+    let result = run_single_case(
+        &temp,
+        "test_typed_skip",
+        "import { skip } from \"std/testing\"\n\
+         pipeline test_typed_skip(_task) {\n\
+           skip(\"opt-in service unavailable\")\n\
+           assert(false, \"assertion after skip ran\")\n\
+         }\n",
+    )
+    .await;
+    assert!(!result.passed);
+    assert_eq!(
+        result.skip_reason.as_deref(),
+        Some("opt-in service unavailable"),
+        "{result:?}"
+    );
+    assert!(result.error.is_none(), "{result:?}");
+    assert!(result.timeout.is_none(), "{result:?}");
+}
+
 /// `log`/`print`/`println` write into the VM's per-case output buffer
 /// (`Vm::output`). That buffer must survive past `drop(vm)` into the
 /// `TestResult` for both outcomes below — a passing case's probes are the
@@ -810,6 +833,7 @@ fn passing_result_with_timings(total_ms: u64, execute_ms: u64) -> TestResult {
         name: "test_budget".to_string(),
         file: "tests/test_budget.harn".to_string(),
         passed: true,
+        skip_reason: None,
         error: None,
         captured_output: None,
         timeout: None,

@@ -7,7 +7,10 @@ signals from provider sources, normalizes them, and emits:
 - a markdown **drift report** under
   `.harn-runs/provider_catalog/drift-report.md`;
 - a TOML **candidate patch** under
-  `.harn-runs/provider_catalog/candidate.toml`.
+  `.harn-runs/provider_catalog/candidate.toml`;
+- a JSON **evidence manifest** under
+  `.harn-runs/provider_catalog/refresh.json`, with adapter coverage,
+  observations, provenance, conflicts, and typed drift.
 
 The workflow never mutates the shipped catalog. The patch is a review
 aid: diff it against the TOML fragments under
@@ -19,6 +22,31 @@ Keep the provider's durable rate card in the main pricing fields. Put a dated
 discount in `pricing.promotions`. Harn uses an active promotion for cost
 estimates and returns to the durable rate when it ends. Use `review_after` when
 a provider gives a minimum duration but no firm end date.
+
+Recurring prices belong in `pricing.schedules`: named weekday windows with a
+fixed UTC offset, inclusive start, exclusive end, and rate multipliers. A
+window may cross midnight. Overlaps fail catalog validation. OpenRouter's
+`pricing.overrides` records are normalized to a peak base card and discount
+windows, including all-day records with omitted time bounds. DeepSeek's
+Chinese-public-holiday exemption remains an explicit approximation in the
+curated row; Harn does not maintain a holiday calendar.
+
+Completed calls resolve the card at request start, then apply the input band,
+cache lifetime, and serving tier. Usage receipts record the selected card and
+`cache_ttl_unpriced` when the route has no one-hour write price. Hosted tool
+counts and audio-token counts use `hosted_tool_fees` and `modality_rates`.
+Unpriced reported units keep the known token cost visible but leave the budget
+projection unbounded. Monthly free allowances are account state and remain
+unapplied, named on the receipt.
+
+`platform_fee_percent` allocates funding overhead when catalog prices estimate
+a request's cost. OpenRouter's 5.5 percent default assumes standard card-funded
+credits and excludes the minimum top-up fee. The receipt calls this
+`platform_fee_estimate_usd` with basis `catalog_estimate_funding_route_unknown`;
+it is not an invoice line, does not describe BYOK or
+alternate funding, and is never added to a provider-reported authoritative
+total. Override the provider field to zero when that funding assumption does
+not apply.
 
 The markdown report includes aggregator discoveries for awareness, but the
 candidate TOML contains only provider-owned, high-confidence changes and
@@ -37,8 +65,9 @@ harn provider catalog refresh
 
 # Live mode: hit real provider sources. Key-required adapters attach
 # the configured auth header from env vars; missing keys produce a
-# "skipped" diagnostic in the report instead of a failure.
-harn provider catalog refresh --live
+# "skipped" adapter record. --json prints a compact coverage summary;
+# the full machine-readable evidence is in refresh.json.
+harn provider catalog refresh --live --json
 
 # CI gate: same fixture replay, but compare against the committed
 # goldens at scripts/provider_catalog_fixtures/expected_*.
@@ -47,6 +76,11 @@ harn provider catalog refresh --check
 # Refresh the committed goldens after intentional adapter changes.
 harn provider catalog refresh --check --update
 ```
+
+The JSON summary distinguishes complete, partial, and unmeasured runs and
+reports adapter, empty-source, and observed-model counts. A live run with no observed models
+fails even when every adapter returned a nominal response. Chat-model indexes
+do not count decision-only routes as removals.
 
 The command stops a refresh that exceeds 120 seconds and reports a timeout as
 a failed, incomplete refresh rather than an empty catalog. Pass
@@ -81,18 +115,31 @@ shape. `provenance` is `authenticated`, `verified_link`, `unverified`, or
 
 The model is limited to a schema-constrained extraction:
 
-- `price`, `promotion`, `retirement`, `endpoint`, and `capability` are distinct typed
-  variants;
-- provider, model id, effective date, old/new values, and supporting evidence
-  are retained;
+- `addition`, `price`, `promotion`, `retirement`, `endpoint`, and `capability` are
+  distinct typed variants;
+- provider, model id, and supporting evidence are retained, with effective dates
+  and old/new values for changes that require them;
 - the model never receives a file mutation tool and never emits TOML.
 
-Deterministic code then resolves exactly one provider and model row in the
-loaded catalog, verifies the old value, finds exactly one owning source table,
-and applies the constrained edit. Missing or duplicate identities are
-rejected. A model absent from an unsupported provider records a no-op; a new
-model on a supported provider produces an incomplete proposal listing context,
-pricing, capability, and routing verification still required.
+For an existing model, extraction sees that provider's catalog IDs, names,
+and current prices. An uncertain identity is rejected for review; an unknown
+ID in a price or retirement candidate cannot masquerade as a new-model
+addition.
+
+Deterministic code resolves the provider and model identity. For an existing
+model, it verifies the old value, finds exactly one owning source table, and
+applies the constrained edit. Duplicate identities are rejected. An
+unsupported provider records a no-op; a new model on a supported provider
+produces an incomplete proposal listing context, pricing, capability, and
+routing verification still required.
+
+An addition needs no invented launch date and cannot insert a catalog row
+without the listed verification. The receipt retains the structured extraction
+that led to the disposition.
+
+The extractor emits at most one candidate per run. Split a notice with several
+changes into focused records and account for every remaining fact.
+
 Capability edits target the generated capability matrix's owning fragments,
 not legacy model tags. They require one exact `model_match` rule; a
 wildcard-derived family rule is deliberately rejected as ambiguous rather than
@@ -122,14 +169,22 @@ harn run \
 ```
 
 For a live extraction, omit `--extraction` and optionally choose `--provider`
-and `--model`. The extraction has a $0.10 per-notice cap. By default the script
-only writes an idempotent local receipt below
-`.harn/provider-catalog-notices/`. `--apply` requires a clean, dedicated
-worktree and runs catalog generation plus drift, artifact, documentation,
-support, and capability checks. `--open-pr` uses a stable branch derived from
-the notice digest, pushes it, and opens a **draft** PR. It never enables merge
-or auto-merge. A repeated notice reuses the same digest and returns an existing
-PR instead of creating another.
+and `--model`. Without `--model`, Harn uses that provider's catalog default;
+it does not pair a cross-provider tier alias with the selected provider.
+`--max-cost-usd` caps its one model call at $0.10 by default;
+`--extraction-timeout-secs` caps that call at 90 seconds by default. By
+default the script only writes an idempotent local receipt below
+`.harn/provider-catalog-notices/`. An incomplete new model writes a proposal
+beside the receipt, even with `--apply --open-pr`, and leaves Git untouched.
+A validated patch with `--apply` requires a clean, dedicated worktree and
+regenerates the catalog, matrix, and support projections before their checks.
+Pass `--harn-bin /absolute/path/to/harn` to use one already built Harn binary
+for generation and checks. The workflow runs the catalog's deterministic
+refresh, artifact, matrix, and support gates. CI also runs the sandbox and
+documentation snippet gates outside this nested Harn execution.
+`--open-pr` signs the commit, stages only tracked changes, and opens a
+**draft** PR on a stable branch derived from the notice digest. It never
+enables merge or auto-merge. A repeated notice returns the existing PR.
 
 ```bash
 git worktree add ../harn-provider-notice origin/main
@@ -166,10 +221,10 @@ provider adapter, request builder, stream parser, and response normalizer as
 
 ```bash
 # Inspect the request without calling the provider.
-harn provider tool-probe openai --model gpt-5.6-sol --dry-run-request
+harn provider tool-probe openai --model gpt-6-sol --dry-run-request
 
 # Check non-streaming and streaming native tool calls.
-harn provider tool-probe openai --model gpt-5.6-sol --mode both
+harn provider tool-probe openai --model gpt-6-sol --mode both
 ```
 
 The probe reads the provider's normal API-key environment variable. Pass
@@ -425,6 +480,14 @@ runtime snapshot at `crates/harn-vm/src/llm/providers.toml` from those
 fragments. Provider capability rules use the same pattern:
 `crates/harn-vm/src/llm/capability_sources/` generates
 `crates/harn-vm/src/llm/capabilities.toml`.
+
+The bare runtime fallback is `fallback_model` in `00-base.toml`.
+`40-defaults/provider-models.toml` records provider-specific `runtime` and
+`portal` choices; they may differ deliberately. Keep those routes in the
+catalog rather than in Rust match tables. Catalog generation rejects unknown,
+provider-mismatched, or deprecated choices there, in `qc_defaults`, the three
+tier aliases, and model ladders. Host environment overrides for local models
+remain runtime input, so the built-in catalog cannot validate their IDs.
 
 ```bash
 # Regenerate providers.toml, capabilities.toml, and all checked-in
@@ -787,10 +850,21 @@ Each adapter is a function `adapter(env, config) -> {run, observations}`.
 
 ### Entry script: `scripts/update_provider_catalog.harn`
 
-Wires four canonical adapters (Anthropic and OpenAI pricing pages,
-the OpenRouter public `/api/v1/models` index, and a key-gated
-Fireworks API stub). Each adapter spec is built by a small
-factory function so the manifest stays readable.
+Fixture mode replays Anthropic and OpenAI pricing pages, the OpenRouter
+public index, and a key-gated Fireworks source. Live mode reads model-index
+sources and its network allowlist from
+`spec/provider-catalog-refresh-sources.json`, including the public OpenRouter
+index. Each source selects an existing mapper by a closed, typed name and
+declares whether its index requires a key and who owns its observations.
+
+The provider catalog supplies credential environment names and authentication
+style. The source registry carries no duplicate credential aliases. Harn's VM
+catalog projects these facts from the same artifact used by catalog tooling
+and includes the provider's local or hosted classification.
+
+Both modes validate the source registry before running an adapter. Empty
+registries, duplicate source IDs, unknown providers, and malformed typed
+records fail the refresh, including the offline `--check` path.
 
 ## Provenance contract
 

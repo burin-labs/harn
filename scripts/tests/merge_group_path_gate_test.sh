@@ -10,7 +10,7 @@ trap 'rm -rf "$tmp_root"' EXIT
 new_repo() {
   local dir="$tmp_root/repo"
   mkdir -p "$dir"
-  git -C "$dir" init -q
+  git -C "$dir" init -b main -q
   git -C "$dir" config user.name "Harn Test"
   git -C "$dir" config user.email "harn-test@example.invalid"
   git -C "$dir" config commit.gpgsign false

@@ -21,7 +21,7 @@ MODEL_JOB_IMAGE_PROMPT='A flat blue flower emblem on a cream background, no text
 harn run --no-sandbox examples/model-jobs/openai-image.harn
 ```
 
-The example uses `gpt-5.6-sol` with the Responses API image-generation tool and
+The example uses `gpt-6-sol` with the Responses API image-generation tool and
 requests low-quality PNG output. Set `OPENAI_IMAGE_RESPONSE_MODEL` to choose a
 different Responses API model that supports the tool. OpenAI selects the GPT
 Image model behind that tool.

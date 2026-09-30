@@ -161,7 +161,10 @@ async fn compaction_run_impl(
     // the same `model`, `provider`, `max_tokens` keys callers pass to
     // `agent_session_compact` so the policy primitive doesn't lose the
     // ability to drive specific models.
-    let llm_opts = if matches!(config.compact_strategy, CompactStrategy::Llm) {
+    let llm_opts = if matches!(
+        config.compact_strategy,
+        CompactStrategy::Llm | CompactStrategy::Classify
+    ) {
         let raw = VmValue::dict(crate::llm::helpers::project_llm_options(&plan)?);
         Some(extract_llm_options(&[
             VmValue::String(arcstr::ArcStr::from("")),

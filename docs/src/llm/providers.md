@@ -837,6 +837,26 @@ The provider files in steps 2-4 are overlays, so a starter file can set
 definition. Project manifests can therefore configure provider adapters and
 model aliases without editing Rust-side registration code.
 
+For Ollama's OpenAI-compatible chat endpoint, declare the response adapter
+alongside the endpoint. Keep the route's `message_wire_format = "ollama"` in
+the model capability row:
+
+```toml
+[llm.providers.ollama]
+chat_endpoint = "/v1/chat/completions"
+chat_api_adapter = "ollama_openai_compat"
+```
+
+This selects OpenAI Chat Completions SSE decoding while mapping request values
+to fields the Ollama `/v1` server consumes. The adapter rejects Ollama-only
+sampling options it cannot carry. `/v1` does not carry `num_ctx` or
+`keep_alive`; use an Ollama Modelfile for context sizing and native `/api/chat`
+when those runtime controls are needed. These fields follow
+[Ollama 0.34's compatibility handler](https://github.com/ollama/ollama/blob/v0.34.0/openai/openai.go).
+
+Set `chat_api_adapter = "model_default"` with `/api/chat` to override an
+inherited compatible adapter and restore native Ollama request and response handling.
+
 ### Managed provider supply
 
 A product or hosted gateway that supplies provider credentials can declare an
@@ -1233,7 +1253,7 @@ Ask for a posture in provider-neutral terms:
 
 ```harn
 harness.llm.call({
-  model: "gpt-5.6",
+  model: "gpt-6-sol",
   messages: messages,
   data_controls: "strictest_available",
 })
@@ -1284,6 +1304,27 @@ that wants it everywhere sets it once in provider config:
 default_posture = "strictest_available"
 ```
 
+## Inference destination boundaries
+
+An embedder may set `HARN_INFERENCE_BOUNDARY_JSON` in the Harn session's
+granted environment. Its value is a JSON object with `reach` and
+`allow_training_discounts`, for example
+`{"reach":"local_only","allow_training_discounts":false}`. A call or agent
+may supply the same typed `inference_boundary` option to narrow that ceiling;
+workers inherit it and cannot widen it. Without a host ceiling or call option,
+standalone Harn keeps its existing routing behavior. A malformed supplied
+ceiling refuses the call.
+
+`local_only` admits only cataloged local runtimes whose resolved endpoint is
+loopback (`localhost`, `127.0.0.0/8`, or `::1`). A provider marked local with
+a remote base URL is refused. `hosted_open_weight` also admits hosted routes
+whose model row explicitly declares `open_weight = true`; `any_hosted` admits
+other hosted routes. Hosted routes still need a cataloged no-training default,
+an applied per-request no-training control, or explicit permission for a
+cataloged training route. Unknown training behavior is refused under a supplied
+boundary. Every allowed live call includes the governing rule and the catalog
+locality and open-weight declarations in its data-controls receipt.
+
 ## Provider resolution order
 
 When you call `harness.llm.call()` or start an `agent_loop(harness, ...)`, Harn resolves the
@@ -1330,7 +1371,7 @@ is specified in the script.
 ### Model resolution guarantees
 
 Harn resolves a model selector and its provider as one decision before a
-provider call. A qualified selector such as `openai:gpt-5.6-sol` is a hard
+provider call. A qualified selector such as `openai:gpt-6-sol` is a hard
 provider constraint. Harn rejects it if the catalog assigns the model to a
 different provider, if a separate `provider` option disagrees, or if a later
 routing step changes the provider. It does not fall through to the default or
@@ -1341,7 +1382,7 @@ provider registry declares the `model_proxy` feature. A custom adapter, the
 generic local OpenAI-compatible adapter, or a catalogued router may deliberately
 serve an upstream model identity, while its selected adapter remains a hard
 transport constraint. This keeps gateways and test adapters composable without
-allowing `ollama:gpt-5.6-sol` or another contradictory namespace-owned selector
+allowing `ollama:gpt-6-sol` or another contradictory namespace-owned selector
 to escape to the wrong provider.
 
 An explicit provider can name a private or newly released model that is not in

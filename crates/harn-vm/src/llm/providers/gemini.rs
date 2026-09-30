@@ -280,12 +280,10 @@ impl GeminiProvider {
             attempt,
             &body,
         );
-        let response = req.send().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "gemini API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))))
-        })?;
+        let response = req
+            .send()
+            .await
+            .map_err(|error| crate::llm::api::reqwest_send_error("gemini", "API", error))?;
         if !response.status().is_success() {
             let status = response.status();
             let headers = response.headers().clone();
@@ -618,7 +616,8 @@ pub(crate) fn parse_response(
     let request_id = json["responseId"]
         .as_str()
         .filter(|value| !value.is_empty());
-    let telemetry = ProviderTelemetry::from_gemini_usage(&json["usageMetadata"], request_id);
+    let mut telemetry = ProviderTelemetry::from_gemini_usage(&json["usageMetadata"], request_id);
+    telemetry.billing = crate::llm::usage::BillingUsage::from_gemini(json);
     Ok(LlmResult {
         attempts: Default::default(),
         text_projection: None,
@@ -642,7 +641,7 @@ pub(crate) fn parse_response(
         stop_reason,
         blocks,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 
@@ -697,6 +696,7 @@ mod tests {
     fn gemini_image_content_maps_to_inline_data() {
         let payload = LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -727,6 +727,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,
@@ -771,6 +772,7 @@ mod tests {
     fn gemini_image_url_content_maps_to_file_data() {
         let mut payload = LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -800,6 +802,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,
@@ -849,6 +852,7 @@ mod tests {
     fn gemini_pdf_and_audio_content_maps_to_parts() {
         let payload = LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -879,6 +883,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,

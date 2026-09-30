@@ -1,6 +1,7 @@
 pub(crate) mod agents_conformance;
 pub(crate) mod app;
 mod app_host_assets;
+pub(crate) mod argument_schema;
 pub(crate) mod bench;
 pub(crate) mod canon;
 pub(crate) mod chat;
@@ -21,6 +22,8 @@ pub(crate) mod diagnostics_catalog;
 pub(crate) mod dispatch_explain;
 pub(crate) mod doc;
 pub(crate) mod doctor;
+#[cfg(feature = "hostlib")]
+pub(crate) mod doctor_sandbox;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod dump_portable_benchmark_schema;
 pub(crate) mod dump_prompt_grammar;
@@ -37,6 +40,7 @@ pub(crate) mod eval_prompt_context;
 pub(crate) mod eval_scope_triage;
 pub mod eval_skill_gate;
 pub(crate) mod eval_tool_calls;
+pub(crate) mod evaluation_tape;
 pub(crate) mod explain;
 pub(crate) mod fix;
 pub mod flow;

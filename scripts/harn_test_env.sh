@@ -19,6 +19,9 @@ unset \
   HARN_EGRESS_ALLOW_LOOPBACK \
   HARN_SESSION_STORE_ROOT
 
+# Keep script tests off the login keychain unless the caller chose a chain.
+export HARN_SECRET_PROVIDERS="${HARN_SECRET_PROVIDERS:-env}"
+
 session_store_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-test-session.XXXXXX")"
 trap 'rm -rf -- "$session_store_root"' EXIT
 

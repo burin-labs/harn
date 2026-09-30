@@ -14,13 +14,13 @@
     "@codemirror/language": "^6.12.4",
     "@codemirror/stream-parser": "^0.19.9",
     "@codemirror/theme-one-dark": "^6.1.3",
-    "@codemirror/view": "^6.43.11",
+    "@codemirror/view": "^6.43.12",
     "@testing-library/dom": "^10.4.2",
     "@uiw/react-codemirror": "^4.25.11",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-intl": "^10.2.2",
-    "react-router": "^8.3.1"
+    "react-router": "^8.4.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -31,14 +31,14 @@
     "@types/react-dom": "^19.3.0",
     "@typescript/native": "npm:typescript@^7.0.2",
     "@vitejs/plugin-react": "^6.1.1",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.6",
-    "jsdom": "^30.0.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "jsdom": "^30.1.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.70.0",
     "vite": "^8.3.0",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.1"
   },
   "overrides": {
     "brace-expansion": "5.0.8"

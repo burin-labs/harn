@@ -80,10 +80,27 @@ open_weight = true
 strengths = ["vision", "reasoning", "tool_use", "summarization", "long_context"]
 
 # 2026-08-15 reachability sweep: NIM retired both undated DeepSeek V4 builds
-# (HTTP 410, end of life 2026-08-07). It still serves the dated Flash snapshot,
-# so that row survives below. There is no DeepSeek V4 Pro build on NIM any more,
-# so the Pro row is gone rather than left pointing at a 410 — a catalog entry
-# that cannot be called is worse than an absent one, because it is selectable.
+# (HTTP 410, end of life 2026-08-07). There is no DeepSeek V4 Pro build on NIM
+# any more, so the Pro row is gone rather than left pointing at a 410 — a
+# catalog entry that cannot be called is worse than an absent one, because it is
+# selectable. By 2026-09-26 NIM had dropped the dated V4 Flash snapshot too and
+# serves DeepSeek V4.1 Flash in its place.
+
+[models."nvidia/deepseek-v4.1-flash"]
+name = "DeepSeek V4.1 Flash (NVIDIA NIM)"
+provider = "nvidia"
+wire_model = "deepseek-ai/deepseek-v4.1-flash"
+context_window = 1048576
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+served_variant = "nvidia-nim"
+api_dialect = "openai_chat"
+# A one-tool `tool_choice: auto` probe on 2026-09-26 returned a native tool call
+# and reported cached prompt tokens.
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
 [models."nvidia/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (NVIDIA NIM)"
@@ -95,6 +112,9 @@ equivalence_group = "deepseek-v4-flash"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+deprecated = true
+deprecation_note = "Absent from NIM's model index (https://integrate.api.nvidia.com/v1/models, read 2026-09-26). NIM serves DeepSeek V4.1 Flash instead."
+superseded_by = "nvidia/deepseek-v4.1-flash"
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]

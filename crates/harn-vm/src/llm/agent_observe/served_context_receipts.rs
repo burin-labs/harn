@@ -5,6 +5,7 @@ use serde::Serialize;
 
 const MESSAGE_LINEAGE_SCHEMA: &str = "harn.llm.message_lineage.v1";
 const SERVED_MESSAGE_SCHEMA: &str = "harn.llm.served_message.v1";
+const OUTPUT_SCHEMA_SCHEMA: &str = "harn.llm.output_schema.v1";
 
 #[derive(Clone, Debug, Serialize)]
 struct ServedMessageLineage {
@@ -147,16 +148,7 @@ pub(super) fn structured_output_receipt(
     opts: &super::super::api::LlmCallOptions,
     payload: &super::super::api::LlmRequestPayload,
 ) -> serde_json::Value {
-    let (mode, strict, requested_schema, sent_schema) = match &opts.output_format {
-        super::super::api::OutputFormat::Text => ("text", None, None, None),
-        super::super::api::OutputFormat::JsonObject => ("json_object", None, None, None),
-        super::super::api::OutputFormat::JsonSchema { schema, strict } => (
-            "json_schema",
-            Some(*strict),
-            Some(opts.output_schema.as_ref().unwrap_or(schema)),
-            payload.output_schema.as_ref(),
-        ),
-    };
+    let (mode, strict, requested_schema, sent_schema) = output_schemas(opts, payload);
     let hash = |schema: Option<&serde_json::Value>| {
         schema
             .map(stable_redacted_json_hash)
@@ -170,6 +162,58 @@ pub(super) fn structured_output_receipt(
         "requested_schema_content_hash": hash(requested_schema),
         "sent_schema_content_hash": hash(sent_schema),
     })
+}
+
+/// The output contract of one call: its mode, strictness, the schema the
+/// caller requested and the schema the provider projection sent.
+fn output_schemas<'a>(
+    opts: &'a super::super::api::LlmCallOptions,
+    payload: &'a super::super::api::LlmRequestPayload,
+) -> (
+    &'static str,
+    Option<bool>,
+    Option<&'a serde_json::Value>,
+    Option<&'a serde_json::Value>,
+) {
+    match &opts.output_format {
+        super::super::api::OutputFormat::Text => ("text", None, None, None),
+        super::super::api::OutputFormat::JsonObject => ("json_object", None, None, None),
+        super::super::api::OutputFormat::JsonSchema { schema, strict } => (
+            "json_schema",
+            Some(*strict),
+            Some(opts.output_schema.as_ref().unwrap_or(schema)),
+            payload.output_schema.as_ref(),
+        ),
+    }
+}
+
+/// Content-addressed definitions of the schemas [`structured_output_receipt`]
+/// fingerprints, so both of its hashes resolve to the exact schema. The two
+/// schemas differ only when the provider projection rewrote the request's;
+/// otherwise one definition serves both hashes.
+pub(super) fn output_schema_definitions(
+    opts: &super::super::api::LlmCallOptions,
+    payload: &super::super::api::LlmRequestPayload,
+) -> Vec<serde_json::Value> {
+    let (_, _, requested, sent) = output_schemas(opts, payload);
+    let mut seen = std::collections::BTreeSet::new();
+    [requested, sent]
+        .into_iter()
+        .flatten()
+        .filter_map(|schema| {
+            let content_hash = stable_redacted_json_hash(schema);
+            seen.insert(content_hash.clone()).then(|| {
+                serde_json::json!({
+                    "type": "output_schema",
+                    "timestamp": chrono_now(),
+                    "span_id": crate::tracing::current_span_id(),
+                    "schema": OUTPUT_SCHEMA_SCHEMA,
+                    "content_hash": content_hash,
+                    "output_schema": schema,
+                })
+            })
+        })
+        .collect()
 }
 
 pub(super) fn served_context_receipt(
@@ -456,6 +500,9 @@ mod tests {
         let payload =
             super::super::dump_llm_request(1, "call-output-schema-receipt", "none", &opts)
                 .expect("valid request");
+        // A second call with the same contract references the same definitions.
+        super::super::dump_llm_request(2, "call-output-schema-repeat", "none", &opts)
+            .expect("valid repeat request");
         super::super::pop_llm_transcript_dir();
         restore_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", previous_verbose);
 
@@ -492,6 +539,48 @@ mod tests {
             !request.to_string().contains("private_contract_marker"),
             "default request events must retain schema hashes, not schema contents"
         );
+
+        // Each hash resolves to exactly one retained definition of that schema.
+        let definitions: Vec<&serde_json::Value> = events
+            .iter()
+            .filter(|event| event["type"] == "output_schema")
+            .collect();
+        assert_eq!(definitions.len(), 2, "{definitions:?}");
+        // Every request's hashes resolve, and the retained text re-hashes to
+        // the hash that names it.
+        let requests: Vec<&serde_json::Value> = events
+            .iter()
+            .filter(|event| event["type"] == "provider_call_request")
+            .collect();
+        assert_eq!(requests.len(), 2, "{requests:?}");
+        for request in &requests {
+            for key in ["requested_schema_content_hash", "sent_schema_content_hash"] {
+                let hash = &request["structured_output"][key];
+                let definition = definitions
+                    .iter()
+                    .find(|definition| &definition["content_hash"] == hash)
+                    .unwrap_or_else(|| panic!("{key} {hash} resolves to no definition"));
+                assert_eq!(
+                    serde_json::json!(stable_redacted_json_hash(&definition["output_schema"])),
+                    *hash,
+                    "the retained schema must re-hash to {hash}"
+                );
+            }
+        }
+        for (hash, schema) in [
+            (&receipt["requested_schema_content_hash"], &requested_schema),
+            (&receipt["sent_schema_content_hash"], &sent_schema),
+        ] {
+            let definition = definitions
+                .iter()
+                .find(|definition| &definition["content_hash"] == hash)
+                .unwrap_or_else(|| panic!("no output_schema definition for {hash}"));
+            assert_eq!(&definition["output_schema"], schema);
+            assert_eq!(
+                definition["schema"],
+                serde_json::json!("harn.llm.output_schema.v1")
+            );
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

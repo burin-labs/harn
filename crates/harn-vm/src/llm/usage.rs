@@ -12,7 +12,9 @@ use crate::value::{VmDictExt, VmValue};
 
 use super::api::{LlmResult, ProviderAttempts};
 
+mod billing;
 mod cache_fields;
+pub use billing::BillingUsage;
 mod prompt_tokens;
 mod receipt;
 mod reported_cache;
@@ -177,6 +179,52 @@ pub struct LlmUsage {
     /// from `cost_usd` rather than letting the absent field read as clean.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unpriced: Option<Box<UnpricedFacts>>,
+    /// Which rate card settled this ledger's priced calls, and when.
+    ///
+    /// `None` is a ledger whose cost did not come from the catalog at all
+    /// (a provider-authoritative cost, a self-hosted zero, or an unpriced
+    /// attempt), or one recorded before this field existed. Boxed so the
+    /// ledger's own frame stays inside the stack-frame budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<Box<PricingFacts>>,
+    #[serde(default, flatten, deserialize_with = "billing::deserialize_optional")]
+    pub billing: Option<Box<BillingUsage>>,
+}
+
+/// How settlement picked the rate card for one ledger.
+///
+/// This exists so per-call spend is auditable after the fact: a reader can see
+/// which card, which whole-request band and which serving tier produced the
+/// recorded `cost_usd`, without re-resolving a catalog that may have moved.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PricingFacts {
+    /// `base`, `promotion:<id>`, or `schedule:<id>`.
+    pub rate_card: String,
+    /// The instant the card was resolved at: the call's start, not the moment
+    /// it was priced.
+    pub settled_at_ms: i64,
+    /// Whole-request input band applied, named by its lower bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_band_minimum: Option<u64>,
+    /// Serving tier whose rates applied, when the call was served on one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serving_tier: Option<String>,
+    /// True when the request asked for a cache lifetime this route publishes
+    /// no rate for, so the write settled at the short-lifetime rate. Naming it
+    /// keeps an under-count visible instead of silent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cache_ttl_unpriced: bool,
+    #[serde(default)]
+    pub platform_fee_estimate_usd: f64,
+    /// A catalog percentage is an estimate, not a provider-reported charge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform_fee_basis: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosted_tool_unpriced: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modality_unpriced: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monthly_allowance_unapplied: Vec<String>,
 }
 
 impl LlmUsage {
@@ -233,7 +281,79 @@ impl UsageCostCertainty {
     /// Whether any attempt folded here carried a price.
     #[must_use]
     pub const fn has_priced_attempt(&self) -> bool {
-        self.unpriced_calls < self.provider_call_count
+        self.unpriced_calls < self.provider_call_count || self.known_cost_usd > 0.0
+    }
+
+    /// Measured total only when every physical attempt has a price.
+    #[must_use]
+    pub fn cost_usd(&self) -> Option<f64> {
+        (self.unpriced_calls == 0).then_some(self.known_cost_usd)
+    }
+
+    /// Fold one completed call without retaining its detailed trace.
+    pub(crate) fn record(&mut self, usage: &LlmUsage) {
+        let summary = self;
+        // An absent call count identifies ledgers recorded before the
+        // aggregation fields existed. Reconstruct their one-call
+        // certainty from the original stable fields. A present zero is a
+        // measurement and remains zero.
+        let legacy = usage.provider_call_count.is_none();
+        summary.known_cost_usd += if legacy {
+            usage.cost_usd.unwrap_or(0.0)
+        } else {
+            usage.known_cost_usd
+        };
+        summary.provider_call_count += usage.provider_call_count.unwrap_or(1);
+        summary.unpriced_calls += if legacy {
+            i64::from(usage.cost_usd.is_none())
+        } else {
+            usage.unpriced_calls
+        };
+        summary.usage_unknown_calls += if legacy {
+            i64::from(usage.accounting_status == UsageAccountingStatus::Unknown)
+        } else {
+            usage.usage_unknown_calls
+        };
+        summary.unpriced_tokens += if legacy {
+            if usage.cost_usd.is_none() {
+                usage.input_tokens.saturating_add(usage.output_tokens)
+            } else {
+                0
+            }
+        } else {
+            usage.unpriced_tokens()
+        };
+        let reason = if legacy {
+            usage.cost_usd.is_none().then_some(UnpricedReason::Mixed)
+        } else {
+            usage.unpriced_reason()
+        };
+        if let Some(reason) = reason {
+            summary.unpriced_reason = Some(
+                summary
+                    .unpriced_reason
+                    .map_or(reason, |existing| existing.merge(reason)),
+            );
+        }
+        // A legacy ledger has no stored projection, so its own cost stands
+        // in: priced members project to exactly what they cost, unpriced
+        // ones refuse.
+        let member_projection = if legacy {
+            usage.cost_usd
+        } else {
+            usage.projected_cost_usd()
+        };
+        let member_known = if legacy {
+            usage.cost_usd.unwrap_or(0.0)
+        } else {
+            usage.known_cost_usd
+        };
+        match member_projection {
+            Some(projected) => {
+                summary.unpriced_projection_usd += (projected - member_known).max(0.0);
+            }
+            None => summary.unprojectable = true,
+        }
     }
 }
 
@@ -241,72 +361,11 @@ impl UsageCostCertainty {
 pub fn summarize_usage_cost_certainty<'a>(
     usages: impl IntoIterator<Item = &'a LlmUsage>,
 ) -> UsageCostCertainty {
-    usages
-        .into_iter()
-        .fold(UsageCostCertainty::default(), |mut summary, usage| {
-            // An absent call count identifies ledgers recorded before the
-            // aggregation fields existed. Reconstruct their one-call
-            // certainty from the original stable fields. A present zero is a
-            // measurement and folds as one.
-            let legacy = usage.provider_call_count.is_none();
-            summary.known_cost_usd += if legacy {
-                usage.cost_usd.unwrap_or(0.0)
-            } else {
-                usage.known_cost_usd
-            };
-            summary.provider_call_count += usage.provider_call_count.unwrap_or(1);
-            summary.unpriced_calls += if legacy {
-                i64::from(usage.cost_usd.is_none())
-            } else {
-                usage.unpriced_calls
-            };
-            summary.usage_unknown_calls += if legacy {
-                i64::from(usage.accounting_status == UsageAccountingStatus::Unknown)
-            } else {
-                usage.usage_unknown_calls
-            };
-            summary.unpriced_tokens += if legacy {
-                if usage.cost_usd.is_none() {
-                    usage.input_tokens.saturating_add(usage.output_tokens)
-                } else {
-                    0
-                }
-            } else {
-                usage.unpriced_tokens()
-            };
-            let reason = if legacy {
-                usage.cost_usd.is_none().then_some(UnpricedReason::Mixed)
-            } else {
-                usage.unpriced_reason()
-            };
-            if let Some(reason) = reason {
-                summary.unpriced_reason = Some(
-                    summary
-                        .unpriced_reason
-                        .map_or(reason, |existing| existing.merge(reason)),
-                );
-            }
-            // A legacy ledger has no stored projection, so its own cost stands
-            // in: priced members project to exactly what they cost, unpriced
-            // ones refuse.
-            let member_projection = if legacy {
-                usage.cost_usd
-            } else {
-                usage.projected_cost_usd()
-            };
-            let member_known = if legacy {
-                usage.cost_usd.unwrap_or(0.0)
-            } else {
-                usage.known_cost_usd
-            };
-            match member_projection {
-                Some(projected) => {
-                    summary.unpriced_projection_usd += (projected - member_known).max(0.0);
-                }
-                None => summary.unprojectable = true,
-            }
-            summary
-        })
+    let mut summary = UsageCostCertainty::default();
+    for usage in usages {
+        summary.record(usage);
+    }
+    summary
 }
 
 /// Classify one attempt's missing price and bound what it may have cost.
@@ -345,6 +404,37 @@ fn unpriced_facts(
             projection_usd: projected,
         })
     })
+}
+
+/// A per-request receipt cannot describe several requests' instants, tiers,
+/// and fees. Aggregates retain it only when they contain one request.
+fn aggregate_pricing_facts(usages: &[LlmUsage]) -> Option<Box<PricingFacts>> {
+    match usages {
+        [usage] => usage.pricing.clone(),
+        _ => None,
+    }
+}
+
+/// Record which card, band and tier produced a catalog-settled cost.
+fn pricing_facts(
+    detail: &super::cost::PricingDetail,
+    settled_at_ms: i64,
+    cache_ttl: Option<super::api::PromptCacheTtl>,
+) -> PricingFacts {
+    PricingFacts {
+        rate_card: detail.rate_card.label(),
+        settled_at_ms,
+        input_band_minimum: detail.input_band_minimum,
+        serving_tier: matches!(
+            detail.source,
+            super::cost::PricingSource::CatalogServingTier
+        )
+        .then(|| super::serving_tiers::FAST_TIER_ID.to_string()),
+        cache_ttl_unpriced: !detail.cache_write_priced(cache_ttl),
+        platform_fee_basis: (detail.platform_fee_percent > 0.0)
+            .then(|| "catalog_estimate_funding_route_unknown".into()),
+        ..PricingFacts::default()
+    }
 }
 
 /// Tokens attributable to an attempt only when that attempt went unpriced.
@@ -423,6 +513,16 @@ impl LlmUsage {
                 certainty.unpriced_reason,
                 (!certainty.unprojectable).then_some(certainty.unpriced_projection_usd),
             ),
+            // Request instants and fees belong to the per-attempt receipts.
+            pricing: aggregate_pricing_facts(usages),
+            billing: usages
+                .iter()
+                .filter_map(|usage| usage.billing.as_deref())
+                .fold(None, |sum, value| {
+                    let mut sum = sum.unwrap_or_else(|| Box::new(BillingUsage::default()));
+                    sum.add(value);
+                    Some(sum)
+                }),
         }
     }
 
@@ -511,6 +611,9 @@ impl LlmUsage {
                 reason: UnpricedReason::NoResponse,
                 projection_usd: None,
             })),
+            // Nothing was priced, so no card settled anything.
+            pricing: None,
+            billing: None,
         }
     }
 
@@ -553,28 +656,69 @@ impl LlmUsage {
         // ceiling whole. `usage_unknown_calls` still records that the token
         // counts were missing: that stays unknown, only the cost does not.
         let free_route = crate::llm_config::provider_is_self_hosted(&result.provider);
+        // Settle at the instant the request left the client. A promotion that
+        // expired, or a time-of-day window the call started inside, priced the
+        // call as it began, not as it was accounted for.
+        let settled_at_ms = result
+            .telemetry
+            .started_at_ms
+            .unwrap_or_else(crate::stdlib::clock::now_wall_ms_unrecorded);
+        let at = super::cost::instant_from_wall_ms(settled_at_ms);
+        let cache_ttl = result
+            .telemetry
+            .prompt_cache_ttl
+            .as_deref()
+            .and_then(super::api::PromptCacheTtl::parse);
         // The price table is looked up whether or not the counts are usable,
         // because it is what separates an unpriced attempt that still has a
         // worst case from one that has none at any token count.
-        let table_cost = super::cost::pricing_detail_for_tier(
+        let detail = super::cost::pricing_detail_for_tier(
             &result.provider,
             &result.model,
             result.served_fast,
             result.input_tokens,
-        )
-        .map(|detail| {
+            at,
+        );
+        let token_cost = detail.as_ref().map(|detail| {
             super::cost::project_call_cost(
-                &detail,
+                detail,
                 result.input_tokens,
                 result.output_tokens,
                 result.cache_read_tokens,
                 result.cache_write_tokens,
+                cache_ttl,
             )
         });
+        let billing = result.telemetry.billing.clone();
+        let settlement = detail.as_ref().zip(token_cost).map(|(detail, cost)| {
+            billing
+                .as_deref()
+                .unwrap_or(&BillingUsage::default())
+                .settle(detail, cost)
+        });
+        let table_cost = settlement.as_ref().map(|settlement| settlement.total_usd);
+        let units_unpriced = authoritative_cost.is_none()
+            && !free_route
+            && (settlement
+                .as_ref()
+                .is_some_and(billing::BillingSettlement::has_unpriced_units)
+                || (!component_usage_known && billing.is_some())
+                || (result.cache_write_tokens > 0
+                    && detail
+                        .as_ref()
+                        .is_some_and(|detail| !detail.cache_write_priced(cache_ttl))));
         let cost_usd = authoritative_cost
             .or_else(|| free_route.then_some(0.0))
-            .or_else(|| component_usage_known.then_some(table_cost).flatten());
-        let (unpriced_reason, projected_cost_usd) = unpriced_projection(cost_usd, table_cost);
+            .or_else(|| {
+                (component_usage_known || billing.is_some())
+                    .then_some(table_cost)
+                    .flatten()
+            });
+        let (unpriced_reason, projected_cost_usd) = if units_unpriced {
+            (Some(UnpricedReason::Mixed), None)
+        } else {
+            unpriced_projection(cost_usd, table_cost)
+        };
         let cache_hit_ratio = (result.telemetry.cache_accounting_declared == Some(true)
             && result.cache_supported)
             .then(|| super::cost::cache_hit_ratio(result.input_tokens, result.cache_read_tokens));
@@ -594,23 +738,47 @@ impl LlmUsage {
                 result.input_tokens,
                 result.cache_read_tokens,
                 result.cache_write_tokens,
+                at,
+                cache_ttl,
             ),
             cache_hit: result.cache_read_tokens > 0,
             served_fast: result.served_fast,
-            accounting_status: if usage_known || authoritative_cost.is_some() {
+            accounting_status: if units_unpriced {
+                UsageAccountingStatus::Partial
+            } else if usage_known || authoritative_cost.is_some() {
                 UsageAccountingStatus::Reported
             } else {
                 UsageAccountingStatus::Unknown
             },
             known_cost_usd: cost_usd.unwrap_or(0.0),
             provider_call_count: Some(1),
-            unpriced_calls: i64::from(cost_usd.is_none()),
+            unpriced_calls: i64::from(cost_usd.is_none() || units_unpriced),
             usage_unknown_calls: i64::from(!usage_known && authoritative_cost.is_none()),
             unpriced: unpriced_facts(
                 unpriced_token_count(cost_usd, result.input_tokens, result.output_tokens),
                 unpriced_reason,
                 projected_cost_usd,
             ),
+            // Only a catalog-settled cost has a card to name. A provider's own
+            // cost figure and a self-hosted zero did not come from one, and
+            // claiming a card for them would put the catalog's name on a
+            // number it did not produce.
+            pricing: (cost_usd.is_some() && authoritative_cost.is_none() && !free_route)
+                .then(|| {
+                    detail.as_ref().map(|detail| {
+                        let mut facts = pricing_facts(detail, settled_at_ms, cache_ttl);
+                        if let Some(settlement) = &settlement {
+                            facts.platform_fee_estimate_usd = settlement.platform_fee_estimate_usd;
+                            facts.hosted_tool_unpriced = settlement.hosted_tool_unpriced.clone();
+                            facts.modality_unpriced = settlement.modality_unpriced.clone();
+                            facts.monthly_allowance_unapplied =
+                                settlement.monthly_allowance_unapplied.clone();
+                        }
+                        Box::new(facts)
+                    })
+                })
+                .flatten(),
+            billing,
         }
     }
 
@@ -627,26 +795,59 @@ impl LlmUsage {
         let output_tokens = receipt.output_tokens.unwrap_or(0);
         let complete_counts = receipt.has_complete_token_counts();
         let free_route = crate::llm_config::provider_is_self_hosted(provider);
-        let table_cost = super::cost::pricing_detail_for_tier(
+        let settled_at_ms = receipt
+            .started_at_ms
+            .unwrap_or_else(crate::stdlib::clock::now_wall_ms_unrecorded);
+        let cache_ttl = receipt.prompt_cache_ttl;
+        let at = super::cost::instant_from_wall_ms(settled_at_ms);
+        let detail = super::cost::pricing_detail_for_tier(
             provider,
             model,
             receipt.served_fast,
             input_tokens,
-        )
-        .map(|detail| {
+            at,
+        );
+        let token_cost = detail.as_ref().map(|detail| {
             super::cost::project_call_cost(
-                &detail,
+                detail,
                 input_tokens,
                 output_tokens,
                 receipt.cache_read_tokens,
                 receipt.cache_write_tokens,
+                cache_ttl,
             )
         });
+        let billing = receipt.billing.clone();
+        let settlement = detail.as_ref().zip(token_cost).map(|(detail, cost)| {
+            billing
+                .as_deref()
+                .unwrap_or(&BillingUsage::default())
+                .settle(detail, cost)
+        });
+        let table_cost = settlement.as_ref().map(|settlement| settlement.total_usd);
+        let units_unpriced = receipt.provider_cost_usd.is_none()
+            && !free_route
+            && (settlement
+                .as_ref()
+                .is_some_and(billing::BillingSettlement::has_unpriced_units)
+                || (!complete_counts && billing.is_some())
+                || (receipt.cache_write_tokens > 0
+                    && detail
+                        .as_ref()
+                        .is_some_and(|detail| !detail.cache_write_priced(cache_ttl))));
         let cost_usd = receipt
             .provider_cost_usd
             .or_else(|| free_route.then_some(0.0))
-            .or_else(|| complete_counts.then_some(table_cost).flatten());
-        let (unpriced_reason, projected_cost_usd) = unpriced_projection(cost_usd, table_cost);
+            .or_else(|| {
+                (complete_counts || billing.is_some())
+                    .then_some(table_cost)
+                    .flatten()
+            });
+        let (unpriced_reason, projected_cost_usd) = if units_unpriced {
+            (Some(UnpricedReason::Mixed), None)
+        } else {
+            unpriced_projection(cost_usd, table_cost)
+        };
         let usage_unknown = i64::from(!complete_counts);
         Self {
             input_tokens,
@@ -666,23 +867,43 @@ impl LlmUsage {
                 input_tokens,
                 receipt.cache_read_tokens,
                 receipt.cache_write_tokens,
+                at,
+                cache_ttl,
             ),
             cache_hit: receipt.cache_read_tokens > 0,
             served_fast: receipt.served_fast,
-            accounting_status: if usage_unknown == 0 {
+            accounting_status: if units_unpriced {
+                UsageAccountingStatus::Partial
+            } else if usage_unknown == 0 {
                 UsageAccountingStatus::Reported
             } else {
                 UsageAccountingStatus::Unknown
             },
             known_cost_usd: cost_usd.unwrap_or(0.0),
             provider_call_count: Some(1),
-            unpriced_calls: i64::from(cost_usd.is_none()),
+            unpriced_calls: i64::from(cost_usd.is_none() || units_unpriced),
             usage_unknown_calls: usage_unknown,
             unpriced: unpriced_facts(
                 unpriced_token_count(cost_usd, input_tokens, output_tokens),
                 unpriced_reason,
                 projected_cost_usd,
             ),
+            pricing: (cost_usd.is_some() && receipt.provider_cost_usd.is_none() && !free_route)
+                .then(|| {
+                    detail.as_ref().map(|detail| {
+                        let mut facts = pricing_facts(detail, settled_at_ms, cache_ttl);
+                        if let Some(settlement) = &settlement {
+                            facts.platform_fee_estimate_usd = settlement.platform_fee_estimate_usd;
+                            facts.hosted_tool_unpriced = settlement.hosted_tool_unpriced.clone();
+                            facts.modality_unpriced = settlement.modality_unpriced.clone();
+                            facts.monthly_allowance_unapplied =
+                                settlement.monthly_allowance_unapplied.clone();
+                        }
+                        Box::new(facts)
+                    })
+                })
+                .flatten(),
+            billing,
         }
     }
 
@@ -706,6 +927,15 @@ impl LlmUsage {
     /// by the observed-call boundary and stays nested under this one owner.
     pub(crate) fn to_vm_dict(&self, attempts: &ProviderAttempts) -> crate::value::DictMap {
         let mut usage = crate::value::DictMap::new();
+        if let Some(billing) = &self.billing {
+            if let Value::Object(fields) =
+                serde_json::to_value(billing).expect("billing serializes")
+            {
+                for (key, value) in fields {
+                    usage.insert(key.into(), crate::schema::json_to_vm_value(&value));
+                }
+            }
+        }
         usage.insert(
             crate::value::intern_key("input_tokens"),
             VmValue::Int(self.input_tokens),
@@ -758,6 +988,65 @@ impl LlmUsage {
             self.projected_cost_usd()
                 .map_or(VmValue::Nil, VmValue::Float),
         );
+        // Present only when the catalog settled this ledger, so a consumer can
+        // tell "no card applied" from "a base card applied".
+        if let Some(pricing) = self.pricing.as_deref() {
+            let mut card = crate::value::DictMap::new();
+            card.insert(
+                "platform_fee_estimate_usd".into(),
+                VmValue::Float(pricing.platform_fee_estimate_usd),
+            );
+            card.insert(
+                "platform_fee_basis".into(),
+                pricing
+                    .platform_fee_basis
+                    .as_deref()
+                    .map_or(VmValue::Nil, VmValue::string),
+            );
+            card.insert(
+                "hosted_tool_unpriced".into(),
+                crate::schema::json_to_vm_value(&serde_json::json!(pricing.hosted_tool_unpriced)),
+            );
+            card.insert(
+                "modality_unpriced".into(),
+                crate::schema::json_to_vm_value(&serde_json::json!(pricing.modality_unpriced)),
+            );
+            card.insert(
+                "monthly_allowance_unapplied".into(),
+                crate::schema::json_to_vm_value(&serde_json::json!(
+                    pricing.monthly_allowance_unapplied
+                )),
+            );
+            card.insert(
+                crate::value::intern_key("rate_card"),
+                VmValue::string(pricing.rate_card.as_str()),
+            );
+            card.insert(
+                crate::value::intern_key("settled_at_ms"),
+                VmValue::Int(pricing.settled_at_ms),
+            );
+            card.insert(
+                crate::value::intern_key("input_band_minimum"),
+                pricing
+                    .input_band_minimum
+                    .map_or(VmValue::Nil, |band| VmValue::Int(band as i64)),
+            );
+            card.insert(
+                crate::value::intern_key("serving_tier"),
+                pricing
+                    .serving_tier
+                    .as_deref()
+                    .map_or(VmValue::Nil, VmValue::string),
+            );
+            card.insert(
+                crate::value::intern_key("cache_ttl_unpriced"),
+                VmValue::Bool(pricing.cache_ttl_unpriced),
+            );
+            usage.insert(
+                crate::value::intern_key("pricing"),
+                VmValue::Dict(std::sync::Arc::new(card)),
+            );
+        }
         usage.insert(
             crate::value::intern_key("cache_read_tokens"),
             VmValue::Int(self.cache_read_tokens),
@@ -823,6 +1112,13 @@ impl LlmUsage {
     /// Receipt producers use this instead of round-tripping through a JSON
     /// object or maintaining a second cost projection.
     pub(crate) fn project_onto_fields(&self, fields: &mut serde_json::Map<String, Value>) {
+        if let Some(billing) = &self.billing {
+            if let Value::Object(billing) =
+                serde_json::to_value(billing).expect("billing serializes")
+            {
+                fields.extend(billing);
+            }
+        }
         fields.insert("input_tokens".to_string(), self.input_tokens.into());
         fields.insert("output_tokens".to_string(), self.output_tokens.into());
         fields.insert(
@@ -857,6 +1153,12 @@ impl LlmUsage {
             self.projected_cost_usd()
                 .map_or(Value::Null, serde_json::Value::from),
         );
+        if let Some(pricing) = self.pricing.as_deref() {
+            fields.insert(
+                "pricing".to_string(),
+                serde_json::to_value(pricing).unwrap_or(Value::Null),
+            );
+        }
         fields.insert(
             "cache_read_tokens".to_string(),
             self.cache_read_tokens.into(),
@@ -940,6 +1242,40 @@ impl LlmUsage {
         }
         if let Some(total_tokens) = self.reported_total_tokens {
             pairs.push((meta::REPORTED_TOTAL_TOKENS, serde_json::json!(total_tokens)));
+        }
+        // A recorded `cost_usd` is only auditable alongside the card that
+        // produced it: the same route settles at two prices on either side of
+        // an off-peak boundary, and the number alone cannot say which.
+        if let Some(pricing) = self.pricing.as_deref() {
+            pairs.push((meta::RATE_CARD, serde_json::json!(pricing.rate_card)));
+            pairs.push((
+                "platform_fee_estimate_usd",
+                serde_json::json!(pricing.platform_fee_estimate_usd),
+            ));
+            if let Some(basis) = &pricing.platform_fee_basis {
+                pairs.push(("platform_fee_basis", serde_json::json!(basis)));
+            }
+            pairs.push((
+                "hosted_tool_unpriced",
+                serde_json::json!(pricing.hosted_tool_unpriced),
+            ));
+            pairs.push((
+                "modality_unpriced",
+                serde_json::json!(pricing.modality_unpriced),
+            ));
+            pairs.push((
+                "monthly_allowance_unapplied",
+                serde_json::json!(pricing.monthly_allowance_unapplied),
+            ));
+            if let Some(band) = pricing.input_band_minimum {
+                pairs.push((meta::PRICING_BAND, serde_json::json!(band)));
+            }
+            if let Some(tier) = pricing.serving_tier.as_deref() {
+                pairs.push((meta::PRICING_TIER, serde_json::json!(tier)));
+            }
+            if pricing.cache_ttl_unpriced {
+                pairs.push((meta::CACHE_TTL_UNPRICED, serde_json::json!(true)));
+            }
         }
         pairs
     }

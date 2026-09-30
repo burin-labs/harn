@@ -9,6 +9,8 @@ PUBLISH_SCRIPT="${HARN_PUBLISH_SCRIPT:-./scripts/publish.sh}"
 source "$SCRIPT_DIR/lib/cargo_env.sh"
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$SCRIPT_DIR/lib/harn_bin.sh"
+# shellcheck source=scripts/lib/source_gate_receipt.sh
+source "$SCRIPT_DIR/lib/source_gate_receipt.sh"
 
 release_gate_target_name() {
   printf '%s' "$(basename "$ROOT_DIR")" | tr -c 'A-Za-z0-9._-' '-'
@@ -320,14 +322,15 @@ release_gate_snapshot_prepare_tools_cli() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release_gate.sh audit [--receipt path] [--source-only] [--validate-only]
+  ./scripts/release_gate.sh audit [--receipt path | --source-only | --residual-only] [--validate-only]
   ./scripts/release_gate.sh prepare --bump patch
   ./scripts/release_gate.sh publish [--dry-run]
   ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
   ./scripts/release_gate.sh full --bump patch [--dry-run]
 
 Commands:
-  audit    Run the full audit, source-only lanes, or receipt-authorized residual lanes.
+  audit    Run the full audit, source-only lanes, or the residual lanes (receipt-authorized,
+           or --residual-only to rehearse them before a cut).
   prepare  Bump the workspace version locally and print next tag/release steps.
   publish  Publish crates with scripts/publish.sh and print tag/release follow-up.
   notes    Render GitHub release notes for a version from CHANGELOG.md.
@@ -415,17 +418,7 @@ harn_cmd() {
 }
 
 file_sha256() {
-  local path="$1"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$path" | awk '{print $1}'
-    return 0
-  fi
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$path" | awk '{print $1}'
-    return 0
-  fi
-  echo "error: sha256sum or shasum is required to validate the warmed Harn binary" >&2
-  return 1
+  sha256_file_hex "$1"
 }
 
 run_docs_audit() {
@@ -624,7 +617,7 @@ resolve_audit_plan() {
   local receipt_path="$1"
   local plan_path="$2"
   local certified_source_sha="$3"
-  local source_only="$4"
+  local plan_scope="$4"
   local args=(
     run scripts/release_audit_contract.harn --
     --contract scripts/release_audit_contract.json
@@ -639,8 +632,10 @@ resolve_audit_plan() {
       warm_binary_sha256="$(file_sha256 "$HARN_BIN")"
     fi
     args+=(--warm-binary-sha256 "$warm_binary_sha256")
-  elif [[ "$source_only" -eq 1 ]]; then
+  elif [[ "$plan_scope" == "source" ]]; then
     args+=(--source-only)
+  elif [[ "$plan_scope" == "residual" ]]; then
+    args+=(--residual-only)
   fi
   harn_cmd "${args[@]}" > "$plan_path"
 
@@ -690,6 +685,7 @@ resolve_audit_plan() {
 cmd_audit() {
   local receipt_path=""
   local source_only=0
+  local residual_only=0
   local validate_only=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -709,6 +705,10 @@ cmd_audit() {
         source_only=1
         shift
         ;;
+      --residual-only)
+        residual_only=1
+        shift
+        ;;
       *)
         echo "error: unknown audit arg: $1" >&2
         usage
@@ -716,16 +716,26 @@ cmd_audit() {
         ;;
     esac
   done
-  if [[ "$source_only" -eq 1 && -n "$receipt_path" ]]; then
-    echo "error: audit --source-only cannot be combined with --receipt" >&2
+  local selected_scopes=$(( source_only + residual_only ))
+  if [[ -n "$receipt_path" ]]; then
+    selected_scopes=$(( selected_scopes + 1 ))
+  fi
+  if [[ "$selected_scopes" -gt 1 ]]; then
+    echo "error: audit --receipt, --source-only, and --residual-only are mutually exclusive" >&2
     exit 1
+  fi
+  local plan_scope="full"
+  if [[ "$source_only" -eq 1 ]]; then
+    plan_scope="source"
+  elif [[ "$residual_only" -eq 1 ]]; then
+    plan_scope="residual"
   fi
 
   local plan_path
   plan_path="$(mktemp)"
   local certified_source_sha
   certified_source_sha="$(git rev-parse HEAD)"
-  if ! resolve_audit_plan "$receipt_path" "$plan_path" "$certified_source_sha" "$source_only"; then
+  if ! resolve_audit_plan "$receipt_path" "$plan_path" "$certified_source_sha" "$plan_scope"; then
     rm -f "$plan_path"
     exit 1
   fi
@@ -751,7 +761,9 @@ cmd_audit() {
   local prebuild_started prebuild_elapsed
   prebuild_started="$(date +%s)"
   local cargo_harn_bin=""
-  if [[ ( "$AUDIT_RECEIPT_REUSED" == "true" || "$source_only" -eq 1 ) && -n "${HARN_BIN:-}" && -x "$HARN_BIN" ]]; then
+  # A residual-only rehearsal takes the staged CLI exactly as a receipt-backed
+  # audit does, so it fails on the same binary the live release would hand it.
+  if [[ ( "$AUDIT_RECEIPT_REUSED" == "true" || "$plan_scope" != "full" ) && -n "${HARN_BIN:-}" && -x "$HARN_BIN" ]]; then
     cargo_harn_bin="$HARN_BIN"
     echo ">>> warm-prebuild (reuse exact receipt-warmed HARN_BIN)"
   else
@@ -767,6 +779,18 @@ cmd_audit() {
     echo "error: warm prebuild completed but HARN_BIN is not executable: $cargo_harn_bin"
     exit 1
   fi
+  # The residual lanes run on a binary this gate may not have built. Bind it to
+  # the audited commit once, before any lane starts, through the proof the docs
+  # lane already requires: a freshness receipt, a certified snapshot, or the
+  # identity CI exported when it verified a downloaded artifact. Otherwise only
+  # that one lane notices a substituted binary, and the others audit it anyway.
+  if [[ "$AUDIT_RECEIPT_REUSED" == "true" || "$plan_scope" == "residual" ]]; then
+    if ! harn_source_gate_binary_identity "$cargo_harn_bin" "$certified_source_sha" >/dev/null; then
+      echo "error: the residual audit's HARN_BIN is not proven to be built from $certified_source_sha" >&2
+      exit 1
+    fi
+    printf 'ok: %-15s (%s)\n' "harn-bin-proof" "$certified_source_sha"
+  fi
 
   local tmp
   tmp="$(mktemp -d)"
@@ -775,7 +799,7 @@ cmd_audit() {
   fi
   local stable_bin_dir stable_harn_bin
   stable_bin_dir="$tmp/harn-bin"
-  stable_harn_bin="$(harn_snapshot_binary "$cargo_harn_bin" "$stable_bin_dir")"
+  stable_harn_bin="$(harn_snapshot_binary "$cargo_harn_bin" "$stable_bin_dir" harn certify)"
   HARN_BIN="$stable_harn_bin"
   HARN_CONFORMANCE_HARN_BIN="$stable_harn_bin"
   export HARN_BIN HARN_CONFORMANCE_HARN_BIN
@@ -1247,10 +1271,8 @@ cmd_prepare() {
     echo "  1. Review docs/release notes diff"
     echo "  2. Commit on a release/v$next branch: git commit -am 'Release v$next'"
     echo "  3. Open the Release v$next PR and enable auto-merge"
-    echo "  4. After merge, let the watcher tag the exact main squash commit"
-    echo "  5. Let the tag-triggered publish and binary workflows finish"
-    echo "  6. Require Release smoke against the published artifacts:"
-    echo "       ./scripts/check_release_smoke.sh v$next"
+    echo "  4. After merge, the push to main builds and checks the v$next release candidate"
+    echo "     (Build release binaries); promotion publishes exactly those files"
   )
 }
 
@@ -1281,11 +1303,9 @@ cmd_publish() {
   fi
   echo "Publish phase complete for v$version"
   echo "Follow-up / verification checklist:"
-  echo "  Ensure tag v$version has been pushed from the merge-queue-approved main commit"
+  echo "  Ensure tag v$version was created by promotion at the version commit"
   echo "  Review changelog-backed GitHub release notes"
-  echo "  Wait for Build release binaries to finalize the GitHub release (7 assets)"
-  echo "  Require Release smoke to pass against the published artifacts:"
-  echo "    ./scripts/check_release_smoke.sh v$version"
+  echo "  Confirm the release holds the files the candidate run checked (candidate-manifest.json)"
 }
 
 cmd_notes() {

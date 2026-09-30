@@ -127,7 +127,7 @@ mod macos {
     }
 
     #[test]
-    fn missing_managed_process_policy_denies_before_destination_connect() {
+    fn granted_process_network_without_policy_denies_private_destination() {
         let root = tempfile::TempDir::new().expect("tempdir");
         let destination = TcpListener::bind(("127.0.0.1", 0)).expect("destination listener");
         let port = destination.local_addr().unwrap().port();
@@ -164,7 +164,7 @@ mod macos {
         assert!(String::from_utf8_lossy(&output.stdout).contains("missing-policy-denied"));
         assert!(
             matches!(destination.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
-            "missing policy must not reach the destination"
+            "the grant default must not reach a private destination"
         );
     }
 

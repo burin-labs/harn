@@ -10,7 +10,17 @@ fn main(harness: Harness) {
     contains(argv, "--write"),
   )
   harness.stdio.println(json_stringify(report))
+  if report.entries <= 0 {
+    throw "agent gate registry: no entries measured"
+  }
   if report.pending > 0 {
+    harness.stdio.println("The agent gate census no longer matches the sources it records:")
+    for failure in report.failures {
+      harness.stdio.println("  ${failure}")
+    }
+    harness.stdio.println(
+      "Regenerate with make gen-agent-gates, then stage spec/agent-gates and docs/src/dev/agent-gates.",
+    )
     throw "agent gate registry: unregistered reads or stale projections"
   }
 }

@@ -81,6 +81,14 @@ pub(super) fn build_cost_report(run_dir: &Path) -> Result<PortalCostReport, Stri
             .unwrap_or("unknown")
             .to_string();
 
+        // Re-pricing a recorded run uses the card that was in force while it
+        // ran. `span.start_ms` is relative to the collector's epoch, so the
+        // run's own start is what anchors it to a date.
+        let run_started_at = time::OffsetDateTime::parse(
+            &run.started_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
         for span in run
             .evidence
             .trace_spans
@@ -119,6 +127,7 @@ pub(super) fn build_cost_report(run_dir: &Path) -> Result<PortalCostReport, Stri
                         &model,
                         input_tokens,
                         output_tokens,
+                        run_started_at + time::Duration::milliseconds(span.start_ms as i64),
                     )
                 });
             if cost_usd <= 0.0 && input_tokens == 0 && output_tokens == 0 {

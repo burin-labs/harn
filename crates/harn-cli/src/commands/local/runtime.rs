@@ -128,14 +128,13 @@ pub(crate) async fn snapshot_provider(
     state_dir: &Path,
 ) -> Result<LocalProviderSnapshot, String> {
     let provider = normalize_local_provider_id(provider);
-    let def = llm_config::provider_config(&provider)
-        .ok_or_else(|| format!("unknown provider: {provider}"))?;
-    snapshot_resolved_provider(&provider, def, state_dir).await
+    let def = resolve_provider_def(&provider)?;
+    snapshot_resolved_provider(&provider, &def, state_dir).await
 }
 
 async fn snapshot_resolved_provider(
     provider: &str,
-    def: ProviderDef,
+    def: &ProviderDef,
     state_dir: &Path,
 ) -> Result<LocalProviderSnapshot, String> {
     let lifecycle = def
@@ -144,7 +143,7 @@ async fn snapshot_resolved_provider(
         .ok_or_else(|| format!("'{provider}' has no local runtime catalog row"))?
         .lifecycle()
         .map_err(|error| format!("provider '{provider}' {error}"))?;
-    let base_url = llm_config::resolve_base_url(&def);
+    let base_url = llm_config::resolve_base_url(def);
 
     let (reachable, status, message, served_models) = match lifecycle.wire_protocol {
         LocalRuntimeWireProtocol::OllamaApi => snapshot_ollama_reachability(&base_url).await,
@@ -491,9 +490,12 @@ fn terminate_pid(pid: u32) -> Result<PidTermination, String> {
     }
 }
 
-pub(crate) fn resolve_provider_def(provider: &str) -> Result<ProviderDef, String> {
+// Local lifecycle calls retain this record across awaits. Keep catalog
+// additions out of the inline state of every dispatcher and operation.
+pub(crate) fn resolve_provider_def(provider: &str) -> Result<Box<ProviderDef>, String> {
     let provider = normalize_local_provider_id(provider);
     llm_config::provider_config(&provider)
+        .map(Box::new)
         .ok_or_else(|| format!("unknown provider '{provider}' in Harn provider catalog"))
 }
 
@@ -613,7 +615,7 @@ mod tests {
         tgi.base_url = format!("http://{addr}");
         tgi.base_url_env = None;
         let state_dir = tempfile::tempdir().expect("snapshot state directory");
-        let snapshot = snapshot_resolved_provider("tgi", tgi, state_dir.path())
+        let snapshot = snapshot_resolved_provider("tgi", &tgi, state_dir.path())
             .await
             .expect("TGI snapshot");
         handle.join().expect("TGI stub joins");

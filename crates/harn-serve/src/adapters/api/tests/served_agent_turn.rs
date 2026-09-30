@@ -1,6 +1,10 @@
 use super::*;
 
 async fn create_session(app: &Router) -> String {
+    create_session_with_body(app, json!({"workspace_id": "local"})).await
+}
+
+async fn create_session_with_body(app: &Router, input: Value) -> String {
     let response = app
         .clone()
         .oneshot(
@@ -8,7 +12,9 @@ async fn create_session(app: &Router) -> String {
                 .method("POST")
                 .uri("/v1/sessions")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"workspace_id":"local"}"#))
+                .body(Body::from(
+                    serde_json::to_vec(&input).expect("session json"),
+                ))
                 .expect("session request"),
         )
         .await
@@ -128,10 +134,16 @@ pipeline main(harness: Harness) {
       "the default served task must consume exactly one model call",
     )
     harness.stdio.println("control-plane-ok")
+  } else if prompt == "runtime-state" {
+    harness.runtime.store_set("served.turn.started", true)
+    agent_loop(harness, prompt, nil, {provider: "mock", model: "served-proof"})
+    assert(harness.runtime.store_get("served.turn.started") == true, "runtime state write fired")
+    harness.stdio.println("runtime-state-ok")
   } else {
     harness.fs.write_text("ceiling-probe.txt", "must-not-write")
   }
 }
+
 "#,
     )
     .expect("write pipeline");
@@ -155,6 +167,15 @@ pipeline main(harness: Harness) {
         admitted.payload
     );
 
+    let coding_session =
+        create_session_with_body(&app, json!({"workspace_id": "local", "mode_id": "code"})).await;
+    let coding = submit_and_wait(&app, &mut events, &coding_session, "runtime-state").await;
+    assert_eq!(
+        coding.event, "task.completed",
+        "explicit coding mode must allow internal turn state and reach the model: {}",
+        coding.payload
+    );
+
     let denied_session = create_session(&app).await;
     let denied = submit_and_wait(&app, &mut events, &denied_session, "workspace-write").await;
     assert_eq!(
@@ -172,4 +193,72 @@ pipeline main(harness: Harness) {
         !dir.path().join("ceiling-probe.txt").exists(),
         "the rejected workspace write reached the filesystem"
     );
+
+    for body in [
+        json!({"workspace_id": "local", "mode_id": "unrestricted"}),
+        json!({"workspace_id": "local", "mode_id": 1}),
+        json!({"workspace_id": "local", "mode_id": ""}),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&body).expect("invalid mode json"),
+                    ))
+                    .expect("invalid mode request"),
+            )
+            .await
+            .expect("invalid mode response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("invalid mode body");
+        let failure: Value = serde_json::from_slice(&body).expect("invalid mode response json");
+        assert_eq!(failure["error"]["code"], "invalid_session_mode");
+    }
+
+    let malformed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from("{"))
+                .expect("malformed request"),
+        )
+        .await
+        .expect("malformed response");
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn configured_server_mode_applies_to_sessions_that_omit_mode_id() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("agent.harn");
+    std::fs::write(
+        &script,
+        r#"pipeline main(harness: Harness) {
+  harness.runtime.store_set("served.default.mode", true)
+  assert(harness.runtime.store_get("served.default.mode") == true, "state write fired")
+  harness.stdio.println("default-code-mode-fired")
+}
+"#,
+    )
+    .expect("write pipeline");
+    let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().to_string())
+        .with_default_session_mode("code")
+        .expect("known coding mode");
+    config.workspace_root = dir.path().to_path_buf();
+    let server = ApiServer::new(config);
+    let state = server.state;
+    let mut events = state.events_tx.subscribe();
+    let app = api_router(state);
+    let session_id = create_session(&app).await;
+    let terminal = submit_and_wait(&app, &mut events, &session_id, "run").await;
+    assert_eq!(terminal.event, "task.completed", "{}", terminal.payload);
 }

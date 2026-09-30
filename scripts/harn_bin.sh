@@ -102,7 +102,8 @@ fi
 bin="$(harn_resolve_binary "$mode")"
 if [[ "$print_build_freshness" = "1" ]]; then
   if [[ "${GITHUB_ACTIONS:-false}" = "true" ]] && \
-     [[ ! -r "$(harn_binary_freshness_receipt_path "$bin")" ]]; then
+     [[ ! -r "$(harn_binary_freshness_receipt_path "$bin")" ]] && \
+     [[ ! -r "$(harn_binary_snapshot_provenance_path "$bin")" ]]; then
     # Hosted artifact provenance already has one owner. Local absolute Cargo
     # dependency paths cannot travel with this independently verified binary.
     # shellcheck source=scripts/lib/source_gate_receipt.sh

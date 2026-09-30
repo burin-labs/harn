@@ -50,6 +50,20 @@ fn granting_reviewer() {
   }
 }
 
+/**
+ * Grants only when the request names the loop's route. `approval_reviewer_for`
+ * hands that route to a reviewer whose policy names no model, so a request
+ * without it would send the reviewer to the process-wide default instead.
+ */
+fn route_checking_reviewer() {
+  return { request ->
+    if request?.route?.model == "loop-route-model" {
+      return {approved: true, reviewer_answered: true, rationale: "the loop's route arrived"}
+    }
+    return {approved: false, reviewer_answered: true, rationale: "no loop route on the request"}
+  }
+}
+
 pipeline main(harness: Harness) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
@@ -119,6 +133,32 @@ pipeline main(harness: Harness) {
       // which is deliberately absent from the argv, so it can only appear here
       // if the refused call was granted and actually executed.
       harness.stdio.println("reviewed_output_present=" + to_string(contains(second_turn, "42")))
+    },
+  )
+  // The loop hands its own route to the reviewer. The reviewer grants only
+  // when that route arrived, so the command's output proves it did.
+  with_llm_script(
+    harness.llm,
+    probe_script(),
+    { ->
+      agent_loop(
+        harness,
+        "Run the command and report back.",
+        nil,
+        {
+          provider: "mock",
+          model: "loop-route-model",
+          tools: probe_tools(harness, root),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          approval_policy: asking_policy,
+          approval_reviewer: route_checking_reviewer(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      const second_turn = json_stringify(calls[1].messages)
+      harness.stdio.println("routed_output_present=" + to_string(contains(second_turn, "42")))
     },
   )
 }

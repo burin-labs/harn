@@ -87,6 +87,8 @@ pub(crate) struct AmbientExecutionScope {
     connector_ctx: Vec<ConnectorCtx>,
     /// Outbound-network policy shared by one pipeline execution tree.
     egress_policy: Option<EgressPolicyContext>,
+    /// Host inference ceiling follows every worker and inline model call.
+    inference_boundary: Option<crate::llm::api::InferenceBoundary>,
     /// Provider catalog overlay for this execution. An ACP host can install a
     /// verified endpoint without mutating the process or a sibling server.
     provider_overrides: Option<ProvidersConfig>,
@@ -208,6 +210,9 @@ impl AmbientExecutionScope {
             llm_mock: current_llm_mock_context(),
             llm_admission: clone_via_swap(crate::llm::admission::swap_scope),
             egress_policy: clone_via_swap(swap_policy_context),
+            inference_boundary: clone_via_swap(
+                crate::llm::api::inference_boundary::swap_ambient_boundary,
+            ),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
@@ -274,6 +279,9 @@ impl AmbientExecutionScope {
             llm_admission: clone_via_swap(crate::llm::admission::swap_scope),
             connector_ctx: clone_via_swap(swap_active_harn_connector_ctx),
             egress_policy: clone_via_swap(swap_policy_context),
+            inference_boundary: clone_via_swap(
+                crate::llm::api::inference_boundary::swap_ambient_boundary,
+            ),
             session_stack: clone_via_swap(swap_current_session_stack),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
@@ -344,6 +352,10 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.llm_admission, crate::llm::admission::swap_scope);
         swap_slot(&mut self.connector_ctx, swap_active_harn_connector_ctx);
         swap_slot(&mut self.egress_policy, swap_policy_context);
+        swap_slot(
+            &mut self.inference_boundary,
+            crate::llm::api::inference_boundary::swap_ambient_boundary,
+        );
         swap_slot(&mut self.session_stack, swap_current_session_stack);
         swap_slot(&mut self.execution_context, swap_thread_execution_context);
         swap_slot(&mut self.source_dir, swap_source_dir);
@@ -587,6 +599,18 @@ pub(crate) fn scope_ambient_transaction<F: Future>(inner: F) -> Scoped<F> {
 /// Preserve the caller's complete logical execution scope in a spawned task.
 pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
     scope_ambient(AmbientExecutionScope::capture_for_inline_subtask(), inner)
+}
+
+/// Install a ceiling for one closure and all workers it spawns. Nested scopes
+/// can tighten the inherited ceiling but cannot grant a wider destination.
+pub(crate) fn scope_inference_boundary<F: Future>(
+    boundary: crate::llm::api::InferenceBoundary,
+    inner: F,
+) -> Scoped<F> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    scope.inference_boundary =
+        crate::llm::api::inference_boundary::meet(scope.inference_boundary, Some(boundary));
+    scope_ambient(scope, inner)
 }
 
 /// Run one asynchronous tool execution under its resolved agent session.
@@ -1380,6 +1404,7 @@ mod tests {
             },
             expose_as_env: Some("GH_TOKEN".to_string()),
             for_command: None,
+            expose_to: Default::default(),
         }];
         let granted =
             SessionEnvironment::launch(EnvironmentPolicyKind::Granted, grant_specs, &|_| None)

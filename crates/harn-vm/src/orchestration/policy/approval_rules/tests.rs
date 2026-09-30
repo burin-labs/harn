@@ -58,6 +58,12 @@ fn ambiguous_or_invalid_rule_shapes_are_rejected() {
         "path": "**/.env"
     }));
     assert!(mixed_matchers.is_err());
+
+    let invalid_source = serde_json::from_value::<PolicyRule>(serde_json::json!({
+        "source": "superuser",
+        "allow": {"tool": "read_file"}
+    }));
+    assert!(invalid_source.is_err());
 }
 
 #[test]
@@ -77,6 +83,226 @@ fn deny_beats_ask_and_allow_regardless_of_order() {
     assert_eq!(
         decision.matched_rule.as_ref().and_then(|rule| rule.index),
         Some(2)
+    );
+}
+
+#[test]
+fn explicit_user_rules_outrank_mode_defaults_and_name_the_winner() {
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"id": "mode-ask", "source": "mode", "ask": {"tool": "run_command"}},
+            {"id": "remembered-allow", "source": "user", "allow": {"tool": "run_command"}}
+        ]
+    }))
+    .expect("policy with typed user source");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_allow(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.source.as_str()),
+        Some("user")
+    );
+    assert_eq!(decision.receipt["matched_rule"]["source"], "user");
+    let host_decision = policy.evaluate_request(&ToolApprovalRequest {
+        tool_name: "run_command".to_string(),
+        arguments: serde_json::json!({"command": "git status"}),
+        ..Default::default()
+    });
+    assert_eq!(host_decision.action, decision.action);
+    assert_eq!(host_decision.receipt["matched_rule"]["source"], "user");
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"id": "mode-allow", "source": "mode", "allow": {"tool": "run_command"}},
+            {"id": "remembered-deny", "source": "user", "deny": {"tool": "run_command"}}
+        ]
+    }))
+    .expect("policy with typed user source");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_deny(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.source.as_str()),
+        Some("user")
+    );
+}
+
+#[test]
+fn user_allow_cannot_override_path_guards() {
+    policy_with_path_annotation("read_file", ToolKind::Read);
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [{"source": "user", "allow": {"tool": "read_file"}}]
+    }))
+    .expect("policy with typed user source");
+    for (path, source) in [
+        ("config/.env", SOURCE_DEFAULT_SENSITIVE_PATH),
+        ("/tmp/outside.txt", SOURCE_DEFAULT_EXTERNAL_PATH),
+        ("../outside.txt", SOURCE_DEFAULT_PATH_GUARD),
+    ] {
+        let decision = evaluate_tool_approval_policy(
+            &policy,
+            "read_file",
+            &serde_json::json!({"path": path}),
+            None,
+        );
+        assert!(decision.is_deny(), "{path}: {decision:?}");
+        assert_eq!(
+            decision
+                .matched_rule
+                .as_ref()
+                .map(|rule| rule.source.as_str()),
+            Some(source)
+        );
+    }
+    pop_execution_policy();
+}
+
+#[test]
+fn source_priority_only_overrides_mode_defaults() {
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "require_approval": ["run_command"],
+        "rules": [
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "user-allow"}
+        ]
+    }))
+    .expect("legacy approval constraint");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_ask(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.source.as_str()),
+        Some("require_approval")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "mode", "deny": {"tool": "run_command"}, "id": "mode-deny"},
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "user-allow"}
+        ]
+    }))
+    .expect("typed sources");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_allow(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("user-allow")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "mode", "deny": {"tool": "run_command"}, "id": "mode-deny"},
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "user-allow"},
+            {"source": "policy", "deny": {"tool": "run_command"}, "id": "policy-deny"}
+        ]
+    }))
+    .expect("typed sources");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_deny(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("policy-deny")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "policy", "allow": {"tool": "run_command"}, "id": "policy-allow"},
+            {"source": "user", "deny": {"tool": "run_command"}, "id": "user-deny"}
+        ]
+    }))
+    .expect("a policy allow and explicit user deny");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_deny(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("user-deny")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "first-allow"},
+            {"source": "user", "deny": {"tool": "run_command"}, "id": "second-deny"}
+        ]
+    }))
+    .expect("same-source rules");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_deny(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("second-deny")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "first"},
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "second"}
+        ]
+    }))
+    .expect("same-source ties");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("first")
     );
 }
 

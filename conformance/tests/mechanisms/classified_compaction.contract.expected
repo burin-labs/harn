@@ -1,0 +1,4 @@
+classified_strategy_fired=true
+confidence_floor_applied=true
+raw_drop_recorded=true
+below_threshold_does_not_compact=true

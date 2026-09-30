@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=scripts/ci/cache_policy.sh
 source "${SCRIPT_DIR}/cache_policy.sh"
+# shellcheck source=scripts/lib/sha256.sh
+source "${SCRIPT_DIR}/../lib/sha256.sh"
 
 # Owned by .github/cache-policy.json nextest_version (schema v5).
 NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
@@ -26,12 +28,13 @@ usage:
   scripts/ci/rust_artifact.sh restore-tests <bundle.tar.zst> <directory> <commit-sha> [github-env]
   scripts/ci/rust_artifact.sh restore-cli <cli-bundle.tar.zst> <directory> <commit-sha> [github-env]
   scripts/ci/rust_artifact.sh restore-security <security-bundle.tar.zst> <directory> <commit-sha>
+  scripts/ci/rust_artifact.sh restore-candidate <archive> <candidate-manifest.json> <target> <directory> <commit-sha> [github-env]
 
 EOF
 }
 
 sha256() {
-  sha256sum "$1" | cut -d ' ' -f 1
+  sha256_file_hex "$1"
 }
 
 require_nextest_version() {
@@ -487,6 +490,94 @@ restore_security_bundle() {
   report_timing restore "$((SECONDS - started))" "$bytes"
 }
 
+# Restore one release candidate archive exactly as a release would ship it.
+# The candidate manifest (burin-labs.candidate_manifest.v1) is the record of
+# what the build produced at one commit. Refuse unless that commit is this
+# checkout, the manifest names this target's archive, and the archive's bytes
+# match the manifest's digest. The archive digest becomes the build freshness
+# identity: it is the 64-hex identity of the shipped bytes the executable came
+# from, so the source gate binds the audited commit to what will be published.
+restore_candidate() {
+  local archive=$1
+  local manifest=$2
+  local target=$3
+  local destination=$4
+  local commit=$5
+  local github_env=${6:-}
+  local file entries expected actual manifest_commit bin
+
+  validate_commit "$commit"
+  require_source_commit "$commit"
+  if [[ -e "$destination" ]]; then
+    echo "error: restore destination already exists: $destination" >&2
+    exit 1
+  fi
+  if [[ ! -f "$archive" || ! -f "$manifest" ]]; then
+    echo "error: candidate archive or manifest is missing: $archive, $manifest" >&2
+    exit 1
+  fi
+  if ! jq -e '.schemaVersion == "burin-labs.candidate_manifest.v1"' "$manifest" >/dev/null; then
+    echo "error: $manifest is not a burin-labs.candidate_manifest.v1 manifest" >&2
+    exit 1
+  fi
+  # jq on Windows runners may end lines with CR; compare bare values.
+  manifest_commit="$(jq -r '.sourceCommit' "$manifest" | tr -d '\r')"
+  if [[ "$manifest_commit" != "$commit" ]]; then
+    echo "error: candidate manifest records sourceCommit ${manifest_commit}, not ${commit}" >&2
+    exit 1
+  fi
+
+  file="$(basename "$archive")"
+  entries="$(jq -c --arg target "$target" \
+    '[.artifacts[] | select(.kind == "archive" and .target == $target)]' "$manifest" | tr -d '\r')"
+  if [[ "$(jq 'length' <<<"$entries" | tr -d '\r')" != 1 ]]; then
+    echo "error: candidate manifest does not list exactly one archive for ${target}" >&2
+    exit 1
+  fi
+  if [[ "$(jq -r '.[0].file' <<<"$entries" | tr -d '\r')" != "$file" ]]; then
+    echo "error: candidate manifest names $(jq -r '.[0].file' <<<"$entries") for ${target}, not ${file}" >&2
+    exit 1
+  fi
+  expected="$(jq -r '.[0].sha256' <<<"$entries" | tr -d '\r')"
+  actual="$(sha256 "$archive")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "error: ${file} has sha256 ${actual} but the candidate manifest records ${expected}" >&2
+    exit 1
+  fi
+
+  mkdir -p "$destination"
+  case "$file" in
+    *.tar.gz) tar -xzf "$archive" -C "$destination" ;;
+    *.zip)
+      if command -v unzip >/dev/null 2>&1; then
+        unzip -q "$archive" -d "$destination"
+      else
+        7z x -y "$archive" "-o$destination" >/dev/null
+      fi
+      ;;
+    *)
+      echo "error: unsupported candidate archive format: $file" >&2
+      exit 1
+      ;;
+  esac
+  bin="$destination/harn"
+  [[ -f "$bin" ]] || bin="$destination/harn.exe"
+  if [[ ! -f "$bin" || ! -x "$bin" ]]; then
+    echo "error: candidate archive ${file} has no executable harn" >&2
+    exit 1
+  fi
+  bin="$(cd "$(dirname "$bin")" && pwd -P)/$(basename "$bin")"
+  echo "restored ${file} for ${target} at ${commit}: ${bin}"
+  if [[ -n "$github_env" ]]; then
+    {
+      printf 'HARN_BIN=%s\n' "$bin"
+      printf 'SOURCE_GATE_CI_BINARY_COMMIT=%s\n' "$commit"
+      printf 'SOURCE_GATE_CI_BINARY_SHA256=%s\n' "$(sha256 "$bin")"
+      printf 'SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID=%s\n' "$actual"
+    } >> "$github_env"
+  fi
+}
+
 if [[ $# -lt 1 ]]; then
   usage >&2
   exit 2
@@ -518,6 +609,10 @@ case "$command" in
   restore-security)
     [[ $# -eq 3 ]] || { usage >&2; exit 2; }
     restore_security_bundle "$@"
+    ;;
+  restore-candidate)
+    [[ $# -ge 5 && $# -le 6 ]] || { usage >&2; exit 2; }
+    restore_candidate "$@"
     ;;
   *)
     usage >&2

@@ -1,6 +1,11 @@
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
+struct LookupOutcome {
+  success: bool
+  answer: string
+}
+
 /**
  * Mocked Gemini-native tool calls should drive normal agent_loop dispatch.
  *
@@ -18,7 +23,7 @@ fn lookup_tools(runtime: HarnessRuntime, lookups: any) {
       parameters: {query: {type: "string"}},
       handler: { args ->
         runtime.atomic_add(lookups, 1)
-        return {answer: "found:" + to_string(args.query)}
+        return LookupOutcome {success: true, answer: "found:" + to_string(args.query)}
       },
     },
   )

@@ -108,11 +108,30 @@ name the same backend, and package scripts read canonical connector ids such as
 
 Automated tests and CI should not touch the OS credential store. Use
 `HARN_SECRET_PROVIDERS=env` plus test-only `HARN_SECRET_*` variables for
-secret-dependent smokes, or inject a mock `Harness`. On macOS, Keychain
-“Always Allow” grants are tied to a stable application identity; unsigned debug
-binaries rebuilt in different worktrees can still prompt again. Long-running
-automation should use a stable signed helper, broker, or external vault instead
-of relying on per-build Keychain prompts.
+secret-dependent smokes, or inject a mock `Harness`. `harn test`, `make test`,
+and the script-test wrapper set `HARN_SECRET_PROVIDERS=env` themselves when the
+caller has not chosen a chain. On macOS, Keychain “Always Allow” grants are tied
+to a stable application identity; unsigned debug binaries rebuilt in different
+worktrees can still prompt again. Long-running automation should use a stable
+signed helper, broker, or external vault instead of relying on per-build
+Keychain prompts.
+
+### Keychain dialogs
+
+On macOS, reading a stored value can raise a Keychain access dialog. Harn
+raises one only when a person can answer it:
+
+- Status and availability questions (`harness.llm.providers()`,
+  `harn doctor`, `harn models recommend`, routing) check whether a credential
+  exists without reading it, so they never raise a dialog.
+- A process with no terminal on stdin, or one running under `CI`, never
+  raises a dialog. A read that would need one fails with a typed
+  needs-approval error naming the credential, and provider status reports
+  `needs_user_approval`. Provide the credential through its environment
+  variable or set `HARN_SECRET_PROVIDERS=env`.
+- A host that launches Harn without a terminal while a person is at the
+  machine can set `HARN_SECRET_INTERACTIVE=1` to allow dialogs.
+  `HARN_SECRET_INTERACTIVE=0` forbids them everywhere.
 
 ## Provider chain configuration
 

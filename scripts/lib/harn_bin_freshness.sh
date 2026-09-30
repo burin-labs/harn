@@ -497,6 +497,7 @@ harn_record_binary_freshness() (
   local embedded_build_freshness=""
   local dep_info_hash=""
   local dependencies_hash=""
+  local binary_content=""
 
   cleanup_temporary_files() {
     [[ -z "$temporary_receipt" ]] || rm -f "$temporary_receipt"
@@ -540,9 +541,10 @@ harn_record_binary_freshness() (
   temporary_checker=""
   checker_evidence="$("$checker" record-evidence \
     "$bin" "$temporary_manifest" "$(harn_repo_root)")" || return $?
+  binary_content="$("$checker" content-hash "$bin")" || return $?
   temporary_receipt="$(mktemp "${receipt}.tmp.XXXXXX")" || return $?
-  printf 'harn-bin-freshness-v6\nworktree=%s\n%s\n%s\n' \
-    "$worktree_hash" "$artifact_evidence" "$checker_evidence" >"$temporary_receipt" || return $?
+  printf 'harn-bin-freshness-v7\nworktree=%s\n%s\n%s\nbinary-content=%s\n' \
+    "$worktree_hash" "$artifact_evidence" "$checker_evidence" "$binary_content" >"$temporary_receipt" || return $?
   mv "$temporary_manifest" "$manifest" || return $?
   temporary_manifest=""
   mv "$temporary_receipt" "$receipt" || return $?
@@ -594,16 +596,91 @@ harn_require_binary_freshness_receipt() (
   fi
 )
 
+# A vanished Cargo uplift loses the inode identity recorded in its receipt.
+# Recover only an exact byte match from deps, with the same checker and exact
+# source manifest, then publish a new receipt for the restored inode. An old
+# receipt without a content digest cannot make this claim and stays refused.
+harn_restore_binary_from_receipt() (
+  local bin="$1"
+  local receipt=""
+  local manifest=""
+  local checker=""
+  local deps_dir=""
+  local name="${bin##*/}"
+  local suffix=""
+  local candidate=""
+  local recorded_content=""
+  local restored_content=""
+  local link_error=""
+
+  receipt="$(harn_binary_freshness_receipt_path "$bin")" || return $?
+  manifest="$(harn_binary_freshness_manifest_path "$bin")" || return $?
+  checker="$(harn_binary_freshness_checker_path "$bin")" || return $?
+  if [[ ! -r "$receipt" || ! -r "$manifest" || ! -x "$checker" ]]; then
+    echo "note: recovery refused: the build receipt, input manifest, or proof checker is missing." >&2
+    return 1
+  fi
+  if [[ "$(sed -n '1p' "$receipt")" != "harn-bin-freshness-v7" ]]; then
+    echo "note: recovery refused: this build receipt has no executable content proof." >&2
+    return 1
+  fi
+  recorded_content="$(sed -n '14s/^binary-content=//p' "$receipt")"
+  if [[ ! "$recorded_content" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "note: recovery refused: the executable content proof is malformed." >&2
+    return 1
+  fi
+  deps_dir="$(harn_binary_deps_dir "$bin")" || return $?
+  case "$name" in
+    *.exe) name="${name%.exe}"; suffix=.exe ;;
+  esac
+  for candidate in "$deps_dir/$name"-*"$suffix"; do
+    if [[ ! -f "$candidate" || ! -x "$candidate" || -L "$candidate" ]]; then
+      continue
+    fi
+    if ! "$checker" verify-recovery "$receipt" "$manifest" "$candidate" "$(harn_repo_root)" >/dev/null 2>&1; then
+      continue
+    fi
+    if ! link_error="$(ln "$candidate" "$bin" 2>&1)"; then
+      # Another Cargo producer may have published its own uplift meanwhile.
+      if [[ -x "$bin" ]] && harn_require_binary_freshness_receipt "$bin"; then
+        return 0
+      fi
+      echo "note: recovery refused: the proven artifact could not be linked: $link_error" >&2
+      return 1
+    fi
+    harn_record_binary_freshness "$bin" || return 1
+    restored_content="$(sed -n '14s/^binary-content=//p' "$receipt")"
+    if [[ "$restored_content" != "$recorded_content" ]]; then
+      echo "error: recovered Harn executable changed while refreshing its receipt" >&2
+      return 1
+    fi
+    harn_require_binary_freshness_receipt "$bin" || return 1
+    echo "note: restored the freshness-proven Harn executable from its compiled artifact." >&2
+    return 0
+  done
+  echo "note: recovery refused: no compiled artifact matches the receipt's bytes and current source." >&2
+  return 1
+)
+
 # Return the compiled identity from a receipt only after the canonical checker
 # has rebound that receipt to the current executable, manifest, and checkout.
 # CI exports this build input to later Cargo invocations so they cannot relink
 # the proven binary with a different `rerun-if-env-changed` value.
+#
+# A snapshot copy has no receipt of its own (the receipt binds the executable
+# by file identity, and a copy is a different file); its provenance sidecar
+# answers instead. See `harn_record_snapshot_provenance`.
 harn_verified_build_freshness_id() (
   local bin="$1"
   local receipt=""
   local identity=""
   local count=""
 
+  if [[ ! -r "$(harn_binary_freshness_receipt_path "$bin")" ]] && \
+     [[ -r "$(harn_binary_snapshot_provenance_path "$bin")" ]]; then
+    harn_verified_snapshot_build_freshness_id "$bin"
+    return
+  fi
   harn_require_binary_freshness_receipt "$bin" || return $?
   receipt="$(harn_binary_freshness_receipt_path "$bin")" || return $?
   count="$(grep -c '^build-freshness=' "$receipt" || true)"
@@ -611,6 +688,118 @@ harn_verified_build_freshness_id() (
   if [[ "$count" != "1" ]] \
     || [[ ! "$identity" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
     echo "error: Harn freshness receipt has a missing, duplicate, or malformed build identity" >&2
+    return 1
+  fi
+  printf '%s\n' "$identity"
+)
+
+harn_binary_snapshot_provenance_path() {
+  printf '%s.snapshot-provenance\n' "$1"
+}
+
+# shellcheck source=scripts/lib/sha256.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/sha256.sh"
+
+harn_file_sha256() {
+  sha256_file_hex "$1"
+}
+
+# Certify a byte-identical copy of a proven executable.
+#
+# Release and `make all` run their gates on a snapshot so a concurrent Cargo
+# relink cannot change the binary mid-gate. The source's receipt cannot vouch
+# for the copy, so the source proof is checked NOW and three facts are sealed
+# beside the copy: the verified build identity, the copy's content hash, and
+# the checkout identity that build was proven against (with the target
+# directory the fingerprint excludes). `harn_verified_snapshot_build_freshness_id`
+# accepts the copy only while all three still hold.
+harn_record_snapshot_provenance() (
+  local source_bin="$1"
+  local snapshot="$2"
+  local receipt=""
+  local provenance=""
+  local temporary=""
+  local identity=""
+  local worktree=""
+  local target_dir=""
+  local source_hash=""
+  local snapshot_hash=""
+
+  cleanup_snapshot_provenance() {
+    [[ -z "$temporary" ]] || rm -f "$temporary"
+  }
+  trap cleanup_snapshot_provenance EXIT
+
+  identity="$(harn_verified_build_freshness_id "$source_bin")" || return $?
+  receipt="$(harn_binary_freshness_receipt_path "$source_bin")" || return $?
+  if [[ "$(grep -c '^worktree=' "$receipt" || true)" != "1" ]]; then
+    echo "error: Harn freshness receipt has a missing or duplicate worktree identity" >&2
+    return 1
+  fi
+  worktree="$(sed -n 's/^worktree=//p' "$receipt")"
+  if [[ ! "$worktree" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+    echo "error: Harn freshness receipt has a malformed worktree identity" >&2
+    return 1
+  fi
+  target_dir="$(cd "$(harn_binary_target_dir "$source_bin")" && pwd -P)" || return $?
+  source_hash="$(harn_file_sha256 "$source_bin")" || return $?
+  snapshot_hash="$(harn_file_sha256 "$snapshot")" || return $?
+  if [[ "$source_hash" != "$snapshot_hash" ]]; then
+    echo "error: Harn snapshot is not byte-identical to its proven source executable" >&2
+    return 1
+  fi
+  provenance="$(harn_binary_snapshot_provenance_path "$snapshot")" || return $?
+  temporary="$(mktemp "${provenance}.tmp.XXXXXX")" || return $?
+  printf 'harn-bin-snapshot-v1\nbuild-freshness=%s\nworktree=%s\ntarget-dir=%s\nsha256=%s\n' \
+    "$identity" "$worktree" "$target_dir" "$snapshot_hash" >"$temporary" || return $?
+  mv "$temporary" "$provenance" || return $?
+  temporary=""
+)
+
+# The build identity of a certified snapshot, or a refusal naming what moved.
+harn_verified_snapshot_build_freshness_id() (
+  local bin="$1"
+  local provenance=""
+  local git_covered_list=""
+  local identity=""
+  local worktree=""
+  local target_dir=""
+  local sha256=""
+  local current=""
+
+  cleanup_snapshot_fingerprint() {
+    [[ -z "$git_covered_list" ]] || rm -f "$git_covered_list"
+  }
+  trap cleanup_snapshot_fingerprint EXIT
+
+  harn_require_executable_bin "$bin" || return $?
+  provenance="$(harn_binary_snapshot_provenance_path "$bin")" || return $?
+  if [[ "$(sed -n '1p' "$provenance")" != "harn-bin-snapshot-v1" ]] || \
+     [[ "$(wc -l <"$provenance" | tr -d ' ')" != "5" ]]; then
+    echo "error: malformed Harn snapshot provenance at $provenance" >&2
+    return 1
+  fi
+  identity="$(sed -n '2s/^build-freshness=//p' "$provenance")"
+  worktree="$(sed -n '3s/^worktree=//p' "$provenance")"
+  target_dir="$(sed -n '4s/^target-dir=//p' "$provenance")"
+  sha256="$(sed -n '5s/^sha256=//p' "$provenance")"
+  if [[ ! "$identity" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || \
+     [[ ! "$worktree" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || \
+     [[ "$target_dir" != /* ]] || \
+     [[ ! "$sha256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "error: malformed Harn snapshot provenance at $provenance" >&2
+    return 1
+  fi
+  current="$(harn_file_sha256 "$bin")" || return $?
+  if [[ "$current" != "$sha256" ]]; then
+    echo "error: Harn snapshot executable changed after it was certified: $bin" >&2
+    return 1
+  fi
+  git_covered_list="$(mktemp "${TMPDIR:-/tmp}/harn-bin-git-covered.XXXXXX")" || return $?
+  current="$(harn_worktree_content_fingerprint "$target_dir" "$git_covered_list")" || return $?
+  if [[ "$current" != "$worktree" ]]; then
+    echo "error: checkout changed after the Harn snapshot's source binary was built: $bin" >&2
+    harn_print_binary_freshness_recovery
     return 1
   fi
   printf '%s\n' "$identity"

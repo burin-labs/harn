@@ -117,12 +117,17 @@ impl OllamaProvider {
         }
         // Ollama templates (qwen3:30b-a3b etc.) gate `<think>` emission
         // on the top-level `think` field, NOT
-        // `chat_template_kwargs.enable_thinking`. The OpenAI-compat shim
-        // passes `think` through to the same template context. Default
+        // `chat_template_kwargs.enable_thinking`. The OpenAI-compatible
+        // adapter maps reasoning separately through `reasoning_effort`. Default
         // false for fast tool-call-shaped turns; callers who want
         // reasoning set `thinking` explicitly.
         body["think"] = serde_json::json!(opts.thinking.is_enabled());
-        crate::llm::api::apply_ollama_runtime_settings(&mut body, opts.provider_overrides.as_ref());
+        crate::llm::api::apply_ollama_runtime_settings(
+            &mut body,
+            &opts.provider,
+            &opts.model,
+            opts.provider_overrides.as_ref(),
+        );
         body
     }
 
@@ -177,7 +182,12 @@ impl OllamaProvider {
                 body["format"] = schema.clone();
             }
         }
-        crate::llm::api::apply_ollama_runtime_settings(&mut body, opts.provider_overrides.as_ref());
+        crate::llm::api::apply_ollama_runtime_settings(
+            &mut body,
+            &opts.provider,
+            &opts.model,
+            opts.provider_overrides.as_ref(),
+        );
         body
     }
 
@@ -223,10 +233,7 @@ impl OllamaProvider {
         let req = crate::llm::api::apply_auth_headers(req, &request.api_key, pdef.as_ref());
         let started = Instant::now();
         let response = req.send().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "ollama raw generate API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))))
+            crate::llm::api::reqwest_send_error("ollama", "raw generate", error)
         })?;
         if !response.status().is_success() {
             let status = response.status();
@@ -427,7 +434,7 @@ fn parse_raw_generate_json(
             .and_then(|value| value.as_str())
             .map(str::to_string),
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 
@@ -526,7 +533,7 @@ async fn parse_raw_generate_stream(
         thinking_summary: None,
         stop_reason,
         logprobs: Vec::new(),
-        telemetry,
+        telemetry: Box::new(telemetry),
     })
 }
 
@@ -551,6 +558,7 @@ mod tests {
     fn base_payload() -> LlmRequestPayload {
         LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "ollama".to_string(),
             model: "qwen3.5:35b-a3b-coding-nvfp4".to_string(),
             region: None,
@@ -576,6 +584,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::JsonSchema {

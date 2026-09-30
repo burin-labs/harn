@@ -429,7 +429,7 @@ fn failed_snapshot_write_is_retried_before_the_next_reference() {
 // next-turn payload is unchanged.
 #[test]
 fn response_record_exposes_text_parsed_calls_without_touching_history() {
-    use super::super::api::{vm_build_llm_result, LlmResult, ProviderTelemetry};
+    use super::super::api::{vm_build_llm_result, LlmResult};
     use crate::event_log::{
         install_active_event_log, reset_active_event_log, AnyEventLog, EventLog, SqliteEventLog,
         Topic,
@@ -493,7 +493,7 @@ summary: Listed the workspace\n\
         stop_reason: Some("stop".to_string()),
         blocks: Vec::new(),
         logprobs: Vec::new(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: Box::default(),
     };
     let tools = run_tool_registry();
     futures::executor::block_on(crate::llm::api::ensure_llm_text_projection(
@@ -1422,4 +1422,23 @@ fn the_typed_retry_after_field_is_read_before_any_message() {
         "the HTTP path must keep throwing a structured value, not prose"
     );
     assert_eq!(extract_retry_after_ms(&err), Some(2000));
+}
+
+/// The retry decision itself, on the exact value the stream reader throws.
+/// A malformed generated channel is resampled; a request fault is not.
+#[test]
+fn malformed_generated_channel_is_retried_and_request_fault_is_not() {
+    let malformed = crate::llm::api::classify_provider_stream_error(
+        "fireworks",
+        r#"{"error":{"message":"Invalid channel: tool_call","type":"invalid_request_error","code":"invalid_request_error"}}"#,
+        false,
+    );
+    assert!(is_retryable_llm_error(&malformed));
+
+    let request_fault = crate::llm::api::classify_provider_stream_error(
+        "fireworks",
+        r#"{"error":{"message":"Unknown parameter: foo","type":"invalid_request_error","code":"invalid_request_error"}}"#,
+        false,
+    );
+    assert!(!is_retryable_llm_error(&request_fault));
 }

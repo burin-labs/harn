@@ -21,6 +21,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=scripts/ci/cache_policy.sh
 source "${SCRIPT_DIR}/cache_policy.sh"
+# shellcheck source=scripts/lib/sha256.sh
+source "${SCRIPT_DIR}/../lib/sha256.sh"
 
 # Set by select_platform before any policy read. Unset is a bug, not a default:
 # a missing platform must refuse rather than pick one.
@@ -89,11 +91,7 @@ EOF
 }
 
 sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{ print $1 }'
-  else
-    shasum -a 256 "$1" | awk '{ print $1 }'
-  fi
+  sha256_file_hex "$1"
 }
 
 sha256_string() {

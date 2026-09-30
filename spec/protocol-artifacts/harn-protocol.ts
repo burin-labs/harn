@@ -139,6 +139,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "context_overflow",
   "provider_misconfigured",
   "provider_unavailable",
+  "provider_billing",
   "rate_limited",
   "timeout",
   "resource_busy",
@@ -1539,6 +1540,7 @@ export interface ACPTranscriptCompactedUpdateMetaHarn {
   compactionPolicy: ACPValue
   recap: ACPValue
   sourceMeasurement: ACPValue
+  classification: ACPValue
   replayed?: boolean
 }
 

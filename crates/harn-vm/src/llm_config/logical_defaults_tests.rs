@@ -3,6 +3,34 @@ use std::collections::BTreeMap;
 use super::*;
 
 #[test]
+fn catalog_gate_rejects_a_deprecated_provider_default() {
+    let mut config = default_config();
+    let (provider, model_id) = config
+        .provider_defaults
+        .iter()
+        .find_map(|(provider, defaults)| {
+            defaults
+                .portal
+                .as_ref()
+                .map(|model_id| (provider.clone(), model_id.clone()))
+        })
+        .expect("the catalog must have a portal default to check");
+    assert!(provider_route_default_issues(&config).is_empty());
+    config
+        .models
+        .get_mut(&model_id)
+        .expect("the configured default must resolve")
+        .deprecated = true;
+    let issues = provider_route_default_issues(&config);
+    assert!(
+        issues.iter().any(|issue| issue.contains(&format!(
+            "provider_defaults.{provider}.portal targets deprecated model"
+        ))),
+        "deprecated default must fail catalog generation: {issues:?}"
+    );
+}
+
+#[test]
 fn route_default_overrides_logical_model_default() {
     let mut config = default_config();
     config.model_defaults.insert(

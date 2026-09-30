@@ -53,6 +53,7 @@ pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
 pub use modules::resolve_module_import_path;
 pub use state::{Vm, VmBaseline};
 pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;
+pub use stdlib_artifact::{warm_embedded_stdlib, StdlibWarmReport};
 pub(crate) use task_cleanup::PendingTaskCleanup;
 
 pub(crate) use call_args::CallArgs;

@@ -25,7 +25,7 @@ use crate::llm::providers::schema_compat::{
 };
 use crate::llm::usage::{InputTokenBasis, PromptTokenCounts};
 use crate::url_encoding::percent_encode_component;
-use crate::value::VmError;
+use crate::value::{categorized_error, ErrorCategory, VmError};
 
 pub(crate) struct BedrockProvider;
 
@@ -184,12 +184,10 @@ impl BedrockProvider {
         for (name, value) in signed.headers {
             req = req.header(name, value);
         }
-        let response = req.send().await.map_err(|error| {
-            vm_err(format!(
-                "bedrock API error: {}",
-                crate::egress::redact_reqwest_error(&error)
-            ))
-        })?;
+        let response = req
+            .send()
+            .await
+            .map_err(|error| crate::llm::api::reqwest_send_error("bedrock", "API", error))?;
         if !response.status().is_success() {
             return Err(crate::llm::api::err_for_non_success("bedrock", response).await);
         }
@@ -572,7 +570,7 @@ fn parse_bedrock_converse_response(
         })
         .transpose()?
         .unwrap_or(0);
-    result.telemetry =
+    *result.telemetry =
         crate::llm::api::ProviderTelemetry::new(crate::llm::api::telemetry_source::BEDROCK_USAGE);
     result.telemetry.server_prompt_tokens = reported_input_tokens;
     result.telemetry.server_output_tokens = json["usage"]["outputTokens"].as_i64();
@@ -609,15 +607,100 @@ fn resolve_region(override_region: Option<&str>) -> Result<String, VmError> {
         }
     }
     if implicit_discovery_allowed() {
-        let profile = crate::stdlib::process::session_env_var("AWS_PROFILE")?
-            .unwrap_or_else(|| "default".to_string());
-        if let Some(region) = read_aws_profile_value("config", &profile, "region") {
+        if let Some(region) = read_aws_profile_value("config", &aws_profile_name(), "region") {
             return Ok(region);
         }
     }
-    Err(vm_err(
+    Err(region_unconfigured_error())
+}
+
+/// A missing region is a host configuration gap, not a provider failure: no
+/// request was sent and a retry cannot help.
+fn region_unconfigured_error() -> VmError {
+    categorized_error(
         "AWS region is not configured; set AWS_REGION, AWS_DEFAULT_REGION, or BEDROCK_REGION",
-    ))
+        ErrorCategory::Environment,
+    )
+}
+
+/// No credential reached the signer, so the route cannot authenticate.
+fn credentials_unavailable_error(message: impl Into<String>) -> VmError {
+    categorized_error(message, ErrorCategory::Auth)
+}
+
+fn aws_profile_name() -> String {
+    crate::stdlib::process::session_env_var("AWS_PROFILE")
+        .ok()
+        .flatten()
+        .filter(|profile| !profile.trim().is_empty())
+        .unwrap_or_else(|| "default".to_string())
+}
+
+/// Profile keys through which the AWS credential chain resolves a profile's
+/// credential: static keys, an assumed role, an external process, SSO, or a
+/// web identity token.
+const AWS_PROFILE_CREDENTIAL_KEYS: &[&str] = &[
+    "aws_access_key_id",
+    "role_arn",
+    "credential_process",
+    "sso_session",
+    "sso_start_url",
+    "web_identity_token_file",
+    "credential_source",
+];
+
+/// Whether a live Bedrock call could resolve a region and a credential,
+/// answered without the network.
+///
+/// Mirrors the offline links of the chains `chat_impl` uses. Region: the
+/// explicit variables, then the profile in the shared config file. Credentials:
+/// a prepared identity, the environment key pair, a web identity token, a
+/// container credential endpoint, or the profile in the shared config or
+/// credentials file. Instance metadata is a network call and is not probed, so
+/// a host whose only source is an instance role reads as unconfigured here
+/// while its explicit calls still succeed.
+pub(crate) fn offline_prerequisites() -> Result<(), super::PlatformPrerequisiteGap> {
+    let prepared = crate::prepared_run::prepared_identity_declares_provider("bedrock");
+    if resolve_region(None).is_err() {
+        return Err(super::PlatformPrerequisiteGap::Region);
+    }
+    let credentials = match prepared {
+        // Under a prepared lease the brokered identity is the only source.
+        Some(declared) => declared,
+        None => offline_credential_source_present(),
+    };
+    if credentials {
+        Ok(())
+    } else {
+        Err(super::PlatformPrerequisiteGap::Credentials)
+    }
+}
+
+fn offline_credential_source_present() -> bool {
+    let set = |name: &str| {
+        crate::stdlib::process::session_env_var(name)
+            .ok()
+            .flatten()
+            .is_some_and(|value| !value.trim().is_empty())
+    };
+    if set("AWS_ACCESS_KEY_ID") && set("AWS_SECRET_ACCESS_KEY") {
+        return true;
+    }
+    // Without implicit discovery the live path reads only the key pair.
+    if !implicit_discovery_allowed() {
+        return false;
+    }
+    if (set("AWS_WEB_IDENTITY_TOKEN_FILE") && set("AWS_ROLE_ARN"))
+        || set("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
+        || set("AWS_CONTAINER_CREDENTIALS_FULL_URI")
+    {
+        return true;
+    }
+    let profile = aws_profile_name();
+    AWS_PROFILE_CREDENTIAL_KEYS.iter().any(|key| {
+        read_aws_profile_value("credentials", &profile, key).is_some()
+            || read_aws_profile_value("config", &profile, key).is_some()
+    })
 }
 
 pub(crate) async fn resolve_live_region(override_region: Option<&str>) -> Result<String, VmError> {
@@ -643,11 +726,7 @@ pub(crate) async fn resolve_live_region(override_region: Option<&str>) -> Result
             .region()
             .await
             .map(|region| region.as_ref().to_string())
-            .ok_or_else(|| {
-                vm_err(
-                    "AWS region is not configured; set AWS_REGION, AWS_DEFAULT_REGION, or BEDROCK_REGION",
-                )
-            });
+            .ok_or_else(region_unconfigured_error);
     }
     #[cfg(not(feature = "cloud-aws"))]
     resolve_region(None)
@@ -656,18 +735,11 @@ pub(crate) async fn resolve_live_region(override_region: Option<&str>) -> Result
 #[cfg(feature = "cloud-aws")]
 pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentials, VmError> {
     if !implicit_discovery_allowed() {
-        let access_key_id =
-            crate::stdlib::process::session_env_var("AWS_ACCESS_KEY_ID")?.ok_or_else(|| {
-                vm_err(
-                    "AWS credentials are not granted to this session; grant AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY or use the inherited environment policy",
-                )
-            })?;
-        let secret_access_key =
-            crate::stdlib::process::session_env_var("AWS_SECRET_ACCESS_KEY")?.ok_or_else(|| {
-                vm_err(
-                    "AWS credentials are not granted to this session; grant AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY or use the inherited environment policy",
-                )
-            })?;
+        const NOT_GRANTED: &str = "AWS credentials are not granted to this session; grant AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY or use the inherited environment policy";
+        let access_key_id = crate::stdlib::process::session_env_var("AWS_ACCESS_KEY_ID")?
+            .ok_or_else(|| credentials_unavailable_error(NOT_GRANTED))?;
+        let secret_access_key = crate::stdlib::process::session_env_var("AWS_SECRET_ACCESS_KEY")?
+            .ok_or_else(|| credentials_unavailable_error(NOT_GRANTED))?;
         let session_token = crate::stdlib::process::session_env_var("AWS_SESSION_TOKEN")?;
         return Ok(AwsCredentials {
             access_key_id,
@@ -680,7 +752,7 @@ pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentia
         .build()
         .await;
     let credentials = provider.provide_credentials().await.map_err(|error| {
-        vm_err(format!(
+        credentials_unavailable_error(format!(
             "AWS credential provider chain could not load credentials: {error}"
         ))
     })?;
@@ -693,10 +765,11 @@ pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentia
 
 #[cfg(not(feature = "cloud-aws"))]
 pub(crate) async fn resolve_aws_credentials(_region: &str) -> Result<AwsCredentials, VmError> {
+    const NEEDS_FEATURE: &str = "AWS credentials require the harn-vm `cloud-aws` feature";
     let access_key_id = crate::stdlib::process::session_env_var("AWS_ACCESS_KEY_ID")?
-        .ok_or_else(|| vm_err("AWS credentials require the harn-vm `cloud-aws` feature"))?;
+        .ok_or_else(|| credentials_unavailable_error(NEEDS_FEATURE))?;
     let secret_access_key = crate::stdlib::process::session_env_var("AWS_SECRET_ACCESS_KEY")?
-        .ok_or_else(|| vm_err("AWS credentials require the harn-vm `cloud-aws` feature"))?;
+        .ok_or_else(|| credentials_unavailable_error(NEEDS_FEATURE))?;
     let session_token = crate::stdlib::process::session_env_var("AWS_SESSION_TOKEN")?;
     Ok(AwsCredentials {
         access_key_id,
@@ -710,12 +783,26 @@ fn implicit_discovery_allowed() -> bool {
         .is_none_or(|environment| environment.allows_implicit_discovery())
 }
 
+/// Read one key from the AWS shared config or credentials file, honoring the
+/// same `AWS_CONFIG_FILE` / `AWS_SHARED_CREDENTIALS_FILE` overrides the SDK
+/// chain reads, so a status answer and a live call consult the same file.
 fn read_aws_profile_value(file_kind: &str, profile: &str, key: &str) -> Option<String> {
-    let home = crate::user_dirs::home_dir()?;
-    let path = match file_kind {
-        "credentials" => home.join(".aws").join("credentials"),
-        "config" => home.join(".aws").join("config"),
+    let (override_env, default_name) = match file_kind {
+        "credentials" => ("AWS_SHARED_CREDENTIALS_FILE", "credentials"),
+        "config" => ("AWS_CONFIG_FILE", "config"),
         _ => return None,
+    };
+    let home = crate::user_dirs::home_dir();
+    let path = match crate::stdlib::process::session_env_var(override_env)
+        .ok()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(raw) => match raw.strip_prefix("~/") {
+            Some(rest) => home?.join(rest),
+            None => std::path::PathBuf::from(raw),
+        },
+        None => home?.join(".aws").join(default_name),
     };
     let text = std::fs::read_to_string(path).ok()?;
     let profile_section = if file_kind == "config" && profile != "default" {
@@ -1264,6 +1351,7 @@ aws_secret_access_key = dev-secret
     fn base_request() -> LlmRequestPayload {
         LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "bedrock".to_string(),
             model: "anthropic.claude-3-5-sonnet-20240620-v1:0".to_string(),
             region: None,
@@ -1288,6 +1376,7 @@ aws_secret_access_key = dev-secret
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,

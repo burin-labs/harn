@@ -388,8 +388,6 @@ The built-in section names are:
 | `examples` | Few-shot examples or demonstrations. |
 | `output_format` | Output schema or parse contract. Suppressed when `structured_output_mode == "native_json"` because the provider envelope carries the schema. |
 | `tools` | Tool definitions rendered as XML, Markdown/JSON, or a ReAct-style text contract depending on the route. |
-| `thinking_scaffold` | Thinking envelope for models that need one; no output for models with no thinking section style. |
-| `chain_of_thought` | A provider-shaped private-reasoning instruction. |
 | `system_framing` | Top-level persona or policy framing; uses developer-role wording when `prefers_role_developer` is true. |
 
 Section arguments use `name=value` pairs. `output_format` accepts `schema=...`;
@@ -415,7 +413,6 @@ Capability dispatch is feature-based, not provider-string-based:
 | `native_tools` | `tools` renders as a Markdown/JSON description when XML tools are not preferred. |
 | `text_tool_wire_format_supported` | `tools` renders a ReAct-style text-tool contract for local/text routes. |
 | `structured_output_mode` | Controls `output_format`; `native_json` omits the section. |
-| `thinking_block_style` | Controls `thinking_scaffold` (`none`, `thinking_blocks`, `reasoning_summary`, `inline`). |
 | `prefers_role_developer` | `system_framing` targets developer instructions instead of system instructions. |
 
 ## Variant resolution in transcripts

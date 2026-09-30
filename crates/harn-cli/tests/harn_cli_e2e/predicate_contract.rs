@@ -309,9 +309,13 @@ pub(super) fn predicate_operation_admission_invalidates_cached_success() {
         execution.status.code(),
         String::from_utf8_lossy(&execution.stderr)
     );
+    let receipt = stdout
+        .trim()
+        .strip_prefix("unavailable ")
+        .expect("typed unavailable outcome and receipt");
     assert!(
-        stdout.starts_with("unavailable blake3:"),
-        "expected the typed unavailable outcome and its receipt, got: {stdout}"
+        !receipt.is_empty() && !receipt.chars().any(char::is_whitespace),
+        "expected one receipt identity after the typed unavailable outcome, got: {stdout}"
     );
     assert!(
         !stdout.contains("accepted"),

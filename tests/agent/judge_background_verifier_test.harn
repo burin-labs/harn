@@ -1,0 +1,126 @@
+// Run: harn test tests/agent/judge_background_verifier_test.harn
+//
+// A verifier that outlives its foreground budget returns `running` and a
+// handle. The call that later resolves that handle carries the verifier's
+// terminal result, so the completion judge's verification slot must show it
+// (harn#8770). Before this, the slot kept the `running` banner and the judge
+// refused verified work for want of an exit status sitting in the transcript.
+import { __judge_evidence_projection } from "std/agent/judge"
+
+const TOOLS = {
+  tools: [
+    {name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}},
+    {
+      name: "verify",
+      annotations: {
+        kind: "execute",
+        side_effect_level: "process_exec",
+        completion_evidence_role: "verification",
+      },
+    },
+    {name: "run", annotations: {kind: "execute", side_effect_level: "process_exec"}},
+    // A host that declares no role on its handle tools: the case the packet dropped.
+    {name: "wait_command", annotations: {kind: "execute", side_effect_level: "read_only"}},
+  ],
+}
+
+fn call(tool_name: string, call_id: string, args: dict) -> dict {
+  return {
+    role: "assistant",
+    content: "",
+    _harn: {
+      kind: "assistant",
+      tool_calls: [{id: call_id, function: {name: tool_name, arguments: args}}],
+    },
+  }
+}
+
+fn result(tool_name: string, call_id: string, content: string, data: dict) -> dict {
+  return {
+    role: "user",
+    content: content,
+    _harn: {
+      kind: "tool_result",
+      tool_call_id: call_id,
+      tool_name: tool_name,
+      outcome: "ok",
+      data: data,
+    },
+  }
+}
+
+fn backgrounded(minter: string, handle: string, waited: string = "") -> list {
+  return [
+    {role: "user", content: "Add a test for archive."},
+    call("edit", "edit-1", {path: "tests/test_service.py"}),
+    result("edit", "edit-1", "applied", {}),
+    call(minter, "cmd-1", {command: "pytest -q"}),
+    // Nested under `run_outcome`, the wrapped shape a host may return.
+    result(
+      minter,
+      "cmd-1",
+      "Command still running. Handle: " + handle,
+      {
+        command_status: "running",
+        run_outcome: {command_status: "running", exit_code: -1, handle_id: handle},
+      },
+    ),
+    call(
+      "wait_command",
+      "wait-1",
+      {
+        handle_id: if waited == "" {
+          handle
+        } else {
+          waited
+        },
+      },
+    ),
+    result(
+      "wait_command",
+      "wait-1",
+      "3 passed",
+      {
+        command_status: "succeeded",
+        run_outcome: {command_status: "succeeded", exit_code: 0, handle_id: handle},
+      },
+    ),
+  ]
+}
+
+fn verification_actions(projected: dict) -> list {
+  return projected.packet.actions.filter({ a -> a.semantics.evidence_role == "verification" })
+    .to_list()
+}
+
+pipeline test_the_wait_that_resolves_a_verifier_is_the_verification(
+  harness: Harness,
+  task: unknown,
+) {
+  const projected = __judge_evidence_projection(backgrounded("verify", "h1"), TOOLS)
+  const verifications = verification_actions(projected)
+  assert_eq(len(verifications), 1)
+  assert_eq(verifications[0].name, "wait_command")
+  assert(contains(verifications[0].result_facts, "succeeded"))
+}
+
+pipeline test_a_wait_on_another_commands_handle_is_not_the_verification(
+  harness: Harness,
+  task: unknown,
+) {
+  // NEGATIVE CONTROL: the handle came from `run`, not the verifier, so the wait
+  // must not take the verification slot.
+  const projected = __judge_evidence_projection(backgrounded("run", "h1"), TOOLS)
+  assert_eq(len(verification_actions(projected)), 0)
+}
+
+pipeline test_a_wait_on_a_different_handle_leaves_the_verifier_in_place(
+  harness: Harness,
+  task: unknown,
+) {
+  // The wait names a handle nothing in this run minted.
+  const projected = __judge_evidence_projection(backgrounded("verify", "h1", "h2"), TOOLS)
+  const verifications = verification_actions(projected)
+  assert_eq(len(verifications), 1)
+  assert_eq(verifications[0].name, "verify")
+}

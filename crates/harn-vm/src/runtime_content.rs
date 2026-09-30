@@ -280,6 +280,9 @@ mod tests {
         assert_ne!(first.content_sha256, second.content_sha256);
     }
 
+    /// "Lean" here is a `harn-vm` build without its optional feature families,
+    /// the shape an in-process embedding through `harn-serve` links. The CLI
+    /// always builds with hostlib and has no lean configuration (harn#7665).
     #[test]
     fn full_and_lean_builds_have_distinct_content_digests() {
         let stdlib = embedded_stdlib_digest_from_sources([("agent", "source")]);

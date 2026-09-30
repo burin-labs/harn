@@ -15,4 +15,5 @@ HARN_TEST_ONE_NAME='parser_agreement_corpus::resolved_grammars_pass_the_versione
   HARN_TEST_ONE_BINARY=harn_hostlib \
   make test-one
 
-gh pr merge "$pr_url" --auto --squash
+source "$(dirname "${BASH_SOURCE[0]}")/lib/release_auto_merge.sh"
+release_arm_auto_merge "$pr_url"

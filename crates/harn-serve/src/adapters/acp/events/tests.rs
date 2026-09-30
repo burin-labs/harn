@@ -30,6 +30,7 @@ mod schema_contract;
 mod step_judge_skips;
 mod subagent_stop;
 mod tool_data;
+mod tool_format_override;
 use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
 use compaction_events::fixture_compaction_receipt;
 use plan_document::fixture_plan_document_event;
@@ -630,6 +631,8 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             recommended_format: "text".to_string(),
             catalog_parity: "native_unreliable".to_string(),
             override_reason: Some("cross-check provider regression".to_string()),
+            applied_format: Some("text".to_string()),
+            steered: Some(true),
         },
         AgentEvent::ToolCallAudit {
             session_id: "session-1".to_string(),
@@ -772,32 +775,6 @@ async fn input_guardrail_verdict_agent_event_carries_tripwire_shape() {
     assert_eq!(params["label"], "secret_exfiltration");
     assert_eq!(params["confidenceThreshold"], 0.8);
     assert_eq!(params["classifierKind"], "custom");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_format_override_agent_event_uses_camel_case_fields() {
-    let actual = collect_notifications(vec![AgentEvent::ToolFormatOverride {
-        session_id: "session-1".to_string(),
-        provider: "openrouter".to_string(),
-        model: "qwen/qwen3-coder".to_string(),
-        requested_format: "native".to_string(),
-        recommended_format: "text".to_string(),
-        catalog_parity: "native_unreliable".to_string(),
-        override_reason: Some("cross-check provider regression".to_string()),
-    }])
-    .await;
-
-    let notification = &actual[0];
-    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
-    let params = &notification["params"];
-    assert_eq!(params["kind"], "tool_format_override");
-    assert_eq!(params["sessionId"], "session-1");
-    assert_eq!(params["provider"], "openrouter");
-    assert_eq!(params["model"], "qwen/qwen3-coder");
-    assert_eq!(params["requestedFormat"], "native");
-    assert_eq!(params["recommendedFormat"], "text");
-    assert_eq!(params["catalogParity"], "native_unreliable");
-    assert_eq!(params["overrideReason"], "cross-check provider regression");
 }
 
 #[tokio::test(flavor = "current_thread")]

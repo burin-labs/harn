@@ -102,6 +102,10 @@ pub struct ApprovalReviewOutcome {
     pub authorization: Option<String>,
     /// Set when the reviewer never ran. Never set on a real verdict.
     pub unavailable_reason: Option<String>,
+    /// Why, in the reviewer's own words, when it said: the model call's error
+    /// or the unparseable reply. Redacted. Without it a reviewer that fails on
+    /// every call reads the same as one that was never consulted.
+    pub unavailable_detail: Option<String>,
 }
 
 impl ApprovalReviewOutcome {
@@ -114,6 +118,16 @@ impl ApprovalReviewOutcome {
             risk: None,
             authorization: None,
             unavailable_reason: Some(reason.to_string()),
+            unavailable_detail: None,
+        }
+    }
+
+    fn unavailable_with_detail(reason: &str, detail: Option<String>) -> Self {
+        Self {
+            unavailable_detail: detail
+                .filter(|detail| !detail.trim().is_empty())
+                .map(|detail| crate::egress::redact_diagnostic_text(&detail)),
+            ..Self::unavailable(reason)
         }
     }
 }
@@ -224,10 +238,10 @@ pub async fn run_approval_review(
         // A raising reviewer is a refusal. Propagating the error would abort a
         // run over a failed *optional* rescue attempt, turning a recoverable
         // denial into a dead run.
-        Err(VmError::Runtime(message)) => {
-            ApprovalReviewOutcome::unavailable(&format!("reviewer_error: {message}"))
-        }
-        Err(_) => ApprovalReviewOutcome::unavailable("reviewer_error"),
+        Err(error) => ApprovalReviewOutcome::unavailable_with_detail(
+            "reviewer_error",
+            Some(error.to_string()),
+        ),
     };
     if outcome.reviewer_answered {
         record_verdict(session_id, outcome.approved);
@@ -258,7 +272,10 @@ fn parse_review_verdict(value: VmValue) -> ApprovalReviewOutcome {
     if !answered {
         let reason = string_field(&map, "unavailable_reason")
             .unwrap_or_else(|| "reviewer_did_not_answer".to_string());
-        return ApprovalReviewOutcome::unavailable(&reason);
+        return ApprovalReviewOutcome::unavailable_with_detail(
+            &reason,
+            string_field(&map, "detail"),
+        );
     }
     ApprovalReviewOutcome {
         approved,
@@ -267,6 +284,7 @@ fn parse_review_verdict(value: VmValue) -> ApprovalReviewOutcome {
         risk: string_field(&map, "risk"),
         authorization: string_field(&map, "authorization"),
         unavailable_reason: None,
+        unavailable_detail: None,
     }
 }
 
@@ -383,6 +401,7 @@ fn record_decline(
     reviewer_answered: bool,
     rationale: &str,
     unavailable_reason: Option<&str>,
+    unavailable_detail: Option<&str>,
 ) {
     if let Some(map) = decision.receipt.as_object_mut() {
         map.insert(
@@ -392,6 +411,7 @@ fn record_decline(
                 "reviewer_answered": reviewer_answered,
                 "rationale": rationale,
                 "unavailable_reason": unavailable_reason,
+                "unavailable_detail": unavailable_detail,
                 "decider": "auto_reviewer",
             }),
         );
@@ -453,7 +473,7 @@ pub async fn maybe_grant_by_auto_review(
     // nobody to ask produced a bare `host_rejected` -- a record naming the last
     // layer to say no rather than the layer that was supposed to answer.
     if !approval_reviewer_active() {
-        record_decline(decision, false, "", Some(NO_REVIEWER_INSTALLED));
+        record_decline(decision, false, "", Some(NO_REVIEWER_INSTALLED), None);
         return false;
     }
     let request = serde_json::json!({
@@ -476,6 +496,7 @@ pub async fn maybe_grant_by_auto_review(
             outcome.reviewer_answered,
             &outcome.rationale,
             outcome.unavailable_reason.as_deref(),
+            outcome.unavailable_detail.as_deref(),
         );
         return false;
     }
@@ -521,6 +542,37 @@ mod tests {
             outcome.unavailable_reason.as_deref(),
             Some("reviewer_unparseable")
         );
+    }
+
+    /// The reviewer's own account of why it could not answer reaches the
+    /// outcome, redacted. Before this only `unavailable_reason` survived, so a
+    /// reviewer failing authentication on every call read as "reviewer_error"
+    /// with nothing to say which credential it lacked.
+    #[test]
+    fn an_unavailable_reviewer_keeps_its_redacted_detail() {
+        let secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+        let outcome = parse_review_verdict(dict(&[
+            ("approved", VmValue::Bool(false)),
+            ("reviewer_answered", VmValue::Bool(false)),
+            ("unavailable_reason", text("reviewer_error")),
+            (
+                "detail",
+                text(&format!(
+                    "Missing API key: set ANTHROPIC_API_KEY (last tried {secret})"
+                )),
+            ),
+        ]));
+        assert!(!outcome.reviewer_answered);
+        assert_eq!(
+            outcome.unavailable_reason.as_deref(),
+            Some("reviewer_error")
+        );
+        let detail = outcome.unavailable_detail.expect("detail survives");
+        assert!(
+            detail.contains("Missing API key: set ANTHROPIC_API_KEY"),
+            "{detail}"
+        );
+        assert!(!detail.contains(secret), "detail leaked a key: {detail}");
     }
 
     #[test]

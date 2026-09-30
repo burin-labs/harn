@@ -184,10 +184,17 @@ harn_require_executable_bin() {
 # Copy a resolved Cargo output into a caller-owned immutable execution path.
 # Parallel Cargo invocations may replace or briefly unlink target/debug/harn;
 # long-lived gates must execute a snapshot whose lifetime they control.
+# Copy an executable so a later Cargo relink cannot change it under a caller.
+#
+# `certify` (the fourth argument) keeps a freshness-proven source provable: a
+# source with a receipt must still verify, and the copy then carries snapshot
+# provenance that the freshness gates accept in place of a receipt. A source
+# with no receipt is copied as-is, and a gate that needs proof refuses it later.
 harn_snapshot_binary() {
   local source_bin="$1"
   local destination_dir="$2"
   local destination_name="${3:-harn}"
+  local mode="${4:-plain}"
   local suffix=""
   local snapshot=""
 
@@ -197,8 +204,12 @@ harn_snapshot_binary() {
   esac
   mkdir -p "$destination_dir" || return $?
   snapshot="$destination_dir/$destination_name$suffix"
+  rm -f "$(harn_binary_snapshot_provenance_path "$snapshot")" || return $?
   cp "$source_bin" "$snapshot" || return $?
   chmod +x "$snapshot" || return $?
+  if [[ "$mode" = "certify" ]] && [[ -r "$(harn_binary_freshness_receipt_path "$source_bin")" ]]; then
+    harn_record_snapshot_provenance "$source_bin" "$snapshot" || return $?
+  fi
   printf '%s\n' "$snapshot"
 }
 
@@ -476,6 +487,12 @@ harn_resolve_binary() (
       harn_require_binary_freshness_receipt "$bin" || return $?
       printf '%s\n' "$bin"
       return 0
+    fi
+    if harn_compiled_binary_artifact_exists "$bin"; then
+      if harn_restore_binary_from_receipt "$bin"; then
+        printf '%s\n' "$bin"
+        return 0
+      fi
     fi
     echo "error: no fresh worktree harn binary found at $bin" >&2
     if harn_compiled_binary_artifact_exists "$bin"; then

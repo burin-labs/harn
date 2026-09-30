@@ -190,7 +190,8 @@ pub fn agent_feedback_compose(candidates: list?, context: dict? = nil) -> dict {
   let next_history = history
   for message in messages {
     if message.next_step != "" {
-      next_history = {next_step: message.next_step, knowledge_state: knowledge_state}
+      next_history = next_history
+        + {next_step: message.next_step, knowledge_state: knowledge_state}
     }
   }
   return {messages: messages, suppressed: suppressed, history: next_history}

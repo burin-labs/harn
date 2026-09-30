@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, VecDeque};
 #[cfg(not(unix))]
 use std::io::BufRead;
-use std::io::{IsTerminal, Read, Write};
+use std::io::{IsTerminal, Read};
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
@@ -190,11 +190,9 @@ pub(crate) fn write_stderr(line: &str) {
     let capturing = STDERR_CAPTURING.with(|c| *c.borrow());
     if capturing {
         STDERR_BUFFER.with(|s| s.borrow_mut().push_str(line));
-    } else {
-        let mut stderr = std::io::stderr().lock();
-        let _ = stderr.write_all(line.as_bytes());
-        let _ = stderr.flush();
+        return;
     }
+    crate::host_stdio::write(crate::host_stdio::HostStdioStream::Stderr, line);
 }
 
 pub(crate) fn write_stdout(out: &mut String, text: &str) {
@@ -204,22 +202,18 @@ pub(crate) fn write_stdout(out: &mut String, text: &str) {
         });
         return;
     }
-    if STDOUT_ALLOWED.get() && stdout_passthrough_enabled() {
-        let mut stdout = std::io::stdout().lock();
-        let _ = stdout.write_all(text.as_bytes());
-        let _ = stdout.flush();
-    } else {
+    if !(STDOUT_ALLOWED.get() && stdout_passthrough_enabled()) {
         out.push_str(text);
+        return;
     }
+    crate::host_stdio::write(crate::host_stdio::HostStdioStream::Stdout, text);
 }
 
 pub(crate) fn write_ambient_stdout(text: &str) {
     if !STDOUT_ALLOWED.get() {
         return;
     }
-    let mut stdout = std::io::stdout().lock();
-    let _ = stdout.write_all(text.as_bytes());
-    let _ = stdout.flush();
+    crate::host_stdio::write(crate::host_stdio::HostStdioStream::Stdout, text);
 }
 
 fn stdout_passthrough_enabled() -> bool {

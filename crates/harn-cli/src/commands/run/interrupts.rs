@@ -12,7 +12,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::RunInterruptTokens;
+#[derive(Clone)]
+pub struct RunInterruptTokens {
+    pub cancel_token: Arc<AtomicBool>,
+    pub signal_token: Arc<Mutex<Option<String>>>,
+}
 
 const FIRST_SIGNAL_MESSAGE: &str =
     "[harn] signal received, interrupting VM (give it a moment to unwind in-flight async ops; Ctrl-C again to force-exit)...";

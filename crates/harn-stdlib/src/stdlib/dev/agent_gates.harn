@@ -397,20 +397,39 @@ pub fn agent_gate_markdown(repo: string, layer: string, entries: list<AgentGateE
   return lines.join("\n") + "\n"
 }
 
-fn classification_index(read: AgentGateRead, rows: list<AgentGateForwarder>) -> int? {
-  let selected: int? = nil
+fn classification_key(scope: string, file: string, expression: string) -> string {
+  return json_stringify([scope, file, expression])
+}
+
+/**
+ * Validate each batch once, then match immutable source identities without rescanning it per read.
+ */
+fn classification_indices(
+  reads: list<AgentGateRead>,
+  rows: list<AgentGateForwarder>,
+) -> list<int?> {
+  let by_identity: dict<string, list<int>> = {}
   for index in range(0, len(rows)) {
     const row = rows[index]
-    if row.scope != read.scope || row.file != read.file || row.expression != read.expression {
+    const key = classification_key(row.scope, row.file, row.expression)
+    by_identity[key] = (by_identity[key] ?? []) + [index]
+  }
+  let selected: list<int?> = []
+  for read in reads {
+    const matches = by_identity[classification_key(read.scope, read.file, read.expression)] ?? []
+    if len(matches) == 0 {
+      selected = selected + [nil]
       continue
     }
-    if selected != nil {
+    if len(matches) > 1 {
       throw "agent gate registry: duplicate classification ${read.file} ${read.expression}"
     }
+    const index = matches[0]
+    const row = rows[index]
     if row.owner.trim() == "" || row.evidence.trim() == "" {
       throw "agent gate registry: classification lacks owner/evidence"
     }
-    selected = index
+    selected = selected + [index]
   }
   return selected
 }
@@ -468,9 +487,13 @@ pub fn agent_gate_findings(
   let non_behavior = 0
   let used_forwarders: list<int> = []
   let used_exclusions: list<int> = []
+  const exclusions = classification_indices(reads, non_behavior_reads)
+  const forwarding_indices = classification_indices(reads, forwarders)
+  let read_index = 0
   for read in reads {
-    const excluded = classification_index(read, non_behavior_reads)
-    const forwarding = classification_index(read, forwarders)
+    const excluded = exclusions[read_index]
+    const forwarding = forwarding_indices[read_index]
+    read_index += 1
     if excluded != nil && forwarding != nil {
       throw "agent gate registry: conflicting classifications ${read.file} ${read.expression}"
     }
@@ -586,13 +609,17 @@ pub fn agent_gate_audit(
   )
   const findings = agent_gate_findings(entries, reads, forwarders, non_behavior, flag_scopes)
   let failures = findings.failures
-  const observed = observed_entries(
-    entries,
-    reads.filter(
-      fn(read) { return classification_index(read, forwarders) == nil
-        && classification_index(read, non_behavior) == nil },
-    ),
-  )
+  const forwarding_indices = classification_indices(reads, forwarders)
+  const exclusions = classification_indices(reads, non_behavior)
+  let behavior_reads: list<AgentGateRead> = []
+  let read_index = 0
+  for read in reads {
+    if forwarding_indices[read_index] == nil && exclusions[read_index] == nil {
+      behavior_reads = behavior_reads + [read]
+    }
+    read_index += 1
+  }
+  const observed = observed_entries(entries, behavior_reads)
   if write {
     write_observed_entries(harness.fs, registry.entry_files, observed)
   } else {

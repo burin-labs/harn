@@ -10,7 +10,7 @@ rows="$tmp_root/pr-rows.tsv"
 bin_dir="$tmp_root/bin"
 mkdir -p "$fixture" "$bin_dir"
 
-git -C "$fixture" init --quiet
+git -C "$fixture" init -b main --quiet
 git -C "$fixture" config user.name "Development Cutover Monitor Test"
 git -C "$fixture" config user.email "development-cutover-monitor@example.com"
 git -C "$fixture" config commit.gpgsign false
@@ -130,7 +130,7 @@ grep -Fq 'MERGED:https://example.invalid/pull/41' "$merged_log"
 off_ancestry_fixture="$tmp_root/off-ancestry"
 off_ancestry_rows="$tmp_root/off-ancestry-rows.tsv"
 mkdir -p "$off_ancestry_fixture"
-git -C "$off_ancestry_fixture" init --quiet
+git -C "$off_ancestry_fixture" init -b main --quiet
 git -C "$off_ancestry_fixture" config user.name "Development Cutover Monitor Test"
 git -C "$off_ancestry_fixture" config user.email "development-cutover-monitor@example.com"
 git -C "$off_ancestry_fixture" config commit.gpgsign false

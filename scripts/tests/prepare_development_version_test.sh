@@ -20,7 +20,7 @@ name = "example"
 version.workspace = true
 EOF
 printf '# initial lock\n' > "$fixture/Cargo.lock"
-git -C "$fixture" init --quiet
+git -C "$fixture" init -b main --quiet
 git -C "$fixture" config user.name "Development Version Test"
 git -C "$fixture" config user.email "development-version-test@example.com"
 git -C "$fixture" config commit.gpgsign false

@@ -162,6 +162,7 @@ const UNAVAILABLE: Ty = Ty::Shape(&[
             Ty::LitString("unsupported_options"),
             Ty::LitString("transport_failed"),
             Ty::LitString("authority_denied"),
+            Ty::LitString("admission_refused"),
             Ty::LitString("producer_cancelled"),
             Ty::LitString("cache_miss"),
         ]),

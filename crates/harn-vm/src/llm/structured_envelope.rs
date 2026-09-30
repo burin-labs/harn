@@ -35,6 +35,9 @@ use crate::value::{VmError, VmValue};
 use super::helpers::{extract_llm_options, vm_value_to_json};
 use super::{execute_schema_retry_loop, rewrite_structured_args, SchemaLoopOutcome};
 
+mod prepared;
+pub(crate) use prepared::run_prepared_structured_call;
+
 /// Build the `{ok, data, raw_text, error, error_category, attempts,
 /// repaired, repair_tier, extracted_json, usage, model, provider}`
 /// envelope. Never
@@ -893,7 +896,7 @@ mod tests {
             served_fast: false,
             blocks: Vec::new(),
             logprobs: Vec::new(),
-            telemetry: crate::llm::api::ProviderTelemetry::default(),
+            telemetry: Box::default(),
         };
         let usage = result.usage();
         SchemaLoopOutcome {
@@ -930,6 +933,7 @@ mod tests {
             "claude-sonnet-4-20250514",
             1_000,
             1_000,
+            crate::llm::cost::settlement_now(),
         )
         .expect("catalog-priced result");
 

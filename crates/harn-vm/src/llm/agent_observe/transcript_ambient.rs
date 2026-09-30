@@ -17,6 +17,9 @@ thread_local! {
     /// Content-addressed provider-visible messages already defined in the
     /// active transcript. Request receipts carry these ids in served order.
     static EMITTED_SERVED_MESSAGE_IDS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
+    /// Content-addressed output schemas already defined in the active
+    /// transcript. Request receipts carry these ids as schema hashes.
+    static EMITTED_OUTPUT_SCHEMA_IDS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
     static TRANSCRIPT_DIR_STACK: RefCell<Vec<TranscriptDirFrame>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -60,6 +63,7 @@ pub(crate) struct LlmTranscriptAmbient {
     tool_schemas_hash: Option<u64>,
     capability_snapshot_ids: BTreeSet<String>,
     served_message_ids: BTreeSet<String>,
+    output_schema_ids: BTreeSet<String>,
     transcript_dirs: Vec<TranscriptDirFrame>,
 }
 
@@ -81,6 +85,8 @@ pub(crate) fn swap_llm_transcript_ambient(
         served_message_ids: EMITTED_SERVED_MESSAGE_IDS.with(|slot| {
             std::mem::replace(&mut *slot.borrow_mut(), replacement.served_message_ids)
         }),
+        output_schema_ids: EMITTED_OUTPUT_SCHEMA_IDS
+            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.output_schema_ids)),
         transcript_dirs: TRANSCRIPT_DIR_STACK
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.transcript_dirs)),
     }
@@ -92,6 +98,7 @@ fn reset_deduplication() {
     LAST_TOOL_SCHEMAS_HASH.with(|hash| *hash.borrow_mut() = None);
     EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| ids.borrow_mut().clear());
     EMITTED_SERVED_MESSAGE_IDS.with(|ids| ids.borrow_mut().clear());
+    EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| ids.borrow_mut().clear());
 }
 
 pub(super) fn system_prompt_changed(current: u64) -> bool {
@@ -145,6 +152,24 @@ pub(super) fn record_served_message_definition(message_id: &str) {
     if current_transcript_dir().is_some() {
         EMITTED_SERVED_MESSAGE_IDS.with(|ids| {
             ids.borrow_mut().insert(message_id.to_string());
+        });
+    }
+}
+
+/// Whether an output schema needs a retained definition in the active
+/// transcript; unscoped sinks receive it beside every reference.
+pub(super) fn output_schema_needs_definition(schema_id: &str) -> bool {
+    if current_transcript_dir().is_none() {
+        return true;
+    }
+    EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| !ids.borrow().contains(schema_id))
+}
+
+/// Claim an output schema definition only after persistence.
+pub(super) fn record_output_schema_definition(schema_id: &str) {
+    if current_transcript_dir().is_some() {
+        EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| {
+            ids.borrow_mut().insert(schema_id.to_string());
         });
     }
 }

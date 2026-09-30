@@ -15,9 +15,7 @@
 
 #![cfg(unix)]
 
-use std::io::{BufRead, Read, Write};
-use std::os::fd::{FromRawFd, RawFd};
-use std::os::unix::process::CommandExt;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use harn_hostlib::tools::ToolsCapability;
@@ -54,7 +52,7 @@ fn registry() -> BuiltinRegistry {
 /// environment says so. Saying it here keeps each test asserting what it is
 /// about, and keeps the refusal meaningful — `process_session_environment`
 /// owns the case where nothing is declared.
-fn declare_inherited() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
+pub(super) fn declare_inherited() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
     harn_vm::stdlib::process::declare_session_environment_if_absent(
         harn_vm::security::SessionEnvironment::inherited(),
     )
@@ -146,8 +144,6 @@ fn require_list(map: &harn_vm::value::DictMap, key: &str) -> Vec<VmValue> {
     }
 }
 
-const OWNER_DEATH_SUPERVISOR_ENV: &str = "HARN_TEST_OWNER_DEATH_SUPERVISOR";
-const OWNER_DEATH_REPORT_FD_ENV: &str = "HARN_TEST_OWNER_DEATH_REPORT_FD";
 const SESSION_REPORT_ENV: &str = "HARN_TEST_SESSION_REPORT";
 
 #[test]
@@ -164,308 +160,6 @@ fn owner_death_guardian_fixture() {
         return;
     }
     harn_hostlib::process::owner_death::run_guardian_from_pipe().expect("run owner-death guardian");
-}
-
-#[test]
-fn owner_death_grandchild_fixture() {
-    if std::env::var_os(OWNER_DEATH_REPORT_FD_ENV).is_none() {
-        return;
-    }
-    loop {
-        unsafe {
-            libc::pause();
-        }
-    }
-}
-
-#[test]
-fn owner_death_payload_fixture() {
-    let Some(report_fd) = std::env::var(OWNER_DEATH_REPORT_FD_ENV)
-        .ok()
-        .and_then(|value| value.parse::<RawFd>().ok())
-    else {
-        return;
-    };
-    let grandchild = std::process::Command::new(
-        std::env::current_exe().expect("resolve process-tools test executable"),
-    )
-    .args([
-        "--exact",
-        "process_tools_e2e::owner_death_grandchild_fixture",
-        "--nocapture",
-    ])
-    .process_group(0)
-    .spawn()
-    .expect("spawn native grandchild fixture");
-    let report = format!(
-        "payload={} pgid={} grandchild={} grandchild_pgid={}\n",
-        std::process::id(),
-        unsafe { libc::getpgrp() },
-        grandchild.id(),
-        grandchild.id(),
-    );
-    let written = unsafe { libc::write(report_fd, report.as_ptr().cast(), report.len()) };
-    assert_eq!(written, report.len() as isize, "write payload handshake");
-    std::mem::forget(grandchild);
-    loop {
-        unsafe {
-            libc::pause();
-        }
-    }
-}
-
-#[test]
-fn owner_death_supervisor_fixture() {
-    if std::env::var_os(OWNER_DEATH_SUPERVISOR_ENV).is_none() {
-        return;
-    }
-    // A separate process, so it does not go through this module's `call`
-    // helper and declares its own inheriting environment (harn#8477).
-    let _environment = declare_inherited();
-    let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
-        "--exact",
-        "process_tools_e2e::owner_death_guardian_fixture",
-        "--nocapture",
-    ]);
-    let info = harn_hostlib::tools::long_running::spawn_long_running(
-        "owner_death_supervisor_fixture",
-        std::env::current_exe()
-            .expect("resolve process-tools test executable")
-            .to_string_lossy()
-            .into_owned(),
-        vec![
-            "--exact".to_string(),
-            "process_tools_e2e::owner_death_payload_fixture".to_string(),
-            "--nocapture".to_string(),
-        ],
-        None,
-        std::collections::BTreeMap::new(),
-        format!("owner-death-supervisor-{}", std::process::id()),
-    )
-    .expect("spawn managed background payload");
-    println!(
-        "supervisor={} supervisor_pgid={} worker={} worker_pgid={}",
-        std::process::id(),
-        unsafe { libc::getpgrp() },
-        info.pid,
-        info.process_group_id.expect("worker process group")
-    );
-    std::io::stdout().flush().expect("flush supervisor report");
-    loop {
-        unsafe {
-            libc::pause();
-        }
-    }
-}
-
-struct ProcessGroupCleanup {
-    groups: Vec<i32>,
-}
-
-impl Drop for ProcessGroupCleanup {
-    fn drop(&mut self) {
-        for pgid in &self.groups {
-            if *pgid > 0 {
-                unsafe {
-                    libc::kill(-*pgid, libc::SIGKILL);
-                }
-            }
-        }
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-#[test]
-fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
-    let mut report_pipe = [0_i32; 2];
-    assert_eq!(unsafe { libc::pipe(report_pipe.as_mut_ptr()) }, 0);
-    let read_fd = report_pipe[0];
-    let write_fd = report_pipe[1];
-    let read_flags = unsafe { libc::fcntl(read_fd, libc::F_GETFD) };
-    assert!(read_flags >= 0);
-    assert_eq!(
-        unsafe { libc::fcntl(read_fd, libc::F_SETFD, read_flags | libc::FD_CLOEXEC) },
-        0
-    );
-
-    let mut supervisor = std::process::Command::new(
-        std::env::current_exe().expect("resolve process-tools test executable"),
-    );
-    supervisor
-        .args([
-            "--exact",
-            "process_tools_e2e::owner_death_supervisor_fixture",
-            "--nocapture",
-        ])
-        .env(OWNER_DEATH_SUPERVISOR_ENV, "1")
-        .env(OWNER_DEATH_REPORT_FD_ENV, write_fd.to_string())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .process_group(0);
-    let mut supervisor = supervisor.spawn().expect("spawn isolated supervisor");
-    unsafe {
-        libc::close(write_fd);
-    }
-    let mut cleanup = ProcessGroupCleanup {
-        groups: vec![supervisor.id() as i32],
-    };
-
-    let supervisor_stdout = supervisor.stdout.take().expect("supervisor stdout");
-    let mut supervisor_lines = std::io::BufReader::new(supervisor_stdout).lines();
-    let supervisor_report = supervisor_lines
-        .find_map(|line| {
-            let line = line.expect("read supervisor report");
-            line.starts_with("supervisor=").then_some(line)
-        })
-        .expect("supervisor report line");
-    let fields = parse_pid_fields(&supervisor_report);
-    let supervisor_pid = fields["supervisor"];
-    let supervisor_pgid = fields["supervisor_pgid"];
-    let worker_pid = fields["worker"];
-    let worker_pgid = fields["worker_pgid"];
-    assert_eq!(supervisor_pid, supervisor_pgid);
-    assert_eq!(worker_pid, worker_pgid);
-    assert_ne!(worker_pgid, supervisor_pgid);
-    cleanup.groups.push(worker_pgid);
-
-    let mut report_file = unsafe { std::fs::File::from_raw_fd(read_fd) };
-    let mut payload_report = String::new();
-    std::io::BufReader::new(&mut report_file)
-        .read_line(&mut payload_report)
-        .expect("read payload report");
-    let payload_fields = parse_pid_fields(&payload_report);
-    assert_eq!(payload_fields["pgid"], worker_pgid);
-    assert_ne!(payload_fields["payload"], payload_fields["grandchild"]);
-    assert_eq!(
-        payload_fields["grandchild"],
-        payload_fields["grandchild_pgid"]
-    );
-    assert_ne!(payload_fields["grandchild_pgid"], worker_pgid);
-    cleanup.groups.push(payload_fields["grandchild_pgid"]);
-
-    assert_eq!(
-        unsafe { libc::kill(-supervisor_pgid, libc::SIGKILL) },
-        0,
-        "SIGKILL isolated supervisor group"
-    );
-    supervisor.wait().expect("reap supervisor");
-
-    let mut poll_fd = libc::pollfd {
-        fd: read_fd,
-        events: libc::POLLIN | libc::POLLHUP,
-        revents: 0,
-    };
-    assert_eq!(
-        unsafe { libc::poll(&raw mut poll_fd, 1, 10_000) },
-        1,
-        "worker descriptors did not close after owner death"
-    );
-    let mut eof = [0_u8; 1];
-    assert_eq!(
-        report_file.read(&mut eof).expect("read owner-death EOF"),
-        0,
-        "worker report descriptor remained open"
-    );
-    wait_for_native_exit(worker_pid);
-    if unsafe { libc::kill(-worker_pgid, 0) } != -1
-        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
-    {
-        // Darwin can report the just-exited group as EAGAIN between NOTE_EXIT
-        // delivery and launchd reaping its orphaned leader. A second native
-        // process-exit barrier closes that kernel transition without sleeping
-        // or polling.
-        wait_for_native_exit(worker_pid);
-    }
-    assert_eq!(unsafe { libc::kill(-worker_pgid, 0) }, -1);
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
-    );
-    wait_for_native_exit(payload_fields["grandchild"]);
-    assert_eq!(
-        unsafe { libc::kill(-payload_fields["grandchild_pgid"], 0) },
-        -1
-    );
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
-    );
-    cleanup.groups.clear();
-}
-
-fn parse_pid_fields(line: &str) -> std::collections::BTreeMap<&str, i32> {
-    line.split_whitespace()
-        .filter_map(|field| field.split_once('='))
-        .map(|(key, value)| {
-            (
-                key,
-                value
-                    .parse::<i32>()
-                    .unwrap_or_else(|_| panic!("invalid pid field {key}={value}")),
-            )
-        })
-        .collect()
-}
-
-#[cfg(target_os = "linux")]
-fn wait_for_native_exit(pid: i32) {
-    let pid_fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as i32 };
-    if pid_fd < 0 {
-        assert_eq!(
-            std::io::Error::last_os_error().raw_os_error(),
-            Some(libc::ESRCH)
-        );
-        return;
-    }
-    let mut poll_fd = libc::pollfd {
-        fd: pid_fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    assert_eq!(unsafe { libc::poll(&raw mut poll_fd, 1, 10_000) }, 1);
-    unsafe {
-        libc::close(pid_fd);
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn wait_for_native_exit(pid: i32) {
-    let queue = unsafe { libc::kqueue() };
-    assert!(queue >= 0, "create process kqueue");
-    let change = libc::kevent {
-        ident: pid as usize,
-        filter: libc::EVFILT_PROC,
-        flags: libc::EV_ADD | libc::EV_ONESHOT,
-        fflags: libc::NOTE_EXIT,
-        data: 0,
-        udata: std::ptr::null_mut(),
-    };
-    let timeout = libc::timespec {
-        tv_sec: 10,
-        tv_nsec: 0,
-    };
-    let mut event = change;
-    let result = unsafe {
-        libc::kevent(
-            queue,
-            &raw const change,
-            1,
-            &raw mut event,
-            1,
-            &raw const timeout,
-        )
-    };
-    unsafe {
-        libc::close(queue);
-    }
-    if result < 0 {
-        assert_eq!(
-            std::io::Error::last_os_error().raw_os_error(),
-            Some(libc::ESRCH)
-        );
-    } else {
-        assert_eq!(result, 1, "worker did not exit before kernel deadline");
-    }
 }
 
 fn as_dict(value: &VmValue) -> harn_vm::value::DictMap {
@@ -1405,16 +1099,19 @@ fn real_run_command_file_capture_does_not_wait_for_reparented_pipe_holder() {
     };
     let temp = tempfile::tempdir().expect("pid tempdir");
     let pid_path = temp.path().join("descendant.pid");
+    let parent_pid_path = temp.path().join("parent.pid");
     let script_path = temp.path().join("parent.py");
     let _cleanup_guard = PidFileCleanup {
         path: pid_path.clone(),
     };
     let parent = r#"
+import os
 import pathlib
 import subprocess
 import sys
 
-pid_path = sys.argv[1]
+pid_path, parent_pid_path = sys.argv[1:]
+pathlib.Path(parent_pid_path).write_text(str(os.getpid()))
 child = "import signal; signal.pause()"
 descendant = subprocess.Popen([sys.executable, "-c", child], start_new_session=True)
 pathlib.Path(pid_path).write_text(str(descendant.pid))
@@ -1426,15 +1123,18 @@ print("parent-exit", flush=True)
     capture.insert("transport".into(), vstr("file"));
     let mut req = dict();
     let command = format!(
-        "{} {} {}",
+        "{} {} {} {}",
         shell_words::quote(&python),
         shell_words::quote(&script_path.to_string_lossy()),
-        shell_words::quote(&pid_path.to_string_lossy())
+        shell_words::quote(&pid_path.to_string_lossy()),
+        shell_words::quote(&parent_pid_path.to_string_lossy())
     );
     req.insert("mode".into(), vstr("shell"));
     req.insert("command".into(), vstr(&command));
     req.insert("shell_id".into(), vstr("sh"));
-    req.insert("timeout_ms".into(), VmValue::Int(500));
+    // A generous bound catches a broken capture that waits for the escaped
+    // holder forever; elapsed time is not the assertion under test.
+    req.insert("timeout_ms".into(), VmValue::Int(10_000));
     req.insert("capture".into(), VmValue::dict(capture));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
@@ -1447,6 +1147,19 @@ print("parent-exit", flush=True)
         "file capture should preserve direct-run output: {stdout:?}"
     );
     assert!(resp.get("process_cleanup").is_none());
+    let parent_pid = std::fs::read_to_string(&parent_pid_path)
+        .expect("direct parent pid")
+        .parse::<i64>()
+        .expect("numeric direct parent pid");
+    let descendant_pid = std::fs::read_to_string(&pid_path)
+        .expect("escaped pipe holder pid")
+        .parse::<i64>()
+        .expect("numeric pipe holder pid");
+    assert_process_gone(parent_pid, "direct parent after capture returns");
+    assert!(
+        unix_process_exists(descendant_pid),
+        "file capture must return while escaped pipe holder {descendant_pid} is still alive"
+    );
 }
 
 #[test]

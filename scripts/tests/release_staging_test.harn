@@ -34,7 +34,7 @@ pipeline rehearsal_cannot_skip_main_or_disappear_from_the_required_gate(
 
 @test
 pipeline canonical_staging_is_required_in_each_real_consumer(harness: Harness, task: unknown) {
-  assert_eq(len(RELEASE_STAGING_CONSUMERS), 2)
+  assert_eq(len(RELEASE_STAGING_CONSUMERS), 1)
   for consumer in RELEASE_STAGING_CONSUMERS {
     const workflow = read_yaml(harness.fs, "../../.github/workflows/" + consumer.workflow, nil)
     assert_eq(release_staging_errors(workflow, consumer), [])

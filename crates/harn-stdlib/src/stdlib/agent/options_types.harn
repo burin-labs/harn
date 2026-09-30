@@ -357,6 +357,11 @@ pub type AgentModelSpec = {
   // Requested provider retention/training posture. See LlmCallOptions; every
   // turn's telemetry.data_controls receipt reports what actually happened.
   data_controls?: "default" | "strictest_available",
+  // A host's route ceiling. Harn checks the resolved route before transport.
+  inference_boundary?: {
+    reach: "local_only" | "hosted_open_weight" | "any_hosted",
+    allow_training_discounts: bool,
+  },
   store?: bool | dict,
   background?: bool,
   truncation?: string,

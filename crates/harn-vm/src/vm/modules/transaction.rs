@@ -46,6 +46,8 @@ impl Vm {
         let mut staged_states: BTreeMap<PathBuf, (crate::value::ModuleState, VmEnv)> =
             BTreeMap::new();
         for import in deferred {
+            let allow_sibling =
+                harn_modules::sibling_module_access(&import.importer, &import.target);
             let (Some(importer), Some(target)) = (
                 self.module_cache.get(&import.importer).cloned(),
                 self.module_cache.get(&import.target).cloned(),
@@ -68,6 +70,7 @@ impl Vm {
                         &import.target.display().to_string(),
                         &target,
                         import.namespace_members.as_deref(),
+                        allow_sibling,
                     )?;
                     module_state.define(alias, dict, false)?;
                 }
@@ -79,6 +82,7 @@ impl Vm {
                 &target,
                 import.selected_names.as_deref(),
                 ImportNameUse::Binding,
+                allow_sibling,
             )?;
             for name in export_names {
                 if module_state.get(&name).is_some() {
@@ -91,6 +95,7 @@ impl Vm {
                 } else if target
                     .public_exports
                     .get(&name)
+                    .or_else(|| target.sibling_exports.get(&name))
                     .is_some_and(|kind| !kind.has_runtime_value())
                 {
                     continue;

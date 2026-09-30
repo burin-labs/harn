@@ -167,6 +167,65 @@ fn anthropic_fable_51_forbids_forced_tool_choice() {
     assert!(fable5.allowed_tool_choice_modes.is_empty());
 }
 
+/// Opus 5.5 narrows the Opus 5 surface: thinking cannot be disabled and
+/// forced tool choice is a 400 (live API, 2026-09-22). Opus 5 is the control
+/// that keeps both, so an Opus 5.5 row that matched too broadly would fail
+/// here instead of silently tightening the previous generation.
+#[test]
+fn anthropic_opus_55_is_always_on_and_forbids_forced_tool_choice() {
+    reset();
+    for model in [
+        "claude-opus-5-5",
+        "anthropic/claude-opus-5-5",
+        "anthropic/claude-opus-5.5",
+    ] {
+        let caps = lookup("anthropic", model);
+        assert!(!caps.reasoning_disable_supported, "{model}");
+        assert_eq!(
+            caps.allowed_tool_choice_modes,
+            vec!["auto", "none"],
+            "{model}"
+        );
+        assert_eq!(caps.prompt_cache_min_prefix_tokens, Some(512), "{model}");
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            vec!["low", "medium", "high", "xhigh", "max"],
+            "{model}"
+        );
+        assert!(!caps.temperature_supported, "{model}");
+        assert!(!caps.supports_assistant_prefill, "{model}");
+    }
+    assert_eq!(
+        lookup("anthropic", "claude-opus-5-5").system_message_placement,
+        lookup("anthropic", "claude-opus-5").system_message_placement,
+        "Opus 5.5 keeps native mid-conversation system messages"
+    );
+
+    for model in ["claude-opus-5", "anthropic/claude-opus-5"] {
+        let caps = lookup("anthropic", model);
+        assert!(caps.reasoning_disable_supported, "{model}");
+        assert!(caps.allowed_tool_choice_modes.is_empty(), "{model}");
+        assert_eq!(caps.prompt_cache_min_prefix_tokens, Some(512), "{model}");
+    }
+
+    // OpenRouter passes tool_choice through verbatim, so the restriction
+    // follows the model onto that route; Opus 5 there stays unrestricted.
+    assert_eq!(
+        lookup("openrouter", "anthropic/claude-opus-5.5").allowed_tool_choice_modes,
+        vec!["auto", "none"]
+    );
+    assert_eq!(
+        lookup("openrouter", "anthropic/claude-fable-5.1").allowed_tool_choice_modes,
+        vec!["auto", "none"]
+    );
+    assert!(lookup("openrouter", "anthropic/claude-opus-5")
+        .allowed_tool_choice_modes
+        .is_empty());
+    assert!(lookup("openrouter", "anthropic/claude-fable-5")
+        .allowed_tool_choice_modes
+        .is_empty());
+}
+
 #[test]
 fn anthropic_47_and_newer_sampling_is_denied_by_the_catalog() {
     reset();
@@ -179,6 +238,8 @@ fn anthropic_47_and_newer_sampling_is_denied_by_the_catalog() {
         "anthropic/claude-opus-4-7",
         "claude-opus-5",
         "anthropic/claude-opus-5",
+        "claude-opus-5-5",
+        "anthropic/claude-opus-5.5",
         "claude-sonnet-5",
         "anthropic/claude-sonnet-5",
     ] {
@@ -266,6 +327,7 @@ fn openrouter_claude_rows_track_direct_anthropic_runtime_quirks() {
         "anthropic/claude-sonnet-5",
         "anthropic/claude-opus-4-6",
         "anthropic/claude-opus-4-7",
+        "anthropic/claude-opus-5.5",
     ] {
         assert_openrouter_anthropic_runtime_parity(model);
     }

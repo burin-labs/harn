@@ -285,6 +285,8 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             recommended_format,
             catalog_parity,
             override_reason,
+            applied_format,
+            steered,
         } => {
             let mut payload = serde_json::json!({
                 "provider": provider,
@@ -295,6 +297,12 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             });
             if let Some(reason) = override_reason {
                 payload["overrideReason"] = serde_json::Value::String(reason.clone());
+            }
+            if let Some(applied) = applied_format {
+                payload["appliedFormat"] = serde_json::Value::String(applied.clone());
+            }
+            if let Some(steered) = steered {
+                payload["steered"] = serde_json::Value::Bool(*steered);
             }
             sink.emit_agent_event_ext("tool_format_override", session_id, payload);
         }

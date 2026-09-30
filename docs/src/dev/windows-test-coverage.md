@@ -28,7 +28,8 @@ The rest of the workspace either has no module-level `#![cfg(unix)]`
 (individual `#[cfg(unix)]` items remain — typically for skill paths,
 symlink helpers, or tokio signal streams that already have a
 `#[cfg(not(unix))]` Windows fallback nearby) or is a Unix-only
-implementation file (`crates/harn-vm/src/stdlib/sandbox.rs`,
+implementation file (`crates/harn-vm/src/stdlib/sandbox/linux.rs`,
+`crates/harn-vm/src/stdlib/sandbox/macos.rs`,
 `crates/harn-cli/src/package/registry.rs::symlink_path_dependency`, etc.)
 that genuinely cannot be implemented on Windows the same way.
 

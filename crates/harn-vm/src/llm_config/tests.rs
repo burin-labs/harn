@@ -45,11 +45,22 @@ fn auto_select_prefers_local_provider_without_cloud_credentials() {
     // regardless of ambient cloud API keys: no preferred/credentialed cloud
     // provider is present, so the local fallback wins deterministically.
     let config = parse_config_toml(
-            "[providers.ollama]\nbase_url = \"http://localhost:11434\"\nchat_endpoint = \"/v1/chat/completions\"\n",
+            "[providers.ollama]\nbase_url = \"http://localhost:11434\"\nchat_endpoint = \"/v1/chat/completions\"\nchat_api_adapter = \"ollama_openai_compat\"\n",
         )
         .expect("config parses");
     assert!(provider_is_local(config.providers.get("ollama").unwrap()));
+    assert_eq!(
+        config.providers["ollama"].chat_api_adapter,
+        Some(ChatApiAdapter::OllamaOpenAiCompat)
+    );
     assert_eq!(auto_select_provider(&config), "ollama");
+}
+
+#[test]
+fn chat_api_adapter_rejects_unknown_variant() {
+    let error = parse_config_toml("[providers.ollama]\nchat_api_adapter = \"ollama_v2\"\n")
+        .expect_err("chat adapter variants are closed");
+    assert!(error.to_string().contains("ollama_v2"));
 }
 
 #[test]
@@ -537,6 +548,21 @@ fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
 }
 
 #[test]
+fn deepinfra_v41_flash_resolves_to_the_served_route() {
+    let id = "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash";
+    let row = model_catalog_entry(id).expect("the observed DeepInfra route is catalogued");
+    assert_eq!(row.provider, "deepinfra");
+    assert_eq!(
+        row.wire_model.as_deref(),
+        Some("deepseek-ai/DeepSeek-V4.1-Flash")
+    );
+    let selected = resolve_model_request(id, None).expect("the route resolves");
+    assert_eq!(selected.resolved_provider, "deepinfra");
+    assert_eq!(selected.resolved_model, id);
+    assert!(model_catalog_entry("deepinfra/deepseek-ai/DeepSeek-V4.2-Flash").is_none());
+}
+
+#[test]
 fn test_external_config_overlays_default_catalog() {
     let mut config = default_config();
     let mut overlay = ProvidersConfig {
@@ -637,8 +663,12 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
                 output_per_mtok: 2.5,
                 cache_read_per_mtok: Some(0.25),
                 cache_write_per_mtok: None,
+                cache_write_1h_per_mtok: None,
                 input_token_bands: Vec::new(),
                 promotions: Vec::new(),
+                schedules: Vec::new(),
+                hosted_tool_fees: Default::default(),
+                modality_rates: None,
             }),
             deprecated: false,
             deprecation_note: None,

@@ -426,7 +426,28 @@ pub const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("state", TY_STRING),
 ]);
 
-const LLM_ACCOUNTING_STATUS: Ty = Ty::Union(&[Ty::LitString("reported"), Ty::LitString("unknown")]);
+const LLM_ACCOUNTING_STATUS: Ty = Ty::Union(&[
+    Ty::LitString("reported"),
+    Ty::LitString("partial"),
+    Ty::LitString("unknown"),
+]);
+
+/// Catalog settlement evidence carried by one request's usage envelope.
+pub const LLM_PRICING_RECEIPT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("rate_card", TY_STRING),
+    ShapeFieldDescriptor::new("settled_at_ms", TY_INT),
+    ShapeFieldDescriptor::new("input_band_minimum", TY_INT_OR_NIL),
+    ShapeFieldDescriptor::new("serving_tier", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("cache_ttl_unpriced", TY_BOOL),
+    ShapeFieldDescriptor::new("platform_fee_estimate_usd", TY_FLOAT),
+    ShapeFieldDescriptor::new("platform_fee_basis", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("hosted_tool_unpriced", Ty::Apply("list", &[TY_STRING])),
+    ShapeFieldDescriptor::new("modality_unpriced", Ty::Apply("list", &[TY_STRING])),
+    ShapeFieldDescriptor::new(
+        "monthly_allowance_unapplied",
+        Ty::Apply("list", &[TY_STRING]),
+    ),
+]);
 
 /// Physical provider requests made for one logical `llm_call`.
 pub const LLM_PROVIDER_ATTEMPTS: Ty = Ty::Shape(&[
@@ -464,6 +485,12 @@ pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("served_fast", TY_BOOL),
     ShapeFieldDescriptor::new("accounting_status", LLM_ACCOUNTING_STATUS),
     ShapeFieldDescriptor::optional("provider_telemetry", TY_DICT),
+    ShapeFieldDescriptor::optional("pricing", LLM_PRICING_RECEIPT),
+    ShapeFieldDescriptor::optional("hosted_tool_calls", TY_DICT),
+    ShapeFieldDescriptor::optional("audio_input_tokens", TY_INT),
+    ShapeFieldDescriptor::optional("audio_output_tokens", TY_INT),
+    ShapeFieldDescriptor::optional("cached_audio_input_tokens", TY_INT),
+    ShapeFieldDescriptor::optional("invalid_modality_counts", TY_BOOL),
 ]);
 
 /// Harn-facing response dict assembled by `vm_build_llm_result` for

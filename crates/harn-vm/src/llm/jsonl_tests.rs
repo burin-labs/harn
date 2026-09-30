@@ -283,7 +283,55 @@ fn header_reads_version_and_strict_scopes() {
     assert_eq!(
         parse_fixture_header(&serde_json::json!({"schemaVersion": 1, "strictScopes": true}))
             .expect("header"),
-        Some((1, true))
+        Some(FixtureHeader {
+            schema_version: 1,
+            strict_scopes: true,
+            live_after_calls: None,
+        })
+    );
+}
+
+#[test]
+fn header_reads_a_live_prefix_and_refuses_zero_or_an_unservable_one() {
+    assert_eq!(
+        parse_fixture_header(&serde_json::json!({
+            "schemaVersion": 1,
+            "strictScopes": false,
+            "liveAfterCalls": 2,
+        }))
+        .expect("header"),
+        Some(FixtureHeader {
+            schema_version: 1,
+            strict_scopes: false,
+            live_after_calls: Some(2),
+        })
+    );
+    let zero = parse_fixture_header(&serde_json::json!({
+        "schemaVersion": 1,
+        "strictScopes": false,
+        "liveAfterCalls": 0,
+    }))
+    .expect_err("a zero-call prefix must be refused");
+    assert!(zero.contains("liveAfterCalls"), "{zero}");
+
+    let short = parse_llm_mocks_jsonl(
+        "{\"schemaVersion\":1,\"strictScopes\":false,\"liveAfterCalls\":2}\n\
+         {\"id\":\"a\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"A\"}\n",
+    )
+    .expect_err("a prefix longer than the fixture must be refused");
+    assert!(short.contains("exceeds the 1 fixture entries"), "{short}");
+
+    let longer = parse_llm_mocks_jsonl(
+        "{\"schemaVersion\":1,\"strictScopes\":false,\"liveAfterCalls\":1}\n\
+         {\"id\":\"a\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"A\"}\n\
+         {\"id\":\"b\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"B\"}\n",
+    )
+    .expect("a full recording may carry a shorter prefix");
+    assert_eq!(longer.live_after_calls, Some(1));
+    assert_eq!(
+        longer.mocks.len(),
+        2,
+        "the document stays faithful; the queue truncates"
     );
 }
 

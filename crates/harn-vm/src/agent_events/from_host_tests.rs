@@ -1,5 +1,6 @@
 //! Host-event decoding, defaults, and field preservation.
 
+mod payload_key_controls;
 mod repaired_emitters;
 
 use super::*;
@@ -95,11 +96,11 @@ fn capability_gap_preserves_unresolved_route_diagnosis() {
 #[test]
 fn from_host_tool_call_defaults_status_and_audit() {
     // No `status` in the payload -> Pending; audit comes from the (absent)
-    // ambient mutation session -> None, never from the payload.
+    // ambient mutation session -> None.
     let event = accepted_host_event(
         "s1",
         "tool_call",
-        &json!({ "tool_call_id": "t1", "tool_name": "read_file", "audit": {"bogus": true} }),
+        &json!({ "tool_call_id": "t1", "tool_name": "read_file" }),
     );
     match event {
         AgentEvent::ToolCall {
@@ -235,6 +236,36 @@ fn from_host_tool_call_update_rejects_unknown_executor() {
 }
 
 #[test]
+fn tool_format_override_preserves_the_applied_route_and_steering_decision() {
+    let captured = crate::boundary::tests::CapturedEvents::install();
+    let event = accepted_host_event(
+        "route-steer",
+        "tool_format_override",
+        &json!({
+            "provider": "openrouter",
+            "model": "qwen/qwen3-coder",
+            "requested_format": "native",
+            "recommended_format": "text",
+            "catalog_parity": "native_unreliable",
+            "applied_format": "text",
+            "steered": true,
+        }),
+    );
+    match event {
+        AgentEvent::ToolFormatOverride {
+            applied_format,
+            steered,
+            ..
+        } => {
+            assert_eq!(applied_format.as_deref(), Some("text"));
+            assert_eq!(steered, Some(true));
+        }
+        other => panic!("expected ToolFormatOverride, got {other:?}"),
+    }
+    assert!(captured.boundary_failures().is_empty());
+}
+
+#[test]
 fn from_host_progress_reported_defaults_replace_true() {
     let event = accepted_host_event("s1", "progress_reported", &json!({}));
     match event {
@@ -361,8 +392,6 @@ fn from_host_no_progress_nudge_preserves_injected_text_and_streak() {
             "content": "No progress last turn. Emit exactly one well-formed <tool_call> now.",
             "streak": 2,
             "turns_since_progress": 2,
-            "has_tools": true,
-            "made_tool_calls": false,
         }),
     );
     match event {
@@ -392,8 +421,6 @@ fn from_host_no_progress_nudge_without_text_uses_explanatory_fallback() {
             "iteration": 4,
             "streak": 2,
             "turns_since_progress": 2,
-            "has_tools": true,
-            "made_tool_calls": false,
         }),
     );
     match event {
@@ -428,10 +455,6 @@ fn from_host_judge_decision_preserves_source() {
             "reason": "repeated_verification_failures",
             "escalation_recommended": true,
             "escalation_target": "frontier",
-            // Retired verdict fields a host built against an older contract
-            // may still send. They must decode away, not fail the event.
-            "specific_gaps": ["rerun the verifier"],
-            "accepted_evidence": ["targeted verifier passed"],
         }),
     );
     match event {
@@ -1362,10 +1385,9 @@ fn a_mechanism_that_injected_reports_that_it_did() {
 
 // --- Dropped payload keys (harn#8217) -------------------------------------
 //
-// An unknown key in a host payload used to vanish: the emit succeeded, the run
-// succeeded, and the field was missing only for whoever read the timeline
-// afterwards. These pin that the boundary now says so, and — the part that can
-// pass vacuously — that it stays quiet when nothing was actually lost.
+// An unknown key in a host payload used to vanish. These pin that the
+// boundary rejects it, reports even when the emitter catches the error, and
+// stays quiet when nothing was actually lost.
 
 fn dropped_key_details(
     session_id: &str,
@@ -1373,7 +1395,7 @@ fn dropped_key_details(
     payload: &serde_json::Value,
 ) -> Vec<String> {
     let captured = crate::boundary::tests::CapturedEvents::install();
-    let _ = accepted_host_event(session_id, event_type, payload);
+    let _ = AgentEvent::from_host_payload(session_id, event_type, payload);
     captured
         .boundary_failures()
         .iter()
@@ -1384,7 +1406,7 @@ fn dropped_key_details(
                 detail,
                 ..
             } if *boundary == crate::boundary::BoundaryId::HostEventIngest
-                && *kind == crate::boundary::BoundaryFailureKind::Dropped =>
+                && *kind == crate::boundary::BoundaryFailureKind::Unrecognized =>
             {
                 Some(detail.clone())
             }
@@ -1404,31 +1426,6 @@ fn a_payload_key_no_field_reads_is_reported_as_dropped() {
     assert!(
         details[0].contains("confidence_floor") && details[0].contains("judge_started"),
         "the report must name the key and the event: {details:?}"
-    );
-}
-
-#[test]
-fn a_payload_every_field_reads_reports_nothing() {
-    // The control for the test above. Without it, a reporter that fired on
-    // every key would look correct.
-    let details = dropped_key_details(
-        "drop-2",
-        "judge_started",
-        &json!({"iteration": 2, "trigger": "turn_end"}),
-    );
-    assert!(details.is_empty(), "clean payload reported: {details:?}");
-}
-
-#[test]
-fn an_arm_that_keeps_the_whole_payload_drops_nothing() {
-    let details = dropped_key_details(
-        "drop-3",
-        "typed_checkpoint",
-        &json!({"anything": 1, "at": "all", "nested": {"k": "v"}}),
-    );
-    assert!(
-        details.is_empty(),
-        "`typed_checkpoint` stores the payload whole: {details:?}"
     );
 }
 
@@ -1488,7 +1485,8 @@ fn a_dropped_key_is_reported_once_per_session_not_once_per_emit() {
     let payload = json!({"iteration": 2, "confidence_floor": 0.4});
     let captured = crate::boundary::tests::CapturedEvents::install();
     for _ in 0..3 {
-        let _ = accepted_host_event("drop-7", "judge_started", &payload);
+        AgentEvent::from_host_payload("drop-7", "judge_started", &payload)
+            .expect_err("dropped key must reject every emit");
     }
     let reported = captured.boundary_failures().len();
     assert_eq!(

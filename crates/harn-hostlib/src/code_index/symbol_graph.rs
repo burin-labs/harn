@@ -13,6 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
 use tree_sitter::{Node as TsNode, Tree};
 
 use crate::ast::{api as ast_api, Language, Symbol, SymbolKind};
@@ -26,7 +27,7 @@ use super::file_table::FileId;
 pub type NodeId = u32;
 
 /// Coarse typed node kinds defined in issue #2434.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NodeKind {
     /// Functions, methods, free-standing closures with names.
     Function,
@@ -117,7 +118,7 @@ impl NodeKind {
 }
 
 /// Coarse typed edge kinds defined in issue #2434.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EdgeKind {
     /// CallSite → Function. A call expression resolving to a function.
     Calls,
@@ -175,7 +176,7 @@ fn forward_match(label: &str) -> Option<EdgeKind> {
 
 /// One typed node in the symbol graph. `line` is 1-based to match the
 /// rest of the host-builtin wire format; `path` is workspace-relative.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     /// Stable graph-local id assigned at construction.
     pub id: NodeId,
@@ -201,7 +202,7 @@ pub struct Node {
 }
 
 /// One directed edge.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Edge {
     /// Source node id.
     pub from: NodeId,
@@ -235,6 +236,15 @@ pub struct SymbolGraph {
     next_id: NodeId,
 }
 
+/// Only the owning graph facts cross the snapshot boundary. Name, file, and
+/// reverse-edge indexes are derived once on restore rather than stored twice.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct GraphSnapshot {
+    pub next_id: NodeId,
+    pub nodes: Vec<Node>,
+    pub edges: Vec<Edge>,
+}
+
 impl SymbolGraph {
     /// Construct an empty graph.
     pub fn new() -> Self {
@@ -242,6 +252,58 @@ impl SymbolGraph {
             next_id: 1,
             ..Self::default()
         }
+    }
+
+    pub(super) fn snapshot(&self) -> GraphSnapshot {
+        let ids = self.all_node_ids();
+        let mut nodes = Vec::with_capacity(ids.len());
+        let mut edges = Vec::with_capacity(self.edge_count());
+        for id in ids {
+            let node = &self.nodes[&id];
+            nodes.push(node.clone());
+            // Harn references come from the embedding host's resolver. A
+            // different process may have no resolver or a different answer.
+            edges.extend(self.outgoing(id).iter().copied().filter(|edge| {
+                !(node.kind == NodeKind::Module
+                    && node.language == "harn"
+                    && edge.kind == EdgeKind::Refs)
+            }));
+        }
+        GraphSnapshot {
+            next_id: self.next_id,
+            nodes,
+            edges,
+        }
+    }
+
+    pub(super) fn from_snapshot(snapshot: GraphSnapshot) -> Result<Self, &'static str> {
+        if snapshot.next_id == 0 {
+            return Err("symbol graph next id is zero");
+        }
+        let mut graph = Self {
+            next_id: snapshot.next_id,
+            ..Self::default()
+        };
+        for node in snapshot.nodes {
+            if node.id == 0 || node.id >= graph.next_id || graph.nodes.contains_key(&node.id) {
+                return Err("symbol graph has an invalid or duplicate node id");
+            }
+            graph.by_file.entry(node.file_id).or_default().push(node.id);
+            graph
+                .by_name
+                .entry(node.name.clone())
+                .or_default()
+                .push(node.id);
+            graph.nodes.insert(node.id, node);
+        }
+        for edge in snapshot.edges {
+            if !graph.nodes.contains_key(&edge.from) || !graph.nodes.contains_key(&edge.to) {
+                return Err("symbol graph edge names an absent node");
+            }
+            graph.out_edges.entry(edge.from).or_default().push(edge);
+            graph.in_edges.entry(edge.to).or_default().push(edge);
+        }
+        Ok(graph)
     }
 
     /// Total node count.

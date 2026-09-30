@@ -25,6 +25,7 @@
 //! (Fly Machines, Modal, E2B, …) implement the same [`SandboxBackend`]
 //! contract from wherever they run.
 
+pub mod conformance;
 mod local;
 
 pub use local::{LocalSandbox, LocalSandboxConfig};

@@ -81,3 +81,56 @@ pipeline main(harness: Harness) {
     assert!(raw_requests[0].get("stage").is_none());
     assert!(raw_responses[0].get("stage").is_none());
 }
+
+/// One agent turn in `child`, and the `actor_chain` its provider request
+/// carried.
+fn child_request_actor_chain(open_child: &str) -> Value {
+    let dir = tempfile::tempdir().expect("child transcript directory");
+    {
+        let _transcript = EnvironmentGuard::set(
+            "HARN_LLM_TRANSCRIPT_DIR",
+            dir.path().to_str().expect("UTF-8 temp path"),
+        );
+        run(&format!(
+            r#"
+import {{ agent_loop }} from "std/agent/loop"
+
+pipeline main(harness: Harness) {{
+  const root = harness.agent.open(nil)
+  const child = {open_child}
+  const result = agent_loop(
+    harness,
+    "Return a short answer.",
+    nil,
+    {{provider: "mock", max_iterations: 1, session_id: child}},
+  )
+  require result.llm.iterations == 1, "the child must make one loop turn"
+}}
+"#
+        ))
+        .expect("child agent loop");
+    }
+    let requests = provider_events(dir.path(), "provider_call_request");
+    assert_eq!(
+        requests.len(),
+        1,
+        "the child must make one provider request"
+    );
+    requests[0]["actor_chain"].clone()
+}
+
+#[test]
+fn a_child_opened_with_an_actor_stamps_its_hop_on_every_provider_request() {
+    // harn#8927: a delegated child opened with plain `open(nil)` inherits the
+    // parent's chain, so its provider requests are indistinguishable from the
+    // primary agent's.
+    assert_eq!(
+        child_request_actor_chain("harness.agent.open(nil)"),
+        Value::Null,
+        "a plain open keeps its inherited, here absent, chain"
+    );
+    assert_eq!(
+        child_request_actor_chain(r#"harness.agent.open(nil, {parent: root, actor: "planner"})"#),
+        serde_json::json!({"sub": "anonymous", "act": {"sub": "planner"}}),
+    );
+}

@@ -71,12 +71,12 @@ if [[ "$main_version" == "$actual" ]]; then
 fi
 pr_url="$(gh pr list --state open --head "$branch" --json url --jq '.[0].url // empty')"
 if [[ -z "$pr_url" ]]; then
-  HARN_DEVELOPMENT_BUMP_TOKEN="$GH_TOKEN" \
-    HARN_DEVELOPMENT_BUMP_BRANCH="$branch" \
-    HARN_DEVELOPMENT_BUMP_BASE_OID="$(git rev-parse HEAD)" \
-    HARN_DEVELOPMENT_BUMP_VERSION="$actual" \
+  HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
+    HARN_BRANCH_COMMIT_BRANCH="$branch" \
+    HARN_BRANCH_COMMIT_BASE_OID="$(git rev-parse HEAD)" \
+    HARN_BRANCH_COMMIT_HEADLINE="Start $actual development" \
     "$harn_bin" run --no-sandbox \
-      "$script_root/scripts/bump-driver/publish_development_bump.harn"
+      "$script_root/scripts/bump-driver/publish_branch_commit.harn"
   body_file="$(mktemp)"
   trap 'rm -f "$body_file"' EXIT
   printf '%s\n' \

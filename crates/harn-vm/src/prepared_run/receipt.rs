@@ -54,6 +54,12 @@ pub struct PolicyDecisionEvidence {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_rule_id: Option<String>,
     pub risk_labels: Vec<String>,
+    /// The gate that refused this requirement, absent for allow and ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denial_gate: Option<crate::agent_events::DenialGate>,
+    /// Network destinations refused by policy, as declared URLs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied_network_targets: Vec<String>,
     /// The canonical `policyDecision` receipt produced by the permission
     /// evaluator. Hosts project this value; they do not reconstruct it.
     pub policy_decision: serde_json::Value,

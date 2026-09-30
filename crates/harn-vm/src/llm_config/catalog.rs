@@ -6,6 +6,18 @@ use std::collections::BTreeMap;
 use super::*;
 
 use harn_glob::match_name as glob_match;
+use time::OffsetDateTime;
+
+/// The instant a caller with no request of its own settles at.
+///
+/// This reads the active (mock-aware) VM clock rather than the system clock,
+/// so a test that pins time gets the card it pinned. `effective_today` builds
+/// a fresh real clock and cannot.
+pub fn pricing_clock_now() -> OffsetDateTime {
+    let value_ms = crate::stdlib::clock::now_wall_ms_unrecorded();
+    OffsetDateTime::from_unix_timestamp_nanos(i128::from(value_ms) * 1_000_000)
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+}
 
 const LOGICAL_MODEL_DEFAULT_PREFIX: &str = "logical:";
 const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
@@ -605,6 +617,11 @@ pub fn model_catalog_id_for_route(provider: &str, model_id: &str) -> Option<Stri
         .map(|(id, _)| id.clone())
 }
 
+/// Catalog metadata for a concrete provider route, including wire-model ids.
+pub fn model_catalog_entry_for_route(provider: &str, model_id: &str) -> Option<ModelDef> {
+    model_catalog_entry(&model_catalog_id_for_route(provider, model_id)?)
+}
+
 pub fn model_rate_limits(model_id: &str) -> Option<RateLimitsDef> {
     model_catalog_entry(model_id).and_then(|model| model.rate_limits)
 }
@@ -880,90 +897,170 @@ pub fn qc_default_model(provider: &str) -> Option<String> {
         })
 }
 
-pub fn default_model_for_provider(provider: &str) -> String {
+pub fn default_model_for_provider(provider: &str) -> Result<String, ModelResolutionError> {
     if provider_uses_acp(provider) {
-        return "default".to_string();
+        return Ok("default".to_string());
     }
-    match provider {
+    if provider == "mock" {
+        return Ok("mock".to_string());
+    }
+    let config = effective_config();
+    if !config.providers.contains_key(provider) {
+        return Err(ModelResolutionError::UnknownProvider {
+            provider: provider.to_string(),
+            catalog_version: MODEL_CATALOG_VERSION.to_string(),
+            suggestions: Vec::new(),
+        });
+    }
+    local_model_env_override(provider)
+        .or_else(|| config.provider_defaults.get(provider)?.runtime.clone())
+        .or_else(|| {
+            (config.default_provider.as_deref() == Some(provider))
+                .then(|| config.fallback_model.clone())
+                .flatten()
+        })
+        .ok_or_else(|| ModelResolutionError::MissingProviderDefault {
+            provider: provider.to_string(),
+            catalog_version: MODEL_CATALOG_VERSION.to_string(),
+            routes: config
+                .models
+                .iter()
+                .filter(|(_, model)| {
+                    model.provider == provider
+                        && !model.deprecated
+                        && model.supports_operation(ModelOperation::TextGeneration)
+                })
+                .take(4)
+                .map(|(id, _)| format!("{provider}:{id}"))
+                .collect(),
+        })
+}
+
+/// The portal's configured choice uses the same catalog contract as the VM.
+pub fn portal_default_model_for_provider(provider: &str) -> Option<String> {
+    local_model_env_override(provider).or_else(|| {
+        effective_config()
+            .provider_defaults
+            .get(provider)?
+            .portal
+            .clone()
+    })
+}
+
+fn local_model_env_override(provider: &str) -> Option<String> {
+    (match provider {
         "local" => crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL")
-            .or_else(|| crate::stdlib::process::session_env_value("HARN_LLM_MODEL"))
-            .unwrap_or_else(|| "gemma-4-26b-a4b-it".to_string()),
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| crate::stdlib::process::session_env_value("HARN_LLM_MODEL")),
         "mlx" => crate::stdlib::process::session_env_var("MLX_MODEL_ID")
             .ok()
-            .flatten()
-            .unwrap_or_else(|| "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()),
-        "openai" => "gpt-4o-mini".to_string(),
-        "ollama" => "llama3.2".to_string(),
-        "openrouter" => "anthropic/claude-sonnet-4.6".to_string(),
-        _ => "claude-sonnet-4-6".to_string(),
-    }
+            .flatten(),
+        _ => None,
+    })
+    .filter(|value| !value.trim().is_empty())
 }
 
 pub fn qc_defaults() -> BTreeMap<String, String> {
     effective_config().qc_defaults.clone()
 }
 
-pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
+/// Resolve a model's rate card as it stood at `at`, naming the card applied.
+///
+/// Settlement passes the instant the request left the client, so a promotion
+/// that expired mid-session and a recurring time-of-day window both price the
+/// call the way the provider billed it. Presentation is the one caller that
+/// legitimately wants "now": it uses `ModelPricing::effective_today`.
+pub fn model_pricing_per_mtok(model_id: &str, at: OffsetDateTime) -> Option<ResolvedPricing> {
     effective_config()
         .models
         .get(model_id)
         .and_then(|model| model.pricing.as_ref())
-        .map(ModelPricing::effective_today)
+        .map(|pricing| pricing.resolve_at(at))
 }
 
-pub fn model_pricing_per_mtok_for_route(provider: &str, model_id: &str) -> Option<ModelPricing> {
+pub fn model_pricing_per_mtok_for_route(
+    provider: &str,
+    model_id: &str,
+    at: OffsetDateTime,
+) -> Option<ResolvedPricing> {
     let catalog_id = model_catalog_id_for_route(provider, model_id)?;
-    model_pricing_per_mtok(&catalog_id)
+    model_pricing_per_mtok(&catalog_id, at)
 }
 
 /// Per-MTok whole-request pricing selected for the provider-reported input
 /// usage. Models without input-token bands retain their base rates.
-pub fn model_pricing_for_input_tokens(model_id: &str, input_tokens: i64) -> Option<ModelPricing> {
-    model_pricing_per_mtok(model_id).map(|pricing| pricing.for_input_tokens(input_tokens))
+pub fn model_pricing_for_input_tokens(
+    model_id: &str,
+    input_tokens: i64,
+    at: OffsetDateTime,
+) -> Option<ModelPricing> {
+    model_pricing_per_mtok(model_id, at)
+        .map(|resolved| resolved.pricing.for_input_tokens(input_tokens))
 }
 
 pub fn model_pricing_for_route_input_tokens(
     provider: &str,
     model_id: &str,
     input_tokens: i64,
+    at: OffsetDateTime,
 ) -> Option<ModelPricing> {
-    model_pricing_per_mtok_for_route(provider, model_id)
-        .map(|pricing| pricing.for_input_tokens(input_tokens))
+    model_pricing_per_mtok_for_route(provider, model_id, at)
+        .map(|resolved| resolved.pricing.for_input_tokens(input_tokens))
 }
 
 /// Per-MTok pricing for a named serving tier. Explicit rates win; otherwise
 /// the tier's multiplier or discount is applied to the effective standard
 /// rate so dated promotions cannot drift from alternate serving modes.
-pub fn model_serving_tier_pricing_per_mtok(model_id: &str, tier_id: &str) -> Option<ModelPricing> {
+pub fn model_serving_tier_pricing_per_mtok(
+    model_id: &str,
+    tier_id: &str,
+    at: OffsetDateTime,
+) -> Option<ResolvedPricing> {
     let config = effective_config();
     let model = config.models.get(model_id)?;
     let tier = model.serving_tiers.iter().find(|tier| tier.id == tier_id)?;
     if let Some(pricing) = &tier.pricing {
-        return Some(pricing.effective_today());
+        let mut resolved = pricing.resolve_at(at);
+        if let Some(standard) = &model.pricing {
+            // Explicit tier token rates do not erase independently billed
+            // hosted tools. A tier may override an individual tool's fee.
+            for (tool, fee) in &standard.hosted_tool_fees {
+                resolved
+                    .pricing
+                    .hosted_tool_fees
+                    .entry(tool.clone())
+                    .or_insert_with(|| fee.clone());
+            }
+        }
+        return Some(resolved);
     }
-    let standard = model.pricing.as_ref()?.effective_today();
+    let standard = model.pricing.as_ref()?.resolve_at(at);
     let multiplier = tier.cost_multiplier.or_else(|| {
         tier.discount_percent
             .map(|percent| 1.0 - f64::from(percent) / 100.0)
     })?;
-    Some(standard.scaled(multiplier))
+    Some(ResolvedPricing {
+        pricing: standard.pricing.scaled(multiplier),
+        rate_card: standard.rate_card,
+    })
 }
 
 pub fn model_serving_tier_pricing_per_mtok_for_route(
     provider: &str,
     model_id: &str,
     tier_id: &str,
-) -> Option<ModelPricing> {
+    at: OffsetDateTime,
+) -> Option<ResolvedPricing> {
     let catalog_id = model_catalog_id_for_route(provider, model_id)?;
-    model_serving_tier_pricing_per_mtok(&catalog_id, tier_id)
+    model_serving_tier_pricing_per_mtok(&catalog_id, tier_id, at)
 }
 
 pub fn pricing_per_1k_for(provider: &str, model_id: &str) -> Option<(f64, f64)> {
-    model_pricing_per_mtok_for_route(provider, model_id)
-        .map(|pricing| {
+    model_pricing_per_mtok_for_route(provider, model_id, pricing_clock_now())
+        .map(|resolved| {
             (
-                pricing.input_per_mtok / 1000.0,
-                pricing.output_per_mtok / 1000.0,
+                resolved.pricing.input_per_mtok / 1000.0,
+                resolved.pricing.output_per_mtok / 1000.0,
             )
         })
         .or_else(|| {
@@ -1296,4 +1393,92 @@ pub fn all_model_candidates() -> Vec<(String, String)> {
             .then_with(|| model_a.cmp(model_b))
     });
     candidates
+}
+
+/// Validate every built-in route chosen without an explicit model selector.
+/// Legacy aliases may name deprecated models, but defaults cannot.
+pub fn provider_route_default_issues(config: &ProvidersConfig) -> Vec<String> {
+    let mut issues = Vec::new();
+    let check = |source: String, provider: &str, model_id: &str| -> Option<String> {
+        match config.models.get(model_id) {
+            None => Some(format!("{source} references unknown model {model_id}")),
+            Some(model) if model.provider != provider => Some(format!(
+                "{source} targets {provider}:{model_id}, but the model belongs to {}",
+                model.provider
+            )),
+            Some(model) if model.deprecated => Some(format!(
+                "{source} targets deprecated model {provider}:{model_id}"
+            )),
+            Some(_) => None,
+        }
+    };
+
+    match (&config.default_provider, &config.fallback_model) {
+        (Some(provider), Some(model)) => {
+            issues.extend(check("fallback_model".to_string(), provider, model));
+        }
+        _ => issues.push("default_provider and fallback_model must both be set".to_string()),
+    }
+    for (provider, defaults) in &config.provider_defaults {
+        if !config.providers.contains_key(provider) {
+            issues.push(format!(
+                "provider_defaults.{provider} names an unknown provider"
+            ));
+        }
+        for (surface, model) in [
+            ("runtime", defaults.runtime.as_deref()),
+            ("portal", defaults.portal.as_deref()),
+        ] {
+            if let Some(model) = model {
+                issues.extend(check(
+                    format!("provider_defaults.{provider}.{surface}"),
+                    provider,
+                    model,
+                ));
+            }
+        }
+    }
+    for (provider, model) in &config.qc_defaults {
+        issues.extend(check(format!("qc_defaults.{provider}"), provider, model));
+    }
+    for alias_name in ["frontier", "mid", "small"] {
+        let alias = config
+            .aliases
+            .get(&format!("tier/{alias_name}"))
+            .or_else(|| config.aliases.get(alias_name));
+        match alias {
+            Some(alias) => issues.extend(check(
+                format!("tier/{alias_name}"),
+                &alias.provider,
+                &alias.id,
+            )),
+            None => issues.push(format!("tier/{alias_name} has no alias")),
+        }
+    }
+    for (ladder_name, ladder) in &config.model_ladders {
+        for step in &ladder.steps {
+            if step.provider.as_deref() == Some("mock") {
+                continue;
+            }
+            let (model_id, provider) = config
+                .aliases
+                .get(&step.model)
+                .map(|alias| (alias.id.as_str(), alias.provider.as_str()))
+                .unwrap_or((step.model.as_str(), step.provider.as_deref().unwrap_or("")));
+            let provider = if provider.is_empty() {
+                config
+                    .models
+                    .get(model_id)
+                    .map_or("", |model| model.provider.as_str())
+            } else {
+                provider
+            };
+            issues.extend(check(
+                format!("model_ladders.{ladder_name}"),
+                provider,
+                model_id,
+            ));
+        }
+    }
+    issues
 }

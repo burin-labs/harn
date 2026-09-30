@@ -35,17 +35,16 @@ workflows cascade automatically under the `harn-release-bot` App
 identity:
 
 ```text
-immutable candidate OID
-  → candidate_only archive matrix (sign/notarize/attest) in parallel with certification
-  → join receipts → merge Release PR
-  → signed tag on the main squash commit
-  → tag-derived archive matrix + finalize + GHCR container
+version commit merges to main
+  → build-release-binaries.yml candidate mode at that exact commit:
+    five-target archives (sign/notarize/attest), SHA256SUMS,
+    release-assets.json, release notes, candidate manifest
+  → same run: residual release audit + release smoke on those files
+  → promotion verifies the run and every digest, then tags and publishes
 ```
 
-Fleet `release_harn` owns that orchestration. Candidate receipts are
-certification evidence only. Publication and recovery both require the signed
-tag to select the matching Release squash commit on `main`; `force_rebuild`
-rebuilds missing archives from that tag.
+Nothing is rebuilt after it is tested. A release publishes exactly the files
+the candidate run built and checked.
 
 ## Local entry points
 
@@ -66,11 +65,6 @@ Manual workflow_dispatch entry points for recovery:
 
 ```bash
 gh workflow run publish-release.yml --ref main
-gh workflow run build-release-binaries.yml --ref main \
-  -f candidate_only=true \
-  -f candidate_source_ref=release-certify/<sha> \
-  -f candidate_source_sha=<40-hex>
-gh workflow run build-release-binaries.yml --ref main -f tag=vX.Y.Z -f force_rebuild=true
 gh workflow run bump-release.yml --ref main          # reconstruct a missed bump PR
 ```
 
@@ -118,9 +112,10 @@ is a published-version concern, not a developer-loop concern.
   release") — publishes crates only after the signed tag is proven to
   select the matching Release squash commit on `main`.
 - `.github/workflows/build-release-binaries.yml` (display name:
-  "Build release binaries") — `candidate_only` builds signed archives
-  for an exact SHA as pre-merge evidence; the tag path builds and attests
-  archives from the merged-main source; `force_rebuild` is audited recovery.
+  "Build release binaries") — on the push that changes the workspace
+  version to a stable `X.Y.Z`, builds and checks the release candidate at
+  that commit and writes `candidate-manifest-<sha>`; other main pushes only
+  warm caches.
 - `.github/workflows/bump-release.yml`, display name "Open version bump
   PR (recovery)". It is `workflow_dispatch` only. Use it to reconstruct
   a bump PR if a "Prepare vX.Y.Z release"-style commit accidentally
