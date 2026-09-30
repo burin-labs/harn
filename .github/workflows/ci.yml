@@ -2371,16 +2371,24 @@ jobs:
   # change that breaks the consumer goes red here instead of days later in the
   # consumer's own update. `scripts/ci/consumer_canary.sh` owns the procedure.
   #
-  # Required in the merge queue. On a pull request it runs only when asked for:
-  # the `consumer-canary` label, or a `Pairs-with:` trailer naming the
-  # consumer pull request that carries the matching change, whose branch is
-  # then rehearsed. Fork pull requests cannot mint the credential and never run
-  # it.
+  # Report-only: it runs on every merge group, but `CI status` does not need
+  # it, so a red verdict is visible without blocking the queue. Graduation to
+  # required: add it to `CI status` only after the consumer has passed at
+  # least 5 consecutive rehearsals at unreleased revisions. Until then a
+  # consumer-side break would block every merge.
   #
-  # The consumer may be private and this job's output is public, so it prints
-  # the verdict, the consumer run's link and the wall time, and nothing else.
-  # It uploads no artifact and writes no step summary; the CI cache policy
-  # refuses any step here beyond checkout, the credential mint and the script.
+  # On a pull request it runs only when asked for: the `consumer-canary`
+  # label, or a `Pairs-with: consumer#N` trailer naming the consumer pull
+  # request that carries the matching change, whose branch is then rehearsed.
+  # Fork pull requests cannot mint the credential and never run it.
+  #
+  # The consumer may be private and this job's output is public. Its identity
+  # comes only from the `CONSUMER_CANARY_REPOSITORY` secret, which the runner
+  # masks, and the script prints the verdict, the consumer run's id and the
+  # wall time, never the consumer's name or a link. It uploads no artifact and
+  # writes no step summary; the CI cache policy refuses any step here beyond
+  # checkout, the credential mint and the script, and refuses reading the
+  # identity from an unmasked variable.
   consumers:
     name: Consumer canary
     if: >-
@@ -2407,14 +2415,14 @@ jobs:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: ${{ vars.CONSUMER_CANARY_REPOSITORY }}
+          repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           permission-actions: write
           permission-pull-requests: read
       - name: Rehearse the consumer update at this revision
         env:
           GH_TOKEN: ${{ steps.consumer-token.outputs.token }}
           CANARY_OWNER: ${{ github.repository_owner }}
-          CANARY_NAME: ${{ vars.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
           SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           PULL_REQUEST_BODY: ${{ github.event.pull_request.body }}
@@ -2472,7 +2480,6 @@ jobs:
         docs-checks,
         actions,
         setup-harn-action,
-        consumers,
       ]
     steps:
       - name: Verify required CI jobs
@@ -2606,14 +2613,6 @@ jobs:
           echo "Rust artifacts ready: $rust_artifacts_ready_result"
           require_result "$rust_artifacts_ready_result" \
             "Rust artifact handoff failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
-
-          # The consumer canary is required in the merge queue. On a pull
-          # request it runs only when asked for, and a run that was asked for
-          # must pass.
-          consumers_result="${{ needs.consumers.result }}"
-          echo "Consumer canary: $consumers_result"
-          require_result "$consumers_result" \
-            "The consumer canary failed, or did not run in the merge queue." [ "$EVENT_NAME" != "merge_group" ]
 
           security_tests_ready_result="${{ needs['security-tests-ready'].result }}"
           echo "Linux security test inputs: $security_tests_ready_result"

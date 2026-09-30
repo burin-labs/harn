@@ -113,7 +113,10 @@ fn consumer_canary_workflow(extra: list) -> dict {
         steps: [
           {uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"},
           {uses: "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"},
-          {name: "Rehearse the consumer update at this revision", run: "bash scripts/ci/consumer_canary.sh"},
+          {
+            name: "Rehearse the consumer update at this revision",
+            run: "bash scripts/ci/consumer_canary.sh",
+          },
         ]
           + extra,
       },
@@ -134,6 +137,20 @@ pipeline test_consumer_canary_refuses_an_upload(harness: Harness, task: unknown)
 pipeline test_consumer_canary_refuses_a_step_summary(harness: Harness, task: unknown) {
   const invalid = consumer_canary_workflow([{run: "cat report.md >> \"$GITHUB_STEP_SUMMARY\""}])
   assert_eq(consumer_canary_errors(invalid), ["ci.yml:consumers must not write a step summary"])
+}
+
+@test
+pipeline test_consumer_canary_refuses_an_unmasked_identity(harness: Harness, task: unknown) {
+  // Variables print in the public log; only a secret is masked.
+  const invalid = consumer_canary_workflow(
+    [
+      {
+        run: "bash scripts/ci/consumer_canary.sh",
+        env: {CANARY_NAME: "vars.CONSUMER_CANARY_REPOSITORY"},
+      },
+    ],
+  )
+  assert_eq(len(consumer_canary_errors(invalid)), 1)
 }
 
 @test

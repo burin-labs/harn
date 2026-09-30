@@ -1879,7 +1879,9 @@ pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github
  * revision, mint its credential and run the canary script, which prints only
  * the verdict, the link and the wall time. Any other action is a way for the
  * consumer's content to leave, an upload most directly, so it is refused by
- * shape rather than by name. A step summary is refused the same way.
+ * shape rather than by name. A step summary is refused the same way. The
+ * consumer's identity must come from a secret: the runner prints each step's
+ * inputs and environment, and masks only secrets.
  */
 pub fn consumer_canary_errors(ci: dict) -> list<string> {
   const job = ci?.jobs?.[CONSUMER_CANARY_JOB]
@@ -1887,6 +1889,12 @@ pub fn consumer_canary_errors(ci: dict) -> list<string> {
     return ["ci.yml:${CONSUMER_CANARY_JOB} must define the consumer canary"]
   }
   let errors: list<string> = []
+  if contains(json_stringify(job), "vars.CONSUMER_CANARY_REPOSITORY") {
+    errors = errors
+      + [
+        "ci.yml:${CONSUMER_CANARY_JOB} must read the consumer's identity from secrets.CONSUMER_CANARY_REPOSITORY, which the runner masks",
+      ]
+  }
   for step in job?.steps ?? [] {
     const uses = step_uses(step)
     if uses != "" && !CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) }) {
