@@ -2219,8 +2219,8 @@ mod tests {
         discovery.authorization_server_metadata.token_endpoint = token_endpoint_url;
         let lock_dir = tempfile::tempdir().unwrap();
 
-        let error = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
+        let error = harn_clock::test_support::within(
+            "refresh against a stalled token endpoint timing out",
             refresh_stored_token_with_store(
                 &store,
                 &stale,
@@ -2229,19 +2229,17 @@ mod tests {
             ),
         )
         .await
-        .expect("refresh against a stalled token endpoint must time out, not hang")
         .unwrap_err();
         assert!(error.contains("Token request failed"), "{error}");
 
         // The failed refresh must release the single-flight lock so later 401
         // recovery is not blocked behind the wedged attempt.
         let key = OAuthTokenStoreKey::from_token(&stale);
-        let guard = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
+        let guard = harn_clock::test_support::within(
+            "refresh lock released after a timed-out refresh",
             acquire_oauth_refresh_lock(&key, Some(lock_dir.path())),
         )
         .await
-        .expect("refresh lock must be released after a timed-out refresh")
         .unwrap();
         drop(guard);
         // The stored token must survive a transient timeout (unlike

@@ -855,9 +855,8 @@ require_declared_operations_served = true
                 session_environment: harn_vm::security::SessionEnvironment::inherited(),
             },
         );
-        tokio::time::timeout(std::time::Duration::from_secs(10), execution)
+        harn_clock::test_support::within("importing turn", execution)
             .await
-            .expect("importing turn completes within the test bound")
             .expect("importing turn executes");
         responder.abort();
         drop(bridge);

@@ -777,13 +777,12 @@ async fn broadcast_forwarder_stops_when_consumer_drops_stream() {
     assert_eq!(sender.receiver_count(), 1);
     drop(stream);
 
-    tokio::time::timeout(std::time::Duration::from_millis(100), async {
+    harn_clock::test_support::within("subscription receiver closing after consumer drop", async {
         while sender.receiver_count() != 0 {
             tokio::task::yield_now().await;
         }
     })
-    .await
-    .expect("subscription receiver should close after consumer drop");
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]

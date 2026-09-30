@@ -641,9 +641,8 @@ pub fn wait_for_cancel(harness: Harness, event: TriggerEvent) -> string {
                 .await
                 .expect("enqueue succeeds");
 
-            tokio::time::timeout(TEST_DEFAULT_TIMEOUT, dequeued_rx)
+            harn_clock::test_support::within("run dequeuing the live inbox event", dequeued_rx)
                 .await
-                .expect("run should dequeue live inbox event")
                 .expect("run dequeued inbox event");
             dispatcher.shutdown();
             run_handle.await.expect("join dispatcher run");

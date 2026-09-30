@@ -8,13 +8,7 @@ async fn receive_plan_mutation(
     let mut response = None;
     let mut received = Vec::new();
     for _ in 0..4 {
-        let line = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-            .await
-            .unwrap_or_else(|_| {
-                panic!("timed out waiting for plan mutation {response_id}; received {received:?}")
-            })
-            .expect("ACP response channel closed");
-        let message: serde_json::Value = serde_json::from_str(&line).expect("ACP JSON line");
+        let message = recv_json(rx).await;
         received.push(message.clone());
         if message["method"] == "session/update"
             && message["params"]["update"]["sessionUpdate"] == "plan"
@@ -31,10 +25,10 @@ async fn receive_plan_mutation(
             break;
         }
     }
-    (
-        notification.expect("plan mutation notification"),
-        response.expect("plan mutation response"),
-    )
+    let (Some(notification), Some(response)) = (notification, response) else {
+        panic!("plan mutation {response_id} incomplete after 4 messages; received {received:?}");
+    };
+    (notification, response)
 }
 
 #[tokio::test(flavor = "current_thread")]

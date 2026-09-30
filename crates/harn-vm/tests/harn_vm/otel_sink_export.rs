@@ -152,13 +152,11 @@ async fn install_otel_sink_emits_spans_to_configured_endpoint() {
 
     reset_event_sinks();
 
-    // Wait for the first request through the channel. The 5 s
-    // budget guards against macOS scheduling jitter under
-    // flake-detection profiles; the typical path completes in under
-    // 50 ms because `shutdown_otel_sink` blocks on `force_flush`.
-    let first = timeout(Duration::from_secs(5), rx.recv())
+    // Wait for the first request through the channel. It arrives by
+    // construction because `shutdown_otel_sink` blocks on `force_flush`, so
+    // only a hang can keep it away.
+    let first = harn_clock::test_support::within("first OTLP export", rx.recv())
         .await
-        .expect("OTLP stub never received an export within 5s")
         .expect("OTLP stub channel closed unexpectedly");
     let snapshot = drain_remaining(&mut rx, first).await;
 

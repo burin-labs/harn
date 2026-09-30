@@ -11,7 +11,6 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use harn_cli::commands::{persona, persona_doctor, persona_scaffold, persona_supervision};
 use harn_vm::event_log::EventLog as _;
@@ -898,9 +897,8 @@ async fn persona_supervision_tail_follow_streams_new_events() {
     // `ready_rx` fires only after the tail has flushed its initial read
     // (empty, here) and is about to wait for changes — so any event we
     // append now must traverse the follow path.
-    let log = tokio::time::timeout(Duration::from_secs(5), ready_rx)
+    let log = harn_clock::test_support::within("tail signalling ready", ready_rx)
         .await
-        .expect("tail signalled ready")
         .expect("ready oneshot delivered");
 
     let topic = harn_vm::event_log::Topic::new(harn_vm::PERSONA_RUNTIME_TOPIC).unwrap();
@@ -917,9 +915,8 @@ async fn persona_supervision_tail_follow_streams_new_events() {
         .expect("append followed event");
     log.flush().await.expect("flush followed event");
 
-    let result = tokio::time::timeout(Duration::from_secs(5), task)
+    let result = harn_clock::test_support::within("tail finishing", task)
         .await
-        .expect("tail finished")
         .expect("tail task did not panic");
     result.expect("tail completed without error");
 

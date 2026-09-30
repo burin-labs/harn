@@ -334,13 +334,12 @@ async fn start_acp_test_listener_with_project_root(
 }
 
 async fn wait_for_acp_session_detached(listener: &ListenerRuntime, session_id: &str) {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    harn_clock::test_support::within("ACP session detaching", async {
         while !listener.acp_session_is_detached_for_test(session_id) {
             tokio::task::yield_now().await;
         }
     })
-    .await
-    .expect("ACP session detached");
+    .await;
 }
 
 async fn pending_events(log: &Arc<AnyEventLog>) -> Vec<(u64, harn_vm::event_log::LogEvent)> {
@@ -799,7 +798,7 @@ async fn acp_websocket_routes_host_requests_only_to_host_owner() {
 
     let mut saw_observer_update = false;
     let mut saw_owner_prompt_response = false;
-    tokio::time::timeout(Duration::from_secs(10), async {
+    harn_clock::test_support::within("multi-client prompt flow", async {
         while !(saw_observer_update && saw_owner_prompt_response) {
             tokio::select! {
                 owner_message = next_acp_text(&mut owner), if !saw_owner_prompt_response => {
@@ -826,8 +825,7 @@ async fn acp_websocket_routes_host_requests_only_to_host_owner() {
             }
         }
     })
-    .await
-    .expect("multi-client prompt flow completed");
+    .await;
 
     listener
         .shutdown(Duration::from_secs(5))
@@ -898,7 +896,7 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
     let mut saw_replayed_host_request = false;
     let mut saw_load_response = false;
     let mut saw_prompt_response = false;
-    tokio::time::timeout(Duration::from_secs(10), async {
+    harn_clock::test_support::within("reconnect flow", async {
         while !(saw_replayed_host_request && saw_load_response && saw_prompt_response) {
             let message = next_acp_text(&mut reconnected).await;
             if message.get("method").is_some() && message.get("id").is_some() {
@@ -917,8 +915,7 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
             }
         }
     })
-    .await
-    .expect("reconnect flow completed");
+    .await;
 
     listener
         .shutdown(Duration::from_secs(5))
@@ -973,7 +970,7 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
 
     let mut saw_persisted_replay = false;
     let mut saw_expired_session_load = false;
-    tokio::time::timeout(Duration::from_secs(10), async {
+    harn_clock::test_support::within("expired replay flow", async {
         while !(saw_persisted_replay && saw_expired_session_load) {
             let message = next_acp_text(&mut reconnected).await;
             if message["_harn"]["replayed"] == json!(true)
@@ -995,8 +992,7 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
             }
         }
     })
-    .await
-    .expect("expired replay flow completed");
+    .await;
 
     listener
         .shutdown(Duration::from_secs(5))

@@ -281,31 +281,24 @@ async fn backpressure_concurrent_overflow_rejects_above_watermark() {
     }
 
     // Wait until exactly MAX tasks have admitted (and `TOTAL - MAX`
-    // rejected). Wrapping the poll in `tokio::time::timeout` keeps a
-    // hung test from stalling the whole CI job, and avoids the
-    // wall-clock-deadline pattern the audit rejects.
+    // rejected). The hang ceiling keeps a hung test from stalling the whole
+    // CI job without timing how fast admission runs on a loaded machine.
     let admitted_wait = admitted.clone();
     let rejected_wait = rejected.clone();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async move {
-        loop {
-            let a = admitted_wait.load(AtomicOrdering::Acquire);
-            let r = rejected_wait.load(AtomicOrdering::Acquire);
-            if a == MAX as usize && r == TOTAL - MAX as usize {
-                return;
+    harn_clock::test_support::within(
+        &format!("{MAX} admitted and {} rejected", TOTAL - MAX as usize),
+        async move {
+            loop {
+                let a = admitted_wait.load(AtomicOrdering::Acquire);
+                let r = rejected_wait.load(AtomicOrdering::Acquire);
+                if a == MAX as usize && r == TOTAL - MAX as usize {
+                    return;
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
-            "timed out: admitted={}, rejected={} (want {} and {})",
-            admitted.load(AtomicOrdering::Acquire),
-            rejected.load(AtomicOrdering::Acquire),
-            MAX,
-            TOTAL - MAX as usize
-        )
-    });
+        },
+    )
+    .await;
 
     // Release the admitted tasks so they drop their guards and join.
     release.notify_waiters();

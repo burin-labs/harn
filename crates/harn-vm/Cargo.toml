@@ -262,6 +262,7 @@ zbus-secret-service-keyring-store = { version = "1.0", features = ["rt-async-io-
 
 [dev-dependencies]
 criterion = "0.8"
+harn-clock = { path = "../harn-clock", version = "=0.10.153-dev", features = ["test-support"] }
 http = "1"
 proptest = "1"
 rcgen = "0.14"
