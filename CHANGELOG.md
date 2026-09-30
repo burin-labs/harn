@@ -9,6 +9,215 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.152
+
+### Breaking
+
+- **`harn_vm::orchestration::ApprovalReviewOutcome` gains a public
+  `evaluation_review` field (#8659).** It carries the validated decision review
+  (outcome, confidence provenance, and the rule applied) when a reviewer returns
+  one. A struct literal that names every field no longer compiles.
+
+  Migration: set the new field, or fill the rest from `Default`:
+
+  ```rust
+  // Before
+  ApprovalReviewOutcome { approved, reviewer_answered, rationale, risk,
+      authorization, unavailable_reason, unavailable_detail }
+  // After
+  ApprovalReviewOutcome { approved, reviewer_answered, rationale,
+      ..ApprovalReviewOutcome::default() }
+  ```
+- **`harn_vm::llm::capabilities::Capabilities` and `ProviderRule` are now
+  `#[non_exhaustive]` (#9029).** Both gain a field whenever a provider adds a
+  request-shape difference; this release adds `thinking_off_type`. Marking them
+  non-exhaustive makes that the last such field addition to break a downstream
+  build.
+
+  Migration: outside `harn-vm`, stop building either struct with a struct
+  literal. Get a `Capabilities` from `capabilities::lookup(provider, model)`,
+  or start from `Capabilities::default()` and assign the fields you need. Get
+  a `ProviderRule` by deserializing capability TOML, the same shape as a
+  `[[provider.<id>]]` row.
+
+  ```rust
+  // before
+  let caps = Capabilities { native_tools: true, ..Capabilities::default() };
+  // after
+  let mut caps = Capabilities::default();
+  caps.native_tools = true;
+  ```
+- **Approval-policy `external_roots` now carry an access mode, and a bare
+  path string means read-only (#8845).** Each entry is a path string or
+  `{path, access}` with `access` one of `read` (the default) or `read_write`.
+  Under a `read` root, the approval boundary refuses any call not known to be
+  read-only with the refusal id `external_root_read_only`. An approval-policy
+  root does not grant filesystem access by itself: the `harness.fs.*`
+  builtins and confined children read only the capability policy's
+  `read_only_roots`, so a caller-authored policy cannot widen the parent's
+  filesystem ceiling. Intersecting two policies keeps the narrower mode for a
+  shared root, and each decision receipt lists the governing roots with their
+  modes under `context.external_roots`. In Rust,
+  `ToolApprovalPolicy::external_roots` is now `Vec<ExternalRoot>`.
+
+  Migration: a string entry that previously granted writes under a root now
+  grants reads only. To keep write access, write the entry as
+  `{path: "/abs/root", access: "read_write"}`. Rust callers building the
+  policy convert with `ExternalRoot::read(path)` or
+  `ExternalRoot::read_write(path)`; `ExternalRoot: From<String>` yields `read`.
+  A host that wants a `read` root readable by the file builtins or a confined
+  child also adds it to the capability policy's `read_only_roots`.
+- **Public error enums in the published crates are now `#[non_exhaustive]`
+  (#8894).** 71 public `*Error` enums, including `harn_vm::VmError`,
+  `harn_vm::SecretError`, `harn_hostlib::HostlibError`, and
+  `harn_parser::PipelineError`, can now gain a variant without breaking a
+  downstream build. A `match` on one of them outside its defining crate needs
+  a wildcard arm. Enums that Harn's own crates map variant by variant to a
+  diagnostic, HTTP status, or protocol error stay exhaustive: `LexerError`,
+  `ParserError`, `AnalysisError`, `StoreError`, `SessionOpenError`,
+  `ToolInvocationError`, `DurationParseError`, and `TenantResolutionError`.
+  Adding a variant to one of those remains a breaking change.
+
+  Migration: add a catch-all (`_`) arm to every exhaustive `match` on one of
+  the newly `#[non_exhaustive]` enums, or the match stops compiling. Route it
+  to a named outcome that records the variant, so a variant added later is
+  reported instead of silently dropped. With `#[allow(unreachable_patterns)]`
+  on the arm, it compiles against both the previous release and this one, so
+  it can land before the upgrade.
+
+  ```rust
+  // before: an exhaustive match (remaining arms elided)
+  match error {
+      HostlibError::Unimplemented { .. } => unsupported(),
+      HostlibError::InvalidParameter { .. } => reject(),
+      HostlibError::Backend { .. } => retry(),
+  }
+  // after: the same arms plus a wildcard for variants added later
+  match error {
+      HostlibError::Unimplemented { .. } => unsupported(),
+      HostlibError::InvalidParameter { .. } => reject(),
+      HostlibError::Backend { .. } => retry(),
+      #[allow(unreachable_patterns)]
+      _ => report_unrecognized(&error), // logs `{error:?}`
+  }
+  ```
+- **`ProcessSandboxPolicy` and `ProcessSandboxGrants` gain a public field
+  (#8915).** `harn_vm::orchestration::ProcessSandboxPolicy` adds
+  `allow_child_workspace_write`, and
+  `harn_vm::process_sandbox::ProcessSandboxGrants` adds
+  `child_writes_withheld`. Both structs are exhaustive, so a struct literal
+  that names every field stops compiling. The wire format is unchanged: the
+  policy field is omitted when false and defaults to false when absent.
+
+  Migration: end each struct literal of either type with
+  `..Default::default()`, or set the new field to `false` to keep the
+  previous behavior.
+
+  ```rust
+  let process = ProcessSandboxPolicy {
+      write_roots: vec!["/opt/cache".into()],
+      ..Default::default()
+  };
+  ```
+
+### Added
+
+- Completion judges can opt into a bounded negative precheck that names missing
+  acceptance evidence before invoking the full judge. Positive or uncertain
+  answers retain the full judge, and the precheck never authorizes completion.
+  Internal continuation metadata is removed before provider admission so a
+  precheck veto can reach the next actor turn under a conservative token budget.
+- Claude Sonnet 5.5 (`claude-sonnet-5-5`, OpenRouter
+  `anthropic/claude-sonnet-5.5`) and GPT-6.1 Sol (`gpt-6.1-sol`, OpenRouter
+  `openai/gpt-6.1-sol` and `-pro`) join the catalog with live-probed request
+  rules. The `sonnet`, `frontier`, and `tier/frontier` aliases now resolve to
+  Sonnet 5.5, and `sol` and `openai/mid` to GPT-6.1 Sol; `sonnet5` and the new
+  `sol6` keep the previous generation addressable.
+- `thinking: false` on Sonnet 5.5 sends its new `between_tools` off switch,
+  named by the new `thinking_off_type` capability field. Before this, every
+  default call to Sonnet 5.5 failed with HTTP 400.
+- OpenRouter GPT-6 Astra and GPT-6.1 Sol calls no longer send a reasoning
+  disable directive those routes reject with HTTP 400.
+- OpenAI's 2026-10-23 shutdowns of gpt-4.1-nano and o4-mini, and Gemini 3.1
+  Flash-Lite's 2027-05-07 shutdown, are marked deprecated with typed sunset
+  dates. GPT-5.5 is not deprecated in the API; it now names GPT-6.1 Sol as its
+  successor.
+- **A read-only role's child processes can now write their workspace
+  (#8915).** `process_sandbox.allow_child_workspace_write` lets a confined
+  child write its workspace roots, `process_sandbox.write_roots`, its
+  `TMPDIR`, and the toolchain caches when the policy's `workspace` capability
+  grants no write, so a reviewer or verifier that runs `cargo test` or
+  `npm test` no longer fails on the first write. Harn's own file builtins and
+  `read_only_roots` are unaffected. A nested policy keeps the grant only when
+  its ceiling's children could already write. The `harn run` receipt reports
+  `process_child_writes` and `process_child_workspace_write_granted`, a refused
+  write under a policy whose children may write nowhere names the missing
+  grant, and `harn doctor sandbox` measures seven new cases for it.
+- **Release binaries can build a signed candidate for a main source commit
+  (#8993).** Dispatching `build-release-binaries.yml` with
+  `source_candidate=true` on `main` runs the full release producer (all five
+  targets, signing, notarization, attestations, manifest and smoke checks)
+  without publishing a tag or release. `scripts/release_contract.harn` decides
+  each request and records a typed admission or refusal receipt.
+
+### Changed
+
+- OpenRouter prices, context windows, and long-prompt price bands follow the provider indexes read on
+  2026-09-29, including GLM 5.1/5.2/5.3, Kimi K2.6, Grok 4.7, DeepSeek V4 Pro, V4.1 Flash, and the GPT-5.4
+  through GPT-6 long-context bands. Groq Qwen 3.8 27B now reports its 131,072-token context window.
+- `harn provider catalog support` no longer recommends a provider's cheapest route by default. A provider with
+  chat routes must name its recommendation in the support notes or a quality-check default, or generation
+  fails and names it. NVIDIA's recommendation moves from Kimi K2.6 (unavailable to this account) to Kimi K3
+  and Together's from GPT-OSS 20B (no longer serverless) to MiniMax M3; every other provider keeps its
+  current recommendation.
+
+### Fixed
+
+- Anthropic option probes now send the selected seed or penalty field instead of reporting a successful request that
+  omitted it as provider support. Weekly probe failures without measured catalog drift now request measurement recovery
+  instead of catalog review.
+- The checker rejects comparisons between typed evaluation answers and undeclared choice labels or score levels.
+  Boolean question builders accept optional typed yes/no criteria on both evaluation backends.
+- A JSON tool payload written against a name the registry does not offer
+  (`name{"key": ...}`), or abutting a sentence rather than starting its own line,
+  now tells the model the call did not run. Both shapes previously came back as
+  prose with no diagnostic, so the agent loop read the turn as an ordinary
+  monologue and the dropped call was invisible to the model and to the person
+  watching. Nothing new is dispatched. Only a quoted first key counts, and a
+  mid-line payload inside a code fence stays silent, so code in an answer
+  (`useState({ a: 1 })`, `Point{ x: 1 }`, `map[string]int{"a": 1}`) is unchanged.
+- **The macOS workspace test lane no longer swaps its build to a crawl (#8599).**
+  Most hosted macOS runs land on a 3-core, 7 GiB runner, where one compiler per
+  core ran out of memory and took a median of 50 minutes to compile what a
+  14 GiB runner compiled in 8. The lane now takes its compiler count from the
+  shared memory-aware build budget, which reads macOS hosts through `sysctl`
+  and counts a self-hosted Mac's runner listeners by their full paths. On the
+  7 GiB runner that is one compiler, which built the workspace in 27 minutes
+  instead of 58.
+- Decision-backed approval reviews retain candidate answers and confidence provenance in permission metadata.
+  Uncertain reviews reach the human fallback without being recorded as a considered rejection.
+- `harn provider tool-probe` asks with `tool_choice: auto` on routes that reject a forced tool choice (Claude
+  Opus 5.5, Fable 5.1, Sonnet 5.5, including their OpenRouter slugs), so those routes are measurable instead
+  of failing every probe with a 400.
+- Meta Muse Spark routes declare that they accept only `tool_choice: auto`, so a forced choice is relaxed to
+  `auto` locally instead of failing at Meta.
+- Seven Together routes that now return "Unable to access non-serverless model" (GPT-OSS 20B, Kimi K2.7
+  Code, MiniMax M2.7, Gemma 4 31B, Qwen 2.5 7B Turbo, Qwen 3.5 397B, Nemotron 3 Ultra) are marked
+  `availability = "dedicated"` and no longer appear as one-click serverless routes.
+- Three more Together routes that return "Unable to access non-serverless model" (GPT-OSS 20B, Qwen 3.5 397B,
+  Nemotron 3 Ultra) are marked `availability = "dedicated"`; the previous refresh listed them but left their
+  rows unmarked. A catalog test now pins every dedicated-only Together route.
+
+### Security
+
+- Authenticate harness directive envelopes with a session nonce, preserve directive commands verbatim,
+  and neutralize directive-shaped text in tool results before provider dispatch.
+- Confined child processes can no longer read the default credential files of
+  several widely used CLIs under the preset-granted `~/.config` and `~/.cache`,
+  including the GitLab, hub, Copilot, rclone, DigitalOcean, Hetzner Cloud,
+  Podman, Wrangler, Stripe and Firebase CLIs, git credential-store, sops age
+  keys, and Hugging Face tokens.
+
 ## v0.10.151
 
 ### Fixed
