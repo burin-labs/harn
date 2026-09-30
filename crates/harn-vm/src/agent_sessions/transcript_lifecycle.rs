@@ -21,8 +21,8 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
 ///
 /// Persistence can fail after the mutation has entered the journal. A retry
 /// must flush that exact queued mutation rather than append a second terminal
-/// record for the same run.
-pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<(), String> {
+/// record for the same run. Returns that retained record, including on retry.
+pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<VmValue, String> {
     validate_session_event(&event, "agent_session_append_terminal_event")?;
     SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
@@ -35,15 +35,25 @@ pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<(),
             ));
         };
         if journal.terminal_queued() {
-            return Ok(());
+            return state
+                .transcript
+                .as_dict()
+                .and_then(|transcript| transcript.get("events"))
+                .and_then(|events| match events {
+                    VmValue::List(events) => events.last().cloned(),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    format!("agent_session_append_terminal_event: session '{id}' lost its terminal record")
+                });
         }
-        append_event_to_state(state, event, "append_terminal_event")?;
+        append_event_to_state(state, event.clone(), "append_terminal_event")?;
         state
             .transcript_journal
             .as_mut()
             .expect("terminal append keeps the active journal installed")
             .mark_terminal_queued();
-        Ok(())
+        Ok(event)
     })
 }
 

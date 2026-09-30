@@ -100,10 +100,30 @@ fn replay_event_from_stored(
     stored: &StoredEvent,
 ) -> Option<AgentSessionReplayEvent> {
     let transcript = stored.payload.get("transcript_event")?;
-    if transcript.get("kind").and_then(serde_json::Value::as_str) == Some("turn_phase_changed") {
-        let payload = transcript.get("metadata")?;
-        let event =
-            AgentEvent::from_host_payload(session_id, "turn_phase_changed", payload).ok()??;
+    let kind = transcript.get("kind").and_then(serde_json::Value::as_str);
+    if matches!(kind, Some("turn_phase_changed" | "agent_run_terminal")) {
+        let metadata = transcript.get("metadata")?;
+        let event = if kind == Some("agent_run_terminal") {
+            AgentEvent::TurnPhaseChanged {
+                session_id: session_id.to_string(),
+                phase: crate::agent_events::AgentTurnPhase::from_terminal_record(metadata)?,
+            }
+        } else {
+            AgentEvent::from_host_payload(session_id, "turn_phase_changed", metadata).ok()??
+        };
+        // A standalone phase row can precede a failed terminal write. Only the
+        // committed run record owns finality; older records lack its reply.
+        if kind == Some("turn_phase_changed")
+            && matches!(
+                event,
+                AgentEvent::TurnPhaseChanged {
+                    phase: crate::agent_events::AgentTurnPhase::Terminal { .. },
+                    ..
+                }
+            )
+        {
+            return None;
+        }
         return Some(AgentSessionReplayEvent {
             event_id: stored.event_id,
             kind: stored_kind_label(&stored.kind),

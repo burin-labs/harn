@@ -597,7 +597,7 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
         crate::agent_events::classify_agent_terminal("completed", "end_turn", false, None),
         "end_turn",
     );
-    super::super::live_transcript_journal::flush_terminal(
+    let persisted_phase = super::super::live_transcript_journal::flush_terminal(
         session_id,
         "completed",
         "end_turn",
@@ -611,6 +611,28 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
     )
     .await
     .expect("persist terminal");
+    let cancelled = crate::agent_events::AgentTerminalOutcome::new(
+        crate::agent_events::AgentTerminalKind::UserCancelled,
+        "cancelled",
+    );
+    let retried_phase = super::super::live_transcript_journal::flush_terminal(
+        session_id,
+        "cancelled",
+        "cancelled",
+        None,
+        None,
+        &cancelled,
+        super::super::live_transcript_journal::TerminalAccounting {
+            provider_call_count: 1,
+            adaptive_budget: None,
+        },
+    )
+    .await
+    .expect("reuse committed terminal");
+    assert_eq!(
+        retried_phase, persisted_phase,
+        "retry must return the committed outcome"
+    );
 
     let error = crate::agent_sessions::append_event(
         session_id,
@@ -902,7 +924,7 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
         );
         assert_eq!(
             pending.stage,
-            super::super::AgentFinalizationStage::TurnPhaseRecorded
+            super::super::AgentFinalizationStage::PromptOutcomeProjected
         );
     });
     let count_kind = |kind: &str| {
@@ -926,7 +948,7 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
             .expect("retained transcript events")
     };
     assert_eq!(count_kind("agent_loop_terminal_error"), 1);
-    assert_eq!(count_kind("turn_phase_changed"), 1);
+    assert_eq!(count_kind("turn_phase_changed"), 0);
     assert_eq!(
         delivered.load(Ordering::SeqCst),
         0,
@@ -949,8 +971,8 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     assert_eq!(count_kind("agent_loop_terminal_error"), 1);
     assert_eq!(
         count_kind("turn_phase_changed"),
-        1,
-        "retry must reuse the recorded phase"
+        0,
+        "failed retries cannot record a terminal phase"
     );
     assert_eq!(
         delivered.load(Ordering::SeqCst),

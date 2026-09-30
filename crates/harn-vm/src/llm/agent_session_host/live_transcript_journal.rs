@@ -199,13 +199,18 @@ pub(super) async fn flush_terminal(
     terminal_error: Option<&serde_json::Value>,
     terminal: &crate::agent_events::AgentTerminalOutcome,
     accounting: TerminalAccounting<'_>,
-) -> Result<(), VmError> {
+) -> Result<crate::agent_events::AgentTurnPhase, VmError> {
+    let visible_reply = crate::agent_sessions::transcript(session_id)
+        .as_ref()
+        .and_then(crate::llm::agent_result_projection::last_assistant_text)
+        .unwrap_or_default();
     let mut metadata = serde_json::json!({
         "final_status": final_status,
         "stop_reason": stop_reason,
         "terminal_class": terminal_class,
         "error": terminal_error,
         "terminal": terminal,
+        "visible_reply": visible_reply,
         "provider_call_count": accounting.provider_call_count,
     });
     if let Some(budget) = accounting.adaptive_budget {
@@ -218,10 +223,17 @@ pub(super) async fn flush_terminal(
         "Agent loop reached a terminal state",
         Some(metadata),
     );
-    crate::agent_sessions::append_terminal_event_once(session_id, event)
+    let record = crate::agent_sessions::append_terminal_event_once(session_id, event)
         .map_err(VmError::Runtime)?;
+    let record = crate::llm::helpers::vm_value_to_json(&record);
+    let phase = record
+        .get("metadata")
+        .and_then(crate::agent_events::AgentTurnPhase::from_terminal_record)
+        .ok_or_else(|| {
+            VmError::Runtime("agent terminal record lacks its typed reply or outcome".into())
+        })?;
     crate::agent_session_journal::flush(session_id).await?;
-    Ok(())
+    Ok(phase)
 }
 
 /// Flush the live transcript journal at the common pre-provider boundary.

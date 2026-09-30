@@ -44,6 +44,40 @@ async fn internal_turn_phases_restore_candidate_and_finality_in_order() {
             .await
             .expect("append phase");
     }
+    let provisional = load_canonical_session_replay_events_from_store(&store, session_id)
+        .await
+        .unwrap()
+        .expect("known session");
+    assert_eq!(
+        provisional.len(),
+        2,
+        "a phase row alone cannot commit finality"
+    );
+    assert!(matches!(
+        provisional[1].event,
+        AgentEvent::TurnPhaseChanged {
+            phase: AgentTurnPhase::Verifying { .. },
+            ..
+        }
+    ));
+    let AgentTurnPhase::Terminal { reply, outcome } = &phases[2] else {
+        unreachable!("terminal fixture")
+    };
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Custom {
+                    custom_type: "agent_run_terminal".into(),
+                },
+                serde_json::json!({"transcript_event": {
+                    "kind": "agent_run_terminal", "visibility": "internal", "text": "",
+                    "metadata": {"visible_reply": reply, "terminal": outcome},
+                }}),
+            ),
+        )
+        .await
+        .expect("commit terminal run record");
     let restored = load_canonical_session_replay_events_from_store(&store, session_id)
         .await
         .unwrap()

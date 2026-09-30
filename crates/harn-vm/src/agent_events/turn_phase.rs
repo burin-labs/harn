@@ -23,6 +23,15 @@ pub enum AgentTurnPhase {
     },
 }
 
+impl AgentTurnPhase {
+    pub(crate) fn from_terminal_record(metadata: &serde_json::Value) -> Option<Self> {
+        Some(Self::Terminal {
+            reply: metadata.get("visible_reply")?.as_str()?.to_string(),
+            outcome: serde_json::from_value(metadata.get("terminal")?.clone()).ok()?,
+        })
+    }
+}
+
 fn deserialize_visible_reply<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,

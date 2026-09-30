@@ -260,7 +260,7 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             crate::agent_events::classify_agent_terminal("cancelled", "cancelled", false, None),
             "cancelled",
         );
-        Box::pin(super::live_transcript_journal::flush_terminal(
+        let phase = Box::pin(super::live_transcript_journal::flush_terminal(
             session_id,
             "cancelled",
             "cancelled",
@@ -273,6 +273,12 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             },
         ))
         .await?;
+        crate::llm::emit_live_agent_event_sync(
+            &crate::agent_events::AgentEvent::TurnPhaseChanged {
+                session_id: session_id.to_string(),
+                phase,
+            },
+        );
     }
     let removed =
         super::AGENT_HOST_SESSIONS.with(|sessions| sessions.borrow_mut().remove(session_id));

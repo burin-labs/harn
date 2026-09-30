@@ -62,7 +62,6 @@ enum AgentFinalizationStage {
     EndHookCompleted,
     TerminalErrorAppended,
     PromptOutcomeProjected,
-    TurnPhaseRecorded,
 }
 
 mod assistant_messages;
