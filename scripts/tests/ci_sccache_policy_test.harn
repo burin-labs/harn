@@ -136,7 +136,10 @@ pipeline test_consumer_canary_refuses_an_upload(harness: Harness, task: unknown)
 @test
 pipeline test_consumer_canary_refuses_a_step_summary(harness: Harness, task: unknown) {
   const invalid = consumer_canary_workflow([{run: "cat report.md >> \"$GITHUB_STEP_SUMMARY\""}])
-  assert_eq(consumer_canary_errors(invalid), ["ci.yml:consumers must not write a step summary"])
+  assert_eq(
+    consumer_canary_errors(invalid),
+    ["consumer-canary.yml:consumers must not write a step summary"],
+  )
 }
 
 @test

@@ -1867,6 +1867,8 @@ pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
   return errors
 }
 
+pub const CONSUMER_CANARY_WORKFLOW = "consumer-canary.yml"
+
 pub const CONSUMER_CANARY_JOB = "consumers"
 
 pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github-app-token@"]
@@ -1883,16 +1885,16 @@ pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github
  * consumer's identity must come from a secret: the runner prints each step's
  * inputs and environment, and masks only secrets.
  */
-pub fn consumer_canary_errors(ci: dict) -> list<string> {
-  const job = ci?.jobs?.[CONSUMER_CANARY_JOB]
+pub fn consumer_canary_errors(workflow: dict) -> list<string> {
+  const job = workflow?.jobs?.[CONSUMER_CANARY_JOB]
   if job == nil {
-    return ["ci.yml:${CONSUMER_CANARY_JOB} must define the consumer canary"]
+    return ["${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must define the consumer canary"]
   }
   let errors: list<string> = []
   if contains(json_stringify(job), "vars.CONSUMER_CANARY_REPOSITORY") {
     errors = errors
       + [
-        "ci.yml:${CONSUMER_CANARY_JOB} must read the consumer's identity from secrets.CONSUMER_CANARY_REPOSITORY, which the runner masks",
+        "${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must read the consumer's identity from secrets.CONSUMER_CANARY_REPOSITORY, which the runner masks",
       ]
   }
   for step in job?.steps ?? [] {
@@ -1900,11 +1902,12 @@ pub fn consumer_canary_errors(ci: dict) -> list<string> {
     if uses != "" && !CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) }) {
       errors = errors
         + [
-          "ci.yml:${CONSUMER_CANARY_JOB} must not run ${uses}; only checkout and the credential mint may run beside the canary script",
+          "${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must not run ${uses}; only checkout and the credential mint may run beside the canary script",
         ]
     }
     if contains(to_string(step?.run ?? ""), "GITHUB_STEP_SUMMARY") {
-      errors = errors + ["ci.yml:${CONSUMER_CANARY_JOB} must not write a step summary"]
+      errors = errors
+        + ["${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must not write a step summary"]
     }
   }
   return errors

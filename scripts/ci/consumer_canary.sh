@@ -25,6 +25,19 @@
 # success, fails by name. There is no path that reports green without a
 # consumer run that concluded success.
 #
+# `--decide` runs first, in its own job, and decides whether this run
+# rehearses at all. A scheduled run whose main commit already has a settled
+# verdict (the "Settled verdict" job of an earlier run of this workflow
+# succeeded at that commit) is skipped, and the skip is logged by name with
+# both commits. A dispatched run always rehearses.
+#
+# Decide inputs:
+#   EVENT_NAME         schedule or workflow_dispatch.
+#   SOURCE_REVISION    main's commit for this run.
+#   CURRENT_RUN_ID     this run, excluded from the history.
+#   GITHUB_REPOSITORY  this repository; GH_TOKEN may read its workflow runs.
+#   GITHUB_OUTPUT      receives run=true|false.
+#
 # Inputs:
 #   CANARY_REPOSITORY  owner/name of the consumer.
 #   CANARY_WORKFLOW    the consumer's rehearsal workflow file.
@@ -33,6 +46,8 @@
 #   PAIRING_TEXT       description and commit messages to read trailers from.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
+#   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
+#                      run concluded; an unmeasured run writes no verdict.
 set -euo pipefail
 
 # The consumer's repository name, which no output line may contain.
@@ -135,10 +150,55 @@ canary_main() {
 
   local verdict=fail
   [[ "$conclusion" == success ]] && verdict=pass
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+  fi
   canary_say "CONSUMER_CANARY verdict=$verdict conclusion=$conclusion run=$run_id wall_seconds=$((now - started))"
   [[ "$verdict" == pass ]] || canary_fail consumer_rehearsal_failed "run=$run_id conclusion=$conclusion"
 }
 
+canary_decide() {
+  local event=${EVENT_NAME:-} sha=${SOURCE_REVISION:-} repo=${GITHUB_REPOSITORY:-}
+  local current=${CURRENT_RUN_ID:-} output=${GITHUB_OUTPUT:-}
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || canary_fail source_revision_invalid
+  [[ -n "$repo" ]] || canary_fail repository_unset
+  [[ -n "$output" ]] || canary_fail output_unset
+  if [[ "$event" != schedule ]]; then
+    canary_say "CONSUMER_CANARY run reason=explicit_$event main=$sha"
+    echo "run=true" >> "$output"
+    return 0
+  fi
+  local history id head settled last= last_run=
+  history=$(gh api "repos/$repo/actions/workflows/consumer-canary.yml/runs?branch=main&status=completed&per_page=20" \
+    --jq '.workflow_runs[] | "\(.id) \(.head_sha)"' 2> /dev/null) \
+    || canary_fail settled_history_unreadable
+  while read -r id head; do
+    [[ -n "$id" && "$id" != "$current" ]] || continue
+    settled=$(gh api "repos/$repo/actions/runs/$id/jobs" \
+      --jq '[.jobs[] | select(.name == "Settled verdict" and .conclusion == "success")] | length' \
+      2> /dev/null) || canary_fail settled_history_unreadable "run=$id"
+    if [[ "$settled" =~ ^[1-9] ]]; then
+      last=$head
+      last_run=$id
+      break
+    fi
+  done <<< "$history"
+  if [[ -z "$last" ]]; then
+    canary_say "CONSUMER_CANARY run reason=no_settled_verdict main=$sha"
+    echo "run=true" >> "$output"
+  elif [[ "$last" == "$sha" ]]; then
+    canary_say "CONSUMER_CANARY skipped reason=main_unchanged main=$sha last_settled=$last last_settled_run=$last_run"
+    echo "run=false" >> "$output"
+  else
+    canary_say "CONSUMER_CANARY run reason=main_moved main=$sha last_settled=$last last_settled_run=$last_run"
+    echo "run=true" >> "$output"
+  fi
+}
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  canary_main
+  if [[ "${1:-}" == --decide ]]; then
+    canary_decide
+  else
+    canary_main
+  fi
 fi
