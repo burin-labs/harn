@@ -407,7 +407,7 @@ fn a_nested_policy_may_add_a_denial_and_may_never_drop_one() {
         ..ProcessSandboxPolicy::default()
     };
 
-    let nested = outer.intersect(&inner);
+    let nested = outer.intersect(&inner, false);
 
     assert!(
         nested
@@ -516,4 +516,79 @@ fn unix_socket_roots_narrow_like_the_other_process_roots() {
     allowed
         .assert_within_ceiling(&elsewhere)
         .expect_err("a flattened stage cannot move socket authority elsewhere");
+}
+
+/// A role whose tools run commands and edit nothing: the `workspace`
+/// capability only reads.
+fn read_only_role(grant: bool) -> CapabilityPolicy {
+    CapabilityPolicy {
+        capabilities: BTreeMap::from([
+            ("process".to_string(), vec!["exec".to_string()]),
+            ("workspace".to_string(), vec!["read_text".to_string()]),
+        ]),
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            allow_child_workspace_write: grant,
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    }
+}
+
+#[test]
+fn children_may_write_through_the_capability_or_the_grant_and_nothing_else() {
+    assert!(CapabilityPolicy::default().children_may_write());
+    assert!(!read_only_role(false).children_may_write());
+    assert!(read_only_role(true).children_may_write());
+    let mut writer = read_only_role(false);
+    writer
+        .capabilities
+        .insert("workspace".to_string(), vec!["write_text".to_string()]);
+    assert!(writer.children_may_write());
+}
+
+#[test]
+fn the_child_write_grant_narrows_against_what_the_ceilings_children_could_do() {
+    // A ceiling whose children may write (unrestricted capabilities, as the
+    // default `harn run` policy has) lets a read-only role keep the grant.
+    let kept = CapabilityPolicy::default()
+        .intersect(&read_only_role(true))
+        .unwrap();
+    assert!(kept.process_sandbox.allow_child_workspace_write);
+    assert!(kept.children_may_write());
+    // So does a read-only ceiling that holds the grant itself.
+    let kept = read_only_role(true)
+        .intersect(&read_only_role(true))
+        .unwrap();
+    assert!(kept.children_may_write());
+    // A read-only ceiling without it cannot hand it down.
+    let dropped = read_only_role(false)
+        .intersect(&read_only_role(true))
+        .unwrap();
+    assert!(!dropped.process_sandbox.allow_child_workspace_write);
+    assert!(!dropped.children_may_write());
+    // A nested request that does not ask for it does not get it.
+    let unasked = read_only_role(true)
+        .intersect(&read_only_role(false))
+        .unwrap();
+    assert!(!unasked.children_may_write());
+}
+
+#[test]
+fn a_flattened_stage_cannot_add_child_writes_beyond_its_ceiling() {
+    let error = read_only_role(false)
+        .assert_within_ceiling(&read_only_role(true))
+        .expect_err("a read-only ceiling must refuse a child write grant");
+    assert!(error.contains("child processes write"), "{error}");
+    assert!(read_only_role(true)
+        .assert_within_ceiling(&read_only_role(true))
+        .is_ok());
+}
+
+#[test]
+fn the_child_write_grant_is_off_the_wire_until_set() {
+    let off = serde_json::to_value(ProcessSandboxPolicy::default()).unwrap();
+    assert!(off.get("allow_child_workspace_write").is_none());
+    let on: ProcessSandboxPolicy =
+        serde_json::from_value(serde_json::json!({"allow_child_workspace_write": true})).unwrap();
+    assert!(on.allow_child_workspace_write);
 }

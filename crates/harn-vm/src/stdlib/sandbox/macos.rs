@@ -16,7 +16,7 @@ use std::process::{Command, Output};
 
 use self::swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
-    normalized_process_roots, policy_allows_network, policy_allows_workspace_write,
+    normalized_process_roots, policy_allows_child_writes, policy_allows_network,
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
@@ -249,7 +249,7 @@ fn render_profile_with_extra_read_roots(
             sandbox_profile_escape(&root.display().to_string())
         ));
     }
-    if policy_allows_workspace_write(policy) {
+    if policy_allows_child_writes(policy) {
         for root in preset_write_roots(policy) {
             profile.push_str(&format!(
                 "(allow file-read* (subpath \"{}\"))\n",

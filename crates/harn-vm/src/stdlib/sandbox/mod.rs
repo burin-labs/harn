@@ -1659,13 +1659,13 @@ pub fn render_policy_root(path: &str) -> PathBuf {
     normalize_for_policy(&resolve_policy_path(path))
 }
 
+/// Whether the OS profile rendered for a child grants its writable roots.
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
-pub(crate) fn policy_allows_workspace_write(policy: &CapabilityPolicy) -> bool {
-    !policy.capabilities_are_restricted()
-        || policy_allows_capability(policy, "workspace", &["write_text", "delete"])
+pub(crate) fn policy_allows_child_writes(policy: &CapabilityPolicy) -> bool {
+    policy.children_may_write()
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
+#[cfg(target_os = "linux")]
 pub(crate) fn policy_allows_capability(
     policy: &CapabilityPolicy,
     capability: &str,

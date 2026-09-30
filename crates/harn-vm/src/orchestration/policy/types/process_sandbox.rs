@@ -136,6 +136,29 @@ pub struct ProcessSandboxPolicy {
     /// spawns. That widening is stated rather than hidden.
     #[serde(default, skip_serializing_if = "is_false")]
     pub allow_process_self_introspection: bool,
+    /// Let a confined child write its workspace roots, the process-only
+    /// `write_roots`, the session's temp dir, and the toolchain caches, even
+    /// when the policy grants no in-process workspace write.
+    ///
+    /// Without it a child writes wherever the policy's own `workspace`
+    /// capability does, so a role whose tools run commands but edit nothing (a
+    /// reviewer, a verifier) spawns children that cannot write anything: not
+    /// the workspace, not `TMPDIR`, not a compiler cache. Every test or build
+    /// such a role runs then fails on its first write.
+    ///
+    /// It widens the OS profile rendered for children and nothing else. Harn's
+    /// own file builtins stay gated on the `workspace` capability, and
+    /// `read_only_roots` stay unwritable to the child, because every backend
+    /// renders them read-only after the writable roots.
+    ///
+    /// A nested request keeps it only when its ceiling's children could
+    /// already write, through this grant or through the ceiling's workspace
+    /// capability; see [`CapabilityPolicy::children_may_write`]. Omitted from
+    /// the wire when false so no digest pinned before the field existed moves.
+    ///
+    /// [`CapabilityPolicy::children_may_write`]: super::CapabilityPolicy::children_may_write
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_child_workspace_write: bool,
     /// Absolute path to the helper that builds a private network namespace for
     /// a confined child, supplied by the embedder rather than compiled in.
     ///
@@ -240,12 +263,16 @@ impl ProcessSandboxPolicy {
         self.allow_tcp_loopback |= other.allow_tcp_loopback;
         extend_unique(&mut self.unix_socket_roots, &other.unix_socket_roots);
         self.allow_process_self_introspection |= other.allow_process_self_introspection;
+        self.allow_child_workspace_write |= other.allow_child_workspace_write;
         if let Some(path) = other.netns_launcher_path.as_ref() {
             self.netns_launcher_path = Some(path.clone());
         }
     }
 
-    pub(super) fn intersect(&self, requested: &Self) -> Self {
+    /// `ceiling_children_may_write` is whether a child spawned under the
+    /// ceiling policy could already write its workspace, which only the
+    /// enclosing [`super::CapabilityPolicy`] can answer.
+    pub(super) fn intersect(&self, requested: &Self, ceiling_children_may_write: bool) -> Self {
         let presets = match (&self.presets, &requested.presets) {
             (None, None) => None,
             _ => Some(intersect_presets(
@@ -278,6 +305,14 @@ impl ProcessSandboxPolicy {
             // keep the grant its ceiling already made and may never invent it.
             allow_process_self_introspection: self.allow_process_self_introspection
                 && requested.allow_process_self_introspection,
+            // Narrows against what the ceiling's children could actually do,
+            // not against the ceiling's flag alone. A ceiling that grants the
+            // `workspace` write capability already lets its children write, so
+            // a read-only role nested under it may keep that for its children
+            // without holding the capability itself; a ceiling whose children
+            // could write nothing cannot hand the grant down.
+            allow_child_workspace_write: requested.allow_child_workspace_write
+                && ceiling_children_may_write,
             // Host-owned like `allow_tcp_loopback` and for the same reason:
             // naming an executable that may build a namespace is authority,
             // and a nested request may neither invent it nor erase the one

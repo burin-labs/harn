@@ -136,6 +136,14 @@ impl ProcessSandboxMechanism {
                     None => String::new(),
                 }
             ),
+            Self::Write if grants.child_writes_withheld => {
+                "the sandbox refused a write because this \
+                policy lets its child processes write nowhere: its capabilities grant no \
+                workspace write and its process sandbox does not set \
+                allow_child_workspace_write. A role that runs builds or tests without editing \
+                files needs that grant"
+                    .to_string()
+            }
             Self::Write => "the sandbox refused a write outside every writable root; grant the \
                             directory as a process write root or point the tool's cache at \
                             the workspace"
@@ -153,6 +161,11 @@ impl ProcessSandboxMechanism {
 pub struct ProcessSandboxGrants {
     pub tcp_loopback: bool,
     pub unix_socket_roots: Vec<String>,
+    /// The policy lets its child processes write nowhere: a read-only role
+    /// with no child write grant, where even a workspace write is refused and
+    /// the fix is the grant, not another root. False by default, so a missing
+    /// policy never reads as a withheld one.
+    pub child_writes_withheld: bool,
     /// The home-relative credential path the output named, when the refused
     /// read was one the denylist refuses by design.
     pub denied_home_path: Option<String>,
@@ -163,6 +176,7 @@ impl ProcessSandboxGrants {
         Self {
             tcp_loopback: policy.process_sandbox.allow_tcp_loopback,
             unix_socket_roots: policy.process_sandbox.unix_socket_roots.clone(),
+            child_writes_withheld: !policy.children_may_write(),
             denied_home_path: None,
         }
     }

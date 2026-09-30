@@ -480,6 +480,24 @@ impl CapabilityPolicy {
         }
     }
 
+    /// Whether a child process spawned under this policy may write its
+    /// writable roots: the workspace roots, the process-only `write_roots`,
+    /// the session's temp dir, and the toolchain caches.
+    ///
+    /// The one owner of that decision for every OS backend. It is true when
+    /// the `workspace` capability grants a write (or capabilities are
+    /// unrestricted), or when the process sandbox grants
+    /// [`ProcessSandboxPolicy::allow_child_workspace_write`]. It never decides
+    /// what Harn's own file builtins may write; those read the capability
+    /// alone.
+    pub fn children_may_write(&self) -> bool {
+        self.process_sandbox.allow_child_workspace_write
+            || !self.capabilities_are_restricted()
+            || self
+                .capability_operations("workspace")
+                .is_some_and(|ops| ops.iter().any(|op| op == "write_text" || op == "delete"))
+    }
+
     pub fn restrict_capabilities(&mut self, capabilities: BTreeMap<String, Vec<String>>) {
         self.capabilities = encode_restricted_capabilities(capabilities);
     }
@@ -625,7 +643,9 @@ impl CapabilityPolicy {
         // yields os_hardened (the host gets the stricter of the two).
         let sandbox_profile =
             strictest_sandbox_profile(self.sandbox_profile, requested.sandbox_profile);
-        let process_sandbox = self.process_sandbox.intersect(&requested.process_sandbox);
+        let process_sandbox = self
+            .process_sandbox
+            .intersect(&requested.process_sandbox, self.children_may_write());
         // Only the outer/ceiling policy may contribute transport endpoints.
         // Never inherit them from a nested request: naming a loopback port is
         // authority because the OS sandbox will grant that exact destination.
@@ -874,6 +894,12 @@ impl CapabilityPolicy {
         {
             return Err(
                 "flattened stage policy enabled process self-introspection beyond the stage grant"
+                    .to_string(),
+            );
+        }
+        if requested_ps.allow_child_workspace_write && !self.children_may_write() {
+            return Err(
+                "flattened stage policy let child processes write beyond the stage grant"
                     .to_string(),
             );
         }

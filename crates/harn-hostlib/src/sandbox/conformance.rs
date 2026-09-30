@@ -252,6 +252,8 @@ struct Layout {
     _root: tempfile::TempDir,
     workspace: PathBuf,
     outside: PathBuf,
+    /// A root the read-only role cases grant read-only, holding a file.
+    read_only: PathBuf,
     socket_root: PathBuf,
     /// A directory under the workspace that the credential case puts on the
     /// denylist. The workspace grant covers it, so only the denial can refuse.
@@ -282,12 +284,14 @@ impl Layout {
         };
         let workspace = base.join("workspace");
         let outside = base.join("outside");
+        let read_only = base.join("read-only");
         let socket_root = base.join("sockets");
         let credentials = workspace.join(".harn-conformance-credentials");
-        for dir in [&workspace, &outside, &socket_root, &credentials] {
+        for dir in [&workspace, &outside, &read_only, &socket_root, &credentials] {
             std::fs::create_dir_all(dir)?;
         }
         std::fs::write(outside.join("secret.txt"), OUTSIDE_CONTENT)?;
+        std::fs::write(read_only.join("secret.txt"), OUTSIDE_CONTENT)?;
         std::fs::write(credentials.join("secret.txt"), OUTSIDE_CONTENT)?;
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
@@ -299,6 +303,7 @@ impl Layout {
             _root: root,
             workspace,
             outside,
+            read_only,
             socket_root,
             credentials,
             listener,
@@ -343,9 +348,39 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
         ConformanceCase::NetworkConnectAdmitted => {
             policy.side_effect_level = Some("network".to_string());
         }
+        ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused
+        | ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted => {
+            read_only_role(&mut policy, layout);
+        }
+        ConformanceCase::ChildWriteGrantWorkspaceWriteAdmitted
+        | ConformanceCase::ChildWriteGrantTempWriteAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootWriteRefused
+        | ConformanceCase::ChildWriteGrantOutsideWriteRefused
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
+            read_only_role(&mut policy, layout);
+            policy.process_sandbox.allow_child_workspace_write = true;
+        }
         _ => {}
     }
     policy
+}
+
+/// The capability policy of a role whose tools run commands and edit nothing:
+/// the `workspace` capability reads only, so its children write nowhere
+/// unless the process sandbox grants it. One root is granted read-only.
+fn read_only_role(policy: &mut CapabilityPolicy, layout: &Layout) {
+    policy.capabilities = BTreeMap::from([
+        ("process".to_string(), vec!["exec".to_string()]),
+        (
+            "workspace".to_string(),
+            vec![
+                "read_text".to_string(),
+                "list".to_string(),
+                "exists".to_string(),
+            ],
+        ),
+    ]);
+    policy.read_only_roots = vec![layout.read_only.display().to_string()];
 }
 
 /// The child's argv, and the path it touches (or what it reads, for the
@@ -353,9 +388,23 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
 fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
     let owned = |argv: &[&str]| argv.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
     match case {
-        ConformanceCase::WorkspaceWriteAdmitted => {
+        ConformanceCase::WorkspaceWriteAdmitted
+        | ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused
+        | ConformanceCase::ChildWriteGrantWorkspaceWriteAdmitted => {
             let target = layout.workspace.join("probe.txt");
             (write_argv(&target), target.display().to_string())
+        }
+        ConformanceCase::ChildWriteGrantReadOnlyRootWriteRefused => {
+            let target = layout.read_only.join("probe.txt");
+            (write_argv(&target), target.display().to_string())
+        }
+        ConformanceCase::ChildWriteGrantOutsideWriteRefused => {
+            let target = layout.outside.join("grant-probe.txt");
+            (write_argv(&target), target.display().to_string())
+        }
+        ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
+            read_probe(&layout.read_only.join("secret.txt"))
         }
         ConformanceCase::OutsideWriteRefused | ConformanceCase::GuardianOutsideWriteRefused => {
             let target = layout.outside.join("probe.txt");
@@ -389,7 +438,8 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
                 target.display().to_string(),
             )
         }
-        ConformanceCase::SessionTempWriteAdmitted => {
+        ConformanceCase::SessionTempWriteAdmitted
+        | ConformanceCase::ChildWriteGrantTempWriteAdmitted => {
             // The child names the file through its own TMPDIR; the target is
             // where the session temp dir must put it.
             let target =
@@ -629,7 +679,9 @@ fn observe(
     match case {
         ConformanceCase::OutsideReadRefused
         | ConformanceCase::SiblingTempReadRefused
-        | ConformanceCase::DeniedCredentialReadRefused => {
+        | ConformanceCase::DeniedCredentialReadRefused
+        | ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
             Ok(took_effect(child.stdout.contains(OUTSIDE_CONTENT)))
         }
         // The child has exited, so a connection it made is already queued on
