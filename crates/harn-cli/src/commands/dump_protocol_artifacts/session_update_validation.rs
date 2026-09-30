@@ -4,12 +4,12 @@ use super::records::Target;
 use serde_json::Value;
 
 pub(super) fn append_checks(out: &mut String, shape: &Value, target: Target) {
+    assert!(matches!(target, Target::Swift));
     append_object(out, shape, &[], target);
 }
 
 fn access(path: &[String], target: Target) -> String {
     match target {
-        Target::Rust => format!("value.pointer({:?})", format!("/{}", path.join("/"))),
         Target::Swift => {
             let mut result = "value".to_owned();
             for (index, key) in path.iter().enumerate() {
@@ -24,7 +24,6 @@ fn access(path: &[String], target: Target) -> String {
 fn refuse(out: &mut String, condition: &str, path: &[String], reason: &str, target: Target) {
     let message = format!("session update {} {reason}", path.join("."));
     match target {
-        Target::Rust => out.push_str(&format!("                if {condition} {{ return Err(serde::de::Error::custom({message:?})); }}\n")),
         Target::Swift => out.push_str(&format!("            if {condition} {{ throw DecodingError.dataCorruptedError(in: container, debugDescription: {message:?}) }}\n")),
         _ => unreachable!(),
     }
@@ -43,7 +42,6 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
             .is_some_and(|required| required.iter().any(|name| name == key))
         {
             let missing = match target {
-                Target::Rust => format!("{value}.is_none()"),
                 Target::Swift => format!("{value} == nil"),
                 _ => unreachable!(),
             };
@@ -51,9 +49,6 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
         }
         if let Some(minimum) = field["minLength"].as_u64() {
             let too_short = match target {
-                Target::Rust => format!(
-                    "{value}.and_then(Value::as_str).is_some_and(|text| text.chars().count() < {minimum})"
-                ),
                 Target::Swift => {
                     format!("({value}?.stringValue?.unicodeScalars.count ?? {minimum}) < {minimum}")
                 }
@@ -63,9 +58,6 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
         }
         if let Some(minimum) = field["minimum"].as_i64() {
             let too_small = match target {
-                Target::Rust => format!(
-                    "{value}.and_then(Value::as_i64).is_some_and(|number| number < {minimum})"
-                ),
                 Target::Swift => format!("({value}?.intValue ?? {minimum}) < {minimum}"),
                 _ => unreachable!(),
             };
@@ -74,9 +66,6 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
         if let Some(pattern) = field["pattern"].as_str() {
             assert_eq!(pattern, "\\S", "unsupported session-update string pattern");
             let blank = match target {
-                Target::Rust => format!(
-                    "{value}.and_then(Value::as_str).is_some_and(|text| text.trim().is_empty())"
-                ),
                 Target::Swift => format!(
                     "{value}?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true"
                 ),
@@ -87,9 +76,6 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
         if let Some(choices) = field["enum"].as_array() {
             let choices = string_choices(choices);
             let outside = match target {
-                Target::Rust => format!(
-                    "{value}.and_then(Value::as_str).is_some_and(|text| ![{choices}].contains(&text))"
-                ),
                 Target::Swift => {
                     format!("{value}?.stringValue.map({{ ![{choices}].contains($0) }}) == true")
                 }
@@ -104,7 +90,6 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
                 continue;
             }
             let present = match target {
-                Target::Rust => format!("{value}.is_some()"),
                 Target::Swift => format!("{value} != nil"),
                 _ => unreachable!(),
             };
@@ -133,9 +118,6 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
                     .expect("conditional string enum"),
             );
             let applies = match target {
-                Target::Rust => format!(
-                    "{value}.and_then(Value::as_str).is_some_and(|text| [{choices}].contains(&text))"
-                ),
                 Target::Swift => {
                     format!("{value}?.stringValue.map({{ [{choices}].contains($0) }}) == true")
                 }
@@ -149,7 +131,6 @@ fn append_object(out: &mut String, shape: &Value, path: &[String], target: Targe
                 required_path.push(field.as_str().expect("field name").to_owned());
                 let required = access(&required_path, target);
                 let missing = match target {
-                    Target::Rust => format!("{applies} && {required}.is_none()"),
                     Target::Swift => format!("({applies}) && {required} == nil"),
                     _ => unreachable!(),
                 };
