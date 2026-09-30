@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 use std::thread_local;
 
 use serde::de::{Error as DeError, MapAccess, Visitor};
@@ -19,8 +18,8 @@ mod sensitive_paths;
 pub use host_request::ToolApprovalRequest;
 use path_guards::default_guard;
 pub use path_guards::{
-    denial_gate_for_source, SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD,
-    SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
+    denial_gate_for_source, EXTERNAL_ROOT_READ_ONLY, SOURCE_DEFAULT_EXTERNAL_PATH,
+    SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
 };
 pub use rule_source::PolicyRuleSource;
 
@@ -552,6 +551,9 @@ struct EvaluationContext {
     mode: Option<String>,
     env_modes: Vec<String>,
     repeat_count: Option<u64>,
+    /// The external roots governing this call's declared paths, with their
+    /// modes, so the receipt states what access each root granted.
+    external_roots: Vec<super::ExternalRoot>,
 }
 
 impl EvaluationContext {
@@ -630,6 +632,7 @@ impl EvaluationContext {
             mode,
             env_modes,
             repeat_count,
+            external_roots: Vec::new(),
         }
     }
 
@@ -819,6 +822,7 @@ impl EvaluationContext {
             "mode": self.mode,
             "env_modes": self.env_modes,
             "repeat_count": self.repeat_count,
+            "external_roots": self.external_roots,
         })
     }
 }
@@ -930,7 +934,9 @@ pub fn evaluate_tool_approval_request(
     evaluate_context(policy, EvaluationContext::from_request(request))
 }
 
-fn evaluate_context(policy: &ToolApprovalPolicy, ctx: EvaluationContext) -> PolicyEvaluation {
+fn evaluate_context(policy: &ToolApprovalPolicy, mut ctx: EvaluationContext) -> PolicyEvaluation {
+    ctx.external_roots =
+        super::external_roots::governing_roots(&policy.external_roots, &ctx.path_entries);
     if let Some(default) = default_guard(policy, &ctx) {
         return evaluation_from_candidate(default, &ctx);
     }
@@ -1189,17 +1195,6 @@ fn risk_labels_for_rule(rule: &PolicyRule) -> Vec<String> {
     labels
 }
 
-fn under_external_root(path: &str, roots: &[String]) -> bool {
-    if roots.is_empty() {
-        return false;
-    }
-    let path = normalize_path(Path::new(path));
-    roots
-        .iter()
-        .map(|root| normalize_path(Path::new(root)))
-        .any(|root| path.starts_with(root))
-}
-
 fn path_entry_json(entry: &WorkspacePathInfo) -> JsonValue {
     serde_json::json!({
         "input": entry.input,
@@ -1421,27 +1416,6 @@ fn normalize_patterns_upper(patterns: &[String]) -> Vec<String> {
 
 fn collapse_whitespace(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let raw = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        crate::stdlib::process::execution_root_path().join(path)
-    };
-    let mut out = PathBuf::new();
-    for component in raw.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::Prefix(prefix) => out.push(prefix.as_os_str()),
-            std::path::Component::RootDir => out.push(component.as_os_str()),
-            std::path::Component::Normal(part) => out.push(part),
-        }
-    }
-    out
 }
 
 fn tool_kind_string(kind: crate::tool_annotations::ToolKind) -> &'static str {

@@ -1632,7 +1632,10 @@ agent/persona/mode, capability operation, and repeated-call counts. Deny wins
 over ask, ask wins over allow, and unmatched tools are approved. Active
 approval policies deny sensitive filenames such as `.env` and private keys by
 default, and declared host-absolute paths outside the workspace require an
-explicit `external_roots` allowance. Ask decisions call
+explicit `external_roots` allowance. Each root carries an `access` mode,
+`read` (the default, and the meaning of a bare path string) or `read_write`;
+a call that is not read-only is refused under a `read` root with
+`external_root_read_only`. Ask decisions call
 `session/request_permission`; the host request and the transcript event both
 carry a `policyDecision` receipt with matched rule and rationale.
 

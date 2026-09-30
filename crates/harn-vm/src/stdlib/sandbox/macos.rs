@@ -571,3 +571,7 @@ mod tests;
 #[cfg(test)]
 #[path = "macos/write_roots_tests.rs"]
 mod write_roots_tests;
+
+#[cfg(test)]
+#[path = "macos/external_root_tests.rs"]
+mod external_root_tests;

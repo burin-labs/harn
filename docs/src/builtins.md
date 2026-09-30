@@ -2787,6 +2787,26 @@ paths outside the workspace are also denied unless `external_roots` explicitly
 allows the root or `allow_external_paths: true` is set. Set
 `allow_sensitive_paths: true` only when a host already mediates secret reads.
 
+Each `external_roots` entry grants an access mode. Write it as
+`{path: "/opt/fixtures", access: "read"}` or
+`{path: "/opt/scratch", access: "read_write"}`. `access` defaults to `read`,
+and a bare path string also means `read`. Under a `read` root:
+
+- the approval boundary refuses any call that is not known to be read-only
+  (side effect `workspace_write` or stronger, or a non-read tool kind) with
+  the refusal id `external_root_read_only`, whose reason names the path, the
+  root, and its mode. This holds even with `allow_external_paths: true`.
+
+An approval-policy root does not by itself grant filesystem access. The
+`harness.fs.*` builtins and confined child processes read only the capability
+policy's `read_only_roots`, so a caller-authored approval policy cannot widen
+the parent's filesystem ceiling. A host that wants a `read` root readable by
+those builtins and children projects it into `read_only_roots` as well.
+
+When roots nest, the deepest root containing a path decides its mode. Each
+decision receipt lists the roots that governed its declared paths, with their
+modes, under `context.external_roots`.
+
 `ask` and `require_approval` call the host via the canonical ACP
 `session/request_permission` request and **fail closed** if the host does not
 implement it. The prompt payload includes a `policyDecision` receipt with the
@@ -2836,15 +2856,20 @@ const managed_enterprise_policy = {
     {deny: {domain: ["*.pastebin.com", "*.ngrok.io"]}},
     {deny: {path: ["**/.env*", "**/.aws/credentials"]}}
   ],
-  external_roots: ["/tmp/harn-approved"]
+  external_roots: [
+    {path: "/opt/reference", access: "read"},
+    {path: "/tmp/harn-approved", access: "read_write"}
+  ]
 }
 ```
 
 Policies compose
 across nested scopes with most-restrictive intersection: auto-deny and
 require-approval take the union, while `auto_approve` and
-`write_path_allowlist` take the intersection. Rule lists concatenate and retain
-deny/ask/allow precedence; repeat limits keep the smaller threshold.
+`write_path_allowlist` take the intersection. `external_roots` also take the
+intersection, and a root both scopes name keeps the narrower mode. Rule lists
+concatenate and retain deny/ask/allow precedence; repeat limits keep the
+smaller threshold.
 
 Example (`agent.harn`):
 

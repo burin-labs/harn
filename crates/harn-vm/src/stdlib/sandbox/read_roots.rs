@@ -6,10 +6,47 @@
 //! the OS backends and the pure path-scope checks read the same answers from
 //! here, which is what keeps a backend's rendered grant and the parent's view
 //! of the jail from drifting apart.
+//!
+//! [`normalized_read_only_roots`] is the one policy reading here: the
+//! read-only scope both consumers resolve. Host-granted external roots arrive
+//! through `CapabilityPolicy::read_only_roots`; approval-policy metadata does
+//! not independently grant filesystem access.
 
 use std::path::{Path, PathBuf};
 
 use super::paths::normalize_for_policy;
+use crate::orchestration::CapabilityPolicy;
+
+/// Normalize the policy's read-only roots. Unlike
+/// [`super::normalized_workspace_roots`], an empty list stays empty — read-only
+/// scope is purely additive, so there is no execution-root fallback to
+/// synthesize.
+///
+/// Host-granted external roots are already projected into the capability
+/// policy's `read_only_roots`. Keeping this scope owned by the capability
+/// policy means a caller-authored approval policy cannot widen filesystem
+/// access. Both the in-process filesystem builtins
+/// ([`super::check_fs_path_scope`]) and the OS sandbox profile for a confined
+/// child resolve the same roots here.
+pub(super) fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for root in &policy.read_only_roots {
+        let root = normalize_for_policy(&super::resolve_policy_path(root));
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    // Object stores borrowed through `objects/info/alternates` (e.g. a
+    // `git clone --shared`) live outside the workspace and are only ever read
+    // by git; grant them read-only scope. See [`crate::stdlib::git_topology`].
+    for dir in super::git_scope_extension_for_roots(&super::base_workspace_roots(policy)).read_only
+    {
+        if !roots.iter().any(|existing| existing == &dir) {
+            roots.push(dir);
+        }
+    }
+    roots
+}
 
 /// Per-user toolchain *cache* roots that JVM/iOS build tools read **and write**
 /// while a sandboxed build runs (Gradle, Maven, CocoaPods, Xcode, Kotlin

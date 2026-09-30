@@ -284,7 +284,7 @@ fn sandbox_exec_profile_scopes_toolchain_cache_writes() {
     );
 }
 
-fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
+pub(super) fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
     CapabilityPolicy {
         tools: Vec::new(),
         capabilities: std::collections::BTreeMap::from([(

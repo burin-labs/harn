@@ -2,7 +2,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::FsAccess;
 
-pub(super) fn normalize_for_policy(path: &Path) -> PathBuf {
+pub(crate) fn normalize_for_policy(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
