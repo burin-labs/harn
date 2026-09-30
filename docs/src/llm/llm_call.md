@@ -130,6 +130,7 @@ accounting lives under `usage`. The typed contract is
 | `data` | any | Parsed and optionally schema-validated value when `output` requests JSON |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
 | `thinking_summary` | string | Provider-supplied summary of the reasoning trace, when available |
+| `effective_reasoning_effort` | record | Provider-confirmed effort: `{status: "reported", level: string, source: string}` or `{status: "not_reported"}`. See [Effective reasoning effort](#effective-reasoning-effort). |
 | `stop_reason` | string | Provider-native stop vocabulary (`"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"`), kept for forensics — prefer `outcome` |
 | `tool_calls` | `list<LlmToolCall>` | Dispatchable tool calls, merged from the provider-native and text-protocol channels. Always present, possibly empty. |
 | `native_tool_calls` | `list<LlmToolCall>` | Provider-native tool calls only. Always present, possibly empty. |
@@ -147,6 +148,35 @@ The four text channels each have a distinct job — none are aliases.
 pre-projection source with protocol tags intact, `visible_text` is the
 sanitized human-visible output, and `canonical_text` is the canonical
 replay form of a tagged-protocol response.
+
+#### Effective reasoning effort
+
+`effective_reasoning_effort` is always present on a completed call. The
+Responses API supplies the level through its response's `reasoning.effort`
+field. Harn compares that echo with the final request after provider overrides.
+It doesn't infer a level from the requested effort, thinking budget, or token count.
+
+The record has `status: "reported"`, `level`, and one of these `source` values:
+
+| Source | Meaning |
+|---|---|
+| `operator` | The caller selected the echoed level. |
+| `catalog` | A catalog default selected the echoed level. |
+| `policy` | The reasoning policy selected the echoed level. |
+| `request` | The request selected the level, but its selection source is unavailable. |
+| `provider_default` | The request omitted effort and the provider echoed its default. |
+| `provider_adjusted` | The provider echoed a different level from the request. |
+
+Without a usable echo, the record is `{status: "not_reported"}`. This also
+applies to older recordings and providers without an effort echo.
+[Responses configuration updates](https://developers.openai.com/api/docs/guides/reasoning#change-reasoning-mid-conversation)
+can supersede the echoed request setting. Calls with configuration updates or
+an opaque `previous_response_id` therefore return `not_reported`.
+
+The same observation appears in provider response events, transcript
+`provider_payload` metadata, durable assistant messages under
+`_harn.effective_reasoning_effort`, and `usage.provider_telemetry`. Streaming calls
+include it on the terminal chunk.
 
 #### Usage
 

@@ -228,6 +228,14 @@ pub fn parse_llm_mock_value_versioned(
     };
 
     Ok(LlmMock {
+        effective_reasoning_effort: object
+            .get("effective_reasoning_effort")
+            .map(|value| {
+                serde_json::from_value(value.clone())
+                    .map_err(|error| format!("invalid effective_reasoning_effort: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default(),
         text,
         tool_calls,
         raw_tool_calls,
@@ -287,6 +295,13 @@ fn serialize_llm_mock_value(
 ) -> Result<serde_json::Value, String> {
     let versioned = v1_entry_id.is_some();
     let mut object = serde_json::Map::new();
+    if mock.effective_reasoning_effort != super::EffectiveReasoningEffort::NotReported {
+        object.insert(
+            "effective_reasoning_effort".into(),
+            serde_json::to_value(mock.effective_reasoning_effort)
+                .map_err(|error| format!("failed to serialize reasoning effort: {error}"))?,
+        );
+    }
     if let Some(match_pattern) = mock.match_pattern {
         object.insert(
             "match".to_string(),
@@ -585,6 +600,7 @@ fn required_v1_string_field(
 /// returns before reading them at v0, so authoring one here would be the very
 /// silent drop this check exists to stop.
 const V0_ENTRY_FIELDS: &[&str] = &[
+    "effective_reasoning_effort",
     "match",
     "consume_match",
     "text",
@@ -662,6 +678,7 @@ fn unknown_field_message(label: &str, key: &str, allowed_fields: &[&str]) -> Str
 }
 
 const V1_ENTRY_FIELDS: &[&str] = &[
+    "effective_reasoning_effort",
     "id",
     "scope",
     "consume",

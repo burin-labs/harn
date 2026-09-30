@@ -6,6 +6,7 @@ use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
 
 pub(super) fn base_payload() -> LlmRequestPayload {
     LlmRequestPayload {
+        reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
         data_controls: crate::llm_config::DataPosture::Default,
         inference_boundary: None,
         provider: "anthropic".to_string(),

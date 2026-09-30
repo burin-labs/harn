@@ -168,6 +168,7 @@ fn consume_label(sticky: bool) -> &'static str {
 
 #[derive(Clone, Debug)]
 pub struct LlmMock {
+    pub effective_reasoning_effort: super::EffectiveReasoningEffort,
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
     pub raw_tool_calls: Vec<RawProviderToolCall>,
@@ -830,7 +831,10 @@ fn build_mock_result(
         stop_reason: mock.stop_reason.clone(),
         blocks,
         logprobs: mock.logprobs.clone(),
-        telemetry: Box::new(ProviderTelemetry::mock_replay(mock.simulated_cost_usd)),
+        telemetry: Box::new(ProviderTelemetry {
+            effective_reasoning_effort: mock.effective_reasoning_effort.clone(),
+            ..ProviderTelemetry::mock_replay(mock.simulated_cost_usd)
+        }),
     }
 }
 
@@ -1050,6 +1054,7 @@ pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, res
         return;
     }
     state.recordings.push(LlmMock {
+        effective_reasoning_effort: result.telemetry.effective_reasoning_effort.clone(),
         text: result.text.clone(),
         tool_calls: result.tool_calls.clone(),
         raw_tool_calls: result.raw_tool_calls.clone(),

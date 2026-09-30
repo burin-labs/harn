@@ -11,6 +11,7 @@ use std::task::Poll;
 
 fn text_mock(text: &str) -> LlmMock {
     LlmMock {
+        effective_reasoning_effort: Default::default(),
         text: text.to_string(),
         tool_calls: Vec::new(),
         raw_tool_calls: Vec::new(),
@@ -112,7 +113,12 @@ fn cli_llm_mock_record_scope_collects_provider_worker_thread_results() {
     reset_llm_mock_state();
     enable_cli_llm_mock_recording();
     let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("anthropic"));
-    let result = build_mock_result(&text_mock("cross-thread record"), 7, &mut 0);
+    let mut result = build_mock_result(&text_mock("cross-thread record"), 7, &mut 0);
+    let effort = crate::llm::EffectiveReasoningEffort::Reported {
+        level: "medium".into(),
+        source: crate::llm::ReasoningEffortSource::ProviderDefault,
+    };
+    result.telemetry.effective_reasoning_effort = effort.clone();
 
     assert!(request.cli_llm_mock_scope.is_some());
     std::thread::spawn(move || record_cli_llm_result(&request, &result))
@@ -122,6 +128,16 @@ fn cli_llm_mock_record_scope_collects_provider_worker_thread_results() {
     let recordings = take_cli_llm_recordings();
     assert_eq!(recordings.len(), 1);
     assert_eq!(recordings[0].text, "cross-thread record");
+    let serialized = crate::llm::jsonl::serialize_llm_mock(recordings[0].clone()).unwrap();
+    let replay =
+        crate::llm::jsonl::parse_llm_mock_value(&serde_json::from_str(&serialized).unwrap())
+            .unwrap();
+    assert_eq!(
+        build_mock_result(&replay, 7, &mut 0)
+            .telemetry
+            .effective_reasoning_effort,
+        effort
+    );
     clear_cli_llm_mock_mode();
 }
 

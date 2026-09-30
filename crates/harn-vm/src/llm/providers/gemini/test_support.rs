@@ -10,6 +10,7 @@ use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
 /// A minimal single-user-turn Gemini payload.
 pub(super) fn gemini_payload(model: &str, thinking: ThinkingConfig) -> LlmRequestPayload {
     LlmRequestPayload {
+        reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
         data_controls: crate::llm_config::DataPosture::Default,
         inference_boundary: None,
         provider: "gemini".to_string(),

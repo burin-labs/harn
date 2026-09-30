@@ -143,8 +143,10 @@ pub(crate) fn effort_probe_ungated() -> bool {
 pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
     !effort_probe_ungated()
 }
+mod effective_effort;
 pub(crate) mod reasoning_modes;
 pub mod reasoning_receipt;
+pub use effective_effort::{EffectiveReasoningEffort, ReasoningEffortSource};
 pub use reasoning_receipt::{
     dropped_reasoning_receipts, peek_reasoning_receipts, reset_reasoning_receipts, ReasoningReceipt,
 };
@@ -1139,6 +1141,7 @@ mod tests {
     async fn execute_llm_call_retries_when_response_has_no_json_data() {
         reset_llm_state();
         mock::push_llm_mock(mock::LlmMock {
+            effective_reasoning_effort: Default::default(),
             text: "Analyzing the task carefully".to_string(),
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),
@@ -1162,6 +1165,7 @@ mod tests {
             stream_chunks: Vec::new(),
         });
         mock::push_llm_mock(mock::LlmMock {
+            effective_reasoning_effort: Default::default(),
             text: "{\"name\":\"Ada\"}".to_string(),
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),

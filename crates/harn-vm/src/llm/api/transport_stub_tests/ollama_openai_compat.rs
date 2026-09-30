@@ -17,7 +17,7 @@ impl Drop for Cleanup {
     }
 }
 
-fn read_http_request(stream: &mut std::net::TcpStream) -> (String, serde_json::Value) {
+pub(super) fn read_http_request(stream: &mut std::net::TcpStream) -> (String, serde_json::Value) {
     use std::io::Read;
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 4096];
