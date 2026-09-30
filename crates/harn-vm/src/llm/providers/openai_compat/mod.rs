@@ -486,6 +486,16 @@ impl OpenAiCompatibleProvider {
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
         let dialect = crate::llm::api::DialectContract::for_request(request);
+        self.chat_impl_with_dialect(request, delta_tx, dialect)
+            .await
+    }
+
+    pub(crate) async fn chat_impl_with_dialect(
+        &self,
+        request: &LlmRequestPayload,
+        delta_tx: Option<DeltaSender>,
+        dialect: crate::llm::api::DialectContract,
+    ) -> Result<LlmResult, VmError> {
         let caps = crate::llm::managed_supply::capabilities_for(&request.provider, &request.model);
         let mut body = dialect.build_openai_request_body_with_caps(request, &caps);
         Self::transform_request_with_caps(&mut body, &caps);

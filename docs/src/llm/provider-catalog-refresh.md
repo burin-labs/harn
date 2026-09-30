@@ -850,10 +850,21 @@ Each adapter is a function `adapter(env, config) -> {run, observations}`.
 
 ### Entry script: `scripts/update_provider_catalog.harn`
 
-Wires four canonical adapters (Anthropic and OpenAI pricing pages,
-the OpenRouter public `/api/v1/models` index, and a key-gated
-Fireworks API stub). Each adapter spec is built by a small
-factory function so the manifest stays readable.
+Fixture mode replays Anthropic and OpenAI pricing pages, the OpenRouter
+public index, and a key-gated Fireworks source. Live mode reads model-index
+sources and its network allowlist from
+`spec/provider-catalog-refresh-sources.json`, including the public OpenRouter
+index. Each source selects an existing mapper by a closed, typed name and
+declares whether its index requires a key and who owns its observations.
+
+The provider catalog supplies credential environment names and authentication
+style. The source registry carries no duplicate credential aliases. Harn's VM
+catalog projects these facts from the same artifact used by catalog tooling
+and includes the provider's local or hosted classification.
+
+Both modes validate the source registry before running an adapter. Empty
+registries, duplicate source IDs, unknown providers, and malformed typed
+records fail the refresh, including the offline `--check` path.
 
 ## Provenance contract
 

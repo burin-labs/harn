@@ -48,6 +48,7 @@ pub use changed_paths::{
     session_changed_paths, take_session_changed_paths,
 };
 mod journal;
+pub mod reclaim_hooks;
 mod subscribers;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
 pub(crate) use journal::{
@@ -1067,7 +1068,7 @@ pub fn close(id: &str) -> bool {
         return false;
     }
     if removed {
-        clear_session_changed_paths(id);
+        reclaim_hooks::release_closed_session(id);
     }
     // Cross-thread per-session state must be released too, otherwise
     // pending inbox entries can be delivered to a future session that
@@ -1116,7 +1117,7 @@ pub fn close_with_status(
     if !removed {
         return Ok(false);
     }
-    clear_session_changed_paths(id);
+    reclaim_hooks::release_closed_session(id);
     crate::orchestration::agent_inbox::clear_session(id);
     clear_unknown_host_event_warnings(id);
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::SessionClosed {

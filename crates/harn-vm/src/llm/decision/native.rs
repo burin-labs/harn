@@ -134,6 +134,13 @@ impl DecisionBackend for NativeDecisionBackend {
     ) -> Result<RawDecisionResponse, DecisionTransportError> {
         crate::llm::ensure_real_llm_allowed(request.provider)
             .map_err(|_| DecisionTransportError::AuthorityDenied)?;
+        let boundary_rule = crate::llm::api::inference_boundary::preflight(
+            None,
+            request.provider,
+            request.model,
+            &privacy_plan(&request).receipt,
+        )
+        .map_err(|diagnostic| DecisionTransportError::LocalAdmissionDenied { diagnostic })?;
         let body = request_body(&request)?;
         let definition = crate::llm_config::provider_config(request.provider)
             .ok_or_else(|| unsupported("decision provider is not configured"))?;
@@ -193,13 +200,14 @@ impl DecisionBackend for NativeDecisionBackend {
                 diagnostic: format!("native decision provider returned HTTP {status}"),
             });
         }
-        read_response(&request, &data)
+        read_response(&request, &data, boundary_rule)
     }
 }
 
 pub(super) fn read_response(
     request: &DecisionRequest<'_>,
     data: &Value,
+    boundary_rule: Option<&'static str>,
 ) -> Result<RawDecisionResponse, DecisionTransportError> {
     let fields = data
         .get("answers")
@@ -297,7 +305,22 @@ pub(super) fn read_response(
     Ok(RawDecisionResponse {
         usage: None,
         native_transport: Some(super::receipt::NativeTransportReceipt {
-            data_controls: privacy_plan(request).receipt,
+            data_controls: {
+                let mut receipt = privacy_plan(request).receipt;
+                receipt.inference_boundary_rule = boundary_rule.map(str::to_string);
+                if boundary_rule.is_some() {
+                    receipt.inference_catalog_evidence = Some(
+                        crate::llm::api::inference_boundary::catalog_evidence(
+                            request.provider,
+                            request.model,
+                        )
+                        .map_err(|diagnostic| {
+                            DecisionTransportError::LocalAdmissionDenied { diagnostic }
+                        })?,
+                    );
+                }
+                receipt
+            },
             provider_attempts_reported: data
                 .pointer("/providerMetadata/gateway/routing/totalProviderAttemptCount")
                 .and_then(Value::as_u64),

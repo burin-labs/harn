@@ -144,6 +144,15 @@ pub(super) fn opt_data_posture_field(
     }
 }
 
+pub(super) fn opt_inference_boundary_field(
+    options: Option<&crate::value::DictMap>,
+) -> Result<Option<crate::llm::api::InferenceBoundary>, VmError> {
+    options
+        .and_then(|opts| opts.get("inference_boundary"))
+        .map(crate::llm::api::inference_boundary::parse_vm_value)
+        .transpose()
+}
+
 pub(super) fn parse_schema_value(
     raw: Option<&VmValue>,
     field: &str,

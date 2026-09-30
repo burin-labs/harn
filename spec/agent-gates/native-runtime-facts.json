@@ -124,5 +124,12 @@
     "expression": "\"_iteration\"",
     "owner": "opt_int",
     "evidence": "The current iteration number is supplied by the runner for event and tool-dispatch evidence."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/call.rs",
+    "expression": "\"_user_visible\"",
+    "owner": "opt_bool",
+    "evidence": "The agent loop marks its main request as the turn a person is waiting to read; the schema loop streams that request's visible deltas to the host bridge only then."
   }
 ]

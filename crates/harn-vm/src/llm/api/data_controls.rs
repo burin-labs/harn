@@ -118,6 +118,12 @@ pub struct DataControlsReceipt {
     /// train would read as safe if this reported the provider's line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Governing rule when an embedder supplied an inference boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_boundary_rule: Option<String>,
+    /// Catalog locality and model-weight declarations used by that rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_catalog_evidence: Option<super::inference_boundary::InferenceCatalogEvidence>,
 }
 
 impl DataControlsReceipt {
@@ -171,12 +177,20 @@ pub(crate) fn training_refusal(
     provider: &str,
     model: &str,
     posture: DataPosture,
+    receipt: &DataControlsReceipt,
 ) -> Option<String> {
     if posture != DataPosture::StrictestAvailable {
         return None;
     }
     if crate::llm_config::effective_training_default(provider, model)
         != Some(crate::llm_config::TrainingDefault::Trains)
+    {
+        return None;
+    }
+    if receipt
+        .applied
+        .iter()
+        .any(|control| control.effect == "training")
     {
         return None;
     }
@@ -242,6 +256,8 @@ pub(crate) fn resolve(
                 control_scope: declaration.as_ref().map(|entry| entry.control_scope),
                 applied: Vec::new(),
                 note: route_note(declaration.and_then(|entry| entry.note)),
+                inference_boundary_rule: None,
+                inference_catalog_evidence: None,
             },
         };
     }
@@ -259,6 +275,8 @@ pub(crate) fn resolve(
                 control_scope: None,
                 applied: Vec::new(),
                 note: route_note(None),
+                inference_boundary_rule: None,
+                inference_catalog_evidence: None,
             },
         };
     };
@@ -301,6 +319,8 @@ pub(crate) fn resolve(
             control_scope: Some(declaration.control_scope),
             applied,
             note: route_note(declaration.note),
+            inference_boundary_rule: None,
+            inference_catalog_evidence: None,
         },
     }
 }

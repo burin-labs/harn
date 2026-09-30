@@ -1,6 +1,7 @@
 import { __judge_classify_verdict, __judge_run_checkpoint } from "std/agent/judge_internals"
 import { step_judge_system_prompt, step_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
+import { agent_tool_is_read_only } from "std/agent/tool_annotations"
 import { estimate_call_cost } from "std/llm/economics"
 
 fn __step_judge_schema() {
@@ -71,8 +72,42 @@ fn __effective_on_veto(
   return on_veto
 }
 
+fn __registry_entries(registry: any) -> list {
+  if type_of(registry) == "dict" {
+    return registry?.tools ?? []
+  }
+  if type_of(registry) == "list" {
+    return registry
+  }
+  return []
+}
+
+/**
+ * Whether every tool call in the step is read-only by its tool's declared
+ * annotation. A read changes nothing, so vetoing it only withholds the facts the
+ * next step needs; an unannotated tool counts as mutating.
+ */
+fn __step_is_read_only(opts: dict, llm_result: dict) -> bool {
+  const calls = llm_result?.tool_calls ?? []
+  if len(calls) == 0 {
+    return false
+  }
+  const entries = __registry_entries(opts?.tools)
+  for call in calls {
+    const name = to_string(call?.name ?? call?.function?.name ?? "")
+    const entry = entries.find(
+      { candidate -> to_string(candidate?.function?.name ?? candidate?.name ?? "") == name },
+    )
+    if entry == nil || !agent_tool_is_read_only(entry, opts?.policy, name) {
+      return false
+    }
+  }
+  return true
+}
+
 fn __should_skip(
   judge_cfg: dict,
+  opts: dict,
   llm_result: dict,
   attempts: int,
   stall_warning: any,
@@ -95,6 +130,9 @@ fn __should_skip(
   const skip_stalled = judge_cfg?.skip_when_stalled ?? true
   if skip_stalled && stall_warning != nil {
     return {skip: true, reason: "stall_already_detected"}
+  }
+  if __step_is_read_only(opts, llm_result) {
+    return {skip: true, reason: "read_only_step"}
   }
   return {skip: false}
 }
@@ -202,6 +240,22 @@ fn __invoke(harness: Harness, judge_cfg: dict, opts: dict, payload: any) {
     [critique, reasoning],
     feedback_default,
   )
+  // A veto the judge cannot explain gives the agent nothing to change: the
+  // fallback sentence is all it would read, and the step it withheld never
+  // runs. It stands as no objection, and the decision records why.
+  if outcome.vetoed && trim(to_string(critique)) == "" && trim(to_string(reasoning)) == "" {
+    return outcome
+      + {
+        vetoed: false,
+        verdict: "pass",
+        reason: "veto_without_critique",
+        reasoning: "",
+        critique: "",
+        confidence: confidence,
+        judge_duration_ms: duration_ms,
+        typed_checkpoint: checkpoint,
+      }
+  }
   return outcome
     + {
       reasoning: reasoning,
@@ -311,7 +365,14 @@ pub fn agent_step_judge(
     return {vetoed: false, skipped: true, reason: "not_configured"}
   }
   const on_veto = judge_cfg?.on_veto ?? "replace"
-  const skip = __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations)
+  const skip = __should_skip(
+    judge_cfg,
+    opts,
+    llm_result,
+    attempts,
+    stall_warning,
+    remaining_iterations,
+  )
   if skip.skip {
     const verdict = {
       vetoed: false,

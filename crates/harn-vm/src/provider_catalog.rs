@@ -255,6 +255,7 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
                 })
                 .collect(),
             chat_endpoint: provider.chat_endpoint.clone(),
+            chat_api_adapter: provider.chat_api_adapter,
             completion_endpoint: provider.completion_endpoint.clone(),
             embeddings_endpoint: provider.embeddings_endpoint.clone(),
         },

@@ -418,6 +418,52 @@ fn __judge_latest_mutation_per_target(
   return ordered
 }
 
+/**
+ * The latest call of each distinct command among the process calls whose
+ * declared role is `observation`: a general-purpose shell `run` whose output
+ * is what the task asked for.
+ *
+ * Such a call is often the work itself. "Run `wc -c README.md` and report the
+ * result" is finished by a `run` that is neither a mutation nor the verifier,
+ * and a packet built only from those slots dropped it: the judge was told an
+ * action was omitted, answered that the step had no evidence, and sent the
+ * agent back to run it again, six times over, on a correct answer. Only the
+ * fallback slot ever held an observation, and only when nothing else did.
+ *
+ * The role stays declared, never guessed: a process tool with no declared
+ * role is still `other` and still fills no slot. Keyed by the call's
+ * arguments, so repeating one command keeps only its latest result, and
+ * bounded like the mutation slots, keeping the most recent. What is dropped is
+ * still counted in `omitted_older_action_count`.
+ */
+fn __judge_latest_observation_per_command(
+  calls: list<AgentTranscriptToolLifecycle>,
+  opts: dict,
+) -> list<CompletionEvidenceAction> {
+  let latest_by_command = {}
+  let order: list<string> = []
+  for call in calls {
+    const action = __judge_lifecycle_action(call, opts)
+    if (action.harness_authored_only ?? false)
+      || action.semantics.read_only
+      || action.semantics.evidence_role != "observation" {
+      continue
+    }
+    const key = json_stringify(call.args ?? {})
+    order = order.filter({ seen -> seen != key }).to_list() + [key]
+    latest_by_command = latest_by_command
+      + {[key]: __judge_latest(latest_by_command[key], action)}
+  }
+  let ordered: list<CompletionEvidenceAction> = []
+  for key in order {
+    ordered = ordered + [latest_by_command[key]]
+  }
+  if len(ordered) > COMPLETION_MUTATION_TARGET_LIMIT {
+    return ordered.slice(len(ordered) - COMPLETION_MUTATION_TARGET_LIMIT, len(ordered))
+  }
+  return ordered
+}
+
 fn __judge_issue_evidence(issue: AgentTranscriptIssue) -> CompletionEvidenceIssue {
   return {
     code: __judge_clip_evidence(issue.code, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
@@ -507,14 +553,16 @@ pub fn __judge_evidence_projection_from_lifecycle(
   for issue in issue_tail {
     latest_issues = latest_issues + [__judge_issue_evidence(issue)]
   }
-  // Every touched path, then the verifier and the latest problem. State first,
-  // narrative second: the judge is being asked what the workspace looks like
-  // now, not which call happened last (#8090).
+  // Every touched path, every distinct command the task ran, then the
+  // verifier and the latest problem. State first, narrative second: the judge
+  // is being asked what the workspace looks like now, not which call happened
+  // last (#8090).
   const selected = if len(claim_refs) > 0 {
     claimed_actions
   } else {
     __judge_unique_slot_actions(
       __judge_latest_mutation_per_target(evidence_lifecycle.calls, opts)
+        + __judge_latest_observation_per_command(evidence_lifecycle.calls, opts)
         + [latest_verification, latest_problem],
     )
   }

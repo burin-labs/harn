@@ -24,6 +24,13 @@ fn arg_spec() {
         },
         {
           kind: "flag",
+          name: "tool_probe_report",
+          long: "--tool-probe-report",
+          parse: "string",
+          help: "Live Harn tool-probe report required to enable native tools.",
+        },
+        {
+          kind: "flag",
           name: "provider",
           long: "--provider",
           parse: "string",
@@ -234,7 +241,7 @@ fn __proposal_markdown(notice: dict, receipt: dict, candidate: ProviderCatalogCa
   return """# Incomplete provider catalog proposal
 
 This proposal was produced from a trusted provider notice. It intentionally
-does not add a model row until the missing facts below are verified.
+does not apply catalog changes until the missing facts below are verified.
 
 ## Source
 
@@ -372,7 +379,28 @@ pipeline main(harness: Harness, task: unknown) {
     {classification: "candidate"}
   }
   const extraction: dict = json_parse(json_stringify(extraction_value))
-  let plan = plan_notice(harness, notice_raw, extraction, catalog)
+  const tool_evidence = if options?.tool_probe_report != nil {
+    const result = __run(
+      harness.process,
+      options.harn_bin,
+      [
+        "provider",
+        "tool-scorecard",
+        "--tool-probe-report",
+        __from_root(root, options.tool_probe_report),
+        "--json",
+      ],
+      root,
+    )
+    if result.exit_code == 0 {
+      json_parse(result.stdout)
+    } else {
+      {error: trim(result.stderr ?? "tool-probe report validation failed")}
+    }
+  } else {
+    nil
+  }
+  let plan = plan_notice(harness, notice_raw, extraction, catalog, tool_evidence)
   const output_dir = __ensure_output_dir(harness.fs, root, options.output_dir)
   plan.receipt = plan.receipt
     + {
@@ -403,11 +431,9 @@ pipeline main(harness: Harness, task: unknown) {
   // produced a candidate, so a missing one here is a broken receipt rather than
   // an empty notice — say so instead of writing a patch from nothing.
   const candidate = plan.candidate
-  if plan.receipt.disposition == "incomplete_add" {
+  if ["incomplete_add", "incomplete_capability"].contains(plan.receipt.disposition) {
     if candidate == nil {
-      harness.stdio.eprintln(
-        "receipt disposition is 'incomplete_add' but the plan carries no candidate",
-      )
+      harness.stdio.eprintln("incomplete receipt carries no candidate")
       return 1
     }
     const proposal_path = path_join(output_dir, plan.receipt.notice_id + ".md")
