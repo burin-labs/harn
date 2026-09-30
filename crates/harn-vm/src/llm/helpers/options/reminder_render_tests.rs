@@ -11,6 +11,7 @@ fn reminder(
     body: &str,
 ) -> SystemReminder {
     SystemReminder {
+        goal_pin: None,
         id: "reminder-1".to_string(),
         tags: vec!["test".to_string()],
         dedupe_key: None,

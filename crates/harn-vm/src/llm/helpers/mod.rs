@@ -1,4 +1,5 @@
 mod blocks;
+mod goal_pin;
 mod messages;
 mod opt_get;
 mod options;
@@ -13,6 +14,7 @@ impl From<crate::llm_config::ModelResolutionError> for VmError {
     }
 }
 
+pub(crate) use goal_pin::GoalPinProjection;
 pub(crate) use messages::{
     json_messages_to_vm, vm_add_role_message, vm_message_value, vm_messages_to_json,
 };

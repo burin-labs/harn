@@ -732,6 +732,13 @@ payload is validated as a reminder spec; non-standard host metadata belongs unde
 `_meta`. Malformed reminder payloads are rejected with `HARN-RMD-002`; unknown
 top-level reminder options are rejected with `HARN-RMD-001`.
 
+`pin_reminder` can include a typed `goal_pin` projection with `spec` and
+`control_id`. The spec carries the objective, active and retired criteria
+(`id` and `description`), constraints, and budget. Machine-check callbacks stay
+with the caller. Harn updates this projection when a recorded retarget lands,
+so the pin preserves the current goal across compaction. An optional `max_body`
+preserves the visible-body limit from `pin_reminder` when Harn refreshes the pin.
+
 Hosts that need an operator-facing queue can call
 `session/pending_injections` with `{ "sessionId": "..." }`. The response is
 `{pendingCount, injections}` in FIFO order, with `kind: "user"` rows for

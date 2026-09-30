@@ -10,6 +10,9 @@
 // surface. The legacy `[no-compact]` heading marker is supported as a
 // documented ingestion format via `recognize_no_compact`.
 import { compaction_policy } from "std/agent/autocompact"
+import { __goal_pin_spec, __render_goal_text } from "std/agent/goal_contract"
+import { __agent_goal_projection } from "std/agent/goal_projection"
+import { agent_completion_obligations } from "std/agent/obligations"
 import { agent_session_inject_reminder } from "std/agent/state"
 import { agent_report_truncation } from "std/agent/truncation"
 
@@ -395,6 +398,16 @@ pub fn pin_reminder(agent: HarnessAgent, pin: dict, opts: any = nil) {
   if type_of(propagate) == "string" && propagate != "" {
     reminder = reminder + {propagate: propagate}
   }
+  if pin?.kind == "goal" && pin?.meta?.goal != nil {
+    reminder = reminder
+      + {
+        goal_pin: {
+          spec: __goal_pin_spec(pin.meta.goal),
+          control_id: pin?.meta?.goal_control_id,
+          max_body: options?.max_body,
+        },
+      }
+  }
   return reminder
 }
 
@@ -408,7 +421,68 @@ pub fn pin_reminder(agent: HarnessAgent, pin: dict, opts: any = nil) {
  * @api_stability: stable
  */
 pub fn agent_pin(agent: HarnessAgent, session_id: any, pin: dict) {
-  return agent_session_inject_reminder(agent, session_id, pin_reminder(agent, pin))
+  const obligations = if pin?.kind == "goal" && pin?.meta?.goal != nil {
+    agent_completion_obligations(agent, session_id, "")
+  } else {
+    nil
+  }
+  const current = if pin?.kind == "goal" && pin?.meta?.goal != nil {
+    const projected = __agent_goal_projection(agent, session_id, pin.meta.goal, obligations)
+    pin
+      + {
+        content: __render_goal_text(projected),
+        meta: pin.meta + {goal: projected, goal_control_id: obligations?.retarget?.control_id},
+      }
+  } else {
+    pin
+  }
+  return agent_session_inject_reminder(agent, session_id, pin_reminder(agent, current))
+}
+
+/**
+ * Refresh persisted typed goal pins at a control boundary, including replay.
+ * @effects: [agent]
+ * @errors: [runtime]
+ * @api_stability: internal
+ */
+pub fn __agent_refresh_goal_pins(agent: HarnessAgent, session_id: string) -> nil {
+  const obligations = agent_completion_obligations(agent, session_id, "")
+  if obligations?.retarget == nil {
+    return nil
+  }
+  const events = (agent.snapshot(session_id) ?? {})?.events ?? []
+  for event in events {
+    const reminder = event?.reminder
+    if event?.kind != "system_reminder" || reminder?.goal_pin == nil
+      || reminder.goal_pin?.control_id == obligations.retarget.control_id {
+      continue
+    }
+    const current = __agent_goal_projection(agent, session_id, reminder.goal_pin.spec, obligations)
+    agent_session_inject_reminder(
+      agent,
+      session_id,
+      {
+        body: __pin_reminder_body(
+          agent,
+          __render_goal_text(current),
+          {max_body: reminder.goal_pin?.max_body},
+        ),
+        dedupe_key: reminder.dedupe_key,
+        preserve_on_compact: reminder.preserve_on_compact,
+        role_hint: reminder.role_hint,
+        authority: reminder.authority,
+        tags: reminder.tags,
+        propagate: reminder.propagate,
+        ttl_turns: reminder.ttl_turns,
+        goal_pin: {
+          spec: __goal_pin_spec(current),
+          control_id: obligations.retarget.control_id,
+          max_body: reminder.goal_pin?.max_body,
+        },
+      },
+    )
+  }
+  return nil
 }
 
 /**

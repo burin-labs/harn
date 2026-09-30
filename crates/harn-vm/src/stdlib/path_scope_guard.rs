@@ -151,6 +151,7 @@ pub fn scope_alert_reminder(
         anchor = anchor.primary.display(),
     );
     SystemReminder {
+        goal_pin: None,
         id: format!("scope-alert:{tool_name}:{}", short_path_hash(path)),
         tags: vec!["scope_alert".to_string()],
         dedupe_key: Some(format!("scope_alert:{tool_name}:{}", short_path_hash(path))),

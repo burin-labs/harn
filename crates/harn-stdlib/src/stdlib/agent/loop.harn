@@ -10,6 +10,7 @@ import {
 import { agent_tool_format_override_warning_text } from "std/agent/options"
 import { __validate_agent_loop_option_keys } from "std/agent/options_surface"
 import { __validate_removed_agent_loop_options } from "std/agent/options_validation"
+import { __agent_primary_system_text } from "std/agent/preflight"
 import {
   agent_purpose_label_config,
   agent_purpose_label_prompt_fragment,
@@ -78,7 +79,14 @@ pub fn agent_loop(
     if effective_system != nil && effective_system != "" {
       opts = opts + {_primary_system: effective_system}
     }
-    const initialized_session = agent_session_init(harness.agent, message, effective_system, opts)
+    // The loop projects context fragments each turn; they are not part of
+    // the session's retained base prompt.
+    const initialized_session = agent_session_init(
+      harness.agent,
+      message,
+      effective_system,
+      __dict_omit(opts, ["context_profile"]),
+    )
     session = initialized_session
     if initialized_session.done {
       session_finalized = true
@@ -88,6 +96,10 @@ pub fn agent_loop(
       }
       return completed_result
     }
+    // Capture even an empty base once, before a turn stores its assembled
+    // prompt. Dynamic fragments must never become the next turn's base.
+    opts = opts
+      + {_primary_system: __agent_primary_system_text(harness.agent, initialized_session, opts)}
     agent_scratchpad_init(harness.agent, initialized_session, opts)
     if opts?._tool_format_override != nil {
       agent_emit_event(

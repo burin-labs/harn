@@ -1,3 +1,6 @@
+import { __render_goal_text } from "std/agent/goal_contract"
+import { __agent_goal_projection } from "std/agent/goal_projection"
+import { agent_completion_obligations } from "std/agent/obligations"
 import { agent_tool_format } from "std/agent/options"
 import { __validate_done_sentinel } from "std/agent/options_validation"
 import { loop_until_done_system_prompt, render_agent_prompt_id } from "std/agent/prompts"
@@ -652,11 +655,22 @@ pub fn __with_prompt_fragment(agent_options: any, fragment: any) {
   return opts + {context_profile: profile + {prompt_fragments: existing + [fragment]}}
 }
 
-fn __agent_context_profile_fragments(opts: dict) {
+fn __agent_context_profile_fragments(agent: HarnessAgent, session: dict, opts: dict) {
   let fragments = []
   const profile = opts?.context_profile ?? opts?.project_context_profile ?? {}
   for fragment in profile?.prompt_fragments ?? [] {
-    const body = trim(fragment?.body ?? fragment?.content ?? "")
+    const body = if fragment?.goal != nil {
+      __render_goal_text(
+        __agent_goal_projection(
+          agent,
+          session.session_id,
+          fragment.goal,
+          agent_completion_obligations(agent, session.session_id, session?.task ?? ""),
+        ),
+      )
+    } else {
+      trim(fragment?.body ?? fragment?.content ?? "")
+    }
     if body == "" {
       continue
     }
@@ -673,8 +687,14 @@ fn __agent_context_profile_fragments(opts: dict) {
   return fragments
 }
 
-fn __agent_primary_system_text(agent: HarnessAgent, session: dict, opts: dict) {
-  if opts?._primary_system != nil && opts._primary_system != "" {
+/**
+ * Resolve the caller's base prompt before turn fragments are assembled.
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __agent_primary_system_text(agent: HarnessAgent, session: dict, opts: dict) -> string {
+  if opts?._primary_system != nil {
     return opts._primary_system
   }
   if type_of(opts?.system) == "string" && opts.system != "" {
@@ -738,7 +758,7 @@ pub fn agent_build_turn_system_fragments(
     "mcp_advisory",
     __agent_mcp_initialize_advisory_prompt(opts),
   )
-  fragments = fragments + __agent_context_profile_fragments(opts)
+  fragments = fragments + __agent_context_profile_fragments(harness.agent, session, opts)
   fragments = __agent_push_system_fragment(
     fragments,
     "active_skills",

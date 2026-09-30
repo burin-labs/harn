@@ -133,6 +133,7 @@ fn session_remind_payload_from_value(
         "dedupe_key",
         "fired_at_turn",
         "id",
+        "goal_pin",
         "preserve_on_compact",
         "propagate",
         "role_hint",
@@ -200,6 +201,14 @@ fn session_remind_payload_from_value(
         authority::directive_authority(string_field(map, "authority", false)?.as_deref())
             .map_err(session_remind_shape_error)?;
     Ok(crate::llm::helpers::SystemReminder {
+        goal_pin: map
+            .get("goal_pin")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                crate::llm::helpers::GoalPinProjection::from_json(value.clone())
+                    .map_err(session_remind_shape_error)
+            })
+            .transpose()?,
         id: string_field(map, "id", false)?.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
         tags: tags_field(map)?,
         dedupe_key: string_field(map, "dedupe_key", false)?,

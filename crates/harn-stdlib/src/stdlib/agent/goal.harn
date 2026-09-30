@@ -1,3 +1,5 @@
+pub import { GoalCriterion, GoalSpec, goal_under_obligations } from "std/agent/goal_contract"
+import { __goal_judge_system, __goal_pin_spec, __render_goal_text } from "std/agent/goal_contract"
 import { JudgeConfig } from "std/agent/options_types"
 // Goal object: a typed, long-running objective the agent converges on. A goal
 // bundles an `objective`, machine-checkable `success_criteria`, `constraints`,
@@ -32,26 +34,6 @@ const __GOAL_DONE_MARKER = "<<GOAL-DONE>>"
 fn __goal_callable(value: any) {
   const kind = type_of(value)
   return kind == "closure" || kind == "function" || kind == "fn"
-}
-
-/**
- * A single success criterion. `description` is the human/LLM-checkable statement;
- * `check` is an OPTIONAL host-fact callback `(facts) -> bool` that makes the
- * criterion machine-checkable (deterministic floor) instead of LLM-judged.
- */
-pub type GoalCriterion = {id?: string, description: string, check?: any}
-
-/**
- * GoalSpec is the normalized shape returned by `goal(spec)`. `retired_criteria`
- * is set only by `goal_under_obligations`: the criteria an operator retarget
- * retired, kept so a reader can tell them from criteria that were met.
- */
-pub type GoalSpec = {
-  objective: string,
-  success_criteria?: list<GoalCriterion>,
-  constraints?: list<string>,
-  budget?: dict,
-  retired_criteria?: list<GoalCriterion>,
 }
 
 pub type GoalJudgeOptions = {
@@ -134,33 +116,6 @@ pub fn goal(spec: dict) {
   }
 }
 
-fn __render_goal_text(g: any) {
-  let lines = ["## Goal", "Objective: " + g.objective]
-  if len(g.success_criteria) > 0 {
-    lines = lines.appending("Success criteria:")
-    for crit in g.success_criteria {
-      lines = lines.appending("- " + crit.description)
-    }
-  }
-  const retired = g.retired_criteria ?? []
-  if len(retired) > 0 {
-    lines = lines.appending("Retired by the operator's retarget (no longer owed, not met):")
-    for crit in retired {
-      lines = lines.appending("- " + crit.description)
-    }
-  }
-  if len(g.constraints) > 0 {
-    lines = lines.appending("Constraints:")
-    for c in g.constraints {
-      lines = lines.appending("- " + c)
-    }
-  }
-  if len(g.budget.keys()) > 0 {
-    lines = lines.appending("Budget: " + json_stringify(g.budget))
-  }
-  return join(lines, "\n")
-}
-
 /**
  * goal_text(goal) renders the goal into its canonical prompt block. Exposed for
  * callers that assemble prompts by hand.
@@ -169,7 +124,7 @@ fn __render_goal_text(g: any) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_text(g: dict) {
+pub fn goal_text(g: GoalSpec) -> string {
   return __render_goal_text(g)
 }
 
@@ -184,7 +139,7 @@ pub fn goal_text(g: dict) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_prompt_part(g: dict) {
+pub fn goal_prompt_part(g: GoalSpec) {
   return system_prompt_part(__render_goal_text(g), {label: "goal", position: "before"})
 }
 
@@ -197,8 +152,10 @@ pub fn goal_prompt_part(g: dict) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_context_fragment(g: dict) {
-  return {body: __render_goal_text(g), id: "goal", source: "goal"}
+pub fn goal_context_fragment(
+  g: GoalSpec,
+) -> {body: string, id: string, source: string, goal: GoalSpec} {
+  return {body: __render_goal_text(g), id: "goal", source: "goal", goal: g}
 }
 
 /**
@@ -225,34 +182,13 @@ pub fn with_goal(agent_options: any, g: GoalSpec) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_pin(random: HarnessRandom, g: dict) {
-  return pin(random, "goal", __render_goal_text(g), {dedupe_key: "pin/goal"})
-}
-
-/**
- * goal_under_obligations(goal, obligations?) returns the goal as a run's
- * completion obligations leave it. An accepted steer that retargeted the run
- * (`obligations.retarget`, read from the recorded control row) replaces the
- * objective, and every success criterion set under the previous objective moves
- * to `retired_criteria`: no longer owed, and not met either. Constraints and
- * budget stand. Without a retarget the goal is returned unchanged.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: goal_under_obligations(g, payload?.obligations)
- */
-pub fn goal_under_obligations(g: GoalSpec, obligations: any = nil) -> GoalSpec {
-  const objective = trim(to_string(obligations?.retarget?.objective ?? ""))
-  if objective == "" {
-    return g
-  }
-  return g
-    + {
-      objective: objective,
-      success_criteria: [],
-      retired_criteria: (g.retired_criteria ?? []) + (g.success_criteria ?? []),
-    }
+pub fn goal_pin(random: HarnessRandom, g: GoalSpec) {
+  return pin(
+    random,
+    "goal",
+    __render_goal_text(g),
+    {dedupe_key: "pin/goal", meta: {goal: __goal_pin_spec(g)}},
+  )
 }
 
 /**
@@ -286,16 +222,6 @@ pub fn goal_check(g: GoalSpec, facts: any = nil) {
   return {checkable: len(met) + len(unmet), done: len(unmet) == 0, met: met, unmet: unmet}
 }
 
-fn __goal_judge_system(g: any) {
-  let lines = [
-    "You are the goal completion judge. Decide whether the stated goal is fully met by the work so far.",
-    "Return `action: \"accept\"` only if every success criterion is satisfied. Otherwise return `action: \"continue\"` with one concrete repair and the remaining specific gaps.",
-    "",
-    __render_goal_text(g),
-  ]
-  return join(lines, "\n")
-}
-
 /**
  * goal_judge(goal, opts?) returns a `turn_end_condition` JudgeConfig (see
  * `std/agent/judge`) whose system prompt embeds the goal. Spread it into
@@ -313,6 +239,7 @@ fn __goal_judge_system(g: any) {
 pub fn goal_judge(g: GoalSpec, opts: GoalJudgeOptions? = nil) -> JudgeConfig {
   const o = opts ?? {}
   let config: JudgeConfig = {
+    goal: g,
     feedback_fallback: o?.feedback_fallback
       ?? "The goal is not yet met; keep working toward the success criteria.",
     max_invocations: o?.max_invocations ?? __GOAL_MAX_RELOOPS,

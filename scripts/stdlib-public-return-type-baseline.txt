@@ -15,7 +15,7 @@
 # count    2  crates/harn-stdlib/src/stdlib/agent/daemon.harn
 # count   13  crates/harn-stdlib/src/stdlib/agent/events.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/fact.harn
-# count    8  crates/harn-stdlib/src/stdlib/agent/goal.harn
+# count    6  crates/harn-stdlib/src/stdlib/agent/goal.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/governors.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/guardrails.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/host_tools.harn
@@ -203,11 +203,9 @@ crates/harn-stdlib/src/stdlib/agent/fact.harn::invalidate_facts
 crates/harn-stdlib/src/stdlib/agent/fact.harn::store_fact
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_check
-crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_context_fragment
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_pin
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_prompt_part
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_reloop
-crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_text
 crates/harn-stdlib/src/stdlib/agent/goal.harn::with_goal
 crates/harn-stdlib/src/stdlib/agent/governors.harn::compose_post_turn
 crates/harn-stdlib/src/stdlib/agent/governors.harn::governor_post_turn

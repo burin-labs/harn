@@ -630,6 +630,7 @@ fn same_provider_reminder(
         && existing.source == candidate.source
         && existing.body == candidate.body
         && existing.originating_agent_id == candidate.originating_agent_id
+        && existing.goal_pin == candidate.goal_pin
 }
 
 /// Stop future projection of a live session reminder.
@@ -680,4 +681,32 @@ pub fn revoke_reminder(id: &str, reminder_id: &str) -> Result<&'static str, Stri
         }
         Ok("unknown_reminder_id")
     })
+}
+
+/// Retire the goal pins frozen under the previous objective. The delivered
+/// retarget's contract directive becomes the durable replacement goal pin.
+pub(crate) fn retire_goal_pins(id: &str) -> Result<(), String> {
+    let reminders = super::snapshot(id)
+        .and_then(|snapshot| snapshot.as_dict().cloned())
+        .and_then(|snapshot| snapshot.get("events").cloned())
+        .and_then(|events| match events {
+            VmValue::List(events) => Some(events),
+            _ => None,
+        })
+        .map(|events| {
+            events
+                .iter()
+                .filter_map(crate::llm::helpers::reminder_from_event)
+                .filter(|reminder| {
+                    reminder.goal_pin.is_none()
+                        && reminder.tags.iter().any(|tag| tag == "pin")
+                        && reminder.tags.iter().any(|tag| tag == "goal")
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for reminder in reminders {
+        revoke_reminder(id, &reminder.id)?;
+    }
+    Ok(())
 }
