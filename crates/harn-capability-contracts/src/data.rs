@@ -308,7 +308,7 @@ capability_method!(
     system_sandbox_confinement,
     "harness.system.sandbox_confinement",
     ["host.read@const=sandbox"],
-    "__cap_system_sandbox_confinement() -> dict",
+    "__cap_system_sandbox_confinement() -> {schema: string, backend: string, mechanism: string, confines_processes: bool, os_hardened_refusal: {category: string, message: string, source: string, sandbox_mechanism: {schema: string, mechanism: string, availability: string, profile: string, requirement: string, selector_honored: bool}}?}",
     "Read whether this host can confine child processes, and the refusal an os_hardened spawn gets when it cannot."
 );
 capability_method!(

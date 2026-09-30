@@ -752,14 +752,32 @@ E2B, …) implement the same trait from wherever they run.
 
 ## Diagnostics from a script
 
-Three Harn builtins surface backend identity for `harn doctor`-style
+Harn builtins surface backend identity and confinement for `harn doctor`-style
 scripts and conformance fixtures:
 
 | Builtin | Returns | Use |
 |---|---|---|
 | `harness.system.sandbox_active_backend()` | `string` | name of the compiled-in backend (`linux`, `macos`, `openbsd`, `unconfined`) |
-| `harness.system.sandbox_backend_available()` | `bool` | whether the platform mechanism behind the backend is reachable on the running host |
+| `harness.system.sandbox_backend_available()` | `bool` | whether the backend is available; Linux reports `true` even when Landlock is unavailable |
 | `harness.system.sandbox_active_profile()` | `string` | profile carried by the current execution policy (`worktree` under default `harn run`, `unrestricted` if no policy is active) |
+| `harness.system.sandbox_confinement()` | closed record | whether this host can confine child processes, before any spawn |
+
+The confinement record has schema `harn.process.sandbox_confinement.v1`.
+Its `backend` names the compiled backend; `mechanism` names its filesystem
+confinement mechanism. `confines_processes` reports whether that mechanism is
+available on the running host. On Linux, the backend can be available while
+Landlock is unavailable, so check `confines_processes` before promising confinement.
+
+When the mechanism is unavailable, `os_hardened_refusal` contains the exact
+structured value an `os_hardened` spawn throws. Otherwise it is `nil`.
+Both `harness.process.run` and `harness.tools.run_command` preserve this value
+in a `catch` binding. This host status doesn't guarantee that every requested
+policy dimension is enforceable; each spawn checks its own policy.
+
+ACP clients read the same engine-host record from
+`agentCapabilities._meta.harn.sandboxConfinement` in the initialize response.
+This lets a client report a remote engine's confinement status before its
+first command.
 
 ## Replay fidelity
 

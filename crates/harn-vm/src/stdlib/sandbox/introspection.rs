@@ -126,7 +126,7 @@ pub fn host_confinement() -> VmValue {
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "sandbox_confinement() -> dict",
+    sig = "sandbox_confinement() -> {schema: string, backend: string, mechanism: string, confines_processes: bool, os_hardened_refusal: {category: string, message: string, source: string, sandbox_mechanism: {schema: string, mechanism: string, availability: string, profile: string, requirement: string, selector_honored: bool}}?}",
     category = "sandbox"
 )]
 fn sandbox_confinement_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

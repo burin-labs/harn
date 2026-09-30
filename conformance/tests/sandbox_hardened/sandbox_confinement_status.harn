@@ -6,8 +6,8 @@
  * confines. Both spawn paths are checked, because hostlib's `run_command` used
  * to flatten the typed refusal into a `backend_error` string.
  */
-fn os_hardened_outcome(harness: Harness, attempt: any) -> any {
-  return harness.runtime.with_execution_policy(
+fn os_hardened_outcome(runtime: HarnessRuntime, attempt: any) -> any {
+  return runtime.with_execution_policy(
     {sandbox_profile: "os_hardened"},
     { ->
       const outcome = try {
@@ -40,12 +40,12 @@ pipeline default(harness: Harness) {
     ["printf", "ok"]
   }
   const hostlib = os_hardened_outcome(
-    harness,
+    harness.runtime,
     { -> harness.tools.run_command({argv: argv, cwd: harness.fs.workspace_temp_dir()}) },
   )
   harness.stdio.println(agrees(status, hostlib))
   const process = os_hardened_outcome(
-    harness,
+    harness.runtime,
     { -> harness.process.run({program: argv[0], args: argv[1:len(argv)]}) },
   )
   harness.stdio.println(agrees(status, process))
