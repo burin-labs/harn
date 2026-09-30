@@ -64,6 +64,16 @@ for conclusion in failure cancelled timed_out none; do
   refuses consumer_rehearsal_failed
 done
 
+# An unset repository secret arrives as a bare owner and fails by name.
+if PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/ \
+  CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
+  TARGET_VERSION=v1.2.3-dev CANARY_POLL_SECONDS=0 \
+  bash "$root/scripts/ci/consumer_canary.sh" > "$scratch/out" 2>&1; then
+  echo "an unset consumer repository reported green" >&2
+  exit 1
+fi
+grep -q "reason=consumer_repository_unset" "$scratch/out"
+
 # A dispatch that names no run is not a pass.
 : > "$scratch/dispatch"
 refuses dispatch_returned_no_run

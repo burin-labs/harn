@@ -75,7 +75,9 @@ canary_main() {
   local repo=${CANARY_REPOSITORY:-} workflow=${CANARY_WORKFLOW:-}
   local revision=${SOURCE_REVISION:-} version=${TARGET_VERSION:-}
   local poll=${CANARY_POLL_SECONDS:-60} deadline=${CANARY_DEADLINE_SECONDS:-2400}
-  [[ -n "$repo" ]] || canary_fail consumer_repository_unset
+  # The job joins the owner and the secret's name, so an unset secret arrives
+  # as "owner/" and must not reach the API as a half-formed repository.
+  [[ "$repo" =~ ^[^/]+/[^/]+$ ]] || canary_fail consumer_repository_unset
   CANARY_SECRET_NAME=${repo#*/}
   [[ -n "$workflow" ]] || canary_fail consumer_workflow_unset
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || canary_fail source_revision_invalid
