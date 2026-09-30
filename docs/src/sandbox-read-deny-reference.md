@@ -24,8 +24,8 @@ Two properties distinguish it from every other field:
 
 - **It beats every grant.** The denial is checked before any preset, any
   `read_roots` entry, and any `workspace_roots` entry. `PackageManagerConfig`
-  grants `~/.config`, `~/.cache`, and `~/.netrc` wholesale, so a term that
-  merely competed with presets would never fire on the paths it exists for.
+  grants tool roots such as `~/.config/composer`, whose `auth.json` remains
+  denied. Explicit host grants may also cover credential directories.
 - **It unions as policies nest.** `CapabilityPolicy::intersect` narrows presets
   and roots to their common set. Narrowing a *denial* would widen authority, so
   a nested policy may add a denial and can never drop one.
@@ -67,9 +67,9 @@ the data instead of in a comment that drifts from it.
 `.cache/huggingface/stored_tokens`.
 
 The list names the default credential locations of widely used CLIs. It is not
-exhaustive: a tool whose credentials sit elsewhere under the preset-granted
-`~/.config` or `~/.cache` stays readable until it is added here or a host adds
-it through `read_deny_roots`.
+exhaustive: credentials elsewhere inside an admitted tool root need another
+denial. Unknown `~/.config` and `~/.cache` siblings aren't admitted by the
+preset. See [Toolchain config and cache reference](./sandbox-config-census.md).
 
 A denied config file is not left for the tool to trip over. npm and pnpm read
 `~/.npmrc` at startup and exit on the `EPERM`, so a confined child instead gets

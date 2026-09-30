@@ -1,5 +1,5 @@
 //! Every default denylist entry is refused to a live confined child, even
-//! though `PackageManagerConfig` grants the directory that holds it.
+//! though an explicit host read root grants the directory that holds it.
 //!
 //! The substitution tests in `linux_tests.rs` check which paths the backend
 //! decided to grant. This checks the claim a reader of
@@ -13,7 +13,7 @@ use crate::orchestration::{
 };
 use crate::stdlib::sandbox::{command_output, ProcessCommandConfig};
 
-/// Concrete credential files at CLI default locations under the preset-granted
+/// Concrete credential files at CLI default locations under the host-granted
 /// directories. Each must be refused whatever shape its denylist entry takes,
 /// a file or a directory above it, so a narrowed or dropped entry fails here
 /// by name rather than by the entry disappearing from the loop below.
@@ -49,15 +49,15 @@ fn reads_under(policy: &CapabilityPolicy, target: &std::path::Path) -> bool {
 
 /// # The defect
 ///
-/// The preset opens all of `~/.config` and `~/.cache`, and the denylist named
-/// only three credential locations under them. The GitLab, DigitalOcean,
-/// Hetzner and rclone CLIs, among others, keep tokens at their default paths
-/// there, and a confined child read each one.
+/// The preset originally opened all of `~/.config` and `~/.cache`, and the
+/// denylist named only three credential locations under them. The GitLab,
+/// DigitalOcean, Hetzner and rclone CLIs, among others, keep tokens at their
+/// default paths there, and a confined child read each one.
 ///
 /// # The legs
 ///
-/// * control: an ordinary file under `~/.config` and one under `~/.cache` are
-///   readable, so a refusal cannot be explained by an absent grant;
+/// * control: a host grants the whole synthetic home, so ordinary config and
+///   cache files are readable and a refusal can't be an absent grant;
 /// * claim: a file planted at every default entry, and at every known CLI
 ///   credential location, is refused.
 #[test]
@@ -112,6 +112,9 @@ fn a_confined_child_is_refused_every_default_denylist_entry() {
         sandbox_profile: SandboxProfile::Worktree,
         process_sandbox: Box::new(ProcessSandboxPolicy {
             presets: Some(vec![ProcessSandboxPreset::PackageManagerConfig]),
+            // The narrowed presets no longer admit unknown XDG siblings.
+            // Grant the parent explicitly so a dropped denial still fails.
+            read_roots: vec![home_path.display().to_string()],
             ..Default::default()
         }),
         ..CapabilityPolicy::default()
@@ -131,7 +134,7 @@ fn a_confined_child_is_refused_every_default_denylist_entry() {
 
     assert!(
         unreadable_controls.is_empty(),
-        "the preset must grant these, or every refusal below proves nothing: \
+        "the explicit home grant must admit these, or every refusal below proves nothing: \
          {unreadable_controls:?}"
     );
     assert!(

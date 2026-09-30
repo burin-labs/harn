@@ -410,8 +410,8 @@ fn render_profile_with_extra_read_roots(
     // `sandbox-exec` is last-match-wins, so position is the enforcement: a deny
     // written here beats the preset allows, the workspace and read-only allows,
     // the policy read roots, and the write block's read re-grants. That ordering
-    // is the requirement, not an optimization — `PackageManagerConfig` grants
-    // `~/.config`, `~/.cache`, and `~/.netrc` wholesale, so a denial that
+    // is the requirement, not an optimization: `PackageManagerConfig` grants
+    // credential-bearing roots such as `~/.config/composer`, so a denial that
     // competed with presets instead of beating them would never fire on the
     // paths it exists for.
     //

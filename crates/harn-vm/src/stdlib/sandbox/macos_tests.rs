@@ -1093,8 +1093,8 @@ let package = Package(
 
 // ---- read denylist: it must beat the presets ---------------------------
 //
-// `PackageManagerConfig` grants child reads of `~/.netrc`, `~/.config`, and
-// `~/.cache` wholesale. A denylist that merely competed with presets would
+// `PackageManagerConfig` grants child reads of tool configuration, including
+// `~/.config/composer`. A denylist that merely competed with presets would
 // never fire on the paths it exists for, because the credential is INSIDE a
 // directory the preset already opened. Composition order is the feature, so
 // it is what these assert.
@@ -1120,13 +1120,13 @@ fn denylist_home() -> std::path::PathBuf {
 #[test]
 fn the_package_manager_preset_really_grants_the_parent_directory() {
     let profile = render_profile(&package_manager_preset_policy());
-    let config = denylist_home().join(".config");
+    let config = denylist_home().join(".config/composer");
     assert!(
         profile.contains(&format!(
             "(allow file-read* (subpath \"{}\"))",
             config.display()
         )),
-        "PackageManagerConfig must grant ~/.config, or the denial below proves nothing:\n{profile}"
+        "PackageManagerConfig must grant ~/.config/composer, or the denial below proves nothing:\n{profile}"
     );
 }
 

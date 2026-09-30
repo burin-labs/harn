@@ -295,7 +295,7 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     // them. A workspace root, a read-only root, and a preset are each a reason
     // to allow; this is the one reason to refuse, and a subtraction that ran
     // after the grants would never fire on the paths that matter (a credential
-    // under a preset-granted `~/.config` is exactly that case).
+    // under preset-granted `~/.config/composer` is exactly that case).
     if access == FsAccess::Read && path_is_denied(&candidate, &scope.read_deny) {
         return Err(SandboxViolation {
             attempted: candidate,
