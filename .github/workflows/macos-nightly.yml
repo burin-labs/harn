@@ -165,6 +165,22 @@ jobs:
         uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: nextest@0.9.132
+      - name: DIAGNOSTIC memory sampler
+        shell: bash
+        run: |
+          sysctl hw.ncpu hw.memsize hw.perflevel0.physicalcpu machdep.cpu.brand_string || true
+          (
+            while true; do
+              ts=$(date +%s)
+              swap=$(sysctl -n vm.swapusage | sed -E 's/.*used = ([0-9.]+)M.*/\1/')
+              ps -axo rss=,args= | awk -v ts="$ts" -v swap="$swap" '
+                /rustc/ && /--crate-name/ { n++; for (i=1;i<=NF;i++) if ($i=="--crate-name") c=$(i+1); if (/--test/) c=c"[test]"; printf "%s\t%s\tproc\t%s\t%d\n", ts, swap, c, $1/1024 }
+                /(^| )(ld|ld64|ld-prime)( |$)|\/ld / { printf "%s\t%s\tproc\tLINKER\t%d\n", ts, swap, $1/1024 }
+                END { printf "%s\t%s\tcount\t%d\t0\n", ts, swap, n }'
+              sleep 5
+            done
+          ) > "$RUNNER_TEMP/mem.tsv" 2>/dev/null &
+          echo $! > "$RUNNER_TEMP/sampler.pid"
       - name: Run workspace nextest
         shell: bash
         # The whole workspace runs, less one member that contributes nothing to
@@ -184,7 +200,22 @@ jobs:
         # Tests gated to `#![cfg(unix)]` still run here (macOS is Unix); the
         # macOS-specific surface is exactly what this nightly exists to
         # exercise.
-        run: scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --exclude harn-wasm --profile ci
+        run: scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --exclude harn-wasm --profile ci --no-run
+      - name: DIAGNOSTIC memory report
+        if: always()
+        shell: bash
+        run: |
+          kill "$(cat "$RUNNER_TEMP/sampler.pid")" || true
+          f="$RUNNER_TEMP/mem.tsv"
+          echo "samples=$(wc -l < "$f")"
+          echo "== peak RSS MiB per crate (top 15)"
+          awk -F'\t' '$3=="proc" { if ($5>m[$4]) m[$4]=$5 } END { for (c in m) print m[c], c }' "$f" | sort -rn | head -15
+          echo "== peak swap used MiB"
+          awk -F'\t' '{ if ($2+0>m) m=$2+0 } END { print m }' "$f"
+          echo "== concurrent rustc histogram (samples)"
+          awk -F'\t' '$3=="count" { h[$4]++ } END { for (k in h) print k, h[k] }' "$f" | sort -n
+          echo "== timeline every 60s: ts swapMiB rustc_count total_rustc_rss_MiB"
+          awk -F'\t' '$3=="proc" { t[$1]+=$5 } $3=="count" { c[$1]=$4; s[$1]=$2 } END { for (k in c) print k, s[k], c[k], t[k]+0 }' "$f" | sort -n | awk 'NR==1{b=$1} ($1-b)%60<5'
       - name: Smoke test harn run
         shell: bash
         run: |
