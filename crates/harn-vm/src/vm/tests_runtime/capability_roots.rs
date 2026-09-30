@@ -525,7 +525,7 @@ fn a_read_external_root_serves_builtin_reads_and_refuses_builtin_writes() {
     // form would turn a Windows `\r` separator into a carriage return.
     let reference_literal = serde_json::to_string(&reference.display().to_string()).unwrap();
     let read_source = format!(
-        r#"pipeline t(harness: Harness, task: unknown) {{ return harness.fs.read_text({reference_literal}) }}"#
+        "pipeline t(harness: Harness, task: unknown) {{ return harness.fs.read_text({reference_literal}) }}"
     );
     let write_source = format!(
         r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.write_text({reference_literal}, "x") }}"#
