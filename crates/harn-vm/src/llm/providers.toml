@@ -7381,9 +7381,12 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
+# Together lists this model but a 2026-09-29 chat call returned "Unable to
+# access non-serverless model"; it needs a dedicated endpoint.
 [models."openai/gpt-oss-20b"]
 name = "GPT-OSS 20B (Together)"
 provider = "together"
+availability = "dedicated"
 context_window = 131072
 logical_model = "openai-gpt-oss-20b"
 equivalence_group = "openai-gpt-oss-20b"
@@ -7416,9 +7419,12 @@ tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
 
+# Together lists this model but a 2026-09-29 chat call returned "Unable to
+# access non-serverless model"; it needs a dedicated endpoint.
 [models."Qwen/Qwen3.5-397B-A17B"]
 name = "Qwen3.5 397B A17B (Together)"
 provider = "together"
+availability = "dedicated"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 3.60, cache_read_per_mtok = 0.35 }
@@ -7431,9 +7437,12 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 # (HTTP 400 `model_not_available`), same as GLM-5.1. Removed rather than left
 # selectable; `zai-org/GLM-5.2` is the reachable Together GLM route.
 
+# Together lists this model but a 2026-09-29 chat call returned "Unable to
+# access non-serverless model"; it needs a dedicated endpoint.
 [models."together/nvidia/nemotron-3-ultra-550b-a55b"]
 name = "Nemotron 3 Ultra 550B A55B (Together)"
 provider = "together"
+availability = "dedicated"
 wire_model = "nvidia/nemotron-3-ultra-550b-a55b"
 context_window = 512288
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]

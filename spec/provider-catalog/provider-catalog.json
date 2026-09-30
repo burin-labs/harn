@@ -28466,7 +28466,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -29631,7 +29631,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -29720,7 +29720,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
