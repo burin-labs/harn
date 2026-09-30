@@ -87,6 +87,7 @@ pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
         "stop_reason": result.stop_reason,
         "blocks": result.blocks,
         "logprobs": result.logprobs,
+        "telemetry": result.telemetry,
     });
     let _ = std::fs::write(
         &path,

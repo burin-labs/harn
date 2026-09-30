@@ -732,6 +732,13 @@ pub(crate) fn vm_build_llm_result(
         dict.put_str("thinking_summary", summary.as_str());
     }
 
+    dict.insert(
+        crate::value::intern_key("effective_reasoning_effort"),
+        json_to_vm_value(
+            &serde_json::to_value(&result.telemetry.effective_reasoning_effort)
+                .expect("effort observation serializes"),
+        ),
+    );
     if let Some(ref stop_reason) = result.stop_reason {
         dict.put_str("stop_reason", stop_reason.as_str());
     }
@@ -929,6 +936,7 @@ mod cache_supported_serde_tests {
             "canonical_text",
             "thinking",
             "thinking_summary",
+            "effective_reasoning_effort",
             "stop_reason",
             "tool_calls",
             "native_tool_calls",

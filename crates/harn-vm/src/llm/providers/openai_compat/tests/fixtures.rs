@@ -5,6 +5,7 @@ use serde_json::json;
 
 pub(super) fn base_request_payload() -> LlmRequestPayload {
     LlmRequestPayload {
+        reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
         data_controls: crate::llm_config::DataPosture::Default,
         inference_boundary: None,
         provider: "openrouter".to_string(),

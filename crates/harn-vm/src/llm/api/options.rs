@@ -867,6 +867,8 @@ pub(crate) fn push_unique_anthropic_beta_feature(features: &mut Vec<String>, fea
 /// Send-safe subset of `LlmCallOptions` used for provider transport.
 #[derive(Clone, Debug, serde::Serialize)]
 pub(crate) struct LlmRequestPayload {
+    #[serde(skip_serializing)]
+    pub(crate) reasoning_effort_source: crate::llm::ReasoningEffortSource,
     pub provider: String,
     pub model: String,
     /// See [`LlmCallOptions::region`]. Forwarded to provider transport so
@@ -1062,6 +1064,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             None => (opts.output_format.clone(), opts.output_schema.clone()),
         };
         let mut payload = Self {
+            reasoning_effort_source: crate::llm::effective_effort::request_source(opts),
             provider: opts.provider.clone(),
             model: opts.model.clone(),
             region: opts.region.clone(),

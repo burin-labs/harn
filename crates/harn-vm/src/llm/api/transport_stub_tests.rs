@@ -15,6 +15,7 @@ use crate::llm::env_guard;
 mod admission;
 mod anthropic_admission;
 mod anthropic_egress;
+mod effective_effort;
 #[path = "transport_stub_tests/gemini_generate_content.rs"]
 mod gemini_generate_content;
 mod inference_boundary_tests;

@@ -95,6 +95,12 @@ impl OpenAiResponsesProvider {
             &request.provider,
             &request.model,
         )?;
+        result.telemetry.effective_reasoning_effort =
+            crate::llm::EffectiveReasoningEffort::from_responses(&json, &body);
+        result
+            .telemetry
+            .effective_reasoning_effort
+            .resolve_source(request.reasoning_effort_source);
         if result.telemetry.client_wall_ms.is_none() {
             result.telemetry.client_wall_ms = Some(elapsed_ms(&*clock, started_ms));
         }

@@ -1350,6 +1350,7 @@ aws_secret_access_key = dev-secret
 
     fn base_request() -> LlmRequestPayload {
         LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
             inference_boundary: None,
             provider: "bedrock".to_string(),

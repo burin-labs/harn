@@ -665,6 +665,7 @@ pub(super) fn dump_llm_response(
         // (an IDE host bug report) was blind to output-cap cuts. `null` when the
         // provider reported nothing.
         "stop_reason": result.stop_reason,
+        "effective_reasoning_effort": result.telemetry.effective_reasoning_effort,
         "response_ms": response_ms,
         // Server-side runtime telemetry (Ollama timings, llama.cpp prefill /
         // decode breakdown, etc.). Empty for providers that report nothing.

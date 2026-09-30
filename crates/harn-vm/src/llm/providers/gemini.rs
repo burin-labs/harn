@@ -695,6 +695,7 @@ mod tests {
     #[test]
     fn gemini_image_content_maps_to_inline_data() {
         let payload = LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
             inference_boundary: None,
             provider: "gemini".to_string(),
@@ -771,6 +772,7 @@ mod tests {
     #[test]
     fn gemini_image_url_content_maps_to_file_data() {
         let mut payload = LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
             inference_boundary: None,
             provider: "gemini".to_string(),
@@ -851,6 +853,7 @@ mod tests {
     #[test]
     fn gemini_pdf_and_audio_content_maps_to_parts() {
         let payload = LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
             inference_boundary: None,
             provider: "gemini".to_string(),
