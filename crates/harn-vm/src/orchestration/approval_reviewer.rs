@@ -293,6 +293,7 @@ fn parse_review_verdict(value: VmValue) -> ApprovalReviewOutcome {
             risk: string_field(&map, "risk"),
             authorization: string_field(&map, "authorization"),
             unavailable_reason,
+            unavailable_detail: None,
         };
     }
     // `reviewer_answered` comes from the record when present. Absent, a
