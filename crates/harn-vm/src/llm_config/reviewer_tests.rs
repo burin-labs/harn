@@ -173,8 +173,32 @@ fn complementary_reviewer_reports_no_available_independent_route() {
     );
 }
 
+/// OpenAI's last non-GPT reviewer, o4-mini, shuts down 2026-10-23 and is
+/// deprecated, so an OpenAI-only author has no independent family left on its
+/// own key at any price. The floor case below therefore needs a second
+/// provider.
 #[test]
-fn luna_with_own_provider_gets_independent_reviewer_with_bounded_floor() {
+fn luna_with_only_openai_has_no_independent_reviewer() {
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "gpt-6-luna".to_string(),
+            author_provider: Some("openai".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: Some(3.0),
+            min_price_cap_per_mtok: Some(6.0),
+            max_price_cap_per_mtok: Some(15.0),
+        },
+        |provider| provider == "openai",
+    );
+    assert_eq!(
+        selection.fallback_code.as_deref(),
+        Some(ReviewerFallbackCode::NoDiffFamilyAvailable.as_code())
+    );
+}
+
+#[test]
+fn luna_with_anthropic_key_gets_independent_reviewer_with_bounded_floor() {
+    let available = |provider: &str| provider == "openai" || provider == "anthropic";
     let old_policy = pick_complementary_reviewer_with_availability(
         ComplementaryReviewerOptions {
             author_model: "gpt-6-luna".to_string(),
@@ -184,7 +208,7 @@ fn luna_with_own_provider_gets_independent_reviewer_with_bounded_floor() {
             min_price_cap_per_mtok: None,
             max_price_cap_per_mtok: None,
         },
-        |provider| provider == "openai",
+        available,
     );
     assert_eq!(
         old_policy.fallback_code.as_deref(),
@@ -200,12 +224,12 @@ fn luna_with_own_provider_gets_independent_reviewer_with_bounded_floor() {
             min_price_cap_per_mtok: Some(6.0),
             max_price_cap_per_mtok: Some(15.0),
         },
-        |provider| provider == "openai",
+        available,
     );
 
     assert!(!selection.fallback, "{selection:?}");
     assert_ne!(selection.author.family, selection.reviewer.family);
-    assert_eq!(selection.reviewer.provider, "openai");
+    assert_eq!(selection.reviewer.provider, "anthropic");
     let cost = selection
         .estimated_incremental_cost
         .expect("priced reviewer");

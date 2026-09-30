@@ -92,6 +92,7 @@ pub(super) fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_none_supported: None,
         max_thinking_budget: None,
         reasoning_disable_supported: None,
+        thinking_off_type: None,
         reasoning_required_for_tools: None,
         reasoning_text_promotable: None,
         reasoning_wire_format: None,
@@ -309,6 +310,7 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
         reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
         max_thinking_budget: rule.max_thinking_budget,
         reasoning_disable_supported: rule.reasoning_disable_supported.unwrap_or(true),
+        thinking_off_type: rule.thinking_off_type.unwrap_or_default(),
         reasoning_required_for_tools: rule.reasoning_required_for_tools.unwrap_or(false),
         reasoning_text_promotable: rule.reasoning_text_promotable.unwrap_or(false),
         reasoning_wire_format: rule

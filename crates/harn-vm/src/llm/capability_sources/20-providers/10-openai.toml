@@ -115,9 +115,19 @@ thinking_block_style = "reasoning_summary"
 # `reasoning_none_supported = true` and leaves temperature/top_p unconstrained.
 # That combination turns a routine effort=none or temperature-bearing preset
 # into a provider 400 at request time, so keep this row ahead of the wildcard.
+#
+# GPT-6.1 Sol (2026-09-29) has Astra's surface, not GPT-6 Sol's. Probed
+# 2026-09-29 against gpt-6.1-sol with gpt-6-sol as the control: effort
+# low/medium/high/xhigh -> 200; none, minimal, and max -> 400 (gpt-6-sol takes
+# none; OpenAI's 6.1 model page lists max); temperature=0.2 -> 400; function
+# tools on /v1/chat/completions -> 400 at the default effort, 200 on
+# /v1/responses; service_tier fast/flex and reasoning.mode=pro -> 200. The
+# `gpt-6*` wildcard below would otherwise grant it Sol's `none`, so a
+# thinking-off call would 400. The match is exact so a later 6.1 tier is not
+# swept in unprobed.
 [[provider.openai]]
 # Bare `gpt-6` is the Astra pointer, so it carries Astra's narrowed ladder.
-model_match = ["gpt-6-astra*", "gpt-6"]
+model_match = ["gpt-6-astra*", "gpt-6", "gpt-6.1-sol*"]
 prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
@@ -460,8 +470,17 @@ thinking_block_style = "reasoning_summary"
 # constraints as the direct OpenAI route. Keep this ahead of the broad gateway
 # GPT rule so `none`/`max` effort and temperature/top_p are rejected locally
 # rather than costing a round trip.
+#
+# OpenRouter answers `reasoning: {enabled: false}` for these models with a 400
+# ("Reasoning is mandatory for this endpoint and cannot be disabled"; probed
+# 2026-09-29 on openai/gpt-6-astra and openai/gpt-6.1-sol). Harn sends that
+# directive whenever the resolved thinking is off, which made even a default
+# tool call fail. `reasoning_disable_supported = false` makes Harn omit the
+# directive so the endpoint's own default effort applies, and refuse an
+# explicit `thinking: false` locally instead of spending a request on a 400.
 [[provider.openai]]
-model_match = ["openai/gpt-6-astra*", "openai/gpt-6"]
+model_match = ["openai/gpt-6-astra*", "openai/gpt-6", "openai/gpt-6.1-sol*"]
+reasoning_disable_supported = false
 prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"

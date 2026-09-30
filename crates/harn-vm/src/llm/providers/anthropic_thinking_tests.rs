@@ -162,6 +162,67 @@ fn always_on_models_relower_a_disabled_thinking_override_at_egress() {
     assert_eq!(body["thinking"], serde_json::json!({ "type": "disabled" }));
 }
 
+/// Sonnet 5.5 turns thinking off with `between_tools`; `disabled` is a 400
+/// there, while Sonnet 5 (the control) still takes `disabled`. The same shape
+/// must reach the wire from the builder, from a caller override at egress,
+/// and under the `high` effort ceiling both off switches share.
+#[test]
+fn sonnet_55_lowers_thinking_off_to_between_tools() {
+    let built = |model: &str| {
+        let mut payload = base_payload();
+        payload.model = model.to_string();
+        payload.thinking = ThinkingConfig::Disabled;
+        AnthropicProvider::build_request_body(&payload)
+    };
+    assert_eq!(
+        built("claude-sonnet-5-5")["thinking"],
+        serde_json::json!({ "type": "between_tools" })
+    );
+    assert_eq!(
+        built("claude-sonnet-5")["thinking"],
+        serde_json::json!({ "type": "disabled" })
+    );
+
+    let reconciled = |model: &str, thinking: &str, effort: &str| {
+        let mut body = serde_json::json!({
+            "model": model,
+            "thinking": {"type": thinking},
+            "output_config": {"effort": effort},
+        });
+        reconcile_request_body(
+            &mut body,
+            "anthropic",
+            model,
+            &ThinkingConfig::Disabled,
+            None,
+        );
+        body
+    };
+    // A caller override written for the older models is re-lowered.
+    let body = reconciled("claude-sonnet-5-5", "disabled", "medium");
+    assert_eq!(
+        body["thinking"],
+        serde_json::json!({ "type": "between_tools" })
+    );
+    assert_eq!(body["output_config"]["effort"], "medium");
+    // ...and the reverse, so a Sonnet 5.5 override cannot 400 on Sonnet 5.
+    let body = reconciled("claude-sonnet-5", "between_tools", "medium");
+    assert_eq!(body["thinking"], serde_json::json!({ "type": "disabled" }));
+    // Before generation 5 an omitted field is the off switch, so an unknown
+    // `between_tools` is dropped rather than sent.
+    let body = reconciled("claude-opus-4-8", "between_tools", "medium");
+    assert!(body.get("thinking").is_none(), "{body}");
+    // `between_tools` above `high` is a 400, like `disabled`.
+    for effort in ["xhigh", "max"] {
+        let body = reconciled("claude-sonnet-5-5", "between_tools", effort);
+        assert_eq!(body["output_config"]["effort"], "high", "{effort}");
+        assert_eq!(
+            body["thinking"],
+            serde_json::json!({ "type": "between_tools" })
+        );
+    }
+}
+
 #[test]
 fn opus_5_clamps_effort_when_thinking_is_disabled() {
     // `thinking:{disabled}` above effort `high` is a 400 on generation-5

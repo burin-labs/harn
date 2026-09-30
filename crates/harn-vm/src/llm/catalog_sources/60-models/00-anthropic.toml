@@ -135,18 +135,44 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # model exists — Anthropic's models overview (verified 2026-07-02) goes
 # Sonnet 4.5 -> 4.6 -> 5; only the Opus line had a 4.7 release.
 
-# Claude Sonnet 5 (released 2026-05) — the current Sonnet generation.
+# Claude Sonnet 5 (released 2026-06-30), now the previous Sonnet generation.
 # Same request surface as Opus 4.8: adaptive thinking only (extended
 # thinking budgets return 400), `output_config.effort` defaults to high,
 # sampling params rejected, no assistant prefill. 1M-token context at
-# standard pricing. Introductory pricing ($2 / $10 per MTok in/out,
-# cache read 0.1x, 5-min cache write 1.25x) runs through 2026-08-31;
-# standard $3 / $15 applies from 2026-09-01 — update this row then.
+# standard pricing. Anthropic made the $2 / $10 launch price permanent and
+# cancelled the planned 2026-09-01 rise to $3 / $15 (pricing page read
+# 2026-09-29). Anthropic lists it as active, retiring no sooner than
+# 2027-06-30.
 [models."claude-sonnet-5"]
 name = "Claude Sonnet 5"
 provider = "anthropic"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
+released = "2026-06-30"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+superseded_by = "claude-sonnet-5-5"
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+
+# Claude Sonnet 5.5 (released 2026-09-28) — the current Sonnet generation and
+# the `sonnet` / `frontier` alias target. Same price, context, and 128K output
+# ceiling as Sonnet 5 (pricing and model pages read 2026-09-29; the live
+# /v1/models entry reports max_input_tokens 1000000 and max_tokens 128000).
+# Knowledge cutoff moves to 2026-06. Its request surface differs from Sonnet
+# 5 in three ways the capability row records: thinking turns off with
+# `{"type":"between_tools"}`, forced tool choice is removed, and the minimum
+# cacheable prefix drops to 512 tokens. Thinking blocks are bound to the
+# model: Sonnet 5.5 reads Sonnet 5 and older blocks, and no other model reads
+# its blocks.
+[models."claude-sonnet-5-5"]
+name = "Claude Sonnet 5.5"
+provider = "anthropic"
+context_window = 1000000
+equivalence_group = "frontier-agent-coding"
+released = "2026-09-28"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
@@ -202,6 +228,21 @@ context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00 }
+superseded_by = "anthropic/claude-sonnet-5.5"
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+# OpenRouter serves Sonnet 5.5 under a dotted slug at Anthropic's list price
+# (live /models index 2026-09-29: $2 / $10, cache read $0.20, write $2.50).
+[models."anthropic/claude-sonnet-5.5"]
+name = "Claude Sonnet 5.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+equivalence_group = "frontier-agent-coding"
+released = "2026-09-28"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]

@@ -318,6 +318,28 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Sonnet 5.5 (2026-09-28) narrows the Sonnet 5 surface in three wire-visible
+# ways, each probed against the live API on 2026-09-29 with Sonnet 5 as the
+# control:
+#   * the off switch is `{"type":"between_tools"}`; `{"type":"disabled"}` is a
+#     400 (Sonnet 5 accepts it). Like `disabled`, it caps effort at `high`:
+#     `xhigh` and `max` with it are 400s;
+#   * forced tool choice is gone — `tool_choice` `any` / `tool` are 400s,
+#     `auto` and `none` return 200 (Sonnet 5 accepts `tool`);
+#   * the minimum cacheable prefix is 512 tokens: a 522-token prefix wrote a
+#     cache entry, while a 776-token prefix on Sonnet 5 wrote none.
+# The `claude-sonnet-5*` glob below matches `claude-sonnet-5-5` too, so without
+# this row Sonnet 5.5 silently inherited Sonnet 5's `disabled` switch and every
+# default Harn call to it failed with a 400.
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+thinking_off_type = "between_tools"
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.anthropic]]
 model_match = "claude-sonnet-5*"
 prompt_cache_min_prefix_tokens = 1024
@@ -624,6 +646,16 @@ top_k_supported = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Prefixed Sonnet 5.5 ids mirror the direct 5.5 row above.
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+thinking_off_type = "between_tools"
+allowed_tool_choice_modes = ["auto", "none"]
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-5*"

@@ -197,6 +197,49 @@ fn openai_gpt_6_sol_and_luna_accept_effort_none() {
     }
 }
 
+/// GPT-6.1 Sol has Astra's surface, not GPT-6 Sol's: effort `none` is a 400
+/// on it, directly and through OpenRouter (live API, 2026-09-29). The
+/// `gpt-6*` wildcard would grant it `none`, so the GPT-6 Sol control proves
+/// the Astra row, not the wildcard, decided these values.
+#[test]
+fn openai_gpt_6_1_sol_rejects_effort_none() {
+    reset();
+    for (provider, model) in [
+        ("openai", "gpt-6.1-sol"),
+        ("openrouter", "openai/gpt-6.1-sol"),
+        ("openrouter", "openai/gpt-6.1-sol-pro"),
+    ] {
+        let caps = lookup(provider, model);
+        assert!(!caps.reasoning_none_supported, "{model}");
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            vec!["low", "medium", "high", "xhigh"],
+            "{model}"
+        );
+        assert!(!caps.temperature_supported, "{model}");
+    }
+    // Only the direct route must move tool calls to Responses; OpenRouter
+    // does that routing itself (a chat-completions tool call returned 200).
+    assert!(lookup("openai", "gpt-6.1-sol").reasoning_tools_require_responses);
+    assert!(lookup("openai", "gpt-6-sol").reasoning_none_supported);
+
+    // OpenRouter 400s `reasoning: {enabled: false}` on Astra and 6.1 Sol, so
+    // Harn must omit it there; GPT-6 Sol on the same route accepts it.
+    for model in [
+        "openai/gpt-6.1-sol",
+        "openai/gpt-6.1-sol-pro",
+        "openai/gpt-6-astra",
+    ] {
+        assert!(
+            !lookup("openrouter", model).reasoning_disable_supported,
+            "{model}"
+        );
+    }
+    assert!(lookup("openrouter", "openai/gpt-6-sol").reasoning_disable_supported);
+    // The direct route keeps its effort-floor lowering.
+    assert!(lookup("openai", "gpt-6.1-sol").reasoning_disable_supported);
+}
+
 /// Direction control for the row above: the sibling family it sits next to
 /// must keep its own, wider ladder. A row that accidentally widened Astra's
 /// match glob would pass the assertions above by making every GPT model look

@@ -619,6 +619,35 @@ impl ReasoningHistoryWireField {
     }
 }
 
+/// The Anthropic `thinking.type` that turns thinking off on a route whose
+/// `reasoning_disable_supported` is true.
+///
+/// An enum rather than a free string: the wrong value is an HTTP 400 on every
+/// thinking-off call, and generation-5 Claude defaults thinking on, so a
+/// mistyped catalog value must fail capability loading instead of reaching
+/// the wire.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingOffType {
+    /// `{"type": "disabled"}`, the off switch through Claude Sonnet 5.
+    #[default]
+    Disabled,
+    /// `{"type": "between_tools"}` (Claude Sonnet 5.5). The model does not
+    /// think before responding; the short updates it writes between tool
+    /// calls come back as thinking blocks. `disabled` is a 400 on these
+    /// models.
+    BetweenTools,
+}
+
+impl ThinkingOffType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::BetweenTools => "between_tools",
+        }
+    }
+}
+
 /// Where a route's `tool_mode_parity` verdict came from.
 ///
 /// Both variants are declarations about a route, not measurements of one. A
@@ -711,6 +740,7 @@ impl StructuredOutputStrategy {
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Capabilities {
     pub native_tools: bool,
     pub message_wire_format: WireDialect,
@@ -823,6 +853,8 @@ pub struct Capabilities {
     /// the provider's own default ceiling.
     pub max_thinking_budget: Option<i64>,
     pub reasoning_disable_supported: bool,
+    /// See [`ProviderRule::thinking_off_type`].
+    pub thinking_off_type: ThinkingOffType,
     /// See [`ProviderRule::reasoning_required_for_tools`].
     pub reasoning_required_for_tools: bool,
     pub reasoning_text_promotable: bool,
@@ -969,6 +1001,7 @@ impl Default for Capabilities {
             reasoning_none_supported: false,
             max_thinking_budget: None,
             reasoning_disable_supported: true,
+            thinking_off_type: ThinkingOffType::Disabled,
             reasoning_required_for_tools: false,
             reasoning_text_promotable: false,
             reasoning_wire_format: None,

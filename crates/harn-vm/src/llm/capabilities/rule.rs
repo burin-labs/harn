@@ -14,7 +14,8 @@ use super::decision::{DecisionLimits, DecisionProtocol, DecisionQuestionKind};
 use super::model::{
     fill_opt, CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle,
     LiveEndpointFamily, ProviderDefaults, ReasoningHistoryWireField, ReasoningRoundTripPolicy,
-    ScreenshotScaling, SystemMessagePlacement, ToolFormatJustification, ToolModeParitySource,
+    ScreenshotScaling, SystemMessagePlacement, ThinkingOffType, ToolFormatJustification,
+    ToolModeParitySource,
 };
 use super::pattern::{rule_matches, ModelPatterns};
 use super::projection::{defaults_to_caps, rule_to_caps};
@@ -23,6 +24,7 @@ pub(super) use super::effort::{rule_reasoning_effort_supported, rule_thinking_mo
 
 /// One row of the capability matrix.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct ProviderRule {
     /// One glob pattern, or a list of aliases that share one contract.
     pub model_match: ModelPatterns,
@@ -362,6 +364,10 @@ pub struct ProviderRule {
     /// Some routes require reasoning and reject the provider's disabled shape.
     #[serde(default)]
     pub reasoning_disable_supported: Option<bool>,
+    /// The Anthropic `thinking.type` that turns thinking off where
+    /// `reasoning_disable_supported` is true. Unset means `disabled`.
+    #[serde(default)]
+    pub thinking_off_type: Option<ThinkingOffType>,
     /// Whether this model performs *tool calls inside its reasoning channel*,
     /// so disabling reasoning silently breaks tool calling. The canonical case
     /// is the OpenAI gpt-oss (Harmony) family: with reasoning disabled it emits
@@ -655,6 +661,7 @@ impl ProviderRule {
             reasoning_none_supported,
             max_thinking_budget,
             reasoning_disable_supported,
+            thinking_off_type,
             reasoning_required_for_tools,
             reasoning_text_promotable,
             reasoning_wire_format,
@@ -800,6 +807,7 @@ impl ProviderRule {
             &mut self.reasoning_disable_supported,
             reasoning_disable_supported,
         );
+        fill_opt(&mut self.thinking_off_type, thinking_off_type);
         fill_opt(
             &mut self.reasoning_required_for_tools,
             reasoning_required_for_tools,
