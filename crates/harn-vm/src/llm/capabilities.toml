@@ -1109,6 +1109,28 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Sonnet 5.5 (2026-09-28) narrows the Sonnet 5 surface in three wire-visible
+# ways, each probed against the live API on 2026-09-29 with Sonnet 5 as the
+# control:
+#   * the off switch is `{"type":"between_tools"}`; `{"type":"disabled"}` is a
+#     400 (Sonnet 5 accepts it). Like `disabled`, it caps effort at `high`:
+#     `xhigh` and `max` with it are 400s;
+#   * forced tool choice is gone — `tool_choice` `any` / `tool` are 400s,
+#     `auto` and `none` return 200 (Sonnet 5 accepts `tool`);
+#   * the minimum cacheable prefix is 512 tokens: a 522-token prefix wrote a
+#     cache entry, while a 776-token prefix on Sonnet 5 wrote none.
+# The `claude-sonnet-5*` glob below matches `claude-sonnet-5-5` too, so without
+# this row Sonnet 5.5 silently inherited Sonnet 5's `disabled` switch and every
+# default Harn call to it failed with a 400.
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+thinking_off_type = "between_tools"
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.anthropic]]
 model_match = "claude-sonnet-5*"
 prompt_cache_min_prefix_tokens = 1024
@@ -1415,6 +1437,16 @@ top_k_supported = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Prefixed Sonnet 5.5 ids mirror the direct 5.5 row above.
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+thinking_off_type = "between_tools"
+allowed_tool_choice_modes = ["auto", "none"]
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-5*"
@@ -1954,9 +1986,19 @@ thinking_block_style = "reasoning_summary"
 # `reasoning_none_supported = true` and leaves temperature/top_p unconstrained.
 # That combination turns a routine effort=none or temperature-bearing preset
 # into a provider 400 at request time, so keep this row ahead of the wildcard.
+#
+# GPT-6.1 Sol (2026-09-29) has Astra's surface, not GPT-6 Sol's. Probed
+# 2026-09-29 against gpt-6.1-sol with gpt-6-sol as the control: effort
+# low/medium/high/xhigh -> 200; none, minimal, and max -> 400 (gpt-6-sol takes
+# none; OpenAI's 6.1 model page lists max); temperature=0.2 -> 400; function
+# tools on /v1/chat/completions -> 400 at the default effort, 200 on
+# /v1/responses; service_tier fast/flex and reasoning.mode=pro -> 200. The
+# `gpt-6*` wildcard below would otherwise grant it Sol's `none`, so a
+# thinking-off call would 400. The match is exact so a later 6.1 tier is not
+# swept in unprobed.
 [[provider.openai]]
 # Bare `gpt-6` is the Astra pointer, so it carries Astra's narrowed ladder.
-model_match = ["gpt-6-astra*", "gpt-6"]
+model_match = ["gpt-6-astra*", "gpt-6", "gpt-6.1-sol*"]
 prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
@@ -2299,8 +2341,17 @@ thinking_block_style = "reasoning_summary"
 # constraints as the direct OpenAI route. Keep this ahead of the broad gateway
 # GPT rule so `none`/`max` effort and temperature/top_p are rejected locally
 # rather than costing a round trip.
+#
+# OpenRouter answers `reasoning: {enabled: false}` for these models with a 400
+# ("Reasoning is mandatory for this endpoint and cannot be disabled"; probed
+# 2026-09-29 on openai/gpt-6-astra and openai/gpt-6.1-sol). Harn sends that
+# directive whenever the resolved thinking is off, which made even a default
+# tool call fail. `reasoning_disable_supported = false` makes Harn omit the
+# directive so the endpoint's own default effort applies, and refuse an
+# explicit `thinking: false` locally instead of spending a request on a 400.
 [[provider.openai]]
-model_match = ["openai/gpt-6-astra*", "openai/gpt-6"]
+model_match = ["openai/gpt-6-astra*", "openai/gpt-6", "openai/gpt-6.1-sol*"]
+reasoning_disable_supported = false
 prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
@@ -3382,6 +3433,21 @@ model_match = "anthropic/claude-opus-*"
 version_min = [5, 5]
 extends = true
 native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
+# Sonnet 5.5 through OpenRouter, probed 2026-09-29: `tool_choice: "required"`
+# is a 400 carrying Anthropic's "type tool and any are not supported" error,
+# and `reasoning: {enabled: false}` is a 400 ("Reasoning is mandatory for this
+# endpoint and cannot be disabled"). OpenRouter does not expose Anthropic's
+# `between_tools` off switch. With `reasoning_disable_supported = false`, a
+# default call omits the disable directive and succeeds, and an explicit
+# `thinking: false` is refused locally rather than sent to that 400.
+[[provider.openrouter]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+reasoning_disable_supported = false
 allowed_tool_choice_modes = ["auto", "none"]
 
 [[provider.openrouter]]

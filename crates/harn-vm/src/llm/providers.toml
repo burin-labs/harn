@@ -1685,14 +1685,18 @@ default = "mid"
 # Short flagship aliases — these track whatever the current
 # generation is. Bump these when a successor lands.
 [aliases.sonnet]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
+[aliases.sonnet55]
+id = "claude-sonnet-5-5"
+provider = "anthropic"
+
+# Previous Sonnet generations, kept addressable for pinned workflows.
 [aliases.sonnet5]
 id = "claude-sonnet-5"
 provider = "anthropic"
 
-# Previous Sonnet generation, kept addressable for pinned workflows.
 [aliases.sonnet46]
 id = "claude-sonnet-4-6"
 provider = "anthropic"
@@ -1734,11 +1738,11 @@ id = "claude-haiku-4-5-20251001"
 provider = "anthropic"
 
 [aliases.frontier]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
 [aliases."tier/frontier"]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
 # Default balanced hosted route for routine coding-agent work.
@@ -1757,9 +1761,11 @@ id = "accounts/fireworks/models/gpt-oss-120b"
 provider = "fireworks"
 
 # GPT-6 tiers: Astra is the frontier, Sol the balanced tier (GPT-6 has no
-# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier.
+# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier. The balanced
+# tier tracks the newest Sol, GPT-6.1 Sol (2026-09-29); GPT-6 Sol stays
+# addressable by id and as `sol6`.
 [aliases."openai/mid"]
-id = "gpt-6-sol"
+id = "gpt-6.1-sol"
 provider = "openai"
 
 [aliases."openai/frontier"]
@@ -1787,6 +1793,14 @@ id = "gpt-6-astra"
 provider = "openai"
 
 [aliases.sol]
+id = "gpt-6.1-sol"
+provider = "openai"
+
+[aliases.sol61]
+id = "gpt-6.1-sol"
+provider = "openai"
+
+[aliases.sol6]
 id = "gpt-6-sol"
 provider = "openai"
 
@@ -2770,13 +2784,13 @@ plain_description = "Larger variants trade speed and cost for more capability."
 kind = "model"
 ordered_values = [
   { value = "luna", label = "Luna", plain_description = "Fastest and lowest cost for routine work.", relative_cost_hint = 1, relative_speed_hint = 5, model_id = "gpt-6-luna" },
-  { value = "sol", label = "Sol", plain_description = "Strong reasoning for everyday coding and analysis.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "gpt-6-sol" },
+  { value = "sol", label = "Sol", plain_description = "Strong reasoning for everyday coding and analysis.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "gpt-6.1-sol" },
   { value = "astra", label = "Astra", plain_description = "Most capable and most expensive for the hardest work.", relative_cost_hint = 5, relative_speed_hint = 1, model_id = "gpt-6-astra" },
 ]
 
-# Only the levels every GPT-6 model accepts. Sol and Luna also take `none`,
-# but Astra rejects it, and all three reject `max` despite the model pages
-# listing it (live probe 2026-09-22).
+# Only the levels every offered GPT-6 model accepts. Luna also takes `none`,
+# but Astra and GPT-6.1 Sol reject it, and all three reject `max` despite the
+# model pages listing it (live probes 2026-09-22 and 2026-09-29).
 [[presentation.families.openai-gpt-6.dimensions]]
 key = "effort"
 label = "Thinking time"
@@ -2945,18 +2959,44 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # model exists — Anthropic's models overview (verified 2026-07-02) goes
 # Sonnet 4.5 -> 4.6 -> 5; only the Opus line had a 4.7 release.
 
-# Claude Sonnet 5 (released 2026-05) — the current Sonnet generation.
+# Claude Sonnet 5 (released 2026-06-30), now the previous Sonnet generation.
 # Same request surface as Opus 4.8: adaptive thinking only (extended
 # thinking budgets return 400), `output_config.effort` defaults to high,
 # sampling params rejected, no assistant prefill. 1M-token context at
-# standard pricing. Introductory pricing ($2 / $10 per MTok in/out,
-# cache read 0.1x, 5-min cache write 1.25x) runs through 2026-08-31;
-# standard $3 / $15 applies from 2026-09-01 — update this row then.
+# standard pricing. Anthropic made the $2 / $10 launch price permanent and
+# cancelled the planned 2026-09-01 rise to $3 / $15 (pricing page read
+# 2026-09-29). Anthropic lists it as active, retiring no sooner than
+# 2027-06-30.
 [models."claude-sonnet-5"]
 name = "Claude Sonnet 5"
 provider = "anthropic"
 context_window = 1000000
 equivalence_group = "frontier-agent-coding"
+released = "2026-06-30"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+superseded_by = "claude-sonnet-5-5"
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+
+# Claude Sonnet 5.5 (released 2026-09-28) — the current Sonnet generation and
+# the `sonnet` / `frontier` alias target. Same price, context, and 128K output
+# ceiling as Sonnet 5 (pricing and model pages read 2026-09-29; the live
+# /v1/models entry reports max_input_tokens 1000000 and max_tokens 128000).
+# Knowledge cutoff moves to 2026-06. Its request surface differs from Sonnet
+# 5 in three ways the capability row records: thinking turns off with
+# `{"type":"between_tools"}`, forced tool choice is removed, and the minimum
+# cacheable prefix drops to 512 tokens. Thinking blocks are bound to the
+# model: Sonnet 5.5 reads Sonnet 5 and older blocks, and no other model reads
+# its blocks.
+[models."claude-sonnet-5-5"]
+name = "Claude Sonnet 5.5"
+provider = "anthropic"
+context_window = 1000000
+equivalence_group = "frontier-agent-coding"
+released = "2026-09-28"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
@@ -3012,6 +3052,21 @@ context_window = 1000000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00 }
+superseded_by = "anthropic/claude-sonnet-5.5"
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+# OpenRouter serves Sonnet 5.5 under a dotted slug at Anthropic's list price
+# (live /models index 2026-09-29: $2 / $10, cache read $0.20, write $2.50).
+[models."anthropic/claude-sonnet-5.5"]
+name = "Claude Sonnet 5.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+equivalence_group = "frontier-agent-coding"
+released = "2026-09-28"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -3362,6 +3417,9 @@ equivalence_group = "gpt-6-sol"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+# Still served with no announced shutdown. Unlike GPT-6.1 Sol it accepts
+# effort `none`, and with it function tools on Chat Completions.
+superseded_by = "gpt-6.1-sol"
 tier = "mid"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3372,6 +3430,39 @@ serving_tiers = [
 ]
 reasoning_modes = [
   { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-22). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6. OpenRouter's `-pro` slugs sell this knob, not a separate model." },
+]
+
+# GPT-6.1 Sol (released 2026-09-29) — the balanced-tier successor to GPT-6
+# Sol at the same $2 / $10 list price, with cached input halved to $0.10 (5%
+# of input) and knowledge cutoff moved to 2026-04-30 (model and pricing pages
+# read 2026-09-29). It is the only GPT-6.1 model: OpenAI publishes no 6.1
+# Astra, Terra, or Luna, and no `gpt-6.1-sol-pro` id — OpenRouter's `-pro`
+# slug sells `reasoning.mode = "pro"` on this model. Its request surface is
+# Astra's, not GPT-6 Sol's: effort is low/medium/high/xhigh only (`none`,
+# `minimal`, and the documented `max` are 400s) and function tools need the
+# Responses API at every effort. Long-context band as GPT-6. Live probe
+# 2026-09-29: service_tier fast and flex echo their tier; reasoning.mode=pro
+# returns 200.
+[models."gpt-6.1-sol"]
+name = "GPT-6.1 Sol"
+blurb = "Newest GPT-6 reasoning for everyday coding, planning, and review at a moderate cost."
+provider = "openai"
+context_window = 1050000
+logical_model = "gpt-6.1-sol"
+equivalence_group = "gpt-6.1-sol"
+released = "2026-09-29"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+tier = "mid"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "Not available with EU data residency. GPT-6.1 responses echo service_tier=fast when the premium tier was served (live probe 2026-09-29)." },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.05, cache_write_per_mtok = 1.25 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6.1 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-29). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6.1. OpenRouter's `-pro` slugs sell this knob, not a separate model." },
 ]
 
 [models."gpt-6-luna"]
@@ -3414,7 +3505,7 @@ logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
-superseded_by = "gpt-6-sol"
+superseded_by = "gpt-6.1-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3442,7 +3533,7 @@ logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
-superseded_by = "gpt-6-sol"
+superseded_by = "gpt-6.1-sol"
 tier = "mid"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
@@ -3477,7 +3568,12 @@ reasoning_modes = [
   { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top." },
 ]
 
-# GPT-5.5 — current OpenAI frontier (Responses + Chat Completions).
+# GPT-5.5 — superseded by the GPT-5.6 and GPT-6 generations but still served.
+# It is NOT deprecated in the API: the OpenAI deprecations page and
+# changelog (read 2026-09-29) list no shutdown for gpt-5.5 or gpt-5.5-pro,
+# and both remain on the pricing page. A reported October 2026 removal is
+# ChatGPT-app only and unconfirmed by OpenAI. Mark it deprecated only when a
+# first-party API shutdown date exists.
 # Reasoning model driven by `reasoning_effort` (none/low/medium/high/
 # xhigh; reasoning tokens bill as output). Standard $5 / $30 per MTok
 # (cached input $0.50); short-context rates shown — prompts over 272k
@@ -3493,6 +3589,7 @@ provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+superseded_by = "gpt-6.1-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -3508,6 +3605,7 @@ provider = "openai"
 context_window = 1050000
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+superseded_by = "gpt-6.1-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
@@ -3621,6 +3719,10 @@ provider = "openai"
 context_window = 1047576
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.025 }
+deprecated = true
+deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page and the typed shutdown_date on GET /v1/models (read 2026-09-29). OpenAI names gpt-5.6-luna; Harn recommends gpt-6-luna."
+sunset_date = "2026-10-23"
+superseded_by = "gpt-6-luna"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "tool_use", "long_context", "vision"]
@@ -3644,7 +3746,9 @@ context_window = 128000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 10.00, output_per_mtok = 30.00 }
 deprecated = true
-deprecation_note = "Superseded by gpt-5 family. Listed for cost-attribution backfill only."
+deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page and the typed shutdown_date on GET /v1/models (read 2026-09-29). Listed for cost-attribution backfill; Harn recommends gpt-6.1-sol."
+sunset_date = "2026-10-23"
+superseded_by = "gpt-6.1-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "tool_use"]
@@ -3655,12 +3759,12 @@ context_window = 200000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 60.00, cache_read_per_mtok = 7.50 }
 deprecated = true
-deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.5."
+deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Harn recommends gpt-6.1-sol."
 # The retirement date was prose only. OpenAI publishes it as a typed
 # `shutdown_date` on the model record (GET /v1/models, read 2026-09-20), so it
 # belongs in the typed field consumers read.
 sunset_date = "2026-10-23"
-superseded_by = "gpt-5.5"
+superseded_by = "gpt-6.1-sol"
 tier = "reasoning"
 open_weight = false
 strengths = ["reasoning"]
@@ -3674,8 +3778,8 @@ context_window = 200000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 8.00, cache_read_per_mtok = 0.50 }
 deprecated = true
-deprecation_note = "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page. Use gpt-5.5."
-superseded_by = "gpt-5.5"
+deprecation_note = "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page. Harn recommends gpt-6.1-sol."
+superseded_by = "gpt-6.1-sol"
 tier = "reasoning"
 open_weight = false
 strengths = ["reasoning", "coding"]
@@ -3686,6 +3790,10 @@ provider = "openai"
 context_window = 200000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 1.10, output_per_mtok = 4.40, cache_read_per_mtok = 0.275 }
+deprecated = true
+deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page and the typed shutdown_date on GET /v1/models (read 2026-09-29). OpenAI names gpt-5.6-terra; Harn recommends gpt-6.1-sol."
+sunset_date = "2026-10-23"
+superseded_by = "gpt-6.1-sol"
 tier = "mid"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "vision"]
@@ -3697,6 +3805,7 @@ capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 1.10, output_per_mtok = 4.40, cache_read_per_mtok = 0.55 }
 deprecated = true
 deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.4-mini."
+sunset_date = "2026-10-23"
 superseded_by = "gpt-5.4-mini"
 tier = "reasoning"
 open_weight = false
@@ -3872,6 +3981,10 @@ operations = ["text_generation", "decision"]
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025, hosted_tool_fees = { google_search = { per_1k_calls = 14.0, free_per_month = 5000, source_url = "https://ai.google.dev/gemini-api/docs/pricing" } } }
+deprecated = true
+deprecation_note = "Shutdown 2027-05-07 per the Gemini API deprecations page (read 2026-09-29). Use gemini-3.5-flash-lite."
+sunset_date = "2027-05-07"
+superseded_by = "gemini-3.5-flash-lite"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "tool_use"]
@@ -6871,6 +6984,7 @@ provider = "openrouter"
 context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50 }
+superseded_by = "openai/gpt-6.1-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6920,6 +7034,7 @@ served_variant = "openrouter"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+superseded_by = "openai/gpt-6.1-sol"
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -6934,6 +7049,41 @@ served_variant = "openrouter_pro"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+superseded_by = "openai/gpt-6.1-sol-pro"
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+# GPT-6.1 Sol on OpenRouter, listed 2026-09-29 at OpenAI's list price (live
+# /models index: $2 / $10, cache read $0.10, cache write $2.50). The `-pro`
+# slug is the same model with pro reasoning mode, priced identically per
+# token. Probed 2026-09-29: function tools over chat completions return a
+# tool call (OpenRouter routes to Responses), and `reasoning.effort = "none"`
+# is a 400 ("Reasoning is mandatory"), as on the direct route.
+[models."openai/gpt-6.1-sol"]
+name = "GPT-6.1 Sol (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6.1-sol"
+equivalence_group = "gpt-6.1-sol"
+served_variant = "openrouter"
+released = "2026-09-29"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6.1-sol-pro"]
+name = "GPT-6.1 Sol Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6.1-sol"
+equivalence_group = "gpt-6.1-sol"
+served_variant = "openrouter_pro"
+released = "2026-09-29"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50 }
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7605,7 +7755,7 @@ steps = [
 label = "agent frontier route with transport fallback"
 steps = [
   { model = "claude-opus-5-5", provider = "anthropic", label = "frontier" },
-  { model = "claude-sonnet-5", provider = "anthropic", label = "fallback" },
+  { model = "claude-sonnet-5-5", provider = "anthropic", label = "fallback" },
 ]
 
 [model_ladders.agent_cheap]

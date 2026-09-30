@@ -4470,9 +4470,151 @@
       "display_name": "Claude Sonnet 5",
       "provider": "anthropic",
       "aliases": [
+        "sonnet5"
+      ],
+      "context_window": 1000000,
+      "equivalence_group": "frontier-agent-coding",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "anthropic_messages",
+        "input_mode": "inline_requests",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 100000,
+        "max_input_bytes": 268435456,
+        "result_retention_days": 29,
+        "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
+          "Batch data is scoped to the workspace that owns the API key.",
+          "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": 2.5,
+        "cache_write_1h_per_mtok": 4.0,
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
+      },
+      "deprecation": {
+        "status": "active",
+        "superseded_by": "claude-sonnet-5-5"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ],
+      "released": "2026-06-30"
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Claude Sonnet 5.5",
+      "provider": "anthropic",
+      "aliases": [
         "frontier",
         "sonnet",
-        "sonnet5",
+        "sonnet55",
         "tier/frontier"
       ],
       "context_window": 1000000,
@@ -4603,7 +4745,8 @@
         "tool_use",
         "long_context",
         "agentic"
-      ]
+      ],
+      "released": "2026-09-28"
     },
     {
       "id": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731",
@@ -10420,7 +10563,10 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Shutdown 2027-05-07 per the Gemini API deprecations page (read 2026-09-29). Use gemini-3.5-flash-lite.",
+        "sunset_date": "2027-05-07",
+        "superseded_by": "gemini-3.5-flash-lite"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -16505,7 +16651,9 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Superseded by gpt-5 family. Listed for cost-attribution backfill only."
+        "note": "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page and the typed shutdown_date on GET /v1/models (read 2026-09-29). Listed for cost-attribution backfill; Harn recommends gpt-6.1-sol.",
+        "sunset_date": "2026-10-23",
+        "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -16797,7 +16945,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page and the typed shutdown_date on GET /v1/models (read 2026-09-29). OpenAI names gpt-5.6-luna; Harn recommends gpt-6-luna.",
+        "sunset_date": "2026-10-23",
+        "superseded_by": "gpt-6-luna"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -17742,7 +17893,8 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -17927,7 +18079,8 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -18318,7 +18471,7 @@
       },
       "deprecation": {
         "status": "active",
-        "superseded_by": "gpt-6-sol"
+        "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -18540,7 +18693,7 @@
       },
       "deprecation": {
         "status": "active",
-        "superseded_by": "gpt-6-sol"
+        "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -19082,8 +19235,7 @@
       "blurb": "Strong GPT-6 reasoning for everyday coding, planning, and review at a moderate cost.",
       "provider": "openai",
       "aliases": [
-        "openai/mid",
-        "sol"
+        "sol6"
       ],
       "context_window": 1050000,
       "logical_model": "gpt-6-sol",
@@ -19180,7 +19332,8 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -19307,6 +19460,241 @@
       "released": "2026-09-22"
     },
     {
+      "id": "gpt-6.1-sol",
+      "name": "GPT-6.1 Sol",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.1 Sol",
+      "blurb": "Newest GPT-6 reasoning for everyday coding, planning, and review at a moderate cost.",
+      "provider": "openai",
+      "aliases": [
+        "openai/mid",
+        "sol",
+        "sol61"
+      ],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.1-sol",
+      "equivalence_group": "gpt-6.1-sol",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision",
+        "agentic"
+      ],
+      "serving_tiers": [
+        {
+          "id": "fast",
+          "label": "Fast mode",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "fast",
+            "response_values": [
+              "fast",
+              "priority"
+            ]
+          },
+          "cost_multiplier": 2.0,
+          "status": "ga",
+          "pricing": {
+            "input_per_mtok": 4.0,
+            "output_per_mtok": 20.0,
+            "cache_read_per_mtok": 0.2,
+            "cache_write_per_mtok": 5.0
+          },
+          "latency": "faster output with more consistent latency for user-facing traffic",
+          "reliability": "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "Not available with EU data residency. GPT-6.1 responses echo service_tier=fast when the premium tier was served (live probe 2026-09-29)."
+        },
+        {
+          "id": "flex",
+          "label": "Flex processing",
+          "mode": "synchronous",
+          "economics": "discounted",
+          "request": {
+            "param": "service_tier",
+            "value": "flex"
+          },
+          "discount_percent": 50,
+          "status": "beta",
+          "pricing": {
+            "input_per_mtok": 1.0,
+            "output_per_mtok": 5.0,
+            "cache_read_per_mtok": 0.05,
+            "cache_write_per_mtok": 1.25
+          },
+          "latency": "slower and variable synchronous latency",
+          "reliability": "best-effort availability; provider can return resource unavailable",
+          "suitable_workloads": [
+            "offline_eval",
+            "corpus",
+            "bulk_judge"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat"
+          ]
+        }
+      ],
+      "reasoning_modes": [
+        {
+          "id": "pro",
+          "label": "Pro mode",
+          "economics": "premium",
+          "request": {
+            "param_path": [
+              "reasoning",
+              "mode"
+            ],
+            "value": "pro",
+            "response_values": [
+              "pro"
+            ]
+          },
+          "token_multiplier": 6.0,
+          "status": "ga",
+          "latency": "multi-minute for hard prompts; far slower than standard mode at the same effort",
+          "suitable_workloads": [
+            "hard_planning",
+            "architecture_review",
+            "oracle_consult"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat",
+            "agent_inner_loop",
+            "bulk_judge",
+            "corpus"
+          ],
+          "note": "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6.1 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-29). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6.1. OpenRouter's `-pro` slugs sell this knob, not a separate model."
+        }
+      ],
+      "released": "2026-09-29"
+    },
+    {
       "id": "o1",
       "name": "OpenAI o1",
       "operations": [
@@ -19383,9 +19771,9 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.5.",
+        "note": "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Harn recommends gpt-6.1-sol.",
         "sunset_date": "2026-10-23",
-        "superseded_by": "gpt-5.5"
+        "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -19483,8 +19871,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page. Use gpt-5.5.",
-        "superseded_by": "gpt-5.5"
+        "note": "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page. Harn recommends gpt-6.1-sol.",
+        "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -19587,6 +19975,7 @@
       "deprecation": {
         "status": "deprecated",
         "note": "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.4-mini.",
+        "sunset_date": "2026-10-23",
         "superseded_by": "gpt-5.4-mini"
       },
       "availability": "serverless",
@@ -19690,7 +20079,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page and the typed shutdown_date on GET /v1/models (read 2026-09-29). OpenAI names gpt-5.6-terra; Harn recommends gpt-6.1-sol.",
+        "sunset_date": "2026-10-23",
+        "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -20533,7 +20925,8 @@
         "cache_write_1h_per_mtok": 4.0
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "anthropic/claude-sonnet-5.5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -20564,6 +20957,97 @@
         "long_context",
         "agentic"
       ]
+    },
+    {
+      "id": "anthropic/claude-sonnet-5.5",
+      "name": "Claude Sonnet 5.5 (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Claude Sonnet 5.5",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "equivalence_group": "frontier-agent-coding",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": 2.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ],
+      "released": "2026-09-28"
     },
     {
       "id": "bytedance-seed/seed-2.0-lite",
@@ -23230,7 +23714,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "openai/gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -24372,7 +24857,8 @@
         "cache_write_per_mtok": 2.5
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "openai/gpt-6.1-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -24465,7 +24951,8 @@
         "cache_write_per_mtok": 2.5
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "openai/gpt-6.1-sol-pro"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -24491,6 +24978,190 @@
         "long_context"
       ],
       "released": "2026-09-22"
+    },
+    {
+      "id": "openai/gpt-6.1-sol",
+      "name": "GPT-6.1 Sol (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.1 Sol",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.1-sol",
+      "equivalence_group": "gpt-6.1-sol",
+      "served_variant": "openrouter",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 2.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ],
+      "released": "2026-09-29"
+    },
+    {
+      "id": "openai/gpt-6.1-sol-pro",
+      "name": "GPT-6.1 Sol Pro (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.1 Sol Pro",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.1-sol",
+      "equivalence_group": "gpt-6.1-sol",
+      "served_variant": "openrouter_pro",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 2.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ],
+      "released": "2026-09-29"
     },
     {
       "id": "openai/gpt-oss-120b",
@@ -31259,7 +31930,7 @@
     },
     {
       "name": "frontier",
-      "model_id": "claude-sonnet-5",
+      "model_id": "claude-sonnet-5-5",
       "provider": "anthropic"
     },
     {
@@ -31681,7 +32352,7 @@
     },
     {
       "name": "openai/mid",
-      "model_id": "gpt-6-sol",
+      "model_id": "gpt-6.1-sol",
       "provider": "openai"
     },
     {
@@ -31866,12 +32537,22 @@
     },
     {
       "name": "sol",
+      "model_id": "gpt-6.1-sol",
+      "provider": "openai"
+    },
+    {
+      "name": "sol6",
       "model_id": "gpt-6-sol",
       "provider": "openai"
     },
     {
+      "name": "sol61",
+      "model_id": "gpt-6.1-sol",
+      "provider": "openai"
+    },
+    {
       "name": "sonnet",
-      "model_id": "claude-sonnet-5",
+      "model_id": "claude-sonnet-5-5",
       "provider": "anthropic"
     },
     {
@@ -31885,13 +32566,18 @@
       "provider": "anthropic"
     },
     {
+      "name": "sonnet55",
+      "model_id": "claude-sonnet-5-5",
+      "provider": "anthropic"
+    },
+    {
       "name": "step-3.7-flash",
       "model_id": "stepfun/step-3.7-flash",
       "provider": "openrouter"
     },
     {
       "name": "tier/frontier",
-      "model_id": "claude-sonnet-5",
+      "model_id": "claude-sonnet-5-5",
       "provider": "anthropic"
     },
     {
@@ -32026,7 +32712,7 @@
       "id": "high-reasoning",
       "label": "High reasoning",
       "description": "Most capable route for difficult planning, repair, and review.",
-      "model_id": "claude-sonnet-5",
+      "model_id": "claude-sonnet-5-5",
       "provider": "anthropic",
       "source": "alias:frontier"
     },
@@ -32090,7 +32776,7 @@
               "plain_description": "Strong reasoning for everyday coding and analysis.",
               "relative_cost_hint": 3,
               "relative_speed_hint": 3,
-              "model_id": "gpt-6-sol"
+              "model_id": "gpt-6.1-sol"
             },
             {
               "value": "astra",
@@ -32474,6 +33160,34 @@
       "base_url": "https://api.anthropic.com/v1",
       "secret_env": "ANTHROPIC_API_KEY",
       "label": "Claude Sonnet 5",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Sonnet 5.5",
       "family": "anthropic-claude",
       "capabilities": [
         "audio",
@@ -33497,32 +34211,6 @@
         "prefers_markdown_scaffolding",
         "prefers_xml_scaffolding",
         "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "gemini",
-      "model": "gemini-3.1-flash-lite",
-      "base_url": "https://generativelanguage.googleapis.com",
-      "secret_env": "GEMINI_API_KEY",
-      "label": "Gemini 3.1 Flash-Lite",
-      "family": "google-gemini",
-      "capabilities": [
-        "audio",
-        "batch",
-        "extended_thinking",
-        "files",
-        "native_tools",
-        "pdf",
-        "prefers_markdown_scaffolding",
-        "prefers_xml_scaffolding",
-        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -34751,26 +35439,6 @@
     },
     {
       "provider": "openai",
-      "model": "gpt-4.1-nano",
-      "base_url": "https://api.openai.com/v1",
-      "secret_env": "OPENAI_API_KEY",
-      "label": "GPT-4.1 Nano",
-      "family": "openai-gpt",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "openai",
       "model": "gpt-4o",
       "base_url": "https://api.openai.com/v1",
       "secret_env": "OPENAI_API_KEY",
@@ -35125,11 +35793,11 @@
     },
     {
       "provider": "openai",
-      "model": "o4-mini",
+      "model": "gpt-6.1-sol",
       "base_url": "https://api.openai.com/v1",
       "secret_env": "OPENAI_API_KEY",
-      "label": "OpenAI o4-mini",
-      "family": "openai-reasoning",
+      "label": "GPT-6.1 Sol",
+      "family": "openai-gpt",
       "capabilities": [
         "batch",
         "extended_thinking",
@@ -35142,6 +35810,7 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
+        "tool_search",
         "tools",
         "vision"
       ]
@@ -35331,6 +36000,27 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "Claude Sonnet 5 (via OpenRouter)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-5.5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Claude Sonnet 5.5 (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
         "audio",
@@ -36220,6 +36910,50 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "GPT-6 Sol Pro (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-6.1-sol",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-6.1 Sol (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-6.1-sol-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-6.1 Sol Pro (via OpenRouter)",
       "family": "openai-gpt",
       "capabilities": [
         "extended_thinking",

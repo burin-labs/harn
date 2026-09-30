@@ -649,6 +649,7 @@ accepts these fields:
 | `reasoning_wire_format` | string | Non-standard OpenAI-compatible reasoning request shape: `openrouter` or `enabled`. |
 | `reasoning_effort_supported` | bool | Provider accepts a `reasoning_effort` request field for effort-capable models. |
 | `reasoning_none_supported` | bool | Provider accepts `reasoning_effort: "none"` as true reasoning-off instead of flooring at `minimal`. |
+| `thinking_off_type` | string | Anthropic `thinking.type` sent for `thinking: false` where reasoning can be disabled: `disabled` (default), or `between_tools` for Claude Sonnet 5.5, which rejects `disabled`. An unknown value fails capability loading. |
 | `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's `interleaved-thinking-2025-05-14` beta header. |
 | `anthropic_beta_features` | list of strings | Anthropic beta feature names always requested for this provider/model route. |
 | `vision_supported` | bool | Image content accepted by the provider/model route. |

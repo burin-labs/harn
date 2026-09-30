@@ -149,11 +149,12 @@ fn clamp_effort_for_disabled_thinking(body: &mut serde_json::Value, model: &str)
     if !matches!(claude_generation(model), Some((major, _)) if major >= 5) {
         return;
     }
-    let thinking_disabled = body
-        .get("thinking")
-        .and_then(|thinking| thinking.get("type"))
-        .and_then(serde_json::Value::as_str)
-        == Some("disabled");
+    // Sonnet 5.5's `between_tools` off switch has the same `high` ceiling.
+    let thinking_disabled = is_thinking_off_type(
+        body.get("thinking")
+            .and_then(|thinking| thinking.get("type"))
+            .and_then(serde_json::Value::as_str),
+    );
     if !thinking_disabled {
         return;
     }
@@ -180,21 +181,47 @@ fn model_rejects_disabled_thinking(model: &str) -> bool {
     !crate::llm::capabilities::lookup("anthropic", model).reasoning_disable_supported
 }
 
+/// The `thinking.type` this model's catalog row names as its off switch:
+/// `disabled` through Sonnet 5, `between_tools` on Sonnet 5.5.
+fn thinking_off_type(model: &str) -> crate::llm::capabilities::ThinkingOffType {
+    crate::llm::capabilities::lookup("anthropic", model).thinking_off_type
+}
+
+/// Whether `thinking.type` is an off switch rather than a thinking mode.
+fn is_thinking_off_type(value: Option<&str>) -> bool {
+    use crate::llm::capabilities::ThinkingOffType;
+    [ThinkingOffType::Disabled, ThinkingOffType::BetweenTools]
+        .iter()
+        .any(|off| value == Some(off.as_str()))
+}
+
 /// Lower a thinking-off request onto the wire.
 ///
 /// Through Opus 4.8 an omitted `thinking` field is the off switch, so nothing
 /// is written. Generation-5 models think when the field is omitted, so the
-/// ones that accept it get an explicit `{type:"disabled"}`. The always-on
-/// models reject that, and their closest legal request is the lowest effort:
-/// without it they think at the API default (`medium` on Opus 5.5, `high` on
-/// Fable), which is the opposite of what the caller asked for. An effort the
-/// caller already set is left alone.
+/// ones that accept an off switch get it explicitly, in the shape their
+/// catalog row names (`disabled`, or `between_tools` on Sonnet 5.5, where
+/// `disabled` is a 400). The always-on models reject both, and their closest
+/// legal request is the lowest effort: without it they think at the API
+/// default (`medium` on Opus 5.5, `high` on Fable), which is the opposite of
+/// what the caller asked for. An effort the caller already set is left alone.
 fn lower_thinking_off(body: &mut serde_json::Value, model: &str) {
     if !model_defaults_to_adaptive_thinking(model) {
+        // Omitted is already off here; drop an off switch these models do
+        // not know (a `between_tools` override is a 400 on them).
+        let off_type = body
+            .get("thinking")
+            .and_then(|thinking| thinking.get("type"))
+            .and_then(serde_json::Value::as_str);
+        if off_type == Some(crate::llm::capabilities::ThinkingOffType::BetweenTools.as_str()) {
+            if let Some(object) = body.as_object_mut() {
+                object.remove("thinking");
+            }
+        }
         return;
     }
     if !model_rejects_disabled_thinking(model) {
-        body["thinking"] = serde_json::json!({ "type": "disabled" });
+        body["thinking"] = serde_json::json!({ "type": thinking_off_type(model).as_str() });
         return;
     }
     if let Some(object) = body.as_object_mut() {
@@ -209,16 +236,22 @@ fn lower_thinking_off(body: &mut serde_json::Value, model: &str) {
     }
 }
 
-/// A caller override merged after the builder can still carry
-/// `thinking: {type:"disabled"}` to an always-on model, which is a 400.
-/// Re-lower it the same way the builder lowers a thinking-off request.
+/// A caller override merged after the builder can still carry an off switch
+/// the model rejects: `{type:"disabled"}` to an always-on model or to Sonnet
+/// 5.5, or `{type:"between_tools"}` to a model that only knows `disabled`.
+/// Each is a 400. Re-lower it the same way the builder lowers a thinking-off
+/// request.
 fn relower_disabled_thinking_override(body: &mut serde_json::Value, model: &str) {
-    let disabled = body
+    let requested = body
         .get("thinking")
         .and_then(|thinking| thinking.get("type"))
-        .and_then(serde_json::Value::as_str)
-        == Some("disabled");
-    if disabled && model_rejects_disabled_thinking(model) {
+        .and_then(serde_json::Value::as_str);
+    if !is_thinking_off_type(requested) {
+        return;
+    }
+    if model_rejects_disabled_thinking(model)
+        || requested != Some(thinking_off_type(model).as_str())
+    {
         lower_thinking_off(body, model);
     }
 }

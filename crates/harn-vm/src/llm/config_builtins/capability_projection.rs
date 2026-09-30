@@ -327,6 +327,10 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.reasoning_disable_supported),
     );
     dict.insert(
+        crate::value::intern_key("thinking_off_type"),
+        VmValue::String(arcstr::ArcStr::from(caps.thinking_off_type.as_str())),
+    );
+    dict.insert(
         crate::value::intern_key("reasoning_text_promotable"),
         VmValue::Bool(caps.reasoning_text_promotable),
     );

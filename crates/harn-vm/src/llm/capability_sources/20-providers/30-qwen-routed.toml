@@ -383,6 +383,21 @@ extends = true
 native_tools = true
 allowed_tool_choice_modes = ["auto", "none"]
 
+# Sonnet 5.5 through OpenRouter, probed 2026-09-29: `tool_choice: "required"`
+# is a 400 carrying Anthropic's "type tool and any are not supported" error,
+# and `reasoning: {enabled: false}` is a 400 ("Reasoning is mandatory for this
+# endpoint and cannot be disabled"). OpenRouter does not expose Anthropic's
+# `between_tools` off switch. With `reasoning_disable_supported = false`, a
+# default call omits the disable directive and succeeds, and an explicit
+# `thinking: false` is refused locally rather than sent to that 400.
+[[provider.openrouter]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+reasoning_disable_supported = false
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.openrouter]]
 model_match = "anthropic/claude-fable-*"
 native_tools = true

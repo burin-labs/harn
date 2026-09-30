@@ -118,6 +118,7 @@ provider = "openrouter"
 context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50 }
+superseded_by = "openai/gpt-6.1-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -167,6 +168,7 @@ served_variant = "openrouter"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+superseded_by = "openai/gpt-6.1-sol"
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -181,6 +183,41 @@ served_variant = "openrouter_pro"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+superseded_by = "openai/gpt-6.1-sol-pro"
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+# GPT-6.1 Sol on OpenRouter, listed 2026-09-29 at OpenAI's list price (live
+# /models index: $2 / $10, cache read $0.10, cache write $2.50). The `-pro`
+# slug is the same model with pro reasoning mode, priced identically per
+# token. Probed 2026-09-29: function tools over chat completions return a
+# tool call (OpenRouter routes to Responses), and `reasoning.effort = "none"`
+# is a 400 ("Reasoning is mandatory"), as on the direct route.
+[models."openai/gpt-6.1-sol"]
+name = "GPT-6.1 Sol (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6.1-sol"
+equivalence_group = "gpt-6.1-sol"
+served_variant = "openrouter"
+released = "2026-09-29"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."openai/gpt-6.1-sol-pro"]
+name = "GPT-6.1 Sol Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+logical_model = "gpt-6.1-sol"
+equivalence_group = "gpt-6.1-sol"
+served_variant = "openrouter_pro"
+released = "2026-09-29"
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50 }
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]

@@ -92,8 +92,8 @@ pub use model::{
     CacheBreakpointStyle, Capabilities, CapabilitiesFile, CapabilityProbeReceipt,
     CapabilityProbeStatus, ComputerUseStyle, GovernorBackoff, LiveEndpointFamily, ProviderDefaults,
     ProviderLimits, ReasoningHistoryWireField, ReasoningRoundTripPolicy, ScreenshotScaling,
-    StructuredOutputStrategy, SystemMessagePlacement, ToolFormatJustification, ToolFormatMirror,
-    WireDialect,
+    StructuredOutputStrategy, SystemMessagePlacement, ThinkingOffType, ToolFormatJustification,
+    ToolFormatMirror, WireDialect,
 };
 pub(crate) use runtime_probe::ensure_runtime_probe;
 

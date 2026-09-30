@@ -7,14 +7,18 @@
 # Short flagship aliases — these track whatever the current
 # generation is. Bump these when a successor lands.
 [aliases.sonnet]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
+[aliases.sonnet55]
+id = "claude-sonnet-5-5"
+provider = "anthropic"
+
+# Previous Sonnet generations, kept addressable for pinned workflows.
 [aliases.sonnet5]
 id = "claude-sonnet-5"
 provider = "anthropic"
 
-# Previous Sonnet generation, kept addressable for pinned workflows.
 [aliases.sonnet46]
 id = "claude-sonnet-4-6"
 provider = "anthropic"
@@ -56,11 +60,11 @@ id = "claude-haiku-4-5-20251001"
 provider = "anthropic"
 
 [aliases.frontier]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
 [aliases."tier/frontier"]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
 # Default balanced hosted route for routine coding-agent work.
@@ -79,9 +83,11 @@ id = "accounts/fireworks/models/gpt-oss-120b"
 provider = "fireworks"
 
 # GPT-6 tiers: Astra is the frontier, Sol the balanced tier (GPT-6 has no
-# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier.
+# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier. The balanced
+# tier tracks the newest Sol, GPT-6.1 Sol (2026-09-29); GPT-6 Sol stays
+# addressable by id and as `sol6`.
 [aliases."openai/mid"]
-id = "gpt-6-sol"
+id = "gpt-6.1-sol"
 provider = "openai"
 
 [aliases."openai/frontier"]
@@ -109,6 +115,14 @@ id = "gpt-6-astra"
 provider = "openai"
 
 [aliases.sol]
+id = "gpt-6.1-sol"
+provider = "openai"
+
+[aliases.sol61]
+id = "gpt-6.1-sol"
+provider = "openai"
+
+[aliases.sol6]
 id = "gpt-6-sol"
 provider = "openai"
 

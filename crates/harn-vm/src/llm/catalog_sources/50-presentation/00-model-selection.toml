@@ -78,13 +78,13 @@ plain_description = "Larger variants trade speed and cost for more capability."
 kind = "model"
 ordered_values = [
   { value = "luna", label = "Luna", plain_description = "Fastest and lowest cost for routine work.", relative_cost_hint = 1, relative_speed_hint = 5, model_id = "gpt-6-luna" },
-  { value = "sol", label = "Sol", plain_description = "Strong reasoning for everyday coding and analysis.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "gpt-6-sol" },
+  { value = "sol", label = "Sol", plain_description = "Strong reasoning for everyday coding and analysis.", relative_cost_hint = 3, relative_speed_hint = 3, model_id = "gpt-6.1-sol" },
   { value = "astra", label = "Astra", plain_description = "Most capable and most expensive for the hardest work.", relative_cost_hint = 5, relative_speed_hint = 1, model_id = "gpt-6-astra" },
 ]
 
-# Only the levels every GPT-6 model accepts. Sol and Luna also take `none`,
-# but Astra rejects it, and all three reject `max` despite the model pages
-# listing it (live probe 2026-09-22).
+# Only the levels every offered GPT-6 model accepts. Luna also takes `none`,
+# but Astra and GPT-6.1 Sol reject it, and all three reject `max` despite the
+# model pages listing it (live probes 2026-09-22 and 2026-09-29).
 [[presentation.families.openai-gpt-6.dimensions]]
 key = "effort"
 label = "Thinking time"

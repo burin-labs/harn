@@ -26,6 +26,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `anthropic` | `claude-opus-*` | `>=5.0; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `claude-opus-*` | `>=4.8; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `claude-opus-*` | `>=4.7` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-sonnet-*` | `>=5.5; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `anthropic` | `claude-sonnet-5*` | `any` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-sonnet-*` | `>=4.7` | `adaptive` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-haiku-*` | `>=4.5` | `enabled` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
@@ -39,6 +40,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `anthropic` | `anthropic/claude-opus-*` | `>=5.5; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `anthropic` | `anthropic/claude-opus-*` | `>=5.0; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `anthropic/claude-opus-*` | `>=4.7` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-sonnet-*` | `>=5.5; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `anthropic` | `anthropic/claude-sonnet-5*` | `any` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-sonnet-*` | `>=4.7` | `adaptive` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-haiku-*` | `>=4.5` | `enabled` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
@@ -184,7 +186,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `gpt-4o*` | `any` | no | `none` | yes | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `gpt-4.1*` | `any` | no | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `gpt-*codex*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
-| `openai` | `gpt-6-astra* \| gpt-6` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openai` | `gpt-6-astra* \| gpt-6 \| gpt-6.1-sol*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `gpt-6*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `gpt-5.6*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `gpt-5.4* \| openai/gpt-5.4*` | `any; extends` | no | `temperature` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
@@ -198,7 +200,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `openai/gpt-4o*` | `any` | no | `none` | yes | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/gpt-4.1*` | `any` | no | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/gpt-*codex*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
-| `openai` | `openai/gpt-6-astra* \| openai/gpt-6` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openai` | `openai/gpt-6-astra* \| openai/gpt-6 \| openai/gpt-6.1-sol*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/gpt-6*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/gpt-5.6*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/gpt-*` | `>=5.4` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
@@ -214,6 +216,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `qwen/qwen3.6-plus*` | `any; extends` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `anthropic/claude-fable-5.1* \| anthropic/claude-fable-5-1*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `anthropic/claude-opus-*` | `>=5.5; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `anthropic/claude-sonnet-*` | `>=5.5; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `anthropic/claude-fable-*` | `any` | no | `none` | yes | yes | yes | no | yes | no | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `anthropic/claude-mythos-*` | `any` | no | `none` | yes | yes | yes | no | yes | no | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `anthropic/claude-haiku-*` | `>=4.7` | no | `none` | yes | yes | yes | no | yes | no | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
@@ -335,6 +338,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `anthropic` | `claude-sonnet-4-5-20250929` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-sonnet-5-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/deepseek-ai/DeepSeek-V4-Flash-0731` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/deepseek-ai/DeepSeek-V4-Pro-0813` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -474,6 +478,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openai` | `gpt-6-astra` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-6-luna` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-6-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-6.1-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o3-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -488,6 +493,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `anthropic/claude-opus-5.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `anthropic/claude-sonnet-5.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `bytedance-seed/seed-2.0-lite` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `cohere/north-mini-code:free` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `deepseek/deepseek-v3.2` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: OpenRouter DeepSeek V3.2 advertises native tools, but coding-agent runs observed provider-native failures; default to Harn text tools and recover DSML markers. |
@@ -531,6 +537,8 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `openai/gpt-6-luna-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openai/gpt-6-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openai/gpt-6-sol-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `openai/gpt-6.1-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `openai/gpt-6.1-sol-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openai/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/free` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/typesafe/jev-1.13` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
