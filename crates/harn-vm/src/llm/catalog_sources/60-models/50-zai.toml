@@ -159,7 +159,7 @@ provider = "openrouter"
 context_window = 204800
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.966, output_per_mtok = 3.036, cache_read_per_mtok = 0.1794 }
+pricing = { input_per_mtok = 1.4, output_per_mtok = 4.4, cache_read_per_mtok = 0.26 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -169,24 +169,24 @@ provider = "openrouter"
 context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.6496, output_per_mtok = 2.0416, cache_read_per_mtok = 0.12064 }
+pricing = { input_per_mtok = 0.25, output_per_mtok = 3.99, cache_read_per_mtok = 0.2 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 [models."z-ai/glm-5.3"]
 name = "GLM 5.3 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1310720
+context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.91, output_per_mtok = 2.86, cache_read_per_mtok = 0.169 }
+pricing = { input_per_mtok = 1.4, output_per_mtok = 4.4, cache_read_per_mtok = 0.26 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 [models."z-ai/glm-5.3-flash"]
 name = "GLM 5.3 Flash (via OpenRouter)"
 provider = "openrouter"
-context_window = 1310720
+context_window = 1048576
 logical_model = "glm-5.3-flash"
 equivalence_group = "glm-5.3-flash"
 served_variant = "openrouter"
@@ -197,7 +197,7 @@ capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_cac
 # carries (docs.z.ai rate card, re-checked the same day). That is OpenRouter's
 # own rate for this route, not a Z.AI promotion, so it is the base here and the
 # expired promotion is gone.
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.30, cache_read_per_mtok = 0.018 }
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.5, cache_read_per_mtok = 0.03 }
 architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-08-28" }
 tier = "frontier"
 open_weight = true
@@ -236,7 +236,7 @@ logical_model = "glm-5.3-flashx"
 equivalence_group = "glm-5.3-flashx"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.37, output_per_mtok = 1.25, cache_read_per_mtok = 0.075 }
+pricing = { input_per_mtok = 0.37, output_per_mtok = 1.25, cache_read_per_mtok = 0.09 }
 architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-09-20" }
 tier = "frontier"
 open_weight = true

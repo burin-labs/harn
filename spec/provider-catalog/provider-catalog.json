@@ -12238,7 +12238,7 @@
       "aliases": [
         "groq-qwen3.8"
       ],
-      "context_window": 131042,
+      "context_window": 131072,
       "logical_model": "qwen3.8-27b",
       "equivalence_group": "qwen3.8-27b",
       "served_variant": "groq-lpu-preview",
@@ -21104,7 +21104,14 @@
         "input_per_mtok": 0.25,
         "output_per_mtok": 2.0,
         "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 128000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 2.0
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -21264,9 +21271,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.269,
-        "output_per_mtok": 0.4,
-        "cache_read_per_mtok": 0.1345,
+        "input_per_mtok": 0.28,
+        "output_per_mtok": 0.42,
+        "cache_read_per_mtok": 0.028,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -21350,9 +21357,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.089866,
-        "output_per_mtok": 0.179732,
-        "cache_read_per_mtok": 0.0179732,
+        "input_per_mtok": 0.14,
+        "output_per_mtok": 0.28,
+        "cache_read_per_mtok": 0.028,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -21392,7 +21399,7 @@
       "aliases": [
         "deepseek-v4-flash-0731"
       ],
-      "context_window": 1310720,
+      "context_window": 1048576,
       "modalities": {
         "input": [
           "text"
@@ -21514,9 +21521,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.9483,
-        "output_per_mtok": 1.8966,
-        "cache_read_per_mtok": 0.079025,
+        "input_per_mtok": 0.95526,
+        "output_per_mtok": 1.91052,
+        "cache_read_per_mtok": 0.079605,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -21748,9 +21755,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.14,
-        "output_per_mtok": 0.42,
-        "cache_read_per_mtok": 0.0042,
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.006,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -22441,9 +22448,9 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.09,
-        "output_per_mtok": 0.3,
-        "cache_read_per_mtok": 0.05,
+        "input_per_mtok": 0.0765,
+        "output_per_mtok": 0.255,
+        "cache_read_per_mtok": 0.0425,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -22683,8 +22690,8 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.255,
-        "output_per_mtok": 1.02,
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
         "cache_read_per_mtok": null,
         "cache_write_per_mtok": null
       },
@@ -22831,9 +22838,9 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.3,
-        "output_per_mtok": 1.2,
-        "cache_read_per_mtok": 0.06,
+        "input_per_mtok": 0.21,
+        "output_per_mtok": 0.84,
+        "cache_read_per_mtok": 0.042,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -23178,9 +23185,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.95,
-        "output_per_mtok": 4.0,
-        "cache_read_per_mtok": 0.16,
+        "input_per_mtok": 0.65,
+        "output_per_mtok": 3.41,
+        "cache_read_per_mtok": 0.15,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -23276,8 +23283,8 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.7062,
-        "output_per_mtok": 3.21,
+        "input_per_mtok": 0.6712,
+        "output_per_mtok": 3.35,
         "cache_read_per_mtok": 0.18,
         "cache_write_per_mtok": null
       },
@@ -23624,7 +23631,14 @@
         "input_per_mtok": 30.0,
         "output_per_mtok": 180.0,
         "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -23711,7 +23725,14 @@
         "input_per_mtok": 5.0,
         "output_per_mtok": 30.0,
         "cache_read_per_mtok": 0.5,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active",
@@ -23799,7 +23820,14 @@
         "input_per_mtok": 30.0,
         "output_per_mtok": 180.0,
         "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -23893,7 +23921,14 @@
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.2,
         "cache_read_per_mtok": 0.02,
-        "cache_write_per_mtok": 0.25
+        "cache_write_per_mtok": 0.25,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active",
@@ -23989,7 +24024,14 @@
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.2,
         "cache_read_per_mtok": 0.02,
-        "cache_write_per_mtok": 0.25
+        "cache_write_per_mtok": 0.25,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active",
@@ -24086,6 +24128,13 @@
         "output_per_mtok": 30.0,
         "cache_read_per_mtok": 0.5,
         "cache_write_per_mtok": 6.25,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ],
         "promotions": [
           {
             "id": "openrouter-sol-2026-08",
@@ -24192,16 +24241,23 @@
         "output_per_mtok": 30.0,
         "cache_read_per_mtok": 0.5,
         "cache_write_per_mtok": 6.25,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ],
         "promotions": [
           {
             "id": "openrouter-sol-pro-2026-08",
             "starts_on": "2026-08-21",
             "review_after": "2026-11-21",
             "source_url": "https://openrouter.ai/api/v1/models",
-            "input_per_mtok": 2.0,
-            "output_per_mtok": 10.0,
-            "cache_read_per_mtok": 0.2,
-            "cache_write_per_mtok": 2.5
+            "input_per_mtok": 4.0,
+            "output_per_mtok": 20.0,
+            "cache_read_per_mtok": 0.4,
+            "cache_write_per_mtok": 5.0
           }
         ]
       },
@@ -24297,7 +24353,14 @@
         "input_per_mtok": 2.0,
         "output_per_mtok": 12.0,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": 2.5
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active",
@@ -24391,7 +24454,14 @@
         "input_per_mtok": 2.0,
         "output_per_mtok": 12.0,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": 2.5
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active",
@@ -24483,7 +24553,14 @@
         "input_per_mtok": 10.0,
         "output_per_mtok": 50.0,
         "cache_read_per_mtok": 1.0,
-        "cache_write_per_mtok": 12.5
+        "cache_write_per_mtok": 12.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -24575,7 +24652,14 @@
         "input_per_mtok": 10.0,
         "output_per_mtok": 50.0,
         "cache_read_per_mtok": 1.0,
-        "cache_write_per_mtok": 12.5
+        "cache_write_per_mtok": 12.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -24668,7 +24752,14 @@
         "input_per_mtok": 0.1,
         "output_per_mtok": 0.5,
         "cache_read_per_mtok": 0.01,
-        "cache_write_per_mtok": 0.125
+        "cache_write_per_mtok": 0.125,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -24761,7 +24852,14 @@
         "input_per_mtok": 0.1,
         "output_per_mtok": 0.5,
         "cache_read_per_mtok": 0.01,
-        "cache_write_per_mtok": 0.125
+        "cache_write_per_mtok": 0.125,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -24854,7 +24952,14 @@
         "input_per_mtok": 2.0,
         "output_per_mtok": 10.0,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": 2.5
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active",
@@ -24948,7 +25053,14 @@
         "input_per_mtok": 2.0,
         "output_per_mtok": 10.0,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": 2.5
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active",
@@ -25229,8 +25341,8 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.15,
-        "output_per_mtok": 0.6,
+        "input_per_mtok": 0.037,
+        "output_per_mtok": 0.17,
         "cache_read_per_mtok": 0.075,
         "cache_write_per_mtok": null
       },
@@ -25801,7 +25913,14 @@
         "input_per_mtok": 0.3,
         "output_per_mtok": 1.8,
         "cache_read_per_mtok": null,
-        "cache_write_per_mtok": 0.375
+        "cache_write_per_mtok": 0.375,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 256000,
+            "input_multiplier": 1.25,
+            "output_multiplier": 1.25
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -25969,7 +26088,14 @@
         "input_per_mtok": 0.1875,
         "output_per_mtok": 1.125,
         "cache_read_per_mtok": null,
-        "cache_write_per_mtok": 0.234375
+        "cache_write_per_mtok": 0.234375,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 256000,
+            "input_multiplier": 4.0,
+            "output_multiplier": 2.666667
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -26049,7 +26175,14 @@
         "input_per_mtok": 1.027,
         "output_per_mtok": 6.162,
         "cache_read_per_mtok": null,
-        "cache_write_per_mtok": 1.28375
+        "cache_write_per_mtok": 1.28375,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 128000,
+            "input_multiplier": 1.538462,
+            "output_multiplier": 1.538462
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -26132,7 +26265,14 @@
         "input_per_mtok": 0.325,
         "output_per_mtok": 1.95,
         "cache_read_per_mtok": null,
-        "cache_write_per_mtok": 0.40625
+        "cache_write_per_mtok": 0.40625,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 256000,
+            "input_multiplier": 4.0,
+            "output_multiplier": 2.0
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -26309,7 +26449,14 @@
         "input_per_mtok": 0.32,
         "output_per_mtok": 1.28,
         "cache_read_per_mtok": 0.064,
-        "cache_write_per_mtok": 0.4
+        "cache_write_per_mtok": 0.4,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 256000,
+            "input_multiplier": 3.0,
+            "output_multiplier": 3.0
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -26658,10 +26805,17 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 1.6,
-        "output_per_mtok": 4.8,
-        "cache_read_per_mtok": 0.4,
-        "cache_write_per_mtok": null
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 200000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 2.0
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -26823,9 +26977,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.966,
-        "output_per_mtok": 3.036,
-        "cache_read_per_mtok": 0.1794,
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.26,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -26908,9 +27062,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.6496,
-        "output_per_mtok": 2.0416,
-        "cache_read_per_mtok": 0.12064,
+        "input_per_mtok": 0.25,
+        "output_per_mtok": 3.99,
+        "cache_read_per_mtok": 0.2,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -26950,7 +27104,7 @@
       "aliases": [
         "openrouter-glm-5.3"
       ],
-      "context_window": 1310720,
+      "context_window": 1048576,
       "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
@@ -26999,9 +27153,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.91,
-        "output_per_mtok": 2.86,
-        "cache_read_per_mtok": 0.169,
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.26,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -27041,7 +27195,7 @@
       "aliases": [
         "openrouter-glm-5.3-flash"
       ],
-      "context_window": 1310720,
+      "context_window": 1048576,
       "logical_model": "glm-5.3-flash",
       "equivalence_group": "glm-5.3-flash",
       "served_variant": "openrouter",
@@ -27102,9 +27256,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.09,
-        "output_per_mtok": 0.3,
-        "cache_read_per_mtok": 0.018,
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.5,
+        "cache_read_per_mtok": 0.03,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -27208,7 +27362,7 @@
       "pricing": {
         "input_per_mtok": 0.37,
         "output_per_mtok": 1.25,
-        "cache_read_per_mtok": 0.075,
+        "cache_read_per_mtok": 0.09,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -27655,7 +27809,7 @@
       "pricing": {
         "input_per_mtok": 0.6,
         "output_per_mtok": 2.4,
-        "cache_read_per_mtok": 0.0,
+        "cache_read_per_mtok": 0.06,
         "cache_write_per_mtok": 0.0
       },
       "deprecation": {
@@ -27943,7 +28097,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -28128,7 +28282,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -28996,7 +29150,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -29264,7 +29418,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -32736,7 +32890,7 @@
       "id": "vision-capable",
       "label": "Vision capable",
       "description": "Largest-context route that accepts image input.",
-      "model_id": "z-ai/glm-5.3-flash",
+      "model_id": "openai/gpt-6.1-sol-pro",
       "provider": "openrouter",
       "source": "selector:largest_vision_context"
     },
@@ -32744,7 +32898,7 @@
       "id": "long-context",
       "label": "Long context",
       "description": "Largest context-window route in this catalog.",
-      "model_id": "z-ai/glm-5.3-flash",
+      "model_id": "openai/gpt-6.1-sol-pro",
       "provider": "openrouter",
       "source": "selector:largest_context"
     }

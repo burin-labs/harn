@@ -2122,14 +2122,14 @@
         "NIM_API_KEY"
       ],
       "recommended": {
-        "selector": "nvidia:nvidia/kimi-k2.6",
+        "selector": "nvidia:nvidia/kimi-k3",
         "provider": "nvidia",
-        "model": "nvidia/kimi-k2.6",
-        "display_name": "Kimi K2.6 (NVIDIA NIM)",
+        "model": "nvidia/kimi-k3",
+        "display_name": "Kimi K3 (NVIDIA NIM)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"nvidia\"",
-          "model = \"nvidia/kimi-k2.6\"",
+          "model = \"nvidia/kimi-k3\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]
@@ -2142,14 +2142,12 @@
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
-        "reasoning_knobs": [
-          "enabled"
-        ],
-        "prompt_or_context_cache": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
         "serving_tiers": [],
-        "usage_accounting_confidence": "high"
+        "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
         "status": "not_recorded",
@@ -2654,31 +2652,30 @@
         "TOGETHER_AI_API_KEY"
       ],
       "recommended": {
-        "selector": "together:openai/gpt-oss-20b",
+        "selector": "together:MiniMaxAI/MiniMax-M3",
         "provider": "together",
-        "model": "openai/gpt-oss-20b",
-        "display_name": "GPT-OSS 20B (Together)",
-        "tool_format": "native",
+        "model": "MiniMaxAI/MiniMax-M3",
+        "display_name": "MiniMax M3 (Together)",
+        "tool_format": "text",
         "harn_options": [
           "provider = \"together\"",
-          "model = \"openai/gpt-oss-20b\"",
-          "tool_format = \"native\"",
+          "model = \"MiniMaxAI/MiniMax-M3\"",
+          "tool_format = \"text\"",
           "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
         "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "native",
-        "tool_mode_parity": "unknown",
+        "preferred_tool_format": "text",
+        "tool_mode_parity": "native_unreliable",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "effort",
-          "reasoning_effort"
+          "enabled"
         ],
-        "prompt_or_context_cache": false,
+        "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
         "serving_tiers": [],
@@ -2696,7 +2693,9 @@
         "evidence": []
       },
       "notes": [],
-      "caveats": [],
+      "caveats": [
+        "Family-on-host consistency pin: Together MiniMax-M2.7 native was 1/5 fidelity in the 2026-06-24 sweep; no M3-on-Together probe yet, so inherit text rather than an optimistic native pin."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     },

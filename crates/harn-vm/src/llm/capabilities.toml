@@ -4128,10 +4128,17 @@ thinking_block_style = "inline"
 # The `-contributor` ids are the same weights on Meta's training tier, so they
 # share this rule. What differs between the tiers is price and the data grant,
 # which lives on the model rows' `data_controls`, not here.
+#
+# `tool_choice` accepts only `auto`. A 2026-09-29 probe of
+# muse-spark-1.2-contributor and muse-spark-1.3-contributor returned 400 "only
+# `\"auto\"` is supported for `tool_choice`. `\"none\"`, `\"required\"`, and
+# named function choices are not currently supported" for `required`, while
+# `auto` returned 200.
 
 [[provider.meta]]
 model_match = "muse-spark-*"
 native_tools = true
+allowed_tool_choice_modes = ["auto"]
 preferred_tool_format = "native"
 recommended_endpoint = "/chat/completions"
 text_tool_wire_format_supported = true

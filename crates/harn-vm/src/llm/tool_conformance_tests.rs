@@ -134,6 +134,42 @@ fn request_report_materializes_large_string_case_without_provider_call() {
     );
 }
 
+/// Routes that reject forced tool choice are probed with `auto`; the forced
+/// probe was a guaranteed 400 on them. Opus 5 still accepts forcing and is the
+/// control that keeps the named-tool shape, so a change that relaxed every
+/// route would fail here.
+#[test]
+fn probe_asks_with_auto_only_where_forced_tool_choice_is_rejected() {
+    for (provider, model, expected) in [
+        ("anthropic", "claude-opus-5-5", json!({"type": "auto"})),
+        ("anthropic", "claude-sonnet-5-5", json!({"type": "auto"})),
+        (
+            "anthropic",
+            "claude-opus-5",
+            json!({"type": "tool", "name": TOOL_PROBE_TOOL_NAME}),
+        ),
+    ] {
+        let report = tool_conformance_request_report(
+            provider,
+            model,
+            None,
+            vec![ToolProbeMode::NonStreaming],
+            ToolProbeCase::SingleToolCall,
+            ToolProbeRequestProfile::CatalogDefault,
+            "marker",
+        )
+        .expect("request report");
+        let request = &report.requests[0];
+        assert_eq!(request.request_body["tool_choice"], expected, "{model}");
+        assert_eq!(
+            request.validation.status,
+            ToolConformanceRequestValidationStatus::Pass,
+            "{model}: {:?}",
+            request.validation.issues
+        );
+    }
+}
+
 #[test]
 fn request_report_for_json_format_uses_prompt_contract_without_native_tools() {
     let report = tool_conformance_request_report_for_format(
