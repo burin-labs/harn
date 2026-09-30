@@ -31,6 +31,8 @@ pub import {
   agent_verify_completion_judge_cap,
 } from "std/agent/completion_review"
 import { agent_feedback_emit } from "std/agent/feedback"
+import { __goal_judge_system } from "std/agent/goal_contract"
+import { __agent_goal_projection } from "std/agent/goal_projection"
 pub import {
   CompletionJudgeInvocations,
   CompletionPolicyEvaluation,
@@ -335,6 +337,7 @@ fn __judge_payload_with_verification(
 }
 
 fn __judge_stable_prefix(
+  agent: HarnessAgent,
   judge_cfg: any,
   opts: dict,
   payload: CompletionEvidenceSnapshot,
@@ -353,7 +356,14 @@ fn __judge_stable_prefix(
   // The steering block sits AFTER the goal, rubric, and requirement rows so its
   // supersession clause reads over all of them. It renders empty for an
   // unsteered run, which keeps that run's prefix byte-identical (and cacheable).
-  return system
+  const current_system = if judge_cfg?.goal != nil {
+    __goal_judge_system(
+      __agent_goal_projection(agent, payload.session_id, judge_cfg.goal, payload.obligations),
+    )
+  } else {
+    system
+  }
+  return current_system
     + "\n\nStable completion goal:\n"
     + completion_obligations_objective(payload.obligations, payload.task)
     + rubric_block
@@ -442,7 +452,14 @@ fn __judge_invoke_structured(
     "typed_checkpoint",
     payload.judge_evidence_projection,
   )
-  const stable_prefix = __judge_stable_prefix(judge_cfg, opts, payload, system, schema)
+  const stable_prefix = __judge_stable_prefix(
+    harness.agent,
+    judge_cfg,
+    opts,
+    payload,
+    system,
+    schema,
+  )
   const user = completion_judge_user_prompt(harness.fs, payload)
   const ran = __judge_run_checkpoint_bounded(
     harness,

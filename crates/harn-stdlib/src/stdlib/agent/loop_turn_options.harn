@@ -3,6 +3,7 @@ import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
+import { __agent_refresh_goal_pins } from "std/agent/pins"
 import { __agent_stall_verification_dispatch } from "std/agent/stall_checkpoint"
 import { AgentStallState } from "std/agent/stall_types"
 import { __agent_stall_fold_verify_state } from "std/agent/stall_verification"
@@ -1107,6 +1108,9 @@ pub fn agent_stage(
   if modes.audit_only {
     const result = agent_session_drain_bridge_injections(agent, session_id, "audit_only")
     delivered = delivered + (result?.delivered ?? 0)
+  }
+  if delivered > 0 || kind == "iteration_start" {
+    __agent_refresh_goal_pins(agent, session_id)
   }
   let typed_delivered = 0
   if modes.typed_delivery != nil {

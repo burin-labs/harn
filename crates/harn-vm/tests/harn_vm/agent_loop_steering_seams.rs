@@ -1270,6 +1270,8 @@ fn steer_retarget_pipeline(session_id: &str, retarget: bool) -> String {
     format!(
         r###"
 import {{ agent_capture_events }} from "std/agent/events"
+import {{ goal, goal_judge, goal_pin, with_goal }} from "std/agent/goal"
+import {{ agent_pin, pin, pin_reminder }} from "std/agent/pins"
 import {{ agent_session_push_user_message }} from "std/agent/state"
 import {{ llm_text, with_llm_script }} from "std/testing"
 
@@ -1294,6 +1296,13 @@ pipeline main(harness: Harness, task: unknown) {{
     ],
     {{ ->
       const session = "{session_id}"
+      const g = goal({{
+        objective: "Reply exactly ALPHA.",
+        success_criteria: [{{id: "frozen_alpha", description: "Reply ALPHA", check: {{ _ -> false }}}}],
+        constraints: ["Keep the operator's constraints."],
+        budget: {{tokens: 42}},
+      }})
+      const pinned_goal = goal_pin(harness.random, g)
       const seen = harness.runtime.shared_cell(
         {{scope: "task_group", key: "retarget-{session_id}", initial: "unset"}},
       )
@@ -1305,16 +1314,14 @@ pipeline main(harness: Harness, task: unknown) {{
             harness,
             "List changelog.d, read the first 5 lines of AGENTS.md, then reply exactly ALPHA.",
             nil,
-            {{
+            with_goal({{
               provider: "mock",
               session_id: session,
               root: "__HARN_TEST_SESSION_STORE_ROOT__",
               loop_until_done: true,
               done_sentinel: "##DONE##",
               max_iterations: 3,
-              verify_completion_judge: {{
-                provider: "mock",
-                max_invocations: 3,
+              verify_completion_judge: goal_judge(g, {{provider: "mock", max_invocations: 3}}) + {{
                 requirement_contract: {{
                   requirements: [
                     {{requirement_id: "list_changelog", name: "List changelog.d."}},
@@ -1331,6 +1338,9 @@ pipeline main(harness: Harness, task: unknown) {{
               }},
               post_turn_callback: {{ info ->
                 if info.iteration == 0 {{
+                  harness.agent.session_inject_reminder(session, pin_reminder(harness.agent, pinned_goal, {{max_body: 175}}))
+                  agent_pin(harness.agent, session, pin(harness.random, "constraint", "KEEP-CONSTRAINT"))
+                  agent_pin(harness.agent, session, pin(harness.random, "goal", "LEGACY-ALPHA-PIN"))
                   agent_session_push_user_message(
                     harness.agent,
                     session,
@@ -1339,7 +1349,7 @@ pipeline main(harness: Harness, task: unknown) {{
                 }}
                 return nil
               }},
-            }},
+            }}, g),
           )
         }},
       )
@@ -1384,6 +1394,54 @@ pipeline main(harness: Harness, task: unknown) {{
         .to_list()
       harness.stdio.log(len(redirected) > 0 ? "retarget_directive" : "no_retarget_directive")
       harness.stdio.log(harness.runtime.shared_snapshot(seen).value)
+      const goal_calls = calls.filter({{ call -> contains(to_string(call?.system ?? ""), "## Goal") }}).to_list()
+      assert(len(goal_calls) >= 2, "the goal fragment must fire before and after the steer")
+      assert(contains(goal_calls[0].system, "Objective: Reply exactly ALPHA."), "initial goal objective")
+      const expected_objective = {retarget} ? OBJECTIVE : "Reply exactly ALPHA."
+      assert(contains(goal_calls[1].system, "Objective: " + expected_objective), "projected goal objective")
+      assert_eq(len(goal_calls[1].system.split("## Goal")), 2, "one managed goal fragment per request")
+      assert(len(judged) > 0, "the typed goal judge must fire")
+      assert(contains(judged[0].system, "Objective: " + expected_objective), "projected judge objective")
+      if {retarget} {{
+        assert_eq(trim(captured.result.visible_text), "BRAVO")
+        assert(!contains(judged[0].system, "Objective: Reply exactly ALPHA."), "judge drops old objective")
+        assert(!contains(goal_calls[1].system, "Objective: Reply exactly ALPHA."), "goal prompt drops old objective")
+        assert(contains(goal_calls[1].system, "Retired by the operator's retarget"), "goal prompt records retirement")
+        const goal_retired = captured.events.filter({{ event -> event?.checkpoint?.schema == "harn.goal_criteria_retired.v1" }}).to_list()
+        assert_eq(len(goal_retired), 1, "one criterion retirement record; got " + to_string(len(goal_retired)))
+        assert_eq(goal_retired[0].checkpoint.retired[0].id, "frozen_alpha")
+        assert_eq(goal_retired[0].checkpoint.objective, OBJECTIVE)
+        const audit = (harness.agent.snapshot(session) ?? {{}}).events.filter({{ event -> event?.metadata?.schema == "harn.goal_criteria_retired.v1" }}).to_list()
+        assert_eq(len(audit), 1, "one durable criterion retirement record; got " + to_string(len(audit)))
+        assert_eq(audit[0].metadata.retired[0].id, "frozen_alpha")
+      }} else {{
+        assert(!contains(goal_calls[1].system, "Retired by the operator's retarget"))
+      }}
+      // The actual session's surviving directives, through the compactor.
+      const compacted = harness.agent.compact_transcript(harness.agent.snapshot(session), {{strategy: "truncate", keep_last: 1, target_tokens: 1}})
+      const survivors = transcript_events_by_kind(compacted, "system_reminder")
+      assert(len(survivors) > 0, "compaction must retain a known directive")
+      assert(survivors.any({{ event -> event.reminder.body == "KEEP-CONSTRAINT" }}), "constraint pin survives compaction")
+      assert_eq(survivors.any({{ event -> contains(event.reminder.body, "Objective: Reply exactly ALPHA.") }}), !{retarget})
+      assert(survivors.any({{ event -> contains(event?.reminder?.goal_pin?.spec?.constraints ?? [], "Keep the operator's constraints.") }}), "goal constraint survives compaction")
+      assert_eq(survivors.any({{ event -> event.reminder.body == "LEGACY-ALPHA-PIN" }}), !{retarget})
+      if {retarget} {{
+        assert(survivors.any({{ event -> contains(event.reminder.body, "Objective: " + OBJECTIVE) }}), "retargeted pin survives compaction")
+        const typed_pin = survivors.filter({{ event -> event?.reminder?.goal_pin != nil }}).to_list()
+        assert_eq(len(typed_pin), 1, "one typed goal pin must survive")
+        assert_eq(typed_pin[0].reminder.goal_pin.spec.objective, OBJECTIVE)
+        assert_eq(len(typed_pin[0].reminder.goal_pin.spec.success_criteria), 0)
+        assert_eq(typed_pin[0].reminder.goal_pin.spec.retired_criteria[0].id, "frozen_alpha")
+        assert_eq(typed_pin[0].reminder.goal_pin.spec.budget.tokens, 42)
+        assert_eq(typed_pin[0].reminder.goal_pin.max_body, 175)
+        assert(contains(typed_pin[0].reminder.body, "[pin reminder truncated]"), "goal pin body limit survives retarget")
+        assert(survivors.any({{ event -> contains(event.reminder.body, "The objective is now:\n" + OBJECTIVE) }}), "retarget directive survives compaction")
+        agent_pin(harness.agent, session, pinned_goal)
+        const updated = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+        assert(updated.any({{ event -> contains(event.reminder.body, "Objective: " + OBJECTIVE) }}), "caller-held pin projects current goal")
+        assert(!updated.any({{ event -> contains(event.reminder.body, "Objective: Reply exactly ALPHA.") }}), "caller-held pin drops old objective")
+        assert_eq(len((harness.agent.snapshot(session) ?? {{}}).events.filter({{ event -> event?.metadata?.schema == "harn.goal_criteria_retired.v1" }}).to_list()), 1, "reusing a goal pin must not record retirement again")
+      }}
     }},
   )
 }}

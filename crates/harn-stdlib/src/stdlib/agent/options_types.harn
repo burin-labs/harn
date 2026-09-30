@@ -1,4 +1,5 @@
 import { CompletionPrecheckConfig } from "std/agent/completion_precheck"
+import { GoalSpec } from "std/agent/goal_contract"
 import { AgentStallCheckpoint } from "std/agent/stall_types"
 // Canonical declarations for the typed agent-loop option surface.
 // `std/agent/options` is the public facade and re-exports these aliases.
@@ -256,6 +257,7 @@ pub type CompletionRequirementContract = {requirements: list<CompletionRequireme
  * Rust twin: none — judges are stdlib-owned.
  */
 pub type JudgeConfig = {
+  goal?: GoalSpec,
   provider?: string,
   model?: string,
   system?: string,

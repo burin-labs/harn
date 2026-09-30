@@ -2,7 +2,7 @@
   {
     "scope": "JudgeConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-    "expression": "__judge_stable_prefix(judge_cfg, opts, payload, system, schema)",
+    "expression": "__judge_stable_prefix(\n    harness.agent,\n    judge_cfg,\n    opts,\n    payload,\n    system,\n    schema,\n  )",
     "owner": "__judge_stable_prefix",
     "evidence": "Consumer __judge_stable_prefix.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner.",
     "consumers": [

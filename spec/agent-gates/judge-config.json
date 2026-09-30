@@ -80,6 +80,23 @@
     "verdict": "KEEP-with-expiry"
   },
   {
+    "default": "absent; use the configured system prompt",
+    "evidence": "goal_judge supplies the typed goal; __judge_stable_prefix projects it under recorded completion obligations before rendering. Source review establishes this behavior; downstream headless binding is not inferred.",
+    "expiry": "2026-10-30",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "JudgeConfig.goal",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "reader": "__judge_stable_prefix"
+      }
+    ],
+    "reason": "The goal judge needs the typed goal to apply accepted retargets without parsing frozen prompt text.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "completion judge: catalog completion_review.max_judge_calls, then 5; turn-end judge: absent (unbounded); nonpositive disables the cap",
     "evidence": "completion_review.__verify_completion_judge_cap and turn_end.agent_turn_end_judge_cap own the two caller defaults. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",

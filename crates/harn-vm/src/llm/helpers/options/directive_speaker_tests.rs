@@ -18,6 +18,7 @@ fn reminder(
     body: &str,
 ) -> SystemReminder {
     SystemReminder {
+        goal_pin: None,
         id: format!("reminder-{}", role_hint.as_str()),
         tags: vec!["test".to_string()],
         dedupe_key: None,

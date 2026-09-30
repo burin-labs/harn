@@ -1010,6 +1010,7 @@ mod tests {
 
     fn reminder_event_value(body: &str, preserve: bool, ttl: Option<i64>) -> VmValue {
         let reminder = SystemReminder {
+            goal_pin: None,
             id: format!("rem-{}", uuid::Uuid::now_v7()),
             tags: Vec::new(),
             dedupe_key: None,

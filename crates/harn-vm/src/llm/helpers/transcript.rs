@@ -269,6 +269,8 @@ impl ReminderSource {
 /// removed or compacted away."
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SystemReminder {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_pin: Option<Box<super::goal_pin::GoalPinProjection>>,
     pub id: String,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -294,6 +296,7 @@ impl SystemReminder {
     #[allow(dead_code)] // reserved for the R-02+ stdlib reminder providers
     pub fn new(body: impl Into<String>, source: ReminderSource, fired_at_turn: i64) -> Self {
         Self {
+            goal_pin: None,
             id: uuid::Uuid::now_v7().to_string(),
             tags: Vec::new(),
             dedupe_key: None,
@@ -1007,6 +1010,9 @@ pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
         .filter(|s| !s.is_empty());
 
     SystemReminder {
+        goal_pin: dict.get("goal_pin").and_then(|value| {
+            super::goal_pin::GoalPinProjection::from_json(crate::llm::vm_value_to_json(value)).ok()
+        }),
         id,
         tags,
         dedupe_key,
@@ -1118,6 +1124,7 @@ mod tests {
     #[test]
     fn reminder_round_trips_through_serde() {
         let reminder = SystemReminder {
+            goal_pin: None,
             id: "0190abcd-1234-7000-8000-000000000001".to_string(),
             tags: vec!["token_pressure".to_string(), "file_changed".to_string()],
             dedupe_key: Some("token_pressure".to_string()),
