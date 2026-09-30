@@ -828,3 +828,61 @@ fn together_routes_that_need_a_dedicated_endpoint_are_marked_dedicated() {
     assert_eq!(control.provider, "together");
     assert_ne!(control.availability, ModelAvailability::Dedicated);
 }
+
+/// A provider's default model is its own authored `runtime` entry, whichever
+/// provider is the default. Before this, a user overlay naming another default
+/// provider left `provider: "anthropic"` with no default, and a provider with
+/// no authored default was handed Anthropic's model.
+#[test]
+fn provider_default_does_not_depend_on_the_default_provider() {
+    reset_overrides();
+    for default_provider in ["ollama", "mistral"] {
+        let overlay = parse_config_toml(&format!("default_provider = \"{default_provider}\"\n"))
+            .expect("overlay parses");
+        set_user_overrides(Some(overlay));
+        assert_eq!(
+            default_model_for_provider("anthropic").as_deref(),
+            Ok("claude-sonnet-4-6"),
+            "default_provider = {default_provider}"
+        );
+        assert!(
+            matches!(
+                default_model_for_provider("mistral"),
+                Err(ModelResolutionError::MissingProviderDefault { .. })
+            ),
+            "mistral has no authored default and must not borrow one (default_provider = {default_provider})"
+        );
+        clear_user_overrides();
+    }
+}
+
+/// `fallback_model` is the retired spelling of the default provider's default
+/// model. The merge turns it into that provider's `runtime` entry, and an
+/// explicit `provider_defaults` entry in the same overlay still wins.
+#[test]
+fn legacy_fallback_model_normalizes_into_provider_defaults() {
+    let mut config = parse_config_toml("default_provider = \"anthropic\"\n").expect("base parses");
+    let legacy =
+        parse_config_toml("default_provider = \"ollama\"\nfallback_model = \"llama3.2\"\n")
+            .expect("overlay parses");
+    config.merge_from(&legacy);
+    assert_eq!(config.default_provider.as_deref(), Some("ollama"));
+    assert_eq!(
+        config.provider_defaults["ollama"].runtime.as_deref(),
+        Some("llama3.2")
+    );
+    assert_eq!(
+        config.fallback_model, None,
+        "no second mechanism survives the merge"
+    );
+
+    let explicit = parse_config_toml(
+        "fallback_model = \"legacy\"\n[provider_defaults.ollama]\nruntime = \"explicit\"\n",
+    )
+    .expect("overlay parses");
+    config.merge_from(&explicit);
+    assert_eq!(
+        config.provider_defaults["ollama"].runtime.as_deref(),
+        Some("explicit")
+    );
+}

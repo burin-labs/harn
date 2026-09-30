@@ -507,7 +507,9 @@ _unset = ["not_a_generation_default"]
             catalog_source.join("00-base/private.toml"),
             r#"
 default_provider = "private"
-fallback_model = "private/fast"
+
+[provider_defaults.private]
+runtime = "private/fast"
 
 [usage_accounting_audit]
 reviewed_on = "2026-08-25"

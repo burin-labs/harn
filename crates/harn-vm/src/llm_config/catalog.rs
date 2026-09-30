@@ -912,13 +912,10 @@ pub fn default_model_for_provider(provider: &str) -> Result<String, ModelResolut
             suggestions: Vec::new(),
         });
     }
+    // A provider's default model is its own authored `runtime` entry. Which
+    // provider is the default never changes another provider's answer.
     local_model_env_override(provider)
         .or_else(|| config.provider_defaults.get(provider)?.runtime.clone())
-        .or_else(|| {
-            (config.default_provider.as_deref() == Some(provider))
-                .then(|| config.fallback_model.clone())
-                .flatten()
-        })
         .ok_or_else(|| ModelResolutionError::MissingProviderDefault {
             provider: provider.to_string(),
             catalog_version: MODEL_CATALOG_VERSION.to_string(),
@@ -1413,11 +1410,26 @@ pub fn provider_route_default_issues(config: &ProvidersConfig) -> Vec<String> {
         }
     };
 
-    match (&config.default_provider, &config.fallback_model) {
-        (Some(provider), Some(model)) => {
-            issues.extend(check("fallback_model".to_string(), provider, model));
+    match &config.default_provider {
+        Some(provider)
+            if config
+                .provider_defaults
+                .get(provider)
+                .and_then(|defaults| defaults.runtime.as_ref())
+                .is_none() =>
+        {
+            issues.push(format!(
+                "default_provider {provider} has no provider_defaults.{provider}.runtime model"
+            ));
         }
-        _ => issues.push("default_provider and fallback_model must both be set".to_string()),
+        Some(_) => {}
+        None => issues.push("default_provider must be set".to_string()),
+    }
+    if config.fallback_model.is_some() {
+        issues.push(
+            "fallback_model is retired; author provider_defaults.<default_provider>.runtime"
+                .to_string(),
+        );
     }
     for (provider, defaults) in &config.provider_defaults {
         if !config.providers.contains_key(provider) {
