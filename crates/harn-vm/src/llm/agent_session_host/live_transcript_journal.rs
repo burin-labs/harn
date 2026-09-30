@@ -188,13 +188,15 @@ pub(super) async fn flush_init_terminal(
     );
     let phase = append_terminal_phase(session_id, event)?;
     crate::agent_session_journal::flush(session_id).await?;
-    crate::llm::agent_runtime::emit_agent_event_with_ctx(
+    // Subscriber delivery can re-enter the VM. Keep its future off the
+    // initialization caller's stack.
+    Box::pin(crate::llm::agent_runtime::emit_agent_event_with_ctx(
         ctx,
         &crate::agent_events::AgentEvent::TurnPhaseChanged {
             session_id: session_id.to_string(),
             phase,
         },
-    )
+    ))
     .await;
     crate::agent_sessions::clear_journal(session_id);
     Ok(())
