@@ -1116,6 +1116,10 @@ impl HostLeaseStore {
     /// directory therefore lets a waiter wake itself and spin continuously.
     /// The lease deadline remains the fallback if a best-effort signal write
     /// is unavailable after the database commit.
+    fn signal_waiters(&self) {
+        let _ = std::fs::write(&self.wake_path, Uuid::now_v7().to_string());
+    }
+
     /// Wall-clock Unix milliseconds read through the injected clock.
     fn now_ms(&self) -> Result<i64, HostLeaseError> {
         let millis = harn_clock::now_wall_ms(&*self.clock);
@@ -1125,14 +1129,9 @@ impl HostLeaseStore {
         Ok(millis)
     }
 
-    /// Monotonic milliseconds elapsed since `started_ms`, a prior reading of
-    /// the injected clock's monotonic counter.
+    /// Monotonic milliseconds elapsed since a prior clock reading.
     fn monotonic_elapsed(&self, started_ms: i64) -> Duration {
         Duration::from_millis(self.clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64)
-    }
-
-    fn signal_waiters(&self) {
-        let _ = std::fs::write(&self.wake_path, Uuid::now_v7().to_string());
     }
 
     #[cfg(test)]
