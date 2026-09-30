@@ -4,6 +4,63 @@ use harn_session_store::{
 
 use super::*;
 
+#[tokio::test]
+async fn internal_turn_phases_restore_candidate_and_finality_in_order() {
+    use crate::agent_events::{AgentTerminalKind, AgentTerminalOutcome, AgentTurnPhase};
+    let session_id = "turn-phase-replay";
+    let store = store_with_session(session_id).await;
+    let phases = [
+        AgentTurnPhase::Generating,
+        AgentTurnPhase::Verifying {
+            candidate_reply: "candidate".into(),
+        },
+        AgentTurnPhase::Terminal {
+            reply: "accepted".into(),
+            outcome: Box::new(AgentTerminalOutcome::new(
+                AgentTerminalKind::Natural,
+                "done",
+            )),
+        },
+    ];
+    for phase in &phases {
+        let event = AgentEvent::TurnPhaseChanged {
+            session_id: session_id.into(),
+            phase: phase.clone(),
+        };
+        let payload = serde_json::json!({"transcript_event": {
+            "kind": "turn_phase_changed", "role": "assistant", "visibility": "internal",
+            "text": "", "metadata": serde_json::to_value(event).unwrap(),
+        }});
+        store
+            .append(
+                session_id,
+                AppendEvent::new(
+                    SessionEventKind::Custom {
+                        custom_type: "turn_phase_changed".into(),
+                    },
+                    payload,
+                ),
+            )
+            .await
+            .expect("append phase");
+    }
+    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+        .await
+        .unwrap()
+        .expect("known session");
+    assert_eq!(
+        restored.len(),
+        3,
+        "internal phases must not disappear on reconnect"
+    );
+    for (event, expected) in restored.iter().zip(phases) {
+        match &event.event {
+            AgentEvent::TurnPhaseChanged { phase, .. } => assert_eq!(phase, &expected),
+            other => panic!("expected phase, got {other:?}"),
+        }
+    }
+}
+
 fn transcript_row(kind: &str, role: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
         "transcript_event": {

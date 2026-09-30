@@ -100,6 +100,18 @@ fn replay_event_from_stored(
     stored: &StoredEvent,
 ) -> Option<AgentSessionReplayEvent> {
     let transcript = stored.payload.get("transcript_event")?;
+    if transcript.get("kind").and_then(serde_json::Value::as_str) == Some("turn_phase_changed") {
+        let payload = transcript.get("metadata")?;
+        let event =
+            AgentEvent::from_host_payload(session_id, "turn_phase_changed", payload).ok()??;
+        return Some(AgentSessionReplayEvent {
+            event_id: stored.event_id,
+            kind: stored_kind_label(&stored.kind),
+            occurred_at_ms: stored.ts_ms,
+            execution_id: None,
+            event,
+        });
+    }
     // Internal visibility hides bookkeeping and prose the model wrote for
     // itself. It does not hide tool rows: the journal writes every tool call
     // and result as internal, because its text is not conversation, yet a

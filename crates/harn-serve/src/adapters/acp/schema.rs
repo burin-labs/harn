@@ -102,6 +102,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "tool_batch_disposition",
     "tool_call_audit",
     "tool_format_override",
+    "turn_phase_changed",
     "typed_checkpoint",
 ];
 

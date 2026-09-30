@@ -9,18 +9,10 @@ use super::host_injection::{
     AttachmentFlavor, AttachmentRendering, HostInjectionProvenance, InjectionDelivery,
     SanitizationVerdict,
 };
-use super::tool::{ToolCallErrorCategory, ToolCallStatus, ToolExecutor, ToolMutationStatus};
+use super::tool::{
+    StagedWriteSummary, ToolCallErrorCategory, ToolCallStatus, ToolExecutor, ToolMutationStatus,
+};
 use super::worker::{FsWatchEvent, SubagentTerminalStatus, WorkerEvent};
-
-/// Reviewable summary of one path in the staged filesystem overlay.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StagedWriteSummary {
-    pub path: String,
-    pub kind: String,
-    pub byte_delta: i64,
-    pub snapshot_id: Option<String>,
-}
 
 /// The dependency/effect phase assigned to one model-proposed tool call.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -111,6 +103,13 @@ pub struct ToolBatchDispositionReceipt {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
+    /// Phase and reply finality for one agent-loop invocation. Consumers must
+    /// not treat assistant chunks or iteration endings as terminal replies.
+    TurnPhaseChanged {
+        session_id: String,
+        #[serde(flatten)]
+        phase: super::AgentTurnPhase,
+    },
     AgentMessageChunk {
         session_id: String,
         content: String,
@@ -1409,7 +1408,8 @@ impl AgentEvent {
 
     pub fn session_id(&self) -> &str {
         match self {
-            Self::AgentMessageChunk { session_id, .. }
+            Self::TurnPhaseChanged { session_id, .. }
+            | Self::AgentMessageChunk { session_id, .. }
             | Self::AgentThoughtChunk { session_id, .. }
             | Self::UserMessage { session_id, .. }
             | Self::ToolCall { session_id, .. }

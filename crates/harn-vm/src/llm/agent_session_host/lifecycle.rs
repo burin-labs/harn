@@ -633,6 +633,29 @@ pub(super) async fn host_agent_session_finalize(
         }
         session.advance_finalization_to(super::AgentFinalizationStage::PromptOutcomeProjected);
     }
+    let visible_text = crate::agent_sessions::transcript(&session_id)
+        .as_ref()
+        .and_then(crate::llm::agent_result_projection::last_assistant_text)
+        .unwrap_or_default();
+    let terminal_phase = crate::agent_events::AgentEvent::TurnPhaseChanged {
+        session_id: session_id.clone(),
+        phase: crate::agent_events::AgentTurnPhase::Terminal {
+            reply: visible_text.clone(),
+            outcome: terminal_outcome.clone(),
+        },
+    };
+    if finalization_stage < super::AgentFinalizationStage::TurnPhaseRecorded {
+        let transcript_event = crate::llm::helpers::transcript_event(
+            "turn_phase_changed",
+            "assistant",
+            "internal",
+            "",
+            Some(serde_json::to_value(&terminal_phase).expect("turn phase is serializable")),
+        );
+        crate::agent_sessions::append_event(&session_id, transcript_event)
+            .map_err(VmError::Runtime)?;
+        session.advance_finalization_to(super::AgentFinalizationStage::TurnPhaseRecorded);
+    }
     let recap_store = crate::agent_sessions::journal_store(&session_id);
     let recap_from_event_id = crate::agent_sessions::journal_first_event_id(&session_id);
     live_transcript_journal::flush_terminal(
@@ -680,6 +703,7 @@ pub(super) async fn host_agent_session_finalize(
             crate::session_recap::SessionRecapUnavailableReason::JournalUnavailable,
         )
     };
+    crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &terminal_phase).await;
     let mut session = finalization.commit();
     permissions::clear_session_grants(&session_id);
     crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
@@ -700,10 +724,6 @@ pub(super) async fn host_agent_session_finalize(
         .as_ref()
         .map(vm_to_json)
         .unwrap_or(serde_json::Value::Null);
-    let visible_text = snapshot
-        .as_ref()
-        .and_then(crate::llm::agent_result_projection::last_assistant_text)
-        .unwrap_or_default();
 
     emit_event(&terminal_outcome.checkpoint(&session_id, &canonical_status, &stop_reason));
     // The trace event log never carried tool or loop-lifecycle facts (#5997),

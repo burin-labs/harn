@@ -31,24 +31,12 @@ mod step_judge_skips;
 mod subagent_stop;
 mod tool_data;
 mod tool_format_override;
+mod turn_phase;
 use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
 use compaction_events::fixture_compaction_receipt;
 use plan_document::fixture_plan_document_event;
 
-pub(super) async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let (sink, expected_len) = (AcpAgentEventSink::new(AcpOutput::Channel(tx)), events.len());
-    for event in events {
-        sink.handle_event(&event);
-    }
-
-    let mut notifications = Vec::with_capacity(expected_len);
-    for _ in 0..expected_len {
-        let line = rx.recv().await.expect("ACP event notification");
-        notifications.push(serde_json::from_str(&line).expect("json"));
-    }
-    notifications
-}
+pub(super) use schema_contract::collect_notifications;
 
 fn fixture_handoff() -> HandoffArtifact {
     HandoffArtifact {
@@ -646,7 +634,9 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
         },
     ];
     drop(events.splice(14..14, registration_fixtures::events()));
-    schema_contract::with_purpose_label(events)
+    let mut events = schema_contract::with_purpose_label(events);
+    events.extend(turn_phase::fixture_events());
+    events
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -1,0 +1,214 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_options } from "std/agent/options"
+import { agent_emit_event } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness) {
+  const sid = "completion-turn-phase-" + harness.random.uuid()
+  harness.agent.open(sid)
+  harness.agent.subscribe(
+    sid,
+    { event ->
+      if event.type == "turn_phase_changed" && event.phase == "terminal" {
+        assert_eq(harness.agent.current_id(), sid)
+        assert_eq(event.reply, "Accepted")
+        harness.stdio.println("subscriber: terminal reply")
+      }
+    },
+  )
+  const captured = agent_capture_events(
+    harness.agent,
+    sid,
+    { ->
+      with_llm_script(
+        harness.llm,
+        [llm_text("Candidate ##DONE##"), llm_text("Accepted ##DONE##")],
+        { ->
+          const result = agent_loop(
+            harness,
+            "Finish the task",
+            nil,
+            agent_options(
+              {
+                provider: "mock",
+                model: "phase-actor",
+                session_id: sid,
+                loop_until_done: true,
+                done_sentinel: "##DONE##",
+                max_iterations: 3,
+                final_wrapup: false,
+                verify_completion: { info ->
+                  agent_emit_event(
+                    harness.agent,
+                    sid,
+                    "typed_checkpoint",
+                    {kind: "verifier_entered", text: info.text},
+                  )
+                  return if contains(info.text, "Accepted") {
+                    true
+                  } else {
+                    "Try again"
+                  }
+                },
+              },
+            ),
+          )
+          assert_eq(len(harness.llm.mock_calls()), 2, "the veto must actually re-ask the actor")
+          return result
+        },
+      )
+    },
+  )
+  const phases = captured.events.filter({ event -> event.type == "turn_phase_changed" }).to_list()
+  const checkpoints = captured.events.filter(
+    { event -> event.type == "typed_checkpoint" && event?.checkpoint?.kind == "verifier_entered" },
+  )
+    .to_list()
+  assert_eq(len(checkpoints), 2, "both candidates must reach the deterministic verifier")
+  let phase = ""
+  for event in captured.events {
+    if event.type == "turn_phase_changed" {
+      phase = event.phase
+    }
+    if event.type == "typed_checkpoint" && event?.checkpoint?.kind == "verifier_entered" {
+      assert_eq(phase, "verifying", "the host sees verification before the check runs")
+    }
+  }
+  assert_eq(
+    phases.map({ event -> event.phase }),
+    ["generating", "verifying", "generating", "verifying", "terminal"],
+  )
+  assert_eq(phases[1].candidate_reply, "Candidate")
+  assert_eq(phases[3].candidate_reply, "Accepted")
+  assert_eq(phases[4].reply, captured.result.visible_text)
+  assert_eq(phases[4].reply, "Accepted")
+  assert_eq(phases[4].outcome.kind, "natural")
+  assert_eq(len(captured.events.filter({ event -> event.type == "judge_started" }).to_list()), 0)
+  const failed_sid = "completion-phase-error-" + harness.random.uuid()
+  const failed = agent_capture_events(
+    harness.agent,
+    failed_sid,
+    { ->
+      try {
+        with_llm_script(
+          harness.llm,
+          [llm_text("Unverified ##DONE##")],
+          { ->
+            agent_loop(
+              harness,
+              "Finish the task",
+              nil,
+              agent_options(
+                {
+                  provider: "mock",
+                  model: "phase-actor",
+                  session_id: failed_sid,
+                  loop_until_done: true,
+                  done_sentinel: "##DONE##",
+                  max_iterations: 2,
+                  final_wrapup: false,
+                  verify_completion: { info ->
+                    throw "verification failed"
+                  },
+                },
+              ),
+            )
+          },
+        )
+      }
+    },
+  )
+  assert(is_err(failed.result), "a verifier throw must terminate the real loop")
+  const failed_phases = failed.events.filter({ event -> event.type == "turn_phase_changed" })
+    .to_list()
+  assert_eq(failed_phases.map({ event -> event.phase }), ["generating", "verifying", "terminal"])
+  assert_eq(failed_phases[2].outcome.kind, "runtime_error")
+  const unchecked_sid = "completion-phase-unchecked-" + harness.random.uuid()
+  const unchecked = agent_capture_events(
+    harness.agent,
+    unchecked_sid,
+    { ->
+      with_llm_script(
+        harness.llm,
+        [llm_text("No check ##DONE##")],
+        { ->
+          agent_loop(
+            harness,
+            "Finish the task",
+            nil,
+            agent_options(
+              {
+                provider: "mock",
+                model: "phase-actor",
+                session_id: unchecked_sid,
+                loop_until_done: true,
+                done_sentinel: "##DONE##",
+                max_iterations: 2,
+                final_wrapup: false,
+              },
+            ),
+          )
+        },
+      )
+    },
+  )
+  const unchecked_phases = unchecked.events.filter({ event -> event.type == "turn_phase_changed" })
+    .to_list()
+  assert_eq(unchecked_phases.map({ event -> event.phase }), ["generating", "terminal"])
+  assert_eq(unchecked_phases[1].reply, "No check")
+  const judged_sid = "completion-phase-judged-" + harness.random.uuid()
+  const judged = agent_capture_events(
+    harness.agent,
+    judged_sid,
+    { ->
+      with_llm_script(
+        harness.llm,
+        [
+          llm_text("Reviewed ##DONE##"),
+          llm_text(json_stringify({verdict: "done", detail: "Task complete"})),
+        ],
+        { ->
+          agent_loop(
+            harness,
+            "Finish the task",
+            nil,
+            agent_options(
+              {
+                provider: "mock",
+                model: "phase-actor",
+                session_id: judged_sid,
+                loop_until_done: true,
+                done_sentinel: "##DONE##",
+                max_iterations: 2,
+                final_wrapup: false,
+                verify_completion_judge: {
+                  provider: "mock",
+                  model: "phase-judge",
+                  max_invocations: 1,
+                },
+              },
+            ),
+          )
+        },
+      )
+    },
+  )
+  const judged_phases = judged.events.filter({ event -> event.type == "turn_phase_changed" })
+    .to_list()
+  assert_eq(judged_phases.map({ event -> event.phase }), ["generating", "verifying", "terminal"])
+  assert_eq(judged_phases[2].reply, "Reviewed")
+  assert_eq(len(judged.events.filter({ event -> event.type == "judge_started" }).to_list()), 1)
+  let judged_phase = ""
+  for event in judged.events {
+    if event.type == "turn_phase_changed" {
+      judged_phase = event.phase
+    }
+    if event.type == "judge_started" {
+      assert_eq(judged_phase, "verifying", "a model judge must not reset the actor phase")
+    }
+  }
+  harness.stdio.println(
+    "completion turn phase: provisional candidate, veto, re-ask, terminal reply",
+  )
+}

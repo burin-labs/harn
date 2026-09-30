@@ -1022,6 +1022,11 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::TurnPhaseChanged { session_id, phase } => {
+                let payload =
+                    serde_json::to_value(phase).expect("agent turn phase is serializable");
+                self.emit_agent_event_ext("turn_phase_changed", session_id, payload);
+            }
             AgentEvent::JudgeStarted {
                 session_id,
                 iteration,

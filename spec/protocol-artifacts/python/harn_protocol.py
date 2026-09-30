@@ -384,6 +384,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "tool_batch_disposition",
     "tool_call_audit",
     "tool_format_override",
+    "turn_phase_changed",
     "typed_checkpoint",
 )
 ACP_CONTENT_BLOCK_TYPES: tuple = (

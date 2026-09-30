@@ -1548,6 +1548,7 @@ pub enum HarnAgentEventKind {
     ToolBatchDisposition,
     ToolCallAudit,
     ToolFormatOverride,
+    TurnPhaseChanged,
     TypedCheckpoint,
     Other(String),
 }
@@ -1599,6 +1600,7 @@ impl HarnAgentEventKind {
             Self::ToolBatchDisposition => "tool_batch_disposition",
             Self::ToolCallAudit => "tool_call_audit",
             Self::ToolFormatOverride => "tool_format_override",
+            Self::TurnPhaseChanged => "turn_phase_changed",
             Self::TypedCheckpoint => "typed_checkpoint",
             Self::Other(value) => value,
         }
@@ -1665,6 +1667,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "tool_batch_disposition" => Self::ToolBatchDisposition,
             "tool_call_audit" => Self::ToolCallAudit,
             "tool_format_override" => Self::ToolFormatOverride,
+            "turn_phase_changed" => Self::TurnPhaseChanged,
             "typed_checkpoint" => Self::TypedCheckpoint,
             _ => Self::Other(value),
         })
@@ -2346,6 +2349,7 @@ pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision
 pub const HARN_AGENT_EVENT_KIND_TOOL_BATCH_DISPOSITION: &str = "tool_batch_disposition";
 pub const HARN_AGENT_EVENT_KIND_TOOL_CALL_AUDIT: &str = "tool_call_audit";
 pub const HARN_AGENT_EVENT_KIND_TOOL_FORMAT_OVERRIDE: &str = "tool_format_override";
+pub const HARN_AGENT_EVENT_KIND_TURN_PHASE_CHANGED: &str = "turn_phase_changed";
 pub const HARN_AGENT_EVENT_KIND_TYPED_CHECKPOINT: &str = "typed_checkpoint";
 
 /// Pipeline-loop milestone kinds emitted via `_harn/agentEvent`.
@@ -2394,6 +2398,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "tool_batch_disposition",
     "tool_call_audit",
     "tool_format_override",
+    "turn_phase_changed",
     "typed_checkpoint",
 ];
 

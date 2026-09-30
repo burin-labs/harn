@@ -118,6 +118,7 @@ fn __dispatch_emit_call_start(agent: HarnessAgent, llm_opts: dict) {
   if session_id == "" {
     return nil
   }
+  agent_emit_event(agent, session_id, "turn_phase_changed", {phase: "generating"})
   const checkpoint = {
     kind: "llm_call_start",
     phase: "llm_call",

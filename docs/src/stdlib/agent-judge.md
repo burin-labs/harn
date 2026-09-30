@@ -177,6 +177,29 @@ Every other `gap_class` vetoes exactly as before. The judge keeps sole authority
 over artifact clauses, manner and negative clauses, and authorization, and loses
 it only over the one question a deterministic oracle has already answered.
 
+### Turn phase events
+
+Agent streams emit `turn_phase_changed` with a session id and a typed `phase`.
+ACP carries the same payload through `_harn/agentEvent`. Events arrive in turn
+order for each session.
+
+| Phase | Payload | Meaning |
+| --- | --- | --- |
+| `generating` | none | The actor is generating, including a re-ask or final wrap-up. |
+| `verifying` | `candidate_reply` | Completion review is running. The candidate reply is provisional. |
+| `terminal` | `reply`, `outcome` | Session finalization supplies the final visible reply and typed stop outcome. |
+
+Verification starts before deterministic checks, prechecks, model judges, and
+arbitration. `judge_started` still identifies a model judge call within that
+phase. A rejected candidate can lead to another `generating` phase.
+
+Hosts should hold or de-emphasize assistant text until `terminal` supplies
+`reply`. Neither `iteration_end` nor a `done` judge verdict makes text terminal.
+`outcome.kind` distinguishes natural completion from cancellation, failure,
+policy stops, and suspension. A withdrawn candidate can leave `reply` empty.
+The phase events survive canonical session replay. Older recordings without
+these events don't establish reply finality through this contract.
+
 ### When the judge is not called at all
 
 Neither judge seam is called when the runtime already holds the answer. All seven
