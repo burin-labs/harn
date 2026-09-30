@@ -24,6 +24,7 @@ pub(super) use super::effort::{rule_reasoning_effort_supported, rule_thinking_mo
 
 /// One row of the capability matrix.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct ProviderRule {
     /// One glob pattern, or a list of aliases that share one contract.
     pub model_match: ModelPatterns,

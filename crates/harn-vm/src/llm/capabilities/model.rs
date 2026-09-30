@@ -740,6 +740,7 @@ impl StructuredOutputStrategy {
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Capabilities {
     pub native_tools: bool,
     pub message_wire_format: WireDialect,
