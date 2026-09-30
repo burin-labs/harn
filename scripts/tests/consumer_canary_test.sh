@@ -16,6 +16,8 @@ case "$1 $2" in
   "api repos/acme/widget-host/pulls/"*) cat "$STUB/pull" ;;
   "api repos/acme/widget-host/actions/runs/"*) cat "$STUB/run" ;;
   "workflow run") echo "$*" > "$STUB/dispatched"; cat "$STUB/dispatch" ;;
+  "api repos/acme/harn/actions/workflows/"*) [[ -f "$STUB/history" ]] || exit 1; cat "$STUB/history" ;;
+  "api repos/acme/harn/actions/runs/"*/jobs) id=${2#repos/acme/harn/actions/runs/}; cat "$STUB/jobs-${id%/jobs}" ;;
   *) echo "unexpected gh $*" >&2; exit 2 ;;
 esac
 EOF
@@ -25,6 +27,7 @@ canary() {
   PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
     CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
     TARGET_VERSION=v1.2.3-dev CANARY_POLL_SECONDS=0 PAIRING_TEXT="${1:-}" \
+    GITHUB_OUTPUT="$scratch/gho" \
     bash "$root/scripts/ci/consumer_canary.sh" > "$scratch/out" 2>&1
   local status=$?
   # This output is public; the consumer's name or a link to it never is.
@@ -54,16 +57,37 @@ echo "$run_url" > "$scratch/dispatch"
 # Only a completed success is green, and the output names the verdict, the link
 # and the wall time.
 echo "completed success" > "$scratch/run"
+: > "$scratch/gho"
 canary
 grep -q "verdict=pass conclusion=success run=42 wall_seconds=" "$scratch/out"
+grep -qx "verdict=pass" "$scratch/gho"
 grep -q "consumer=configured secret=CONSUMER_CANARY_REPOSITORY" "$scratch/out"
 grep -q -- '--ref main ' "$scratch/dispatched"
 
-# Every other terminal state is red by name.
+# Every other terminal state is red by name, and is still a settled verdict.
 for conclusion in failure cancelled timed_out none; do
   echo "completed $conclusion" > "$scratch/run"
+  : > "$scratch/gho"
   refuses consumer_rehearsal_failed
+  grep -qx "verdict=fail" "$scratch/gho"
 done
+
+# A run that never concludes is unmeasured: red by name, and no verdict.
+echo "in_progress none" > "$scratch/run"
+: > "$scratch/gho"
+if PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
+  CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
+  TARGET_VERSION=v1.2.3-dev CANARY_POLL_SECONDS=0 CANARY_DEADLINE_SECONDS=-1 \
+  GITHUB_OUTPUT="$scratch/gho" \
+  bash "$root/scripts/ci/consumer_canary.sh" > "$scratch/out" 2>&1; then
+  echo "an unconcluded consumer run reported green" >&2
+  exit 1
+fi
+grep -q "reason=no_verdict_before_deadline" "$scratch/out"
+if [[ -s "$scratch/gho" ]]; then
+  echo "an unmeasured run wrote a verdict" >&2
+  exit 1
+fi
 
 # An unset repository secret arrives as a bare owner and fails by name.
 if PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/ \
@@ -106,6 +130,52 @@ fi
 grep -q "reason=identity_in_output" "$scratch/out"
 if grep -q widget-host "$scratch/out"; then
   echo "identity guard echoed the consumer's name" >&2
+  exit 1
+fi
+
+# The decide step skips a scheduled run only when main has not moved since the
+# last settled verdict, and names what it compared either way.
+main_sha=0123456789abcdef0123456789abcdef01234567
+old_sha=89abcdef0123456789abcdef0123456789abcdef
+decide() {
+  : > "$scratch/gho"
+  PATH="$scratch/bin:$PATH" STUB="$scratch" EVENT_NAME=$1 SOURCE_REVISION=$main_sha \
+    GITHUB_REPOSITORY=acme/harn CURRENT_RUN_ID=900 GITHUB_OUTPUT="$scratch/gho" \
+    bash "$root/scripts/ci/consumer_canary.sh" --decide > "$scratch/out" 2>&1
+}
+# Newest first: this run, an unsettled run at main, then a settled one.
+printf '900 %s\n901 %s\n902 %s\n' "$main_sha" "$main_sha" "$old_sha" > "$scratch/history"
+echo 0 > "$scratch/jobs-901"
+echo 1 > "$scratch/jobs-902"
+decide schedule
+grep -qx "run=true" "$scratch/gho"
+grep -q "run reason=main_moved main=$main_sha last_settled=$old_sha last_settled_run=902" "$scratch/out"
+
+echo 1 > "$scratch/jobs-901"
+decide schedule
+grep -qx "run=false" "$scratch/gho"
+grep -q "skipped reason=main_unchanged main=$main_sha last_settled=$main_sha last_settled_run=901" "$scratch/out"
+
+# A dispatch always rehearses, even at an already settled commit.
+decide workflow_dispatch
+grep -qx "run=true" "$scratch/gho"
+grep -q "run reason=explicit_workflow_dispatch main=$main_sha" "$scratch/out"
+
+echo 0 > "$scratch/jobs-901"
+echo 0 > "$scratch/jobs-902"
+decide schedule
+grep -qx "run=true" "$scratch/gho"
+grep -q "run reason=no_settled_verdict main=$main_sha" "$scratch/out"
+
+# Unreadable history is a named failure, never a skip.
+rm "$scratch/history"
+if decide schedule; then
+  echo "unreadable history decided anyway" >&2
+  exit 1
+fi
+grep -q "reason=settled_history_unreadable" "$scratch/out"
+if [[ -s "$scratch/gho" ]]; then
+  echo "unreadable history wrote a decision" >&2
   exit 1
 fi
 
