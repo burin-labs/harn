@@ -2398,7 +2398,9 @@ jobs:
         && (contains(github.event.pull_request.labels.*.name, 'consumer-canary')
         || contains(github.event.pull_request.body, 'Pairs-with:'))) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Ten minutes above the canary's 55-minute verdict deadline, which is
+    # sized to the consumer's observed ~45-minute rehearsal.
+    timeout-minutes: 65
     permissions:
       contents: read
     steps:

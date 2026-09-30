@@ -74,7 +74,12 @@ canary_read_pairing() {
 canary_main() {
   local repo=${CANARY_REPOSITORY:-} workflow=${CANARY_WORKFLOW:-}
   local revision=${SOURCE_REVISION:-} version=${TARGET_VERSION:-}
-  local poll=${CANARY_POLL_SECONDS:-60} deadline=${CANARY_DEADLINE_SECONDS:-2400}
+  # The consumer's rehearsal took about 45 minutes in the runs this canary
+  # dispatched on 2026-09-30, both green after a 40-minute deadline had
+  # already called them unmeasured. 55 minutes leaves headroom; the job's
+  # timeout in ci.yml stays 10 minutes above it so the deadline, not the
+  # runner, names the outcome.
+  local poll=${CANARY_POLL_SECONDS:-60} deadline=${CANARY_DEADLINE_SECONDS:-3300}
   # The job joins the owner and the secret's name, so an unset secret arrives
   # as "owner/" and must not reach the API as a half-formed repository.
   [[ "$repo" =~ ^[^/]+/[^/]+$ ]] \
