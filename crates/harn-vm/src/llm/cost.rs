@@ -121,11 +121,27 @@ impl Drop for LlmBudgetGuard {
 /// `BudgetExceeded`-categorised error which adapter codecs render as
 /// HTTP 429.
 pub fn install_llm_cost_budget(max_cost_usd: f64) -> LlmBudgetGuard {
+    install_llm_cost_budget_seeded(Some(max_cost_usd), 0.0)
+}
+
+/// Install a cost scope that has already spent `spent_usd`, with an optional
+/// ceiling. A durable session spans many dispatches (one per prompt, and a new
+/// process on resume); seeding is what makes its ceiling cover the whole
+/// session instead of restarting at $0 each time. Every reader of the running
+/// total (preflight projection, post-call check, `llm_budget_remaining`) sees
+/// the seed, and [`peek_total_cost`] read before the guard drops is the new
+/// session total to carry forward.
+pub fn install_llm_cost_budget_seeded(max_cost_usd: Option<f64>, spent_usd: f64) -> LlmBudgetGuard {
     let previous_budget = LLM_BUDGET.with(|b| b.borrow().to_owned());
     let previous_accumulated = LLM_ACCUMULATED_COST.with(|a| *a.borrow());
     let previous_observed = peek_observed_session_usage();
-    LLM_BUDGET.with(|b| *b.borrow_mut() = Some(max_cost_usd.max(0.0)));
-    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
+    LLM_BUDGET.with(|b| *b.borrow_mut() = max_cost_usd.map(|max| max.max(0.0)));
+    let seed = if spent_usd.is_finite() {
+        spent_usd.max(0.0)
+    } else {
+        0.0
+    };
+    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = seed);
     LLM_OBSERVED_USAGE.with(|u| *u.borrow_mut() = ObservedSessionUsage::EMPTY);
     LlmBudgetGuard {
         previous_budget,

@@ -326,7 +326,15 @@ impl OpenAiCompatibleProvider {
             }
             Some("thinking_type") => {
                 if let Some(thinking) = typed_thinking_config(&opts.thinking) {
-                    body["thinking"] = thinking;
+                    // Some models require thinking on every request. An omitted
+                    // caller setting reaches us as Disabled, but sending the
+                    // explicit disable makes those endpoints reject a healthy
+                    // plain call. An explicit unsupported disable is rejected
+                    // during option extraction before it reaches this builder.
+                    let implicit_disable = matches!(opts.thinking, ThinkingConfig::Disabled);
+                    if !implicit_disable || caps.reasoning_disable_supported || !may_shape {
+                        body["thinking"] = thinking;
+                    }
                 }
             }
             _ => {}
@@ -478,6 +486,16 @@ impl OpenAiCompatibleProvider {
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
         let dialect = crate::llm::api::DialectContract::for_request(request);
+        self.chat_impl_with_dialect(request, delta_tx, dialect)
+            .await
+    }
+
+    pub(crate) async fn chat_impl_with_dialect(
+        &self,
+        request: &LlmRequestPayload,
+        delta_tx: Option<DeltaSender>,
+        dialect: crate::llm::api::DialectContract,
+    ) -> Result<LlmResult, VmError> {
         let caps = crate::llm::managed_supply::capabilities_for(&request.provider, &request.model);
         let mut body = dialect.build_openai_request_body_with_caps(request, &caps);
         Self::transform_request_with_caps(&mut body, &caps);

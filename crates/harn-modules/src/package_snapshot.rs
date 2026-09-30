@@ -345,6 +345,7 @@ impl PackageSnapshot {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PackageSnapshotError {
     Io {
         operation: &'static str,

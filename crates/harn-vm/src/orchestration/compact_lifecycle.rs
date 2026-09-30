@@ -41,11 +41,11 @@ use crate::llm::helpers::{
 use crate::value::{VmError, VmValue};
 
 use super::{
-    auto_compact_messages_with_result_with_ctx, compact_strategy_name,
-    compaction_policy_metadata_fields, estimate_message_tokens, new_compaction_receipt_id,
-    parse_compact_strategy, run_lifecycle_hooks_with_control_with_ctx,
-    run_lifecycle_hooks_with_ctx, AutoCompactConfig, CompactStrategy, CompactionReceipt,
-    CompactionThresholdSource, HookControl, HookEvent, COMPACTION_RECEIPT_SCHEMA_VERSION,
+    compact_strategy_name, compaction_policy_metadata_fields, estimate_message_tokens,
+    new_compaction_receipt_id, parse_compact_strategy, prepare_compaction_messages_with_ctx,
+    run_lifecycle_hooks_with_control_with_ctx, run_lifecycle_hooks_with_ctx, AutoCompactConfig,
+    CompactStrategy, CompactionReceipt, CompactionThresholdSource, HookControl, HookEvent,
+    COMPACTION_RECEIPT_SCHEMA_VERSION,
 };
 
 /// Identifies the call-site that initiated compaction. The string form is
@@ -370,8 +370,8 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
     let reminder_report = compact_reminder_events(reminder_events);
     config.custom_compactor_reminders = reminder_report.custom_reminders.clone();
 
-    let Some(compact_result) =
-        auto_compact_messages_with_result_with_ctx(ctx, messages, config, llm_opts).await?
+    let Some((compact_result, candidate_messages)) =
+        prepare_compaction_messages_with_ctx(ctx, messages, config, llm_opts).await?
     else {
         return Ok(None);
     };
@@ -385,9 +385,9 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         emit_reminder_lifecycle_records(lifecycle.transcript_id, &reminder_report);
     }
 
-    let estimated_tokens_after = estimate_message_tokens(messages);
+    let estimated_tokens_after = estimate_message_tokens(&candidate_messages);
     let archived_messages = original_message_count
-        .saturating_sub(messages.len())
+        .saturating_sub(candidate_messages.len())
         .saturating_add(1);
 
     let snapshot_asset = lifecycle.source_transcript.map(|transcript| {
@@ -430,6 +430,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         instruction_source: config.policy.instruction_source().map(str::to_string),
         compaction_policy: config.policy.metadata_json(),
         recap: recap_metrics,
+        classification: compact_result.classification,
         source_measurement: Some(source_measurement),
     };
 
@@ -450,7 +451,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
             config,
             HookPayloadStage::Post {
                 original_message_count,
-                remaining_messages: messages.len(),
+                remaining_messages: candidate_messages.len(),
                 archived_messages,
                 estimated_tokens_before,
                 estimated_tokens_after,
@@ -476,6 +477,9 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         }
     }
 
+    // Publish only after every fallible lifecycle stage completed. Provider,
+    // callback, and control-flow errors leave the caller's transcript intact.
+    *messages = candidate_messages;
     Ok(Some(CompactionOutcome {
         summary,
         archived_messages,

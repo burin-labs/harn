@@ -307,6 +307,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "context_overflow",
     "provider_misconfigured",
     "provider_unavailable",
+    "provider_billing",
     "rate_limited",
     "timeout",
     "resource_busy",
@@ -673,6 +674,7 @@ class AgentTerminalClass(str, Enum):
     CONTEXT_OVERFLOW = "context_overflow"
     PROVIDER_MISCONFIGURED = "provider_misconfigured"
     PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PROVIDER_BILLING = "provider_billing"
     RATE_LIMITED = "rate_limited"
     TIMEOUT = "timeout"
     RESOURCE_BUSY = "resource_busy"
@@ -1715,6 +1717,7 @@ class ACPTranscriptCompactedUpdateMetaHarn(_HarnDataclass):
     compactionPolicy: JsonValue
     recap: JsonValue
     sourceMeasurement: JsonValue
+    classification: JsonValue
     replayed: Optional[bool] = None
 
 @dataclass

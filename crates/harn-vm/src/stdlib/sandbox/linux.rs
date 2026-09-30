@@ -16,7 +16,7 @@ use seccompiler::{
 };
 
 use super::{
-    policy_allows_capability, policy_allows_network, policy_allows_workspace_write,
+    policy_allows_capability, policy_allows_child_writes, policy_allows_network,
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
@@ -509,6 +509,11 @@ fn landlock_profile(
     for root in developer_toolchain_system_read_roots(policy) {
         push_rule(&mut profile, root, read_only_access(), true)?;
     }
+    // Through `push_rule`, so the credential denylist is subtracted from these
+    // exactly as from every other grant.
+    for grant in super::read_roots::path_grants::process_sandbox_path_entry_grants(policy) {
+        push_rule(&mut profile, grant.root, read_only_access(), true)?;
+    }
     let workspace_access = workspace_access(policy);
     for root in process_sandbox_roots(policy) {
         push_rule(&mut profile, root, workspace_access, false)?;
@@ -527,7 +532,7 @@ fn landlock_profile(
     // can populate its caches; otherwise read-only so dependency resolution
     // still works. These roots are optional — they are skipped when absent.
     let toolchain_cache_roots = super::process_sandbox_developer_toolchain_cache_roots(policy);
-    let toolchain_cache_access = if policy_allows_workspace_write(policy) {
+    let toolchain_cache_access = if policy_allows_child_writes(policy) {
         workspace_access
     } else {
         read_only_access()
@@ -535,7 +540,7 @@ fn landlock_profile(
     for root in toolchain_cache_roots {
         push_rule(&mut profile, root, toolchain_cache_access, true)?;
     }
-    if policy_allows_workspace_write(policy) {
+    if policy_allows_child_writes(policy) {
         for root in process_sandbox_policy_write_roots(policy) {
             push_rule(&mut profile, root, workspace_access, false)?;
         }
@@ -1310,7 +1315,10 @@ fn workspace_access(policy: &CapabilityPolicy) -> u64 {
         | LANDLOCK_ACCESS_FS_MAKE_SYM
         | LANDLOCK_ACCESS_FS_REFER
         | LANDLOCK_ACCESS_FS_TRUNCATE;
-    if !policy.capabilities_are_restricted() {
+    // The child write grant is the whole write set, whatever subset of it the
+    // policy's own `workspace` capability names: the grant exists for roles
+    // whose capability names none of it.
+    if !policy.capabilities_are_restricted() || policy.process_sandbox.allow_child_workspace_write {
         return read_access | write_access;
     }
     let mut access = 0;
@@ -1437,6 +1445,10 @@ use netns::{namespaced_loopback_grant, namespaced_outcome, resolve_netns_launche
 #[cfg(test)]
 #[path = "linux_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "linux_path_grant_tests.rs"]
+mod path_grant_tests;
 
 #[cfg(test)]
 #[path = "netns_tests.rs"]

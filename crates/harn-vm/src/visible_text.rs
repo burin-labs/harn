@@ -32,6 +32,9 @@ impl VisibleTextState {
     }
 }
 
+/// The opening of a `json`-format tool call fence.
+const JSON_TOOL_FENCE: &str = "```tool";
+
 fn internal_block_patterns() -> &'static [Regex] {
     static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
@@ -46,8 +49,8 @@ fn internal_block_patterns() -> &'static [Regex] {
             r"(?s)<done>.*?</done>",
             r"(?s)<tool_result[^>]*>.*?</tool_result>",
             r"(?s)\[result of [^\]]+\].*?\[end of [^\]]+\]",
-            r"(?m)^\s*(##DONE##|DONE|PLAN_READY)\s*$",
-            r"(?s)\s*(##DONE##|PLAN_READY)\s*$",
+            r"(?m)^\s*(DONE|PLAN_READY)\s*$",
+            r"(?s)\s*PLAN_READY\s*$",
         ]
         .into_iter()
         .map(|pattern| Regex::new(pattern).expect("valid assistant sanitization regex"))
@@ -179,6 +182,45 @@ fn json_fence_regex() -> &'static Regex {
         .get_or_init(|| Regex::new(r"(?s)```json[^\n]*\n(.*?)```").expect("valid json fence regex"))
 }
 
+fn json_tool_fence_regex() -> &'static Regex {
+    static JSON_TOOL_FENCE_RE: OnceLock<Regex> = OnceLock::new();
+    JSON_TOOL_FENCE_RE.get_or_init(|| {
+        Regex::new(r"(?ms)^[ \t]*```tool[ \t]*\r?\n(.*?)```").expect("valid tool fence regex")
+    })
+}
+
+/// Hide the `json` tool format's calls: a fence whose opening line is exactly
+/// ```tool and whose body is one call object, `{"name": ..., "args": {...}}`
+/// (`arguments` accepted). The loop executes those, so showing them again
+/// repeats every call as raw JSON. A ```tool fence holding anything else is
+/// the model's text, not a call, and stays visible.
+fn strip_json_tool_fences(text: &str) -> String {
+    json_tool_fence_regex()
+        .replace_all(text, |caps: &regex::Captures| {
+            let body = caps.get(1).map_or("", |body| body.as_str());
+            if is_tool_call_object(body) {
+                String::new()
+            } else {
+                caps.get(0)
+                    .map(|whole| whole.as_str().to_string())
+                    .unwrap_or_default()
+            }
+        })
+        .to_string()
+}
+
+fn is_tool_call_object(body: &str) -> bool {
+    let Ok(serde_json::Value::Object(call)) = serde_json::from_str(body.trim()) else {
+        return false;
+    };
+    let named = call
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|name| !name.trim().is_empty());
+    let args = call.get("args").or_else(|| call.get("arguments"));
+    named && args.is_some_and(serde_json::Value::is_object)
+}
+
 fn inline_planner_json_regex() -> &'static Regex {
     static INLINE_PLANNER_JSON: OnceLock<Regex> = OnceLock::new();
     INLINE_PLANNER_JSON.get_or_init(|| {
@@ -301,6 +343,30 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
         {
             return text[..open_idx].to_string();
         }
+    }
+
+    // A ```tool fence still streaming: held back until it closes, when
+    // `strip_json_tool_fences` decides whether it was a call. A last line that
+    // is only the start of the opener (```t) is held back too, so it cannot
+    // flash.
+    let mut search_end = text.len();
+    while let Some(open_idx) = text[..search_end].rfind(JSON_TOOL_FENCE) {
+        let line_start = text[..open_idx].rfind('\n').map_or(0, |idx| idx + 1);
+        let (opener_rest, body) = text[open_idx + JSON_TOOL_FENCE.len()..]
+            .split_once('\n')
+            .unwrap_or((&text[open_idx + JSON_TOOL_FENCE.len()..], ""));
+        if text[line_start..open_idx].trim().is_empty() && opener_rest.trim().is_empty() {
+            if !body.contains("```") {
+                return text[..line_start].to_string();
+            }
+            break;
+        }
+        search_end = open_idx;
+    }
+    let last_line_start = text.rfind('\n').map_or(0, |idx| idx + 1);
+    let last_line = text[last_line_start..].trim_start_matches([' ', '\t']);
+    if last_line.len() >= 4 && JSON_TOOL_FENCE.starts_with(last_line) {
+        return text[..last_line_start].to_string();
     }
 
     if let Some(open_idx) = text.rfind("<done>") {
@@ -561,6 +627,83 @@ fn strip_partial_marker_suffix(text: &str) -> String {
     text.to_string()
 }
 
+/// The completion sentinel. It is a protocol signal, never prose.
+const DONE_SENTINEL: &str = "##DONE##";
+
+/// Is `offset` inside an inline code span on its own line (an odd number of
+/// backticks between the line start and `offset`)?
+#[expect(
+    clippy::string_slice,
+    reason = "offset is a match offset of an ASCII sentinel, so a char boundary"
+)]
+fn inside_inline_code(text: &str, offset: usize) -> bool {
+    let line_start = text[..offset].rfind('\n').map_or(0, |at| at + 1);
+    text[line_start..offset].matches('`').count() % 2 == 1
+}
+
+/// Is `offset` inside markdown code, fenced or inline?
+fn inside_code(index: &TextIndex, text: &str, offset: usize) -> bool {
+    index.inside_markdown_fence(offset) || inside_inline_code(text, offset)
+}
+
+/// Remove every done sentinel from visible text, wherever it sits, except where
+/// the reply shows it as code (a fenced block or an inline span the user asked
+/// to see). The model can write text after the sentinel ("x. ##DONE## More."),
+/// and the old rule, which stripped it only alone on a line or at the very end,
+/// showed it mid-reply. Completion is decided on the raw text, so this changes
+/// only what a person sees. A streamed partial also drops a trailing prefix of
+/// the sentinel (`##`, `##DO`) outside code, so it does not flash mid-line.
+#[expect(
+    clippy::string_slice,
+    reason = "cursor and match offsets come from find on an ASCII sentinel, so they are char \
+              boundaries"
+)]
+fn strip_done_sentinels(text: &str, partial: bool) -> String {
+    if !text.contains('#') {
+        return text.to_string();
+    }
+    let index = TextIndex::build(text);
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while let Some(found) = text[cursor..].find(DONE_SENTINEL) {
+        let at = cursor + found;
+        let end = at + DONE_SENTINEL.len();
+        if inside_code(&index, text, at) {
+            out.push_str(&text[cursor..end]);
+            cursor = end;
+            continue;
+        }
+        out.push_str(&text[cursor..at]);
+        let rest = &text[end..];
+        let rest_trimmed = rest.trim_start_matches([' ', '\t']);
+        let joined_by_space = out.ends_with([' ', '\t']);
+        // Keep exactly one space between the words the sentinel separated.
+        if !joined_by_space
+            && !out.is_empty()
+            && !out.ends_with('\n')
+            && !rest_trimmed.is_empty()
+            && !rest_trimmed.starts_with('\n')
+        {
+            out.push(' ');
+        }
+        cursor = end + (rest.len() - rest_trimmed.len());
+    }
+    out.push_str(&text[cursor..]);
+    if partial {
+        for len in (2..DONE_SENTINEL.len()).rev() {
+            let prefix = &DONE_SENTINEL[..len];
+            if let Some(stripped) = out.strip_suffix(prefix) {
+                let stripped_len = stripped.len();
+                if !inside_code(&TextIndex::build(&out), &out, stripped_len) {
+                    out.truncate(stripped_len);
+                }
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn normalize_visible_whitespace(text: &str) -> String {
     text.replace("\r\n", "\n")
         .replace("\n\n\n", "\n\n")
@@ -604,10 +747,12 @@ fn sanitize_inner(text: &str, partial: bool, superseded: Option<&mut String>) ->
     for pattern in internal_block_patterns() {
         sanitized = pattern.replace_all(&sanitized, "").to_string();
     }
+    sanitized = strip_done_sentinels(&sanitized, partial);
     // After runtime tags are stripped, surface only the explicit
     // user-facing response when one exists; otherwise unwrap
     // <assistant_prose> into plain narration.
     sanitized = extract_visible_prose(&sanitized, superseded);
+    sanitized = strip_json_tool_fences(&sanitized);
     sanitized = strip_internal_json_fences(&sanitized);
     sanitized = strip_inline_internal_planning_json(&sanitized, partial);
     // Unconditional: orphan/truncated control-token residue and bare internal
@@ -630,6 +775,40 @@ mod tests {
     use super::{
         project_visible_assistant_text, sanitize_visible_assistant_text, VisibleTextState,
     };
+
+    /// The done sentinel is a protocol signal and never reaches visible text,
+    /// wherever the model put it. Falsifier (burin dogfood, 2026-09-28): the
+    /// model wrote "I then read a.txt; it contains x. ##DONE## The river bends
+    /// toward the quiet sea.", and the TUI showed the literal marker mid-reply.
+    #[test]
+    fn a_done_sentinel_with_text_after_it_is_not_shown() {
+        let raw =
+            "I then read a.txt; it contains x. ##DONE## The river bends toward the quiet sea.";
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "I then read a.txt; it contains x. The river bends toward the quiet sea."
+        );
+        // Every occurrence, not only the first; no space left doubled.
+        assert_eq!(
+            sanitize_visible_assistant_text("One.##DONE##Two. ##DONE## Three.\n##DONE##", false),
+            "One. Two. Three."
+        );
+        // Streaming: a trailing prefix mid-line does not flash.
+        assert_eq!(
+            sanitize_visible_assistant_text("It contains x. ##DO", true),
+            "It contains x."
+        );
+    }
+
+    /// Controls: a sentinel the user asked to see, in a code block or an inline
+    /// code span, stays exactly as written.
+    #[test]
+    fn a_done_sentinel_shown_as_code_is_kept() {
+        let fenced = "The loop stops on this line:\n```text\n##DONE##\n```";
+        assert_eq!(sanitize_visible_assistant_text(fenced, false), fenced);
+        let inline = "The marker is `##DONE##`, written alone.";
+        assert_eq!(sanitize_visible_assistant_text(inline, false), inline);
+    }
     use crate::agent_events::AgentEvent;
     use crate::boundary::tests::CapturedEvents;
     use crate::boundary::{BoundaryFailureKind, BoundaryId};
@@ -786,6 +965,58 @@ mod tests {
         let (visible, delta) = state.push("E##\nmore", true);
         assert_eq!(visible, "Hello\n\nmore");
         assert_eq!(delta, "\n\nmore");
+    }
+
+    /// The `json` tool format's calls are executed from ```tool fences, so the
+    /// reply must not show them again as raw JSON. This is the shape a local
+    /// Devstral route produced, including the close fence running straight
+    /// into the next sentence. Ordinary code fences stay.
+    #[test]
+    fn json_tool_fences_are_hidden_closed_and_while_streaming() {
+        let raw = "I'll look first.\n\n```tool\n{\"args\":{\"file\":\"calc.py\"},\"name\":\"look\"}\n```I see the bug.\n\n```python\nreturn a + b\n```";
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "I'll look first.\n\nI see the bug.\n\n```python\nreturn a + b\n```"
+        );
+
+        let mut state = VisibleTextState::default();
+        let (visible, _) = state.push("I'll look first.\n```to", true);
+        assert_eq!(visible, "I'll look first.");
+        let (visible, delta) = state.push("ol\n{\"name\":\"look\",\"args\":{", true);
+        assert_eq!(visible, "I'll look first.");
+        assert_eq!(delta, "");
+        let (visible, _) = state.push("}}\n```\nDone.", true);
+        assert_eq!(visible, "I'll look first.\n\nDone.");
+    }
+
+    /// Only a call object is hidden. Code in an answer, a ```json block, a
+    /// ```tool fence whose body is not a call, and a fence the stream never
+    /// closed all stay visible in the final text. These are the inputs a
+    /// broader call-shape reader erased (harn#8871).
+    #[test]
+    fn text_that_is_not_a_json_tool_call_stays_visible() {
+        for raw in [
+            "Use it like this:\n\n```js\nconst [s, set] = useState({ a: 1 })\n```",
+            "Call useState({ a: 1 }) once.",
+            "```rust\nlet p = Point{ x: 1, y: 2 };\n```",
+            "Note: make_coffee({ strength: \"strong\" })",
+            "The payload:\n\n```json\n{\"name\":\"look\",\"args\":{\"file\":\"a.rs\"}}\n```",
+            "Example:\n\n```tool\n{\"strength\": \"strong\"}\n```",
+            "Example:\n\n```tool\nlook calc.py\n```",
+        ] {
+            assert_eq!(sanitize_visible_assistant_text(raw, false), raw, "{raw}");
+        }
+
+        let unclosed = "Starting.\n```tool\n{\"name\":\"look\",\"args\":{";
+        assert_eq!(sanitize_visible_assistant_text(unclosed, true), "Starting.");
+        assert_eq!(sanitize_visible_assistant_text(unclosed, false), unclosed);
+
+        let not_a_call = "Example:\n```tool\n{\"strength\": 1}\n```\nMore.";
+        assert_eq!(
+            sanitize_visible_assistant_text(not_a_call, true),
+            not_a_call,
+            "a closed fence that is not a call must not be held back while streaming"
+        );
     }
 
     #[test]

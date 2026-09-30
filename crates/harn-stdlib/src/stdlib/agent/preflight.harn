@@ -704,13 +704,13 @@ fn __agent_primary_system_text(agent: HarnessAgent, session: dict, opts: dict) {
  * The native/json/text tool-call contract (the prose that teaches the model
  * HOW to emit `name({ key: value })` calls in the resolved format) is injected
  * here, in the agent_loop preflight, and NOWHERE else. The bare `llm_call`
- * builtin renders native tool wire definitions and PARSES whatever text/json
- * tool calls come back (via `parse_text_tool_calls_with_tools`), but it never
- * injects the format contract — so a tool caller that bypasses `agent_loop`
- * and drives tools through a bare `llm_call` at `tool_format` json/text would
- * have the model guess the format and parse 0 calls. That is acceptable
- * because nothing does: `agent_loop` is Harn's only tool driver, and embedding
- * hosts project that same driver
+ * builtin renders native tool wire definitions and parses whatever text/json
+ * tool calls come back, but it never injects the format contract. A bare
+ * `llm_call` with tools at `tool_format` json/text would therefore reach the
+ * wire with nothing tool-related on it, so `llm_call` REFUSES that call unless
+ * `agent_direct_llm_options` marked it `_tool_contract_rendered`.
+ * `agent_loop` is Harn's only tool driver, and embedding hosts project that
+ * same driver
  * (the lone bare-`llm_call`-with-tools seam, `std/agents::run_stage` with
  * `mode: "llm"` / `loop_until_done: false`, is a public stdlib entrypoint with
  * no in-tree consumer that passes `tools`). If a future caller needs format-

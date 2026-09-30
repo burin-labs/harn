@@ -7,6 +7,7 @@
 use std::result::Result as StdResult;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PackageError {
     #[error("{0}")]
     Manifest(String),

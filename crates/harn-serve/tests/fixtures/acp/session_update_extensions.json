@@ -192,6 +192,7 @@
         "_meta": {
           "harn": {
             "archivedMessages": 3,
+            "classification": null,
             "compactionPolicy": {
               "instruction_mode": "extend",
               "instruction_source": "host",
@@ -209,7 +210,7 @@
             "receiptId": "compaction-fixture-1",
             "requestedStrategy": "summary",
             "resolvedThresholdTokens": 1,
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "snapshotAssetId": "asset-1",
             "sourceMeasurement": null,
             "strategy": "summary",

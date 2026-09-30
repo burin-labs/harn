@@ -45,7 +45,39 @@ Example: `changelog.d/2492.breaking.md`
   their declared return types across bare returns, fallthrough, nested
   returns, and exhaustive final matches, and top-level forward
   placeholders promote to their concrete binding types.
+
+  Migration: give each generic parameter the concrete type it holds, and
+  make every path of a typed function return its declared type.
 ```
+
+A `breaking` fragment must also say what a downstream consumer changes: a
+`Migration:` line followed by the change, preferably as a before-and-after
+snippet. The pull-request gate refuses a breaking fragment without one, and
+refuses a pull request labelled `breaking` that adds no such fragment. No
+bypass label waives either rule. The release fold keeps the snippet and puts
+`### Breaking` first in each release, where consumers' update tooling reads
+it.
+
+Two checks also decide from the diff that a pull request is breaking and then
+require the same fragment. The `Breaking CLI surface` gate fails when a line
+disappears from `spec/cli-surface.txt`, the generated listing of every `harn`
+command, alias, flag, and positional argument (`make gen-cli-surface`). The
+`Verify publishable crates` job runs `cargo-semver-checks` on the published
+crates against the merge base and fails on a major-level change. Keeping the
+old spelling as an alias, or adding a variant to a `#[non_exhaustive]` enum,
+is not breaking and needs no fragment.
+
+````markdown
+- **`harn run --foo` is removed (#2494).** Use `--bar`, which takes the
+  same value.
+
+  Migration: rename the flag.
+
+  ```sh
+  harn run --foo x   # before
+  harn run --bar x   # after
+  ```
+````
 
 Example: `changelog.d/2493.fixed.md`
 

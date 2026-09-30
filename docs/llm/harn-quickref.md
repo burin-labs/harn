@@ -3292,6 +3292,9 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
 
 - `harness.agent.open(id?, opts?)` / `_close(id)` / `_exists(id)`. `opts` may
   include `workspace_anchor` and `workspace_policy: {default_mount_mode}`.
+  `{parent, actor?}` opens a delegated child of `parent`; `actor` pushes an
+  `act` hop onto the parent's chain (origin `anonymous` when it has none), so
+  the child's provider requests are attributable.
 - `harness.agent.current_id()` returns the innermost active session id or `nil`.
 - `harness.agent.actor_chain(id?)` returns the RFC 8693 `{sub, act}` actor
   chain for `id`, or for the current active session when `id` is omitted.

@@ -6,7 +6,8 @@ use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
 
 use super::{
-    apply_process_config, build_std_command, process_spawn_error, spawn_error, ProcessCommandConfig,
+    apply_process_config, build_std_command, process_spawn_error, spawn_error,
+    ProcessCommandConfig, SandboxMechanism, SandboxMechanismAvailability,
 };
 
 /// What every backend must render, and how a live observation is judged.
@@ -105,36 +106,45 @@ pub(super) type ActiveBackend = super::linux::Backend;
 pub(super) type ActiveBackend = super::macos::Backend;
 #[cfg(target_os = "openbsd")]
 pub(super) type ActiveBackend = super::openbsd::Backend;
-#[cfg(target_os = "windows")]
-pub(super) type ActiveBackend = super::windows::Backend;
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-)))]
-pub(super) type ActiveBackend = NoopBackend;
+/// Windows and every other platform without a backend run children with no
+/// OS sandbox confinement.
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "openbsd")))]
+pub(super) type ActiveBackend = UnconfinedBackend;
 
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-)))]
-struct NoopBackend;
+/// The backend for a platform with no OS sandbox. It confines nothing and
+/// says so: an `os_hardened` spawn is refused before it gets here (see
+/// [`super::enforcement`]), and every other confining profile runs the child
+/// directly after a `handler_sandbox` warning, or refuses under an `enforce`
+/// fallback. It is never a silent pass.
+///
+/// Compiled everywhere so its refusal and warning are tested on every host,
+/// not only on the platforms that select it.
+#[cfg_attr(
+    any(target_os = "linux", target_os = "macos", target_os = "openbsd"),
+    allow(dead_code)
+)]
+pub(crate) struct UnconfinedBackend;
 
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-)))]
-impl SandboxBackend for NoopBackend {
+#[cfg_attr(
+    any(target_os = "linux", target_os = "macos", target_os = "openbsd"),
+    allow(dead_code)
+)]
+impl UnconfinedBackend {
+    fn prepare(profile: SandboxProfile) -> Result<PrepareOutcome, VmError> {
+        super::unavailable(
+            SandboxMechanism::Unconfined,
+            SandboxMechanismAvailability::DoesNotConfine,
+            profile,
+        )
+    }
+}
+
+impl SandboxBackend for UnconfinedBackend {
     fn name() -> &'static str {
-        "noop"
+        "unconfined"
     }
     fn filesystem_mechanism() -> &'static str {
-        "none"
+        SandboxMechanism::Unconfined.as_str()
     }
     fn available() -> bool {
         false
@@ -144,18 +154,18 @@ impl SandboxBackend for NoopBackend {
         _args: &[String],
         _command: &mut Command,
         _policy: &CapabilityPolicy,
-        _profile: SandboxProfile,
+        profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        Ok(PrepareOutcome::Direct)
+        Self::prepare(profile)
     }
     fn prepare_tokio_command(
         _program: &str,
         _args: &[String],
         _command: &mut tokio::process::Command,
         _policy: &CapabilityPolicy,
-        _profile: SandboxProfile,
+        profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
-        Ok(PrepareOutcome::Direct)
+        Self::prepare(profile)
     }
 }
 

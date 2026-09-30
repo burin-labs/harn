@@ -487,3 +487,32 @@ fn sampling_params_stripped_when_body_output_config_effort_override_is_active() 
     assert!(body.get("top_p").is_none());
     assert_eq!(body["output_config"], serde_json::json!({"effort": "high"}));
 }
+
+#[test]
+fn an_unnamed_thinking_budget_stays_under_the_output_cap() {
+    // Anthropic 400s on `budget_tokens >= max_tokens`; the old fixed 10,000
+    // default did exactly that at any cap up to 10,000.
+    for (max_tokens, expected) in [(2048, 2047), (8192, 8191), (64_000, 10_000), (512, 1024)] {
+        let mut payload = base_payload();
+        payload.model = "claude-sonnet-4-6".to_string();
+        payload.max_tokens = max_tokens;
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(
+            body["thinking"],
+            serde_json::json!({"type": "enabled", "budget_tokens": expected}),
+            "max_tokens {max_tokens}"
+        );
+    }
+    // A named budget is the caller's, unchanged.
+    let mut payload = base_payload();
+    payload.model = "claude-sonnet-4-6".to_string();
+    payload.max_tokens = 2048;
+    payload.thinking = ThinkingConfig::Enabled {
+        budget_tokens: Some(1500),
+    };
+    let body = AnthropicProvider::build_request_body(&payload);
+    assert_eq!(body["thinking"]["budget_tokens"], 1500);
+}

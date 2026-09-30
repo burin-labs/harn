@@ -295,7 +295,8 @@ async fn dispatch_to_registered_provider(
             .await;
     }
 
-    match DialectContract::for_request(opts).stream_protocol() {
+    let dialect = DialectContract::for_request(opts);
+    match dialect.stream_protocol() {
         StreamProtocol::OllamaNdjson => {
             crate::llm::providers::OllamaProvider
                 .chat_impl(opts, delta_tx)
@@ -313,7 +314,7 @@ async fn dispatch_to_registered_provider(
         }
         StreamProtocol::OpenAiSse => {
             crate::llm::providers::OpenAiCompatibleProvider::new(provider.clone())
-                .chat_impl(opts, delta_tx)
+                .chat_impl_with_dialect(opts, delta_tx, dialect)
                 .await
         }
     }
@@ -334,6 +335,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
     body: serde_json::Value,
     dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
+    dialect.validate_request(opts)?;
     let started = Instant::now();
     // Absolute counterpart of `started`. `Instant` is monotonic and carries no
     // date, and settlement needs a date to pick a promotion or a time-of-day
@@ -352,20 +354,35 @@ pub(crate) async fn vm_call_llm_api_with_body(
     // to stop it, cannot satisfy the strict posture. Refuse before the request
     // is built rather than sending it and reporting `no_control_available`,
     // which would read as a successful strict call.
-    if let Some(refusal) = crate::llm::api::data_controls::training_refusal(
-        &opts.provider,
-        &opts.model,
-        opts.data_controls,
-    ) {
-        return Err(VmError::Runtime(refusal));
-    }
     let data_controls = crate::llm::api::data_controls::resolve(
         &opts.provider,
         &opts.model,
         crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
         opts.data_controls,
     );
-    let data_controls_receipt = data_controls.receipt.clone();
+    if let Some(refusal) = crate::llm::api::data_controls::training_refusal(
+        &opts.provider,
+        &opts.model,
+        opts.data_controls,
+        &data_controls.receipt,
+    ) {
+        return Err(VmError::Runtime(refusal));
+    }
+    let mut data_controls_receipt = data_controls.receipt.clone();
+    if let Some(boundary) = super::inference_boundary::effective(opts.inference_boundary) {
+        let rule = super::inference_boundary::governing_rule(
+            boundary,
+            &opts.provider,
+            &opts.model,
+            &data_controls_receipt,
+        )
+        .map_err(VmError::Runtime)?;
+        data_controls_receipt.inference_boundary_rule = Some(rule.to_string());
+        data_controls_receipt.inference_catalog_evidence = Some(
+            super::inference_boundary::catalog_evidence(&opts.provider, &opts.model)
+                .map_err(VmError::Runtime)?,
+        );
+    }
     let mut result = vm_call_llm_api_with_body_inner(
         opts,
         delta_tx,
@@ -504,6 +521,9 @@ async fn vm_call_llm_api_with_body_inner(
             opts.provider_overrides.as_ref(),
         );
     }
+    if dialect.is_ollama_openai_compat() {
+        DialectContract::project_ollama_openai_request(&mut body);
+    }
     if stream_protocol == StreamProtocol::AnthropicSse {
         crate::llm::providers::anthropic::reconcile_request_body(
             &mut body,
@@ -526,12 +546,7 @@ async fn vm_call_llm_api_with_body_inner(
         );
     }
 
-    dialect.apply_stream_transport_fields(
-        &mut body,
-        provider,
-        &resolved.endpoint,
-        use_stream_transport,
-    );
+    dialect.apply_stream_transport_fields(&mut body, provider, use_stream_transport);
 
     // Last write wins, deliberately. A declared retention/training control
     // must survive the caller's `provider_overrides` escape hatch, or the

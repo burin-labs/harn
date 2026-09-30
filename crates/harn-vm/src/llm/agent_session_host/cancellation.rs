@@ -240,6 +240,14 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
                 .get(session_id)
                 .is_some_and(|session| session.owns_session)
         });
+    // A stop that lands while a tool runs leaves its call unanswered, and
+    // providers refuse every later request that carries one (harn#8951).
+    // Answer it with the typed repair result before the terminal is written,
+    // so the durable transcript a resume loads is already well formed.
+    super::message_history::pair_orphaned_tool_use(
+        session_id,
+        super::message_history::UNANSWERED_TOOL_CALL_OBSERVATION,
+    );
     if crate::agent_sessions::has_journal(session_id) {
         let provider_call_count = super::AGENT_HOST_SESSIONS.with(|sessions| {
             sessions
@@ -287,6 +295,10 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
     crate::llm::agent_runtime::fire_session_close_hooks(session_id);
     if owns_session {
         crate::agent_sessions::close(session_id);
+    } else {
+        // A stop reclaims what the stopped run's session started even when
+        // the session itself stays open for its host; closing it already did.
+        crate::agent_sessions::reclaim_hooks::fire(session_id);
     }
     Ok(())
 }

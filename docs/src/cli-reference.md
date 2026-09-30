@@ -182,23 +182,45 @@ other: `--no-sandbox` leaves the environment policy fully in force, and an
 environment grant gives no file, network, or tool access. Approval policy is a
 third, separate thing again.
 
-Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]`:
+Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND][,to=in_process]`:
 
 | Part | Meaning |
 |---|---|
 | `NAME` | A unique, non-secret name used in receipts and diagnostics. |
 | `SOURCE` | `env:VAR_NAME` snapshots that launcher variable at session launch. `secret://ACCOUNT/KEY` keeps a live [secret-store](./hostlib/secret_store.md) reference, so rotation and revocation take effect without restarting the session. |
 | `,expose=ENV_VAR` | Optional. Makes the value available under this unique environment name. Without `,for=`, the exposure is session-scoped: `harness.env`, provider configuration, and every spawned command. |
-| `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process — Harn's own `harness.llm.call` is not an exec — so provider keys stay session-scoped by omitting `,for=`. |
+| `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process, because Harn's own `harness.llm.call` is not an exec. |
+| `,to=in_process` | Optional. Requires `,expose=` and rejects `,for=`. Makes the variable visible to Harn's own process only: provider credentials and configuration for `harness.llm.call`, and `harness.env`. No spawned command sees it, in value or as a secret reference. Use it for provider keys that only the run's model calls need. `,to=session` is the default. |
 
 ```bash
 # Let only `gh` see a vault-backed token; other process.exec calls do not inherit it.
 harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
 
-# Snapshot a provider key from the launcher env, exposed under the same name
-# for this run's model calls and every spawned command.
+# Snapshot a provider key for this run's own model calls. No spawned
+# command, including one the agent runs, can read it.
+harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY,to=in_process agent.harn
+
+# The same key for model calls and every spawned command.
 harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
 ```
+
+Each exposed grant reaches one audience:
+
+| Grant | Harn's own process | Spawned commands |
+|---|---|---|
+| `,expose=VAR` | yes | every command |
+| `,expose=VAR,for=COMMAND` | no | `COMMAND` only |
+| `,expose=VAR,to=in_process` | yes | none |
+
+"Spawned commands" means every child the session starts, not only
+`process.exec`: MCP stdio servers, ACP provider transports, and the git and
+other helper commands Harn runs itself all start with the session's resolved
+environment. An `isolated` or `granted` session therefore hands an MCP server
+or ACP provider only the runtime essentials, the grants that reach it, and the
+`env` entries in that server's or provider's own configuration.
+
+A run record's `admitted_environment` lists the names a child could see, so it
+omits in-process grants; their receipts carry `exposed_to: "in_process"`.
 
 Duplicate grant names and duplicate `expose` targets are launch errors. A child
 session inherits its parent's resolved environment by default. It may narrow
@@ -253,10 +275,12 @@ Terminology:
   ACP defines the session lifecycle; `environmentPolicy` is a Harn extension.
 - **Worker**: delegated work inside that lineage. It receives no more
   environment authority than its parent.
-- **Subprocess**: an operating-system command started by the session. It sees
-  the same resolved session environment plus explicit per-call overrides.
-- **Grant**: a named, receipted source-to-environment mapping. Grants are
-  session-wide today.
+- **Subprocess**: an operating-system command started by the session,
+  including MCP stdio servers and ACP provider transports. It sees the
+  resolved session environment minus in-process grants, plus explicit
+  per-call or per-server overrides.
+- **Grant**: a named, receipted source-to-environment mapping whose audience is
+  the whole session, one command, or Harn's own process.
 - **Sandbox**: the separate file/process/network boundary.
 - **Approval**: permission for a risky operation; it does not add environment
   values.
@@ -1953,6 +1977,13 @@ one line per case:
 | `unix_socket.bind_under_root` | a socket file binds under a named socket root |
 | `unix_socket.bind_under_root_with_network` | the same, when the policy also permits networking |
 | `unix_socket.bind_outside_root_refused` | a socket file outside every socket root is refused |
+| `read_only_role.workspace_write_refused` | under a role whose `workspace` capability only reads, with no child write grant, a workspace write is refused |
+| `read_only_role.read_only_root_read_admitted` | the same role with no child write grant: a read under a read-only root lands |
+| `child_write_grant.workspace_write_admitted` | the same role with `allow_child_workspace_write`: a workspace write lands |
+| `child_write_grant.temp_write_admitted` | the same role with the grant: a write to the child's own `TMPDIR` lands |
+| `child_write_grant.read_only_root_write_refused` | the same role with the grant: a write under a read-only root is refused |
+| `child_write_grant.outside_write_refused` | the same role with the grant: a write outside every writable root is refused |
+| `child_write_grant.read_only_root_read_admitted` | the same role with the grant: a read under a read-only root lands |
 
 A case that the backend cannot enforce on this host reads `not measured`, not
 `ok`. The command exits non-zero unless every case that applies on this
@@ -2221,8 +2252,12 @@ harn provider tool-probe openai --model gpt-5.4-mini --tool-format json
 
 Use `--response-fixture` to classify a saved provider response without making a
 network request. Use `--repeat` for live reliability checks; repeated summaries
-only pass when every attempted probe for that mode succeeds. `harn local switch`
-can consume the JSON with `--probe-result`. `--tool-format native|json|text`
+only pass when every attempted probe for that mode succeeds. JSON reports label
+their `evidence_source` as `live_request`, `live_raw_endpoint`, or
+`saved_response`. Only `live_request` reports from the provider adapter can
+satisfy `harn local switch --probe-result`, route-fitness, or catalog promotion
+gates. Saved responses remain useful for parser checks; raw endpoint overrides
+measure that endpoint without certifying the provider route. `--tool-format native|json|text`
 forces the live emission contract and exact parser; it does not enable the
 permissive `adaptive` parser. Probes preserve route generation defaults and
 raise only the minimum output budget when necessary to leave visible tool-call
@@ -2254,8 +2289,9 @@ global default. Snapshot recommendations can only select `native`, `json`, or
 ## harn provider tool-scorecard
 
 Aggregate one or more `harn provider tool-probe --json` reports into a stable
-route scorecard. Fixture input is offline-only: the command reads saved probe
-reports and does not call providers. The JSON report uses `schema_version: 8`
+route scorecard. The command reads saved JSON reports from live probes and does
+not call providers itself. It rejects reports classified from `--response-fixture`
+and legacy reports without live provenance. The JSON report uses `schema_version: 8`
 and includes route-level `catalog_claim`, `catalog_mismatches`, and
 `suggested_catalog_updates` fields plus a `fitness` store with exact
 provider/model/format/case observations. Suggested catalog updates remain
@@ -2268,7 +2304,7 @@ harn provider tool-scorecard --tool-probe-report ./probe.json --markdown > score
 ```
 
 Use `--plan-from-catalog` to render the fixed micro-case matrix for catalogued
-routes before probing. Plan output remains `schema_version: 1`.
+routes before probing. Plan output uses a separate versioned schema.
 
 ```bash
 harn provider tool-scorecard --plan-from-catalog --route anthropic:claude-sonnet-5

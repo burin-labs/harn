@@ -150,6 +150,9 @@
             },
             "unix_socket_roots": {
               "$ref": "#/$defs/stringArray"
+            },
+            "allow_child_workspace_write": {
+              "type": "boolean"
             }
           }
         }

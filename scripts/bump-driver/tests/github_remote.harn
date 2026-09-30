@@ -152,6 +152,13 @@ pipeline test_bump_pr_body_attaches_exact_package_test_receipt(task: unknown) {
   assert_eq(base64_decode(base64_encode(receipt)), receipt)
 }
 
+pipeline test_bump_pr_body_names_exact_source_commit(task: unknown) {
+  const revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  const body = bump_pull_request_body(nil, revision)
+  assert(contains(body, "Target Harn source revision: `${revision}`."))
+  assert(!contains(bump_pull_request_body(), "Target Harn source revision"))
+}
+
 pipeline test_release_projection_is_closed_and_exact(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   const tag = "v0.10.53"

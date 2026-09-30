@@ -45,12 +45,25 @@ pub(crate) async fn vm_call_completion_full(
         return Ok(mock_completion_response(prefix, suffix));
     }
 
+    let controls = super::data_controls::resolve(
+        &opts.provider,
+        &opts.model,
+        crate::llm_config::DataControlDialect::OpenAiSse,
+        crate::llm_config::DataPosture::Default,
+    );
+    let boundary_rule = super::inference_boundary::preflight(
+        opts.inference_boundary,
+        &opts.provider,
+        &opts.model,
+        &controls.receipt,
+    )
+    .map_err(VmError::Runtime)?;
     crate::llm::ensure_real_llm_allowed(&opts.provider)?;
 
     let resolved = crate::llm_config::provider_config(&opts.provider);
     let completion_endpoint = resolved.and_then(|p| p.completion_endpoint);
 
-    match completion_endpoint.as_deref() {
+    let mut result = match completion_endpoint.as_deref() {
         Some("/api/generate") => {
             reject_completion_options(
                 opts,
@@ -81,7 +94,9 @@ pub(crate) async fn vm_call_completion_full(
             vm_call_completion_openai_style(opts, prefix, suffix).await
         }
         None => vm_call_completion_fallback(opts, prefix, suffix).await,
-    }
+    }?;
+    result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
+    Ok(result)
 }
 
 fn reject_completion_options(
@@ -382,4 +397,27 @@ async fn vm_call_completion_fallback(
         fallback_opts.system.as_deref(),
     );
     super::vm_call_llm_full(&fallback_opts).await
+}
+
+#[cfg(test)]
+mod inference_boundary_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn local_ceiling_refuses_hosted_completion_before_provider_io() {
+        let opts = LlmCallOptions {
+            provider: "openai".into(),
+            model: "gpt-4o".into(),
+            api_key: "invalid-test-key".into(),
+            inference_boundary: Some(super::super::InferenceBoundary {
+                reach: super::super::inference_boundary::InferenceReach::LocalOnly,
+                allow_training_discounts: false,
+            }),
+            ..Default::default()
+        };
+        let refusal = vm_call_completion_full(&opts, "prefix", None)
+            .await
+            .expect_err("a hosted route cannot pass the local ceiling");
+        assert!(format!("{refusal:?}").contains("inference_boundary.local_only"));
+    }
 }

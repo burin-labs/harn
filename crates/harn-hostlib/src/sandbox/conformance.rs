@@ -82,6 +82,15 @@ impl ConformanceReport {
             .collect()
     }
 
+    /// Cases the enforcement table declares unconfined on this backend, with
+    /// the escape observed. Never a pass.
+    pub fn not_enforced(&self) -> Vec<&CaseReport> {
+        self.cases
+            .iter()
+            .filter(|case| matches!(case.verdict, Verdict::NotEnforced { .. }))
+            .collect()
+    }
+
     /// How many cases were measured and hold.
     pub fn conforming(&self) -> usize {
         self.cases
@@ -94,13 +103,15 @@ impl ConformanceReport {
     pub fn summary_line(&self) -> String {
         let failing: Vec<&str> = self.failing().iter().map(|case| case.case).collect();
         let not_measured = self.not_measured().len();
+        let not_enforced = self.not_enforced().len();
         let conforming = self.conforming();
         format!(
             "harn.sandbox_conformance_summary backend={} cases={} conforms={conforming} \
-             not_measured={not_measured} not_applicable={} failed={} failing={failing:?}",
+             not_measured={not_measured} not_enforced={not_enforced} not_applicable={} failed={} \
+             failing={failing:?}",
             self.backend,
             self.cases.len(),
-            self.cases.len() - conforming - not_measured - failing.len(),
+            self.cases.len() - conforming - not_measured - not_enforced - failing.len(),
             failing.len(),
         )
     }
@@ -152,6 +163,7 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
     let expectation = case.expectation(&policy);
     let expected = match expectation {
         Expectation::Observe(observation) => Some(observation),
+        Expectation::DeclaredNotEnforced => Some(Observation::Admitted),
         Expectation::NotApplicable(_) => None,
     };
     let (argv, target) = probe(case, &layout);
@@ -196,7 +208,7 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         );
         observe_wrapper(case, &child, &target, &decision)
     } else {
-        observe(case, &child, &target)
+        observe(case, &layout, &child, &target)
     };
     let observed = match observed {
         Ok(observed) => observed,
@@ -240,7 +252,15 @@ struct Layout {
     _root: tempfile::TempDir,
     workspace: PathBuf,
     outside: PathBuf,
+    /// A root the read-only role cases grant read-only, holding a file.
+    read_only: PathBuf,
     socket_root: PathBuf,
+    /// A directory under the workspace that the credential case puts on the
+    /// denylist. The workspace grant covers it, so only the denial can refuse.
+    credentials: PathBuf,
+    /// A loopback listener the network cases connect to. Nonblocking, so a
+    /// connection that never came reads as `WouldBlock` rather than a hang.
+    listener: std::net::TcpListener,
     /// A directory in the host's shared temp dir, holding a file another
     /// process left there. It is the one part of the layout outside `HOME`.
     shared_temp: tempfile::TempDir,
@@ -264,11 +284,17 @@ impl Layout {
         };
         let workspace = base.join("workspace");
         let outside = base.join("outside");
+        let read_only = base.join("read-only");
         let socket_root = base.join("sockets");
-        for dir in [&workspace, &outside, &socket_root] {
+        let credentials = workspace.join(".harn-conformance-credentials");
+        for dir in [&workspace, &outside, &read_only, &socket_root, &credentials] {
             std::fs::create_dir_all(dir)?;
         }
         std::fs::write(outside.join("secret.txt"), OUTSIDE_CONTENT)?;
+        std::fs::write(read_only.join("secret.txt"), OUTSIDE_CONTENT)?;
+        std::fs::write(credentials.join("secret.txt"), OUTSIDE_CONTENT)?;
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+        listener.set_nonblocking(true)?;
         let shared_temp = tempfile::Builder::new()
             .prefix("harn-sandbox-conformance-sibling-")
             .tempdir()?;
@@ -277,15 +303,19 @@ impl Layout {
             _root: root,
             workspace,
             outside,
+            read_only,
             socket_root,
+            credentials,
+            listener,
             shared_temp,
         })
     }
 }
 
 /// The policy a case runs under. Every case shares the worktree profile and a
-/// process-exec ceiling; the socket cases add their roots, and one adds the
-/// network grant that must not narrow them.
+/// process-exec ceiling; the socket cases add their roots, one adds the
+/// network grant that must not narrow them, the credential case denies its
+/// directory, and the network liveness case raises the ceiling.
 fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
     let mut policy = CapabilityPolicy {
         sandbox_profile: SandboxProfile::Worktree,
@@ -309,9 +339,48 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
                 ..ProcessSandboxPolicy::default()
             });
         }
+        ConformanceCase::DeniedCredentialReadRefused => {
+            policy.process_sandbox = Box::new(ProcessSandboxPolicy {
+                read_deny_roots: vec![layout.credentials.display().to_string()],
+                ..ProcessSandboxPolicy::default()
+            });
+        }
+        ConformanceCase::NetworkConnectAdmitted => {
+            policy.side_effect_level = Some("network".to_string());
+        }
+        ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused
+        | ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted => {
+            read_only_role(&mut policy, layout);
+        }
+        ConformanceCase::ChildWriteGrantWorkspaceWriteAdmitted
+        | ConformanceCase::ChildWriteGrantTempWriteAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootWriteRefused
+        | ConformanceCase::ChildWriteGrantOutsideWriteRefused
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
+            read_only_role(&mut policy, layout);
+            policy.process_sandbox.allow_child_workspace_write = true;
+        }
         _ => {}
     }
     policy
+}
+
+/// The capability policy of a role whose tools run commands and edit nothing:
+/// the `workspace` capability reads only, so its children write nowhere
+/// unless the process sandbox grants it. One root is granted read-only.
+fn read_only_role(policy: &mut CapabilityPolicy, layout: &Layout) {
+    policy.capabilities = BTreeMap::from([
+        ("process".to_string(), vec!["exec".to_string()]),
+        (
+            "workspace".to_string(),
+            vec![
+                "read_text".to_string(),
+                "list".to_string(),
+                "exists".to_string(),
+            ],
+        ),
+    ]);
+    policy.read_only_roots = vec![layout.read_only.display().to_string()];
 }
 
 /// The child's argv, and the path it touches (or what it reads, for the
@@ -319,9 +388,23 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
 fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
     let owned = |argv: &[&str]| argv.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
     match case {
-        ConformanceCase::WorkspaceWriteAdmitted => {
+        ConformanceCase::WorkspaceWriteAdmitted
+        | ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused
+        | ConformanceCase::ChildWriteGrantWorkspaceWriteAdmitted => {
             let target = layout.workspace.join("probe.txt");
             (write_argv(&target), target.display().to_string())
+        }
+        ConformanceCase::ChildWriteGrantReadOnlyRootWriteRefused => {
+            let target = layout.read_only.join("probe.txt");
+            (write_argv(&target), target.display().to_string())
+        }
+        ConformanceCase::ChildWriteGrantOutsideWriteRefused => {
+            let target = layout.outside.join("grant-probe.txt");
+            (write_argv(&target), target.display().to_string())
+        }
+        ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
+            read_probe(&layout.read_only.join("secret.txt"))
         }
         ConformanceCase::OutsideWriteRefused | ConformanceCase::GuardianOutsideWriteRefused => {
             let target = layout.outside.join("probe.txt");
@@ -330,6 +413,15 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
         ConformanceCase::OutsideReadRefused => read_probe(&layout.outside.join("secret.txt")),
         ConformanceCase::SiblingTempReadRefused => {
             read_probe(&layout.shared_temp.path().join("secret.txt"))
+        }
+        ConformanceCase::DeniedCredentialReadRefused => {
+            read_probe(&layout.credentials.join("secret.txt"))
+        }
+        ConformanceCase::NetworkConnectRefused | ConformanceCase::NetworkConnectAdmitted => {
+            match layout.listener.local_addr() {
+                Ok(address) => (connect_argv(address), address.to_string()),
+                Err(error) => (Vec::new(), format!("no listener address: {error}")),
+            }
         }
         ConformanceCase::AtomicReplaceAdmitted => {
             // JavaScript for Automation reaches Foundation on every Mac; the
@@ -346,7 +438,8 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
                 target.display().to_string(),
             )
         }
-        ConformanceCase::SessionTempWriteAdmitted => {
+        ConformanceCase::SessionTempWriteAdmitted
+        | ConformanceCase::ChildWriteGrantTempWriteAdmitted => {
             // The child names the file through its own TMPDIR; the target is
             // where the session temp dir must put it.
             let target =
@@ -443,6 +536,30 @@ fn bind_argv(target: &Path) -> Vec<String> {
          bind(S, sockaddr_un($ARGV[0])) or die \"bind: $!\";"
             .into(),
         target.display().to_string(),
+    ]
+}
+
+fn connect_argv(address: std::net::SocketAddr) -> Vec<String> {
+    if cfg!(windows) {
+        return vec![
+            "powershell".into(),
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            format!(
+                "$c = New-Object Net.Sockets.TcpClient; $c.Connect('{}', {}); $c.Close()",
+                address.ip(),
+                address.port()
+            ),
+        ];
+    }
+    vec![
+        "perl".into(),
+        "-MIO::Socket::INET".into(),
+        "-e".into(),
+        "IO::Socket::INET->new(PeerAddr => $ARGV[0], Proto => 'tcp') or die \"connect: $!\";"
+            .into(),
+        address.to_string(),
     ]
 }
 
@@ -543,7 +660,12 @@ enum Unmeasured {
 
 /// Read what the child did from its effect rather than its exit code where
 /// the effect is observable.
-fn observe(case: ConformanceCase, child: &Child, target: &str) -> Result<Observed, Unmeasured> {
+fn observe(
+    case: ConformanceCase,
+    layout: &Layout,
+    child: &Child,
+    target: &str,
+) -> Result<Observed, Unmeasured> {
     if child.spawn_refused {
         return Ok(Observed::Effect(Observation::SpawnRefused));
     }
@@ -555,8 +677,25 @@ fn observe(case: ConformanceCase, child: &Child, target: &str) -> Result<Observe
         })
     };
     match case {
-        ConformanceCase::OutsideReadRefused | ConformanceCase::SiblingTempReadRefused => {
+        ConformanceCase::OutsideReadRefused
+        | ConformanceCase::SiblingTempReadRefused
+        | ConformanceCase::DeniedCredentialReadRefused
+        | ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
             Ok(took_effect(child.stdout.contains(OUTSIDE_CONTENT)))
+        }
+        // The child has exited, so a connection it made is already queued on
+        // the listener; nothing queued means it never connected.
+        ConformanceCase::NetworkConnectRefused | ConformanceCase::NetworkConnectAdmitted => {
+            match layout.listener.accept() {
+                Ok(_) => Ok(took_effect(true)),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    Ok(took_effect(false))
+                }
+                Err(error) => Err(Unmeasured::Broken(format!(
+                    "could not read the loopback listener: {error}"
+                ))),
+            }
         }
         ConformanceCase::UndeclaredEnvironmentNameWithheld
         | ConformanceCase::GuardianUndeclaredEnvironmentNameWithheld => {

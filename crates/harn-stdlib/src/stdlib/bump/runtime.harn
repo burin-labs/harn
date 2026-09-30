@@ -20,6 +20,7 @@ import { compare_release, strip_v } from "std/semver"
 /** Everything the caller controls about one bump attempt. */
 pub type BumpOptions = {
   tag: string,
+  source_revision: string,
   repo: string,
   branch: string,
   base: string,
@@ -104,6 +105,8 @@ pub type BumpAutoMerge = {enabled: bool, state: string, detail: string}
 /** How the consumer's current pin compares with the requested release. */
 pub type BumpVersionRelation = "behind" | "equal" | "ahead"
 
+pub type BumpRevisionRelation = "untracked" | "behind" | "equal" | "ahead" | "diverged"
+
 /**
  * The injected capability surface. Each field is a function the orchestrator
  * calls at a well-defined phase; swapping the record swaps live I/O for
@@ -113,8 +116,10 @@ pub type BumpAdapter = {
   resolve_target_tag: fn(string) -> string,
   release_ready: fn(string) -> ReleaseReadiness,
   read_current_version: fn() -> string,
+  read_current_revision: fn() -> string,
+  revision_relation: fn(string, string, string) -> BumpRevisionRelation,
   base_sha: fn() -> string,
-  apply_version: fn(string) -> BumpApplyOutcome,
+  apply_version: fn(string, string) -> BumpApplyOutcome,
   run_validation: fn() -> BumpValidation,
   working_changes: fn() -> BumpChangeSet,
   remote_base_head: fn() -> BumpBaseHead,
@@ -134,6 +139,7 @@ pub type BumpAdapter = {
  */
 pub type BumpOutcome = "not_ready" \
   | "already_current" \
+  | "revision_conflict" \
   | "refresh_failed" \
   | "no_changes" \
   | "validation_failed" \
@@ -153,8 +159,11 @@ pub type BumpReceipt = {
   repo: string,
   branch: string,
   target_tag: string,
+  target_revision: string,
   previous_version: string,
+  previous_revision: string,
   version_relation: BumpVersionRelation,
+  revision_relation: BumpRevisionRelation?,
   ready: bool,
   readiness_detail: string,
   changed: bool,
@@ -197,6 +206,7 @@ pub fn bump_options(overrides: dict = {}) -> BumpOptions {
   const o = overrides ?? {}
   return {
     tag: to_string(o.tag ?? ""),
+    source_revision: to_string(o.source_revision ?? ""),
     repo: to_string(o.repo ?? ""),
     branch: to_string(o.branch ?? "automation/bump-harn-runtime"),
     base: to_string(o.base ?? "main"),
@@ -252,8 +262,11 @@ pub fn bump_changeset_empty(changeset: BumpChangeSet) -> bool {
 fn __bump_receipt_base(
   options: BumpOptions,
   target: string,
+  target_revision: string,
   previous: string,
+  previous_revision: string,
   relation: BumpVersionRelation,
+  revision_relation: BumpRevisionRelation?,
   readiness: ReleaseReadiness,
 ) -> BumpReceipt {
   return {
@@ -263,8 +276,11 @@ fn __bump_receipt_base(
     repo: options.repo,
     branch: options.branch,
     target_tag: target,
+    target_revision: target_revision,
     previous_version: previous,
+    previous_revision: previous_revision,
     version_relation: relation,
+    revision_relation: revision_relation,
     ready: readiness.ready,
     readiness_detail: readiness.detail,
     changed: false,
@@ -419,10 +435,30 @@ fn __prepare_base_lease(adapter: BumpAdapter, receipt: BumpReceipt) -> BumpBaseP
  */
 pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   const target = adapter.resolve_target_tag(options.tag)
+  const target_revision = lowercase(trim(options.source_revision))
   const readiness = adapter.release_ready(target)
   const previous = trim(adapter.read_current_version())
   const relation = bump_version_relation(previous, target)
-  let receipt = __bump_receipt_base(options, target, previous, relation, readiness)
+  const previous_revision = if target_revision == "" {
+    ""
+  } else {
+    lowercase(trim(adapter.read_current_revision()))
+  }
+  const revision_relation = if target_revision == "" || relation == "ahead" || !readiness.ready {
+    nil
+  } else {
+    adapter.revision_relation(previous_revision, target_revision, target)
+  }
+  let receipt = __bump_receipt_base(
+    options,
+    target,
+    target_revision,
+    previous,
+    previous_revision,
+    relation,
+    revision_relation,
+    readiness,
+  )
   // Phase 1 — release readiness gate. A target that is still publishing its
   // assets is not an error; the scheduled rerun will pick it up.
   if !readiness.ready {
@@ -431,7 +467,7 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   }
   // Phase 2 — idempotent no-op. Concurrent/scheduled reruns land here once the
   // pin already matches, so the common steady state does zero mutation.
-  if relation == "equal" {
+  if relation == "equal" && (revision_relation == nil || revision_relation == "equal") {
     return receipt
       + {outcome: "already_current", ok: true, notes: ["pin already matches ${target}"]}
   }
@@ -444,6 +480,16 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
         outcome: "already_current",
         ok: true,
         notes: ["pin ${previous} is newer than requested target ${target}; no downgrade applied"],
+      }
+  }
+  if revision_relation == "ahead" || revision_relation == "diverged" {
+    return receipt
+      + {
+        outcome: "revision_conflict",
+        ok: false,
+        notes: [
+          "source revision ${target_revision} is ${revision_relation} of current ${previous_revision}; no downgrade or divergent update applied",
+        ],
       }
   }
   // Any previously armed bump must stop before the long refresh begins. It
@@ -508,7 +554,7 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
       continue
     }
     // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
-    const apply = adapter.apply_version(target)
+    const apply = adapter.apply_version(target, target_revision)
     receipt = receipt
       + {
         changed: apply.changed,

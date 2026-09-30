@@ -5,7 +5,13 @@ mod options;
 mod provider;
 mod transcript;
 
-use crate::value::VmValue;
+use crate::value::{VmError, VmValue};
+
+impl From<crate::llm_config::ModelResolutionError> for VmError {
+    fn from(error: crate::llm_config::ModelResolutionError) -> Self {
+        options::model_resolution_error(error)
+    }
+}
 
 pub(crate) use messages::{
     json_messages_to_vm, vm_add_role_message, vm_message_value, vm_messages_to_json,
@@ -17,10 +23,10 @@ pub(crate) use options::{
     has_directive_commit_metadata, pending_reminders_from_session, prepare_llm_options,
     prepare_llm_options_safe, project_agent_tools, project_llm_options, render_pending_reminders,
     resolve_catalog_thinking_config, resolve_thinking_config, system_prompt_event_metadata,
-    system_prompt_metadata, uncommitted_directives, validate_llm_option_keys, validate_options,
+    system_prompt_metadata, turn_boundary_directives, validate_llm_option_keys, validate_options,
 };
 #[cfg(test)]
-pub(crate) use options::{strip_directive_commit_metadata, tracked_directive_envelope_message};
+pub(crate) use options::{strip_internal_message_metadata, tracked_directive_envelope_message};
 pub(crate) use provider::{
     vm_resolve_model, vm_resolve_model_selector, vm_resolve_provider, ResolvedProvider,
 };
@@ -336,7 +342,10 @@ mod tests {
         env.set("LOCAL_LLM_MODEL", "qwen2.5-coder-32b");
 
         assert_eq!(vm_resolve_provider(&None), "local");
-        assert_eq!(vm_resolve_model(&None, "local"), "qwen2.5-coder-32b");
+        assert_eq!(
+            vm_resolve_model(&None, "local").unwrap(),
+            "qwen2.5-coder-32b"
+        );
         assert!(resolve_api_key("local").is_ok());
     }
 
@@ -458,7 +467,7 @@ mod tests {
             VmValue::String(arcstr::ArcStr::from("small")),
         )]));
         let provider = vm_resolve_provider(&options);
-        let resolved = vm_resolve_model(&options, &provider);
+        let resolved = vm_resolve_model(&options, &provider).unwrap();
 
         assert_eq!(provider, "local");
         assert_eq!(resolved, "gemma-4-e4b-it");
@@ -476,7 +485,7 @@ mod tests {
             VmValue::String(arcstr::ArcStr::from("small")),
         )]));
         let provider = vm_resolve_provider(&options);
-        let resolved = vm_resolve_model(&options, &provider);
+        let resolved = vm_resolve_model(&options, &provider).unwrap();
 
         assert_eq!(provider, "local");
         assert_eq!(resolved, "gemma-4-e4b-it");
@@ -494,7 +503,7 @@ mod tests {
             VmValue::String(arcstr::ArcStr::from("small")),
         )]));
         let provider = vm_resolve_provider(&options);
-        let model = vm_resolve_model(&options, &provider);
+        let model = vm_resolve_model(&options, &provider).unwrap();
 
         assert_eq!(provider, "openai");
         assert_eq!(model, "gpt-5.6-luna");
@@ -512,7 +521,7 @@ mod tests {
         env.set("HARN_LLM_MODEL", "google/gemma-4-31B-it");
         env.set("HARN_LLM_PROVIDER", "together");
 
-        let resolved = vm_resolve_model(&None, "together");
+        let resolved = vm_resolve_model(&None, "together").unwrap();
 
         assert_eq!(resolved, "google/gemma-4-31B-it");
     }
@@ -582,9 +591,12 @@ mod tests {
         let _guard = crate::llm::env_guard();
         let _env = crate::test_env::test_env_guard();
 
-        let resolved = vm_resolve_model(&None, "openrouter");
+        let resolved = vm_resolve_model(&None, "openrouter").unwrap();
 
-        assert_eq!(resolved, "anthropic/claude-sonnet-4.6");
+        let row = crate::llm_config::model_catalog_entry_for_route("openrouter", &resolved)
+            .expect("OpenRouter default must name a catalog route");
+        assert_eq!(row.provider, "openrouter");
+        assert!(!row.deprecated);
     }
 
     #[test]
@@ -608,7 +620,7 @@ mod tests {
         let _session_guard = crate::agent_sessions::enter_current_session(id);
 
         let provider = vm_resolve_provider(&None);
-        let model = vm_resolve_model(&None, &provider);
+        let model = vm_resolve_model(&None, &provider).unwrap();
 
         drop(_session_guard);
         crate::agent_sessions::reset_session_store();
@@ -641,7 +653,7 @@ mod tests {
         explicit_opts.put_str("provider", "openai");
         let opts = Some(explicit_opts);
         let provider = vm_resolve_provider(&opts);
-        let model = vm_resolve_model(&opts, &provider);
+        let model = vm_resolve_model(&opts, &provider).unwrap();
 
         drop(_session_guard);
         crate::agent_sessions::reset_session_store();

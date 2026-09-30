@@ -134,9 +134,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   committed files; binary checks require a fresh Harn executable.
 - Generated/local paths include `docs/dist/`, `.harn-runs/`, `.harn/`,
   `.harn/receipts/`, `.claude/`, `.burin/`, `target/`, and `node_modules/`.
-- The prompt-template engine is
-  `crates/harn-vm/src/stdlib/template.rs`. Host and script rendering both use
-  `render_template_result`; do not add another parser or evaluator.
+- The prompt-template engine is `crates/harn-vm/src/stdlib/template/mod.rs`.
+  Host and script rendering both use `render_template_result`; do not add
+  another parser or evaluator.
 - Preserve pre-v2 `{{name}}` missing-identifier passthrough. New constructs
   fail with parse errors. Vocabulary lives in
   `crates/harn-vm/src/stdlib/template/vocabulary.rs`; regenerate with
@@ -275,7 +275,12 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   admin permission and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
   [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
-- Prefer the normal merge queue whenever it is cheap enough.
+- Land with `gh pr merge --squash --auto`, which enqueues. Never use
+  `gh pr merge --admin`. The labels are the only supported way to skip the
+  queue, and the `merge queue` ruleset allows no admin bypass. GitHub ignores
+  `-merge` in `.gitattributes`, so the queue's generated-file check on the
+  combined tree is the only guard against two regenerations merging into a
+  stale file (#8817).
 
 <!-- BEGIN HARN SHARED AGENT CONTRACT: managed by harn-bump-fleet -->
 
@@ -291,5 +296,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Match evidence to the claim: exercise the canonical user path, state the
   falsifier, verify liveness and recovery, and record residual blind spots.
 - "Ship" means landed on main with required deploy and post-merge checks complete.
+- Land PRs through the merge queue with `gh pr merge --squash --auto`; never
+  `gh pr merge --admin`. Incidents use the org override labels `bypass-ci`,
+  `bypass-merge-queue`, or `force-merge`.
 
 <!-- END HARN SHARED AGENT CONTRACT -->

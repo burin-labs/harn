@@ -403,6 +403,7 @@ pub(super) enum DispatchSkipStage {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DispatchError {
     EventLog(String),
     Registry(String),

@@ -24,6 +24,13 @@ fn arg_spec() {
         },
         {
           kind: "flag",
+          name: "tool_probe_report",
+          long: "--tool-probe-report",
+          parse: "string",
+          help: "Live Harn tool-probe report required to enable native tools.",
+        },
+        {
+          kind: "flag",
           name: "provider",
           long: "--provider",
           parse: "string",
@@ -35,8 +42,23 @@ fn arg_spec() {
           name: "model",
           long: "--model",
           parse: "string",
-          default: "logical:cheap",
-          help: "Extraction model when --extraction is omitted.",
+          help: "Optional extraction model; otherwise use the provider's catalog default.",
+        },
+        {
+          kind: "flag",
+          name: "max_cost_usd",
+          long: "--max-cost-usd",
+          parse: "float",
+          default: 0.1,
+          help: "Maximum cost of the one notice-extraction model call.",
+        },
+        {
+          kind: "flag",
+          name: "extraction_timeout_secs",
+          long: "--extraction-timeout-secs",
+          parse: "int",
+          default: 90,
+          help: "Wall-clock timeout of the one notice-extraction model call.",
         },
         {
           kind: "flag",
@@ -200,10 +222,15 @@ fn __switch_notice_branch(process: HarnessProcess, root: string, branch: string)
   __require_success(__run(process, "git", args, root), "notice branch switch")
 }
 
-fn __run_checks(process: HarnessProcess, root: string) -> list<string> {
+fn __run_checks(process: HarnessProcess, root: string, harn_bin: string) -> list<string> {
   let passed: list<string> = []
   for check in provider_notice_checks() {
-    const result = __run(process, "make", [check], root)
+    const args = if harn_bin == "harn" {
+      [check]
+    } else {
+      ["HARN_BIN=" + harn_bin, "HARN_BIN_NO_BUILD=1", check]
+    }
+    const result = __run(process, "make", args, root)
     __require_success(result, check)
     passed = passed + [check]
   }
@@ -214,7 +241,7 @@ fn __proposal_markdown(notice: dict, receipt: dict, candidate: ProviderCatalogCa
   return """# Incomplete provider catalog proposal
 
 This proposal was produced from a trusted provider notice. It intentionally
-does not add a model row until the missing facts below are verified.
+does not apply catalog changes until the missing facts below are verified.
 
 ## Source
 
@@ -229,6 +256,10 @@ does not add a model row until the missing facts below are verified.
 ```json
 ${json_stringify_pretty(candidate)}
 ```
+
+## Notice text
+
+${notice?.text ?? "No notice text supplied; inspect the source URL."}
 
 ## Unresolved verification
 
@@ -259,7 +290,6 @@ ${json_stringify_pretty(receipt)}
 ${diff}
 ```
 
-Closes #4392
 """
 }
 
@@ -272,14 +302,16 @@ fn __open_draft_pr(
   receipt: dict,
   output_dir: string,
 ) -> string {
-  __require_success(__run(process, "git", ["add", "-A"], root), "git add")
+  // The receipt may live inside this worktree. Stage only tracked catalog
+  // changes so an untracked receipt or local secret never joins the PR.
+  __require_success(__run(process, "git", ["add", "-u"], root), "git add")
   const diff_result = __run(process, "git", ["diff", "--cached", "--"], root)
   __require_success(diff_result, "staged diff")
   if trim(diff_result.stdout ?? "") == "" {
     throw "refusing to open a draft PR without an exact data diff"
   }
-  const title = "chore(catalog): apply provider notice " + notice.source_id
-  __require_success(__run(process, "git", ["commit", "-m", title], root), "git commit")
+  const title = "[Models] Apply provider notice " + receipt.notice_id.substring(0, 12)
+  __require_success(__run(process, "git", ["commit", "-S", "-m", title], root), "signed git commit")
   __require_success(__run(process, "git", ["push", "-u", "origin", branch], root), "git push")
   const body_path = path_join(output_dir, "pr-body.md")
   fs.write_text(body_path, __pr_body(notice, receipt, diff_result.stdout ?? ""))
@@ -305,6 +337,10 @@ pipeline main(harness: Harness, task: unknown) {
     return 2
   }
   const options = unwrap(parsed).options
+  if options.max_cost_usd <= 0 || options.extraction_timeout_secs <= 0 {
+    harness.stdio.eprintln("notice extraction cost and timeout limits must be positive")
+    return 2
+  }
   const root_result = __run(
     harness.process,
     "git",
@@ -316,25 +352,69 @@ pipeline main(harness: Harness, task: unknown) {
   const notice_loaded = __read_json(harness.fs, __from_root(root, options.notice))
   const notice_raw = notice_loaded?.notice ?? notice_loaded
   const validated = validate_notice(harness, notice_raw)
+  const catalog = __read_json(
+    harness.fs,
+    path_join(root, "spec/provider-catalog/provider-catalog.json"),
+  )
   const extraction_value = if options?.extraction != nil {
     const loaded = __read_json(harness.fs, __from_root(root, options.extraction))
     loaded?.extraction ?? loaded
   } else if is_ok(validated) {
+    const extraction_options = {
+      provider: options.provider,
+      budget: {max_cost_usd: options.max_cost_usd},
+      operation_timeout_ms: options.extraction_timeout_secs * 1000,
+    }
     extract_notice(
       harness.llm,
       unwrap(validated),
-      {provider: options.provider, model: options.model, budget: {max_cost_usd: 0.1}},
+      catalog,
+      if options?.model == nil {
+        extraction_options
+      } else {
+        extraction_options + {model: options.model}
+      },
     )
   } else {
     {classification: "candidate"}
   }
   const extraction: dict = json_parse(json_stringify(extraction_value))
-  const catalog = __read_json(
-    harness.fs,
-    path_join(root, "spec/provider-catalog/provider-catalog.json"),
-  )
-  let plan = plan_notice(harness, notice_raw, extraction, catalog)
+  const tool_evidence = if options?.tool_probe_report != nil {
+    const result = __run(
+      harness.process,
+      options.harn_bin,
+      [
+        "provider",
+        "tool-scorecard",
+        "--tool-probe-report",
+        __from_root(root, options.tool_probe_report),
+        "--json",
+      ],
+      root,
+    )
+    if result.exit_code == 0 {
+      json_parse(result.stdout)
+    } else {
+      {error: trim(result.stderr ?? "tool-probe report validation failed")}
+    }
+  } else {
+    nil
+  }
+  let plan = plan_notice(harness, notice_raw, extraction, catalog, tool_evidence)
   const output_dir = __ensure_output_dir(harness.fs, root, options.output_dir)
+  plan.receipt = plan.receipt
+    + {
+      extraction: extraction,
+      extraction_run: {
+        mode: if options?.extraction == nil {
+          "live"
+        } else {
+          "replay"
+        },
+        max_cost_usd: options.max_cost_usd,
+        timeout_secs: options.extraction_timeout_secs,
+      },
+    }
   const receipt_path = path_join(output_dir, plan.receipt.notice_id + ".json")
   harness.fs.write_text(receipt_path, json_stringify_pretty(plan.receipt) + "\n")
   harness.stdio.println(
@@ -347,8 +427,28 @@ pipeline main(harness: Harness, task: unknown) {
   if plan.receipt.disposition == "no_op" || (!options.apply && !options.open_pr) {
     return 0
   }
+  // A `patch` or `incomplete_add` disposition is only reachable when validation
+  // produced a candidate, so a missing one here is a broken receipt rather than
+  // an empty notice — say so instead of writing a patch from nothing.
+  const candidate = plan.candidate
+  if ["incomplete_add", "incomplete_capability"].contains(plan.receipt.disposition) {
+    if candidate == nil {
+      harness.stdio.eprintln("incomplete receipt carries no candidate")
+      return 1
+    }
+    const proposal_path = path_join(output_dir, plan.receipt.notice_id + ".md")
+    harness.fs.write_text(proposal_path, __proposal_markdown(notice_raw, plan.receipt, candidate))
+    plan.receipt = plan.receipt + {source_path: proposal_path}
+    harness.fs.write_text(receipt_path, json_stringify_pretty(plan.receipt) + "\n")
+    harness.stdio.println("incomplete proposal: " + proposal_path + "; no catalog PR opened")
+    return 0
+  }
+  if candidate == nil {
+    harness.stdio.eprintln("receipt disposition is 'patch' but the plan carries no candidate")
+    return 1
+  }
   __assert_clean_worktree(harness.process, root)
-  const branch = "provider-notice/" + plan.receipt.notice_id.substring(0, 12)
+  const branch = "ksinder/catalog-notice/" + plan.receipt.notice_id.substring(0, 12)
   if options.open_pr {
     const existing = __existing_pr(harness.process, root, branch)
     if existing != "" {
@@ -357,46 +457,24 @@ pipeline main(harness: Harness, task: unknown) {
     }
     __switch_notice_branch(harness.process, root, branch)
   }
-  // A `patch` or `incomplete_add` disposition is only reachable when validation
-  // produced a candidate, so a missing one here is a broken receipt rather than
-  // an empty notice — say so instead of writing a patch from nothing.
-  const candidate = plan.candidate
-  if plan.receipt.disposition == "patch" {
-    if candidate == nil {
-      harness.stdio.eprintln("receipt disposition is 'patch' but the plan carries no candidate")
-      return 1
-    }
-    const source_path = __resolve_source(harness.process, root, candidate)
-    const patched = apply_candidate_to_source(harness.fs.read_text(source_path), candidate)
-    if is_err(patched) {
-      harness.stdio.eprintln(unwrap_err(patched))
-      return 1
-    }
-    harness.fs.write_text(source_path, unwrap(patched))
-    plan.receipt = plan.receipt + {source_path: __relative_to_root(root, source_path)}
-  } else if plan.receipt.disposition == "incomplete_add" {
-    if candidate == nil {
-      harness.stdio.eprintln(
-        "receipt disposition is 'incomplete_add' but the plan carries no candidate",
-      )
-      return 1
-    }
-    const proposals = path_join(root, "provider-catalog-proposals")
-    if !harness.fs.exists(proposals) {
-      harness.fs.mkdir(proposals, true)
-    }
-    const proposal_path = path_join(proposals, plan.receipt.notice_id + ".md")
-    harness.fs.write_text(proposal_path, __proposal_markdown(notice_raw, plan.receipt, candidate))
-    plan.receipt = plan.receipt + {source_path: __relative_to_root(root, proposal_path)}
+  const source_path = __resolve_source(harness.process, root, candidate)
+  const patched = apply_candidate_to_source(harness.fs.read_text(source_path), candidate)
+  if is_err(patched) {
+    harness.stdio.eprintln(unwrap_err(patched))
+    return 1
   }
-  const generated = __run(
-    harness.process,
-    options.harn_bin,
-    ["provider", "catalog", "generate"],
-    root,
-  )
-  __require_success(generated, "provider catalog generation")
-  plan.receipt = plan.receipt + {checks: __run_checks(harness.process, root)}
+  harness.fs.write_text(source_path, unwrap(patched))
+  plan.receipt = plan.receipt + {source_path: __relative_to_root(root, source_path)}
+  for projection in ["generate", "matrix", "support"] {
+    const generated = __run(
+      harness.process,
+      options.harn_bin,
+      ["provider", "catalog", projection],
+      root,
+    )
+    __require_success(generated, "provider catalog " + projection)
+  }
+  plan.receipt = plan.receipt + {checks: __run_checks(harness.process, root, options.harn_bin)}
   harness.fs.write_text(receipt_path, json_stringify_pretty(plan.receipt) + "\n")
   if options.open_pr {
     const url = __open_draft_pr(

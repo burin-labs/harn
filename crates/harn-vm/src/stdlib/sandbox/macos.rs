@@ -16,7 +16,7 @@ use std::process::{Command, Output};
 
 use self::swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
-    normalized_process_roots, policy_allows_network, policy_allows_workspace_write,
+    normalized_process_roots, policy_allows_child_writes, policy_allows_network,
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
@@ -152,6 +152,13 @@ fn wrap_with_sandbox_exec(
 fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> String {
     let mut developer_toolchain_read_roots = process_sandbox_developer_toolchain_read_roots(policy);
     developer_toolchain_read_roots.extend(toolchain_roots::go_read_root(policy, program));
+    // Rendered with the other toolchain reads, so the read denylist emitted at
+    // the end of the profile beats these grants too (last match wins).
+    developer_toolchain_read_roots.extend(
+        super::read_roots::path_grants::process_sandbox_path_entry_grants(policy)
+            .into_iter()
+            .map(|grant| grant.root),
+    );
     developer_toolchain_read_roots.sort_unstable();
     developer_toolchain_read_roots.dedup();
 
@@ -242,7 +249,7 @@ fn render_profile_with_extra_read_roots(
             sandbox_profile_escape(&root.display().to_string())
         ));
     }
-    if policy_allows_workspace_write(policy) {
+    if policy_allows_child_writes(policy) {
         for root in preset_write_roots(policy) {
             profile.push_str(&format!(
                 "(allow file-read* (subpath \"{}\"))\n",
@@ -255,23 +262,25 @@ fn render_profile_with_extra_read_roots(
                 sandbox_profile_escape(&root.display().to_string())
             ));
         }
-        profile.push_str("(allow file-write*");
-        for root in preset_write_roots(policy) {
-            profile.push_str(&format!(
-                " (subpath \"{}\")",
-                sandbox_profile_escape(&root.display().to_string())
-            ));
+        // `(allow file-write*)` with no filter is an unqualified grant, so the
+        // aggregate rule is emitted only when it names at least one root. A
+        // policy with no preset, policy, or cache write roots can still write
+        // its workspace roots below, and nothing else.
+        let aggregate_write_roots: Vec<_> = preset_write_roots(policy)
+            .into_iter()
+            .chain(policy_write_roots.iter().cloned())
+            .chain(developer_toolchain_cache_roots.iter().cloned())
+            .collect();
+        if !aggregate_write_roots.is_empty() {
+            profile.push_str("(allow file-write*");
+            for root in &aggregate_write_roots {
+                profile.push_str(&format!(
+                    " (subpath \"{}\")",
+                    sandbox_profile_escape(&root.display().to_string())
+                ));
+            }
+            profile.push_str(")\n");
         }
-        for root in policy_write_roots
-            .iter()
-            .chain(developer_toolchain_cache_roots.iter())
-        {
-            profile.push_str(&format!(
-                " (subpath \"{}\")",
-                sandbox_profile_escape(&root.display().to_string())
-            ));
-        }
-        profile.push_str(")\n");
         for root in &roots {
             profile.push_str(&format!(
                 "(allow file-write* (subpath \"{}\"))\n",
@@ -558,3 +567,7 @@ fn standard_device_profile_rules() -> &'static str {
 #[cfg(test)]
 #[path = "macos_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "macos/write_roots_tests.rs"]
+mod write_roots_tests;

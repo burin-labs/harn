@@ -268,6 +268,7 @@
             "context_overflow",
             "provider_misconfigured",
             "provider_unavailable",
+            "provider_billing",
             "rate_limited",
             "timeout",
             "resource_busy",
@@ -321,6 +322,7 @@
             "context_overflow",
             "provider_misconfigured",
             "provider_unavailable",
+            "provider_billing",
             "rate_limited",
             "timeout",
             "resource_busy",
@@ -714,7 +716,8 @@
               "mode", "strategy", "snapshotAssetId", "reason", "receiptId", "schemaVersion",
               "engineStrategy", "requestedStrategy", "resolvedThresholdTokens", "thresholdSource",
               "hardLimitTokens", "archivedMessages", "estimatedTokensBefore", "estimatedTokensAfter",
-              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement"
+              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement",
+              "classification"
             ],
             "additionalProperties": true,
             "properties": {
@@ -731,7 +734,8 @@
               "resolvedThresholdTokens": { "type": ["integer", "null"], "minimum": 0 },
               "thresholdSource": { "type": ["string", "null"] },
               "hardLimitTokens": { "type": ["integer", "null"], "minimum": 0 },
-              "sourceMeasurement": {}
+              "sourceMeasurement": {},
+              "classification": {}
             }
           } }
         }

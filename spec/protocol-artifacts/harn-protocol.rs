@@ -680,6 +680,42 @@ pub struct HarnExternalActionPolicyEvaluation {
     pub reason_code: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<HarnExternalActionDecisionReview>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionReviewProbability {
+    pub label: String,
+    pub probability: serde_json::Number,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionReviewAnswer {
+    pub question_id: String,
+    pub kind: String,
+    pub confidence: serde_json::Number,
+    pub confidence_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probability: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<serde_json::Number>,
+    pub probabilities: Vec<HarnExternalActionReviewProbability>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionDecisionReview {
+    pub receipt: String,
+    pub outcome: String,
+    pub rule: String,
+    pub applied: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_confidence: Option<serde_json::Number>,
+    pub answers: Vec<HarnExternalActionReviewAnswer>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2364,6 +2400,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
 pub const AGENT_TERMINAL_CLASS_CONTEXT_OVERFLOW: &str = "context_overflow";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_MISCONFIGURED: &str = "provider_misconfigured";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_UNAVAILABLE: &str = "provider_unavailable";
+pub const AGENT_TERMINAL_CLASS_PROVIDER_BILLING: &str = "provider_billing";
 pub const AGENT_TERMINAL_CLASS_RATE_LIMITED: &str = "rate_limited";
 pub const AGENT_TERMINAL_CLASS_TIMEOUT: &str = "timeout";
 pub const AGENT_TERMINAL_CLASS_RESOURCE_BUSY: &str = "resource_busy";
@@ -2378,6 +2415,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "context_overflow",
     "provider_misconfigured",
     "provider_unavailable",
+    "provider_billing",
     "rate_limited",
     "timeout",
     "resource_busy",
@@ -2436,6 +2474,7 @@ pub enum HarnAgentTerminalClass {
     ContextOverflow,
     ProviderMisconfigured,
     ProviderUnavailable,
+    ProviderBilling,
     RateLimited,
     Timeout,
     ResourceBusy,
@@ -2455,6 +2494,7 @@ impl HarnAgentTerminalClass {
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
+        Self::ProviderBilling,
         Self::RateLimited,
         Self::Timeout,
         Self::ResourceBusy,
@@ -2471,6 +2511,7 @@ impl HarnAgentTerminalClass {
             Self::ContextOverflow => "context_overflow",
             Self::ProviderMisconfigured => "provider_misconfigured",
             Self::ProviderUnavailable => "provider_unavailable",
+            Self::ProviderBilling => "provider_billing",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
             Self::ResourceBusy => "resource_busy",
@@ -2489,6 +2530,7 @@ impl HarnAgentTerminalClass {
             "context_overflow" => Self::ContextOverflow,
             "provider_misconfigured" => Self::ProviderMisconfigured,
             "provider_unavailable" => Self::ProviderUnavailable,
+            "provider_billing" => Self::ProviderBilling,
             "rate_limited" => Self::RateLimited,
             "timeout" => Self::Timeout,
             "resource_busy" => Self::ResourceBusy,
@@ -3549,6 +3591,7 @@ pub struct ACPTranscriptCompactedUpdateMetaHarn {
     pub recap: Value,
     #[serde(rename = "sourceMeasurement")]
     pub source_measurement: Value,
+    pub classification: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed: Option<bool>,
 }
@@ -4584,6 +4627,11 @@ impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
                         {
                             return Err(serde::de::Error::custom(
                                 "session update _meta.harn.archivedMessages is below its minimum",
+                            ));
+                        }
+                        if value.pointer("/_meta/harn/classification").is_none() {
+                            return Err(serde::de::Error::custom(
+                                "session update _meta.harn.classification is required",
                             ));
                         }
                         if value.pointer("/_meta/harn/compactionPolicy").is_none() {

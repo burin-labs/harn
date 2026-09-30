@@ -14,6 +14,7 @@ use super::{
 static PLATFORM_STORE: OnceLock<Arc<CredentialStore>> = OnceLock::new();
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum NativeKeyringError {
     #[error(transparent)]
     Keyring(#[from] KeyringError),

@@ -1,0 +1,83 @@
+import { CompletionEvidenceSnapshot } from "std/agent/completion_evidence"
+import {
+  CompletionPrecheckConfig,
+  CompletionPrecheckFacts,
+  CompletionPrecheckInput,
+  CompletionPrecheckRequirement,
+  CompletionPrecheckResult,
+  completion_precheck,
+} from "std/agent/completion_precheck"
+import { CompletionRequirementReport } from "std/agent/completion_requirements"
+
+/**
+ * Project the owning ledger and verifier without interpreting tool-name prose.
+ *
+ * @effects: [host, llm.call]
+ * @errors: ["fact resolver failure", "invalid evaluation policy"]
+ */
+pub fn completion_precheck_from_snapshot(
+  llm: HarnessLlm,
+  config: CompletionPrecheckConfig,
+  snapshot: CompletionEvidenceSnapshot,
+  ledger: CompletionRequirementReport,
+) -> CompletionPrecheckResult {
+  const unknown_facts: CompletionPrecheckFacts = {
+    commit: {observed: nil, evidence_refs: []},
+    pull_request: {observed: nil, evidence_refs: []},
+  }
+  const facts = if config.facts != nil {
+    config.facts(snapshot.session_id, snapshot.evidence_id)
+  } else {
+    unknown_facts
+  }
+  let acceptance: list<CompletionPrecheckRequirement> = []
+  for row in ledger.rows {
+    acceptance = acceptance
+      + [
+        {
+          id: row.requirement_id,
+          name: row.name,
+          met: if row.status == "met" {
+            true
+          } else if row.status == "unmet" {
+            false
+          } else {
+            nil
+          },
+          evidence_refs: row.evidence_refs.map(fn(index) { return "evidence:${index}" }).to_list(),
+        },
+      ]
+  }
+  const verification = snapshot.verification
+  const input: CompletionPrecheckInput = {
+    acceptance: acceptance,
+    verification: if verification == nil {
+      []
+    } else {
+      [
+        {
+          name: verification.command,
+          outcome: verification.observed,
+          evidence_refs: if verification.observed_at_evidence_index == nil {
+            []
+          } else {
+            ["evidence:${verification.observed_at_evidence_index}"]
+          },
+        },
+      ]
+    },
+    commit: facts.commit,
+    pull_request: facts.pull_request,
+    last_claim: snapshot.last_text,
+  }
+  // The existing full judge owns interpreting an amended goal. Do not veto
+  // against a stale acceptance projection while it resolves that amendment.
+  if len(snapshot.obligations?.steers ?? []) > 0 || snapshot.obligations?.accepted_stop != nil {
+    return {
+      action: "full_judge",
+      reason: "amended_obligations",
+      input_digest: "sha256:" + sha256(json_stringify(input)),
+    }
+  }
+  return completion_precheck(llm, input, config.policy)
+}

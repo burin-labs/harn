@@ -236,6 +236,41 @@ Projection receipts name their selected actions and resolved evidence roles in
 and then dropped from the bounded packet — is visible without arithmetic on the
 counts.
 
+### Optional negative completion precheck
+
+`JudgeConfig.precheck` accepts a `CompletionPrecheckConfig` from
+`std/agent/completion_precheck`. It runs after existing deterministic decisions,
+judge caps, and catalog skips, before announcing or invoking the full judge.
+It is absent by default and cannot authorize completion.
+
+The config contains `policy` and an optional `facts(session_id, evidence_id)`
+callback. The callback supplies observed commit and pull-request facts, each
+with `observed: bool?` and `evidence_refs: list<string>`. An absent callback
+means unknown facts. The runtime projects the requirement ledger, verifier
+reading, and last assistant claim into the remaining input. Accepted stops or
+amended goals bypass this precheck so the full judge owns their interpretation.
+
+The policy contains an `EvaluationPolicy`, an `achieved_ceiling` in `[0, 0.5)`,
+and a `missing_confidence_floor` in `(0.5, 1]`. One evaluation asks whether the
+requirements are achieved and which named requirement is missing. Only a
+negative answer meeting both authored thresholds returns `continue` with that
+gap. These thresholds are configuration, not a calibrated accuracy guarantee.
+When using a run-cost ceiling, install the conservative parent budget before
+the first actor call; a late precheck cannot retroactively establish accounting
+for earlier calls. The per-evaluation ceiling remains a separate bound.
+
+Positive, uncertain, malformed, and unavailable answers fall through to the
+full judge. Inputs exceeding 12,000 UTF-8 bytes are refused without truncation.
+Cancellation and parent-budget, deadline, or run-cost refusal return
+`control_stop`, which ends the checkpoint unverified. Existing deterministic
+verification and requirement rules retain their authority.
+
+The directive receipt records `precheck`, including its input digest, decision,
+and available evaluation receipt. A precheck veto leaves the full-judge
+invocation false and emits no `judge_started` event; the normal loop delivers
+the named gap to the next actor turn. Standalone callers can use
+`completion_precheck(llm, input, policy)` with the same typed input and policy.
+
 ## See also
 
 - [Agent guardrails](./agent-guardrails.md) — the input-side bookend that can

@@ -139,6 +139,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "context_overflow",
   "provider_misconfigured",
   "provider_unavailable",
+  "provider_billing",
   "rate_limited",
   "timeout",
   "resource_busy",
@@ -647,6 +648,33 @@ export interface HarnExternalActionPolicyEvaluation {
   outcome: HarnExternalActionPolicyEvaluationOutcome
   reason_code: string
   policy_id?: string
+  review?: HarnExternalActionDecisionReview
+}
+
+export interface HarnExternalActionReviewProbability {
+  label: string
+  probability: number
+}
+
+export interface HarnExternalActionReviewAnswer {
+  question_id: string
+  kind: string
+  confidence: number
+  confidence_kind: string
+  verdict?: boolean
+  probability?: number
+  label?: string
+  score?: number
+  probabilities: HarnExternalActionReviewProbability[]
+}
+
+export interface HarnExternalActionDecisionReview {
+  receipt: string
+  outcome: string
+  rule: string
+  applied: boolean
+  minimum_confidence?: number
+  answers: HarnExternalActionReviewAnswer[]
 }
 
 export interface HarnExternalActionDecision {
@@ -1539,6 +1567,7 @@ export interface ACPTranscriptCompactedUpdateMetaHarn {
   compactionPolicy: ACPValue
   recap: ACPValue
   sourceMeasurement: ACPValue
+  classification: ACPValue
   replayed?: boolean
 }
 

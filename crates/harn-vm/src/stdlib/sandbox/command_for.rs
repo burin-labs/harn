@@ -33,6 +33,39 @@ macro_rules! close_env_for_session {
     };
 }
 
+/// A `std` command for `program` whose environment is the session policy's
+/// child environment for that program, without sandbox confinement.
+///
+/// This is the constructor for every child the runtime starts on a session's
+/// behalf that is not itself a confined tool call: MCP stdio servers, ACP
+/// provider transports, git and other plumbing the runtime runs, pagers,
+/// verifier commands. Confined tool calls use [`std_command_for`], which
+/// closes the environment the same way. Callers layer their own `env` /
+/// `env_remove` afterward; an explicit entry wins over the policy's base.
+///
+/// With no session policy installed the command inherits the parent
+/// environment, exactly as `Command::new` does. With one installed, the
+/// child sees the policy's allowlist, the grants that reach this program,
+/// and nothing else: never an `in_process` grant, and never an engine
+/// variable the policy did not admit.
+pub fn session_std_command(program: impl AsRef<std::ffi::OsStr>) -> Result<Command, VmError> {
+    let program = program.as_ref();
+    // A raw constructor is allowed here and only here: this is the funnel.
+    let mut command = Command::new(program);
+    close_env_for_session!(command, &program.to_string_lossy());
+    Ok(command)
+}
+
+/// The Tokio counterpart of [`session_std_command`].
+pub fn session_tokio_command(
+    program: impl AsRef<std::ffi::OsStr>,
+) -> Result<tokio::process::Command, VmError> {
+    let program = program.as_ref();
+    let mut command = tokio::process::Command::new(program);
+    close_env_for_session!(command, &program.to_string_lossy());
+    Ok(command)
+}
+
 pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
     std_command_for_with_env_state(program, args).map(|(command, _)| command)
 }

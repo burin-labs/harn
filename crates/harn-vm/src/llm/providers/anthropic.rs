@@ -223,6 +223,15 @@ fn relower_disabled_thinking_override(body: &mut serde_json::Value, model: &str)
     }
 }
 
+/// The thinking budget when the caller enabled thinking without naming one.
+///
+/// Anthropic refuses `budget_tokens >= max_tokens` with a 400, and a fixed
+/// 10,000 default made `thinking: true` fail on every call capped at or below
+/// it. Keep the budget under the cap, at Anthropic's 1,024 floor at least.
+pub(super) fn default_thinking_budget(max_tokens: i64) -> i64 {
+    (max_tokens - 1).clamp(1024, 10_000)
+}
+
 fn model_supports_anthropic_effort(model: &str) -> bool {
     crate::llm::capabilities::lookup("anthropic", model).reasoning_effort_supported
 }
@@ -822,7 +831,9 @@ impl AnthropicProvider {
             ThinkingConfig::Enabled { budget_tokens } => {
                 body["thinking"] = serde_json::json!({
                     "type": "enabled",
-                    "budget_tokens": budget_tokens.unwrap_or(10000),
+                    "budget_tokens": budget_tokens
+                        .map(i64::from)
+                        .unwrap_or_else(|| default_thinking_budget(anthropic_max)),
                 });
             }
         }

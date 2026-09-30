@@ -59,6 +59,7 @@ pub const DEFAULT_HOST_LEASE_DOMAIN: &str = "default";
 
 /// Failures produced while validating or mutating host lease state.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum HostLeaseError {
     /// The caller supplied an invalid or unsafe contract value.
     #[error("invalid host lease request: {0}")]

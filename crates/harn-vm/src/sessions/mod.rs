@@ -324,6 +324,7 @@ pub async fn expire(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionError {
     Duplicate(String),
     Invalid(String),

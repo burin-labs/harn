@@ -113,6 +113,7 @@ pub struct BindingTypeMismatchError {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum VmError {
     StackUnderflow,
     StackOverflow,

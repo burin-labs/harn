@@ -418,6 +418,21 @@ mod tests {
         assert!(!legacy.thinking_modes.iter().any(|m| m == "effort"));
     }
 
+    #[test]
+    fn zai_glm53_flash_requires_thinking_while_glm52_can_disable_it() {
+        reset();
+        let flash = lookup("zai", "glm-5.3-flash");
+        assert!(!flash.reasoning_disable_supported);
+        assert!(!flash.reasoning_none_supported);
+        assert_eq!(
+            flash.reasoning_wire_format.as_deref(),
+            Some("thinking_type")
+        );
+
+        let previous = lookup("zai", "glm-5.2");
+        assert!(previous.reasoning_disable_supported);
+    }
+
     /// Every claim here was measured against Google's live endpoint on
     /// 2026-09-03, with an unknown-model negative control returning 404 first
     /// so a 200 means the route actually ran.
@@ -719,24 +734,25 @@ mod tests {
         // reasoning fields, so without a dedicated `*gpt-oss*` row gpt-oss
         // would fall through to reasoning-OFF and the eval loop would bill a
         // noncommittal. Tool wire support is provider-specific: the pay-per-token
-        // routes (OpenRouter, Fireworks, DeepInfra, SambaNova) ride Harn's TEXT
-        // channel — their provider-native Harmony path drops tool calls into the
+        // routes (OpenRouter, DeepInfra, SambaNova) ride Harn's TEXT channel —
+        // their provider-native Harmony path drops tool calls into the
         // reasoning/commentary channel (empty `tool_calls` / billed-noncommittal,
         // see the DeepInfra/SambaNova rows + vLLM #22578/#44216, SGLang
         // #8976/#10738, openai/harmony #68). Within the text channel they use the
         // escape-free heredoc (`text`) grammar rather than fenced-JSON, because
         // gpt-oss double-escapes the backslashes a JSON string arg requires and
         // corrupts `\\`-heavy code bodies (empirical A/B 2026-06-21: text beats
-        // json on both dispatch and byte-fidelity). Only the native-clean direct
-        // routes (Cerebras, Groq) still use provider-native tools.
+        // json on both dispatch and byte-fidelity). Fireworks and the direct
+        // routes (Cerebras, Groq) use provider-native tools; the Fireworks row
+        // records the 2026-09-27 re-measurement and its revert trigger.
         reset();
         for (provider, model, native_tools, preferred_tool_format) in [
             ("openrouter", "openai/gpt-oss-120b", false, "text"),
             (
                 "fireworks",
                 "accounts/fireworks/models/gpt-oss-120b",
-                false,
-                "text",
+                true,
+                "native",
             ),
             ("deepinfra", "openai/gpt-oss-120b", false, "text"),
             ("sambanova", "sambanova/gpt-oss-120b", false, "text"),

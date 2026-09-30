@@ -93,8 +93,20 @@ fn directive_instance_receipts_are_stripped_before_provider_dispatch() {
         messages[0][DIRECTIVE_IDS_KEY],
         serde_json::json!(["reminder-1"])
     );
-    strip_directive_commit_metadata(&mut messages);
+    messages.push(serde_json::json!({
+        "role": "assistant",
+        "content": "Withdrawn closing report",
+        "harn_bookkeeping_turn": true,
+    }));
+    strip_internal_message_metadata(&mut messages);
     assert!(messages[0].get(DIRECTIVE_IDS_KEY).is_none());
+    assert_eq!(
+        messages[1],
+        serde_json::json!({
+            "role": "assistant",
+            "content": "Withdrawn closing report",
+        })
+    );
     assert!(messages[0]["content"]
         .as_str()
         .is_some_and(|content| content.contains("ttl_turns=\"1\"")));

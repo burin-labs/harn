@@ -1,0 +1,4 @@
+{"schemaVersion":1,"strictScopes":false,"liveAfterCalls":2}
+{"id":"record-0","scope":"default","consume":"once","tool_calls":[{"id":"call_rec_1","name":"read_file","arguments":{"path":"a.txt"}}]}
+{"id":"record-1","scope":"default","consume":"once","text":"PREFIX-2"}
+{"id":"record-2","scope":"default","consume":"once","text":"PAST-THE-PREFIX"}

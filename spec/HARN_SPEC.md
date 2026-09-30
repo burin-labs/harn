@@ -8343,12 +8343,11 @@ per-platform mechanisms are:
   Writes are limited to scratch dirs plus declared `workspace_roots`
   only when the policy allows workspace writes; network is allowed
   only when the side-effect ceiling permits `network`.
-- **Windows**: a per-spawn AppContainer with no capability SIDs plus
-  a Job Object capping memory, process count, and UI surface;
-  `icacls` grants the AppContainer SID Modify (or ReadAndExecute)
-  on each `workspace_roots` entry for the lifetime of the spawn.
 - **OpenBSD**: `pledge` promises and `unveil` path permissions
   derived from the same policy.
+- **Windows**: no OS sandbox. Children run unconfined; an
+  `os_hardened` spawn is refused, and `worktree` logs a warning
+  once (or refuses under `HARN_HANDLER_SANDBOX=enforce`).
 
 `SandboxProfile::Unrestricted` skips both path enforcement and OS
 confinement; `harn run --no-sandbox` is the CLI escape hatch that
@@ -8544,7 +8543,7 @@ in the built-in method table for the full rule syntax.
 
 | Variable | Description |
 |---|---|
-| `HARN_HANDLER_SANDBOX` | How the `worktree` sandbox profile reacts when the platform's OS confinement mechanism (Linux Landlock + seccomp, macOS `sandbox-exec`, Windows AppContainer) is unavailable: `enforce`/`required`/`1`/`true` fail the spawn, `warn` (default) logs once and continues with workspace-root path enforcement but **without** OS confinement, and `off`/`none`/`0`/`false` disables the OS portion silently. Workspace-root path enforcement for file builtins is unaffected either way. The `os_hardened` profile always enforces and ignores this variable. |
+| `HARN_HANDLER_SANDBOX` | How the `worktree` sandbox profile reacts when the platform's OS confinement mechanism (Linux Landlock + seccomp, macOS `sandbox-exec`) is unavailable, or on Windows, which has none: `enforce`/`required`/`1`/`true` fail the spawn, `warn` (default) logs once and continues with workspace-root path enforcement but **without** OS confinement, and `off`/`none`/`0`/`false` disables the OS portion silently. Workspace-root path enforcement for file builtins is unaffected either way. The `os_hardened` profile always enforces and ignores this variable. |
 | `HARN_EGRESS_ALLOW` | Comma-separated egress allow rules seeding the egress policy. Rules accept exact hosts, `*.suffix` wildcards, IP literals/CIDR, and an optional `:port`. |
 | `HARN_EGRESS_DENY` | Comma-separated egress deny rules, same syntax as `HARN_EGRESS_ALLOW`. Deny wins over allow. |
 | `HARN_EGRESS_DEFAULT` | Action for destinations matching no rule: `allow` (default) or `deny` (allowlist mode). |

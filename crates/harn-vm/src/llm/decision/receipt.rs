@@ -173,6 +173,11 @@ pub struct EvaluationReceipt {
     /// Present when the provider explained a refusal the evaluator mapped onto
     /// an arm, such as the reported reason behind `state_too_large`.
     pub provider_reason: Option<String>,
+    /// The spend admission refusal behind an `admission_refused` or
+    /// `budget_cut` arm, in the `admission_reason` vocabulary chat calls
+    /// throw, such as `late_activation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_reason: Option<String>,
     pub estimated_state_tokens: Option<usize>,
     pub estimated_longest_question_tokens: Option<usize>,
     pub estimated_request_tokens: Option<usize>,
@@ -226,6 +231,7 @@ impl EvaluationReceipt {
             source: EvaluationSource::Live,
             elapsed_ms,
             provider_reason: None,
+            admission_reason: None,
             estimated_state_tokens: None,
             estimated_longest_question_tokens: None,
             estimated_request_tokens: None,

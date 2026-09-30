@@ -12,8 +12,8 @@ use super::super::{
 #[test]
 fn text_only_route_repairs_stale_native_history_format() {
     let result = crate::stdlib::json_to_vm_value(&json!({
-        "provider": "fireworks",
-        "model": "accounts/fireworks/models/gpt-oss-120b",
+        "provider": "deepinfra",
+        "model": "openai/gpt-oss-120b",
         "text": "",
         "_agent_tool_format": "native",
         "native_tool_calls": [{
@@ -149,18 +149,14 @@ fn json_text_route_reserializes_native_surprise_in_its_own_grammar() {
 }
 
 #[test]
-fn fireworks_stale_native_turn_records_text_channel_result_end_to_end() {
+fn text_only_stale_native_turn_records_text_channel_result_end_to_end() {
     reset_agent_session_host_state();
     let session_id = crate::agent_sessions::open_or_create_for_test(Some(
-        "fireworks-stale-native-history".to_string(),
+        "text-only-stale-native-history".to_string(),
     ));
     crate::agent_sessions::claim_tool_format(&session_id, "native")
         .expect("stale native session lock claims");
-    seed_host_session_provider_model(
-        &session_id,
-        "fireworks",
-        "accounts/fireworks/models/gpt-oss-120b",
-    );
+    seed_host_session_provider_model(&session_id, "deepinfra", "openai/gpt-oss-120b");
     crate::agent_sessions::inject_message(
         &session_id,
         crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "inspect"})),
@@ -168,8 +164,8 @@ fn fireworks_stale_native_turn_records_text_channel_result_end_to_end() {
     .expect("user turn injects");
 
     let llm_result = crate::stdlib::json_to_vm_value(&json!({
-        "provider": "fireworks",
-        "model": "accounts/fireworks/models/gpt-oss-120b",
+        "provider": "deepinfra",
+        "model": "openai/gpt-oss-120b",
         "text": "",
         "_agent_tool_format": "native",
         "native_tool_calls": [{

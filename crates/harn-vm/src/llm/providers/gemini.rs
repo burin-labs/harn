@@ -696,6 +696,7 @@ mod tests {
     fn gemini_image_content_maps_to_inline_data() {
         let payload = LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -726,6 +727,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,
@@ -770,6 +772,7 @@ mod tests {
     fn gemini_image_url_content_maps_to_file_data() {
         let mut payload = LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -799,6 +802,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,
@@ -848,6 +852,7 @@ mod tests {
     fn gemini_pdf_and_audio_content_maps_to_parts() {
         let payload = LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -878,6 +883,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,

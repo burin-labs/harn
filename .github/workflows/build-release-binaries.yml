@@ -13,6 +13,10 @@ name: Build release binaries
 #      separate promotion workflow publishes exactly these files; nothing here
 #      creates a tag, a GitHub release, or a container.
 #
+#      When the release's merge group already built and checked that
+#      candidate (trigger 5), the push finds that run by commit and builds
+#      nothing; promotion publishes the merge group's files.
+#
 #   2. push main, any other commit — warm-cache-only mode. Runs the same build
 #      matrix to populate the per-target Swatinem rust-cache on main so the
 #      next candidate restores warm via restore-keys prefix matching. Skips
@@ -22,7 +26,18 @@ name: Build release binaries
 #
 #   3. schedule, daily — safety-net warm-up against GitHub's 7-day eviction.
 #
-#   4. workflow_dispatch — warm_cache_only, or benchmark_only size gates.
+#   4. workflow_dispatch — warm_cache_only, benchmark_only size gates, or an
+#      explicit source_candidate on main. Source candidates reuse the full
+#      signed producer and checks; dispatches cannot trigger promotion.
+#
+#   5. merge_group whose head is a release commit — candidate mode at the
+#      merge group's commit, which is the commit that lands on main, so the
+#      candidate is ready when the release merges instead of 22 to 87 minutes
+#      later. Every other merge group builds nothing.
+#
+#   6. pull_request — builds nothing. It exists so `Release candidate verdict`
+#      reports on every pull request and can be a required check, which makes
+#      the merge queue hold a release until its candidate passed.
 #
 # Cache architecture note. GitHub Actions caches are scoped per-ref. Main warm
 # events and main candidate builds own saves; each target prunes old
@@ -30,6 +45,8 @@ name: Build release binaries
 on:
   push:
     branches: [main]
+  merge_group:
+  pull_request:
   schedule:
     # Daily warm at 05:17 UTC. Staggered from release-smoke's 09:17 cron
     # so the two release-mode workflows don't contend for runners or for
@@ -37,6 +54,11 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:
+      source_candidate:
+        description: 'Build, sign, notarize and attest the main source commit without publishing a release.'
+        required: false
+        type: boolean
+        default: false
       warm_cache_only:
         description: 'Build the release matrix on main only to refresh default-branch Rust caches.'
         required: false
@@ -53,7 +75,7 @@ on:
         type: boolean
         default: false
       benchmark_source_ref:
-        description: 'Optional immutable source ref to build under current-main benchmark policy.'
+        description: 'Optional immutable source ref to build under the policy from the dispatched workflow ref.'
         required: false
         type: string
         default: ''
@@ -83,7 +105,7 @@ permissions:
   packages: read
 
 concurrency:
-  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
+  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
   # Candidate runs are push runs, so they get a run-qualified lane and a later
   # main push can never cancel a release candidate. An immutable-source
   # benchmark has a source-qualified lane. Setup may resolve a push to a no-op;
@@ -111,6 +133,7 @@ jobs:
       candidate_source_sha: ${{ steps.resolve.outputs.candidate_source_sha }}
       build_matrix: ${{ steps.resolve.outputs.build_matrix }}
       build_mode: ${{ steps.resolve.outputs.build_mode }}
+      candidate_purpose: ${{ steps.resolve.outputs.candidate_purpose }}
       runner_profile: ${{ steps.resolve.outputs.runner_profile }}
       cli_aot_primary_runner: ${{ steps.resolve.outputs.cli_aot_primary_runner }}
       cli_aot_standard_runner: ${{ steps.resolve.outputs.cli_aot_standard_runner }}
@@ -135,6 +158,12 @@ jobs:
           #
           # scripts/check_ci_cache_policy.harn enforces this.
           fetch-depth: 0
+
+      - name: Install the source candidate decision runtime
+        if: inputs.source_candidate
+        uses: ./.github/actions/setup-harn
+        with:
+          version-file: .harn-bootstrap-version
 
       - name: Detect release build inputs
         id: release-build-inputs
@@ -166,6 +195,7 @@ jobs:
       - name: Resolve release context
         id: resolve
         env:
+          INPUT_SOURCE_CANDIDATE: ${{ inputs.source_candidate && 'true' || 'false' }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
           INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
@@ -176,16 +206,22 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_BUILD_INPUTS_CHANGED: ${{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}
         run: |
           set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
           source scripts/lib/release_version.sh
+          # shellcheck source=scripts/lib/release_candidate_run.sh
+          source scripts/lib/release_candidate_run.sh
           REF="$REF_NAME"
           SHOULD_BUILD_BINARIES=false
           SHOULD_PACKAGE_ARCHIVES=false
           CANDIDATE_SOURCE_SHA=""
           BUILD_MODE=""
+          CANDIDATE_PURPOSE=none
           RUNNER_PROFILE="${INPUT_RUNNER_PROFILE:-policy}"
           BUILD_MATRIX="[]"
           CLI_AOT_PRIMARY_RUNNER="$(jq -er '.jobs.cli_aot.primary | select(type == "string" and length > 0)' .github/release-runner-policy.json)"
@@ -202,16 +238,46 @@ jobs:
               --targets "$targets"
           }
 
-          if [[ "$INPUT_BENCHMARK_CARGO_BLOAT" == "true" && "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
+          if [[ "${INPUT_SOURCE_CANDIDATE:-false}" != true && "$INPUT_BENCHMARK_CARGO_BLOAT" == "true" && "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
             echo "::error::benchmark_cargo_bloat requires benchmark_only=true"
             exit 1
           fi
-          if [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" || -n "$INPUT_TARGETS" ]] &&
+          if [[ "${INPUT_SOURCE_CANDIDATE:-false}" != true ]] &&
+             [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" || -n "$INPUT_TARGETS" ]] &&
              [[ "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
             echo "::error::targets, benchmark_source_ref, and benchmark_source_sha require benchmark_only=true"
             exit 1
           fi
-          if [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
+          if [[ "${INPUT_SOURCE_CANDIDATE:-false}" == "true" ]]; then
+            SOURCE_REQUEST="${GITHUB_OUTPUT}.source-request.json"
+            SOURCE_DECISION="${GITHUB_OUTPUT}.source-decision.json"
+            jq -n --arg event "$EVENT_NAME" --arg ref_type "$REF_TYPE" \
+              --arg ref_name "$REF_NAME" --arg runner_profile "$RUNNER_PROFILE" \
+              --argjson warm_cache_only "$INPUT_WARM_CACHE_ONLY" \
+              --argjson benchmark_only "$INPUT_BENCHMARK_ONLY" \
+              --arg targets "$INPUT_TARGETS" --arg benchmark_source_ref "$INPUT_BENCHMARK_SOURCE_REF" \
+              --arg benchmark_source_sha "$INPUT_BENCHMARK_SOURCE_SHA" \
+              --argjson benchmark_cargo_bloat "$INPUT_BENCHMARK_CARGO_BLOAT" \
+              '{event:$event,ref_type:$ref_type,ref_name:$ref_name,runner_profile:$runner_profile,
+                warm_cache_only:$warm_cache_only,benchmark_only:$benchmark_only,targets:$targets,
+                benchmark_source_ref:$benchmark_source_ref,benchmark_source_sha:$benchmark_source_sha,
+                benchmark_cargo_bloat:$benchmark_cargo_bloat}' > "$SOURCE_REQUEST"
+            if ! harn run --standalone --no-sandbox scripts/release_contract.harn -- \
+                --source-candidate-request "$SOURCE_REQUEST" > "$SOURCE_DECISION"; then
+              echo "::error::Source candidate request refused: $(cat "$SOURCE_DECISION")"
+              exit 1
+            fi
+            BUILD_MODE="$(jq -er '.build_mode' "$SOURCE_DECISION")"
+            CANDIDATE_PURPOSE="$(jq -er '.candidate_purpose' "$SOURCE_DECISION")"
+            printf 'source_candidate_decision=%s\n' "$(cat "$SOURCE_DECISION")" >> "$GITHUB_OUTPUT"
+            printf '\nSource candidate decision: %s\n' "$(cat "$SOURCE_DECISION")" >> "$GITHUB_STEP_SUMMARY"
+            REF="$GITHUB_SHA"
+            CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
+            BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
+            SHOULD_BUILD_BINARIES=true
+            SHOULD_PACKAGE_ARCHIVES=true
+            echo "::notice::Building signed source candidate $GITHUB_SHA with the existing full candidate producer. This dispatch cannot publish a release."
+          elif [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::benchmark_only is only valid for workflow_dispatch"
               exit 1
@@ -229,16 +295,12 @@ jobs:
                 echo "::error::benchmark_source_ref and benchmark_source_sha must be provided together"
                 exit 1
               fi
-              if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
-                echo "::error::an explicit benchmark source must be dispatched from main so current policy is authoritative (got ${REF_TYPE}/${REF_NAME})"
-                exit 1
-              fi
               if [[ ! "$INPUT_BENCHMARK_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
                 echo "::error::benchmark_source_sha must be an exact lowercase 40-hex commit"
                 exit 1
               fi
               REF="$INPUT_BENCHMARK_SOURCE_REF"
-              echo "::notice::Current policy will benchmark immutable source ${REF} at ${INPUT_BENCHMARK_SOURCE_SHA}."
+              echo "::notice::Policy from ${REF_TYPE}/${REF_NAME} will benchmark immutable source ${REF} at ${INPUT_BENCHMARK_SOURCE_SHA}."
             fi
             BUILD_MODE=benchmark
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE" "$INPUT_TARGETS")"
@@ -274,8 +336,63 @@ jobs:
             # The version commit is the release: a push whose workspace version
             # changes to a stable X.Y.Z builds the candidate at exactly this
             # commit. The decision reads the version, never the commit subject.
+            # A merge queue lands several entries in one push, so the push is
+            # judged from the previous main, not from HEAD^: a release commit
+            # buried under a later entry is refused, never built as a warm cache.
             PREVIOUS_VERSION="$(git show HEAD^:Cargo.toml | release_workspace_version)"
-            if release_push_is_stable_version_change "$PREVIOUS_VERSION" "$VERSION"; then
+            PUSH_BASE="$PUSH_BEFORE"
+            if [[ ! "$PUSH_BASE" =~ ^[0-9a-f]{40}$ || "$PUSH_BASE" =~ ^0+$ ]] ||
+               ! git cat-file -e "$PUSH_BASE^{commit}" 2>/dev/null; then
+              PUSH_BASE="$(git rev-parse HEAD^)"
+            fi
+            RELEASE_COMMITS="$(release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA")"
+            if [[ -n "$RELEASE_COMMITS" && "$RELEASE_COMMITS" != "$GITHUB_SHA" ]]; then
+              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. A person must re-land the release as the head of a push."
+              exit 1
+            fi
+            QUEUE_RUN_ID=""
+            if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
+              QUEUE_RESOLUTION=""
+              if ! QUEUE_RESOLUTION="$(release_candidate_run_resolution \
+                "$GITHUB_REPOSITORY" \
+                "$GITHUB_SHA" \
+                "${GITHUB_RUN_ID:-}" \
+                "${RELEASE_CANDIDATE_WAIT_ATTEMPTS:-60}" \
+                "${RELEASE_CANDIDATE_POLL_SECONDS:-60}"
+              )"; then
+                QUEUE_RESOLUTION="unread||"
+              fi
+              IFS='|' read -r QUEUE_STATE QUEUE_CANDIDATE_RUN QUEUE_DETAIL <<< "$QUEUE_RESOLUTION"
+              case "$QUEUE_STATE" in
+                success)
+                  QUEUE_RUN_ID="$QUEUE_CANDIDATE_RUN"
+                  ;;
+                absent)
+                  echo "::notice::No exact-SHA merge-group candidate exists for v$VERSION at $GITHUB_SHA; building it on the push."
+                  ;;
+                failed)
+                  echo "::warning::Exact-SHA merge-group candidate run $QUEUE_CANDIDATE_RUN concluded ${QUEUE_DETAIL:-unknown}; rebuilding v$VERSION on the push."
+                  ;;
+                missing_manifest)
+                  echo "::warning::Exact-SHA merge-group run $QUEUE_CANDIDATE_RUN succeeded without candidate-manifest-$GITHUB_SHA; rebuilding v$VERSION on the push."
+                  ;;
+                timed_out)
+                  echo "::warning::Timed out waiting for exact-SHA merge-group candidate run $QUEUE_CANDIDATE_RUN while it was ${QUEUE_DETAIL:-in progress}; rebuilding v$VERSION on the push."
+                  ;;
+                unread)
+                  # Unread is not "none": building again is slow but always safe.
+                  echo "::warning::Could not read whether the merge group built v$VERSION at $GITHUB_SHA; building it here."
+                  ;;
+                *)
+                  echo "::error::Unknown exact-SHA candidate resolution '$QUEUE_RESOLUTION'."
+                  exit 1
+                  ;;
+              esac
+            fi
+            if [[ -n "$QUEUE_RUN_ID" ]]; then
+              BUILD_MODE=queued
+              echo "::notice::Merge group run $QUEUE_RUN_ID already built and checked release candidate v$VERSION at $GITHUB_SHA. Nothing to build; promotion publishes that run's files."
+            elif [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
               BUILD_MODE=candidate
               REF="$GITHUB_SHA"
               CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
@@ -298,9 +415,34 @@ jobs:
                 echo "::notice::Push to main did not change a release build input declared in .github/release-warm-cache-paths.yml, and is not a stable version change. Skipping build matrix."
               fi
             fi
+          elif [[ "$EVENT_NAME" == "merge_group" ]]; then
+            RUNNER_PROFILE=policy
+            # The merge group's commit is the commit that lands on main. A group
+            # whose head is a release commit builds the candidate here; the
+            # required release-contract job refuses a group that buries one.
+            RELEASE_COMMITS="$(release_range_release_commits "$MERGE_GROUP_BASE" "$GITHUB_SHA")"
+            if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
+              BUILD_MODE=candidate
+              REF="$GITHUB_SHA"
+              CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
+              BUILD_MATRIX="$(resolve_runner_matrix candidate policy)"
+              SHOULD_BUILD_BINARIES=true
+              SHOULD_PACKAGE_ARCHIVES=true
+              echo "::notice::Merge group lands release v$VERSION at $GITHUB_SHA. Building the candidate before it merges: sign, notarize, package, attest, then run the release checks on those files."
+            else
+              BUILD_MODE=none
+              echo "::notice::Merge group lands no release commit at its head. Nothing to build."
+            fi
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
+            BUILD_MODE=none
+            echo "::notice::Pull requests build nothing; a release's merge group builds its candidate."
           elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "::error::workflow_dispatch requires warm_cache_only=true or benchmark_only=true"
+            echo "::error::workflow_dispatch requires source_candidate=true, warm_cache_only=true or benchmark_only=true"
             exit 1
+          fi
+
+          if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == none ]]; then
+            CANDIDATE_PURPOSE=release
           fi
 
           {
@@ -310,6 +452,7 @@ jobs:
             echo "should_package_archives=$SHOULD_PACKAGE_ARCHIVES"
             echo "candidate_source_sha=$CANDIDATE_SOURCE_SHA"
             echo "build_mode=$BUILD_MODE"
+            echo "candidate_purpose=$CANDIDATE_PURPOSE"
             echo "runner_profile=$RUNNER_PROFILE"
             echo "cli_aot_primary_runner=$CLI_AOT_PRIMARY_RUNNER"
             echo "cli_aot_standard_runner=$CLI_AOT_STANDARD_RUNNER"
@@ -326,6 +469,7 @@ jobs:
             echo "| Ref | $REF |"
             echo "| Version | $VERSION |"
             echo "| Build mode | $BUILD_MODE |"
+            echo "| Candidate purpose | $CANDIDATE_PURPOSE |"
             echo "| Runner profile | $RUNNER_PROFILE |"
             echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
             echo "| Package archives | $SHOULD_PACKAGE_ARCHIVES |"
@@ -626,7 +770,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: cargo-bloat
 
@@ -1406,6 +1550,7 @@ jobs:
           SOURCE_COMMIT: ${{ needs.setup.outputs.candidate_source_sha }}
           POLICY_REVISION: ${{ github.workflow_sha }}
           VERSION: ${{ needs.setup.outputs.version }}
+          CANDIDATE_PURPOSE: ${{ needs.setup.outputs.candidate_purpose }}
         run: |
           set -euo pipefail
           downloads="$RUNNER_TEMP/candidate-artifacts"
@@ -1440,9 +1585,14 @@ jobs:
             --artifacts-dir "$archives" \
             --tag "v$VERSION" \
             --output "$release_files/release-assets.json"
-          "$tools/harn" run scripts/render_release_notes.harn -- \
-            --version "$VERSION" \
-            --output "$release_files/release-notes.md"
+          if [[ "$CANDIDATE_PURPOSE" == source ]]; then
+            printf 'Unreleased source candidate %s at %s.\n' "$VERSION" "$SOURCE_COMMIT" \
+              > "$release_files/release-notes.md"
+          else
+            "$tools/harn" run scripts/render_release_notes.harn -- \
+              --version "$VERSION" \
+              --output "$release_files/release-notes.md"
+          fi
 
           scripts/assemble_candidate_manifest.sh \
             --output "$manifest_dir/candidate-manifest.json" \
@@ -1608,6 +1758,37 @@ jobs:
     uses: ./.github/workflows/release-smoke.yml
     with:
       candidate-commit: ${{ needs.setup.outputs.candidate_source_sha }}
+
+  # One check for the whole candidate, so the merge queue can require it: a
+  # release waits in the queue until its candidate is built and checked, and
+  # every other group passes as soon as setup finds nothing to build.
+  candidate-verdict:
+    name: Release candidate verdict
+    needs: [setup, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every candidate job to pass
+        env:
+          SETUP_RESULT: ${{ needs.setup.result }}
+          BUILD_MODE: ${{ needs.setup.outputs.build_mode }}
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          set -euo pipefail
+          if [[ "$SETUP_RESULT" != success ]]; then
+            echo "::error::Resolve release context finished $SETUP_RESULT; no candidate verdict is possible."
+            exit 1
+          fi
+          if [[ "$BUILD_MODE" != candidate ]]; then
+            echo "This run builds no candidate (build mode ${BUILD_MODE:-unset})."
+            exit 0
+          fi
+          if ! jq -e 'length == 6 and all(. == "success")' <<<"$RESULTS" >/dev/null; then
+            echo "::error::A candidate job did not succeed: $RESULTS"
+            exit 1
+          fi
+          echo "Every candidate job succeeded."
 
   cache_budget:
     name: Report cache budget

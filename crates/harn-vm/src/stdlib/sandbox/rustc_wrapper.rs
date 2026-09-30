@@ -96,6 +96,16 @@ impl RustcWrapperDecision {
     pub fn disables(&self) -> bool {
         self.disposition != RustcWrapperDisposition::Kept
     }
+
+    /// Whether the decision took away a wrapper the caller configured. Only
+    /// that is worth a warning; with no wrapper configured, switching the
+    /// settings off changes nothing.
+    pub fn drops_configured_wrapper(&self) -> bool {
+        matches!(
+            self.disposition,
+            RustcWrapperDisposition::Disabled | RustcWrapperDisposition::Unmeasured
+        )
+    }
 }
 
 type DecisionKey = (String, String, Vec<(String, String)>);
@@ -193,8 +203,12 @@ fn record(decision: &RustcWrapperDecision) {
         }
         RustcWrapperDisposition::NotConfigured => "no Cargo rustc wrapper applies",
     };
-    if decision.disables() {
+    // stderr shows info by default, and scripts assert on exact stderr, so the
+    // ordinary no-wrapper case stays at debug.
+    if decision.drops_configured_wrapper() {
         crate::events::log_warn_meta("process_sandbox_rustc_wrapper", message, metadata);
+    } else if decision.disposition == RustcWrapperDisposition::NotConfigured {
+        crate::events::log_debug_meta("process_sandbox_rustc_wrapper", message, metadata);
     } else {
         crate::events::log_info_meta("process_sandbox_rustc_wrapper", message, metadata);
     }
@@ -325,26 +339,33 @@ fn measure(
         .iter()
         .map(|key| (key.to_string(), String::new()))
         .collect();
-    match build(scratch.path(), cwd, blanked, None) {
-        Ok(without) if without.success => decision(
-            RustcWrapperDisposition::Disabled,
-            wrapper.or_else(|| with_wrapper.failed_wrapper.clone()),
-            format!(
-                "the wrapper cannot run under this profile: {}",
-                with_wrapper.error_line
-            ),
-            cwd,
+    // Why the wrapper-free build failed is the only evidence that separates a
+    // broken toolchain from a broken wrapper, so the reason carries it.
+    let without_error = match build(scratch.path(), cwd, blanked, None) {
+        Ok(without) if without.success => {
+            return decision(
+                RustcWrapperDisposition::Disabled,
+                wrapper.or_else(|| with_wrapper.failed_wrapper.clone()),
+                format!(
+                    "the wrapper cannot run under this profile: {}",
+                    with_wrapper.error_line
+                ),
+                cwd,
+            )
+        }
+        Ok(without) => without.error_line,
+        Err(reason) => reason,
+    };
+    decision(
+        RustcWrapperDisposition::Unmeasured,
+        wrapper.or(with_wrapper.failed_wrapper),
+        format!(
+            "the probe crate failed to build with and without the wrapper: with it: {}; \
+             without it: {without_error}",
+            with_wrapper.error_line
         ),
-        _ => decision(
-            RustcWrapperDisposition::Unmeasured,
-            wrapper.or(with_wrapper.failed_wrapper),
-            format!(
-                "the probe crate failed to build with and without the wrapper: {}",
-                with_wrapper.error_line
-            ),
-            cwd,
-        ),
-    }
+        cwd,
+    )
 }
 
 /// The probe crate's directory, removed on every return path.
@@ -447,7 +468,12 @@ impl KnownWrapper {
         let Some((program, args)) = self.prepare.split_first() else {
             return;
         };
-        let _ = std::process::Command::new(program)
+        // A compiler-cache server outlives the call that starts it, so it must
+        // not start with more of the engine environment than a build child gets.
+        let Ok(mut command) = crate::process_sandbox::session_std_command(program) else {
+            return;
+        };
+        let _ = command
             .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -488,9 +514,13 @@ fn build(
 ) -> Result<BuildOutcome, String> {
     let manifest = scratch.join("Cargo.toml");
     let target = scratch.join("target");
+    // Every reader below parses Cargo's plain words (`error`, `Running \``), so
+    // a caller's `CARGO_TERM_COLOR=always` must not reach the probe's output.
     let args = vec![
         "build".to_string(),
         "-v".to_string(),
+        "--color".to_string(),
+        "never".to_string(),
         "--offline".to_string(),
         "--manifest-path".to_string(),
         manifest.display().to_string(),

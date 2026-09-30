@@ -24,6 +24,9 @@ use serde::Serialize;
 
 use crate::orchestration::{CapabilityPolicy, UnixSocketEnforcement};
 
+use crate::stdlib::sandbox::enforcement::{
+    active_enforcement, BackendEnforcement, ConfinementDimension, Enforcement,
+};
 use crate::stdlib::sandbox::unix_socket_enforcement;
 
 /// One behavior every backend must render.
@@ -44,6 +47,16 @@ pub enum ConformanceCase {
     /// A file another process left in the host's shared temp directory is not
     /// readable. Build tools need a temp dir, not everyone else's.
     SiblingTempReadRefused,
+    /// A file on the credential denylist is not readable, although it sits
+    /// under the workspace root, which is otherwise readable. The denylist is
+    /// the one subtractive term, so this is the case that measures it.
+    DeniedCredentialReadRefused,
+    /// A policy below the `network` ceiling cannot connect to a TCP listener
+    /// on loopback.
+    NetworkConnectRefused,
+    /// The same connection lands at the `network` ceiling. The liveness leg
+    /// for the refusal: a probe that could never connect would pass it.
+    NetworkConnectAdmitted,
     /// An atomic write into the workspace through the platform's replacement
     /// API lands. On macOS Foundation stages it outside the workspace, in a
     /// directory it takes from the OS rather than `TMPDIR`; SwiftPM writes its
@@ -82,6 +95,32 @@ pub enum ConformanceCase {
     /// helper started inside the sandbox would keep the sandbox for its whole
     /// life and serve later builds with it.
     RustcWrapperThatDaemonizesIsSwitchedOff,
+    /// Under a read-only role (tools that run commands and edit nothing) with
+    /// no child write grant, a write inside the workspace is refused. The
+    /// control for the grant cases below: without it they would pass on a
+    /// backend that let every child write its workspace regardless.
+    ReadOnlyRoleWorkspaceWriteRefused,
+    /// The same role with no child write grant: a read under a root it was
+    /// granted read-only lands. Withholding writes must not withhold the
+    /// declared read roots with them.
+    ReadOnlyRoleReadOnlyRootReadAdmitted,
+    /// The same role with `allow_child_workspace_write`: a write inside the
+    /// workspace lands.
+    ChildWriteGrantWorkspaceWriteAdmitted,
+    /// The same role with the grant: a write to the child's own `TMPDIR`
+    /// lands, so a build or test runner has a temp dir.
+    ChildWriteGrantTempWriteAdmitted,
+    /// The same role with the grant: a write under a read-only root is still
+    /// refused. The grant widens the writable roots, never the read-only ones.
+    ChildWriteGrantReadOnlyRootWriteRefused,
+    /// The same role with the grant: a write outside every writable root is
+    /// still refused. The grant changes which roots are writable, never their
+    /// boundary.
+    ChildWriteGrantOutsideWriteRefused,
+    /// The same role with the grant: a read under a read-only root lands. The
+    /// liveness leg for the refusal above, which a backend that withheld the
+    /// read-only root entirely would also pass.
+    ChildWriteGrantReadOnlyRootReadAdmitted,
 }
 
 impl ConformanceCase {
@@ -92,6 +131,9 @@ impl ConformanceCase {
         Self::OutsideReadRefused,
         Self::SessionTempWriteAdmitted,
         Self::SiblingTempReadRefused,
+        Self::DeniedCredentialReadRefused,
+        Self::NetworkConnectRefused,
+        Self::NetworkConnectAdmitted,
         Self::AtomicReplaceAdmitted,
         Self::GuardianOutsideWriteRefused,
         Self::UndeclaredEnvironmentNameWithheld,
@@ -102,6 +144,13 @@ impl ConformanceCase {
         Self::RustcWrapperThatRunsIsKept,
         Self::RustcWrapperThatCannotRunIsSwitchedOff,
         Self::RustcWrapperThatDaemonizesIsSwitchedOff,
+        Self::ReadOnlyRoleWorkspaceWriteRefused,
+        Self::ReadOnlyRoleReadOnlyRootReadAdmitted,
+        Self::ChildWriteGrantWorkspaceWriteAdmitted,
+        Self::ChildWriteGrantTempWriteAdmitted,
+        Self::ChildWriteGrantReadOnlyRootWriteRefused,
+        Self::ChildWriteGrantOutsideWriteRefused,
+        Self::ChildWriteGrantReadOnlyRootReadAdmitted,
     ];
 
     pub fn id(self) -> &'static str {
@@ -111,6 +160,9 @@ impl ConformanceCase {
             Self::OutsideReadRefused => "fs.outside_read_refused",
             Self::SessionTempWriteAdmitted => "fs.session_temp_write_admitted",
             Self::SiblingTempReadRefused => "fs.sibling_temp_read_refused",
+            Self::DeniedCredentialReadRefused => "fs.denied_credential_read_refused",
+            Self::NetworkConnectRefused => "net.connect_refused_below_network",
+            Self::NetworkConnectAdmitted => "net.connect_admitted_at_network",
             Self::AtomicReplaceAdmitted => "fs.atomic_replace_admitted",
             Self::GuardianOutsideWriteRefused => "guardian.outside_write_refused",
             Self::UndeclaredEnvironmentNameWithheld => "env.undeclared_name_withheld",
@@ -127,6 +179,21 @@ impl ConformanceCase {
             Self::RustcWrapperThatDaemonizesIsSwitchedOff => {
                 "rustc_wrapper.daemonizing_is_switched_off"
             }
+            Self::ReadOnlyRoleWorkspaceWriteRefused => "read_only_role.workspace_write_refused",
+            Self::ReadOnlyRoleReadOnlyRootReadAdmitted => {
+                "read_only_role.read_only_root_read_admitted"
+            }
+            Self::ChildWriteGrantWorkspaceWriteAdmitted => {
+                "child_write_grant.workspace_write_admitted"
+            }
+            Self::ChildWriteGrantTempWriteAdmitted => "child_write_grant.temp_write_admitted",
+            Self::ChildWriteGrantReadOnlyRootWriteRefused => {
+                "child_write_grant.read_only_root_write_refused"
+            }
+            Self::ChildWriteGrantOutsideWriteRefused => "child_write_grant.outside_write_refused",
+            Self::ChildWriteGrantReadOnlyRootReadAdmitted => {
+                "child_write_grant.read_only_root_read_admitted"
+            }
         }
     }
 
@@ -140,15 +207,37 @@ impl ConformanceCase {
         }
     }
 
-    /// Whether the case measures a kernel boundary. A case that does can go
-    /// unmeasured on a host without the mechanism; one that does not (the
-    /// child's environment is built in user space) is measured everywhere.
+    /// Whether the case measures the filesystem boundary. A case that does
+    /// can go unmeasured on a host without the mechanism; one that does not
+    /// (the child's environment is built in user space, and the network is
+    /// held by a filter that does not depend on the filesystem mechanism) is
+    /// measured everywhere.
     pub fn needs_filesystem_enforcement(self) -> bool {
         !matches!(
             self,
             Self::UndeclaredEnvironmentNameWithheld
                 | Self::GuardianUndeclaredEnvironmentNameWithheld
+                | Self::NetworkConnectRefused
+                | Self::NetworkConnectAdmitted
         )
+    }
+
+    /// The enforcement-table dimension this case measures, if any. Admission
+    /// cases measure liveness, not a dimension.
+    pub fn dimension(self) -> Option<ConfinementDimension> {
+        match self {
+            Self::OutsideWriteRefused
+            | Self::GuardianOutsideWriteRefused
+            | Self::ReadOnlyRoleWorkspaceWriteRefused
+            | Self::ChildWriteGrantReadOnlyRootWriteRefused
+            | Self::ChildWriteGrantOutsideWriteRefused => Some(ConfinementDimension::Writes),
+            Self::OutsideReadRefused | Self::SiblingTempReadRefused => {
+                Some(ConfinementDimension::Reads)
+            }
+            Self::DeniedCredentialReadRefused => Some(ConfinementDimension::CredentialReads),
+            Self::NetworkConnectRefused => Some(ConfinementDimension::Network),
+            _ => None,
+        }
     }
 
     /// What the caller must observe, given the policy the case runs under.
@@ -157,6 +246,30 @@ impl ConformanceCase {
     /// that reports a grant it does not render fails here rather than in a
     /// build tool's permission error.
     pub fn expectation(self, policy: &CapabilityPolicy) -> Expectation {
+        self.expectation_for(policy, active_enforcement())
+    }
+
+    /// The expectation against a given enforcement row. A dimension the row
+    /// declares not enforced must be observed escaping, so the row cannot
+    /// claim less than the backend does either.
+    pub fn expectation_for(
+        self,
+        policy: &CapabilityPolicy,
+        row: Option<&BackendEnforcement>,
+    ) -> Expectation {
+        let declared_not_enforced = self
+            .dimension()
+            .zip(row)
+            .is_some_and(|(dimension, row)| row.cell(dimension) == Enforcement::NotEnforced);
+        match self.contract_expectation(policy) {
+            Expectation::Observe(Observation::Refused) if declared_not_enforced => {
+                Expectation::DeclaredNotEnforced
+            }
+            expectation => expectation,
+        }
+    }
+
+    fn contract_expectation(self, policy: &CapabilityPolicy) -> Expectation {
         if self.route() == SpawnRoute::Guardian && !cfg!(unix) {
             return Expectation::NotApplicable(
                 "no process-owner guardian on this platform: a process tree is contained \
@@ -185,17 +298,27 @@ impl ConformanceCase {
             Self::WorkspaceWriteAdmitted
             | Self::SessionTempWriteAdmitted
             | Self::AtomicReplaceAdmitted
+            | Self::NetworkConnectAdmitted
             | Self::RustcWrapperThatRunsIsKept
             | Self::RustcWrapperThatCannotRunIsSwitchedOff
-            | Self::RustcWrapperThatDaemonizesIsSwitchedOff => {
+            | Self::RustcWrapperThatDaemonizesIsSwitchedOff
+            | Self::ChildWriteGrantWorkspaceWriteAdmitted
+            | Self::ChildWriteGrantTempWriteAdmitted
+            | Self::ReadOnlyRoleReadOnlyRootReadAdmitted
+            | Self::ChildWriteGrantReadOnlyRootReadAdmitted => {
                 Expectation::Observe(Observation::Admitted)
             }
             Self::OutsideWriteRefused
             | Self::OutsideReadRefused
             | Self::SiblingTempReadRefused
+            | Self::DeniedCredentialReadRefused
+            | Self::NetworkConnectRefused
             | Self::GuardianOutsideWriteRefused
             | Self::UndeclaredEnvironmentNameWithheld
-            | Self::GuardianUndeclaredEnvironmentNameWithheld => {
+            | Self::GuardianUndeclaredEnvironmentNameWithheld
+            | Self::ReadOnlyRoleWorkspaceWriteRefused
+            | Self::ChildWriteGrantReadOnlyRootWriteRefused
+            | Self::ChildWriteGrantOutsideWriteRefused => {
                 Expectation::Observe(Observation::Refused)
             }
             Self::UnixSocketBindUnderRoot | Self::UnixSocketBindUnderRootWithNetwork => {
@@ -250,6 +373,9 @@ pub enum Observation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Expectation {
     Observe(Observation),
+    /// The enforcement table declares the case's dimension not enforced on
+    /// this backend, so the operation must be observed taking effect.
+    DeclaredNotEnforced,
     /// The case does not exist on this platform, and the reason says why.
     NotApplicable(&'static str),
 }
@@ -272,6 +398,11 @@ pub enum Verdict {
     /// prove the detector is not stuck. Not a pass.
     NotMeasured {
         reason: String,
+    },
+    /// The enforcement table declares this dimension not enforced, and the
+    /// escape was observed. Not a pass: the receipt names the gap.
+    NotEnforced {
+        target: String,
     },
     NotApplicable {
         reason: String,
@@ -320,6 +451,20 @@ pub fn judge(
             return Verdict::NotApplicable {
                 reason: reason.to_string(),
             }
+        }
+        Expectation::DeclaredNotEnforced => {
+            return match observed {
+                Observation::Admitted => Verdict::NotEnforced {
+                    target: target.to_string(),
+                },
+                Observation::Refused | Observation::SpawnRefused => Verdict::Contradiction {
+                    target: target.to_string(),
+                    reason: format!(
+                        "the enforcement table declares {case:?} not enforced, yet the operation \
+                         was {observed:?}; the table claims less than the backend does"
+                    ),
+                },
+            };
         }
         Expectation::Observe(expected) => expected,
     };
@@ -439,6 +584,60 @@ mod tests {
             "UNDECLARED_PROBE",
         );
         assert!(matches!(verdict, Verdict::Escaped { .. }), "{verdict:?}");
+    }
+
+    /// A row that says a dimension is not enforced turns the refusal case
+    /// into one that must observe the escape, and an observed refusal then
+    /// contradicts the row in the other direction.
+    #[test]
+    fn a_dimension_declared_not_enforced_must_be_observed_escaping() {
+        use crate::stdlib::sandbox::enforcement::TABLE;
+        let row = TABLE[0];
+        let policy = CapabilityPolicy::default();
+        assert_eq!(
+            row.cell(ConfinementDimension::Writes),
+            Enforcement::Enforced,
+            "precondition: the first row enforces writes"
+        );
+        assert_eq!(
+            ConformanceCase::OutsideWriteRefused.expectation_for(&policy, Some(&row)),
+            REFUSE
+        );
+
+        let declared = ConformanceCase::OutsideReadRefused
+            .expectation_for(&policy, Some(&not_enforcing(ConfinementDimension::Reads)));
+        assert_eq!(declared, Expectation::DeclaredNotEnforced);
+        let escaped = judge(
+            ConformanceCase::OutsideReadRefused,
+            declared,
+            true,
+            Observation::Admitted,
+            "/outside/secret",
+        );
+        assert!(
+            matches!(escaped, Verdict::NotEnforced { .. }),
+            "{escaped:?}"
+        );
+        assert!(!escaped.is_failure());
+        let refused = judge(
+            ConformanceCase::OutsideReadRefused,
+            declared,
+            true,
+            Observation::Refused,
+            "/outside/secret",
+        );
+        assert!(
+            matches!(refused, Verdict::Contradiction { .. }),
+            "{refused:?}"
+        );
+    }
+
+    fn not_enforcing(dimension: ConfinementDimension) -> BackendEnforcement {
+        BackendEnforcement::with_cell(
+            crate::stdlib::sandbox::enforcement::TABLE[0],
+            dimension,
+            Enforcement::NotEnforced,
+        )
     }
 
     #[test]

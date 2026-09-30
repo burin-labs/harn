@@ -563,12 +563,61 @@ public struct HarnExternalActionPolicyEvaluation: Codable, Sendable, Equatable {
     public let outcome: HarnExternalActionPolicyEvaluationOutcome
     public let reasonCode: String
     public let policyId: String?
+    public let review: HarnExternalActionDecisionReview?
 
     enum CodingKeys: String, CodingKey {
         case layer
         case outcome
         case reasonCode = "reason_code"
         case policyId = "policy_id"
+        case review
+    }
+}
+
+public struct HarnExternalActionReviewProbability: Codable, Sendable, Equatable {
+    public let label: String
+    public let probability: Double
+}
+
+public struct HarnExternalActionReviewAnswer: Codable, Sendable, Equatable {
+    public let questionId: String
+    public let kind: String
+    public let confidence: Double
+    public let confidenceKind: String
+    public let verdict: Bool?
+    public let probability: Double?
+    public let label: String?
+    public let score: Double?
+    public let probabilities: [HarnExternalActionReviewProbability]
+
+    enum CodingKeys: String, CodingKey {
+        case questionId = "question_id"
+        case kind
+        case confidence
+        case confidenceKind = "confidence_kind"
+        case verdict
+        case probability
+        case label
+        case score
+        case probabilities
+    }
+}
+
+public struct HarnExternalActionDecisionReview: Codable, Sendable, Equatable {
+    public let receipt: String
+    public let outcome: String
+    public let rule: String
+    public let applied: Bool
+    public let minimumConfidence: Double?
+    public let answers: [HarnExternalActionReviewAnswer]
+
+    enum CodingKeys: String, CodingKey {
+        case receipt
+        case outcome
+        case rule
+        case applied
+        case minimumConfidence = "minimum_confidence"
+        case answers
     }
 }
 
@@ -1656,6 +1705,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let contextOverflow = Self(rawValue: "context_overflow")
     public static let providerMisconfigured = Self(rawValue: "provider_misconfigured")
     public static let providerUnavailable = Self(rawValue: "provider_unavailable")
+    public static let providerBilling = Self(rawValue: "provider_billing")
     public static let rateLimited = Self(rawValue: "rate_limited")
     public static let timeout = Self(rawValue: "timeout")
     public static let resourceBusy = Self(rawValue: "resource_busy")
@@ -1671,6 +1721,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "context_overflow",
         "provider_misconfigured",
         "provider_unavailable",
+        "provider_billing",
         "rate_limited",
         "timeout",
         "resource_busy",
@@ -3702,6 +3753,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
     public var compactionPolicy: HarnACPValue
     public var recap: HarnACPValue
     public var sourceMeasurement: HarnACPValue
+    public var classification: HarnACPValue
     public var replayed: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -3724,6 +3776,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         case compactionPolicy
         case recap
         case sourceMeasurement
+        case classification
         case replayed
     }
 
@@ -3748,6 +3801,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         compactionPolicy = try values.decode(HarnACPValue.self, forKey: .compactionPolicy)
         recap = try values.decode(HarnACPValue.self, forKey: .recap)
         sourceMeasurement = try values.decode(HarnACPValue.self, forKey: .sourceMeasurement)
+        classification = try values.decode(HarnACPValue.self, forKey: .classification)
         replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
     }
 
@@ -3772,6 +3826,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         try values.encode(compactionPolicy, forKey: .compactionPolicy)
         try values.encode(recap, forKey: .recap)
         try values.encode(sourceMeasurement, forKey: .sourceMeasurement)
+        try values.encode(classification, forKey: .classification)
         try values.encodeIfPresent(replayed, forKey: .replayed)
     }
 }
@@ -4131,6 +4186,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"]?["harn"] != nil {
             if value["_meta"]?["harn"]?["archivedMessages"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is required") }
             if (value["_meta"]?["harn"]?["archivedMessages"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is below its minimum") }
+            if value["_meta"]?["harn"]?["classification"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.classification is required") }
             if value["_meta"]?["harn"]?["compactionPolicy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.compactionPolicy is required") }
             if value["_meta"]?["harn"]?["engineStrategy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.engineStrategy is required") }
             if value["_meta"]?["harn"]?["estimatedTokensAfter"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensAfter is required") }

@@ -320,6 +320,7 @@ impl BenchmarkStatistics {
 
 /// Deterministic reason benchmark samples could not be aggregated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BenchmarkStatisticsError {
     Empty,
     NonFinite { index: usize },

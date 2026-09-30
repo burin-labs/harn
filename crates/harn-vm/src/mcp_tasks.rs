@@ -95,6 +95,7 @@ impl Default for McpTaskPolicy {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum McpTaskAdmissionError {
     Capacity {
         limit: usize,

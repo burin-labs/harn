@@ -41,12 +41,15 @@
  */
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 import { deep_merge } from "std/collections"
+import { omit } from "std/json"
 
 /** The canonical decision record schema, one per reviewer verdict. */
 pub const APPROVAL_REVIEW_DECISION_SCHEMA = "harn.approval_review_decision.v1"
 
 /** The checkpoint name the reviewer's model call is recorded under. */
 pub const APPROVAL_REVIEW_CHECKPOINT = "agent.approval_review"
+
+const APPROVAL_REVIEW_MEMO_MAX_ENTRIES = 64
 
 /**
  * The verdict the reviewer model must return.
@@ -495,8 +498,49 @@ fn __approval_review_cost(checkpoint: any) {
  * @errors: []
  */
 pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> any {
+  // The closure is installed for one reviewer session. Keep only answered
+  // decisions, and only for an exact repeated refusal in the same session:
+  // sharing a verdict across different paths or authorization context would
+  // turn a speed optimization into a wider grant. Bound retained decisions so
+  // a noisy run cannot grow the closure indefinitely.
+  let answered = []
   return { request ->
-    approval_review_decide(
+    const session_id = trim(to_string(request?.session_id ?? ""))
+    // The policy's repeat counter changes on each identical action even when
+    // its rule, risk labels, and reviewer question do not. Keep every other
+    // decided field so a changed authority or target still misses.
+    const policy_decision = request?.policy_decision
+    const stable_request = if policy_decision?.context != nil {
+      request
+        + {
+          policy_decision: policy_decision
+            + {context: omit(policy_decision.context, ["repeat_count"])},
+        }
+    } else {
+      request
+    }
+    const fingerprint = if session_id != "" {
+      sha256(json_stringify(stable_request))
+    } else {
+      nil
+    }
+    if fingerprint != nil {
+      for entry in answered {
+        if entry.fingerprint == fingerprint {
+          // This refusal was answered earlier; no provider call or new spend
+          // happened. Keep the verdict, but do not bill its first call twice.
+          return entry.decision
+            + {
+              duration_ms: 0,
+              cost_usd: 0.0,
+              accounting_status: "reported",
+              unpriced_calls: 0,
+              memoized: true,
+            }
+        }
+      }
+    }
+    const decision = approval_review_decide(
       harness,
       policy,
       {
@@ -514,6 +558,12 @@ pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> an
         route: request?.route,
       },
     )
+    if fingerprint != nil
+      && (decision?.reviewer_answered ?? false)
+      && len(answered) < APPROVAL_REVIEW_MEMO_MAX_ENTRIES {
+      answered = answered + [{fingerprint: fingerprint, decision: decision}]
+    }
+    return decision
   }
 }
 
