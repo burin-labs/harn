@@ -506,12 +506,6 @@ mod tests {
     /// A line-range `sed` print is how agents page a file. A real agent session
     /// ran a compound read like the one below after a write, and it read as
     /// unknown, so a completion gate counted the look-around as verification.
-    ///
-    /// POSIX-only for the same gap as the compound case below: a Windows host
-    /// resolves the default shell to PowerShell, where the classifier reports
-    /// even a single quoted line-range print as unknown. Unknown keeps the call
-    /// out of the observation phase, so the gap costs batching, not safety.
-    #[cfg(unix)]
     #[test]
     fn a_line_addressed_sed_print_is_a_read() {
         for command in [

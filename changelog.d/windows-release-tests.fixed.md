@@ -1,4 +1,3 @@
-- The Windows workspace test suite passes again. A capability-root test now
-  embeds its Windows path as an escaped string literal, an approval test
-  expects the forward-slash path the workspace boundary reports, and the
-  line-range sed read case runs only on POSIX hosts.
+- Windows capability-root tests now embed paths as escaped string literals,
+  and approval tests expect the forward-slash paths reported by the workspace
+  boundary.
