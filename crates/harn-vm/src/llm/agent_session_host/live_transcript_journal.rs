@@ -56,6 +56,7 @@ pub(super) async fn initialize(
     system_prompt: Option<String>,
     execution_id: String,
     task_id: String,
+    ctx: &crate::vm::AsyncBuiltinCtx,
 ) -> Result<InitializedSession, VmError> {
     let has_live_session = crate::agent_sessions::exists(session_id);
     let run_id = options
@@ -113,9 +114,14 @@ pub(super) async fn initialize(
         // This is an ordinary returned error, so complete the terminal write
         // here. If that write also fails, preserve the claimed journal and
         // lease for an explicit cancellation/shutdown retry.
-        if flush_init_terminal(&session_id, "failed", "session_initialization_failed")
-            .await
-            .is_ok()
+        if flush_init_terminal(
+            &session_id,
+            "failed",
+            "session_initialization_failed",
+            Some(ctx),
+        )
+        .await
+        .is_ok()
         {
             rollback.disarm();
             if owns_session {
@@ -161,6 +167,7 @@ pub(super) async fn flush_init_terminal(
     session_id: &str,
     final_status: &str,
     stop_reason: &str,
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
 ) -> Result<(), VmError> {
     let terminal = crate::agent_events::AgentTerminalOutcome::new(
         crate::agent_events::classify_agent_terminal(final_status, stop_reason, false, None),
@@ -175,12 +182,22 @@ pub(super) async fn flush_init_terminal(
             "final_status": final_status,
             "stop_reason": stop_reason,
             "terminal": terminal,
+            "visible_reply": "",
             "provider_call_count": 0,
         })),
     );
-    crate::agent_sessions::append_terminal_event_once(session_id, event)
-        .map_err(VmError::Runtime)?;
+    let phase = append_terminal_phase(session_id, event)?;
     crate::agent_session_journal::flush(session_id).await?;
+    // Subscriber delivery can re-enter the VM. Keep its future off the
+    // initialization caller's stack.
+    Box::pin(crate::llm::agent_runtime::emit_agent_event_with_ctx(
+        ctx,
+        &crate::agent_events::AgentEvent::TurnPhaseChanged {
+            session_id: session_id.to_string(),
+            phase,
+        },
+    ))
+    .await;
     crate::agent_sessions::clear_journal(session_id);
     Ok(())
 }
@@ -199,13 +216,18 @@ pub(super) async fn flush_terminal(
     terminal_error: Option<&serde_json::Value>,
     terminal: &crate::agent_events::AgentTerminalOutcome,
     accounting: TerminalAccounting<'_>,
-) -> Result<(), VmError> {
+) -> Result<crate::agent_events::AgentTurnPhase, VmError> {
+    let visible_reply = crate::agent_sessions::transcript(session_id)
+        .as_ref()
+        .and_then(crate::llm::agent_result_projection::last_assistant_text)
+        .unwrap_or_default();
     let mut metadata = serde_json::json!({
         "final_status": final_status,
         "stop_reason": stop_reason,
         "terminal_class": terminal_class,
         "error": terminal_error,
         "terminal": terminal,
+        "visible_reply": visible_reply,
         "provider_call_count": accounting.provider_call_count,
     });
     if let Some(budget) = accounting.adaptive_budget {
@@ -218,10 +240,24 @@ pub(super) async fn flush_terminal(
         "Agent loop reached a terminal state",
         Some(metadata),
     );
-    crate::agent_sessions::append_terminal_event_once(session_id, event)
-        .map_err(VmError::Runtime)?;
+    let phase = append_terminal_phase(session_id, event)?;
     crate::agent_session_journal::flush(session_id).await?;
-    Ok(())
+    Ok(phase)
+}
+
+fn append_terminal_phase(
+    session_id: &str,
+    event: VmValue,
+) -> Result<crate::agent_events::AgentTurnPhase, VmError> {
+    let record = crate::agent_sessions::append_terminal_event_once(session_id, event)
+        .map_err(VmError::Runtime)?;
+    let record = crate::llm::helpers::vm_value_to_json(&record);
+    record
+        .get("metadata")
+        .and_then(crate::agent_events::AgentTurnPhase::from_terminal_record)
+        .ok_or_else(|| {
+            VmError::Runtime("agent terminal record lacks its typed reply or outcome".into())
+        })
 }
 
 /// Flush the live transcript journal at the common pre-provider boundary.

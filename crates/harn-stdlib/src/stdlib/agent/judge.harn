@@ -1381,6 +1381,12 @@ pub fn agent_evaluate_completion(
   iteration: int = 0,
   raw_text: string = "",
 ) -> CompletionDirective {
+  agent_emit_event(
+    harness.agent,
+    session.session_id,
+    "turn_phase_changed",
+    {phase: "verifying", candidate_reply: text},
+  )
   const payload = __judge_payload(
     harness.agent,
     session,

@@ -145,6 +145,12 @@
           "type": "object",
           "required": ["sessionId", "kind"],
           "additionalProperties": true,
+          "allOf": [
+            {
+              "if": { "properties": { "kind": { "const": "turn_phase_changed" } }, "required": ["kind"] },
+              "then": { "$ref": "#/$defs/AgentTurnPhase" }
+            }
+          ],
           "properties": {
             "sessionId": { "type": "string", "minLength": 1 },
             "kind": {
@@ -193,6 +199,7 @@
                 "tool_batch_disposition",
                 "tool_call_audit",
                 "tool_format_override",
+                "turn_phase_changed",
                 "typed_checkpoint"
               ]
             }
@@ -237,6 +244,38 @@
       "properties": {
         "terminal": { "$ref": "#/$defs/AgentTerminalOutcome" }
       }
+    },
+    "AgentTurnPhase": {
+      "type": "object",
+      "required": ["phase"],
+      "oneOf": [
+        {
+          "properties": {
+            "phase": { "const": "generating" },
+            "candidate_reply": false,
+            "reply": false,
+            "outcome": false
+          }
+        },
+        {
+          "required": ["candidate_reply"],
+          "properties": {
+            "phase": { "const": "verifying" },
+            "candidate_reply": { "type": "string" },
+            "reply": false,
+            "outcome": false
+          }
+        },
+        {
+          "required": ["reply", "outcome"],
+          "properties": {
+            "phase": { "const": "terminal" },
+            "reply": { "type": "string" },
+            "outcome": { "$ref": "#/$defs/AgentTerminalOutcome" },
+            "candidate_reply": false
+          }
+        }
+      ]
     },
     "AgentTerminalOutcome": {
       "type": "object",

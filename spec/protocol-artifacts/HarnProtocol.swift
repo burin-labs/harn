@@ -126,6 +126,7 @@ public enum HarnProtocolConstants {
         "tool_batch_disposition",
         "tool_call_audit",
         "tool_format_override",
+        "turn_phase_changed",
         "typed_checkpoint",
     ]
     public static let toolLifecycleExtensionFields: [String] = [

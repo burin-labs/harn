@@ -636,6 +636,36 @@
         "toolCallCount": 3,
         "toolCallIds": []
       }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "kind": "turn_phase_changed",
+        "phase": "generating",
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "candidate_reply": "candidate",
+        "kind": "turn_phase_changed",
+        "phase": "verifying",
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "kind": "turn_phase_changed",
+        "outcome": { "kind": "natural", "owner": "agent", "reason": "done" },
+        "phase": "terminal",
+        "reply": "final",
+        "sessionId": "session-1"
+      }
     }
   ],
   "matrix": {

@@ -161,11 +161,12 @@ impl AgentSessionInitRollback {
         self.armed = false;
     }
 
-    pub(super) async fn fail(&mut self) {
+    pub(super) async fn fail(&mut self, ctx: Option<&crate::vm::AsyncBuiltinCtx>) {
         if let Err(error) = super::live_transcript_journal::flush_init_terminal(
             &self.session_id,
             "failed",
             "session_initialization_failed",
+            ctx,
         )
         .await
         {
@@ -260,7 +261,7 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             crate::agent_events::classify_agent_terminal("cancelled", "cancelled", false, None),
             "cancelled",
         );
-        Box::pin(super::live_transcript_journal::flush_terminal(
+        let phase = Box::pin(super::live_transcript_journal::flush_terminal(
             session_id,
             "cancelled",
             "cancelled",
@@ -273,6 +274,12 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             },
         ))
         .await?;
+        crate::llm::emit_live_agent_event_sync(
+            &crate::agent_events::AgentEvent::TurnPhaseChanged {
+                session_id: session_id.to_string(),
+                phase,
+            },
+        );
     }
     let removed =
         super::AGENT_HOST_SESSIONS.with(|sessions| sessions.borrow_mut().remove(session_id));

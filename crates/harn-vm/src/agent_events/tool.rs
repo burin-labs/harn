@@ -2,6 +2,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::tool_annotations::SideEffectLevel;
 
+/// Reviewable summary of one path in the staged filesystem overlay.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedWriteSummary {
+    pub path: String,
+    pub kind: String,
+    pub byte_delta: i64,
+    pub snapshot_id: Option<String>,
+}
+
 /// Status of a tool call. Mirrors ACP's `toolCallStatus`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
