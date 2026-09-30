@@ -21,6 +21,7 @@ const SLICE_REF_PREFIX: &str = "refs/flow/slices";
 
 /// Errors produced by Flow VCS backends.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum VcsBackendError {
     /// Backend configuration or caller input is invalid.
     Invalid(String),

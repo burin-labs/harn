@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Anything that can go wrong loading, compiling, or running a rule.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RulesError {
     /// A rule file could not be read.
     #[error("read rule `{path}`: {source}")]

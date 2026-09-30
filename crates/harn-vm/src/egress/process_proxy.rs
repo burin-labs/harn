@@ -44,6 +44,7 @@ const MAX_ACTIVE_CONNECTIONS: usize = 128;
 /// Only `PermissionDenied` is classified. Every other bind failure keeps its
 /// unclassified shape so this variant cannot absorb an unrelated error.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProcessEgressProxyError {
     /// `HARN-CAP-202`: the host process may not open a loopback listener.
     HostLoopbackBindDenied {

@@ -82,6 +82,7 @@ impl SkillCorpus {
 
 /// Error returned when disk skill discovery finds malformed files.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SkillDiscoveryError {
     Io {
         path: PathBuf,

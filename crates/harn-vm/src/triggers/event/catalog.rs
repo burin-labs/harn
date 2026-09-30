@@ -113,6 +113,7 @@ pub trait ProviderSchema: Send + Sync {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProviderCatalogError {
     DuplicateProvider(String),
     UnknownProvider(String),

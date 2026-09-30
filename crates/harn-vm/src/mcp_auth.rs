@@ -210,6 +210,7 @@ pub struct McpOAuthDiscovery {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum McpOAuthDiscoveryError {
     InvalidResourceUrl(String),
     InvalidResourceMetadataUrl(String),

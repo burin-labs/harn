@@ -218,6 +218,7 @@ impl RequestBodyChannel {
 /// Errors surfaced on either the outer multipart channel or any inner
 /// per-field channel.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum StreamError {
     /// The multipart parser hit a wire-level error. Wraps the message
     /// reported by `multer`. Most commonly: malformed boundary,

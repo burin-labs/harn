@@ -383,6 +383,7 @@ pub struct SecretLeaseGrant {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum SecretError {
     NotFound {
         provider: String,
