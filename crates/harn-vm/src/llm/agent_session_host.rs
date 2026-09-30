@@ -75,6 +75,7 @@ use assistant_messages::durable_anthropic_blocks;
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
 mod message_history;
+pub(crate) use message_history::answer_unanswered_tool_calls;
 mod plan_document;
 mod run_identity;
 mod session_policies;

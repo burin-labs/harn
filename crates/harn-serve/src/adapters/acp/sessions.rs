@@ -5,7 +5,76 @@ use super::*;
 pub(super) struct ConcurrentSessionControl {
     pub(super) inject_state: harn_vm::bridge::HostBridgeInjectionState,
     pub(super) tool_call_cancellations: Arc<harn_vm::tool_call_cancellations::CancellationRegistry>,
+    /// Shared with the transport router, which records `session/set_budget`
+    /// re-arms here while a prompt may be running.
+    pub(super) llm_spend: Arc<std::sync::Mutex<SessionLlmSpend>>,
     prompt_active: Arc<AtomicBool>,
+}
+
+/// What one session's spend ceiling is measured against across its turns.
+///
+/// Each prompt installs a fresh cost scope, so without this every turn (and
+/// every resumed process) started at $0 and a session cap was really a
+/// per-prompt cap.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct SessionLlmSpend {
+    /// USD this session has spent. `None` until the first prompt in this
+    /// process reads the persisted total.
+    pub(super) spent_usd: Option<f64>,
+    /// Ceilings a `session/set_budget` re-armed. They outlive the turn they
+    /// arrived in.
+    pub(super) llm_cost_usd: Option<CeilingRearm>,
+    pub(super) llm_tokens: Option<CeilingRearm>,
+}
+
+/// What one `session/set_budget` field asks of its ceiling.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum CeilingRearm {
+    Clear,
+    Set(f64),
+}
+
+impl CeilingRearm {
+    fn cap(self) -> Option<f64> {
+        match self {
+            Self::Clear => None,
+            Self::Set(cap) => Some(cap),
+        }
+    }
+
+    fn token_cap(self) -> Option<u64> {
+        self.cap().map(|tokens| tokens.max(0.0) as u64)
+    }
+}
+
+impl SessionLlmSpend {
+    /// The budget a turn runs under: the session's configured spec with any
+    /// re-armed ceilings applied over it.
+    pub(super) fn turn_budget(&self, configured: Option<BudgetSpec>) -> BudgetSpec {
+        let mut budget = configured.unwrap_or_default();
+        if let Some(cost) = self.llm_cost_usd {
+            budget.llm_cost_usd = cost.cap();
+        }
+        if let Some(tokens) = self.llm_tokens {
+            budget.llm_tokens = tokens.token_cap();
+        }
+        budget
+    }
+}
+
+/// Writes the turn's cost-scope total back to the session when the turn's
+/// future is dropped, whether it finished, failed, or was cancelled. Declare it
+/// after the budget guard so it drops first, while the scope is still installed.
+pub(super) struct SessionSpendRecorder(pub(super) Arc<std::sync::Mutex<SessionLlmSpend>>);
+
+impl Drop for SessionSpendRecorder {
+    fn drop(&mut self) {
+        let spent = harn_vm::llm::peek_total_cost();
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .spent_usd = Some(spent);
+    }
 }
 
 impl ConcurrentSessionControl {
@@ -15,6 +84,7 @@ impl ConcurrentSessionControl {
             tool_call_cancellations: Arc::new(
                 harn_vm::tool_call_cancellations::CancellationRegistry::default(),
             ),
+            llm_spend: Arc::default(),
             prompt_active: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -66,6 +136,40 @@ impl ConcurrentSessionControls {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(session_id);
+    }
+
+    /// Apply a `session/set_budget` frame: re-arm the live ceiling for a
+    /// running turn, and record it on the named session so later turns keep
+    /// it instead of reverting to the configured ceiling.
+    pub(super) fn apply_budget_rearm(&self, msg: &serde_json::Value) -> bool {
+        let Some(rearm) = BudgetRearm::parse(msg) else {
+            return false;
+        };
+        rearm.apply_live();
+        let session_id = msg
+            .get("params")
+            .and_then(|params| params.get("sessionId"))
+            .and_then(serde_json::Value::as_str);
+        let control = session_id.and_then(|session_id| {
+            self.sessions
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(session_id)
+                .cloned()
+        });
+        if let Some(control) = control {
+            let mut spend = control
+                .llm_spend
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if rearm.llm_cost_usd.is_some() {
+                spend.llm_cost_usd = rearm.llm_cost_usd;
+            }
+            if rearm.llm_tokens.is_some() {
+                spend.llm_tokens = rearm.llm_tokens;
+            }
+        }
+        true
     }
 
     pub(super) fn inject_owner(
@@ -759,51 +863,55 @@ pub(super) fn preempt_session_interruption(
     }
 }
 
-/// Re-arm the live LLM `call_budget` ceilings on the engine thread out-of-band,
-/// so a prompt turn already in flight observes the new cap on its next LLM
-/// dispatch in a downstream host. Returns `true` when `msg` was a
-/// `session/set_budget` control frame (so the router drops it instead of
-/// queueing it behind the active turn).
+/// One `session/set_budget` control frame.
 ///
-/// This runs on the same router task / engine thread that drives the prompt
-/// turn. The cost/token ceilings are per-thread thread-locals
-/// (`harn_vm::set_llm_*_budget`), which is exactly why this reaches an in-flight
-/// turn: the blocked message loop would only process the frame after the turn
-/// unwinds. It mirrors how `session/cancel` preempts a running turn from the
-/// router.
+/// Shape: `params = { sessionId?, llm_cost_usd?: number|null, llm_tokens?:
+/// number|null }`. An absent or malformed field leaves that ceiling unchanged
+/// rather than guessing; an explicit `null` clears the cap; a finite number
+/// re-arms it.
 ///
-/// Shape: `params = { llm_cost_usd?: number|null, llm_tokens?: number|null }`.
-/// An absent field leaves that ceiling unchanged; an explicit `null` clears the
-/// cap; a number re-arms it. The control re-arms the live ceiling **in place**,
-/// preserving accumulated spend — it deliberately does not touch
-/// `session.budget` (the per-turn `@budget` source), which would reset
-/// accumulation at the next turn.
-pub(super) fn apply_session_budget_rearm(msg: &serde_json::Value) -> bool {
-    if msg.get("method").and_then(|value| value.as_str()) != Some("session/set_budget") {
-        return false;
-    }
-    let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
-    rearm_dimension(params.get("llm_cost_usd"), harn_vm::set_llm_cost_budget);
-    rearm_dimension(params.get("llm_tokens"), |cap| {
-        harn_vm::set_llm_token_budget(cap.map(|tokens| tokens.max(0.0) as u64));
-    });
-    true
+/// The router applies it out-of-band, on the same task / engine thread that
+/// drives the prompt turn, so a turn already in flight observes the new cap on
+/// its next LLM dispatch: the ceilings are per-thread thread-locals
+/// (`harn_vm::set_llm_*_budget`), and the blocked message loop would only
+/// process the frame after the turn unwinds. It mirrors how `session/cancel`
+/// preempts a running turn. The live re-arm preserves accumulated spend.
+struct BudgetRearm {
+    llm_cost_usd: Option<CeilingRearm>,
+    llm_tokens: Option<CeilingRearm>,
 }
 
-/// Re-arm one `session/set_budget` ceiling dimension. An absent field
-/// (`None`) or a malformed value leaves the live ceiling untouched rather than
-/// guessing; an explicit JSON `null` clears the cap (`set(None)`); a finite
-/// number re-arms it (`set(Some(cap))`). The `set` closure adapts the `f64`
-/// ceiling to the dimension's thread-local setter.
-fn rearm_dimension(value: Option<&serde_json::Value>, set: impl FnOnce(Option<f64>)) {
-    match value {
-        Some(serde_json::Value::Null) => set(None),
-        Some(serde_json::Value::Number(number)) => {
-            if let Some(cap) = number.as_f64().filter(|n| n.is_finite()) {
-                set(Some(cap));
-            }
+impl BudgetRearm {
+    fn parse(msg: &serde_json::Value) -> Option<Self> {
+        if msg.get("method").and_then(|value| value.as_str()) != Some("session/set_budget") {
+            return None;
         }
-        _ => {}
+        let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
+        Some(Self {
+            llm_cost_usd: rearm_dimension(params.get("llm_cost_usd")),
+            llm_tokens: rearm_dimension(params.get("llm_tokens")),
+        })
+    }
+
+    fn apply_live(&self) {
+        if let Some(cost) = self.llm_cost_usd {
+            harn_vm::set_llm_cost_budget(cost.cap());
+        }
+        if let Some(tokens) = self.llm_tokens {
+            harn_vm::set_llm_token_budget(tokens.token_cap());
+        }
+    }
+}
+
+/// `None` leaves the dimension untouched.
+fn rearm_dimension(value: Option<&serde_json::Value>) -> Option<CeilingRearm> {
+    match value {
+        Some(serde_json::Value::Null) => Some(CeilingRearm::Clear),
+        Some(serde_json::Value::Number(number)) => number
+            .as_f64()
+            .filter(|n| n.is_finite())
+            .map(CeilingRearm::Set),
+        _ => None,
     }
 }
 
@@ -830,6 +938,10 @@ pub(super) fn prepare_session_prompt(
 mod budget_rearm_tests {
     use super::*;
     use serde_json::json;
+
+    fn apply_session_budget_rearm(msg: &serde_json::Value) -> bool {
+        ConcurrentSessionControls::new(true, serde_json::Value::Null).apply_budget_rearm(msg)
+    }
 
     fn set_budget_frame(params: serde_json::Value) -> serde_json::Value {
         json!({ "jsonrpc": "2.0", "method": "session/set_budget", "params": params })

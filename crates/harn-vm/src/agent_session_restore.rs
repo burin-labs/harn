@@ -18,6 +18,7 @@
 use std::path::Path;
 
 use crate::agent_events::{AgentEvent, ToolCallStatus, ToolMutationStatus};
+use crate::agent_sessions::event_facts as facts;
 use crate::orchestration::AgentSessionReplayEvent;
 use crate::value::VmError;
 use harn_session_store::{ReadRange, SessionEventKind, SessionStore, StoreError, StoredEvent};
@@ -99,13 +100,20 @@ fn replay_event_from_stored(
     stored: &StoredEvent,
 ) -> Option<AgentSessionReplayEvent> {
     let transcript = stored.payload.get("transcript_event")?;
-    if transcript
-        .get("visibility")
-        .and_then(serde_json::Value::as_str)
-        == Some("internal")
+    // Internal visibility hides bookkeeping and prose the model wrote for
+    // itself. It does not hide tool rows: the journal writes every tool call
+    // and result as internal, because its text is not conversation, yet a
+    // client renders each as its own entry. Filtering them here restored a
+    // session with every tool call missing (harn#8920).
+    if matches!(stored.kind, SessionEventKind::Message)
+        && transcript
+            .get("visibility")
+            .and_then(serde_json::Value::as_str)
+            == Some("internal")
     {
         return None;
     }
+    let raw_message = stored.payload.get("raw_message");
     let role = transcript
         .get("role")
         .and_then(serde_json::Value::as_str)
@@ -132,35 +140,47 @@ fn replay_event_from_stored(
         (SessionEventKind::ToolCall, _) => AgentEvent::ToolCall {
             session_id: session_id.to_string(),
             tool_call_id: tool_call_id(stored, transcript)?,
-            tool_name: tool_name(transcript),
+            tool_name: tool_name(transcript, raw_message),
             kind: None,
             status: ToolCallStatus::Completed,
             raw_input: transcript
                 .get("input")
+                .or_else(|| transcript.pointer("/metadata/raw_input"))
                 .cloned()
                 .unwrap_or(serde_json::Value::Null),
             parsing: None,
             audit: None,
         },
-        (SessionEventKind::ToolResult, _) => AgentEvent::ToolCallUpdate {
-            session_id: session_id.to_string(),
-            tool_call_id: tool_call_id(stored, transcript)?,
-            tool_name: tool_name(transcript),
-            status: ToolCallStatus::Completed,
-            raw_output: Some(serde_json::Value::String(text.to_string())),
-            error: None,
-            duration_ms: None,
-            execution_duration_ms: None,
-            error_category: None,
-            mutation_status: ToolMutationStatus::Unknown,
-            changed_paths: None,
-            data: None,
-            executor: None,
-            parsing: None,
-            raw_input: None,
-            raw_input_partial: None,
-            audit: None,
-        },
+        (SessionEventKind::ToolResult, _) => {
+            let failed = facts::bool_at_any(&stored.payload, &facts::TOOL_IS_ERROR_ANY);
+            let data = stored
+                .payload
+                .pointer(facts::TOOL_RESULT_DATA)
+                .filter(|data| data.is_object());
+            AgentEvent::ToolCallUpdate {
+                session_id: session_id.to_string(),
+                tool_call_id: tool_call_id(stored, transcript)?,
+                tool_name: tool_name(transcript, raw_message),
+                status: if failed {
+                    ToolCallStatus::Failed
+                } else {
+                    ToolCallStatus::Completed
+                },
+                raw_output: Some(serde_json::Value::String(text.to_string())),
+                error: failed.then(|| text.to_string()),
+                duration_ms: None,
+                execution_duration_ms: None,
+                error_category: None,
+                mutation_status: mutation_status(data),
+                changed_paths: changed_paths(data),
+                data: data.cloned(),
+                executor: None,
+                parsing: None,
+                raw_input: None,
+                raw_input_partial: None,
+                audit: None,
+            }
+        }
         _ => return None,
     };
 
@@ -202,9 +222,10 @@ fn tool_call_id(stored: &StoredEvent, transcript: &serde_json::Value) -> Option<
 
 /// Read the tool name from the transcript event, then from its `metadata`,
 /// the same order the journal reads a tool call's identity when it writes the
-/// row. Tool lifecycle events carry the name only under `metadata`.
-fn tool_name(transcript: &serde_json::Value) -> String {
-    [Some(transcript), transcript.get("metadata")]
+/// row. Tool lifecycle events carry the name only under `metadata`; a tool
+/// result carries it only on the provider message stored beside it.
+fn tool_name(transcript: &serde_json::Value, raw_message: Option<&serde_json::Value>) -> String {
+    [Some(transcript), transcript.get("metadata"), raw_message]
         .into_iter()
         .flatten()
         .find_map(|value| {
@@ -216,6 +237,30 @@ fn tool_name(transcript: &serde_json::Value) -> String {
         })
         .unwrap_or("tool")
         .to_string()
+}
+
+/// The mutation outcome the producer declared, which the live path projects
+/// onto the same update. An undeclared or unrecognized value stays unknown.
+fn mutation_status(data: Option<&serde_json::Value>) -> ToolMutationStatus {
+    let declared = data
+        .and_then(|data| data.get("mutation_status"))
+        .and_then(serde_json::Value::as_str);
+    ToolMutationStatus::ALL
+        .into_iter()
+        .find(|status| Some(status.as_str()) == declared)
+        .unwrap_or(ToolMutationStatus::Unknown)
+}
+
+fn changed_paths(data: Option<&serde_json::Value>) -> Option<Vec<String>> {
+    let paths = data?.get("changed_paths")?.as_array()?;
+    Some(
+        paths
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|path| !path.trim().is_empty())
+            .map(str::to_string)
+            .collect(),
+    )
 }
 
 fn stored_kind_label(kind: &SessionEventKind) -> String {

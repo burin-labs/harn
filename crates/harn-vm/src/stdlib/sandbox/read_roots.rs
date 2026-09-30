@@ -176,3 +176,6 @@ pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<Pat
     roots.dedup();
     roots
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) mod path_grants;

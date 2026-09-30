@@ -114,13 +114,15 @@ pub(crate) struct SandboxArgs {
     pub environment_policy: Option<crate::commands::run::EnvironmentPolicyArg>,
     /// Grant one named credential to this session. Repeatable.
     ///
-    /// `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]`, where `SOURCE` is
-    /// `env:VAR_NAME` (a launcher variable, snapshotted at launch) or
-    /// `secret://ACCOUNT/KEY` (a secret-store pointer). The optional
-    /// `,expose=ENV_VAR` publishes the value as `ENV_VAR`. Without `,for=`,
-    /// that exposure is session-scoped (spawned commands and this run's own
-    /// model calls). With `,for=COMMAND`, only spawns whose executable
-    /// basename matches `COMMAND` see the variable. Any `--grant` selects the
+    /// `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND][,to=in_process]`, where
+    /// `SOURCE` is `env:VAR_NAME` (a launcher variable, snapshotted at
+    /// launch) or `secret://ACCOUNT/KEY` (a secret-store pointer). The
+    /// optional `,expose=ENV_VAR` publishes the value as `ENV_VAR`. Without
+    /// `,for=`, that exposure is session-scoped (spawned commands and this
+    /// run's own model calls). With `,for=COMMAND`, only spawns whose
+    /// executable basename matches `COMMAND` see the variable. With
+    /// `,to=in_process`, only this run's own model calls and `harness.env`
+    /// see it, and no spawned command does. Any `--grant` selects the
     /// `granted` policy unless the policy is explicit. Nothing else from the
     /// launcher environment crosses the boundary. For example:
     /// `--grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh`.

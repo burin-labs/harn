@@ -17,6 +17,11 @@ fn base_body() -> serde_json::Value {
 /// cases at the bottom of this file.
 const MODEL_WITH_NO_DECLARATION: &str = "m";
 
+fn training_refusal_for_route(provider: &str, model: &str, posture: DataPosture) -> Option<String> {
+    let plan = resolve(provider, model, DataControlDialect::OpenAiSse, posture);
+    training_refusal(provider, model, posture, &plan.receipt)
+}
+
 #[test]
 fn default_posture_leaves_the_request_byte_identical() {
     let mut body = base_body();
@@ -344,7 +349,7 @@ fn a_nested_control_replaces_a_non_object_on_its_path() {
 
 #[test]
 fn strict_posture_refuses_a_model_row_that_declares_training() {
-    let refusal = training_refusal(
+    let refusal = training_refusal_for_route(
         "meta",
         "muse-spark-1.3-contributor",
         DataPosture::StrictestAvailable,
@@ -362,12 +367,34 @@ fn strict_posture_refuses_a_model_row_that_declares_training() {
     );
 }
 
+#[test]
+fn strict_posture_credits_only_an_applied_training_control() {
+    let provider = "meta";
+    let model = "muse-spark-1.3-contributor";
+    let posture = DataPosture::StrictestAvailable;
+    let mut receipt = resolve(provider, model, DataControlDialect::OpenAiSse, posture).receipt;
+    assert!(training_refusal(provider, model, posture, &receipt).is_some());
+    let control = resolve(
+        "openrouter",
+        MODEL_WITH_NO_DECLARATION,
+        DataControlDialect::OpenAiSse,
+        posture,
+    )
+    .receipt
+    .applied
+    .into_iter()
+    .find(|control| control.effect == "training")
+    .expect("the source plan applies a training control");
+    receipt.applied.push(control);
+    assert_eq!(training_refusal(provider, model, posture, &receipt), None);
+}
+
 /// Negative control for the test above. Without this, a `training_refusal`
 /// that refused unconditionally would pass the positive case green.
 #[test]
 fn strict_posture_allows_the_standard_tier_of_the_same_provider() {
     assert_eq!(
-        training_refusal("meta", "muse-spark-1.3", DataPosture::StrictestAvailable),
+        training_refusal_for_route("meta", "muse-spark-1.3", DataPosture::StrictestAvailable),
         None,
         "the standard tier does not train and must still route"
     );
@@ -420,7 +447,7 @@ fn strict_posture_refuses_providers_already_classified_as_training() {
         ("cohere", "command-a-plus-05-2026"),
     ] {
         assert!(
-            training_refusal(provider, model, DataPosture::StrictestAvailable).is_some(),
+            training_refusal_for_route(provider, model, DataPosture::StrictestAvailable).is_some(),
             "{provider} is classified as training on API traffic and must be refused"
         );
     }
@@ -432,11 +459,11 @@ fn strict_posture_refuses_providers_already_classified_as_training() {
 #[test]
 fn the_default_posture_refuses_nothing() {
     assert_eq!(
-        training_refusal("meta", "muse-spark-1.3-contributor", DataPosture::Default),
+        training_refusal_for_route("meta", "muse-spark-1.3-contributor", DataPosture::Default),
         None,
     );
     assert_eq!(
-        training_refusal("deepseek", "deepseek-v4-pro", DataPosture::Default),
+        training_refusal_for_route("deepseek", "deepseek-v4-pro", DataPosture::Default),
         None,
     );
 }
@@ -447,7 +474,7 @@ fn the_default_posture_refuses_nothing() {
 #[test]
 fn an_unresearched_provider_is_not_refused() {
     assert_eq!(
-        training_refusal(
+        training_refusal_for_route(
             "nvidia",
             "some-unresearched-route",
             DataPosture::StrictestAvailable

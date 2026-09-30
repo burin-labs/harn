@@ -83,13 +83,20 @@ pub(crate) async fn cost_route_impl(
     };
 
     let mut child_vm = ctx.child_vm();
+    let boundary = config
+        .get("inference_boundary")
+        .map(crate::llm::api::inference_boundary::parse_vm_value)
+        .transpose()?;
     let mut stack = COST_ROUTE_STACK
         .try_with(|current| current.clone())
         .unwrap_or_default();
     stack.push(config);
-    let result = COST_ROUTE_STACK
-        .scope(stack, child_vm.call_closure_pub(&closure, &[]))
-        .await;
+    let call = COST_ROUTE_STACK.scope(stack, child_vm.call_closure_pub(&closure, &[]));
+    let result = if let Some(boundary) = boundary {
+        crate::orchestration::scope_inference_boundary(boundary, call).await
+    } else {
+        call.await
+    };
     ctx.forward_output(&child_vm.take_output());
     result
 }

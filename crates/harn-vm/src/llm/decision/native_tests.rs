@@ -135,7 +135,7 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
             );
             tape = recorded["response"].clone();
         }
-        let response = read_response(&request, &tape).unwrap();
+        let response = read_response(&request, &tape, None).unwrap();
         assert_eq!(
             response.input_tokens,
             Some(if recorded.is_some() { 356 } else { 100 })
@@ -156,7 +156,7 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
         let mut contradictory = tape.clone();
         contradictory["answers"]["action"]["choice"] = json!("write");
         contradictory["answers"]["action"]["probabilities"] = json!({"read": 0.9, "write": 0.1});
-        let contradiction = read_response(&request, &contradictory).unwrap();
+        let contradiction = read_response(&request, &contradictory, None).unwrap();
         let refusal = Answer::project(
             &questions.questions[1],
             &contradiction.answers["action"],
@@ -166,7 +166,7 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
         assert!(refusal.diagnostic.contains("contradicts"));
         tape["answers"].as_object_mut().unwrap().remove("risk");
         assert!(matches!(
-            read_response(&request, &tape),
+            read_response(&request, &tape, None),
             Err(DecisionTransportError::Refused {
                 reason: RefusalReason::SchemaInvalid,
                 ..

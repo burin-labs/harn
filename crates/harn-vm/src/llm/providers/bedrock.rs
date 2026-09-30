@@ -1351,6 +1351,7 @@ aws_secret_access_key = dev-secret
     fn base_request() -> LlmRequestPayload {
         LlmRequestPayload {
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "bedrock".to_string(),
             model: "anthropic.claude-3-5-sonnet-20240620-v1:0".to_string(),
             region: None,
@@ -1375,6 +1376,7 @@ aws_secret_access_key = dev-secret
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,

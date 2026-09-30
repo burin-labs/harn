@@ -8,7 +8,6 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use super::paths::normalize_for_policy;
 use super::{
@@ -47,7 +46,12 @@ pub(super) fn read_roots_for_workspaces(
     };
     for workspace in workspaces {
         for scope in ["--global", "--system"] {
-            let Ok(output) = Command::new(&git)
+            // The confined git reads its config under the session's child
+            // environment, so the roots are computed under the same one.
+            let Ok(mut command) = crate::process_sandbox::session_std_command(&git) else {
+                continue;
+            };
+            let Ok(output) = command
                 .arg("-C")
                 .arg(workspace)
                 .args([

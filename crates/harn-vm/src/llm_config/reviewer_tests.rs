@@ -8,6 +8,8 @@ fn complementary_reviewer_uses_different_family() {
             author_provider: None,
             intent: ComplementaryReviewerIntent::PlanReview,
             max_price_multiplier: Some(3.0),
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: None,
         },
         |_| true,
     );
@@ -28,6 +30,8 @@ fn complementary_reviewer_falls_back_deterministically_on_price_cap() {
             author_provider: Some("openai".to_string()),
             intent: ComplementaryReviewerIntent::Review,
             max_price_multiplier: Some(0.01),
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: None,
         },
         |_| true,
     );
@@ -84,6 +88,8 @@ fn complementary_reviewer_skips_unavailable_provider() {
             author_provider: Some("openai".to_string()),
             intent: ComplementaryReviewerIntent::Critique,
             max_price_multiplier: None,
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: None,
         },
         |provider| provider != "gemini",
     );
@@ -101,6 +107,8 @@ fn complementary_reviewer_skips_deprecated_model_on_available_provider() {
             author_provider: Some("openai".to_string()),
             intent: ComplementaryReviewerIntent::Critique,
             max_price_multiplier: Some(3.0),
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: None,
         },
         |_| true,
     );
@@ -124,6 +132,8 @@ fn complementary_reviewer_skips_bedrock_without_aws_configuration() {
         author_provider: Some("openai".to_string()),
         intent: ComplementaryReviewerIntent::Review,
         max_price_multiplier: None,
+        min_price_cap_per_mtok: None,
+        max_price_cap_per_mtok: None,
     };
 
     let selection = pick_complementary_reviewer(options.clone());
@@ -150,6 +160,8 @@ fn complementary_reviewer_reports_no_available_independent_route() {
             author_provider: Some("openai".to_string()),
             intent: ComplementaryReviewerIntent::Critique,
             max_price_multiplier: None,
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: None,
         },
         |_| false,
     );
@@ -158,5 +170,127 @@ fn complementary_reviewer_reports_no_available_independent_route() {
     assert_eq!(
         selection.fallback_code.as_deref(),
         Some(ReviewerFallbackCode::NoDiffFamilyAvailable.as_code())
+    );
+}
+
+#[test]
+fn luna_with_own_provider_gets_independent_reviewer_with_bounded_floor() {
+    let old_policy = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "gpt-6-luna".to_string(),
+            author_provider: Some("openai".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: Some(3.0),
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: None,
+        },
+        |provider| provider == "openai",
+    );
+    assert_eq!(
+        old_policy.fallback_code.as_deref(),
+        Some("no_diff_family_within_price")
+    );
+
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "gpt-6-luna".to_string(),
+            author_provider: Some("openai".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: Some(3.0),
+            min_price_cap_per_mtok: Some(6.0),
+            max_price_cap_per_mtok: Some(15.0),
+        },
+        |provider| provider == "openai",
+    );
+
+    assert!(!selection.fallback, "{selection:?}");
+    assert_ne!(selection.author.family, selection.reviewer.family);
+    assert_eq!(selection.reviewer.provider, "openai");
+    let cost = selection
+        .estimated_incremental_cost
+        .expect("priced reviewer");
+    assert!(cost.total_per_mtok <= 6.0, "{cost:?}");
+    assert!(cost.output_per_mtok <= 6.0, "{cost:?}");
+}
+
+#[test]
+fn opus_with_openai_key_keeps_reviewer_below_absolute_ceiling() {
+    let old_policy = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "claude-opus-5".to_string(),
+            author_provider: Some("anthropic".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: Some(3.0),
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: None,
+        },
+        |provider| provider == "anthropic" || provider == "openai",
+    );
+    assert!(
+        old_policy
+            .estimated_incremental_cost
+            .as_ref()
+            .expect("old route is priced")
+            .total_per_mtok
+            > 0.1,
+        "{old_policy:?}"
+    );
+
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "claude-opus-5".to_string(),
+            author_provider: Some("anthropic".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: Some(3.0),
+            min_price_cap_per_mtok: Some(6.0),
+            max_price_cap_per_mtok: Some(15.0),
+        },
+        |provider| provider == "anthropic" || provider == "openai",
+    );
+
+    assert!(!selection.fallback, "{selection:?}");
+    assert_ne!(selection.author.family, selection.reviewer.family);
+    let cost = selection
+        .estimated_incremental_cost
+        .expect("priced reviewer");
+    assert!(cost.total_per_mtok <= 15.0, "{cost:?}");
+    assert!(cost.output_per_mtok <= 15.0, "{cost:?}");
+
+    let too_low_ceiling = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "claude-opus-5".to_string(),
+            author_provider: Some("anthropic".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: Some(3.0),
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: Some(0.000_000_001),
+        },
+        |provider| provider == "anthropic" || provider == "openai",
+    );
+    assert!(too_low_ceiling.fallback, "{too_low_ceiling:?}");
+    assert_eq!(
+        too_low_ceiling.fallback_code.as_deref(),
+        Some("no_diff_family_within_price")
+    );
+}
+
+#[test]
+fn opus_without_other_provider_reports_unavailability() {
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "claude-opus-5".to_string(),
+            author_provider: Some("anthropic".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: Some(3.0),
+            min_price_cap_per_mtok: Some(6.0),
+            max_price_cap_per_mtok: Some(15.0),
+        },
+        |provider| provider == "anthropic",
+    );
+
+    assert!(selection.fallback, "{selection:?}");
+    assert_eq!(
+        selection.fallback_code.as_deref(),
+        Some("no_diff_family_available")
     );
 }

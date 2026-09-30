@@ -532,12 +532,28 @@ fn run(
     policy: VmValue,
     scripted: Vec<super::mock::MockOutcome>,
 ) -> (String, super::receipt::EvaluationReceipt, u32) {
-    let backend = Arc::new(MockDecisionBackend::scripted(scripted));
-    let _guard = super::install_backend(backend.clone());
     // The route the policies below name. A window of 4096 tokens is small
     // enough that the oversized-state test crosses it and large enough that
     // every other state here fits, so one route serves all of them.
-    let _route = super::install_route("mock", "fixture", contract(4096, None));
+    let (outcome, receipt, requests) =
+        run_on(contract(4096, None), state, questions, policy, scripted);
+    (outcome.kind.to_string(), receipt, requests)
+}
+
+fn run_on(
+    route: DecisionContract,
+    state: VmValue,
+    questions: VmValue,
+    policy: VmValue,
+    scripted: Vec<super::mock::MockOutcome>,
+) -> (
+    super::outcome::Outcome,
+    super::receipt::EvaluationReceipt,
+    u32,
+) {
+    let backend = Arc::new(MockDecisionBackend::scripted(scripted));
+    let _guard = super::install_backend(backend.clone());
+    let _route = super::install_route("mock", "fixture", route);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -570,7 +586,7 @@ fn run(
         result
     });
     let receipt = super::last_receipt().expect("every evaluation records a receipt");
-    (outcome.0.kind.to_string(), receipt, backend.request_count())
+    (outcome.0, receipt, backend.request_count())
 }
 
 #[test]
@@ -828,6 +844,70 @@ fn an_evaluation_cost_bound_over_the_limit_refuses_before_dispatch() {
     );
     assert_eq!(kind, "budget_cut");
     assert_eq!(requests, 0);
+}
+
+fn native_policy() -> VmValue {
+    VmValue::dict(vec![
+        ("backend", VmValue::String("native_decision".into())),
+        ("provider", VmValue::String("mock".into())),
+        ("model", VmValue::String("fixture".into())),
+        ("threshold", VmValue::Float(0.5)),
+        ("evaluation_cost_limit", VmValue::Float(0.01)),
+        ("run_cost_limit", VmValue::Float(0.5)),
+    ])
+}
+
+fn run_native() -> (VmValue, super::receipt::EvaluationReceipt, u32) {
+    let route = DecisionContract {
+        protocol: DecisionProtocol::OpenrouterDecisions,
+        structured_output_strategy: None,
+        output_price_per_mtok: Some(0.0),
+        ..contract(4096, None)
+    };
+    let (outcome, receipt, requests) = run_on(
+        route,
+        VmValue::dict(vec![("text", VmValue::String("short".into()))]),
+        questions_value(),
+        native_policy(),
+        vec![Ok(answering(0.95))],
+    );
+    (outcome.into_value(), receipt, requests)
+}
+
+fn field(value: &VmValue, key: &str) -> String {
+    value
+        .as_dict()
+        .and_then(|fields| fields.get(key))
+        .map(|value| value.display())
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_native_decision_after_an_unreserved_chat_call_reports_the_admission_refusal() {
+    use crate::llm::admission::{reserve, swap_scope, AdmissionScope};
+    let previous = swap_scope(AdmissionScope::default());
+    // Control: a fresh execution installs the policy's run ceiling and dispatches.
+    let (outcome, _, requests) = run_native();
+    assert_eq!(field(&outcome, "kind"), "answered");
+    assert_eq!(requests, 1);
+
+    // A chat call with no budget runs unreserved, so the policy's run ceiling
+    // can no longer be installed for this execution.
+    swap_scope(AdmissionScope::default());
+    let mut chat = crate::llm::api::options::base_opts("openai");
+    chat.model = "gpt-5.6-luna".into();
+    chat.provider_overrides = None;
+    chat.budget = None;
+    let request = crate::llm::api::LlmRequestPayload::from(&chat);
+    assert!(reserve(&chat, &request).unwrap().is_none());
+
+    let (outcome, receipt, requests) = run_native();
+    swap_scope(previous);
+    assert_eq!(requests, 0, "the refusal precedes transport");
+    assert_eq!(field(&outcome, "kind"), "unavailable");
+    // No provider was asked, so this is not a credential or entitlement denial.
+    assert_eq!(field(&outcome, "reason"), "admission_refused");
+    assert_eq!(receipt.admission_reason.as_deref(), Some("late_activation"));
 }
 
 #[test]

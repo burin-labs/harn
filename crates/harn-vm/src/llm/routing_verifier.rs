@@ -258,9 +258,16 @@ async fn run_test_command(
         );
     }
     use tokio::io::AsyncWriteExt;
-    use tokio::process::Command;
 
-    let mut cmd = Command::new(&command[0]);
+    let mut cmd = match crate::process_sandbox::session_tokio_command(&command[0]) {
+        Ok(cmd) => cmd,
+        Err(err) => {
+            return signal_for(
+                on_fail,
+                format!("test_run: session environment for {command:?}: {err}"),
+            );
+        }
+    };
     cmd.args(&command[1..]);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());

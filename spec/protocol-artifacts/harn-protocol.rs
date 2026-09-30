@@ -2364,6 +2364,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
 pub const AGENT_TERMINAL_CLASS_CONTEXT_OVERFLOW: &str = "context_overflow";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_MISCONFIGURED: &str = "provider_misconfigured";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_UNAVAILABLE: &str = "provider_unavailable";
+pub const AGENT_TERMINAL_CLASS_PROVIDER_BILLING: &str = "provider_billing";
 pub const AGENT_TERMINAL_CLASS_RATE_LIMITED: &str = "rate_limited";
 pub const AGENT_TERMINAL_CLASS_TIMEOUT: &str = "timeout";
 pub const AGENT_TERMINAL_CLASS_RESOURCE_BUSY: &str = "resource_busy";
@@ -2378,6 +2379,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "context_overflow",
     "provider_misconfigured",
     "provider_unavailable",
+    "provider_billing",
     "rate_limited",
     "timeout",
     "resource_busy",
@@ -2436,6 +2438,7 @@ pub enum HarnAgentTerminalClass {
     ContextOverflow,
     ProviderMisconfigured,
     ProviderUnavailable,
+    ProviderBilling,
     RateLimited,
     Timeout,
     ResourceBusy,
@@ -2455,6 +2458,7 @@ impl HarnAgentTerminalClass {
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
+        Self::ProviderBilling,
         Self::RateLimited,
         Self::Timeout,
         Self::ResourceBusy,
@@ -2471,6 +2475,7 @@ impl HarnAgentTerminalClass {
             Self::ContextOverflow => "context_overflow",
             Self::ProviderMisconfigured => "provider_misconfigured",
             Self::ProviderUnavailable => "provider_unavailable",
+            Self::ProviderBilling => "provider_billing",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
             Self::ResourceBusy => "resource_busy",
@@ -2489,6 +2494,7 @@ impl HarnAgentTerminalClass {
             "context_overflow" => Self::ContextOverflow,
             "provider_misconfigured" => Self::ProviderMisconfigured,
             "provider_unavailable" => Self::ProviderUnavailable,
+            "provider_billing" => Self::ProviderBilling,
             "rate_limited" => Self::RateLimited,
             "timeout" => Self::Timeout,
             "resource_busy" => Self::ResourceBusy,

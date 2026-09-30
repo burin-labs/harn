@@ -235,8 +235,8 @@ pub(super) fn screenshots_from_tool_result(result: &VmValue) -> Vec<VmValue> {
 ///     `{id, function: {name}}`.
 ///   - Gemini: `content` list of `{functionCall: {name, id?}}` (id optional).
 pub(super) struct AssistantToolUse {
-    id: String,
-    name: String,
+    pub(super) id: String,
+    pub(super) name: String,
 }
 
 /// Extract every provider-native tool-call block declared on an assistant

@@ -272,6 +272,27 @@ impl AcpServer {
             }
         }
 
+        // Settle the session's spend before the client reads the row for its
+        // header. A session recorded before its row carried the total gets it
+        // backfilled from its recorded calls, so every surface reads one
+        // number. A failed read leaves the prompt path to retry and fail closed.
+        if let Ok(spent) = self.session_llm_spend_usd(&session_id).await {
+            if spent > 0.0 {
+                if let Some(project_root) = self
+                    .sessions
+                    .get(&session_id)
+                    .map(|session| session.project_root.clone())
+                {
+                    let _ = harn_vm::agent_session_spend::record_session_llm_spend_usd(
+                        &project_root,
+                        &session_id,
+                        spent,
+                    )
+                    .await;
+                }
+            }
+        }
+
         let replay_sink = AcpAgentEventSink::for_replay(self.output.clone());
         for replay_event in &replay_events {
             replay_sink.handle_event(&replay_event.event);

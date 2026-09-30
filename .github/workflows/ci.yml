@@ -1279,19 +1279,29 @@ jobs:
         run: |
           set -euo pipefail
           receipt="$HARN_SANDBOX_ENFORCEMENT_RECEIPT"
-          if [[ ! -f "$receipt" ]] || [[ "$(wc -l < "$receipt")" -ne 1 ]]; then
-            echo "sandbox enforcement probe produced no single-line receipt" >&2
+          if [[ ! -f "$receipt" ]] || [[ "$(wc -l < "$receipt")" -lt 1 ]]; then
+            echo "sandbox enforcement probe produced no receipt" >&2
             exit 1
           fi
+          # Line one is the enforcement marker; every later line is one
+          # PATH-derived read-and-execute grant with its source entry.
           IFS= read -r marker < "$receipt"
           case "$marker" in
             harn.sandbox_enforcement*) ;;
             *) echo "sandbox enforcement probe produced an invalid receipt" >&2; exit 1 ;;
           esac
+          if ! awk 'NR > 1 && !/^harn\.sandbox_path_grant / { bad = 1 } END { exit bad }' "$receipt"; then
+            echo "sandbox enforcement receipt carries an unrecognized line" >&2
+            exit 1
+          fi
           {
             echo "### Process filesystem confinement"
             echo
             echo "\`$marker\`"
+            echo
+            tail -n +2 "$receipt" | while IFS= read -r grant; do
+              echo "- \`$grant\`"
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
   harn-audit:

@@ -44,9 +44,9 @@ promoted only from a run where they passed.
   paths through `std::path::Path` before sandbox-policy enforcement,
   so a script written on macOS with `/`-separated paths runs unchanged
   on Windows.
-- Windows-only path normalization quirks (UNC, extended-length, drive
-  letters) are absorbed by `crates/harn-vm/src/stdlib/sandbox/windows.rs`
-  before policy enforcement.
+- Windows has no process sandbox backend (removed in #8867), so no
+  Windows-specific sandbox file normalizes UNC, extended-length, or
+  drive-letter paths. Children on Windows run without OS confinement.
 
 ### Line endings
 

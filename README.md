@@ -10,8 +10,7 @@ same agent code with local or hosted models.
 Use Harn when your application needs an agent to take several steps: investigate
 a failed job, review a change, or play a game. For example,
 [20eq](https://github.com/burin-labs/20eq) is a 20 Questions game written in Harn,
-and [Burin](https://github.com/burin-labs/burin-code) uses Harn in its coding
-workbench.
+and [Burin Code](https://burincode.com) uses Harn in its coding workbench.
 
 > Harn is pre-1.0. The language, standard library, and CLI can change between
 > releases. See the [release notes](https://github.com/burin-labs/harn/releases)

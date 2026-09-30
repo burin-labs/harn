@@ -139,7 +139,10 @@ and `model`, and a floating-point `threshold`. Optional finite nonnegative
 them does not create budget authority: native calls require an existing
 conservative ledger ceiling and retain a finite per-call price bound. Install
 that authority before the first model call; earlier unreserved calls cannot be
-retroactively covered.
+retroactively covered. A native call refused this way returns `unavailable`
+with reason `admission_refused` before any request, and its receipt's
+`admission_reason` names the cause, such as `late_activation`.
+`authority_denied` is reserved for a provider or credential refusal.
 Checking validates this shape and the resolved `decision` operation. A route
 with a supported structured transport and text generation derives structured
 decision support at the catalog owner. An explicit unsupported schema override

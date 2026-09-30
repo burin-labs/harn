@@ -1,0 +1,84 @@
+// A host-owned local ceiling refuses hosted inference before provider dispatch.
+// The mock negative keeps fixture runs available without external transport.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { command_run } from "std/command"
+import { llm_text, with_llm_script } from "std/testing"
+import { resolve_harn_bin } from "../_common"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn hosted_probe(harness: Harness) {
+  const session = "inference-boundary-contract-" + harness.random.uuid_v7()
+  const options: AgentSpec = {
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    max_iterations: 1,
+    final_wrapup: false,
+    session_id: session,
+  }
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(harness, "Reply briefly.", nil, options) },
+  )
+  harness.stdio.println(json_stringify(captured.result))
+}
+
+pipeline default(harness: Harness) {
+  if harness.env.get("HARN_EXT_INFERENCE_CONTRACT_PROBE") != nil {
+    hosted_probe(harness)
+    return
+  }
+  const root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const binary = resolve_harn_bin(harness, root)
+  const script = path_join(root, "conformance/tests/mechanisms/inference_boundary.contract.harn")
+  for boundary in [
+    {
+      name: "local_only",
+      value: "{\"reach\":\"local_only\",\"allow_training_discounts\":false}",
+      rule: "inference_boundary.local_only",
+    },
+    {name: "malformed", value: "{", rule: "inference_boundary.host_boundary_malformed"},
+  ] {
+    const child = command_run(
+      harness.tools,
+      [binary, "run", script],
+      {
+        env: {
+          HARN_EXT_INFERENCE_CONTRACT_PROBE: "1",
+          HARN_INFERENCE_BOUNDARY_JSON: boundary.value,
+          OPENAI_API_KEY: "inference-contract-fixture-only",
+          HARN_LLM_CALLS_DISABLED: "0",
+          HARN_EGRESS_DEFAULT: "deny",
+        },
+        capture: {max_inline_bytes: 32768},
+      },
+    )
+    require child.success, child.stderr
+    const result = json_parse(child.stdout)
+    contract_effect(
+      harness.stdio,
+      boundary.name + "_refuses_before_provider_dispatch",
+      json_stringify(result).contains(boundary.rule) && result.provider_call_count == 0,
+    )
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("A fixture reply.")],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        model: "mock",
+        max_iterations: 1,
+        final_wrapup: false,
+      }
+      const result = agent_loop(harness, "Reply briefly.", nil, options)
+      contract_negative(
+        harness.stdio,
+        "mock_fixture_is_not_blocked",
+        json_stringify(result).contains("inference_boundary.") || result.provider_call_count != 1,
+      )
+    },
+  )
+}

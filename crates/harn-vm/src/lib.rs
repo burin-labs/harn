@@ -30,6 +30,7 @@ pub mod agent_events;
 mod agent_lifecycle_cleanup;
 pub(crate) mod agent_session_journal;
 pub mod agent_session_restore;
+pub mod agent_session_spend;
 #[cfg(test)]
 mod agent_session_terminal_evidence_tests;
 pub mod agent_sessions;
@@ -340,10 +341,11 @@ pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
 pub use llm::trigger_predicate::TriggerPredicateBudget;
 pub use llm::{
-    current_agent_session_id, install_llm_cost_budget, install_llm_token_budget,
-    peek_llm_cost_budget, peek_llm_token_budget, register_session_end_hook, set_llm_cost_budget,
-    set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard, MachineSpendPolicy,
-    MachineSpendQuota, MachineSpendReceipt, SessionEndHookRegistration,
+    current_agent_session_id, install_llm_cost_budget, install_llm_cost_budget_seeded,
+    install_llm_token_budget, peek_llm_cost_budget, peek_llm_token_budget,
+    register_session_end_hook, set_llm_cost_budget, set_llm_token_budget, LlmBudgetGuard,
+    LlmTokenBudgetGuard, MachineSpendPolicy, MachineSpendQuota, MachineSpendReceipt,
+    SessionEndHookRegistration,
 };
 pub use mcp::{connect_mcp_server_from_json, connect_mcp_server_from_spec, register_mcp_builtins};
 pub use mcp_allowlist::{

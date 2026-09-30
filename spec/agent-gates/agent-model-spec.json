@@ -1505,6 +1505,10 @@
         "reader": "agent_stance_apply"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "reader": "__step_is_read_only"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
         "reader": "__tool_search_initial_state"
       },
