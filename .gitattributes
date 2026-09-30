@@ -37,7 +37,10 @@ crates/harn-hostlib/src/ast/scala_repro_fixture.scala eol=lf
 # Generated outputs never merge line by line (#8817). Two pull requests that
 # each regenerate one of these files would otherwise merge into a file no
 # generator produced, and the stale result only fails on main. With -merge the
-# second one conflicts instead: rebase it and rerun its gen-* target. This list
+# second one conflicts in local merges and rebases: rerun its gen-* target.
+# GitHub's mergeability check and squash merge ignore this attribute (measured
+# on #8817), so the merge queue's generated-file check on the combined tree is
+# what protects main; do not bypass the queue with an admin merge. This list
 # is the tracked outputs of every gen-* artifact in
 # scripts/generated_artifacts.toml; `make check-generated-registry` fails when
 # one is missing.

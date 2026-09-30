@@ -275,7 +275,12 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   admin permission and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
   [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
-- Prefer the normal merge queue whenever it is cheap enough.
+- Land with `gh pr merge --squash --auto`, which enqueues. Never use
+  `gh pr merge --admin`. The labels are the only supported way to skip the
+  queue, and the `merge queue` ruleset allows no admin bypass. GitHub ignores
+  `-merge` in `.gitattributes`, so the queue's generated-file check on the
+  combined tree is the only guard against two regenerations merging into a
+  stale file (#8817).
 
 <!-- BEGIN HARN SHARED AGENT CONTRACT: managed by harn-bump-fleet -->
 
@@ -291,5 +296,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Match evidence to the claim: exercise the canonical user path, state the
   falsifier, verify liveness and recovery, and record residual blind spots.
 - "Ship" means landed on main with required deploy and post-merge checks complete.
+- Land PRs through the merge queue with `gh pr merge --squash --auto`; never
+  `gh pr merge --admin`. Incidents use the org override labels `bypass-ci`,
+  `bypass-merge-queue`, or `force-merge`.
 
 <!-- END HARN SHARED AGENT CONTRACT -->
