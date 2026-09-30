@@ -107,8 +107,8 @@ mod tests {
 
     #[test]
     fn public_effort_types_and_selection_provenance_agree() {
-        use harn_parser::ast::{Node, TypeExpr};
         use harn_parser::builtin_signatures::TyExt;
+        use harn_parser::{Node, TypeExpr};
         let declarations = harn_parser::parse_source(
             harn_stdlib::get_stdlib_source("llm/envelope").expect("embedded envelope"),
         )
