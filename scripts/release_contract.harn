@@ -16,11 +16,62 @@ pub type ReleaseTagContract = {
   candidate_trailer: "Harn-Release-Candidate",
 }
 
+pub type SourceCandidateRequest = {
+  event: string,
+  ref_type: string,
+  ref_name: string,
+  runner_profile: string,
+  warm_cache_only: bool,
+  benchmark_only: bool,
+  targets: string,
+  benchmark_source_ref: string,
+  benchmark_source_sha: string,
+  benchmark_cargo_bloat: bool,
+}
+
+pub type SourceCandidateDecision = {
+  schema_version: "harn.source_candidate_decision.v1",
+  accepted: bool,
+  reason: "accepted" \
+    | "wrong_event" \
+    | "wrong_ref" \
+    | "wrong_runner_profile" \
+    | "conflicting_inputs" \
+    | "invalid_request",
+  build_mode: "candidate" | "none",
+  candidate_purpose: "source" | "none",
+}
+
+/**
+ * Which dispatch may build a signed source candidate. Only this repository's
+ * producer reads it, so it is not part of the projected cross-repository
+ * contract below.
+ */
+pub type SourceCandidatePolicy = {
+  event: "workflow_dispatch",
+  ref_type: "branch",
+  ref_name: "main",
+  runner_profile: "policy",
+  build_mode: "candidate",
+  purpose: "source",
+}
+
 pub type ReleaseContract = {
   schema_version: "harn.release_contract.v1",
   versions: ReleaseVersionContract,
   changelog: {published_heading: "top_version_heading", candidate_fragments: "must_be_folded"},
   tag: ReleaseTagContract,
+}
+
+pub fn source_candidate_policy() -> SourceCandidatePolicy {
+  return {
+    event: "workflow_dispatch",
+    ref_type: "branch",
+    ref_name: "main",
+    runner_profile: "policy",
+    build_mode: "candidate",
+    purpose: "source",
+  }
 }
 
 /** Harn's release semantics, projected for orchestrators and recovery tools. */
@@ -39,6 +90,63 @@ pub fn release_contract() -> ReleaseContract {
       candidate_trailer: "Harn-Release-Candidate",
     },
   }
+}
+
+/** One request decision, shared by workflow and local producer callers. */
+pub fn source_candidate_decision(request: SourceCandidateRequest) -> SourceCandidateDecision {
+  const policy = source_candidate_policy()
+  let reason = "accepted"
+  if request.event != policy.event {
+    reason = "wrong_event"
+  } else if request.ref_type != policy.ref_type || request.ref_name != policy.ref_name {
+    reason = "wrong_ref"
+  } else if request.runner_profile != policy.runner_profile {
+    reason = "wrong_runner_profile"
+  } else if request.warm_cache_only || request.benchmark_only || request.targets != ""
+    || request.benchmark_source_ref != ""
+    || request.benchmark_source_sha != ""
+    || request.benchmark_cargo_bloat {
+    reason = "conflicting_inputs"
+  }
+  const accepted = reason == "accepted"
+  return {
+    schema_version: "harn.source_candidate_decision.v1",
+    accepted: accepted,
+    reason: reason,
+    build_mode: accepted ? policy.build_mode : "none",
+    candidate_purpose: accepted ? policy.purpose : "none",
+  }
+}
+
+/** Validate external requests once before the typed decision owner. */
+pub fn source_candidate_decision_parse(value: unknown) -> SourceCandidateDecision {
+  const report = schema_validator(
+    schema_closed_object(
+      {
+        event: schema_string(),
+        ref_type: schema_string(),
+        ref_name: schema_string(),
+        runner_profile: schema_string(),
+        warm_cache_only: schema_bool(),
+        benchmark_only: schema_bool(),
+        targets: schema_string(),
+        benchmark_source_ref: schema_string(),
+        benchmark_source_sha: schema_string(),
+        benchmark_cargo_bloat: schema_bool(),
+      },
+    ),
+  )
+    .report(value)
+  if !report.ok {
+    return {
+      schema_version: "harn.source_candidate_decision.v1",
+      accepted: false,
+      reason: "invalid_request",
+      build_mode: "none",
+      candidate_purpose: "none",
+    }
+  }
+  return source_candidate_decision(report.value)
 }
 
 /** The suffix used by Harn's release metadata implementation. */
@@ -113,6 +221,19 @@ fn flag_value(args: list<string>, name: string, fallback: string) -> string {
 }
 
 fn main(harness: Harness) {
+  const request_path = flag_value(argv, "--source-candidate-request", "")
+  if request_path != "" {
+    const request = read_json_result(harness.fs, request_path)
+    if is_err(request) {
+      harness.stdio.eprintln("source candidate request cannot be read: " + request_path)
+    }
+    const decision = source_candidate_decision_parse(is_ok(request) ? unwrap(request) : nil)
+    harness.stdio.println(json_stringify(decision))
+    if !decision.accepted {
+      harness.runtime.exit(2)
+    }
+    return
+  }
   const root = flag_value(argv, "--root", ".")
   const output = flag_value(argv, "--output", "scripts/release_contract.json")
   const shell_output = flag_value(argv, "--shell-output", "scripts/release_contract.env")

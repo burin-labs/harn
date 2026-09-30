@@ -24,6 +24,7 @@ repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$repo/.github"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" "$repo/scripts/lib/"
 cp "$root/scripts/release_contract.env" "$root/scripts/release_runner_matrix.sh" "$repo/scripts/"
+cp "$root/scripts/release_contract.harn" "$root/scripts/path_visibility.harn" "$repo/scripts/"
 cp "$root/.github/release-runner-policy.json" "$repo/.github/"
 git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Trigger Test"
@@ -148,6 +149,59 @@ resolve candidate
 [[ "$(matrix_targets candidate)" == "aarch64-apple-darwin,aarch64-unknown-linux-gnu,x86_64-apple-darwin,x86_64-pc-windows-msvc,x86_64-unknown-linux-gnu" ]] \
   || fail "the candidate does not build all five targets: $(matrix_targets candidate)"
 
+# An explicit main source build reuses the full candidate producer without
+# declaring a release. Dispatches cannot enter the promotion trigger.
+commit_version 0.10.143-dev "Start development"
+resolve source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true
+[[ "$(output source build_mode)" == candidate &&
+   "$(output source candidate_purpose)" == source &&
+   "$(output source candidate_source_sha)" == "$(git -C "$repo" rev-parse HEAD)" &&
+   "$(output source should_package_archives)" == true ]] \
+  || fail "explicit source candidate does not reuse the signed archive producer"
+[[ "$(matrix_targets source)" == "$(matrix_targets warm)" ]] \
+  || fail "source candidate does not cover the existing full matrix"
+[[ "$(output source source_candidate_decision | jq -er '.accepted and .reason == "accepted"')" == true ]] \
+  || fail "actual source resolver did not emit its typed admission receipt"
+for invalid_source in branch tag conflict benchmark profile targets event source_ref source_sha bloat; do
+  case "$invalid_source" in
+    branch) invalid_args=(REF_NAME=topic) ;;
+    tag) invalid_args=(REF_TYPE=tag) ;;
+    conflict) invalid_args=(INPUT_WARM_CACHE_ONLY=true) ;;
+    benchmark) invalid_args=(INPUT_BENCHMARK_ONLY=true) ;;
+    profile) invalid_args=(INPUT_RUNNER_PROFILE=standard) ;;
+    targets) invalid_args=(INPUT_TARGETS=aarch64-apple-darwin) ;;
+    event) invalid_args=(EVENT_NAME=push) ;;
+    source_ref) invalid_args=(INPUT_BENCHMARK_SOURCE_REF=topic) ;;
+    source_sha) invalid_args=(INPUT_BENCHMARK_SOURCE_SHA=0123456789012345678901234567890123456789) ;;
+    bloat) invalid_args=(INPUT_BENCHMARK_CARGO_BLOAT=true) ;;
+  esac
+  if run_resolver "source_$invalid_source" EVENT_NAME=workflow_dispatch \
+       INPUT_SOURCE_CANDIDATE=true "${invalid_args[@]}"; then
+    fail "source candidate accepted invalid $invalid_source context"
+  fi
+  [[ "$(jq -er '.accepted == false and .reason != "accepted" and .build_mode == "none"' \
+      "$tmp/source_$invalid_source.outputs.source-decision.json")" == true ]] \
+    || fail "invalid source $invalid_source omitted its typed refusal receipt"
+done
+
+# Execute promotion's real version decision at that development commit. An
+# absent output cannot stand in for the explicit refusal to publish.
+awk '/        id: plan/{found=1} found && /        run: \|/{body=1;next} body && /^  [^ ]/{exit} body && /^      - /{exit} body{print substr($0,11)}' \
+  "$root/.github/workflows/promote-release.yml" > "$tmp/promote-source.sh"
+grep -Fq 'release_push_is_stable_version_change' "$tmp/promote-source.sh" \
+  || fail "could not extract the actual promotion decision"
+(
+  cd "$repo"
+  PATH="$tmp/bin:$PATH" GITHUB_REPOSITORY=burin-labs/harn \
+    HEAD_SHA="$(git rev-parse HEAD)" BUILD_RUN_ID=4242 \
+    GITHUB_OUTPUT="$tmp/source-promotion.outputs" \
+    bash -eu "$tmp/promote-source.sh" > "$tmp/source-promotion.log" 2>&1
+)
+[[ "$(sed -n 's/^promote=//p' "$tmp/source-promotion.outputs")" == false ]] \
+  || fail "source development candidate did not explicitly refuse promotion"
+
+# Restore the stable fixture before the unchanged-version negative control.
+commit_version 0.10.142 "Restore stable fixture"
 # Negative control: a commit whose subject says Release but whose version did
 # not change is not a candidate.
 commit_version 0.10.142 "Release v0.10.142"
