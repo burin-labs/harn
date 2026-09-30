@@ -680,6 +680,42 @@ pub struct HarnExternalActionPolicyEvaluation {
     pub reason_code: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<HarnExternalActionDecisionReview>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionReviewProbability {
+    pub label: String,
+    pub probability: serde_json::Number,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionReviewAnswer {
+    pub question_id: String,
+    pub kind: String,
+    pub confidence: serde_json::Number,
+    pub confidence_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probability: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<serde_json::Number>,
+    pub probabilities: Vec<HarnExternalActionReviewProbability>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionDecisionReview {
+    pub receipt: String,
+    pub outcome: String,
+    pub rule: String,
+    pub applied: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_confidence: Option<serde_json::Number>,
+    pub answers: Vec<HarnExternalActionReviewAnswer>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

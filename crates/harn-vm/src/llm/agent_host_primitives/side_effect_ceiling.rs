@@ -31,19 +31,60 @@ pub(super) enum SideEffectPermissionOutcome {
     },
 }
 
-pub(super) async fn request_side_effect_permission(
-    bridge: Option<&Arc<HostBridge>>,
-    session_id: &str,
-    tool_call_id: &str,
-    tool_name: &str,
-    tool_args: &serde_json::Value,
-    violation: SideEffectCeilingViolation,
-    reason: String,
-    tool_context: (
+pub(super) struct SideEffectPermissionRequest<'a> {
+    pub session_id: &'a str,
+    pub tool_call_id: &'a str,
+    pub tool_name: &'a str,
+    pub tool_args: &'a serde_json::Value,
+    pub violation: SideEffectCeilingViolation,
+    pub reason: String,
+    pub tool_context: (
         Option<serde_json::Value>,
         Option<crate::tool_annotations::ToolAnnotations>,
     ),
+}
+
+pub(super) async fn review_or_request_side_effect_permission(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    bridge: Option<&Arc<HostBridge>>,
+    request: SideEffectPermissionRequest<'_>,
+) -> (bool, SideEffectPermissionOutcome) {
+    let review = crate::orchestration::maybe_grant_side_effect_by_auto_review(
+        Some(ctx),
+        request.tool_name,
+        request.tool_args,
+        request.session_id,
+        request.violation.ceiling.as_str(),
+        request.violation.required_level.as_str(),
+        &request.reason,
+    )
+    .await;
+    if let Some(policy_decision) = review.grant {
+        return (
+            true,
+            SideEffectPermissionOutcome::Allowed { policy_decision },
+        );
+    }
+    (
+        false,
+        request_side_effect_permission(bridge, request, review.evaluation_review).await,
+    )
+}
+
+pub(super) async fn request_side_effect_permission(
+    bridge: Option<&Arc<HostBridge>>,
+    request: SideEffectPermissionRequest<'_>,
+    evaluation_review: Option<Box<crate::orchestration::DecisionReview>>,
 ) -> SideEffectPermissionOutcome {
+    let SideEffectPermissionRequest {
+        session_id,
+        tool_call_id,
+        tool_name,
+        tool_args,
+        violation,
+        reason,
+        tool_context,
+    } = request;
     let (tool_descriptor, tool_annotations) = tool_context;
     let approval_id = if tool_call_id.is_empty() {
         format!("tool_call_{}", uuid::Uuid::now_v7())
@@ -55,7 +96,7 @@ pub(super) async fn request_side_effect_permission(
         violation,
         SideEffectCeilingRemedy::RequestPermission,
     );
-    let policy_decision = serde_json::json!({
+    let mut policy_decision = serde_json::json!({
         "action": "ask",
         "source": "side_effect_ceiling",
         "scope": "once",
@@ -63,6 +104,13 @@ pub(super) async fn request_side_effect_permission(
         "required_level": violation.required_level,
         "tool": tool_name,
     });
+    if let Some(review) = evaluation_review {
+        policy_decision["auto_review"] = serde_json::json!({
+            "approved": false,
+            "reviewer_answered": review.disposition == crate::orchestration::ReviewDisposition::Denied,
+            "evaluation_review": review,
+        });
+    }
     let request = HostPermissionRequest {
         session_id: session_id.to_string(),
         tool_call_id: approval_id,

@@ -563,12 +563,61 @@ public struct HarnExternalActionPolicyEvaluation: Codable, Sendable, Equatable {
     public let outcome: HarnExternalActionPolicyEvaluationOutcome
     public let reasonCode: String
     public let policyId: String?
+    public let review: HarnExternalActionDecisionReview?
 
     enum CodingKeys: String, CodingKey {
         case layer
         case outcome
         case reasonCode = "reason_code"
         case policyId = "policy_id"
+        case review
+    }
+}
+
+public struct HarnExternalActionReviewProbability: Codable, Sendable, Equatable {
+    public let label: String
+    public let probability: Double
+}
+
+public struct HarnExternalActionReviewAnswer: Codable, Sendable, Equatable {
+    public let questionId: String
+    public let kind: String
+    public let confidence: Double
+    public let confidenceKind: String
+    public let verdict: Bool?
+    public let probability: Double?
+    public let label: String?
+    public let score: Double?
+    public let probabilities: [HarnExternalActionReviewProbability]
+
+    enum CodingKeys: String, CodingKey {
+        case questionId = "question_id"
+        case kind
+        case confidence
+        case confidenceKind = "confidence_kind"
+        case verdict
+        case probability
+        case label
+        case score
+        case probabilities
+    }
+}
+
+public struct HarnExternalActionDecisionReview: Codable, Sendable, Equatable {
+    public let receipt: String
+    public let outcome: String
+    public let rule: String
+    public let applied: Bool
+    public let minimumConfidence: Double?
+    public let answers: [HarnExternalActionReviewAnswer]
+
+    enum CodingKeys: String, CodingKey {
+        case receipt
+        case outcome
+        case rule
+        case applied
+        case minimumConfidence = "minimum_confidence"
+        case answers
     }
 }
 

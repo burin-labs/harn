@@ -223,6 +223,14 @@ pub(super) fn rejecting_bridge_with_reason(
     seen: Arc<std::sync::Mutex<usize>>,
     reason: Option<String>,
 ) -> Arc<crate::bridge::HostBridge> {
+    rejecting_bridge_observing_requests(seen, reason, None)
+}
+
+fn rejecting_bridge_observing_requests(
+    seen: Arc<std::sync::Mutex<usize>>,
+    reason: Option<String>,
+    requests: Option<Arc<std::sync::Mutex<Vec<serde_json::Value>>>>,
+) -> Arc<crate::bridge::HostBridge> {
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
     use tokio::sync::Mutex as TokioMutex;
@@ -243,6 +251,12 @@ pub(super) fn rejecting_bridge_with_reason(
             == Some(crate::llm::acp_permission::METHOD_REQUEST_PERMISSION);
         let result = if is_permission {
             *seen.lock().map_err(|_| "seen mutex poisoned".to_string())? += 1;
+            if let Some(requests) = &requests {
+                requests
+                    .lock()
+                    .map_err(|_| "requests mutex poisoned".to_string())?
+                    .push(request);
+            }
             crate::llm::acp_permission::reject_response(reason.clone())
         } else {
             serde_json::json!({"ok": true})
@@ -263,6 +277,8 @@ pub(super) fn rejecting_bridge_with_reason(
         1,
     ))
 }
+
+mod evaluation_receipt_tests;
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_installed_reviewer_answers_before_a_refusing_host_is_asked() {
