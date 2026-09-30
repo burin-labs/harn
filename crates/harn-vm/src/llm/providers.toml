@@ -4373,7 +4373,7 @@ name = "DeepSeek V3.2"
 provider = "openrouter"
 context_window = 163840
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.269, output_per_mtok = 0.40, cache_read_per_mtok = 0.1345 }
+pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42, cache_read_per_mtok = 0.028 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
@@ -4383,7 +4383,7 @@ name = "Kimi K2.6"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.16 }
+pricing = { input_per_mtok = 0.65, output_per_mtok = 3.41, cache_read_per_mtok = 0.15 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
@@ -4394,7 +4394,7 @@ name = "Kimi K2.7 Code"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.7062, output_per_mtok = 3.21, cache_read_per_mtok = 0.18 }
+pricing = { input_per_mtok = 0.6712, output_per_mtok = 3.35, cache_read_per_mtok = 0.18 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
@@ -4408,7 +4408,7 @@ equivalence_group = "openai-gpt-oss-120b"
 served_variant = "openrouter"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
+pricing = { input_per_mtok = 0.037, output_per_mtok = 0.17, cache_read_per_mtok = 0.075 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
 # Explicit metadata keeps this row self-described across fragment boundaries.
 # GPT-OSS 120B is Apache-2.0 (open weight) and text-only; it is Burin's cheap
@@ -4433,7 +4433,7 @@ name = "Qwen3.7 Plus"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.32, output_per_mtok = 1.28, cache_read_per_mtok = 0.064, cache_write_per_mtok = 0.40 }
+pricing = { input_per_mtok = 0.32, output_per_mtok = 1.28, cache_read_per_mtok = 0.064, cache_write_per_mtok = 0.40, input_token_bands = [{ minimum_input_tokens = 256000, input_multiplier = 3.0, output_multiplier = 3.0 }] }
 
 tier = "frontier"
 open_weight = false
@@ -4614,18 +4614,24 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "visi
 
 # Kimi K2.7 Code on Together — int4-native weights at the first-party
 # list rate. Verified 2026-07-02.
+# Together lists this model but a 2026-09-29 chat call returned "Unable to
+# access non-serverless model"; it needs a dedicated endpoint.
 [models."moonshotai/Kimi-K2.7-Code"]
 name = "Kimi K2.7 Code (Together)"
 provider = "together"
+availability = "dedicated"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.19 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
+# Together lists this model but a 2026-09-29 chat call returned "Unable to
+# access non-serverless model"; it needs a dedicated endpoint.
 [models."MiniMaxAI/MiniMax-M2.7"]
 name = "MiniMax M2.7 (Together)"
 provider = "together"
+availability = "dedicated"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
@@ -4646,9 +4652,12 @@ strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_contex
 # serve as dependable cheap executor samples. Verified live ids on
 # together.ai/models (Qwen2.5 7B Instruct Turbo, Llama 3.3 70B Instruct
 # Turbo).
+# Together lists this model but a 2026-09-29 chat call returned "Unable to
+# access non-serverless model"; it needs a dedicated endpoint.
 [models."Qwen/Qwen2.5-7B-Instruct-Turbo"]
 name = "Qwen2.5 7B Instruct Turbo (Together)"
 provider = "together"
+availability = "dedicated"
 context_window = 32768
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 0.30 }
@@ -4837,7 +4846,7 @@ name = "MiniMax M2.7 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+pricing = { input_per_mtok = 0.21, output_per_mtok = 0.84, cache_read_per_mtok = 0.042 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -4855,7 +4864,7 @@ name = "MiniMax M2 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.255, output_per_mtok = 1.02 }
+pricing = { input_per_mtok = 0.3, output_per_mtok = 1.2 }
 # Inline metadata keeps this row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true
@@ -5023,7 +5032,7 @@ provider = "openrouter"
 context_window = 204800
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.966, output_per_mtok = 3.036, cache_read_per_mtok = 0.1794 }
+pricing = { input_per_mtok = 1.4, output_per_mtok = 4.4, cache_read_per_mtok = 0.26 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -5033,24 +5042,24 @@ provider = "openrouter"
 context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.6496, output_per_mtok = 2.0416, cache_read_per_mtok = 0.12064 }
+pricing = { input_per_mtok = 0.25, output_per_mtok = 3.99, cache_read_per_mtok = 0.2 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 [models."z-ai/glm-5.3"]
 name = "GLM 5.3 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1310720
+context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.91, output_per_mtok = 2.86, cache_read_per_mtok = 0.169 }
+pricing = { input_per_mtok = 1.4, output_per_mtok = 4.4, cache_read_per_mtok = 0.26 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 [models."z-ai/glm-5.3-flash"]
 name = "GLM 5.3 Flash (via OpenRouter)"
 provider = "openrouter"
-context_window = 1310720
+context_window = 1048576
 logical_model = "glm-5.3-flash"
 equivalence_group = "glm-5.3-flash"
 served_variant = "openrouter"
@@ -5061,7 +5070,7 @@ capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_cac
 # carries (docs.z.ai rate card, re-checked the same day). That is OpenRouter's
 # own rate for this route, not a Z.AI promotion, so it is the base here and the
 # expired promotion is gone.
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.30, cache_read_per_mtok = 0.018 }
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.5, cache_read_per_mtok = 0.03 }
 architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-08-28" }
 tier = "frontier"
 open_weight = true
@@ -5100,7 +5109,7 @@ logical_model = "glm-5.3-flashx"
 equivalence_group = "glm-5.3-flashx"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.37, output_per_mtok = 1.25, cache_read_per_mtok = 0.075 }
+pricing = { input_per_mtok = 0.37, output_per_mtok = 1.25, cache_read_per_mtok = 0.09 }
 architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-09-20" }
 tier = "frontier"
 open_weight = true
@@ -5128,8 +5137,9 @@ strengths = ["vision", "coding", "agentic"]
 # holiday calendar; estimates on those weekdays use peak rates.
 #
 # Every OpenRouter, Together and DeepInfra row in this file was re-read
-# against the provider's live models endpoint on 2026-09-20; rates and
-# context windows below are that read.
+# against the provider's live models endpoint on 2026-09-20. OpenRouter rows
+# were read again on 2026-09-29; each changed rate matched at least one
+# serving endpoint's own price.
 [models."deepseek-flash"]
 name = "DeepSeek V4.1 Flash"
 provider = "deepseek"
@@ -5186,7 +5196,7 @@ benchmarks = { aa_intelligence_index = 68.0 }
 # rate card and a binary 1M-token context window for these routes.
 #
 # Prices below are the live OpenRouter rate card read from
-# `GET /api/v1/models` on 2026-09-20. The undated `deepseek/deepseek-v4-*`
+# `GET /api/v1/models` on 2026-09-29. The undated `deepseek/deepseek-v4-*`
 # aliases previously carried DeepSeek's DIRECT rate card, which understated
 # OpenRouter V4 Pro by ~2.7x ($0.435 recorded vs $1.168 charged per MTok in).
 # The dated snapshot rows further below are the ones that actually match the
@@ -5196,7 +5206,7 @@ name = "DeepSeek V4 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.089866, output_per_mtok = 0.179732, cache_read_per_mtok = 0.0179732 }
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.028 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
@@ -5205,7 +5215,7 @@ name = "DeepSeek V4 Pro (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.9483, output_per_mtok = 1.8966, cache_read_per_mtok = 0.079025 }
+pricing = { input_per_mtok = 0.95526, output_per_mtok = 1.91052, cache_read_per_mtok = 0.079605 }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
@@ -5241,10 +5251,14 @@ pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok =
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
+# The 2026-09-29 model index listed $0.01 / $0.64 for this snapshot, a
+# per-field composite that none of its 29 endpoints charges (the cheapest
+# input and the output rates come from different hosts). The context window
+# was taken from that read; the price stays at the last coherent card.
 [models."deepseek/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (via OpenRouter)"
 provider = "openrouter"
-context_window = 1310720
+context_window = 1048576
 capabilities = ["tools", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 0.04, output_per_mtok = 0.16, cache_read_per_mtok = 0.016 }
 tier = "mid"
@@ -5261,7 +5275,7 @@ context_window = 1048576
 logical_model = "deepseek-v4.1-flash"
 equivalence_group = "deepseek-v4.1-flash"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.14, output_per_mtok = 0.42, cache_read_per_mtok = 0.0042 }
+pricing = { input_per_mtok = 0.3, output_per_mtok = 1.2, cache_read_per_mtok = 0.006 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
@@ -5294,7 +5308,7 @@ name = "Qwen3.6 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.1875, output_per_mtok = 1.125, cache_write_per_mtok = 0.234375 }
+pricing = { input_per_mtok = 0.1875, output_per_mtok = 1.125, cache_write_per_mtok = 0.234375, input_token_bands = [{ minimum_input_tokens = 256000, input_multiplier = 4.0, output_multiplier = 2.666667 }] }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "reasoning", "long_context"]
@@ -5306,7 +5320,7 @@ context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "thinking"]
 # Cache write added 2026-09-20: OpenRouter publishes $0.40625 per MTok and no
 # cache-read rate for this route.
-pricing = { input_per_mtok = 0.325, output_per_mtok = 1.95, cache_write_per_mtok = 0.40625 }
+pricing = { input_per_mtok = 0.325, output_per_mtok = 1.95, cache_write_per_mtok = 0.40625, input_token_bands = [{ minimum_input_tokens = 256000, input_multiplier = 4.0, output_multiplier = 2.0 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -5564,7 +5578,7 @@ name = "Gemma 4 26B MoE (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.30, cache_read_per_mtok = 0.05 }
+pricing = { input_per_mtok = 0.0765, output_per_mtok = 0.255, cache_read_per_mtok = 0.0425 }
 tier = "mid"
 open_weight = true
 strengths = ["vision", "cheap", "speed"]
@@ -5584,9 +5598,12 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 tier = "mid"
 open_weight = true
 strengths = ["vision", "cheap", "speed"]
+# Together lists this model but a 2026-09-29 chat call returned "Unable to
+# access non-serverless model"; it needs a dedicated endpoint.
 [models."google/gemma-4-31B-it"]
 name = "Gemma 4 31B (Together)"
 provider = "together"
+availability = "dedicated"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.39, output_per_mtok = 0.97 }
@@ -5854,7 +5871,7 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "visi
 [models."qwen/qwen3.8-27b"]
 name = "Qwen3.8 27B (Groq)"
 provider = "groq"
-context_window = 131042
+context_window = 131072
 logical_model = "qwen3.8-27b"
 equivalence_group = "qwen3.8-27b"
 served_variant = "groq-lpu-preview"
@@ -6299,7 +6316,7 @@ served_variant = "sambanova-rdu"
 api_dialect = "openai_chat"
 context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.0, cache_write_per_mtok = 0.0 }
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.06, cache_write_per_mtok = 0.0 }
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -6950,7 +6967,7 @@ provider = "openrouter"
 context_window = 500000
 released = "2026-09-21"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.60, output_per_mtok = 4.80, cache_read_per_mtok = 0.40 }
+pricing = { input_per_mtok = 2.0, output_per_mtok = 6.0, cache_read_per_mtok = 0.5, input_token_bands = [{ minimum_input_tokens = 200000, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
@@ -6983,7 +7000,7 @@ name = "GPT-5.5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6.1-sol"
 tier = "frontier"
 open_weight = false
@@ -7005,7 +7022,7 @@ equivalence_group = "gpt-6-astra"
 served_variant = "openrouter"
 released = "2026-09-04"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7019,7 +7036,7 @@ equivalence_group = "gpt-6-astra"
 served_variant = "openrouter_pro"
 released = "2026-09-04"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7033,7 +7050,7 @@ equivalence_group = "gpt-6-sol"
 served_variant = "openrouter"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6.1-sol"
 tier = "mid"
 open_weight = false
@@ -7048,7 +7065,7 @@ equivalence_group = "gpt-6-sol"
 served_variant = "openrouter_pro"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6.1-sol-pro"
 tier = "mid"
 open_weight = false
@@ -7097,7 +7114,7 @@ equivalence_group = "gpt-6-luna"
 served_variant = "openrouter"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125 }
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "small"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7111,7 +7128,7 @@ equivalence_group = "gpt-6-luna"
 served_variant = "openrouter_pro"
 released = "2026-09-22"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125 }
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "small"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7124,7 +7141,7 @@ logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }] }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }], input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-sol"
 tier = "frontier"
 open_weight = false
@@ -7138,7 +7155,7 @@ logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-pro-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }] }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-pro-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 4.0, output_per_mtok = 20.0, cache_read_per_mtok = 0.4, cache_write_per_mtok = 5.0 }], input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-sol-pro"
 tier = "frontier"
 open_weight = false
@@ -7152,7 +7169,7 @@ logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-sol"
 tier = "mid"
 open_weight = false
@@ -7166,7 +7183,7 @@ logical_model = "gpt-5.6-terra"
 equivalence_group = "gpt-5.6-terra"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-sol-pro"
 tier = "mid"
 open_weight = false
@@ -7180,7 +7197,7 @@ logical_model = "gpt-5.6-luna"
 equivalence_group = "gpt-5.6-luna"
 served_variant = "openrouter"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25 }
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-luna"
 tier = "small"
 open_weight = false
@@ -7194,7 +7211,7 @@ logical_model = "gpt-5.6-luna"
 equivalence_group = "gpt-5.6-luna"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25 }
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.20, cache_read_per_mtok = 0.02, cache_write_per_mtok = 0.25, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-luna-pro"
 tier = "small"
 open_weight = false
@@ -7205,7 +7222,7 @@ name = "GPT-5.5 Pro (via OpenRouter)"
 provider = "openrouter"
 context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00 }
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7215,7 +7232,7 @@ name = "GPT-5.4 Pro (via OpenRouter)"
 provider = "openrouter"
 context_window = 1050000
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00 }
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7284,7 +7301,7 @@ name = "Seed 2.0 Lite (via OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.25, output_per_mtok = 2.00 }
+pricing = { input_per_mtok = 0.25, output_per_mtok = 2.00, input_token_bands = [{ minimum_input_tokens = 128000, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 tier = "mid"
 open_weight = false
 strengths = ["cheap", "tool_use", "reasoning", "vision", "long_context"]
@@ -7294,7 +7311,7 @@ name = "Qwen3.5 Plus 20260420 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 1.80, cache_write_per_mtok = 0.375 }
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.80, cache_write_per_mtok = 0.375, input_token_bands = [{ minimum_input_tokens = 256000, input_multiplier = 1.25, output_multiplier = 1.25 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7304,7 +7321,7 @@ name = "Qwen3.6 Max Preview (via OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.027, output_per_mtok = 6.162, cache_write_per_mtok = 1.28375 }
+pricing = { input_per_mtok = 1.027, output_per_mtok = 6.162, cache_write_per_mtok = 1.28375, input_token_bands = [{ minimum_input_tokens = 128000, input_multiplier = 1.538462, output_multiplier = 1.538462 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]

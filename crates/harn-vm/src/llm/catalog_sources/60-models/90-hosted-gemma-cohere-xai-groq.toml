@@ -18,7 +18,7 @@ name = "Gemma 4 26B MoE (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.30, cache_read_per_mtok = 0.05 }
+pricing = { input_per_mtok = 0.0765, output_per_mtok = 0.255, cache_read_per_mtok = 0.0425 }
 tier = "mid"
 open_weight = true
 strengths = ["vision", "cheap", "speed"]
@@ -38,9 +38,12 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 tier = "mid"
 open_weight = true
 strengths = ["vision", "cheap", "speed"]
+# Together lists this model but a 2026-09-29 chat call returned "Unable to
+# access non-serverless model"; it needs a dedicated endpoint.
 [models."google/gemma-4-31B-it"]
 name = "Gemma 4 31B (Together)"
 provider = "together"
+availability = "dedicated"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.39, output_per_mtok = 0.97 }
@@ -308,7 +311,7 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "visi
 [models."qwen/qwen3.8-27b"]
 name = "Qwen3.8 27B (Groq)"
 provider = "groq"
-context_window = 131042
+context_window = 131072
 logical_model = "qwen3.8-27b"
 equivalence_group = "qwen3.8-27b"
 served_variant = "groq-lpu-preview"

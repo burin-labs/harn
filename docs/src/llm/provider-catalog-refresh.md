@@ -561,6 +561,13 @@ fragments as `generate`. Run them from the repository root; fragment edits
 don't require rebuilding the CLI. Outside a checkout, missing source directories
 use embedded defaults. Present but invalid sources fail instead of falling back.
 
+Support generation recommends one route per provider and never picks one by
+price. A provider with an active chat route needs a `recommended_model` entry
+in `crates/harn-cli/data/provider_support_notes.toml` or a `qc_defaults`
+entry; otherwise `harn provider catalog support` fails and names it. Adding a
+new provider, or a cheaper row to an existing one, therefore cannot move a
+recommendation silently.
+
 Matrix generation is hermetic by default. To inspect local coding-agent parity
 receipts without changing checked-in output, pass them explicitly:
 

@@ -517,7 +517,8 @@ fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
         .expect("Groq Qwen 3.8's public preview route must be catalogued");
 
     assert_eq!(model.provider, "groq");
-    assert_eq!(model.context_window, 131_042);
+    // Groq's /models record reported 131,072 on 2026-09-29 (131,042 before).
+    assert_eq!(model.context_window, 131_072);
     assert_eq!(model.wire_model.as_deref(), Some("qwen/qwen3.8-27b"));
     assert_eq!(model.open_weight, Some(true));
     for capability in ["tools", "vision", "streaming", "thinking"] {
