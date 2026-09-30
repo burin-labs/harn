@@ -73,7 +73,18 @@ host_memory_mb() {
   # property of the box, not of whatever happened to be cached when the job
   # started. A reading that moves with page cache would hand two runs of the
   # same workflow two different budgets.
-  local cores=${1:-unmeasured} meminfo kb
+  local cores=${1:-unmeasured} meminfo kb bytes
+  # macOS has no /proc. It reports the same property of the box in bytes.
+  if [[ "$(uname -s)" == Darwin ]]; then
+    bytes=$(sysctl -n hw.memsize 2>/dev/null) || bytes=""
+    if [[ ! "$bytes" =~ ^[1-9][0-9]*$ ]]; then
+      budget_refuse memory_census_empty "$cores" unmeasured \
+        "memory_mb=unmeasured hw_memsize=${bytes:-absent}"
+      return 1
+    fi
+    printf '%s\n' "$((bytes / 1024 / 1024))"
+    return 0
+  fi
   if ! meminfo=$(cat /proc/meminfo 2>/dev/null); then
     budget_refuse memory_census_failed "$cores" unmeasured "memory_mb=unmeasured"
     return 1
@@ -85,6 +96,15 @@ host_memory_mb() {
     return 1
   fi
   printf '%s\n' "$((kb / 1024))"
+}
+
+host_cpu_cores() {
+  # macOS ships no `nproc`.
+  if [[ "$(uname -s)" == Darwin ]]; then
+    sysctl -n hw.ncpu
+  else
+    nproc
+  fi
 }
 
 online_local_runners() {
@@ -107,7 +127,9 @@ online_local_runners() {
       "listener_processes=unmeasured census_status=$census_status"
     return 1
   fi
-  count=$(awk '$1 == "Runner.Listener" { count++ } END { print count+0 }' <<< "$census")
+  # Compare the basename: Linux reports the bare command name, while macOS
+  # reports the listener's full path, which an exact match would count as zero.
+  count=$(awk '{ n = split($1, part, "/") } part[n] == "Runner.Listener" { count++ } END { print count+0 }' <<< "$census")
   if ((count == 0)); then
     budget_refuse listener_census_empty "$cores" 0 \
       "listener_processes=0 census_status=$census_status"
@@ -118,7 +140,7 @@ online_local_runners() {
 
 resource_budget_main() {
   local runners cores memory_mb policy profile=${HARN_BUDGET_PROFILE:-e2e}
-  if ! cores=$(nproc); then
+  if ! cores=$(host_cpu_cores); then
     budget_refuse cpu_census_failed unmeasured unmeasured
     return 1
   fi
