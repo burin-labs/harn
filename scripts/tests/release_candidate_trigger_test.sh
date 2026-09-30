@@ -31,10 +31,16 @@ git -C "$repo" config user.name "Release Trigger Test"
 git -C "$repo" config user.email "release-trigger-test@example.com"
 git -C "$repo" config commit.gpgsign false
 
+mkdir -p "$tmp/bin"
+# The source-candidate resolver asks Harn for its decision, as the workflow
+# does after installing the bootstrap interpreter. No Harn is a named failure,
+# never a skip.
+[[ -n "${HARN_BIN:-}" && -x "${HARN_BIN}" ]] \
+  || fail "HARN_BIN must name an executable harn; run through make test-pr-gate-post-warm-integrations"
+ln -s "$HARN_BIN" "$tmp/bin/harn"
 # gh stub for the candidate-run lookup: FAKE_QUEUE_RUN is the run that built a
 # candidate at the pushed commit (unset: none), and FAKE_GH_FAIL=1 makes GitHub
 # unreadable.
-mkdir -p "$tmp/bin"
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 [[ "${FAKE_GH_FAIL:-0}" == 1 ]] && exit 1
