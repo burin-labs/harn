@@ -94,11 +94,16 @@ question id. Each answer is typed from its own question: `disposition.choice`
 is `"keep" | "reword" | "drop"`, so a `match` on it is exhaustive, and
 `risk.level` is the literal union of the declared levels. A partial answer set
 is never a smaller `answered`; it is `refused` with reason `schema_invalid`.
+Comparing a choice or score answer with an undeclared string literal is
+`HARN-TYP-002`, for both `==` and `!=` in either operand order.
 
 The question set is read at the call, because it types every answer and because
 the site manifest records which questions a site asks. Write it as a dict
 literal whose values are `boolean`, `choice`, or `score` calls with literal
 labels. Anything the checker cannot read is `HARN-TYP-036`.
+`boolean(instructions, criteria?)` accepts optional `BooleanCriteria`:
+`{true: string, false: string}` describes what each verdict means.
+Both backends receive these descriptions, and changing them changes cache identity.
 
 The single-boolean projection keeps its own shape:
 

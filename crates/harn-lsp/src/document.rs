@@ -598,6 +598,7 @@ fn main(harness: Harness) {
   }, policy)
   match answers.kind {
     "answered" -> {
+      harness.stdio.println(answers.value.disposition.choice == "delete")
       match answers.value.disposition.choice {
         "keep" -> { harness.stdio.println("keep") }
         "delete" -> { harness.stdio.println("delete") }
@@ -613,7 +614,7 @@ fn main(harness: Harness) {
 "#
             .into(),
         );
-        for code in ["HARN-MAT-001", "HARN-TYP-036"] {
+        for code in ["HARN-MAT-001", "HARN-TYP-002", "HARN-TYP-036"] {
             let diagnostic = state.diagnostics.iter().find(|diagnostic| {
                 matches!(diagnostic.code.as_ref(), Some(NumberOrString::String(value)) if value == code)
             }).unwrap_or_else(|| panic!("missing {code}: {:?}", state.diagnostics));
@@ -631,7 +632,7 @@ fn main(harness: Harness) {
             })
             .collect();
         errors.sort_unstable();
-        assert_eq!(errors, ["HARN-MAT-001", "HARN-TYP-036"]);
+        assert_eq!(errors, ["HARN-MAT-001", "HARN-TYP-002", "HARN-TYP-036"]);
     }
 
     #[test]

@@ -14,6 +14,41 @@ use super::super::scope::TypeScope;
 use super::super::TypeChecker;
 
 impl TypeChecker {
+    /// Equality uses the same closed string vocabulary as argument admission.
+    pub(in crate::typechecker) fn check_closed_string_comparison(
+        &mut self,
+        op: &str,
+        operands: [(&SNode, Option<&TypeExpr>); 2],
+        scope: &TypeScope,
+    ) {
+        if !matches!(op, "==" | "!=") {
+            return;
+        }
+        let [(left, left_type), (right, right_type)] = operands;
+        for (value, ty, literal) in [(left, left_type, right), (right, right_type, left)] {
+            if arg_string_literal(&value.node).is_some()
+                || arg_string_literal(&literal.node).is_none()
+            {
+                continue;
+            }
+            let Some(ty) = ty else { continue };
+            let resolved = self.resolve_alias(ty, scope);
+            let Some(violation) = literal_union_violation(&resolved, literal) else {
+                continue;
+            };
+            self.error_at_with_help(
+                Code::InvalidBinaryOperator,
+                format!(
+                    "{} is not a permitted comparison value of {}",
+                    violation.value,
+                    format_type(ty)
+                ),
+                literal.span,
+                format!("value must be one of [{}]", violation.permitted.join(", ")),
+            );
+        }
+    }
+
     /// Emit an argument-type-mismatch diagnostic when `arg` is a compile-time
     /// literal that the homogeneous literal-union parameter `expected` does not
     /// permit. Returns `true` when it fired, so the caller can skip the ordinary

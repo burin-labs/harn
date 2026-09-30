@@ -101,6 +101,10 @@ mod tests {
             ("EvaluationPolicy", harn_builtin_meta::predicate::POLICY),
             ("PredicateOutcome", harn_builtin_meta::predicate::OUTCOME),
             (
+                "BooleanCriteria",
+                harn_builtin_meta::predicate::BOOLEAN_CRITERIA,
+            ),
+            (
                 "BooleanQuestion",
                 harn_builtin_meta::predicate::BOOLEAN_QUESTION,
             ),

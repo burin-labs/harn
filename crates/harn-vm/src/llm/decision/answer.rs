@@ -208,16 +208,17 @@ impl Answer {
                     .collect()
             };
             let body = match (&question.body, selection) {
-                (QuestionBody::Boolean, ReportedSelection::Boolean(verdict)) => {
-                    AnswerBody::Boolean {
-                        verdict: *verdict,
-                        probability: if *verdict {
-                            confidence
-                        } else {
-                            1.0 - confidence
-                        },
-                    }
-                }
+                (
+                    QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_),
+                    ReportedSelection::Boolean(verdict),
+                ) => AnswerBody::Boolean {
+                    verdict: *verdict,
+                    probability: if *verdict {
+                        confidence
+                    } else {
+                        1.0 - confidence
+                    },
+                },
                 (QuestionBody::Choice(_), ReportedSelection::Choice(choice))
                     if labels.contains(choice) =>
                 {
@@ -249,7 +250,7 @@ impl Answer {
         }
         match (&question.body, raw) {
             (
-                QuestionBody::Boolean,
+                QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_),
                 RawAnswer::Boolean {
                     probability,
                     reported_confidence,

@@ -684,6 +684,11 @@ impl TypeChecker {
                 self.check_node(right, scope);
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
+                self.check_closed_string_comparison(
+                    op,
+                    [(left, lt.as_ref()), (right, rt.as_ref())],
+                    scope,
+                );
                 if op == "??" {
                     self.warn_unreachable_nil_coalesce_fallback(left, right, lt.as_ref(), scope);
                 }

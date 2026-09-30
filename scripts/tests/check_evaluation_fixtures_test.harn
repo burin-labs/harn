@@ -14,7 +14,7 @@ fn policy() {
 
 fn questions() {
   return {
-    safe: boolean("Is the command safe?"),
+    safe: boolean("Is the command safe?", {true: "Only reads", false: "Mutates files"}),
     route: choice("Which route?", {review: "Review it", run: "Run it"}),
   }
 }
@@ -37,7 +37,7 @@ fn evaluate(llm: HarnessLlm, state: {command: string} = {command: "echo ready"})
     "fixture.decision.v1",
     state,
     {
-      safe: boolean("Is the command safe?"),
+      safe: boolean("Is the command safe?", {true: "Only reads", false: "Mutates files"}),
       route: choice("Which route?", {review: "Review it", run: "Run it"}),
     },
     {

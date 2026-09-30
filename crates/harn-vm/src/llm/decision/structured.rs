@@ -48,7 +48,9 @@ pub fn answers_schema(questions: &super::question::QuestionSet) -> JsonValue {
     for question in &questions.questions {
         required.push(JsonValue::String(question.id.clone()));
         let (answer_key, answer_schema) = match &question.body {
-            QuestionBody::Boolean => ("verdict", json!({"type": "boolean"})),
+            QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_) => {
+                ("verdict", json!({"type": "boolean"}))
+            }
             QuestionBody::Choice(criteria) => (
                 "choice",
                 json!({
@@ -76,6 +78,10 @@ pub fn answers_schema(questions: &super::question::QuestionSet) -> JsonValue {
                 levels.join(", ")
             ),
             QuestionBody::Boolean => question.instructions.clone(),
+            QuestionBody::BooleanWithCriteria(criteria) => format!(
+                "{}\nCriteria: true = {}; false = {}",
+                question.instructions, criteria.yes, criteria.no
+            ),
         };
         properties.insert(
             question.id.clone(),
@@ -194,7 +200,7 @@ fn read_answers(
             .and_then(JsonValue::as_str)
             .map(str::to_string);
         let selection = match &question.body {
-            QuestionBody::Boolean => {
+            QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_) => {
                 let verdict = answer
                     .get("verdict")
                     .and_then(JsonValue::as_bool)
@@ -329,7 +335,12 @@ mod tests {
                 Question {
                     id: "safe".into(),
                     instructions: "Safe?".into(),
-                    body: QuestionBody::Boolean,
+                    body: QuestionBody::BooleanWithCriteria(
+                        super::super::question::BooleanCriteria {
+                            yes: "Only reads".into(),
+                            no: "Mutates files".into(),
+                        },
+                    ),
                 },
                 Question {
                     id: "disposition".into(),
@@ -347,6 +358,12 @@ mod tests {
             ],
         };
         let schema = answers_schema(&questions);
+        assert!(
+            schema["properties"]["answers"]["properties"]["safe"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("true = Only reads; false = Mutates files")
+        );
         assert_eq!(
             schema["properties"]["answers"]["required"],
             json!(["safe", "disposition", "risk"])
