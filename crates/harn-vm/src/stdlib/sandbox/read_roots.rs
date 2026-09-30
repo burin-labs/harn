@@ -30,8 +30,8 @@ use crate::orchestration::CapabilityPolicy;
 /// child resolve the same roots here.
 pub(super) fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
-    for root in policy.read_only_roots.iter().cloned() {
-        let root = normalize_for_policy(&super::resolve_policy_path(&root));
+    for root in &policy.read_only_roots {
+        let root = normalize_for_policy(&super::resolve_policy_path(root));
         if !roots.contains(&root) {
             roots.push(root);
         }

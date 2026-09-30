@@ -245,7 +245,7 @@ pipeline main(harness: Harness, task: unknown) {{
     };
 
     let baseline_source = format!(
-        r#"pipeline main(harness: Harness, task: unknown) {{ return harness.fs.read_text({}) }}"#,
+        "pipeline main(harness: Harness, task: unknown) {{ return harness.fs.read_text({}) }}",
         serde_json::to_string(&external_fixture.display().to_string()).unwrap()
     );
     let baseline_err = run_harn_with_policy(&baseline_source, policy.clone())
@@ -545,7 +545,7 @@ fn a_read_external_root_serves_builtin_reads_and_refuses_builtin_writes() {
     });
     let host_projected_policy = crate::orchestration::CapabilityPolicy {
         read_only_roots: vec![external.path().display().to_string()],
-        ..policy.clone()
+        ..policy
     };
     let read = run_harn_with_policy(&read_source, host_projected_policy.clone());
     let write = run_harn_with_policy(&write_source, host_projected_policy);

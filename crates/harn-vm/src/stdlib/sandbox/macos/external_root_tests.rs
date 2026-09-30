@@ -30,14 +30,7 @@ fn a_read_external_root_is_readable_but_not_writable_by_a_confined_child() {
 
     let run = |policy: &crate::orchestration::CapabilityPolicy, script: &str| {
         Command::new(SANDBOX_EXEC_PATH)
-            .args([
-                "-p",
-                &render_profile(&policy),
-                "--",
-                "/bin/sh",
-                "-c",
-                script,
-            ])
+            .args(["-p", &render_profile(policy), "--", "/bin/sh", "-c", script])
             .current_dir(workspace.path())
             .output()
             .expect("spawn sandbox-exec")
