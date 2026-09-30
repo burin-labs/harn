@@ -23,7 +23,7 @@
           "protocolVersion": "0.3.0"
         }
       ],
-      "version": "0.10.152-dev",
+      "version": "0.10.152",
       "defaultInputModes": [
         "application/json"
       ],
