@@ -200,6 +200,9 @@ policy stops, and suspension. A withdrawn candidate can leave `reply` empty.
 The phase events survive canonical session replay. Older recordings without
 these events don't establish reply finality through this contract.
 
+Rust consumers must handle `AgentEvent::TurnPhaseChanged` in exhaustive event
+matches. Its `AgentTurnPhase` value carries the phase-specific reply fields.
+
 ### When the judge is not called at all
 
 Neither judge seam is called when the runtime already holds the answer. All seven

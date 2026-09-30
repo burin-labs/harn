@@ -103,13 +103,6 @@ pub struct ToolBatchDispositionReceipt {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
-    /// Phase and reply finality for one agent-loop invocation. Consumers must
-    /// not treat assistant chunks or iteration endings as terminal replies.
-    TurnPhaseChanged {
-        session_id: String,
-        #[serde(flatten)]
-        phase: super::AgentTurnPhase,
-    },
     AgentMessageChunk {
         session_id: String,
         content: String,
@@ -1377,6 +1370,13 @@ pub enum AgentEvent {
         /// operation; a `true` here is a harness bug worth fixing.
         #[serde(default, skip_serializing_if = "is_false")]
         unreported: bool,
+    },
+    /// Phase and reply finality for one agent-loop invocation. Consumers must
+    /// not treat assistant chunks or iteration endings as terminal replies.
+    TurnPhaseChanged {
+        session_id: String,
+        #[serde(flatten)]
+        phase: super::AgentTurnPhase,
     },
 }
 

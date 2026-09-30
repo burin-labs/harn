@@ -803,6 +803,21 @@ fn stale_finalization_retry_receipt_cannot_claim_a_successor_run() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() {
+    struct TerminalPhaseCounter(Arc<AtomicUsize>);
+    impl crate::agent_events::AgentEventSink for TerminalPhaseCounter {
+        fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
+            if matches!(
+                event,
+                crate::agent_events::AgentEvent::TurnPhaseChanged {
+                    phase: crate::agent_events::AgentTurnPhase::Terminal { .. },
+                    ..
+                }
+            ) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
     crate::agent_sessions::reset_session_store();
     super::super::reset_agent_session_host_state();
     let root = tempfile::tempdir().expect("temp root");
@@ -834,6 +849,30 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
         .await
         .expect("close canonical session to inject terminal flush failure");
 
+    let delivered = Arc::new(AtomicUsize::new(0));
+    crate::agent_events::register_sink(
+        session_id,
+        Arc::new(TerminalPhaseCounter(delivered.clone())),
+    );
+    let assert_observer_live = || {
+        crate::agent_events::emit_event(&crate::agent_events::AgentEvent::TurnPhaseChanged {
+            session_id: session_id.to_string(),
+            phase: crate::agent_events::AgentTurnPhase::Terminal {
+                reply: "observer control".to_string(),
+                outcome: Box::new(crate::agent_events::AgentTerminalOutcome::new(
+                    crate::agent_events::AgentTerminalKind::Natural,
+                    "done",
+                )),
+            },
+        });
+        assert_eq!(
+            delivered.swap(0, Ordering::SeqCst),
+            1,
+            "observer must be live"
+        );
+    };
+    assert_observer_live();
+
     let status = crate::stdlib::json_to_vm_value(&json!({
         "final_status": "failed",
         "stop_reason": "error",
@@ -863,28 +902,37 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
         );
         assert_eq!(
             pending.stage,
-            super::super::AgentFinalizationStage::PromptOutcomeProjected
+            super::super::AgentFinalizationStage::TurnPhaseRecorded
         );
     });
-    let terminal_errors = crate::agent_sessions::transcript(session_id)
-        .and_then(|transcript| transcript.as_dict().cloned())
-        .and_then(|transcript| transcript.get("events").cloned())
-        .and_then(|events| match events {
-            crate::value::VmValue::List(events) => Some(
-                events
-                    .iter()
-                    .filter(|event| {
-                        event
-                            .as_dict()
-                            .and_then(|event| event.get("kind"))
-                            .is_some_and(|kind| kind.display() == "agent_loop_terminal_error")
-                    })
-                    .count(),
-            ),
-            _ => None,
-        })
-        .unwrap_or(0);
-    assert_eq!(terminal_errors, 1);
+    let count_kind = |kind: &str| {
+        crate::agent_sessions::transcript(session_id)
+            .and_then(|transcript| transcript.as_dict().cloned())
+            .and_then(|transcript| transcript.get("events").cloned())
+            .and_then(|events| match events {
+                crate::value::VmValue::List(events) => Some(
+                    events
+                        .iter()
+                        .filter(|event| {
+                            event
+                                .as_dict()
+                                .and_then(|event| event.get("kind"))
+                                .is_some_and(|actual| actual.display() == kind)
+                        })
+                        .count(),
+                ),
+                _ => None,
+            })
+            .expect("retained transcript events")
+    };
+    assert_eq!(count_kind("agent_loop_terminal_error"), 1);
+    assert_eq!(count_kind("turn_phase_changed"), 1);
+    assert_eq!(
+        delivered.load(Ordering::SeqCst),
+        0,
+        "failed persistence cannot publish finality"
+    );
+    assert_observer_live();
 
     let mut retry = crate::value::DictMap::new();
     retry.put_str("retry_run_id", run_id);
@@ -898,26 +946,20 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     .await
     .expect_err("retry still sees the deliberately closed store");
     assert!(retry_error.to_string().contains("closed"));
-    let terminal_errors_after_retry = crate::agent_sessions::transcript(session_id)
-        .and_then(|transcript| transcript.as_dict().cloned())
-        .and_then(|transcript| transcript.get("events").cloned())
-        .and_then(|events| match events {
-            crate::value::VmValue::List(events) => Some(
-                events
-                    .iter()
-                    .filter(|event| {
-                        event
-                            .as_dict()
-                            .and_then(|event| event.get("kind"))
-                            .is_some_and(|kind| kind.display() == "agent_loop_terminal_error")
-                    })
-                    .count(),
-            ),
-            _ => None,
-        })
-        .unwrap_or(0);
-    assert_eq!(terminal_errors_after_retry, 1);
+    assert_eq!(count_kind("agent_loop_terminal_error"), 1);
+    assert_eq!(
+        count_kind("turn_phase_changed"),
+        1,
+        "retry must reuse the recorded phase"
+    );
+    assert_eq!(
+        delivered.load(Ordering::SeqCst),
+        0,
+        "failed retry cannot publish finality"
+    );
+    assert_observer_live();
 
+    crate::agent_events::clear_session_sinks(session_id);
     crate::agent_sessions::reset_session_store();
     super::super::reset_agent_session_host_state();
 }
