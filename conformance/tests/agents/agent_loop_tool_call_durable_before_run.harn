@@ -39,9 +39,11 @@ preferred_tool_format = "native"
           const transcript_event = event.payload?.transcript_event ?? {}
           if transcript_event.kind == "tool_call" || transcript_event.kind == "tool_call_update" {
             seen_while_running = seen_while_running
-              + [transcript_event.kind + ":" + to_string(transcript_event.metadata?.tool_name)
-                + ":"
-                + to_string(transcript_event.metadata?.status)]
+              + [
+                transcript_event.kind + ":" + to_string(transcript_event.metadata?.tool_name)
+                  + ":"
+                  + to_string(transcript_event.metadata?.status),
+              ]
           }
         }
         return SlowOutcome {success: true}
