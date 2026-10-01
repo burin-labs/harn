@@ -13,6 +13,10 @@ import {
 //
 //   harn run scripts/run_approval_review_calibration.harn
 //   harn run scripts/run_approval_review_calibration.harn -- --model <id>
+//   harn run scripts/run_approval_review_calibration.harn -- --policy <overlay.toml>
+//
+// `--policy` overlays a TOML file on the runtime's bundled policy, and
+// `--diagnostics` adds the reviewer trace to the receipt.
 //
 // Writes a receipt when --receipt is given, so a PR can carry the run rather
 // than a claim about it.
@@ -46,9 +50,22 @@ fn main(harness: Harness) {
     build_marker: __flag_value(argv, "--build-marker", ""),
   }
   const policy_path = trim(to_string(args.policy))
-  const policy_doc = approval_review_policy(
-    policy_path == "" ? {} : toml_parse(harness.fs.read_text(policy_path)),
-  )
+  const overlay = if policy_path == "" {
+    Ok({})
+  } else {
+    try {
+      toml_parse(harness.fs.read_text(policy_path))
+    }
+  }
+  // A bad overlay must stop the run. Falling back to the bundled policy would
+  // produce a receipt that names the overlay while measuring something else.
+  if is_err(overlay) {
+    harness.stdio.println(
+      "could not read policy overlay at " + policy_path + ": " + to_string(unwrap_err(overlay)),
+    )
+    return 2
+  }
+  const policy_doc = approval_review_policy(unwrap(overlay) ?? {})
   const policy = if trim(to_string(args.model)) != "" {
     policy_doc + {reviewer: (policy_doc?.reviewer ?? {}) + {model: trim(to_string(args.model))}}
   } else {
