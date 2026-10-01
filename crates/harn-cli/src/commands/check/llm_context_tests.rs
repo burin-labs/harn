@@ -2,12 +2,13 @@ use super::*;
 
 fn policy_context(dir: &Path, supports_effort: bool) -> LlmCheckContext {
     let modes = if supports_effort { "effort" } else { "enabled" };
+    let levels = if supports_effort { "\"high\"" } else { "" };
     std::fs::write(
         dir.join("harn.toml"),
         format!(
             "[[capabilities.provider.test-provider]]\nmodel_match = \"configured-model\"\n\
              thinking_modes = [\"{modes}\"]\nreasoning_effort_supported = {supports_effort}\n\
-             reasoning_effort_levels = [\"high\"]\n"
+             reasoning_effort_levels = [{levels}]\n"
         ),
     )
     .unwrap();
