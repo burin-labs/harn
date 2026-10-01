@@ -101,16 +101,6 @@ pub enum HostlibError {
         message: String,
     },
 
-    /// A spawn required a platform sandbox mechanism this host cannot supply.
-    /// Converts to the VM's own typed refusal, never to a message string.
-    #[error("{refusal}")]
-    SandboxMechanismUnavailable {
-        /// Fully-qualified builtin name.
-        builtin: &'static str,
-        /// Harn's typed refusal.
-        refusal: Box<harn_vm::process_sandbox::SandboxMechanismUnavailable>,
-    },
-
     /// A host capability cannot preserve the active sandbox contract.
     #[error("{message}")]
     SandboxUnsupported {
@@ -136,6 +126,15 @@ pub enum HostlibError {
         builtin: &'static str,
         /// The verbatim floor rationale (never-approvable reason).
         message: String,
+    },
+    /// A spawn required a platform sandbox mechanism this host cannot supply.
+    /// Converts to the VM's own typed refusal, never to a message string.
+    #[error("{refusal}")]
+    SandboxMechanismUnavailable {
+        /// Fully-qualified builtin name.
+        builtin: &'static str,
+        /// Harn's typed refusal.
+        refusal: Box<harn_vm::process_sandbox::SandboxMechanismUnavailable>,
     },
 }
 
