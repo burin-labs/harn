@@ -1,11 +1,10 @@
 use harn_builtin_meta::CapabilityId;
 
 use super::{
-    active_backend_available, active_backend_filesystem_available,
-    active_backend_filesystem_mechanism, active_backend_name, SandboxMechanism,
+    active_backend_available, active_backend_name, ActiveBackend, SandboxBackend, SandboxMechanism,
     SandboxMechanismAvailability, SandboxMechanismUnavailable,
 };
-use crate::orchestration::{current_execution_policy, SandboxProfile};
+use crate::orchestration::{current_execution_policy, CapabilityPolicy, SandboxProfile};
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -90,12 +89,20 @@ pub const SANDBOX_CONFINEMENT_SCHEMA: &str = "harn.process.sandbox_confinement.v
 /// before the first spawn, to tell a person why every confined command will be
 /// refused. `os_hardened_refusal` is the exact value a `catch` observes when an
 /// `os_hardened` spawn is refused for the missing mechanism, so a notice read
-/// here and a refusal caught later cannot disagree. It covers only the host
-/// fact: a policy dimension the mechanism does not confine is refused per
-/// spawn, with its own `does_not_confine` value.
+/// here and a refusal caught later under the same policy cannot disagree.
+/// The refusal uses the current policy's dimensions with the hardened profile;
+/// each spawn still checks its own policy independently.
 pub fn host_confinement() -> VmValue {
-    let mechanism_name = active_backend_filesystem_mechanism();
-    let confines = active_backend_filesystem_available();
+    let policy = CapabilityPolicy {
+        sandbox_profile: SandboxProfile::OsHardened,
+        ..current_execution_policy().unwrap_or_default()
+    };
+    confinement_for::<ActiveBackend>(&policy)
+}
+
+fn confinement_for<B: SandboxBackend>(policy: &CapabilityPolicy) -> VmValue {
+    let mechanism_name = B::filesystem_mechanism();
+    let confines = B::filesystem_available();
     let refusal = if confines {
         VmValue::Nil
     } else {
@@ -104,19 +111,21 @@ pub fn host_confinement() -> VmValue {
             .copied()
             .find(|mechanism| mechanism.as_str() == mechanism_name)
             .unwrap_or(SandboxMechanism::Unconfined);
-        // The same availability each backend's own refusal states: a platform
-        // with no backend has nothing to be absent, it simply confines nothing.
-        let availability = if mechanism == SandboxMechanism::Unconfined {
-            SandboxMechanismAvailability::DoesNotConfine
-        } else {
-            SandboxMechanismAvailability::AbsentOnHost
-        };
-        SandboxMechanismUnavailable::new(mechanism, availability, SandboxProfile::OsHardened)
+        // Spawn checks the enforcement row before preparing the backend.
+        // Preserve its policy-dependent dimensions on unconfined platforms.
+        super::enforcement::refusal_for_mechanism(mechanism_name, policy)
+            .unwrap_or_else(|| {
+                SandboxMechanismUnavailable::new(
+                    mechanism,
+                    SandboxMechanismAvailability::AbsentOnHost,
+                    SandboxProfile::OsHardened,
+                )
+            })
             .thrown_value()
     };
     let mut dict = std::collections::BTreeMap::new();
     dict.put_str("schema", SANDBOX_CONFINEMENT_SCHEMA);
-    dict.put_str("backend", active_backend_name());
+    dict.put_str("backend", B::name());
     dict.put_str("mechanism", mechanism_name);
     dict.insert("confines_processes".to_string(), VmValue::Bool(confines));
     dict.insert("os_hardened_refusal".to_string(), refusal);
@@ -126,9 +135,13 @@ pub fn host_confinement() -> VmValue {
 #[crate::stdlib::macros::harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "sandbox_confinement() -> {schema: string, backend: string, mechanism: string, confines_processes: bool, os_hardened_refusal: {category: string, message: string, source: string, sandbox_mechanism: {schema: string, mechanism: string, availability: string, profile: string, requirement: string, selector_honored: bool}}?}",
+    sig = "sandbox_confinement() -> {schema: string, backend: string, mechanism: string, confines_processes: bool, os_hardened_refusal: {category: string, message: string, source: string, sandbox_mechanism: {schema: string, mechanism: string, availability: string, profile: string, requirement: string, selector_honored: bool, unconfined: list<string>?}}?}",
     category = "sandbox"
 )]
 fn sandbox_confinement_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(host_confinement())
 }
+
+#[cfg(test)]
+#[path = "introspection_tests.rs"]
+mod tests;

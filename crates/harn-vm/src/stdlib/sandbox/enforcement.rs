@@ -241,9 +241,7 @@ fn enforcement_for(filesystem_mechanism: &str) -> Option<&'static BackendEnforce
 pub(crate) fn ensure_spawn_enforceable<B: SandboxBackend + ?Sized>(
     policy: &CapabilityPolicy,
 ) -> Result<(), VmError> {
-    if let Some(refusal) =
-        enforcement_for(B::filesystem_mechanism()).and_then(|row| refusal_for(row, policy))
-    {
+    if let Some(refusal) = refusal_for_mechanism(B::filesystem_mechanism(), policy) {
         return Err(refusal.into_error());
     }
     #[cfg(target_os = "macos")]
@@ -261,6 +259,13 @@ pub(crate) fn ensure_spawn_enforceable<B: SandboxBackend + ?Sized>(
         }
         Ok(())
     }
+}
+
+pub(super) fn refusal_for_mechanism(
+    mechanism: &str,
+    policy: &CapabilityPolicy,
+) -> Option<SandboxMechanismUnavailable> {
+    enforcement_for(mechanism).and_then(|row| refusal_for(row, policy))
 }
 
 fn refusal_for(

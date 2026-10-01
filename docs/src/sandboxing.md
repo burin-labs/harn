@@ -769,7 +769,9 @@ available on the running host. On Linux, the backend can be available while
 Landlock is unavailable, so check `confines_processes` before promising confinement.
 
 When the mechanism is unavailable, `os_hardened_refusal` contains the exact
-structured value an `os_hardened` spawn throws. Otherwise it is `nil`.
+structured value an `os_hardened` spawn throws under the current execution
+policy. On an unconfined platform, its `sandbox_mechanism.unconfined` list
+names the dimensions that policy requires. Otherwise it is `nil`.
 Both `harness.process.run` and `harness.tools.run_command` preserve this value
 in a `catch` binding. This host status doesn't guarantee that every requested
 policy dimension is enforceable; each spawn checks its own policy.
