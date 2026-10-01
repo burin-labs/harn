@@ -47,6 +47,24 @@ Plain `harn run` executions use the same execution identity for the record id.
 Workflow records retain their workflow identity and carry the execution owner
 inside `evidence.execution_id`.
 
+## Reasoning receipts
+
+`evidence.reasoning_receipts` records the reasoning directive resolved for each
+provider request and the value read from its built request body. For example,
+`resolved_level: "xhigh"` with `sent_value: "high"` shows that the dialect
+lowered the requested effort. Retries can produce more than one receipt for a
+logical call.
+
+Agent sessions journal these receipts when the request body is built, so a
+cancelled call retains its receipt. Hosts preserve them when they call
+`materialize_session_run_record`. New sessions with no provider requests carry
+an empty list. Journals produced before receipt reporting carry `null`, meaning
+unmeasured. Receipt indices start at zero for each invocation of a session.
+
+Run records retain the first 1,024 receipts. Additional receipts produce a
+`reasoning_receipts` gap with code `receipt_limit_exceeded` and the discarded
+count. Consumers must treat that list as partial evidence.
+
 ## Durable agent-event correlation
 
 Agent events written inside a VM execution carry the same `execution_id`.

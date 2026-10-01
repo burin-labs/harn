@@ -65,17 +65,10 @@ impl Vm {
             });
         }
         let dropped = crate::llm::dropped_reasoning_receipts();
-        if dropped > 0 {
+        if let Some(gap) = crate::llm::reasoning_receipt::overflow_gap(dropped) {
             // A truncated list must not read as the whole run. The overflow is
             // named as a gap rather than left to look like a short run.
-            gaps.push(crate::orchestration::RunEvidenceGapRecord {
-                component: "reasoning_receipts".to_string(),
-                code: "receipt_limit_exceeded".to_string(),
-                message: format!(
-                    "{dropped} reasoning receipts past the first {} were not retained",
-                    crate::llm::reasoning_receipt::MAX_REASONING_RECEIPTS
-                ),
-            });
+            gaps.push(gap);
         }
         crate::orchestration::ExecutionEvidenceRecord {
             evaluation_receipts: Some(evaluation_receipts),

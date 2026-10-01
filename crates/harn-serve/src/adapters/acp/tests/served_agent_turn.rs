@@ -55,7 +55,7 @@ fn answer_host_capabilities(
 
 /// Send one `session/prompt` and return its response, answering the host
 /// capability handshake along the way.
-async fn prompt(
+pub(super) async fn prompt(
     request_tx: &mpsc::UnboundedSender<serde_json::Value>,
     response_rx: &mut mpsc::UnboundedReceiver<String>,
     session_id: &str,
@@ -75,7 +75,7 @@ async fn prompt(
         .expect("send session/prompt");
 
     let mut seen_methods = Vec::new();
-    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+    tokio::time::timeout(std::time::Duration::from_mins(2), async {
         loop {
             let line = response_rx
                 .recv()

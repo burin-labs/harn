@@ -14,6 +14,10 @@
 
 use serde_json::Value;
 
+pub(crate) const REASONING_RECEIPTS_REPORTED: &str =
+    "/transcript_event/metadata/reasoning_receipts_reported";
+pub(crate) const REASONING_RECEIPT: &str = "/transcript_event/metadata/receipt";
+
 /// Canonical journal identity, with fallbacks for older transcript envelopes.
 pub(crate) fn tool_call_id(event: &harn_session_store::StoredEvent) -> Option<String> {
     event

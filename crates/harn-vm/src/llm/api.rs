@@ -385,15 +385,19 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
     request.emit_reminder_lifecycle();
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
     let observed = observed.clone();
+    let reasoning_receipts = observed.reasoning_receipts();
     let result = tokio::task::spawn(crate::orchestration::scope_inline_subtask(async move {
-        if let Some(context) = raw_capture_context {
-            crate::llm::agent_observe::with_raw_provider_capture_context(context, async {
+        super::reasoning_receipt::scope_request_receipts(reasoning_receipts, async {
+            if let Some(context) = raw_capture_context {
+                crate::llm::agent_observe::with_raw_provider_capture_context(context, async {
+                    vm_call_llm_full_inner_offthread(&observed, &request, Some(delta_tx)).await
+                })
+                .await
+            } else {
                 vm_call_llm_full_inner_offthread(&observed, &request, Some(delta_tx)).await
-            })
-            .await
-        } else {
-            vm_call_llm_full_inner_offthread(&observed, &request, Some(delta_tx)).await
-        }
+            }
+        })
+        .await
     }))
     .await
     .map_err(|join_err| {

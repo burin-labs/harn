@@ -156,6 +156,7 @@ async fn stamp_run_started(session_id: &str) -> Result<(), VmError> {
         "Agent loop started",
         Some(serde_json::json!({
             "execution_id": execution_id,
+            "reasoning_receipts_reported": true,
             "lifecycle_state": crate::agent_events::AgentLifecycleState::Running.wire_name(),
         })),
     );
