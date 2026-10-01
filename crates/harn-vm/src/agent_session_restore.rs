@@ -276,7 +276,7 @@ fn provider_tool_call<'a>(
 /// result carries it only on the provider message stored beside it; an
 /// assistant turn's call carries it only in that message's `tool_calls`.
 /// Without the last, a call cut off before its result replays as "tool"
-/// (burin-labs/burin-code#9208).
+/// (harn#9061).
 fn tool_name(
     transcript: &serde_json::Value,
     raw_message: Option<&serde_json::Value>,
