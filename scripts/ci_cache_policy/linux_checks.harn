@@ -772,13 +772,15 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
   const ready_needs = ready_job?.needs ?? []
   const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for Linux security tests")
   const ready_command = trim(ready_step?.run ?? "")
+  // The waiter reads the producer's state, so a queued or running producer is
+  // pending rather than spending the wait. Gating the barrier on producer
+  // completion as well only delays the sandbox proof behind the test phase.
   if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
-      != "15"
-    || trim(ready_step?.env?.HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
-      != "6"
-    || ready_needs != ["changes", "rust-check-inputs"]
-    || !contains(trim(ready_job?.if ?? ""), "needs.rust-check-inputs.result == 'success'")
+      != ARTIFACT_READY_TIMEOUT_MINUTES
+    || ready_step?.env?.HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS != nil
+    || ready_needs != ["changes"]
+    || trim(ready_job?.if ?? "") != "needs.changes.outputs.rust == 'true'"
     || trim(ready_job?.permissions?.actions ?? "") != "read"
     || trim(ready_job?.permissions?.contents ?? "")
       != "read"
@@ -788,7 +790,7 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
     || len(matching_steps(ready_job, PERSISTENT_SCCACHE_ACTION))
       > 0
     || len(matching_steps(ready_job, RUST_CACHE_ACTION)) > 0 {
-    return ["ci.yml:security-tests-ready must wait for the security archive producer to finish"]
+    return ["ci.yml:security-tests-ready must be the bounded free-hosted security archive barrier"]
   }
   return []
 }
