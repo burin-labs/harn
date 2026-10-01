@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
     (
         "harn-vm/src/stdlib/sandbox/command_for.rs",
-        4,
+        6,
         "the funnel: builds the command and closes its environment",
     ),
     (

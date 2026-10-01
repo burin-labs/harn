@@ -10,8 +10,8 @@ use super::{active_sandbox_policy, build_std_command, build_tokio_command, proce
 
 /// Close a freshly built command's environment under an active session policy:
 /// the choke point that makes the environment contract structural, since every
-/// spawn seam in the VM and `harn-hostlib` reaches a child through the three
-/// funnel fns below. Callers still layer `env`/`env_remove` on top afterward;
+/// spawn seam in the VM and `harn-hostlib` reaches a child through this module's
+/// constructors. Callers still layer `env`/`env_remove` on top afterward;
 /// sandbox confinement sets no env vars, so clearing cannot weaken it.
 ///
 /// Evaluates to whether it closed the environment, because a command's cleared
@@ -100,12 +100,53 @@ pub fn std_command_for_with_env_state(
     Ok((command, env_closed))
 }
 
-pub(super) fn close_std_command_environment(
+fn close_std_command_environment(
     mut command: Command,
     program: &str,
 ) -> Result<(Command, bool), VmError> {
     let env_closed = close_env_for_session!(command, program);
     Ok((command, env_closed))
+}
+
+/// Prepare a command for an exec-based supervisor. The caller carries the
+/// returned ruleset on `ruleset_fd`; a namespace helper enters it only after
+/// constructing the network boundary. No callback is lost in the projection.
+///
+/// The boolean reports whether the session policy cleared the environment.
+/// `None` means no confinement is active; an unavailable requested mechanism
+/// returns an error. The returned command has no confinement callbacks, so
+/// the caller must transfer and apply the returned confinement as directed.
+#[cfg(target_os = "linux")]
+pub fn command_for_reexec(
+    program: &str,
+    args: &[String],
+    ruleset_fd: i32,
+) -> Result<(Command, bool, Option<super::linux::ReexecConfinement>), VmError> {
+    use super::linux::{launcher_argv_with_ruleset, resolve_netns_launcher, ReexecConfinement};
+
+    let resolved = crate::stdlib::process::resolve_program_path_for_spawn(program);
+    let mut command = Command::new(&resolved);
+    command.args(args);
+    let confinement = match super::linux::transferable_confinement(program)? {
+        None => None,
+        Some(confinement) => {
+            let (policy, _) = active_sandbox_policy().expect("confinement requires policy");
+            if let Some(launcher) = resolve_netns_launcher(&policy)? {
+                command = Command::new(launcher);
+                command.args(launcher_argv_with_ruleset(
+                    &resolved,
+                    args,
+                    &confinement,
+                    confinement.ruleset_fd().map(|_| ruleset_fd),
+                ));
+                Some(ReexecConfinement::AfterNamespace(confinement))
+            } else {
+                Some(ReexecConfinement::BeforeExec(confinement))
+            }
+        }
+    };
+    let (command, env_closed) = close_std_command_environment(command, program)?;
+    Ok((command, env_closed, confinement))
 }
 
 pub fn tokio_command_for(
