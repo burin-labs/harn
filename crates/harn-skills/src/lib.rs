@@ -568,7 +568,7 @@ mod tests {
         assert!(skill.body.contains(procedure));
         assert!(skill
             .body
-            .contains("https://harnlang.com/docs/maintainer-release.html"));
+            .contains("https://harnlang.com/maintainer-release.html"));
         assert!(
             !skill.body.contains("```"),
             "release commands belong in the maintainer procedure"
