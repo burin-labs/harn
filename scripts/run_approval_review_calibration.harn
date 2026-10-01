@@ -1,3 +1,4 @@
+import { approval_review_policy } from "std/agent/approval_review"
 import {
   approval_review_corpus,
   approval_review_report,
@@ -12,14 +13,16 @@ import {
 //
 //   harn run scripts/run_approval_review_calibration.harn
 //   harn run scripts/run_approval_review_calibration.harn -- --model <id>
+//   harn run scripts/run_approval_review_calibration.harn -- --policy <overlay.toml>
+//
+// `--policy` overlays a TOML file on the runtime's bundled policy, and
+// `--diagnostics` adds the reviewer trace to the receipt.
 //
 // Writes a receipt when --receipt is given, so a PR can carry the run rather
 // than a claim about it.
 import { write_json } from "std/fs"
 
 const CORPUS_PATH = "crates/harn-stdlib/src/stdlib/agent/data/approval_review_calibration.toml"
-
-const POLICY_PATH = "crates/harn-vm/src/orchestration/policy/approval_review_policy.toml"
 
 fn format_rate(value: any) -> string {
   // nil is not 0. A rate over an empty subset is undefined, and printing 0.0
@@ -34,9 +37,11 @@ fn format_rate(value: any) -> string {
 fn main(harness: Harness) {
   const args = {
     model: __flag_value(argv, "--model", ""),
+    policy: __flag_value(argv, "--policy", ""),
     receipt: __flag_value(argv, "--receipt", ""),
     corpus: __flag_value(argv, "--corpus", CORPUS_PATH),
     verbose: contains(argv ?? [], "--verbose"),
+    diagnostics: contains(argv ?? [], "--diagnostics"),
     // Build provenance, supplied by the caller that actually probed the binary.
     // A receipt that does not say WHICH build answered cannot be checked later,
     // and the stdlib is include_str!'d, so a stale binary silently runs old
@@ -44,7 +49,30 @@ fn main(harness: Harness) {
     build_revision: __flag_value(argv, "--build-revision", ""),
     build_marker: __flag_value(argv, "--build-marker", ""),
   }
-  const policy_doc = read_toml_or_fail(pick(harness, ["fs", "stdio"]), POLICY_PATH)
+  const policy_path = trim(to_string(args.policy))
+  const overlay = if policy_path == "" {
+    Ok({})
+  } else {
+    try {
+      toml_parse(harness.fs.read_text(policy_path))
+    }
+  }
+  // A bad overlay must stop the run. Falling back to the bundled policy would
+  // produce a receipt that names the overlay while measuring something else.
+  if is_err(overlay) {
+    harness.stdio.println(
+      "could not read policy overlay at " + policy_path + ": " + to_string(unwrap_err(overlay)),
+    )
+    return 2
+  }
+  const resolved = try {
+    approval_review_policy(unwrap(overlay) ?? {})
+  }
+  if is_err(resolved) {
+    harness.stdio.println("invalid policy overlay: " + to_string(unwrap_err(resolved)))
+    return 2
+  }
+  const policy_doc = unwrap(resolved)
   const policy = if trim(to_string(args.model)) != "" {
     policy_doc + {reviewer: (policy_doc?.reviewer ?? {}) + {model: trim(to_string(args.model))}}
   } else {
@@ -124,7 +152,9 @@ fn main(harness: Harness) {
           build_revision: args.build_revision,
           build_marker_probe: args.build_marker,
           corpus_path: to_string(args.corpus),
-          policy_path: POLICY_PATH,
+          policy_path: policy_path == "" ? "bundled:approval_review" : policy_path,
+          policy_sha256: "sha256:" + sha256(json_stringify(policy)),
+          reviewer_trace: args.diagnostics ? harness.obs.agent_trace() : nil,
         },
     )
     harness.stdio.println("")
@@ -136,17 +166,6 @@ fn main(harness: Harness) {
     return 1
   }
   return 0
-}
-
-fn read_toml_or_fail(caps: {fs: HarnessFs, stdio: HarnessStdio}, path: string) -> dict {
-  const parsed = try {
-    toml_parse(caps.fs.read_text(path))
-  }
-  if is_err(parsed) {
-    caps.stdio.println("could not read policy at " + path + ": " + to_string(unwrap_err(parsed)))
-    return {}
-  }
-  return unwrap(parsed) ?? {}
 }
 
 /** `--name value` from argv, or `fallback`. */

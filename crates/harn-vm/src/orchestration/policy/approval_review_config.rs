@@ -33,6 +33,7 @@ pub static APPROVAL_REVIEW_POLICY: LazyLock<ApprovalReviewPolicy> = LazyLock::ne
 // No `Eq`: `BreakerConfig` carries a float share, and a policy is compared for
 // display and tests rather than used as a key.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApprovalReviewPolicy {
     pub version: u32,
     pub reviewer: ReviewerConfig,
@@ -41,9 +42,13 @@ pub struct ApprovalReviewPolicy {
     pub denylist: DenylistConfig,
     pub trust: TrustConfig,
     pub verdict: VerdictConfig,
+    /// Caller wording contributed by the host's reviewer session.
+    #[serde(default)]
+    pub host_guidance: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReviewerConfig {
     pub model: String,
     pub effort: String,
@@ -52,6 +57,9 @@ pub struct ReviewerConfig {
     /// supported; the field exists so the fail-closed choice is visible in the
     /// policy a reader inspects, not buried in a match arm.
     pub on_error: OnReviewerError,
+    /// An explicit caller route; absent means normal reviewer route selection.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -63,6 +71,7 @@ pub enum OnReviewerError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BreakerConfig {
     pub max_consecutive_denials: u32,
     pub max_denials_per_turn: u32,
@@ -70,22 +79,26 @@ pub struct BreakerConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FloorConfig {
     pub never_grant: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DenylistConfig {
     pub categories: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TrustConfig {
     pub trusted_inputs: Vec<String>,
     pub untrusted_inputs: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VerdictConfig {
     pub risk_levels: Vec<String>,
     pub authorization_levels: Vec<String>,

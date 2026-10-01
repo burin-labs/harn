@@ -357,6 +357,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/obligations" => "stdlib/agent/obligations.harn",
     "agent/judge" => "stdlib/agent/judge.harn",
     "agent/approval_review" => "stdlib/agent/approval_review.harn",
+    "agent/approval_review_policy_types" => "stdlib/agent/approval_review_policy_types.harn",
     "agent/approval_review_calibration" => "stdlib/agent/approval_review_calibration.harn",
     "agent/guardrails" => "stdlib/agent/guardrails.harn",
     "agent/step_judge" => "stdlib/agent/step_judge.harn",
