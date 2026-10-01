@@ -987,6 +987,7 @@ jobs:
           cache-on-failure: true
           cache-bin: false
           cache-workspace-crates: "true"
+          reuse-workspace-crates: "true"
           save: "true"
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
@@ -1013,6 +1014,11 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
+      # Name the commit this target was built from, for the next restore's
+      # workspace crate reuse. Only a fully successful build may claim it.
+      - name: Record the workspace cache source
+        if: success()
+        run: ./scripts/ci/reuse_workspace_crates.sh record "${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}"
       # Report the compiler cache on every tier, named by nothing it excludes.
       # Guarding this on a single tier is what let the owned pool run for
       # weeks with nobody able to say whether it was compiling warm or cold:
