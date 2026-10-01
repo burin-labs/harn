@@ -101,7 +101,7 @@ jobs:
           SOURCE_REVISION: ${{ github.sha }}
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
-            TARGET_VERSION=v$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml) \
+            WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)" \
             PAIRING_TEXT="$(git log -1 --format=%B HEAD)" \
             bash scripts/ci/consumer_canary.sh
 

@@ -24,9 +24,10 @@ EOF
 chmod +x "$scratch/bin/gh"
 
 canary() {
+  local workspace_version=${2:-1.2.4-dev}
   PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
     CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
-    TARGET_VERSION=v1.2.3-dev CANARY_POLL_SECONDS=0 PAIRING_TEXT="${1:-}" \
+    WORKSPACE_VERSION="$workspace_version" CANARY_POLL_SECONDS=0 PAIRING_TEXT="${1:-}" \
     GITHUB_OUTPUT="$scratch/gho" \
     bash "$root/scripts/ci/consumer_canary.sh" > "$scratch/out" 2>&1
   local status=$?
@@ -63,6 +64,20 @@ grep -q "verdict=pass conclusion=success run=42 wall_seconds=" "$scratch/out"
 grep -qx "verdict=pass" "$scratch/gho"
 grep -q "consumer=configured secret=CONSUMER_CANARY_REPOSITORY" "$scratch/out"
 grep -q -- '--ref main ' "$scratch/dispatched"
+grep -q -- '-f target=v1.2.3 ' "$scratch/dispatched"
+
+# The current development identity maps to the latest published tag, which is
+# the version the consumer accepts as its repin floor.
+echo "completed success" > "$scratch/run"
+canary "" 0.10.153-dev
+grep -q -- '-f target=v0.10.152 ' "$scratch/dispatched"
+
+# A prerelease that is not the workspace's canonical development identity has
+# no published target and must fail before contacting or dispatching to the
+# consumer.
+rm -f "$scratch/dispatched"
+refuses workspace_version_unpublished "" 1.2.4-rc.1
+[[ ! -e "$scratch/dispatched" ]]
 
 # Every other terminal state is red by name, and is still a settled verdict.
 for conclusion in failure cancelled timed_out none; do
@@ -77,7 +92,7 @@ echo "in_progress none" > "$scratch/run"
 : > "$scratch/gho"
 if PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
   CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
-  TARGET_VERSION=v1.2.3-dev CANARY_POLL_SECONDS=0 CANARY_DEADLINE_SECONDS=-1 \
+  WORKSPACE_VERSION=1.2.4-dev CANARY_POLL_SECONDS=0 CANARY_DEADLINE_SECONDS=-1 \
   GITHUB_OUTPUT="$scratch/gho" \
   bash "$root/scripts/ci/consumer_canary.sh" > "$scratch/out" 2>&1; then
   echo "an unconcluded consumer run reported green" >&2
@@ -92,7 +107,7 @@ fi
 # An unset repository secret arrives as a bare owner and fails by name.
 if PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/ \
   CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
-  TARGET_VERSION=v1.2.3-dev CANARY_POLL_SECONDS=0 \
+  WORKSPACE_VERSION=1.2.4-dev CANARY_POLL_SECONDS=0 \
   bash "$root/scripts/ci/consumer_canary.sh" > "$scratch/out" 2>&1; then
   echo "an unset consumer repository reported green" >&2
   exit 1
