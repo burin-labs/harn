@@ -427,8 +427,8 @@ pub struct Vm {
     /// Authority provenance used for the next root module graph. This can only
     /// move from ordinary user code to trusted host dispatch before loading.
     pub(crate) module_provenance: crate::module_artifact::ModuleProvenance,
-    /// Optional timing recorder shared by this VM execution tree.
-    pub(crate) module_phase_recorder: Option<super::ModulePhaseRecorder>,
+    /// Optional observations shared by this VM execution tree.
+    pub(super) recorders: Option<Box<super::work::VmRecorders>>,
     /// Successful module loads staged by an isolated graph transaction.
     /// `None` records immediately; `Some` commits the count with the graph.
     pub(crate) staged_module_load_count: Option<usize>,
@@ -621,7 +621,7 @@ impl VmBaseline {
             prepared_module_cache: self.prepared_module_cache.clone(),
             prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: self.module_provenance,
-            module_phase_recorder: None,
+            recorders: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::clone(&self.source_cache),
@@ -898,7 +898,7 @@ impl Vm {
             prepared_module_cache: crate::PreparedModuleCache::default(),
             prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: crate::module_artifact::ModuleProvenance::User,
-            module_phase_recorder: None,
+            recorders: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(BTreeMap::new()),
@@ -1185,7 +1185,7 @@ impl Vm {
             prepared_module_cache: self.prepared_module_cache.clone(),
             prepared_module_validation: self.prepared_module_validation.clone(),
             module_provenance: self.module_provenance,
-            module_phase_recorder: self.module_phase_recorder.clone(),
+            recorders: self.recorders.clone(),
             staged_module_load_count: None,
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
             source_cache: Arc::clone(&self.source_cache),

@@ -438,7 +438,7 @@ impl Vm {
                 &synthetic,
                 &source,
                 None,
-                self.module_phase_recorder.as_ref(),
+                self.module_phase_recorder(),
                 self.module_provenance,
                 &self.prepared_module_validation,
             )?
@@ -524,12 +524,8 @@ impl Vm {
         }
         Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), Arc::from(source));
 
-        let artifact = stdlib_module_artifact(
-            module,
-            &synthetic,
-            source,
-            self.module_phase_recorder.as_ref(),
-        )?;
+        let artifact =
+            stdlib_module_artifact(module, &synthetic, source, self.module_phase_recorder())?;
         self.imported_paths.push(synthetic.clone());
         let loaded = self.instantiate_stdlib_module(artifact.as_ref()).await;
         self.imported_paths.pop();
@@ -1222,7 +1218,7 @@ impl Vm {
                         &canonical,
                         &source,
                         None,
-                        self.module_phase_recorder.as_ref(),
+                        self.module_phase_recorder(),
                         ModuleProvenance::TrustedHostDispatch,
                         &self.prepared_module_validation,
                     )?,
@@ -1233,7 +1229,7 @@ impl Vm {
                         &canonical,
                         &source,
                         None,
-                        self.module_phase_recorder.as_ref(),
+                        self.module_phase_recorder(),
                         ModuleProvenance::User,
                         &self.prepared_module_validation,
                     )?,

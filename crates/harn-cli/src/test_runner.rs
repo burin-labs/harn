@@ -772,6 +772,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
+                    work: None,
                     timing_spans: Vec::new(),
                 });
                 continue;
@@ -791,6 +792,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
+                    work: None,
                     timing_spans: Vec::new(),
                 });
                 continue;
@@ -817,6 +819,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                 timeout: None,
                 duration_ms: 0,
                 phases: None,
+                work: None,
                 timing_spans: Vec::new(),
             }),
         }
@@ -1002,6 +1005,7 @@ fn stale_baseline_error(cases: &[TestCase], baseline: &TimingBaseline) -> Option
         timeout: None,
         duration_ms: 0,
         phases: None,
+        work: None,
         timing_spans: Vec::new(),
     })
 }

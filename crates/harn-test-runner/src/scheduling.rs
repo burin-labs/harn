@@ -94,16 +94,8 @@ where
                     Ok(worker) => worker,
                     Err(error) => {
                         infrastructure_errors.lock().unwrap().push(TestResult {
-                            name: "<worker error>".to_string(),
-                            file: String::new(),
-                            passed: false,
-                            skip_reason: None,
                             error: Some(error),
-                            captured_output: None,
-                            timeout: None,
-                            duration_ms: 0,
-                            phases: None,
-                            timing_spans: Vec::new(),
+                            ..TestResult::unmeasured("<worker error>", "", false, 0)
                         });
                         return;
                     }
@@ -345,10 +337,15 @@ mod tests {
         .unwrap();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&events);
+        let finished = Arc::new(Mutex::new(Vec::<TestResult>::new()));
+        let captured_results = Arc::clone(&finished);
         let progress = Arc::new(move |event| {
             captured.lock().unwrap().push(match event {
                 TestRunEvent::TestStarted { .. } => "started",
-                TestRunEvent::TestFinished(_) => "finished",
+                TestRunEvent::TestFinished(result) => {
+                    captured_results.lock().unwrap().push(result);
+                    "finished"
+                }
                 _ => "suite",
             });
         });
@@ -364,21 +361,17 @@ mod tests {
             },
             |_| Ok(()),
             |_, case| TestResult {
-                name: case.name.clone(),
-                file: case.file.display().to_string(),
-                passed: false,
-                skip_reason: None,
                 error: Some("deterministic failure".to_string()),
-                captured_output: None,
-                timeout: None,
-                duration_ms: 0,
-                phases: None,
-                timing_spans: Vec::new(),
+                ..TestResult::unmeasured(&case.name, case.file.display().to_string(), false, 0)
             },
         );
 
         assert_eq!(run.cases.len(), 1);
         assert!(run.infrastructure_errors.is_empty());
         assert_eq!(*events.lock().unwrap(), ["started", "finished"]);
+        let finished = finished.lock().unwrap();
+        assert_eq!(finished.len(), 1);
+        assert_eq!(finished[0].name, run.cases[0].name);
+        assert_eq!(finished[0].error, run.cases[0].error);
     }
 }

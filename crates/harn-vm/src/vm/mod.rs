@@ -23,6 +23,7 @@ mod stdlib_registration;
 pub mod subtask;
 mod task_cleanup;
 mod tool_callable;
+mod work;
 
 #[cfg(test)]
 mod depth_regression_tests;
@@ -55,6 +56,7 @@ pub use state::{Vm, VmBaseline};
 pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;
 pub use stdlib_artifact::{warm_embedded_stdlib, StdlibWarmReport};
 pub(crate) use task_cleanup::PendingTaskCleanup;
+pub use work::{VmWork, VmWorkRecorder};
 
 pub(crate) use call_args::CallArgs;
 pub(crate) use state::{

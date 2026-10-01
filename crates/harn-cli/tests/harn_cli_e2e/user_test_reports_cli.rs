@@ -34,6 +34,95 @@ fn run_test(temp: &TempDir, extra: &[&str]) -> Output {
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
+fn work_receipts_are_repeatable_and_detect_more_work_over_the_same_imports() {
+    let temp = TempDir::new().expect("tempdir");
+    write_fixture(
+        temp.path(), "suite/sum.harn",
+        "pub fn sum(n: int) -> int { let total = 0\n for i in range(0, n) { total = total + i }\n return total }\n",
+    );
+    let source = r#"
+import { sum } from "./sum.harn"
+pipeline test_work() { assert_eq(sum(10), 45) }
+pipeline test_child() {
+  const handle = spawn { sum(20) }
+  assert_eq(await(handle), 190)
+}
+"#;
+    write_fixture(temp.path(), "suite/test_work.harn", source);
+    let report_path = temp.path().join("work.json");
+    let mut reference = None;
+    for parallel in [false, false, true] {
+        let mut args = vec!["--json-out", report_path.to_str().unwrap()];
+        if parallel {
+            args.push("--parallel");
+        }
+        let output = run_test(&temp, &args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: Value = serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
+        assert_eq!(report["schemaVersion"], 5);
+        assert_eq!(report["summary"]["passed"], 2);
+        let counts: std::collections::BTreeMap<_, _> = report["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|case| {
+                let steps = case["work"]["vm_steps"].as_u64().expect("measured work");
+                assert!(steps > 0);
+                (case["name"].as_str().unwrap().to_owned(), steps)
+            })
+            .collect();
+        if let Some(reference) = &reference {
+            assert_eq!(&counts, reference);
+        } else {
+            reference = Some(counts);
+        }
+    }
+    write_fixture(
+        temp.path(),
+        "suite/test_work.harn",
+        &source.replace("sum(10), 45", "sum(20), 190"),
+    );
+    let output = run_test(&temp, &["--json-out", report_path.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
+    let work_case = report["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == "test_work")
+        .unwrap();
+    assert!(work_case["work"]["vm_steps"].as_u64().unwrap() > reference.unwrap()["test_work"]);
+
+    write_fixture(
+        temp.path(),
+        "suite/test_invalid.harn",
+        "pipeline test_invalid() { const value = }\n",
+    );
+    let output = run_test(&temp, &["--json-out", report_path.to_str().unwrap()]);
+    assert!(!output.status.success());
+    let report: Value = serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
+    let error_case = report["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["file"] == "test_invalid.harn")
+        .unwrap();
+    assert!(error_case
+        .get("work")
+        .expect("explicit unavailable measurement")
+        .is_null());
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
 fn junit_and_json_out_written_for_passing_user_tests() {
     let temp = TempDir::new().expect("tempdir");
     write_fixture(temp.path(), "suite/test_pass.harn", PASS_PIPELINE);

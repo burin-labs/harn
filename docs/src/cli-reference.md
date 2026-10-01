@@ -714,7 +714,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--api-key <key>` | Bearer API key for `harn test agents-conformance`; also read from `HARN_AGENTS_CONFORMANCE_API_KEY` |
 | `--category <name>` | Agents conformance category to run; repeatable or comma-separated |
 | `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
-| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 4 includes typed timeout, phase, named `std/timing` spans, shard-plan, cost-regression, aggregate, latency-distribution, and captured-output data |
+| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 5 includes per-case `work.vm_steps`, typed timeout, phase, named `std/timing` spans, shard-plan, cost-regression, aggregate, latency-distribution, and captured-output data |
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
 | `--parallel` | Run a bounded worker pool. User tests run in-process; conformance tests run in isolated processes because each worker owns process-wide runtime state. |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). The default follows available CPU and memory, capped at 8. |
@@ -731,7 +731,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget; forces a single measurement worker |
 | `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget; forces a single measurement worker |
 | `--timing-environment <name>` | Stamp a stable enforcing-environment identity into a user-test JSON receipt; also read from `HARN_TEST_TIMING_ENVIRONMENT` |
-| `--timing-baseline <path>` | Read shard weights and absolute-cost baselines from a schema-v4 Harn user-test receipt. Requires the same `--timing-environment`; stale deleted or renamed cases fail the run. |
+| `--timing-baseline <path>` | Read shard weights and absolute-cost baselines from a schema-v5 Harn user-test receipt. Requires the same `--timing-environment`; stale deleted or renamed cases fail the run. |
 | `--max-cost-regression-percent <percent>` | Fail a case whose execution cost grows beyond this percentage of its receipt baseline (default: 25) |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
 | `--replay` | Replay recorded LLM responses |
@@ -3905,7 +3905,8 @@ the Harn `server_version`, stable `worker_id`, and `process_id`. Then call
 `max_execute_ms`, `parallel`, `fail_fast`, `jobs`, `shard`, `skill_dirs`, or
 `diagnose`. Each response includes the same worker identity, typed test
 summary, cumulative `run_count`, and cache counters before and after that run.
-The advertised `test_run.schema_version` is 4; summaries include a separate
+The advertised `test_run.schema_version` is 5; summaries include per-case
+`work.vm_steps` (or `work: null` when no VM was constructed) and a separate
 skipped count, the shared duration distribution, and per-case and aggregate module attribution.
 `shutdown` returns the final run and cache receipt; closing stdin also stops the
 worker. Every test still receives fresh VM and module state; only reusable
