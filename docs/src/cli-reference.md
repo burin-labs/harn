@@ -7,6 +7,36 @@ To add a new subcommand or port an existing one off Rust, see
 machine-readable side of `--json` modes, see the
 [`harn --json` contract](./cli-json-contract.md).
 
+## Durable provider allowance
+
+`--spend-policy PATH` applies a TOML policy to provider calls in the invocation's
+execution tree. `HARN_SPEND_POLICY` supplies the path when the flag is absent.
+Subprocess invocations must receive their own policy path. Multicall LSP/DAP
+entry points don't parse this flag.
+
+```toml
+ledger_path = "/absolute/private/path/spend.sqlite"
+scope = "catalog-maintenance"
+
+[limits]
+lifetime_limit_microusd = 2000000
+```
+
+Limits use integer micro-USD, with no floating-point rounding in admission.
+The optional `daily_limit_microusd` and `monthly_limit_microusd` fields reset at
+UTC day and calendar-month boundaries. At least one nonnegative ceiling is required.
+Lifetime ceilings don't reset. Concurrent invocations share the allowance when
+they use the same ledger and scope.
+
+Harn reserves the catalog's cost bound before transport. Complete usage releases
+only the proven unused amount; interrupted calls and missing usage keep their reservations.
+Unknown pricing is refused before transport. An ordinary reopen can't change
+stored limits. Authorized host updates use `MachineSpendQuota::update_policy`
+and leave a durable audit receipt.
+
+Keep the policy and ledger outside an agent's writable roots. A host embedding
+Harn can install the same allowance through `MachineSpendQuota::scope`.
+
 ## harn self
 
 Use a released Harn binary for an exact before-and-after check without

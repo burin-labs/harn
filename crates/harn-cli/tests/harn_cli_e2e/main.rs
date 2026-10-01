@@ -44,6 +44,7 @@ mod dispatch_echo;
 mod dispatch_snapshot;
 mod doctor_cli;
 mod doctor_dispatch;
+mod durable_spend_policy;
 mod environment_registry_cli;
 mod eval_calibrate_cli;
 mod eval_cluster_dispatch;

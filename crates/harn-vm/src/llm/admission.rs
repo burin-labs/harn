@@ -503,19 +503,9 @@ pub(crate) fn machine_remaining_usd() -> Result<Option<f64>, VmError> {
     let machine = SCOPE.with(|slot| slot.borrow().machine.clone());
     machine
         .map(|quota| {
-            let receipt = quota.receipt()?;
-            if receipt.contract_broken {
-                return Ok(0.0);
-            }
-            let remaining = [
-                receipt.daily_remaining_microusd,
-                receipt.monthly_remaining_microusd,
-            ]
-            .into_iter()
-            .flatten()
-            .min()
-            .ok_or_else(|| error(DenialKind::InvalidBudget, "machine spend limit is absent"))?;
-            Ok(remaining as f64 / 1_000_000.0)
+            quota
+                .remaining_microusd()
+                .map(|remaining| remaining as f64 / 1_000_000.0)
         })
         .transpose()
 }
