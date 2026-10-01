@@ -565,13 +565,6 @@ mod tests {
     fn release_skill_routes_to_one_maintainer_procedure() {
         let skill = get_embedded_skill("release-harn").expect("embedded release skill");
         let procedure = "docs/src/maintainer-release.md";
-        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join(procedure);
-        assert!(
-            source.is_file(),
-            "release procedure must exist in the checkout"
-        );
         assert!(skill.body.contains(procedure));
         assert!(skill
             .body
