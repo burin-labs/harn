@@ -205,6 +205,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // cannot be honored stops startup instead of degrading silently, and that
   // a rejected relative override writes no cache beside the caller.
   "crates/harn-cli/tests/harn_cli_e2e/cache_dir_cli.rs",
+  // Shared spend admission must cross concurrent CLI processes and a restart.
+  "crates/harn-cli/tests/harn_cli_e2e/durable_spend_policy.rs",
   "crates/harn-cli/tests/harn_cli_fast/burin_mini_playground.rs",
   "crates/harn-cli/tests/harn_cli_e2e/check_result_cache.rs",
   // Imported-site manifests and their persisted cache must survive fresh CLI processes.

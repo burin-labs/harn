@@ -14,17 +14,19 @@ use time::{Date, OffsetDateTime};
 use uuid::Uuid;
 
 use super::{error, unavailable, DenialKind};
-use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteSchema};
+use crate::runtime_sqlite::{initialize_runtime_sqlite_migrating, RuntimeSqliteSchema};
 use crate::value::{ErrorCategory, VmError};
 
 const SCALE: i64 = 1_000_000;
+const LIFETIME_PERIOD: &str = "L";
 const SQLITE_SCHEMA: RuntimeSqliteSchema = RuntimeSqliteSchema::new(
     "machine_spend_quota",
-    1,
+    2,
     "CREATE TABLE IF NOT EXISTS spend_policy (scope TEXT PRIMARY KEY, daily_limit INTEGER, monthly_limit INTEGER, contract_broken INTEGER NOT NULL DEFAULT 0);
      CREATE TABLE IF NOT EXISTS spend_period (scope TEXT NOT NULL, period TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), PRIMARY KEY(scope, period));
      CREATE TABLE IF NOT EXISTS spend_attempt (id TEXT PRIMARY KEY, scope TEXT NOT NULL, day TEXT NOT NULL, month TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), actual INTEGER, settled INTEGER NOT NULL DEFAULT 0, created_ms INTEGER NOT NULL);
-     CREATE TABLE IF NOT EXISTS spend_policy_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, at_ms INTEGER NOT NULL, approved_by TEXT NOT NULL, old_daily INTEGER, old_monthly INTEGER, new_daily INTEGER, new_monthly INTEGER);",
+     CREATE TABLE IF NOT EXISTS spend_policy_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, at_ms INTEGER NOT NULL, approved_by TEXT NOT NULL, old_daily INTEGER, old_monthly INTEGER, new_daily INTEGER, new_monthly INTEGER);
+     CREATE INDEX IF NOT EXISTS spend_attempt_scope ON spend_attempt(scope);",
 );
 
 #[derive(Clone, Debug)]
@@ -39,10 +41,24 @@ struct QuotaConfig {
     clock: Arc<dyn harn_clock::Clock>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MachineSpendPolicy {
     pub daily_limit_microusd: Option<i64>,
     pub monthly_limit_microusd: Option<i64>,
+    /// Ceiling for the stable billing scope across restarts and calendar periods.
+    pub lifetime_limit_microusd: Option<i64>,
+}
+
+impl MachineSpendPolicy {
+    fn valid(&self) -> bool {
+        let limits = [
+            self.daily_limit_microusd,
+            self.monthly_limit_microusd,
+            self.lifetime_limit_microusd,
+        ];
+        limits.iter().any(Option::is_some) && limits.iter().flatten().all(|limit| *limit >= 0)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -54,8 +70,38 @@ pub struct MachineSpendReceipt {
     pub contract_broken: bool,
     pub daily_remaining_microusd: Option<i64>,
     pub monthly_remaining_microusd: Option<i64>,
+    pub lifetime_reserved_microusd: i64,
+    pub lifetime_actual_known_microusd: i64,
+    pub lifetime_usage_unknown_attempts: u64,
+    pub lifetime_remaining_microusd: Option<i64>,
     pub daily_reset_unix_ms: i64,
     pub monthly_reset_unix_ms: i64,
+}
+
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum QuotaPeriod {
+    Day,
+    Month,
+    Lifetime,
+}
+
+struct LifetimeSpend {
+    reserved: i64,
+    actual_known: i64,
+    usage_unknown: u64,
+}
+
+fn lifetime_spend(connection: &Connection, scope: &str) -> Result<LifetimeSpend, VmError> {
+    connection.query_row(
+        "SELECT COALESCE(SUM(reserved), 0), COALESCE(SUM(actual), 0), COALESCE(SUM(CASE WHEN actual IS NULL THEN 1 ELSE 0 END), 0) FROM spend_attempt WHERE scope = ?1",
+        [scope],
+        |row| Ok(LifetimeSpend {
+            reserved: row.get(0)?,
+            actual_known: row.get(1)?,
+            usage_unknown: row.get::<_, i64>(2)?.try_into().unwrap_or(u64::MAX),
+        }),
+    ).map_err(db_error)
 }
 
 #[derive(Debug)]
@@ -84,12 +130,7 @@ impl MachineSpendQuota {
         clock: Arc<dyn harn_clock::Clock>,
     ) -> Result<Self, VmError> {
         let scope = scope.into();
-        if !path.as_ref().is_absolute()
-            || scope.trim().is_empty()
-            || policy.daily_limit_microusd.is_none() && policy.monthly_limit_microusd.is_none()
-            || policy.daily_limit_microusd.is_some_and(|limit| limit < 0)
-            || policy.monthly_limit_microusd.is_some_and(|limit| limit < 0)
-        {
+        if !path.as_ref().is_absolute() || scope.trim().is_empty() || !policy.valid() {
             return Err(error(
                 DenialKind::InvalidBudget,
                 "machine spend quota requires an absolute path, a scope, and valid limits",
@@ -103,8 +144,8 @@ impl MachineSpendQuota {
         let connection = connect(&config.path)?;
         connection
             .execute(
-                "INSERT OR IGNORE INTO spend_policy(scope, daily_limit, monthly_limit) VALUES (?1, ?2, ?3)",
-                params![config.scope, policy.daily_limit_microusd, policy.monthly_limit_microusd],
+                "INSERT OR IGNORE INTO spend_policy(scope, daily_limit, monthly_limit, lifetime_limit) VALUES (?1, ?2, ?3, ?4)",
+                params![config.scope, policy.daily_limit_microusd, policy.monthly_limit_microusd, policy.lifetime_limit_microusd],
             )
             .map_err(db_error)?;
         let stored = read_policy(&connection, &config.scope)?;
@@ -129,6 +170,7 @@ impl MachineSpendQuota {
         let mut admission = super::SCOPE.with(|slot| slot.borrow().clone());
         let parent_ledger = admission.ledger.clone();
         admission.machine = Some(self.clone());
+        admission.host_owned = true;
         let mut ambient = crate::orchestration::AmbientExecutionScope::capture_for_inline_subtask();
         ambient.set_llm_admission(admission);
         let mut inner = std::pin::pin!(crate::orchestration::scope_ambient(ambient, inner));
@@ -189,11 +231,7 @@ impl MachineSpendQuota {
         policy: MachineSpendPolicy,
         approved_by: &str,
     ) -> Result<(), VmError> {
-        if approved_by.trim().is_empty()
-            || policy.daily_limit_microusd.is_none() && policy.monthly_limit_microusd.is_none()
-            || policy.daily_limit_microusd.is_some_and(|limit| limit < 0)
-            || policy.monthly_limit_microusd.is_some_and(|limit| limit < 0)
-        {
+        if approved_by.trim().is_empty() || !policy.valid() {
             return Err(error(
                 DenialKind::InvalidBudget,
                 "invalid approved spend policy update",
@@ -205,17 +243,18 @@ impl MachineSpendQuota {
             .map_err(db_error)?;
         let old = read_policy(&tx, &self.inner.scope)?;
         tx.execute(
-            "UPDATE spend_policy SET daily_limit = ?2, monthly_limit = ?3 WHERE scope = ?1",
+            "UPDATE spend_policy SET daily_limit = ?2, monthly_limit = ?3, lifetime_limit = ?4 WHERE scope = ?1",
             params![
                 self.inner.scope,
                 policy.daily_limit_microusd,
-                policy.monthly_limit_microusd
+                policy.monthly_limit_microusd,
+                policy.lifetime_limit_microusd
             ],
         )
         .map_err(db_error)?;
         tx.execute(
-            "INSERT INTO spend_policy_audit(scope, at_ms, approved_by, old_daily, old_monthly, new_daily, new_monthly) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![self.inner.scope, harn_clock::now_wall_ms(self.inner.clock.as_ref()), approved_by, old.daily_limit_microusd, old.monthly_limit_microusd, policy.daily_limit_microusd, policy.monthly_limit_microusd],
+            "INSERT INTO spend_policy_audit(scope, at_ms, approved_by, old_daily, old_monthly, new_daily, new_monthly, old_lifetime, new_lifetime) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![self.inner.scope, harn_clock::now_wall_ms(self.inner.clock.as_ref()), approved_by, old.daily_limit_microusd, old.monthly_limit_microusd, policy.daily_limit_microusd, policy.monthly_limit_microusd, old.lifetime_limit_microusd, policy.lifetime_limit_microusd],
         )
         .map_err(db_error)?;
         tx.commit().map_err(db_error)
@@ -236,22 +275,30 @@ impl MachineSpendQuota {
                 "machine spend scope has an unresolved provider contract violation",
             ));
         }
-        for (period, limit, reset) in [
-            (&day, policy.daily_limit_microusd, daily_reset),
-            (&month, policy.monthly_limit_microusd, monthly_reset),
+        for (period, kind, limit, reset) in [
+            (
+                day.as_str(),
+                QuotaPeriod::Day,
+                policy.daily_limit_microusd,
+                Some(daily_reset),
+            ),
+            (
+                month.as_str(),
+                QuotaPeriod::Month,
+                policy.monthly_limit_microusd,
+                Some(monthly_reset),
+            ),
+            (
+                LIFETIME_PERIOD,
+                QuotaPeriod::Lifetime,
+                policy.lifetime_limit_microusd,
+                None,
+            ),
         ] {
             if let Some(limit) = limit {
-                let used: i64 = tx
-                    .query_row(
-                        "SELECT reserved FROM spend_period WHERE scope = ?1 AND period = ?2",
-                        params![self.inner.scope, period],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .map_err(db_error)?
-                    .unwrap_or(0);
+                let used = period_reserved(&tx, &self.inner.scope, period)?;
                 if amount > limit.saturating_sub(used) {
-                    return Err(exhausted(period, limit, used, reset));
+                    return Err(exhausted(kind, limit, used, reset));
                 }
             }
         }
@@ -261,7 +308,7 @@ impl MachineSpendQuota {
             params![id, self.inner.scope, day, month, amount, harn_clock::now_wall_ms(self.inner.clock.as_ref())],
         )
         .map_err(db_error)?;
-        for period in [&day, &month] {
+        for period in [day.as_str(), month.as_str(), LIFETIME_PERIOD] {
             tx.execute(
                 "INSERT INTO spend_period(scope, period, reserved) VALUES (?1, ?2, ?3) ON CONFLICT(scope, period) DO UPDATE SET reserved = reserved + excluded.reserved",
                 params![self.inner.scope, period, amount],
@@ -275,6 +322,33 @@ impl MachineSpendQuota {
         })
     }
 
+    /// Budget preflight reads indexed counters, without scanning usage history.
+    pub(super) fn remaining_microusd(&self) -> Result<i64, VmError> {
+        let (day, month, _, _) = periods(self.inner.clock.now_utc());
+        let mut connection = connect(&self.inner.path)?;
+        let snapshot = connection
+            .transaction_with_behavior(TransactionBehavior::Deferred)
+            .map_err(db_error)?;
+        let policy = read_policy(&snapshot, &self.inner.scope)?;
+        if contract_broken(&snapshot, &self.inner.scope)? {
+            return Ok(0);
+        }
+        let mut remaining = None;
+        for (period, limit) in [
+            (day.as_str(), policy.daily_limit_microusd),
+            (month.as_str(), policy.monthly_limit_microusd),
+            (LIFETIME_PERIOD, policy.lifetime_limit_microusd),
+        ] {
+            if let Some(limit) = limit {
+                let used = period_reserved(&snapshot, &self.inner.scope, period)?;
+                let available = limit.saturating_sub(used).max(0);
+                remaining = Some(remaining.map_or(available, |prior: i64| prior.min(available)));
+            }
+        }
+        snapshot.commit().map_err(db_error)?;
+        remaining.ok_or_else(|| error(DenialKind::InvalidBudget, "machine spend limit is absent"))
+    }
+
     pub fn receipt(&self) -> Result<MachineSpendReceipt, VmError> {
         let now = self.inner.clock.now_utc();
         let (day, month, daily_reset_unix_ms, monthly_reset_unix_ms) = periods(now);
@@ -284,19 +358,8 @@ impl MachineSpendQuota {
             .map_err(db_error)?;
         let policy = read_policy(&snapshot, &self.inner.scope)?;
         let contract_broken = contract_broken(&snapshot, &self.inner.scope)?;
-        let used = |period: &str| -> Result<i64, VmError> {
-            Ok(snapshot
-                .query_row(
-                    "SELECT reserved FROM spend_period WHERE scope = ?1 AND period = ?2",
-                    params![self.inner.scope, period],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(db_error)?
-                .unwrap_or(0))
-        };
-        let day_used = used(&day)?;
-        let month_used = used(&month)?;
+        let day_used = period_reserved(&snapshot, &self.inner.scope, &day)?;
+        let month_used = period_reserved(&snapshot, &self.inner.scope, &month)?;
         let (actual_known, usage_unknown): (i64, i64) = snapshot
             .query_row(
                 "SELECT COALESCE(SUM(actual), 0), SUM(CASE WHEN actual IS NULL THEN 1 ELSE 0 END) FROM spend_attempt WHERE scope = ?1 AND month = ?2",
@@ -304,12 +367,19 @@ impl MachineSpendQuota {
                 |row| Ok((row.get(0)?, row.get::<_, Option<i64>>(1)?.unwrap_or(0))),
             )
             .map_err(db_error)?;
+        let lifetime = lifetime_spend(&snapshot, &self.inner.scope)?;
         snapshot.commit().map_err(db_error)?;
         Ok(MachineSpendReceipt {
             reserved_microusd: month_used,
             actual_known_microusd: actual_known,
             usage_unknown_attempts: usage_unknown.try_into().unwrap_or(u64::MAX),
             contract_broken,
+            lifetime_reserved_microusd: lifetime.reserved,
+            lifetime_actual_known_microusd: lifetime.actual_known,
+            lifetime_usage_unknown_attempts: lifetime.usage_unknown,
+            lifetime_remaining_microusd: policy
+                .lifetime_limit_microusd
+                .map(|limit| limit.saturating_sub(lifetime.reserved).max(0)),
             daily_remaining_microusd: policy
                 .daily_limit_microusd
                 .map(|limit| limit.saturating_sub(day_used).max(0)),
@@ -367,7 +437,7 @@ impl DurableReservation {
             params![self.id, upper, actual],
         )
         .map_err(db_error)?;
-        for period in [&day, &month] {
+        for period in [day.as_str(), month.as_str(), LIFETIME_PERIOD] {
             tx.execute(
                 "UPDATE spend_period SET reserved = reserved - ?3 WHERE scope = ?1 AND period = ?2",
                 params![self.config.scope, period, reserved - upper],
@@ -394,20 +464,59 @@ fn connect(path: &Path) -> Result<Connection, VmError> {
     // a cross-process lock. Switching a fresh file here first raced every other
     // process opening it and failed about one round in twenty with
     // "database is locked" (harn#8818).
-    initialize_runtime_sqlite(&connection, Duration::from_secs(5), &SQLITE_SCHEMA)
-        .map_err(db_error)?;
+    initialize_runtime_sqlite_migrating(
+        &connection,
+        Duration::from_secs(5),
+        &SQLITE_SCHEMA,
+        |tx| {
+            for (table, column) in [
+                ("spend_policy", "lifetime_limit"),
+                ("spend_policy_audit", "old_lifetime"),
+                ("spend_policy_audit", "new_lifetime"),
+            ] {
+                let mut statement = tx.prepare(&format!("PRAGMA table_info({table})"))?;
+                let columns = statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                if !columns.iter().any(|name| name == column) {
+                    tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} INTEGER"))?;
+                }
+            }
+            // Upgrade the existing period projection once, in the schema
+            // transaction. Admission then reads one indexed row per ceiling.
+            tx.execute(
+                "INSERT INTO spend_period(scope, period, reserved) SELECT scope, ?1, SUM(reserved) FROM spend_attempt GROUP BY scope",
+                [LIFETIME_PERIOD],
+            )?;
+            Ok(())
+        },
+    )
+    .map_err(db_error)?;
     Ok(connection)
+}
+
+fn period_reserved(connection: &Connection, scope: &str, period: &str) -> Result<i64, VmError> {
+    Ok(connection
+        .query_row(
+            "SELECT reserved FROM spend_period WHERE scope = ?1 AND period = ?2",
+            params![scope, period],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(db_error)?
+        .unwrap_or(0))
 }
 
 fn read_policy(connection: &Connection, scope: &str) -> Result<MachineSpendPolicy, VmError> {
     connection
         .query_row(
-            "SELECT daily_limit, monthly_limit FROM spend_policy WHERE scope = ?1",
+            "SELECT daily_limit, monthly_limit, lifetime_limit FROM spend_policy WHERE scope = ?1",
             [scope],
             |row| {
                 Ok(MachineSpendPolicy {
                     daily_limit_microusd: row.get(0)?,
                     monthly_limit_microusd: row.get(1)?,
+                    lifetime_limit_microusd: row.get(2)?,
                 })
             },
         )
@@ -491,14 +600,10 @@ fn db_error(error_value: impl LedgerFailure) -> VmError {
     )
 }
 
-fn exhausted(period: &str, limit: i64, used: i64, reset_unix_ms: i64) -> VmError {
-    let period = if period.starts_with("D:") {
-        "day"
-    } else {
-        "month"
-    };
+fn exhausted(period: QuotaPeriod, limit: i64, used: i64, reset_unix_ms: Option<i64>) -> VmError {
     VmError::Thrown(crate::schema::json_to_vm_value(&serde_json::json!({
         "category": "budget_exceeded",
+        "origin": "local",
         "kind": "terminal",
         "reason": "budget_exceeded",
         "admission_reason": "insufficient_allowance",
@@ -520,6 +625,7 @@ mod tests {
         MachineSpendPolicy {
             daily_limit_microusd: Some(limit),
             monthly_limit_microusd: Some(limit),
+            lifetime_limit_microusd: None,
         }
     }
 
@@ -585,26 +691,183 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_connections_cannot_spend_the_same_remainder() {
+    fn lifetime_allowance_keeps_interrupted_reservations_across_calendar_rollover() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("spend.sqlite");
-        let quota = MachineSpendQuota::open(&path, "person", policy(1_000_000)).unwrap();
-        let handles: Vec<_> = (0..8)
-            .map(|_| {
-                let path = path.clone();
-                std::thread::spawn(move || {
-                    let quota = MachineSpendQuota::open(path, "person", policy(1_000_000)).unwrap();
-                    quota.reserve(Decimal::new(3, 1)).is_ok()
+        let clock = harn_clock::PausedClock::new(
+            Date::from_calendar_date(2028, time::Month::December, 31)
+                .unwrap()
+                .midnight()
+                .assume_utc(),
+        );
+        let policy = MachineSpendPolicy {
+            daily_limit_microusd: None,
+            monthly_limit_microusd: None,
+            lifetime_limit_microusd: Some(1_000_000),
+        };
+        let first =
+            MachineSpendQuota::open_with_clock(&path, "campaign", policy.clone(), clock.clone())
+                .unwrap();
+        drop(first.reserve(Decimal::new(6, 1)).unwrap());
+        drop(first);
+        clock.advance_time(time::Duration::days(2));
+        let restarted =
+            MachineSpendQuota::open_with_clock(&path, "campaign", policy, clock).unwrap();
+        let VmError::Thrown(receipt) = restarted
+            .reserve(Decimal::new(5, 1))
+            .expect_err("calendar rollover replenished campaign allowance")
+        else {
+            panic!("rollover refusal did not produce a structured budget receipt");
+        };
+        let receipt = crate::value::vm_to_storage_json(&receipt).unwrap();
+        assert_eq!(receipt["category"], "budget_exceeded");
+        assert_eq!(receipt["period"], "lifetime");
+        assert_eq!(receipt["reserved_microusd"], 600_000);
+        assert_eq!(receipt["remaining_microusd"], 400_000);
+        assert!(receipt["reset_at_unix_ms"].is_null());
+        let ledger = restarted.receipt().unwrap();
+        assert_eq!(ledger.lifetime_reserved_microusd, 600_000);
+        assert_eq!(ledger.lifetime_actual_known_microusd, 0);
+        assert_eq!(ledger.lifetime_usage_unknown_attempts, 1);
+        assert_eq!(ledger.lifetime_remaining_microusd, Some(400_000));
+        // A genuinely different billing scope remains independent.
+        let other = MachineSpendQuota::open(
+            &path,
+            "other-campaign",
+            MachineSpendPolicy {
+                daily_limit_microusd: None,
+                monthly_limit_microusd: None,
+                lifetime_limit_microusd: Some(1_000_000),
+            },
+        )
+        .unwrap();
+        assert!(other.reserve(Decimal::new(5, 1)).is_ok());
+    }
+
+    #[test]
+    fn lifetime_settlement_and_authorized_policy_updates_preserve_prior_spend() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("spend.sqlite");
+        let policy = MachineSpendPolicy {
+            daily_limit_microusd: None,
+            monthly_limit_microusd: None,
+            lifetime_limit_microusd: Some(1_000_000),
+        };
+        let quota = MachineSpendQuota::open(&path, "campaign", policy.clone()).unwrap();
+        quota
+            .reserve(Decimal::new(6, 1))
+            .unwrap()
+            .settle(Decimal::new(2, 1), Some(Decimal::new(2, 1)))
+            .unwrap();
+        drop(quota.reserve(Decimal::new(5, 1)).unwrap());
+        let receipt = quota.receipt().unwrap();
+        assert_eq!(receipt.lifetime_reserved_microusd, 700_000);
+        assert_eq!(receipt.lifetime_actual_known_microusd, 200_000);
+        assert_eq!(receipt.lifetime_usage_unknown_attempts, 1);
+        let increased = MachineSpendPolicy {
+            lifetime_limit_microusd: Some(2_000_000),
+            ..policy
+        };
+        assert!(MachineSpendQuota::open(&path, "campaign", increased.clone()).is_err());
+        quota.update_policy(increased.clone(), "").unwrap_err();
+        quota
+            .update_policy(increased.clone(), "approved-host-action")
+            .unwrap();
+        let reopened = MachineSpendQuota::open(&path, "campaign", increased).unwrap();
+        assert_eq!(
+            reopened.receipt().unwrap().lifetime_remaining_microusd,
+            Some(1_300_000)
+        );
+        let audit: (i64, i64) = connect(&path).unwrap().query_row(
+            "SELECT old_lifetime, new_lifetime FROM spend_policy_audit WHERE scope = 'campaign'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(audit, (1_000_000, 2_000_000));
+    }
+
+    #[test]
+    fn version_one_policy_migrates_without_changing_its_authority() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("spend.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        harn_sqlite::initialize_file(&connection, Duration::from_secs(5),
+            harn_sqlite::SchemaVersion::new("machine_spend_quota", 1), |tx| {
+                tx.execute_batch("CREATE TABLE spend_policy (scope TEXT PRIMARY KEY, daily_limit INTEGER, monthly_limit INTEGER, contract_broken INTEGER NOT NULL DEFAULT 0);
+                    CREATE TABLE spend_policy_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, at_ms INTEGER NOT NULL, approved_by TEXT NOT NULL, old_daily INTEGER, old_monthly INTEGER, new_daily INTEGER, new_monthly INTEGER);
+                    CREATE TABLE spend_period (scope TEXT NOT NULL, period TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), PRIMARY KEY(scope, period));
+                    CREATE TABLE spend_attempt (id TEXT PRIMARY KEY, scope TEXT NOT NULL, day TEXT NOT NULL, month TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), actual INTEGER, settled INTEGER NOT NULL DEFAULT 0, created_ms INTEGER NOT NULL);
+                    INSERT INTO spend_policy VALUES ('person', 1000000, 1000000, 0);
+                    INSERT INTO spend_period VALUES ('person', 'D:2029-01-02', 600000), ('person', 'M:2029-01', 600000);
+                    INSERT INTO spend_attempt VALUES ('old-call', 'person', 'D:2029-01-02', 'M:2029-01', 600000, NULL, 0, 0);")
+            }).unwrap();
+        drop(connection);
+        let now = Date::from_calendar_date(2029, time::Month::January, 2)
+            .unwrap()
+            .midnight()
+            .assume_utc();
+        let clock = harn_clock::PausedClock::new(now);
+        let reopened =
+            MachineSpendQuota::open_with_clock(&path, "person", policy(1_000_000), clock).unwrap();
+        assert!(reopened.reserve(Decimal::new(5, 1)).is_err());
+        assert_eq!(
+            reopened.receipt().unwrap().lifetime_reserved_microusd,
+            600_000
+        );
+        assert_eq!(reopened.policy().unwrap(), policy(1_000_000));
+        assert_eq!(
+            reopened.receipt().unwrap().lifetime_usage_unknown_attempts,
+            1
+        );
+        let incompatible = MachineSpendPolicy {
+            lifetime_limit_microusd: Some(2_000_000),
+            ..policy(1_000_000)
+        };
+        assert!(MachineSpendQuota::open(&path, "person", incompatible).is_err());
+        // An old reader must refuse the upgraded schema, never discard its limits.
+        let old = harn_sqlite::require_file_initialized::<rusqlite::Error>(
+            &Connection::open(&path).unwrap(),
+            Duration::from_secs(5),
+            harn_sqlite::SchemaVersion::new("machine_spend_quota", 1),
+        );
+        assert!(matches!(
+            old,
+            Err(harn_sqlite::InitializationError::NewerSchemaVersion { .. })
+        ));
+    }
+
+    #[test]
+    fn concurrent_connections_cannot_spend_the_same_remainder() {
+        for policy in [
+            policy(1_000_000),
+            MachineSpendPolicy {
+                daily_limit_microusd: None,
+                monthly_limit_microusd: None,
+                lifetime_limit_microusd: Some(1_000_000),
+            },
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("spend.sqlite");
+            let quota = MachineSpendQuota::open(&path, "person", policy.clone()).unwrap();
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let path = path.clone();
+                    let policy = policy.clone();
+                    std::thread::spawn(move || {
+                        let quota = MachineSpendQuota::open(path, "person", policy).unwrap();
+                        quota.reserve(Decimal::new(3, 1)).is_ok()
+                    })
                 })
-            })
-            .collect();
-        let admitted = handles
-            .into_iter()
-            .map(|handle| handle.join().unwrap())
-            .filter(|admitted| *admitted)
-            .count();
-        assert_eq!(admitted, 3);
-        assert_eq!(quota.receipt().unwrap().reserved_microusd, 900_000);
+                .collect();
+            let admitted = handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .filter(|admitted| *admitted)
+                .count();
+            assert_eq!(admitted, 3);
+            let receipt = quota.receipt().unwrap();
+            assert_eq!(receipt.reserved_microusd, 900_000);
+            assert_eq!(receipt.lifetime_reserved_microusd, 900_000);
+        }
     }
 
     #[test]

@@ -40,6 +40,7 @@ mod runtime;
 pub mod skill_loader;
 pub mod skill_provenance;
 mod source_exec;
+mod spend_policy;
 pub mod test_report;
 pub mod test_runner;
 pub mod test_timing {
