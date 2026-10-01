@@ -31,7 +31,8 @@ schedule and, when the default lock refresh is insufficient, the
 Set `finalize-refresh-command` when generated artifacts depend on Harn source files.
 It runs after compatibility migrations, repairs, and formatting, before validation.
 For example, use `pnpm run codegen` to regenerate bytecode from the final source tree.
-The default is empty. A failed finalizer stops the bump before validation or publication.
+The default is empty. A failed finalizer refuses refresh success.
+With the default `publish-failure-for-repair: false`, the bump stops before validation or publication.
 
 ```yaml
 name: Bump Harn Runtime

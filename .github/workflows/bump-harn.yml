@@ -42,7 +42,7 @@ on:
         type: string
         default: ""
       finalize-refresh-command:
-        description: "Optional repository-owned generation command run after source migrations and formatting. Failure refuses validation and publication."
+        description: "Optional repository-owned generation command run after source migrations and formatting. Failure refuses refresh success."
         required: false
         type: string
         default: ""
