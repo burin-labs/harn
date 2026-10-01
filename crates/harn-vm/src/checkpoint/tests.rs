@@ -1,5 +1,97 @@
 use super::*;
 
+#[test]
+fn independent_checkpoint_owners_preserve_other_keys_and_observe_updates() {
+    let root = tempfile::tempdir().unwrap();
+    let mut first = CheckpointState::at_state_root(root.path(), "shared");
+    let mut second = CheckpointState::at_state_root(root.path(), "shared");
+    assert!(matches!(first.get("first").unwrap(), VmValue::Nil));
+    assert!(matches!(second.get("second").unwrap(), VmValue::Nil));
+
+    first.set("first".into(), serde_json::json!(1)).unwrap();
+    second.set("second".into(), serde_json::json!(2)).unwrap();
+    let mut fresh = CheckpointState::at_state_root(root.path(), "shared");
+    assert!(
+        matches!(fresh.get("first").unwrap(), VmValue::Int(1)),
+        "a stale owner must preserve another owner's committed key"
+    );
+    assert!(matches!(first.get("second").unwrap(), VmValue::Int(2)));
+    assert!(first.exists("second").unwrap());
+    assert_eq!(first.list().unwrap(), ["first", "second"]);
+
+    second.delete("first").unwrap();
+    assert!(matches!(first.get("first").unwrap(), VmValue::Nil));
+    second.clear().unwrap();
+    assert!(first.list().unwrap().is_empty());
+}
+
+#[test]
+fn concurrent_insert_retains_one_candidate_and_reports_one_winner() {
+    let root = tempfile::tempdir().unwrap();
+    let ready = std::sync::Arc::new(std::sync::Barrier::new(8));
+    let receipts = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..8)
+            .map(|candidate| {
+                let ready = ready.clone();
+                let root = root.path();
+                scope.spawn(move || {
+                    let mut state = CheckpointState::at_state_root(root, "shared");
+                    assert!(matches!(state.get("candidate").unwrap(), VmValue::Nil));
+                    ready.wait();
+                    vm_to_json(
+                        &state
+                            .insert("candidate".into(), serde_json::json!(candidate))
+                            .unwrap(),
+                    )
+                    .unwrap()
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(receipts.len(), 8);
+    assert_eq!(
+        receipts
+            .iter()
+            .filter(|receipt| receipt["inserted"] == true)
+            .count(),
+        1
+    );
+    let retained = &receipts[0]["value"];
+    assert!(retained
+        .as_i64()
+        .is_some_and(|value| (0..8).contains(&value)));
+    assert!(receipts.iter().all(|receipt| &receipt["value"] == retained));
+}
+
+#[test]
+fn insert_preserves_a_retained_null_value() {
+    let root = tempfile::tempdir().unwrap();
+    let mut first = CheckpointState::at_state_root(root.path(), "shared");
+    assert_eq!(
+        vm_to_json(
+            &first
+                .insert("candidate".into(), serde_json::Value::Null)
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::json!({"inserted": true, "value": null})
+    );
+    let mut second = CheckpointState::at_state_root(root.path(), "shared");
+    assert_eq!(
+        vm_to_json(
+            &second
+                .insert("candidate".into(), serde_json::json!(7))
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::json!({"inserted": false, "value": null})
+    );
+}
+
 fn vm(root: &Path) -> Vm {
     let mut vm = Vm::new();
     register_checkpoint_builtins_at_state_root(&mut vm, root, "recovery");
@@ -20,6 +112,10 @@ async fn damaged_store_refuses_reads_and_mutations_until_explicit_recovery() {
             ("checkpoint_list", vec![]),
             (
                 "checkpoint",
+                vec![VmValue::string("spent"), VmValue::Int(0)],
+            ),
+            (
+                "checkpoint_insert",
                 vec![VmValue::string("spent"), VmValue::Int(0)],
             ),
             ("checkpoint_delete", vec![VmValue::string("spent")]),
