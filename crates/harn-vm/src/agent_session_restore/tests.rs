@@ -242,6 +242,63 @@ async fn a_replayed_tool_call_keeps_its_metadata_tool_name() {
     }
 }
 
+/// The assistant turn's own tool-call row names the call only inside its
+/// provider message. A call cut off before its result has no later row to
+/// rename it, so replay must read that name or the client shows "tool".
+#[tokio::test]
+async fn an_assistant_tool_call_row_replays_with_its_provider_name() {
+    let session_id = "with-cut-off-call";
+    let store = store_with_session(session_id).await;
+    let mut event = AppendEvent::new(
+        SessionEventKind::ToolCall,
+        serde_json::json!({
+            "transcript_event": {
+                "id": "event-assistant",
+                "kind": "message",
+                "role": "assistant",
+                "visibility": "public",
+                "text": "",
+            },
+            "raw_message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call-other", "name": "look", "arguments": {}},
+                    {"id": "call-cut", "name": "wait_command", "arguments": {"handle_id": "h-1"}},
+                ],
+            },
+        }),
+    );
+    event
+        .headers
+        .insert("tool_call_id".to_string(), "call-cut".to_string());
+    store
+        .append(session_id, event)
+        .await
+        .expect("append assistant tool call row");
+
+    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+        .await
+        .expect("restore should not error")
+        .expect("the store knows this session");
+    match &restored[..] {
+        [replayed] => match &replayed.event {
+            AgentEvent::ToolCall {
+                tool_call_id,
+                tool_name,
+                raw_input,
+                ..
+            } => {
+                assert_eq!(tool_call_id, "call-cut");
+                assert_eq!(tool_name, "wait_command");
+                assert_eq!(raw_input, &serde_json::json!({"handle_id": "h-1"}));
+            }
+            other => panic!("expected a replayed tool call, got {other:?}"),
+        },
+        other => panic!("expected one replayed event, got {other:?}"),
+    }
+}
+
 /// Internal bookkeeping rows (usage checkpoints, audit annotations) are not
 /// conversation, and must not surface in a restored transcript.
 #[tokio::test]

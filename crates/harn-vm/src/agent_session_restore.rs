@@ -169,20 +169,25 @@ fn replay_event_from_stored(
             session_id: session_id.to_string(),
             content: text.to_string(),
         },
-        (SessionEventKind::ToolCall, _) => AgentEvent::ToolCall {
-            session_id: session_id.to_string(),
-            tool_call_id: tool_call_id(stored, transcript)?,
-            tool_name: tool_name(transcript, raw_message),
-            kind: None,
-            status: ToolCallStatus::Completed,
-            raw_input: transcript
-                .get("input")
-                .or_else(|| transcript.pointer("/metadata/raw_input"))
-                .cloned()
-                .unwrap_or(serde_json::Value::Null),
-            parsing: None,
-            audit: None,
-        },
+        (SessionEventKind::ToolCall, _) => {
+            let tool_call_id = tool_call_id(stored, transcript)?;
+            let provider_call = provider_tool_call(raw_message, &tool_call_id);
+            AgentEvent::ToolCall {
+                session_id: session_id.to_string(),
+                tool_name: tool_name(transcript, raw_message, provider_call),
+                tool_call_id,
+                kind: None,
+                status: ToolCallStatus::Completed,
+                raw_input: transcript
+                    .get("input")
+                    .or_else(|| transcript.pointer("/metadata/raw_input"))
+                    .or_else(|| provider_call.and_then(|call| call.get("arguments")))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                parsing: None,
+                audit: None,
+            }
+        }
         (SessionEventKind::ToolResult, _) => {
             let failed = facts::bool_at_any(&stored.payload, &facts::TOOL_IS_ERROR_ANY);
             let data = stored
@@ -192,7 +197,7 @@ fn replay_event_from_stored(
             AgentEvent::ToolCallUpdate {
                 session_id: session_id.to_string(),
                 tool_call_id: tool_call_id(stored, transcript)?,
-                tool_name: tool_name(transcript, raw_message),
+                tool_name: tool_name(transcript, raw_message, None),
                 status: if failed {
                     ToolCallStatus::Failed
                 } else {
@@ -252,23 +257,49 @@ fn tool_call_id(stored: &StoredEvent, transcript: &serde_json::Value) -> Option<
         })
 }
 
+/// The provider's own entry for `tool_call_id` in an assistant message's
+/// `tool_calls`. An assistant turn's tool-call row carries the name only there.
+fn provider_tool_call<'a>(
+    raw_message: Option<&'a serde_json::Value>,
+    tool_call_id: &str,
+) -> Option<&'a serde_json::Value> {
+    raw_message?
+        .get("tool_calls")?
+        .as_array()?
+        .iter()
+        .find(|call| call.get("id").and_then(serde_json::Value::as_str) == Some(tool_call_id))
+}
+
 /// Read the tool name from the transcript event, then from its `metadata`,
 /// the same order the journal reads a tool call's identity when it writes the
 /// row. Tool lifecycle events carry the name only under `metadata`; a tool
-/// result carries it only on the provider message stored beside it.
-fn tool_name(transcript: &serde_json::Value, raw_message: Option<&serde_json::Value>) -> String {
-    [Some(transcript), transcript.get("metadata"), raw_message]
-        .into_iter()
-        .flatten()
-        .find_map(|value| {
-            value
-                .get("tool_name")
-                .or_else(|| value.get("name"))
-                .and_then(serde_json::Value::as_str)
-                .filter(|name| !name.trim().is_empty())
-        })
-        .unwrap_or("tool")
-        .to_string()
+/// result carries it only on the provider message stored beside it; an
+/// assistant turn's call carries it only in that message's `tool_calls`.
+/// Without the last, a call cut off before its result replays as "tool"
+/// (burin-labs/burin-code#9208).
+fn tool_name(
+    transcript: &serde_json::Value,
+    raw_message: Option<&serde_json::Value>,
+    provider_call: Option<&serde_json::Value>,
+) -> String {
+    [
+        Some(transcript),
+        transcript.get("metadata"),
+        raw_message,
+        provider_call,
+        provider_call.and_then(|call| call.get("function")),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|value| {
+        value
+            .get("tool_name")
+            .or_else(|| value.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+    })
+    .unwrap_or("tool")
+    .to_string()
 }
 
 /// The mutation outcome the producer declared, which the live path projects
