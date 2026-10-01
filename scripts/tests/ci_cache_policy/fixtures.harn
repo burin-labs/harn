@@ -335,11 +335,13 @@ pub fn action() {
           "continue-on-error": true,
           with: {
             "shared-key": gha_expression(
-              "format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v1' || '')",
+              "format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v2' || '')",
             ),
             "cache-workspace-crates": gha_expression("inputs.cache-workspace-crates"),
             "cache-targets": gha_expression("inputs.target-dir == ''"),
-            "cache-directories": gha_expression("inputs.target-dir"),
+            "cache-directories": gha_expression(
+              "format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '.harn-workspace-source' || '')",
+            ),
             "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
           },
         },

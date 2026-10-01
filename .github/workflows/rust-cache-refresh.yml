@@ -142,7 +142,7 @@ jobs:
       # reuse on restore. Only a warm build that succeeded may claim it.
       - name: Record the workspace cache source
         if: success() && steps.rust-cache.outputs.cache-hit != 'true'
-        run: ./scripts/ci/reuse_workspace_crates.sh record "${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}"
+        run: ./scripts/ci/reuse_workspace_crates.sh record
       - name: Report cache generation already current
         if: steps.rust-cache.outputs.cache-hit == 'true'
         env:

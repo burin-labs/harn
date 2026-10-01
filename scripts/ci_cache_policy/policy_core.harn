@@ -418,7 +418,13 @@ pub const CACHE_PRUNE_INPUT = "prune-superseded-release-generations"
 // deps-only entry and save.ts exits without replacing it (#5003).
 pub const WORKSPACE_CACHE_INPUT = "cache-workspace-crates"
 
-pub const WORKSPACE_CACHE_GENERATION = "workspace-crates-v1"
+// v2: entries also carry the workspace source record directory, which changes
+// the cached path set and therefore every entry's version.
+pub const WORKSPACE_CACHE_GENERATION = "workspace-crates-v2"
+
+// Saved beside the target directory by every workspace-crate cache entry; see
+// scripts/ci/reuse_workspace_crates.sh for why it cannot live in the target.
+pub const WORKSPACE_SOURCE_RECORD_DIR = ".harn-workspace-source"
 
 pub const RELEASE_CACHE_WORKFLOW = "build-release-binaries.yml"
 
@@ -1018,7 +1024,8 @@ pub fn remote_sccache_errors(value: any, path: string = "") -> list<string> {
 
 pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
   const expected_cache_targets = "$" + "{{ inputs.target-dir == '' }}"
-  const expected_cache_directories = "$" + "{{ inputs.target-dir }}"
+  const expected_cache_directories = "$"
+    + "{{ format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '${WORKSPACE_SOURCE_RECORD_DIR}' || '') }}"
   if trim(action?.inputs?.["target-dir"]?.default ?? "") != ""
     || trim(step?.with?.["cache-targets"] ?? "")
       != expected_cache_targets

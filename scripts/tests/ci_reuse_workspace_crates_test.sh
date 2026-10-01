@@ -12,7 +12,7 @@ if ! touch -h -d @946684800 "$probe" 2>/dev/null \
   rm -f "$probe"
   # The producer runners are Linux. Elsewhere the script refuses by name, so
   # check that refusal instead of the stamps it cannot set.
-  out=$("$script" restore "$(mktemp -d)")
+  out=$(cd "$(mktemp -d)" && git init -q . && "$script" restore)
   [[ "$out" == *"cannot set file times here"* ]]
   echo "ci_reuse_workspace_crates_test: ok (refusal where file times cannot be set)"
   exit 0
@@ -29,11 +29,13 @@ mkdir -p crates/a/src crates/b/src crates/c/src
 echo a > crates/a/src/lib.rs
 echo b > crates/b/src/lib.rs
 echo c > crates/c/src/lib.rs
-echo target/ > .gitignore
+printf 'target/\n.harn-workspace-source/\n' > .gitignore
 git add -A && git commit -q -m one
-mkdir -p target
-"$script" record target >/dev/null
-[[ "$(cat target/.harn-workspace-source)" == "$(git rev-parse HEAD)" ]]
+record=.harn-workspace-source/commit
+# Recording from a subdirectory still writes the record at the checkout root,
+# where the rust-cache action saves it.
+(cd crates/a && "$script" record >/dev/null)
+[[ "$(cat "$record")" == "$(git rev-parse HEAD)" ]]
 
 echo b2 > crates/b/src/lib.rs
 git rm -q crates/c/src/lib.rs
@@ -42,9 +44,9 @@ git add -A && git commit -q -m two
 
 build_time=1577836800 # 2020-01-01T00:00:00Z
 stamp() { stat -c %Y "$1"; }
-out=$("$script" restore target)
+out=$("$script" restore)
 [[ "$out" == *"3 path(s) changed"* ]]
-[[ ! -e target/.harn-workspace-source ]]
+[[ ! -e "$record" ]]
 (( $(stamp crates/a/src/lib.rs) < build_time ))
 (( $(stamp crates/a/src) < build_time ))
 (( $(stamp crates/b/src/lib.rs) > build_time ))
@@ -56,18 +58,18 @@ out=$("$script" restore target)
 
 # No record: nothing is back-dated, so everything rebuilds as before.
 touch crates/a/src/lib.rs
-out=$("$script" restore target)
+out=$("$script" restore)
 [[ "$out" == *"no source record"* ]]
 (( $(stamp crates/a/src/lib.rs) > build_time ))
 
 # An unreadable or unfetchable record is dropped and changes nothing.
-echo not-a-commit > target/.harn-workspace-source
-out=$("$script" restore target)
+echo not-a-commit > "$record"
+out=$("$script" restore)
 [[ "$out" == *"unreadable source record"* ]]
-[[ ! -e target/.harn-workspace-source ]]
+[[ ! -e "$record" ]]
 (( $(stamp crates/a/src/lib.rs) > build_time ))
-printf '%040d\n' 0 > target/.harn-workspace-source
-out=$("$script" restore target)
+printf '%040d\n' 0 > "$record"
+out=$("$script" restore)
 [[ "$out" == *"cannot fetch"* ]]
 (( $(stamp crates/a/src/lib.rs) > build_time ))
 

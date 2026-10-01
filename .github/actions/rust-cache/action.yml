@@ -94,12 +94,15 @@ runs:
       continue-on-error: true
       with:
         shared-key: >-
-          ${{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v1' || '') }}
+          ${{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v2' || '') }}
         cache-on-failure: ${{ inputs.cache-on-failure }}
         cache-bin: ${{ inputs.cache-bin }}
         cache-workspace-crates: ${{ inputs.cache-workspace-crates }}
         cache-targets: ${{ inputs.target-dir == '' }}
-        cache-directories: ${{ inputs.target-dir }}
+        # Workspace-crate entries also carry the source record that
+        # scripts/ci/reuse_workspace_crates.sh writes; the target directory
+        # cannot hold it because Swatinem deletes its top-level files on save.
+        cache-directories: ${{ format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '.harn-workspace-source' || '') }}
         # Fall back to Swatinem's documented default rather than passing an
         # empty string, so existing callers keep their exact current key.
         workspaces: ${{ inputs.workspaces != '' && inputs.workspaces || '.' }}
@@ -111,6 +114,4 @@ runs:
     - name: Reuse unchanged workspace crates
       if: inputs.reuse-workspace-crates == 'true' && inputs.cache-workspace-crates == 'true'
       shell: bash
-      env:
-        REUSE_TARGET_DIR: ${{ inputs.target-dir != '' && inputs.target-dir || env.CARGO_TARGET_DIR || format('{0}/target', github.workspace) }}
-      run: ./scripts/ci/reuse_workspace_crates.sh restore "$REUSE_TARGET_DIR"
+      run: ./scripts/ci/reuse_workspace_crates.sh restore

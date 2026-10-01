@@ -15,7 +15,7 @@ fn record_step(condition: string) {
   return {
     name: "Record the workspace cache source",
     if: condition,
-    run: "./scripts/ci/reuse_workspace_crates.sh record target",
+    run: "./scripts/ci/reuse_workspace_crates.sh record",
   }
 }
 

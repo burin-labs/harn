@@ -20,30 +20,40 @@
 # record. Without a readable record, or when its commit cannot be fetched,
 # `restore` changes nothing and every crate rebuilds, as before.
 #
+# The record lives in its own directory at the checkout root, which the
+# rust-cache action saves beside the target directory. It cannot live inside
+# the target directory: Swatinem's save deletes every file at the target's top
+# level except CACHEDIR.TAG. At the checkout root it shares the target's
+# lifecycle on every runner: checkout cleans both, and one cache entry restores
+# both. If the target directory sits somewhere checkout does not clean, the
+# record is simply missing and every crate rebuilds.
+#
 # Usage:
-#   scripts/ci/reuse_workspace_crates.sh restore TARGET_DIR
-#   scripts/ci/reuse_workspace_crates.sh record TARGET_DIR
+#   scripts/ci/reuse_workspace_crates.sh restore
+#   scripts/ci/reuse_workspace_crates.sh record
 set -euo pipefail
 
-RECORD_NAME=".harn-workspace-source"
+# Keep in step with the rust-cache action's cache-directories, which saves
+# this directory with every workspace-crate cache entry.
+RECORD_DIR=".harn-workspace-source"
 # 2000-01-01T00:00:00Z, written as an epoch so no implementation reads a zone.
 BEFORE_ANY_BUILD="@946684800"
 
 usage() {
-  echo "usage: $0 restore|record TARGET_DIR" >&2
+  echo "usage: $0 restore|record" >&2
   exit 2
 }
 
-[[ $# -eq 2 ]] || usage
+[[ $# -eq 1 ]] || usage
 mode=$1
-target_dir=$2
-record="$target_dir/$RECORD_NAME"
+cd "$(git rev-parse --show-toplevel)"
+record="$RECORD_DIR/commit"
 
 case "$mode" in
   record)
-    mkdir -p "$target_dir"
+    mkdir -p "$RECORD_DIR"
     git rev-parse --verify HEAD > "$record"
-    echo "workspace crate reuse: recorded $(cat "$record") as the source of $target_dir"
+    echo "workspace crate reuse: recorded $(cat "$record") as the source of the cached build"
     exit 0
     ;;
   restore) ;;
@@ -68,7 +78,7 @@ if ! can_back_date; then
   exit 0
 fi
 if [[ ! -f "$record" ]]; then
-  echo "workspace crate reuse: no source record in $target_dir; every workspace crate rebuilds"
+  echo "workspace crate reuse: no source record; every workspace crate rebuilds"
   exit 0
 fi
 source_commit=$(tr -d '[:space:]' < "$record")
