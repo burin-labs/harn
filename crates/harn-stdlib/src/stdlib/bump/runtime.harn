@@ -409,19 +409,25 @@ type BumpBasePreparation = {existing: BumpPrState?, base: BumpBaseReconciliation
 
 fn __prepare_base_lease(adapter: BumpAdapter, receipt: BumpReceipt) -> BumpBasePreparation {
   const existing = adapter.find_bump_pr()
-  let next_receipt = receipt
-  if existing != nil && existing.auto_merge_enabled {
-    if !adapter.disable_auto_merge(existing, existing.base_oid) {
+  const base = __observe_base_lease(adapter, receipt, "before_refresh")
+  let next_receipt = base.receipt
+  const observed_oid = base.receipt.observed_base_oid
+  if existing != nil && existing.auto_merge_enabled && observed_oid != nil {
+    // The PR's base snapshot can predate main; guard the current branch head.
+    if !adapter.disable_auto_merge(existing, observed_oid) {
       throw "std/bump/runtime: failed to disable stale auto-merge on #${existing.number}"
     }
-    next_receipt = receipt
+    next_receipt = base.receipt
       + {
         lease_recovered: true,
         notes: receipt.notes
           + ["disarmed stale auto-merge on #${existing.number} before refresh"],
       }
   }
-  return {existing: existing, base: __observe_base_lease(adapter, next_receipt, "before_refresh")}
+  return {
+    existing: existing,
+    base: {current: base.current, receipt: next_receipt, detail: base.detail},
+  }
 }
 
 /**
