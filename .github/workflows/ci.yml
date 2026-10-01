@@ -709,8 +709,20 @@ jobs:
           "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
           "$GITHUB_ENV"
+      # `make check-docs` was this job's long pole (about 120s of a 160s docs
+      # lane on a fast host, roughly three times that here) and repeats what
+      # "Check Harn documentation" proves on the same commit and binary in this
+      # run; ci-status requires both. In sprint mode that job is skipped, so
+      # the rehearsal runs the contracts itself. A release never passes this.
       - name: Run the release residual audit
-        run: ./scripts/release_gate.sh audit --residual-only
+        env:
+          DOCS_CONTRACTS_PROVEN_BY: ${{ needs.changes.outputs.sprint_fast_ci != 'true' && 'Check Harn documentation' || '' }}
+        run: |
+          args=(--residual-only)
+          if [ -n "$DOCS_CONTRACTS_PROVEN_BY" ]; then
+            args+=(--docs-contracts-proven-by "$DOCS_CONTRACTS_PROVEN_BY")
+          fi
+          ./scripts/release_gate.sh audit "${args[@]}"
 
   # Strict Clippy is an independent compile proof. The full test graph is owned
   # by rust-check-inputs so the repository pays for one behavior build rather

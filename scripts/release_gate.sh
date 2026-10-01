@@ -323,6 +323,7 @@ usage() {
   cat <<'EOF'
 Usage:
   ./scripts/release_gate.sh audit [--receipt path | --source-only | --residual-only] [--validate-only]
+                                 [--docs-contracts-proven-by JOB]
   ./scripts/release_gate.sh prepare --bump patch
   ./scripts/release_gate.sh publish [--dry-run]
   ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
@@ -330,7 +331,10 @@ Usage:
 
 Commands:
   audit    Run the full audit, source-only lanes, or the residual lanes (receipt-authorized,
-           or --residual-only to rehearse them before a cut).
+           or --residual-only to rehearse them before a cut). In GitHub Actions only, a
+           --residual-only rehearsal may pass --docs-contracts-proven-by JOB to name the
+           sibling CI job that runs `make check-docs` on the same commit instead of
+           repeating it.
   prepare  Bump the workspace version locally and print next tag/release steps.
   publish  Publish crates with scripts/publish.sh and print tag/release follow-up.
   notes    Render GitHub release notes for a version from CHANGELOG.md.
@@ -421,6 +425,12 @@ file_sha256() {
   sha256_file_hex "$1"
 }
 
+# Set only by `audit --residual-only --docs-contracts-proven-by JOB` inside
+# GitHub Actions: the CI rehearsal names the sibling job that runs
+# `make check-docs` on the same commit and binary. A release, and a local
+# rehearsal before a cut, never set it and always run the contracts here.
+DOCS_CONTRACTS_PROVEN_BY=""
+
 run_docs_audit() {
   if ! command -v npm >/dev/null 2>&1; then
     echo "error: npm (Node.js) is required for the release docs audit" >&2
@@ -428,6 +438,10 @@ run_docs_audit() {
   fi
   time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
   time_phase "docs site build" ./scripts/build_docs_site.sh
+  if [[ -n "$DOCS_CONTRACTS_PROVEN_BY" ]]; then
+    echo "  -- documentation contracts: proven on this commit by CI job '${DOCS_CONTRACTS_PROVEN_BY}'; not repeated in the rehearsal"
+    return 0
+  fi
   time_phase "documentation contracts" make -j4 check-docs
 }
 
@@ -709,6 +723,14 @@ cmd_audit() {
         residual_only=1
         shift
         ;;
+      --docs-contracts-proven-by)
+        if [[ $# -lt 2 || -z "${2:-}" ]]; then
+          echo "error: audit --docs-contracts-proven-by requires a CI job name" >&2
+          exit 1
+        fi
+        DOCS_CONTRACTS_PROVEN_BY="$2"
+        shift 2
+        ;;
       *)
         echo "error: unknown audit arg: $1" >&2
         usage
@@ -722,6 +744,13 @@ cmd_audit() {
   fi
   if [[ "$selected_scopes" -gt 1 ]]; then
     echo "error: audit --receipt, --source-only, and --residual-only are mutually exclusive" >&2
+    exit 1
+  fi
+  # Only the CI rehearsal may lean on a sibling job's proof: it runs in the
+  # same workflow run as that job, and the aggregate requires both.
+  if [[ -n "$DOCS_CONTRACTS_PROVEN_BY" ]] \
+    && { [[ "$residual_only" -ne 1 ]] || [[ "${GITHUB_ACTIONS:-}" != "true" ]]; }; then
+    echo "error: --docs-contracts-proven-by is only valid with --residual-only inside GitHub Actions" >&2
     exit 1
   fi
   local plan_scope="full"

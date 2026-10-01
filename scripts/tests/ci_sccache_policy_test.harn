@@ -391,6 +391,20 @@ fn workflow() {
         ],
       },
       "rust-test": rust_test,
+      "release-residual-audit": {
+        steps: [
+          {
+            name: "Run the release residual audit",
+            env: {
+              DOCS_CONTRACTS_PROVEN_BY: gha_expression(
+                "needs.changes.outputs.sprint_fast_ci != 'true' && 'Check Harn documentation' || ''",
+              ),
+            },
+            run:
+              "./scripts/release_gate.sh audit --residual-only --docs-contracts-proven-by \"$DOCS_CONTRACTS_PROVEN_BY\"",
+          },
+        ],
+      },
       "security-tests-ready": {
         "runs-on": "ubuntu-latest",
         "timeout-minutes": 50,
@@ -425,6 +439,14 @@ fn workflow() {
         needs: ["changes"],
         if:
           "needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'",
+        strategy: {
+          matrix: {
+            include: [
+              {kind: "audit", name: "Check Harn sources", selector: "--group=sources"},
+              {kind: "audit-docs", name: "Check Harn documentation", selector: "--group=docs"},
+            ],
+          },
+        },
         steps: [
           {name: "Build tree-sitter grammar for the parse sweep"},
           {name: "Check generated parser is current", run: "make check-tree-sitter-parser"},
@@ -1710,4 +1732,50 @@ pipeline test_a_step_budget_below_its_recorded_cold_wall_is_refused(
     [],
   )
   assert_eq(producer_step_budget_margin_errors(), [])
+}
+
+@test
+pipeline test_residual_rehearsal_names_the_docs_slice_it_relies_on(
+  harness: Harness,
+  task: unknown,
+) {
+  const valid = workflow()
+  const message =
+    "ci.yml:release-residual-audit may skip check-docs only by naming the harn-audit docs slice outside sprint mode"
+  assert(!ci_linux_lane_policy_errors(valid).contains(message))
+  // A renamed docs slice leaves the rehearsal pointing at a job that proves nothing.
+  const audit = valid.jobs["harn-audit"]
+  const renamed = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "harn-audit": {
+        ...audit,
+        strategy: {
+          matrix: {
+            include: audit.strategy.matrix.include.map(
+              { row -> row.kind == "audit-docs" ? {...row, name: "Docs v2"} : row },
+            )
+              .to_list(),
+          },
+        },
+      },
+    },
+  }
+  assert(ci_linux_lane_policy_errors(renamed).contains(message))
+  // Leaning on the slice in sprint mode, where it is skipped, proves nothing.
+  const residual = valid.jobs["release-residual-audit"]
+  const always = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "release-residual-audit": {
+        ...residual,
+        steps: [
+          {...residual.steps[0], env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn documentation"}},
+        ],
+      },
+    },
+  }
+  assert(ci_linux_lane_policy_errors(always).contains(message))
 }
