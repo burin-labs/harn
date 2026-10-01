@@ -207,7 +207,12 @@ pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 // top-level token is contents/read-only; without a job-level grant, Swatinem
 // save fails under continue-on-error and the Linux workspace-tests cache stays
 // empty (#5003).
-pub const CI_CACHE_WRITE_JOBS = ["package-audit", "rust-cli", "rust-check-inputs", "rust-cache-refresh"]
+pub const CI_CACHE_WRITE_JOBS = [
+  "package-audit",
+  "rust-cli",
+  "rust-check-inputs",
+  "rust-cache-refresh",
+]
 
 // Compile fan-out on the producer is measured, not typed, and the ceiling now
 // rests on a measurement rather than on a fear. It lives in
