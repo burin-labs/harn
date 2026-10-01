@@ -11,6 +11,11 @@ set -euo pipefail
 # usage: scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex> [--base REF]
 #                                  [--workflow PATH] [--expect NAME ...] [--json]
 #
+# Automatic routing expectations apply only to Harn and a workflow owned by
+# its repository. Other repositories must supply required checks with --expect.
+# Explicit requirements replace routing inference and must finish successfully;
+# a skipped required check fails, while unrelated routed skips remain visible.
+#
 # Exit codes: 0 green, 1 failing, 2 pending, 3 settled with an expected check
 # missing or expectations unobservable, 64 usage error.
 
