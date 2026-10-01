@@ -399,7 +399,7 @@ mod tests {
                         limit_ms: 10,
                     }),
                     duration_ms: 12,
-                    work: Some(harn_vm::VmWork { vm_steps: 5 }),
+                    work: Some(Box::new(harn_vm::VmWork { vm_steps: 5 })),
                     phases: Some(crate::test_runner::PhaseTimings {
                         setup_ms: 1,
                         compile_ms: 1,

@@ -1173,7 +1173,7 @@ async fn execute_cases(
             }
             emit_progress(
                 &options.progress,
-                TestRunEvent::TestFinished(Box::new(result.clone())),
+                TestRunEvent::TestFinished(result.clone()),
             );
             results.push(result);
             if options.fail_fast

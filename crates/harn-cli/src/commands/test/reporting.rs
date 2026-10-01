@@ -166,7 +166,7 @@ pub(super) fn user_test_report_from_summary(
             duration_ms: result.duration_ms,
             timeout: result.timeout,
             phases: result.phases,
-            work: result.work,
+            work: result.work.as_deref().copied(),
             timing_spans: result.timing_spans.clone(),
             message: result.skip_reason.clone().or_else(|| result.error.clone()),
             captured_output: result.captured_output.clone(),
@@ -504,7 +504,7 @@ mod tests {
                     }),
                     duration_ms: 30,
                     phases: Some(phases),
-                    work: Some(harn_vm::VmWork { vm_steps: 12 }),
+                    work: Some(Box::new(harn_vm::VmWork { vm_steps: 12 })),
                     timing_spans: Vec::new(),
                 },
                 TestResult {

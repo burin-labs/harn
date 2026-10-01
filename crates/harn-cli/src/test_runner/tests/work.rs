@@ -35,7 +35,11 @@ pipeline test_failure() { assert_eq(sum(10), -1) }
             .results
             .iter()
             .map(|case| {
-                let steps = case.work.expect("executed case has measured work").vm_steps;
+                let steps = case
+                    .work
+                    .as_ref()
+                    .expect("executed case has measured work")
+                    .vm_steps;
                 assert!(steps > 0);
                 (case.name.clone(), steps)
             })

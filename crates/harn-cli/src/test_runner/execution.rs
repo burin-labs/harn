@@ -440,7 +440,7 @@ async fn execute_compiled(
             timeout,
             duration_ms,
             phases: Some(phases),
-            work: Some(work_recorder.snapshot()),
+            work: Some(Box::new(work_recorder.snapshot())),
             timing_spans,
         },
         value,
