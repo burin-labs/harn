@@ -81,6 +81,7 @@ pub(crate) mod fake;
 pub(crate) mod first_token;
 mod hash_replay;
 pub(crate) mod helpers;
+pub use helpers::admit_reasoning_literals;
 pub mod introspection;
 pub mod jsonl;
 pub mod local_profiles;

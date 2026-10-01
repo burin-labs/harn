@@ -177,9 +177,12 @@ pub(super) fn output_format_error(message: impl Into<String>) -> VmError {
 }
 
 pub(super) fn unsupported_option_error(option: &str, provider: &str, model: &str) -> VmError {
+    let rule = crate::llm::capabilities::capability_rule_provenance(provider, model)
+        .map(|rule| format!(" Decided by {rule}."))
+        .unwrap_or_default();
     crate::llm::call::invalid_request_error(
         format!(
-            "option `{option}` is not supported by `{model}` (provider `{provider}`). See `harn provider catalog matrix` for compatibility."
+            "option `{option}` is not supported by `{model}` (provider `{provider}`).{rule} See `harn provider catalog matrix` for compatibility."
         ),
         provider,
         model,

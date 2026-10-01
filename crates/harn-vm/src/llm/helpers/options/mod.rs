@@ -94,6 +94,7 @@ pub(crate) use system_prompt::{
     assemble_system_prompt, compose_system_prompt, system_prompt_event_metadata,
     system_prompt_metadata,
 };
+pub use thinking::admit_reasoning_literals;
 pub(crate) use thinking::{resolve_catalog_thinking_config, resolve_thinking_config};
 
 /// Resolve an outbound call after refreshing runtime-owned capabilities.
