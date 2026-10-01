@@ -56,6 +56,7 @@ type PublicationMetadata = {expected_branch_oid?: string, repair_commits?: list<
 type CommitIdentity = {
   oid: string,
   author: {user: {login: string, ...rest}?, ...rest},
+  committer: {user: {login: string, ...rest}?, ...rest},
   signature: {isValid: bool, wasSignedByGitHub: bool, ...rest}?,
   ...rest,
 }
@@ -85,7 +86,7 @@ fn __is_generated_commit(
           method: "POST",
           body: {
             query:
-              "query($owner:String!,$repo:String!,$oid:GitObjectID!){repository(owner:$owner,name:$repo){commit:object(oid:$oid){... on Commit{oid author{user{login}} signature{isValid wasSignedByGitHub}}}}}",
+              "query($owner:String!,$repo:String!,$oid:GitObjectID!){repository(owner:$owner,name:$repo){commit:object(oid:$oid){... on Commit{oid author{user{login}} committer{user{login}} signature{isValid wasSignedByGitHub}}}}}",
             variables: {owner: repo.owner, repo: repo.name, oid: oid},
           },
           options: options,
@@ -103,6 +104,7 @@ fn __is_generated_commit(
     throw "bump-driver: commit identity lookup did not resolve the inspected commit"
   }
   return lowercase(commit.author.user?.login ?? "") == bot_login
+    && lowercase(commit.committer.user?.login ?? "") == bot_login
     && (commit.signature?.isValid ?? false)
     && (commit.signature?.wasSignedByGitHub ?? false)
 }
