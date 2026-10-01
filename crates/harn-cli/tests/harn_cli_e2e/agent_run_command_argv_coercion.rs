@@ -135,8 +135,14 @@ fn capture(request: dict, args: unknown) {
 pipeline main(harness: Harness) {
   const opts = {root: "/workspace", command_policy: capture, output_format: "value"}
   const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
-  const from_command = h({command: ["bash", "-lc", "ls -1"]})
-  const from_argv = h({argv: ["bash", "-lc", "ls -1"]})
+  const command_result = h({command: ["bash", "-lc", "ls -1"]})
+  const argv_result = h({argv: ["bash", "-lc", "ls -1"]})
+  assert(command_result.schema == "harn.agent_tool_handler_result.v2")
+  assert(command_result.outcome == "rejected")
+  assert(argv_result.schema == command_result.schema)
+  assert(argv_result.outcome == command_result.outcome)
+  const from_command = command_result.data
+  const from_argv = argv_result.data
   harness.stdio.println("COMMAND_REASON=" + from_command.reason)
   harness.stdio.println("ARGV_REASON=" + from_argv.reason)
   harness.stdio.println("EQUAL=" + to_string(from_command.reason == from_argv.reason))
@@ -270,7 +276,10 @@ fn capture(request: dict, args: unknown) {
 pipeline main(harness: Harness) {
   const opts = {root: "/workspace", command_policy: capture, output_format: "value"}
   const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
-  const r = h({argv: ["echo", "hi"]})
+  const result = h({argv: ["echo", "hi"]})
+  assert(result.schema == "harn.agent_tool_handler_result.v2")
+  assert(result.outcome == "rejected")
+  const r = result.data
   harness.stdio.println("REASON=" + r.reason)
 }
 "#;
@@ -296,7 +305,10 @@ fn capture(request: dict, args: unknown) {
 pipeline main(harness: Harness) {
   const opts = {root: "/workspace", command_policy: capture, output_format: "value"}
   const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
-  const r = h({argv: ["echo", "hi"]})
+  const result = h({argv: ["echo", "hi"]})
+  assert(result.schema == "harn.agent_tool_handler_result.v2")
+  assert(result.outcome == "rejected")
+  const r = result.data
   harness.stdio.println("REASON=" + r.reason)
 }
 "#;
@@ -320,7 +332,10 @@ fn require_approval(request: dict, args: unknown) {
 pipeline main(harness: Harness) {
   const opts = {root: "/workspace", command_policy: require_approval, output_format: "value"}
   const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
-  const r = h({argv: ["definitely-not-run-command-policy-sentinel"]})
+  const result = h({argv: ["definitely-not-run-command-policy-sentinel"]})
+  assert(result.schema == "harn.agent_tool_handler_result.v2")
+  assert(result.outcome == "rejected")
+  const r = result.data
   harness.stdio.println("STATUS=" + to_string(r.status))
   harness.stdio.println("REQUIRES=" + to_string(r.requires_approval))
   harness.stdio.println("REASON=" + r.reason)
@@ -367,7 +382,10 @@ fn capture(request: dict, args: unknown) {
 pipeline main(harness: Harness) {
   const opts = {root: "/workspace", allow_shell: false, command_policy: capture, output_format: "value"}
   const h = tool_find(agent_command_tools(harness, tool_registry(), opts), "run_command").handler
-  const r = h({command: ["bash", "-lc", "ls"]})
+  const result = h({command: ["bash", "-lc", "ls"]})
+  assert(result.schema == "harn.agent_tool_handler_result.v2")
+  assert(result.outcome == "rejected")
+  const r = result.data
   harness.stdio.println("REASON=" + r.reason)
 }
 "#;
