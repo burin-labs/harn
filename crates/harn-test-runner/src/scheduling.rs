@@ -23,7 +23,7 @@ pub enum TestRunEvent {
         test_index: usize,
         total_tests: usize,
     },
-    TestFinished(TestResult),
+    TestFinished(Box<TestResult>),
 }
 
 pub type TestRunProgress = Arc<dyn Fn(TestRunEvent) + Send + Sync>;
@@ -131,7 +131,10 @@ where
                     if fail_fast && !result.passed && result.skip_reason.is_none() {
                         cancelled.store(true, Ordering::Release);
                     }
-                    emit_progress(&progress, TestRunEvent::TestFinished(result.clone()));
+                    emit_progress(
+                        &progress,
+                        TestRunEvent::TestFinished(Box::new(result.clone())),
+                    );
                     results.lock().unwrap().push(result);
                 }
             })

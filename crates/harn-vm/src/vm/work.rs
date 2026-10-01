@@ -5,6 +5,13 @@ use serde::Serialize;
 
 use super::Vm;
 
+/// Optional observations share one pointer in the VM's stack-resident state.
+#[derive(Clone, Default)]
+pub(super) struct VmRecorders {
+    pub module_phases: Option<super::ModulePhaseRecorder>,
+    pub work: Option<VmWorkRecorder>,
+}
+
 /// Counted interpreter work, independent of wall time and module compilation caches.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct VmWork {
@@ -34,7 +41,9 @@ impl Vm {
     /// Enable counted work for this execution tree. Repeated calls retain the count.
     /// Fresh VMs and baseline instances start with recording disabled.
     pub fn enable_work_recording(&mut self) -> VmWorkRecorder {
-        self.work_recorder
+        self.recorders
+            .get_or_insert_with(Default::default)
+            .work
             .get_or_insert_with(VmWorkRecorder::default)
             .clone()
     }
@@ -59,7 +68,7 @@ mod tests {
     #[tokio::test]
     async fn counts_dispatched_instructions_not_operand_bytes_across_children() {
         let mut vm = Vm::new();
-        assert!(vm.work_recorder.is_none());
+        assert!(vm.recorders.is_none());
         let recorder = vm.enable_work_recording();
         assert_eq!(recorder.snapshot().vm_steps, 0);
         let chunk = four_steps();
@@ -77,8 +86,8 @@ mod tests {
         ));
         assert_eq!(recorder.snapshot().vm_steps, 8);
         assert_eq!(vm.enable_work_recording().snapshot(), recorder.snapshot());
-        assert!(vm.baseline().instantiate().work_recorder.is_none());
-        assert!(Vm::new().work_recorder.is_none());
+        assert!(vm.baseline().instantiate().recorders.is_none());
+        assert!(Vm::new().recorders.is_none());
     }
 
     #[tokio::test]
