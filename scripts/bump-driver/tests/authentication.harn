@@ -1,0 +1,44 @@
+import { assert_throws } from "std/testing"
+import { github_bump_auth_options, github_bump_read_private_key } from "../authentication"
+
+pipeline test_private_key_handoff_is_consumed_and_other_files_are_preserved(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("bump-key-handoff-")
+  const path = root + "/harn-bump-app-key.A12345"
+  const other = root + "/user-private-key.pem"
+  harness.fs.write_text(path, "synthetic-key")
+  harness.fs.write_text(other, "preserve-this")
+  assert_eq(
+    github_bump_read_private_key(harness.fs, {path: path, temporary_root: root}),
+    "synthetic-key",
+  )
+  assert_eq(harness.fs.status(path, "read").status, "missing")
+  assert_throws(
+    fn() { github_bump_read_private_key(harness.fs, {path: other, temporary_root: root}) },
+  )
+  assert_eq(harness.fs.read_text(other), "preserve-this")
+  harness.fs.delete(root)
+}
+
+pipeline test_authentication_requires_complete_single_identity() {
+  const credentials = {app_id: "app-id", installation_id: "77", private_key_pem: "synthetic-key"}
+  const options = github_bump_auth_options(credentials, "octo-org/octo-repo")
+  assert_eq(
+    options.installation_scope,
+    {repositories: ["octo-repo"], permissions: {contents: "write", pull_requests: "write"}},
+  )
+  assert_eq(options.installation_token, nil)
+  assert_eq(
+    github_bump_auth_options({token: "synthetic-token"}, "octo-org/octo-repo"),
+    {installation_token: "synthetic-token"},
+  )
+  for invalid in [
+    {},
+    {app_id: "app-id"},
+    {installation_id: "77"},
+    {private_key_pem: "synthetic-key"},
+    credentials + {token: "synthetic-token"},
+  ] {
+    assert_throws(fn() { github_bump_auth_options(invalid, "octo-org/octo-repo") })
+  }
+  assert_throws(fn() { github_bump_auth_options(credentials, "octo-org/") })
+}
