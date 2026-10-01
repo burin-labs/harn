@@ -812,9 +812,9 @@ jobs:
   # runner. Host-bound Linux sandbox proofs remain explicitly GitHub-owned below.
   # Where the Rust workspace producer is allowed to land. Read for its
   # `capacity` counts rather than its per-lane booleans: those booleans go
-  # false both when the fleet is switched off and when it is merely busy, and a
-  # busy fleet is a reason to queue, not a reason to send this job somewhere
-  # else.
+  # false both when the fleet is switched off and when it is merely busy. A
+  # fully busy pool routes hosted by name: queueing behind it cost pull
+  # requests 40-60 minutes and timed out the producer's consumers (#9086).
   #
   # Same-repository pull requests only. Fork pull requests cannot read the
   # release-app credentials this probe needs, and they are not eligible for

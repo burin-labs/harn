@@ -91,6 +91,15 @@ runner_capacity_decision() {
     echo "${CAPACITY_LABEL} event=$event route=hosted reason=pool_reported_zero_carriers pool=$pool carriers=0 idle=$idle"
     return 0
   fi
+  if [[ "$idle" =~ ^[0-9]+$ ]] && ((idle < 1)); then
+    # Every carrier is busy. Queueing behind them cost same-repository pull
+    # requests 40-60 minutes on 2026-10-01, long enough for the producer's
+    # consumers to give up waiting, so a fully busy pool routes hosted (#9086).
+    # An unreported idle count keeps the owned route: absence is not a
+    # measured zero.
+    echo "${CAPACITY_LABEL} event=$event route=hosted reason=pool_fully_busy pool=$pool carriers=$online idle=0"
+    return 0
+  fi
   echo "${CAPACITY_LABEL} event=$event route=owned pool=$pool carriers=$online idle=$idle"
 }
 
@@ -105,6 +114,11 @@ runner_capacity_main() {
   fallback=false
   [[ "$line" == *" fallback=true"* ]] && fallback=true
   printf 'route=%s\nfallback=%s\n' "$route" "$fallback" >> "${GITHUB_OUTPUT:?}"
+  # The job summary is where a reader looks for why a job landed where it did.
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    # shellcheck disable=SC2016 # Literal Markdown code spans.
+    printf '%s: route `%s`\n\n`%s`\n' "$CAPACITY_LABEL" "$route" "$line" >> "$GITHUB_STEP_SUMMARY"
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

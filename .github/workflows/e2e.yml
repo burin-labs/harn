@@ -100,8 +100,9 @@ jobs:
 
   # Where the main-push runs are allowed to land. Read for its `capacity`
   # counts rather than its per-lane booleans: those booleans go false both when
-  # the fleet is switched off and when it is merely busy, and a busy fleet is a
-  # reason to queue, not a reason to send this suite somewhere else.
+  # the fleet is switched off and when it is merely busy. The counts let
+  # `scripts/ci/runner_capacity.sh` tell those apart: a pool with carriers but
+  # none idle routes hosted by name (#9086) rather than queueing behind it.
   #
   # Same-repository events only. A fork pull request cannot read the
   # release-app credentials this probe needs, and it is not eligible for owned
