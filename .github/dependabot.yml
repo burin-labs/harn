@@ -13,14 +13,15 @@ updates:
       timezone: "America/Los_Angeles"
     cooldown:
       default-days: 7
-    # harn-bump-fleet updates this reference together with orchestration-sha.
-    # Dependabot changes only the reference and breaks their exact pairing.
-    ignore:
-      - dependency-name: "burin-labs/harn/.github/workflows/bump-harn.yml"
     groups:
       actions:
         patterns:
           - "*"
+    # harn-bump-fleet updates this reference together with orchestration-sha.
+    # Dependabot changes only the reference and breaks their exact pairing.
+    # Keep this list last so projections can append repository-owned ignores.
+    ignore:
+      - dependency-name: "burin-labs/harn/.github/workflows/bump-harn.yml"
 
   - package-ecosystem: "cargo"
     directories:
