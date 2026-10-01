@@ -1,0 +1,112 @@
+import { LiveBumpRemote, live_bump_adapter } from "std/bump/live"
+import { BumpAdapter } from "std/bump/runtime"
+import { GithubClientOptions, installation_token } from "harn-github-connector/default"
+
+/** Repository automation retains the bootstrap workflow's permission ceiling. */
+pub const GITHUB_BUMP_PERMISSIONS = {contents: "write", pull_requests: "write"}
+
+pub type GithubBumpCredentials = {
+  app_id?: string,
+  installation_id?: string,
+  private_key_pem?: string,
+  token?: string,
+}
+
+/** Consume only the workflow's disposable credential file before any child runs. */
+pub fn github_bump_read_private_key(
+  fs: HarnessFs,
+  handoff: {path: string, temporary_root: string},
+) -> string {
+  const root = handoff.temporary_root.trim_end("/")
+  const prefix = root + "/harn-bump-app-key."
+  const parts = split(handoff.path, prefix)
+  if root == "" || len(parts) != 2 || parts[0] != ""
+    || regex_match("^[A-Za-z0-9]{6,}$", parts[1]) == nil {
+    throw "bump-driver: private key handoff must be an owned runner temporary file"
+  }
+  if fs.status(handoff.path, "read")?.status != "present_file" {
+    throw "bump-driver: private key handoff is not a readable file"
+  }
+  const key = fs.read_text(handoff.path)
+  fs.delete(handoff.path)
+  if trim(key) == "" {
+    throw "bump-driver: private key handoff is empty"
+  }
+  return key
+}
+
+/** Bind renewable credentials to exactly the calling repository. */
+pub fn github_bump_auth_options(
+  credentials: GithubBumpCredentials,
+  repo: string,
+) -> GithubClientOptions {
+  const app_id = trim(credentials.app_id ?? "")
+  const installation_id = trim(credentials.installation_id ?? "")
+  const private_key = credentials.private_key_pem ?? ""
+  const token = credentials.token ?? ""
+  if app_id != "" || installation_id != "" || trim(private_key) != "" {
+    if app_id == "" || installation_id == "" || trim(private_key) == "" {
+      throw "bump-driver: renewable App credentials must include App ID, installation ID, and private key"
+    }
+    if trim(token) != "" {
+      throw "bump-driver: choose renewable App credentials or a supplied token"
+    }
+    const parts = split(repo, "/")
+    if len(parts) != 2 || trim(parts[0]) == "" || trim(parts[1]) == "" {
+      throw "bump-driver: repository identity must be owner/repo"
+    }
+    return {
+      app_id: app_id,
+      installation_id: installation_id,
+      private_key_pem: private_key,
+      installation_scope: {repositories: [parts[1]], permissions: GITHUB_BUMP_PERMISSIONS},
+    }
+  }
+  if trim(token) == "" {
+    throw "bump-driver: renewable App credentials or HARN_BUMP_TOKEN are required"
+  }
+  return {installation_token: token}
+}
+
+/** REST requests and Git transport share the connector's token cache and renewal. */
+pub fn github_bump_access_token(harness: Harness, options: GithubClientOptions) -> string {
+  const supplied = options.installation_token ?? options.token
+  if supplied != nil {
+    if options.installation_scope != nil {
+      throw "bump-driver: supplied tokens cannot claim mint-time restrictions"
+    }
+    return supplied
+  }
+  const result = installation_token(harness, options)
+  if is_err(result) {
+    throw "bump-driver: token issuance failed: " + to_string(unwrap_err(result).code)
+  }
+  return to_string(result)
+}
+
+/** Renew each callback's credential; std/bump/live still owns its mutations. */
+pub fn github_bump_live_adapter(
+  harness: Harness,
+  request: {remote: LiveBumpRemote, authentication: GithubClientOptions, config: dict},
+) -> BumpAdapter {
+  const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    request.remote,
+    request.config,
+    harness.fs,
+  )
+  return adapter
+    + {
+      apply_version: fn(tag, revision) {
+        const environment = request.config?.refresh_environment ?? {}
+        const fresh = request.config
+          + {
+            refresh_environment: environment
+              + {GH_TOKEN: github_bump_access_token(harness, request.authentication)},
+          }
+        return live_bump_adapter(harness.clock, harness.tools, request.remote, fresh, harness.fs)
+          .apply_version(tag, revision)
+      },
+    }
+}

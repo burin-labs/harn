@@ -111,7 +111,7 @@ jobs:
           # ref. The declared PR base, not the caller ref, owns bump ancestry.
           ref: ${{ inputs.base }}
           token: ${{ steps.app-token.outputs.token }}
-          # The Harn driver owns signed publication through HARN_BUMP_TOKEN.
+          # The Harn driver renews restricted credentials for signed publication.
           # Persisted checkout credentials leave a runner-temporary includeIf
           # in .git/config that caller-owned git probes cannot safely traverse.
           persist-credentials: false
@@ -266,9 +266,10 @@ jobs:
       - name: Run bump orchestration
         working-directory: package
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_ID: ${{ secrets.app-client-id }}
+          GITHUB_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.app-private-key }}
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
           HARN_BUMP_SOURCE_REVISION: ${{ inputs.source-revision }}
           HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}
@@ -328,6 +329,14 @@ jobs:
           export HARN_BUMP_REFRESH="${refresh_caller}${refresh_implicit_any}${refresh_migrations}${refresh_behavior_preserving}${refresh_format}${refresh_complete}"
           # shellcheck disable=SC2016 # expand in the child shell, not here
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
+          # Consume the key into driver memory, then delete its disposable file.
+          # Raw key material must not be inherited by caller-owned commands.
+          key_file="$(mktemp "${RUNNER_TEMP}/harn-bump-app-key.XXXXXX")"
+          trap 'rm -f -- "$key_file"' EXIT
+          chmod 600 "$key_file"
+          printf '%s' "${GITHUB_APP_PRIVATE_KEY:?}" > "$key_file"
+          unset GITHUB_APP_PRIVATE_KEY
+          export GITHUB_APP_PRIVATE_KEY_FILE="$key_file"
           harn --version
           harn run --no-sandbox ../.harn-runtime/scripts/bump-driver/bump_harn_runtime.harn
 

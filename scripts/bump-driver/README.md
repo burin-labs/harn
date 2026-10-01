@@ -17,6 +17,18 @@ The boundary is deliberate:
   validated worktree plus the same base lease; refresh and validation are never
   rerun. Authentication, schema, conflict, and other semantic failures remain
   fail-fast.
+- The workflow supplies renewable App credentials to the driver. Its connector
+  mints tokens for only the calling repository, with Contents: write and Pull
+  requests: write. REST requests and Git fetches share token renewal, so a long
+  validation cannot leave publication using an expired bootstrap token.
+
+`GithubBumpRemoteConfig.options` accepts `GithubClientOptions`. The legacy
+`token` field remains available for callers that manage their own token
+lifetime; supply one field, not both. The locked connector requires Harn
+0.10.135 or newer. App credentials stay inside the driver; caller refresh
+commands receive only a scoped token through `GH_TOKEN`.
+Each new refresh callback receives a current token. A child command making
+GitHub calls beyond that token's lifetime must manage its own renewal.
 
 Verify the package with `harn package verify . --strict`. No GitHub credential
 is needed; the tests use exact typed HTTP fixtures.
