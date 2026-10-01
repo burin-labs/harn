@@ -105,16 +105,30 @@ pipeline test_backgrounded_failing_verify_is_delivered_red(harness: Harness, tas
   if !posix_only(harness) {
     return nil
   }
-  const started = command_run(
-    harness.tools,
-    slow_failing_command(),
-    {background_after_ms: FOREGROUND_BUDGET_MS, capture: {max_inline_bytes: 4000}},
+  const registry = background_command_tools(
+    {fs: harness.fs, tools: harness.tools},
+    tool_registry(),
+    FOREGROUND_BUDGET_MS,
   )
-  assert_eq(started.status, "running")
-  const waited = command_wait(harness.tools, started, {timeout_ms: 30000})
-  assert_eq(waited.status, "completed")
-  assert_eq(waited.exit_code, 3)
-  assert_eq(waited.stderr, "VERIFY_FAILED")
+  const started = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "run", arguments: {command: slow_failing_command()[2]}},
+    registry,
+  )
+  assert(started.ok, "starting a background command must declare successful dispatch")
+  assert_eq(started.result.data.status, "running")
+  assert_eq(started.result.data.exit_code, nil)
+  const waited = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "wait_command", arguments: {handle_id: handle_from_text(started.rendered_result)}},
+    registry,
+  )
+  assert(!waited.ok, "a failed verifier must remain failed through registry dispatch")
+  assert_eq(waited.error_category, "tool_error")
+  assert_eq(waited.result.outcome, "error")
+  assert_eq(waited.result.data.status, "completed")
+  assert_eq(waited.result.data.exit_code, 3)
+  assert_eq(waited.result.data.stderr, "VERIFY_FAILED")
 }
 
 /**
@@ -201,6 +215,7 @@ pipeline test_registry_delivers_a_terminal_result_to_the_loop(harness: Harness, 
     registry,
   )
   const started_text = to_string(started?.rendered_result ?? "")
+  assert(started.ok, "starting a background command must declare successful dispatch")
   assert(
     contains(started_text, "status: running"),
     "a slow verify must reach the loop as still running; got ${started_text}",
@@ -220,6 +235,7 @@ pipeline test_registry_delivers_a_terminal_result_to_the_loop(harness: Harness, 
     registry,
   )
   const waited_text = to_string(waited?.rendered_result ?? "")
+  assert(waited.ok, "a successful verifier must remain successful through registry dispatch")
   assert(
     contains(waited_text, "status: completed"),
     "awaiting the handle must reach a terminal status; got ${waited_text}",

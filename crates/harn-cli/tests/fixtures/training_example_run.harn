@@ -17,6 +17,7 @@
  * differ from the one the model was served.
  */
 import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { llm_done, llm_text, llm_tool_call, with_llm_mocks } from "std/testing"
 import { tool_registry_from } from "std/tools"
 
@@ -35,7 +36,9 @@ fn main(harness: Harness) -> int {
           start_line: {type: "integer", required: false},
           end_line: {type: "integer", required: false},
         },
-        handler: { args -> {ok: true, observation: "fn main() {}"} },
+        handler: { args ->
+          agent_tool_handler_result("fn main() {}", {observation: "fn main() {}"})
+        },
       },
     ],
   )

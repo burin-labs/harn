@@ -1,0 +1,136 @@
+import { __tool_result_ok } from "std/agent/loop_result_status"
+
+struct DomainOutcome {
+  ok: bool
+  status: string
+  error: string
+}
+
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+import { agent_tool_handler_result, agent_tool_result_outcome } from "std/agent/tool_lifecycle"
+
+fn freeform() -> dict {
+  return {failed: true, error_code: 7}
+}
+
+fn main(harness: Harness) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "helper",
+    "Return a helper's freeform dict",
+    {
+      parameters: {},
+      handler: { _ ->
+        harness.stdio.println("helper handler reached")
+        freeform()
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "mutable",
+    "Return a mutable freeform dict",
+    {
+      parameters: {},
+      handler: { _ ->
+        let result = freeform()
+        result = {failed: true}
+        result
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "success",
+    "Declare success independently of data",
+    {
+      parameters: {},
+      handler: { _ ->
+        harness.stdio.println("success handler reached")
+        agent_tool_handler_result(
+          "successful operation",
+          {ok: false, status: "error", error: "permission_denied"},
+        )
+          + {ok: false, error: "permission_denied"}
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "failure",
+    "Declare failure with unconventional data",
+    {
+      parameters: {},
+      handler: { _ ->
+        agent_tool_handler_result("operation failed", {failed: true, error_code: 7}, "error")
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "rejected",
+    "Declare a refusal",
+    {
+      parameters: {},
+      handler: { _ -> agent_tool_handler_result("operation refused", {}, "rejected") },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "result_error",
+    "Return a typed Result failure",
+    {parameters: {}, handler: { _ -> Err({failed: true, error_code: 7}) }},
+  )
+  tools = tool_define(
+    tools,
+    "result_ok",
+    "Return a typed Result success",
+    {parameters: {}, handler: { _ -> Ok({failed: true, error_code: 7}) }},
+  )
+  for name in ["nominal_error", "nominal_ok"] {
+    tools = tool_define(
+      tools,
+      name,
+      "Return a nominal outcome independently of metadata",
+      {
+        parameters: {},
+        handler: { _ ->
+          DomainOutcome {ok: name == "nominal_ok", status: "error", error: "permission_denied"}
+        },
+      },
+    )
+  }
+  for name in [
+    "helper",
+    "mutable",
+    "success",
+    "failure",
+    "rejected",
+    "result_error",
+    "result_ok",
+    "nominal_error",
+    "nominal_ok",
+  ] {
+    const result = agent_dispatch_tool_call(
+      harness.tools,
+      {name: name, arguments: {}},
+      tools,
+      {tool_retries: 2, tool_backoff_ms: 0},
+    )
+    harness.stdio.println(
+      name + " " + to_string(result.ok) + " " + to_string(result.error_category),
+    )
+    if name == "success" {
+      assert(result.result.data.ok == false)
+      assert(result.rendered_result == "successful operation")
+      assert(agent_tool_result_outcome(result).kind == "ok")
+      assert(__tool_result_ok(result))
+    }
+    if name == "nominal_ok" {
+      assert(agent_tool_result_outcome(result).kind == "ok")
+      assert(__tool_result_ok(result))
+    }
+  }
+}

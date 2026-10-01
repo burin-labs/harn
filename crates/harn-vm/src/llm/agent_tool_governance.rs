@@ -102,7 +102,7 @@ pub(super) fn registry_dispatch_rejection(
                 category: ErrorCategory::ToolRejected,
             }),
             executor: None,
-            declared_failure: None,
+            handler_outcome: None,
         })
 }
 

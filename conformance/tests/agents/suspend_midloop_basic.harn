@@ -44,8 +44,8 @@ pipeline main(harness: Harness) {
       const resumed = resume_tool.handler({handle: handle.id})
       const done = wait_agent(harness.agent, handle)
       harness.stdio.println("suspended_status=" + suspended.status)
-      harness.stdio.println("pause_again_status=" + pause_again.status)
-      harness.stdio.println("resume_status=" + resumed.status)
+      harness.stdio.println("pause_again_status=" + pause_again.data.status)
+      harness.stdio.println("resume_status=" + resumed.data.status)
       harness.stdio.println("final_status=" + done.status)
       harness.stdio.println("has_transcript=" + to_string(done.has_transcript))
       const continuity = transcript_events_by_kind(done.transcript, "system_reminder").filter(

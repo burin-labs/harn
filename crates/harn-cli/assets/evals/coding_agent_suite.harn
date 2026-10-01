@@ -6,6 +6,7 @@
 import { agent_host_tools } from "std/agent/host_tools"
 import { agent_loop } from "std/agent/loop"
 import { agent_preset } from "std/agent/presets"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { parse, parser } from "std/cli/argparse"
 import { command_run } from "std/command"
 import { edit_apply_old_new_patch } from "std/edit"
@@ -150,18 +151,17 @@ fn __replace_tool(
         if patch.ok {
           fs.write_text(path, patch.patched)
         }
-        return json_stringify(
-          {
-            ok: patch.ok,
-            changed: patch.changed,
-            match_kind: patch.match_kind,
-            error_code: patch?.error_code,
-            message: patch?.message,
-            changed_regions: patch.changed_regions,
-            before_sha256: patch.before_sha256,
-            after_sha256: patch.after_sha256,
-          },
-        )
+        const result = {
+          ok: patch.ok,
+          changed: patch.changed,
+          match_kind: patch.match_kind,
+          error_code: patch?.error_code,
+          message: patch?.message,
+          changed_regions: patch.changed_regions,
+          before_sha256: patch.before_sha256,
+          after_sha256: patch.after_sha256,
+        }
+        return agent_tool_handler_result(json_stringify(result), result, patch.ok ? "ok" : "error")
       },
     },
   )
