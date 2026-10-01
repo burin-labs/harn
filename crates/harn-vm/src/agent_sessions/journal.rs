@@ -21,7 +21,7 @@ pub(crate) fn install_journal(
     })
 }
 
-pub(crate) fn journal_flush_lock(id: &str) -> Option<std::rc::Rc<tokio::sync::Mutex<()>>> {
+pub(crate) fn journal_flush_lock(id: &str) -> Option<std::sync::Arc<tokio::sync::Mutex<()>>> {
     super::SESSIONS.with(|sessions| {
         sessions
             .borrow()

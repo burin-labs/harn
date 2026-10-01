@@ -60,12 +60,12 @@ pub(crate) struct JournalState {
     /// Held across a whole flush. A flush reads the queue head, awaits its
     /// append, then pops it, so two interleaved flushes (sibling tool calls in
     /// `parallel settle`) would each append the same head.
-    flush_lock: std::rc::Rc<tokio::sync::Mutex<()>>,
+    flush_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     _writer_lease: SessionWriteLease,
 }
 
 impl JournalState {
-    pub(crate) fn flush_lock(&self) -> std::rc::Rc<tokio::sync::Mutex<()>> {
+    pub(crate) fn flush_lock(&self) -> std::sync::Arc<tokio::sync::Mutex<()>> {
         self.flush_lock.clone()
     }
 
@@ -220,7 +220,7 @@ pub(crate) async fn prepare(
             task_id: None,
             owns_session: false,
             lifecycle_reservation: None,
-            flush_lock: std::rc::Rc::default(),
+            flush_lock: std::sync::Arc::default(),
             _writer_lease: writer_lease,
         },
     })
