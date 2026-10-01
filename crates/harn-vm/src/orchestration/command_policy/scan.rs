@@ -101,9 +101,9 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert("package_install".to_string());
         rationale.push("package installation command detected");
     }
-    if lower.contains("git push") && (lower.contains("--force") || lower.contains("-f")) {
+    if super::catastrophic::analysis_rewrites_remote_refs(&command_analysis) {
         labels.insert("git_force_push".to_string());
-        rationale.push("git force-push detected");
+        rationale.push("git force-push or remote ref deletion detected");
     }
     if has_process_kill(&lower) {
         labels.insert("process_kill".to_string());
