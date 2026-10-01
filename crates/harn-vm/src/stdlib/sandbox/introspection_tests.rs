@@ -25,13 +25,15 @@ fn unconfined_status_matches_actual_spawn_refusal_for_each_network_ceiling() {
             .sandbox_mechanism_unavailable()
             .expect("the spawn must preserve its typed refusal");
         assert_eq!(refusal.unconfined.len(), dimensions);
-        assert_eq!(
+        assert!(matches!(
             status.get("confines_processes"),
-            Some(&VmValue::Bool(false))
-        );
-        assert_eq!(
-            status.get("os_hardened_refusal"),
-            Some(&refusal.thrown_value()),
+            Some(VmValue::Bool(false))
+        ));
+        let projected = status
+            .get("os_hardened_refusal")
+            .expect("an unconfined status must carry its refusal");
+        assert!(
+            crate::value::values_equal(projected, &refusal.thrown_value()),
             "status must project the actual refusal at the {level} ceiling"
         );
     }
