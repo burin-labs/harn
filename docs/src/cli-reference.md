@@ -1491,7 +1491,10 @@ controls and tool-channel combinations as `HARN-LLM-006`, using the runtime's
 capability rules. A direct `harness.llm.call` with known nonempty tools cannot
 use a text tool channel: that channel requires the contract rendered by
 `agent_loop`. Diagnostics name the deciding catalog rule and whether it came
-from Harn or a user overlay. Dynamic expressions remain checked at runtime;
+from Harn or a user overlay. Each file uses its nearest project's `[llm]` and
+`[capabilities]` declarations, including when one invocation checks several
+projects. Changing those declarations invalidates cached check results.
+Dynamic expressions remain checked at runtime;
 passing this static check does not prove a provider will honor an option.
 
 `check` builds a cross-module graph from each entry file and follows
