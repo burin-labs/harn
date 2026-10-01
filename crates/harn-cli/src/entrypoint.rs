@@ -55,7 +55,7 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         return;
     };
     if let Err(error) =
-        crate::spend_policy::run(cli.spend_policy.as_deref(), dispatch(subcommand)).await
+        crate::spend_policy::run(cli.spend_policy.as_deref(), Box::pin(dispatch(subcommand))).await
     {
         eprintln!("error: {error}");
         process::exit(1);
