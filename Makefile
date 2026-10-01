@@ -509,7 +509,7 @@ lint-harn-conformance:
 	@echo "=== Linting Harn conformance tests ==="
 	@start=$$(date +%s); \
 	HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh; \
-	rc=$$?; echo "    conformance lint took $$(( $$(date +%s) - start ))s"; exit $$rc
+	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 # Directories, not globs. `scripts/*.harn scripts/tests/*.harn` was flat, so a
 # nested script directory had no lint gate at all and its absence of findings
@@ -529,7 +529,7 @@ lint-harn-scripts:
 	@start=$$(date +%s); \
 	$(HARN_CMD) lint --strict scripts && \
 	$(HARN_CMD) check --strict-types scripts; \
-	rc=$$?; echo "    script lint and type check took $$(( $$(date +%s) - start ))s"; exit $$rc
+	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 # The `tests/` tree and `bench/` were unwalked by the same flat-glob omission.
 # The last three roots were each measured at zero findings before being
@@ -543,7 +543,7 @@ lint-harn-trees:
 	$(HARN_CMD) lint --strict bench && \
 	$(HARN_CMD) lint --strict crates/harn-cli/assets/demo && \
 	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals; \
-	rc=$$?; echo "    tree lint took $$(( $$(date +%s) - start ))s"; exit $$rc
+	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 lint-harn-stdlib-metadata:
 	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="
@@ -551,7 +551,7 @@ lint-harn-stdlib-metadata:
 	harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
 	tmp=$$(mktemp); \
 	find crates/harn-stdlib/src/stdlib -name '*.harn' -print0 | xargs -0 "$$harn_bin" lint > "$$tmp" 2>&1 || true; \
-	echo "    stdlib metadata lint took $$(( $$(date +%s) - start ))s"; \
+	echo "    $@ took $$(( $$(date +%s) - start ))s"; \
 	if grep -q 'HARN-STD-101' "$$tmp"; then \
 		grep -E 'HARN-STD-101' -B1 "$$tmp" | grep -v 'no issues found' | head -40; \
 		rm -f "$$tmp"; \
