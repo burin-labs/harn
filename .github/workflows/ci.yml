@@ -465,9 +465,37 @@ jobs:
         # so their shared feature graph compiles once, then checks every exact
         # publishable archive in one temporary Cargo workspace.
         run: ./scripts/verify_crate_packages.sh
-      # A public API break in a published crate needs a breaking fragment with
-      # its migration. This lane already restored the workspace's compiled
-      # dependency graph, which the rustdoc builds reuse.
+  # A public API break in a published crate needs a breaking fragment with its
+  # migration. This proof shares nothing with package verification but its
+  # trigger and warm dependency cache, so it runs beside it: in sequence the two
+  # took 1,045-1,449s of one runner across the 2026-10-01 merge-group sample,
+  # the longest job in the queue.
+  public-api:
+    name: Check public Rust API
+    needs: [changes]
+    if: needs.changes.outputs.package_audit == 'true'
+    runs-on: ubuntu-latest
+    # Hang tripwire, not a perf budget.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The public API check diffs against a pull request merge commit's
+          # first parent, so keep one parent.
+          fetch-depth: 2
+      - uses: ./.github/actions/rust-toolchain
+      # Restore-only: the rustdoc builds reuse package verification's compiled
+      # dependency graph, and package-audit remains its sole writer.
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: package-audit
+          cache-bin: false
+          cache-workspace-crates: "true"
       - name: Install cargo-semver-checks
         uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
@@ -495,11 +523,6 @@ jobs:
           BASE_SHA: ${{ steps.api-baseline.outputs.base_sha }}
           HEAD_SHA: HEAD
         run: ./.github/scripts/breaking-surface-check.sh rust-api
-      # The baseline checkout and its placeholder workspaces are per-commit,
-      # so keep them out of the saved cache.
-      - name: Drop the public API baseline workspace
-        if: always()
-        run: rm -rf target/semver-checks
 
   lint-md:
     name: Markdown lint
@@ -2385,6 +2408,7 @@ jobs:
         changes,
         fmt,
         package-audit,
+        public-api,
         lint-md,
         release-contract,
         release-residual-audit,
@@ -2470,6 +2494,20 @@ jobs:
               :
             else
               echo "::error::Publishable crate checks failed or skipped when required."
+              exit 1
+            fi
+          fi
+
+          # The public API check shares package verification's trigger, so the
+          # same skips are the only acceptable ones.
+          public_api_result="${{ needs['public-api'].result }}"
+          echo "Public Rust API check: $public_api_result"
+          if [ "$public_api_result" != "success" ]; then
+            if [ "$public_api_result" = "skipped" ] \
+              && { [ "$package_audit_expected" != "true" ] || [ "$merge_group_proven" = "true" ]; }; then
+              :
+            else
+              echo "::error::Public Rust API check failed or skipped when required."
               exit 1
             fi
           fi
