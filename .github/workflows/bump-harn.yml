@@ -41,6 +41,11 @@ on:
         required: false
         type: string
         default: ""
+      finalize-refresh-command:
+        description: "Optional repository-owned generation command run after source migrations and formatting. Failure refuses validation and publication."
+        required: false
+        type: string
+        default: ""
       validate-command:
         description: "Repository-owned verification command run after all refresh mutations and before the signed commit."
         required: false
@@ -274,6 +279,7 @@ jobs:
           HARN_BUMP_SOURCE_REVISION: ${{ inputs.source-revision }}
           HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}
           HARN_BUMP_FORMAT_COMMAND: ${{ inputs.format-command }}
+          BUMP_REFRESH_FINALIZE_COMMAND: ${{ inputs.finalize-refresh-command }}
           HARN_BUMP_VALIDATE_COMMAND: ${{ inputs.validate-command }}
           HARN_BUMP_REFRESH_SENTINEL: ${{ runner.temp }}/harn-bump-refresh-${{ github.run_id }}-${{ github.run_attempt }}.ok
           HARN_BUMP_BRANCH: ${{ inputs.branch }}
@@ -320,13 +326,16 @@ jobs:
           # the success sentinel.
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_format='test -n "$HARN_BUMP_FORMAT_COMMAND"; eval "$HARN_BUMP_FORMAT_COMMAND"; '
+          # Regenerate source-derived artifacts only after every source mutation.
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          refresh_finalize='if [ -n "$BUMP_REFRESH_FINALIZE_COMMAND" ]; then eval "$BUMP_REFRESH_FINALIZE_COMMAND"; fi; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_complete='printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
           if [ "${HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES}" != "true" ]; then
             refresh_behavior_preserving=''
             echo "::notice::Skipping the unattended behavior-preserving fix pass; capability migrations still applied."
           fi
-          export HARN_BUMP_REFRESH="${refresh_caller}${refresh_implicit_any}${refresh_migrations}${refresh_behavior_preserving}${refresh_format}${refresh_complete}"
+          export HARN_BUMP_REFRESH="${refresh_caller}${refresh_implicit_any}${refresh_migrations}${refresh_behavior_preserving}${refresh_format}${refresh_finalize}${refresh_complete}"
           # shellcheck disable=SC2016 # expand in the child shell, not here
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           # Consume the key into driver memory, then delete its disposable file.
