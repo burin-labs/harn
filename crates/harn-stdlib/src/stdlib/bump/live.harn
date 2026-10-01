@@ -41,7 +41,6 @@ pub type LiveBumpConfig = {
   readiness_max_attempts: int,
   readiness_interval_ms: int,
   readiness_timeout_ms: int,
-  bot_author: string,
 }
 
 /** Verdict of an authenticated fetch of a commit into the local checkout. */
@@ -62,6 +61,7 @@ pub type LiveBumpRemote = {
   release_view: fn(string) -> LiveBumpRelease,
   base_head: fn() -> BumpBaseHead,
   fetch_base: fn(string) -> LiveBumpFetch,
+  is_generated_commit: fn(string) -> bool,
   find_bump_pr: fn() -> BumpPrState?,
   disable_auto_merge: fn(BumpPrState, string) -> bool,
   publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
@@ -98,7 +98,6 @@ pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
     readiness_max_attempts: to_int(o.readiness_max_attempts ?? 1) ?? 1,
     readiness_interval_ms: to_int(o.readiness_interval_ms ?? 20000) ?? 20000,
     readiness_timeout_ms: to_int(o.readiness_timeout_ms ?? 20000) ?? 20000,
-    bot_author: to_string(o.bot_author ?? "harn-release-bot[bot]"),
   }
 }
 
@@ -487,7 +486,7 @@ pub fn live_bump_adapter(
     preserve_repairs: fn(existing, base) { return replay_bump_repairs(
       tools,
       cfg.repo_dir,
-      cfg.bot_author,
+      remote.is_generated_commit,
       existing,
       base,
       remote.fetch_base,

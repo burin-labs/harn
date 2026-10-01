@@ -4,7 +4,7 @@ import { command_run } from "std/command"
 import { strip_v } from "std/semver"
 import { assert_eq, assert_throws } from "std/testing"
 
-fn repair_fixture(harness: {fs: HarnessFs, tools: HarnessTools}) {
+fn repair_fixture(harness: {fs: HarnessFs, tools: HarnessTools}, author: string = "Harn Test") {
   const root = harness.fs.mkdtemp_in_workspace("harn-bump-repairs-")
   git_ok(harness.tools, root, ["init", "--quiet"])
   git_ok(harness.tools, root, ["config", "user.email", "harn-test@example.invalid"])
@@ -21,11 +21,16 @@ fn repair_fixture(harness: {fs: HarnessFs, tools: HarnessTools}) {
   git_ok(
     harness.tools,
     root,
-    ["commit", "--quiet", "--author=release[bot] <bot@example.invalid>", "-m", "old bump"],
+    ["commit", "--quiet", "--author=harn-release-bot[bot] <bot@example.invalid>", "-m", "old bump"],
   )
+  const generated = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
   harness.fs.write_text(path_join(root, "repair.txt"), "repaired\n")
   git_ok(harness.tools, root, ["add", "--all"])
-  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "consumer repair"])
+  git_ok(
+    harness.tools,
+    root,
+    ["commit", "--quiet", "--author=${author} <repair@example.invalid>", "-m", "consumer repair"],
+  )
   const repair = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
   git_ok(harness.tools, root, ["checkout", "--quiet", "--detach", base])
   const existing: BumpPrState = {
@@ -38,11 +43,19 @@ fn repair_fixture(harness: {fs: HarnessFs, tools: HarnessTools}) {
     url: "https://example.invalid/pull/1",
     state: "open",
   }
-  return {root: root, base: base, repair: repair, existing: existing}
+  return {root: root, base: base, generated: generated, repair: repair, existing: existing}
 }
 
 pipeline test_refresh_preserves_repairs_on_two_consecutive_publications(harness: Harness) {
-  const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
+  refresh_preserves_repairs(harness, "Harn Test")
+}
+
+pipeline test_refresh_preserves_a_repair_with_a_forged_bot_author(harness: Harness) {
+  refresh_preserves_repairs(harness, "harn-release-bot[bot]")
+}
+
+fn refresh_preserves_repairs(harness: Harness, author: string) {
+  const fixture = repair_fixture(pick(harness, ["fs", "tools"]), author)
   let existing = fixture.existing
   let publications = []
   const remote = unreachable_remote()
@@ -59,6 +72,8 @@ pipeline test_refresh_preserves_repairs_on_two_consecutive_publications(harness:
         return {ok: true, detail: ""}
       },
       find_bump_pr: fn() { return existing },
+      is_generated_commit:
+        fn(oid) { return oid == fixture.generated || contains(publications, oid) },
       publish_commit: fn(request) {
         assert_eq(request.expected_branch_oid, existing.head_oid)
         assert_eq(request.repair_commits, [fixture.repair])
@@ -71,7 +86,7 @@ pipeline test_refresh_preserves_repairs_on_two_consecutive_publications(harness:
           [
             "commit",
             "--quiet",
-            "--author=release[bot] <bot@example.invalid>",
+            "--author=harn-release-bot[bot] <bot@example.invalid>",
             "-m",
             request.headline,
             "-m",
@@ -98,7 +113,6 @@ pipeline test_refresh_preserves_repairs_on_two_consecutive_publications(harness:
     {
       repo_dir: fixture.root,
       version_file: path_join(fixture.root, ".harn-version"),
-      bot_author: "release[bot]",
       refresh_command: "true",
       validation_command: "test \"$(cat repair.txt)\" = repaired",
     },
@@ -138,6 +152,7 @@ pipeline test_refresh_refuses_a_conflicting_repair_before_validation_and_publica
       base_head: fn() { return {available: true, oid: advanced, detail: ""} },
       fetch_base: fn(_oid) { return {ok: true, detail: ""} },
       find_bump_pr: fn() { return fixture.existing },
+      is_generated_commit: fn(oid) { return oid == fixture.generated },
     }
   const adapter = live_bump_adapter(
     harness.clock,
@@ -146,7 +161,6 @@ pipeline test_refresh_refuses_a_conflicting_repair_before_validation_and_publica
     {
       repo_dir: fixture.root,
       version_file: path_join(fixture.root, ".harn-version"),
-      bot_author: "release[bot]",
       refresh_command: "true",
       validation_command: "touch validation-ran",
     },
@@ -172,6 +186,7 @@ fn unreachable_remote() -> LiveBumpRemote {
     release_view: fn(_tag) { return unreachable() },
     base_head: unreachable,
     fetch_base: fn(_oid) { return unreachable() },
+    is_generated_commit: fn(_oid) { return unreachable() },
     find_bump_pr: unreachable,
     disable_auto_merge: fn(_pr, _base_sha) { return unreachable() },
     publish_commit: fn(_request) { return unreachable() },

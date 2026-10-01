@@ -30,11 +30,14 @@ Signed bump commits retain `Harn-Repair-Commit` trailers, so later refreshes
 can replay those same repairs after the branch was flattened. Repair commits
 must remain fetchable by their recorded IDs. A missing commit fails the run.
 
-The release App's exact bot author identifies generated bump commits; other
-authors' commits are repairs. Repair merge commits are refused. A patch conflict
+The GitHub adapter identifies generated commits by the configured publisher's
+GitHub login and a valid GitHub signature. A local Git author name is not
+identity evidence. Unsigned, unknown, or other publishers' commits are repairs;
+an unavailable identity lookup fails the run. Repair merge commits are refused.
+A patch conflict
 returns `repair_conflict` without publishing or arming auto-merge. Publication
-also leases the inspected pull-request head, so a concurrent repair can't be
-overwritten. The receipt's `repair_commits` names the repair set, and
+also rechecks the inspected pull-request head and refuses an observed change
+before replacing it. The receipt's `repair_commits` names the repair set, and
 `repair_conflicts` names contested paths.
 
 Drop this into the consuming repo. The only repo-specific parts are the trigger

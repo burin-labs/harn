@@ -84,6 +84,7 @@ pipeline main(harness: Harness) {
       options: auth_options,
       branch: branch,
       base: base,
+      bot_login: env_or(harness.env, "HARN_EXT_BUMP_BOT_LOGIN", "harn-release-bot[bot]"),
       source_revision: env_or(harness.env, "HARN_BUMP_SOURCE_REVISION", ""),
       package_test_receipt: package_test_receipt(harness.fs, harness.env) ?? "",
     },
@@ -96,7 +97,6 @@ pipeline main(harness: Harness) {
       config: {
         release_repo: release_repo,
         validation_command: env_or(harness.env, "HARN_BUMP_VALIDATE", ""),
-        bot_author: env_or(harness.env, "HARN_EXT_BUMP_BOT_AUTHOR", "harn-release-bot[bot]"),
         refresh_command: env_or(
           harness.env,
           "HARN_BUMP_REFRESH",

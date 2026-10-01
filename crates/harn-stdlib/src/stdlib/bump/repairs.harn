@@ -34,16 +34,13 @@ fn lines(value: string) -> list<string> {
 pub fn replay_bump_repairs(
   tools: HarnessTools,
   root: string,
-  bot_author: string,
+  is_generated_commit: fn(string) -> bool,
   existing: BumpPrState?,
   base: string,
   fetch: fn(string) -> {ok: bool, detail: string},
 ) -> BumpRepairs {
   if existing == nil {
     return {ok: true, commits: [], conflicts: [], detail: "no open bump PR"}
-  }
-  if trim(bot_author) == "" {
-    throw "std/bump/repairs: bot author is required"
   }
   for oid in [base, existing.head_oid] {
     if regex_match("^[0-9a-f]{40}$", oid) == nil {
@@ -59,8 +56,7 @@ pub fn replay_bump_repairs(
   )
   let repairs: list<string> = []
   for oid in history {
-    const author = checked(tools, root, ["show", "-s", "--format=%an", oid])
-    if author == bot_author {
+    if is_generated_commit(oid) {
       const trailers = lines(
         checked(
           tools,
