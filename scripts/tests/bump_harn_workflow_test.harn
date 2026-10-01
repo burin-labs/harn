@@ -1,5 +1,5 @@
 import { read_yaml } from "std/fs"
-import { GITHUB_BUMP_PERMISSIONS } from "../bump-driver/authentication"
+import { GITHUB_BUMP_PERMISSIONS } from "../bump-driver/github_authority"
 
 fn checkout_boundary_errors(steps: list) -> list<string> {
   let errors: list<string> = []
