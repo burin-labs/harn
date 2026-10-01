@@ -8,7 +8,7 @@ impl crate::vm::Vm {
         match method {
             "unsettled_state" => {
                 let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
-                Ok(crate::stdlib::json_to_vm_value(&snapshot.to_json()))
+                Ok(crate::value::json::json_to_vm_value(&snapshot.to_json()))
             }
             "is_empty" => {
                 let empty = match args.first() {
@@ -20,12 +20,12 @@ impl crate::vm::Vm {
                 Ok(VmValue::Bool(empty))
             }
             "counts" => match args.first() {
-                Some(state) => Ok(crate::stdlib::json_to_vm_value(
+                Some(state) => Ok(crate::value::json::json_to_vm_value(
                     &state_counts(state)?.to_json(),
                 )),
                 None => {
                     let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
-                    Ok(crate::stdlib::json_to_vm_value(&snapshot.counts_json()))
+                    Ok(crate::value::json::json_to_vm_value(&snapshot.counts_json()))
                 }
             },
             "summary" => match args.first() {
@@ -78,7 +78,7 @@ impl crate::vm::Vm {
                 } else {
                     "unsettled"
                 };
-                Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+                Ok(crate::value::json::json_to_vm_value(&serde_json::json!({
                     "status": status,
                     "timed_out": !snapshot.is_empty(),
                     "state": snapshot.to_json(),
