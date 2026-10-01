@@ -41,6 +41,8 @@ pipeline test_github_api_retries_a_reset_http2_stream(task: unknown) {
     ),
     "transient_transport",
   )
+  assert_eq(github_api_failure_kind(failed("gh: Server Error (HTTP 502)")), "transient_transport")
+  assert_eq(github_api_failure_kind(failed("gh: Server Error (HTTP 500)")), "command")
 }
 
 pipeline test_github_api_fails_closed_after_bounded_transport_retries(task: unknown) {

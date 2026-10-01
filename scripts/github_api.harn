@@ -18,7 +18,8 @@ const DEFAULT_RETRY_POLICY: GitHubApiRetryPolicy = {max_attempts: 3, delay_ms: 1
 
 /**
  * Classify only known transport failures as retryable. "stream error: stream ID"
- * is an HTTP/2 stream the server reset, e.g. "stream ID 1; CANCEL; received from peer".
+ * is an HTTP/2 stream the server reset, e.g. "stream ID 1; CANCEL; received from peer";
+ * "(HTTP 502)" is how gh itself reports a gateway error.
  */
 pub fn github_api_failure_kind(attempt: GitHubApiAttempt) -> GitHubApiFailureKind {
   if attempt.timed_out {
@@ -34,7 +35,10 @@ pub fn github_api_failure_kind(attempt: GitHubApiAttempt) -> GitHubApiFailureKin
     || detail.contains("temporarily unavailable")
     || detail.contains("502 bad gateway")
     || detail.contains("503 service unavailable")
-    || detail.contains("504 gateway timeout") {
+    || detail.contains("504 gateway timeout")
+    || detail.contains("(http 502)")
+    || detail.contains("(http 503)")
+    || detail.contains("(http 504)") {
     return "transient_transport"
   }
   return "command"
