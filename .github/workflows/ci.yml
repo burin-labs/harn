@@ -30,12 +30,18 @@ env:
   # exact-run artifacts. Every live consumer shares this bounded wait policy;
   # the barrier jobs add scheduling and API headroom above it. The waits share
   # the workflow token's API budget with every job in the repository, so each
-  # backs off from 10s to 60s between reads, and a producer still queued after
+  # backs off from 10s to 15s between reads, and a producer still queued after
   # 30 minutes fails the wait by name, inside the shortest waiter's 45-minute
   # job timeout, instead of polling until that timeout.
+  #
+  # Every Harn proof lane starts its real work when its waiter sees the CLI, so
+  # the cap is merge-queue latency: at 60s a consumer noticed the artifact
+  # about 30s late on average. On the organization's Enterprise plan the token
+  # allows 15,000 requests an hour per repository; nine waiters at two reads
+  # per poll spend about 450 of them in a six-minute wait.
   HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
   HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
-  HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS: "60"
+  HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS: "15"
   HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS: "1800"
   HARN_EXT_ARTIFACT_PRODUCER_JOB: "Rust workspace tests"
   # Incremental fights the within-job sccache wrapper. Cross-run reuse is
