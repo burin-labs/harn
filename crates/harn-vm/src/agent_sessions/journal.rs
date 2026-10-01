@@ -21,6 +21,16 @@ pub(crate) fn install_journal(
     })
 }
 
+pub(crate) fn journal_flush_lock(id: &str) -> Option<std::rc::Rc<tokio::sync::Mutex<()>>> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(id)
+            .and_then(|state| state.transcript_journal.as_ref())
+            .map(crate::agent_session_journal::JournalState::flush_lock)
+    })
+}
+
 pub(crate) fn next_journal_event(
     id: &str,
 ) -> Result<

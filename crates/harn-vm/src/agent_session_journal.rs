@@ -57,10 +57,18 @@ pub(crate) struct JournalState {
     task_id: Option<String>,
     owns_session: bool,
     lifecycle_reservation: Option<crate::agent_lifecycle_cleanup::LifecycleReservation>,
+    /// Held across a whole flush. A flush reads the queue head, awaits its
+    /// append, then pops it, so two interleaved flushes (sibling tool calls in
+    /// `parallel settle`) would each append the same head.
+    flush_lock: std::rc::Rc<tokio::sync::Mutex<()>>,
     _writer_lease: SessionWriteLease,
 }
 
 impl JournalState {
+    pub(crate) fn flush_lock(&self) -> std::rc::Rc<tokio::sync::Mutex<()>> {
+        self.flush_lock.clone()
+    }
+
     pub(crate) fn run_id(&self) -> &str {
         &self.config.run_id
     }
@@ -212,6 +220,7 @@ pub(crate) async fn prepare(
             task_id: None,
             owns_session: false,
             lifecycle_reservation: None,
+            flush_lock: std::rc::Rc::default(),
             _writer_lease: writer_lease,
         },
     })
@@ -309,6 +318,10 @@ fn enqueue(journal: &mut Option<JournalState>, mutation: TranscriptMutation) {
 /// until its individual append succeeds, so a later failure is observable and
 /// retryable without a background writer or a best-effort drop.
 pub(crate) async fn flush(session_id: &str) -> Result<(), VmError> {
+    let Some(lock) = crate::agent_sessions::journal_flush_lock(session_id) else {
+        return Ok(());
+    };
+    let _flushing = lock.lock().await;
     loop {
         let Some((store, event)) = crate::agent_sessions::next_journal_event(session_id)? else {
             return Ok(());

@@ -52,7 +52,7 @@ pub mod reclaim_hooks;
 mod subscribers;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
 pub(crate) use journal::{
-    claim_journal_task, clear_journal, install_journal, journal_owns_session,
+    claim_journal_task, clear_journal, install_journal, journal_flush_lock, journal_owns_session,
     journal_sessions_for_task, next_journal_event, record_persisted_journal_event,
 };
 pub(crate) use subscribers::registered_subscribers_for;
