@@ -18,6 +18,13 @@ migration to another machine.
 `checkpoint_exists` is preferable to `checkpoint_get(key) == nil` when `nil`
 is a valid checkpoint value.
 
+Only an absent checkpoint file starts an empty store. If the file is
+unreadable, is not valid JSON, or is not a JSON object, every builtin except
+`checkpoint_clear` throws and leaves the file untouched, so a resumed pipeline
+never replays completed stages from damaged state. Inspect or repair the file,
+or call `checkpoint_clear()` to start over. If a write fails, the next call
+reloads the file instead of trusting the unpersisted in-memory value.
+
 ### std/checkpoint module
 
 ```harn

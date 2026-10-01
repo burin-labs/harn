@@ -48,9 +48,16 @@ impl CheckpointState {
             return Ok(());
         }
         self.data = match std::fs::read_to_string(&self.path) {
+            // serde's own message can quote stored values, so report only
+            // the failure class and position.
             Ok(contents) => serde_json::from_str(&contents).map_err(|e| {
+                let reason = match e.classify() {
+                    serde_json::error::Category::Data => "not a JSON object",
+                    _ => "malformed JSON",
+                };
                 format!(
-                    "checkpoint decode error at line {}, column {}",
+                    "checkpoint decode error in {}: {reason} at line {}, column {}",
+                    self.path.display(),
                     e.line(),
                     e.column()
                 )

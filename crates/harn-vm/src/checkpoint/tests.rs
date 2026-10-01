@@ -25,7 +25,12 @@ async fn damaged_store_refuses_reads_and_mutations_until_explicit_recovery() {
             ("checkpoint_delete", vec![VmValue::string("spent")]),
         ] {
             let error = vm.call_named_builtin(name, args).await.unwrap_err();
-            assert!(!error.to_string().contains("synthetic-checkpoint-secret"));
+            let message = error.to_string();
+            assert!(
+                message.contains("checkpoint decode error"),
+                "{name} on {bytes:?}: {message}"
+            );
+            assert!(!message.contains("synthetic-checkpoint-secret"));
             assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes);
         }
         vm.call_named_builtin("checkpoint_clear", vec![])
