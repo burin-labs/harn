@@ -4,6 +4,7 @@ use std::sync::{mpsc, Arc, Barrier, OnceLock};
 use std::thread;
 use std::time::Instant;
 
+use harn_clock::test_support::recv_within;
 use harn_clock::PausedClock;
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -120,12 +121,12 @@ fn status_reports_an_admitted_worker_before_the_next_acquisition() {
         thread::spawn(move || {
             let mut report = |receipt: &HostLeaseAcquireReceipt| {
                 progress_tx.send(receipt.clone()).unwrap();
-                resume_rx.recv().unwrap();
+                recv_within("host lease worker resumes", &resume_rx);
             };
             store.acquire_wait_for_run_with_progress(&run_id, std::process::id(), &mut report)
         })
     };
-    let progress = progress_rx.recv().unwrap();
+    let progress = recv_within("pending host lease worker reports progress", &progress_rx);
     assert_eq!(progress.queue.unwrap().position, 1);
     assert!(
         store
@@ -200,8 +201,8 @@ fn supervised_wait_projects_typed_progress_before_event_driven_handoff() {
 
     // The first attempt is always deferred behind the holder and the schedule
     // reports at elapsed zero, so this event is guaranteed. If the waiter
-    // fails instead, its sender drops and `recv` errors rather than hanging.
-    let progress = progress_rx.recv().unwrap();
+    // fails instead, its sender drops and the receive fails immediately.
+    let progress = recv_within("queued host lease waiter reports progress", &progress_rx);
     assert_eq!(progress.status, HostLeaseAcquireStatus::Deferred);
     assert_eq!(
         progress.defer.unwrap().active.unwrap().owner,

@@ -123,10 +123,8 @@ const SYSTEM_TIME_ALLOWLIST: list<string> = [
 // refused and a fixed one fails until its row is lowered or deleted. Every row
 // says why its waits are not hang detectors.
 const LITERAL_TIMEOUT_BASELINE = [
-  // Host-lease coverage belongs to a separate change and was left untouched
-  // here. The CLI case waits on a real Cargo child process.
+  // The CLI case waits on a real Cargo child process.
   {rule: "literal_timeout", path: "crates/harn-cli/tests/harn_cli_e2e/host_lease_cli.rs", count: 1},
-  {rule: "literal_timeout", path: "crates/harn-hostlib/src/host_lease/tests.rs", count: 1},
   // Runtime code, not a test wait: the inline-module split scans everything
   // below a file's first `#[cfg(test)] mod`, and these files declare one
   // above runtime code. The durations are user-supplied budgets.
