@@ -174,6 +174,7 @@ fn machine_quota_survives_retry_and_process_style_reopen_on_real_transport() {
         let policy = MachineSpendPolicy {
             daily_limit_microusd: Some(600_000),
             monthly_limit_microusd: Some(600_000),
+            lifetime_limit_microusd: None,
         };
         let count = Arc::new(AtomicUsize::new(0));
         let server = stub(count.clone(), false, true);

@@ -561,6 +561,7 @@ fn host_session_budget_inherits_machine_scope_without_replacing_it() {
         MachineSpendPolicy {
             daily_limit_microusd: Some(1_000_000),
             monthly_limit_microusd: Some(1_000_000),
+            lifetime_limit_microusd: None,
         },
     )
     .unwrap();
@@ -602,6 +603,7 @@ fn registered_self_hosted_route_is_known_zero_under_machine_quota() {
         MachineSpendPolicy {
             daily_limit_microusd: Some(0),
             monthly_limit_microusd: Some(0),
+            lifetime_limit_microusd: None,
         },
     )
     .unwrap();
@@ -637,6 +639,7 @@ fn machine_quota_refuses_late_activation_after_provider_admission() {
         MachineSpendPolicy {
             daily_limit_microusd: Some(1_000_000),
             monthly_limit_microusd: Some(1_000_000),
+            lifetime_limit_microusd: None,
         },
     )
     .unwrap();
@@ -659,6 +662,7 @@ fn native_decisions_draw_on_and_are_refused_by_the_machine_quota() {
         MachineSpendPolicy {
             daily_limit_microusd: Some(500_000),
             monthly_limit_microusd: Some(500_000),
+            lifetime_limit_microusd: None,
         },
     )
     .unwrap();
