@@ -136,7 +136,9 @@ without rebuilding, put the fields to override in a TOML file and pass it:
 harn run scripts/run_approval_review_calibration.harn -- --policy reviewer-policy.toml --receipt review.json
 ```
 
-Omitted fields inherit the bundled policy through `approval_review_policy`.
+Omitted fields inherit the bundled policy through `approval_review_policy`,
+which returns a typed policy record. Unknown keys and invalid field values
+fail before the reviewer is called.
 The receipt records the effective `policy_sha256` and its source. Add
 `--diagnostics` to include Harn's canonical reviewer trace with raw verdicts,
 schema retries, and validation failures. Each case also retains its failure

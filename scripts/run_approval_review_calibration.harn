@@ -65,7 +65,14 @@ fn main(harness: Harness) {
     )
     return 2
   }
-  const policy_doc = approval_review_policy(unwrap(overlay) ?? {})
+  const resolved = try {
+    approval_review_policy(unwrap(overlay) ?? {})
+  }
+  if is_err(resolved) {
+    harness.stdio.println("invalid policy overlay: " + to_string(unwrap_err(resolved)))
+    return 2
+  }
+  const policy_doc = unwrap(resolved)
   const policy = if trim(to_string(args.model)) != "" {
     policy_doc + {reviewer: (policy_doc?.reviewer ?? {}) + {model: trim(to_string(args.model))}}
   } else {

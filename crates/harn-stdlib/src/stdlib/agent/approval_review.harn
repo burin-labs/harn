@@ -1,3 +1,4 @@
+import { ApprovalReviewPolicy } from "std/agent/approval_review_policy_types"
 /**
  * The approval reviewer: the model that answers a would-be permission denial.
  *
@@ -40,7 +41,6 @@
  * without collapsing both facts into one bit.
  */
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
-import { deep_merge } from "std/collections"
 import { omit } from "std/json"
 
 /** The canonical decision record schema, one per reviewer verdict. */
@@ -276,7 +276,7 @@ fn approval_review_unavailable(request: dict, reason: string, detail: any) -> di
 pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> dict {
   const effective_policy = approval_review_policy(policy)
   const category = trim(to_string(request?.category ?? ""))
-  const floor = approval_review_floor_decision(policy, request)
+  const floor = __approval_review_floor_decision(effective_policy, request)
   if floor != nil {
     return floor
   }
@@ -293,7 +293,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
       provider: route.provider,
       model: route.model,
       system: approval_review_system_prompt(effective_policy),
-      timeout_ms: effective_policy?.reviewer?.timeout_ms,
+      timeout_ms: effective_policy.reviewer.timeout_ms,
       output: {schema: schema, strict: true, validation: "error"},
       mock_scope: "agent.approval_review",
       _call_stage: "verify",
@@ -373,14 +373,14 @@ const __APPROVAL_REVIEW_ROLE_LADDER = "approval_reviewer"
 fn __approval_review_route(
   llm: HarnessLlm,
   caller_policy: dict?,
-  effective_policy: dict,
+  effective_policy: ApprovalReviewPolicy,
   request: dict,
 ) -> dict {
   const explicit = caller_policy?.reviewer
   // The policy's effort is a reasoning-policy LEVEL, not a wire `effort`: a
   // level snaps to what the route accepts, whereas a wire value refuses any
   // model that takes no effort ladder, and a refused call is a denial.
-  const configured_effort = effective_policy?.reviewer?.effort
+  const configured_effort = effective_policy.reviewer.effort
   const reasoning = configured_effort == nil ? {} : {reasoning_policy: configured_effort}
   if explicit?.model != nil {
     return {
@@ -393,8 +393,8 @@ fn __approval_review_route(
   const route = request?.route
   if route == nil {
     return {
-      provider: effective_policy?.reviewer?.provider,
-      model: effective_policy?.reviewer?.model,
+      provider: effective_policy.reviewer.provider,
+      model: effective_policy.reviewer.model,
       reasoning: reasoning,
       source: "bundled",
     }
@@ -445,14 +445,14 @@ fn __approval_review_role_model(llm: HarnessLlm, provider: string?) -> string? {
 /**
  * Resolve caller and host customizations against the one Rust-parsed policy.
  *
- * The merge is recursive because hosts ordinarily contribute one leaf such as
- * `host_guidance`; requiring them to repeat the floor and verdict tables would
- * create a second policy owner and make omitted data look like an empty policy.
+ * The Rust policy boundary validates the recursive overlay. Hosts can supply
+ * one leaf such as `host_guidance` without repeating the floor and verdict
+ * tables; omitted fields retain the bundled values.
  * @effects: []
- * @errors: []
+ * @errors: ["invalid approval-review policy"]
  */
-pub fn approval_review_policy(policy: dict = {}) -> dict {
-  return deep_merge(__approval_review_default_policy(), policy ?? {})
+pub fn approval_review_policy(policy: dict = {}) -> ApprovalReviewPolicy {
+  return __approval_review_policy(policy ?? {})
 }
 
 /** The usage block of a checkpoint envelope, wherever the envelope puts it. */
@@ -634,6 +634,13 @@ pub fn approval_review_is_floor(policy: dict, category: string) -> bool {
  */
 pub fn approval_review_floor_decision(policy: dict, request: dict) -> dict? {
   const effective_policy = approval_review_policy(policy)
+  return __approval_review_floor_decision(effective_policy, request)
+}
+
+fn __approval_review_floor_decision(
+  effective_policy: ApprovalReviewPolicy,
+  request: dict,
+) -> dict? {
   const category = __reviewer_category(request)
   if !approval_review_is_floor(effective_policy, category) {
     return nil

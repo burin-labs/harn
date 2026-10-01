@@ -1,5 +1,5 @@
 import { approval_review_policy } from "std/agent/approval_review"
-import { assert, assert_eq, llm_error, with_llm_script } from "std/testing"
+import { assert, assert_eq, assert_error_contains, llm_error, with_llm_script } from "std/testing"
 import {
   approval_review_report,
   approval_review_run_case,
@@ -136,12 +136,32 @@ pipeline test_policy_overlay_inherits_the_bundled_policy() {
   const bundled = approval_review_policy()
   // CONTROL: an empty bundled policy would make every inheritance check below
   // compare nil to nil.
-  assert(len(bundled?.floor?.never_grant ?? []) > 0, "the bundled policy must carry a floor")
-  const overlaid = approval_review_policy({reviewer: {model: "overlay-model"}})
+  assert(len(bundled.floor.never_grant) > 0, "the bundled policy must carry a floor")
+  const overlaid = approval_review_policy(
+    {
+      reviewer: {model: "overlay-model", provider: "mock"},
+      host_guidance: "Use the named task as the authorization boundary.",
+    },
+  )
   assert_eq(overlaid.reviewer.model, "overlay-model")
+  assert_eq(overlaid.reviewer.provider, "mock")
+  assert_eq(overlaid.host_guidance, "Use the named task as the authorization boundary.")
   assert_eq(overlaid.reviewer.on_error, bundled.reviewer.on_error)
   assert_eq(overlaid.floor, bundled.floor)
   assert_eq(overlaid.verdict, bundled.verdict)
+}
+
+@test
+pipeline test_policy_overlay_refuses_invalid_values_and_unknown_keys() {
+  assert_error_contains(
+    { -> approval_review_policy({reviewer: {timeout_ms: "not a duration"}}) },
+    "invalid approval-review policy",
+  )
+  assert_error_contains({ -> approval_review_policy({floor: {never_grantt: []}}) }, "unknown field")
+  assert_error_contains(
+    { -> approval_review_policy({reviewer: {on_error: "allow"}}) },
+    "unknown variant",
+  )
 }
 
 @test
