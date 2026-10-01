@@ -1720,7 +1720,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   }
   // The Rust workspace producer carries one more rung than its siblings.
   // A same-repository pull request prefers the owned pool when its census
-  // reports online carriers, including a busy pool that must queue work.
+  // reports an idle carrier; a fully busy pool routes hosted (#9086).
   // Merge groups and main pushes are deliberately NOT eligible: main pushes are
   // the authorized cache writer, and merge throughput must not depend on a
   // residential machine's health, which is the objection #6217 recorded when it

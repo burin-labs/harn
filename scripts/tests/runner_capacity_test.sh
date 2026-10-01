@@ -36,6 +36,26 @@ decision=$(runner_capacity_decision push '' "$retired")
   'RUNNER_CAPACITY_DECISION event=push route=hosted reason=pool_reported_zero_carriers pool=linux_big carriers=0 idle=0' ]]
 [[ $decision != *route=owned* ]]
 
+# A fully busy pool routes hosted by name rather than queueing (#9086), and an
+# unreported idle count is not a measured zero, so it keeps the owned route.
+busy='{"linux_big":{"online":3,"idle":0}}'
+[[ $(runner_capacity_decision push '' "$busy") == \
+  'RUNNER_CAPACITY_DECISION event=push route=hosted reason=pool_fully_busy pool=linux_big carriers=3 idle=0' ]]
+unreported='{"linux_big":{"online":3}}'
+[[ $(runner_capacity_decision push '' "$unreported") == \
+  'RUNNER_CAPACITY_DECISION event=push route=owned pool=linux_big carriers=3 idle=unreported' ]]
+
+# The main entry point names the decision in the job summary as well as the log.
+summary=$(mktemp "${TMPDIR:-/tmp}/harn-capacity-summary.XXXXXX")
+outputs=$(mktemp "${TMPDIR:-/tmp}/harn-capacity-outputs.XXXXXX")
+EVENT_NAME=push SELFHOSTED_DISABLED='' RUNNER_CAPACITY="$busy" FLEET_EVACUATION='' \
+  GITHUB_OUTPUT="$outputs" GITHUB_STEP_SUMMARY="$summary" runner_capacity_main 2>/dev/null
+grep -qx 'route=hosted' "$outputs"
+# shellcheck disable=SC2016 # Literal Markdown code span.
+grep -q 'route `hosted`' "$summary"
+grep -q 'reason=pool_fully_busy' "$summary"
+rm -f "$summary" "$outputs"
+
 # Every non-push event keeps hosted runners without consulting the census.
 [[ $(runner_capacity_decision pull_request '' '') == \
   'RUNNER_CAPACITY_DECISION event=pull_request route=hosted reason=event_is_not_push pool=linux_big carriers=not_consulted' ]]
