@@ -53,6 +53,7 @@ fn make_fake(config: dict = {}) {
     commit_oid: "c0ffee",
     auto_merge_enabled: true,
     disable_ok: true,
+    disable_expected_base_oid: nil,
   }
     + config
   const adapter: BumpAdapter = {
@@ -134,6 +135,9 @@ fn make_fake(config: dict = {}) {
     find_bump_pr: fn() { return cfg.existing_pr },
     disable_auto_merge: fn(pr, base_sha) {
       record("disable_auto_merge", {pr: pr, base_sha: base_sha})
+      if cfg.disable_expected_base_oid != nil && base_sha != cfg.disable_expected_base_oid {
+        return false
+      }
       return cfg.disable_ok
     },
     publish_commit: fn(request) {
@@ -458,8 +462,8 @@ pipeline test_stale_lease_is_disarmed_before_publication(harness: Harness, task:
   assert_eq(
     call_names(fake.calls()),
     [
-      "disable_auto_merge",
       "remote_base_head",
+      "disable_auto_merge",
       "apply_version",
       "run_validation",
       "remote_base_head",
@@ -487,7 +491,65 @@ pipeline test_failed_lease_disarm_stops_before_publication(harness: Harness, tas
     assert_throws({ -> run_bump(opts(), fake.adapter) }),
     "std/bump/runtime: failed to disable stale auto-merge on #72",
   )
-  assert_eq(call_names(fake.calls()), ["disable_auto_merge"])
+  assert_eq(call_names(fake.calls()), ["remote_base_head", "disable_auto_merge"])
+}
+
+pipeline test_armed_pr_uses_current_base_instead_of_its_historical_snapshot() {
+  const stale: BumpPrState = {
+    number: 73,
+    head_oid: "stale101",
+    base_ref: "main",
+    base_oid: "historical",
+    auto_merge_enabled: true,
+    auto_merge_method: "SQUASH",
+    url: "https://example.test/pull/73",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: stale, disable_expected_base_oid: "base000"})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.lease_recovered, true)
+  const disarms = fake.calls().filter({ call -> call.name == "disable_auto_merge" }).to_list()
+  assert_eq(len(disarms), 1)
+  assert_eq(disarms[0].arg.base_sha, "base000")
+}
+
+pipeline test_missing_current_base_does_not_disarm_an_existing_pr() {
+  const stale: BumpPrState = {
+    number: 74,
+    head_oid: "stale102",
+    base_ref: "main",
+    base_oid: "historical",
+    auto_merge_enabled: true,
+    auto_merge_method: "SQUASH",
+    url: "https://example.test/pull/74",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: stale, remote_base_available: false})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "base_advanced")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.lease_recovered, false)
+  assert_eq(call_names(fake.calls()), ["remote_base_head"])
+}
+
+pipeline test_base_advance_during_disarm_refuses_refresh() {
+  const stale: BumpPrState = {
+    number: 75,
+    head_oid: "stale103",
+    base_ref: "main",
+    base_oid: "historical",
+    auto_merge_enabled: true,
+    auto_merge_method: "SQUASH",
+    url: "https://example.test/pull/75",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: stale, disable_expected_base_oid: "base001"})
+  assert_eq(
+    assert_throws({ -> run_bump(opts(), fake.adapter) }),
+    "std/bump/runtime: failed to disable stale auto-merge on #75",
+  )
+  assert_eq(call_names(fake.calls()), ["remote_base_head", "disable_auto_merge"])
 }
 
 /**

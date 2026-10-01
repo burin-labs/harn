@@ -150,7 +150,9 @@ arbitrary orchestration ref.
   before this command existed record `package_test_inventory_unsupported`;
   they never report an unmeasured suite as zero.
 - Stale heads: an open bump PR with auto-merge armed is disarmed only under its
-  exact PR-head and base-head leases before refresh begins. The runtime checks
+  exact PR-head and the freshly observed base-branch head before refresh begins.
+  The PR's historical base snapshot does not identify the current branch head;
+  an unavailable current head prevents disarming. The runtime checks
   the checkout's exact base against the remote branch before refresh, after
   validation, and again immediately before arming. The connector derives and
   publishes a GitHub-signed commit only while the measured lease is current.
