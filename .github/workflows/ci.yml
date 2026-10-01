@@ -492,7 +492,7 @@ jobs:
       # workspace crate reuse. Only a fully successful build may claim it.
       - name: Record the workspace cache source
         if: success()
-        run: ./scripts/ci/reuse_workspace_crates.sh record "${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}"
+        run: ./scripts/ci/reuse_workspace_crates.sh record
   # A public API break in a published crate needs a breaking fragment with its
   # migration. This proof shares nothing with package verification but its
   # trigger and warm dependency cache, so it runs beside it: in sequence the two
@@ -1018,7 +1018,7 @@ jobs:
       # workspace crate reuse. Only a fully successful build may claim it.
       - name: Record the workspace cache source
         if: success()
-        run: ./scripts/ci/reuse_workspace_crates.sh record "${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}"
+        run: ./scripts/ci/reuse_workspace_crates.sh record
       # Report the compiler cache on every tier, named by nothing it excludes.
       # Guarding this on a single tier is what let the owned pool run for
       # weeks with nobody able to say whether it was compiling warm or cold:
@@ -1248,7 +1248,7 @@ jobs:
       # workspace crate reuse. Only a fully successful build may claim it.
       - name: Record the workspace cache source
         if: success()
-        run: ./scripts/ci/reuse_workspace_crates.sh record "${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}"
+        run: ./scripts/ci/reuse_workspace_crates.sh record
       # Report the compiler cache on every tier, named by nothing it excludes.
       # Guarding this on a single tier is what let the owned pool run for
       # weeks with nobody able to say whether it was compiling warm or cold:
