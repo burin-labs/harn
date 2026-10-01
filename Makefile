@@ -17,14 +17,13 @@ define HARN_REQUIRE_NEXTEST
 	fi
 	@cargo-nextest nextest --version >/dev/null
 endef
-# Rust tests start from a known security-policy environment. Focused tests may
-# still seed these variables explicitly after process startup. Harn script
-# tests use harn_test_env.sh so they also get a fresh durable session store.
-HARN_EGRESS_TEST_ENV = env -u HARN_EGRESS_ALLOW -u HARN_EGRESS_DENY -u HARN_EGRESS_DEFAULT -u HARN_EGRESS_BLOCK_PRIVATE -u HARN_EGRESS_ALLOW_LOOPBACK
-# HARN_SECRET_PROVIDERS=env keeps every test off the login keychain unless the
-# caller set a chain on purpose.
-HARN_RUST_TEST_ENV = $(HARN_EGRESS_TEST_ENV) HARN_LLM_CALLS_DISABLED=1 HARN_SECRET_PROVIDERS="$${HARN_SECRET_PROVIDERS:-env}" RUST_MIN_STACK="$${RUST_MIN_STACK:-16777216}"
+# Every test process, Rust or Harn script, starts in the one environment
+# scripts/harn_test_env.sh defines: no ambient egress policy or config
+# pointers, an empty user config directory, a fresh session store, no keychain,
+# live LLM calls disabled, and a 16 MiB thread stack. CI's Rust lanes reach the
+# same script through scripts/ci/run_rust_test_lane.sh.
 HARN_SCRIPT_TEST_ENV = bash ./scripts/harn_test_env.sh
+HARN_RUST_TEST_ENV = $(HARN_SCRIPT_TEST_ENV) --per-test-state
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
 HARN_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --,$(HARN_BIN_CMD) --)
