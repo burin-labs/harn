@@ -1,5 +1,6 @@
 import { omit } from "std/json"
 import {
+  release_audit_ci_contract_report,
   release_audit_contract_parse,
   release_audit_receipt_plan,
   release_audit_residual_plan,
@@ -412,4 +413,47 @@ pipeline test_release_audit_windows_nightly_is_advisory(harness: Harness, task: 
     release_audit_receipt_plan(cfg, {...receipt(), extra: true}, SHA, BINARY_SHA).advisories,
     [],
   )
+}
+
+fn lint_leg(kind: string, name: string) {
+  return {
+    name: name,
+    job_id: "lint",
+    matrix_kind: kind,
+    proofs: ["source-audit"],
+    steps: [{id: "lint", condition: "", run: "./lint.sh", required_env: {}}],
+  }
+}
+
+fn lint_ci(kinds: list<dict>) {
+  return {
+    jobs: {
+      lint: {
+        name: "lint",
+        strategy: {matrix: {include: kinds}},
+        steps: [{id: "lint", run: "./lint.sh"}],
+      },
+    },
+  }
+}
+
+pipeline test_release_audit_ci_contract_requires_every_matrix_leg(harness: Harness, task: unknown) {
+  const cfg = release_audit_contract_parse(
+    {
+      ...contract(),
+      merge_group_jobs: [lint_leg("workspace", "Lint"), lint_leg("lean", "Lint (lean)")],
+    },
+  )
+  assert(cfg != nil)
+  const both = [{kind: "workspace", name: "Lint"}, {kind: "lean", name: "Lint (lean)"}]
+  const covered = release_audit_ci_contract_report(cfg, lint_ci(both))
+  assert_eq(covered.errors, [])
+  assert_eq(covered.ok, true)
+  // A leg the proof does not name could fail while the proof reads complete.
+  const extra = release_audit_ci_contract_report(
+    cfg,
+    lint_ci(both + [{kind: "extra", name: "Lint (extra)"}]),
+  )
+  assert_eq(extra.ok, false)
+  assert_eq(extra.errors, ["uncontracted matrix kind: lint:extra"])
 }

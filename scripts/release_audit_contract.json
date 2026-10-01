@@ -32,13 +32,39 @@
     {
       "name": "Check Rust code",
       "job_id": "rust-checks",
-      "matrix_kind": "",
+      "matrix_kind": "workspace",
       "proofs": ["rust-audit"],
       "steps": [
         {
           "id": "release-audit-rust-lint",
           "condition": "",
-          "run": "./scripts/ci/run_rust_lint_lane.sh"
+          "run": "./scripts/ci/run_rust_lint_lane.sh --leg \"${{ matrix.kind }}\""
+        }
+      ]
+    },
+    {
+      "name": "Check Rust code (lean LSP features)",
+      "job_id": "rust-checks",
+      "matrix_kind": "lean-lsp",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-lint",
+          "condition": "",
+          "run": "./scripts/ci/run_rust_lint_lane.sh --leg \"${{ matrix.kind }}\""
+        }
+      ]
+    },
+    {
+      "name": "Check Rust code (freshness checker)",
+      "job_id": "rust-checks",
+      "matrix_kind": "freshness-checker",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-lint",
+          "condition": "",
+          "run": "./scripts/ci/run_rust_lint_lane.sh --leg \"${{ matrix.kind }}\""
         }
       ]
     },

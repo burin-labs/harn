@@ -45,7 +45,7 @@ write_response() {
 }
 
 successful_jobs="$tmp_root/successful-jobs.json"
-printf '%s\n' '{"total_count":11,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Verify publishable crates","status":"completed","conclusion":"success"},{"name":"Check Rust code","status":"completed","conclusion":"success"},{"name":"Rust workspace tests","status":"completed","conclusion":"success"},{"name":"Rust test","status":"completed","conclusion":"success"},{"name":"Run Linux sandbox tests","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests","status":"completed","conclusion":"success"},{"name":"Check Harn sources and generated files","status":"completed","conclusion":"success"},{"name":"Check repository policies","status":"completed","conclusion":"success"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"},{"name":"Write CI timing report","status":"completed","conclusion":"success"}]}' > "$successful_jobs"
+printf '%s\n' '{"total_count":13,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Verify publishable crates","status":"completed","conclusion":"success"},{"name":"Check Rust code","status":"completed","conclusion":"success"},{"name":"Check Rust code (lean LSP features)","status":"completed","conclusion":"success"},{"name":"Check Rust code (freshness checker)","status":"completed","conclusion":"success"},{"name":"Rust workspace tests","status":"completed","conclusion":"success"},{"name":"Rust test","status":"completed","conclusion":"success"},{"name":"Run Linux sandbox tests","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests","status":"completed","conclusion":"success"},{"name":"Check Harn sources and generated files","status":"completed","conclusion":"success"},{"name":"Check repository policies","status":"completed","conclusion":"success"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"},{"name":"Write CI timing report","status":"completed","conclusion":"success"}]}' > "$successful_jobs"
 
 success_response="$tmp_root/success.json"
 write_response "$success_response" "[{\"id\":123,\"head_sha\":\"$sha\",\"path\":\".github/workflows/ci.yml\",\"event\":\"merge_group\",\"status\":\"completed\",\"conclusion\":\"success\"}]"
@@ -53,7 +53,7 @@ write_response "$success_response" "[{\"id\":123,\"head_sha\":\"$sha\",\"path\":
   || { echo "exact successful merge-group proof was not accepted" >&2; exit 1; }
 
 native_jobs="$tmp_root/native-jobs.json"
-jq '.jobs += [{"name":"Rust on Windows (build + smoke test)","status":"completed","conclusion":"success"}] | .total_count = 12' \
+jq '.jobs += [{"name":"Rust on Windows (build + smoke test)","status":"completed","conclusion":"success"}] | .total_count = 14' \
   "$successful_jobs" > "$native_jobs"
 [[ "$(run_proof "$success_response" "$native_jobs" "" --require-job "Rust on Windows (build + smoke test)")" == "true" ]] \
   || { echo "exact successful native Windows proof was not accepted" >&2; exit 1; }
@@ -70,10 +70,17 @@ for conclusion in skipped failure cancelled; do
 done
 
 missing_harn_jobs="$tmp_root/missing-harn-jobs.json"
-jq 'del(.jobs[] | select(.name == "Run Harn conformance tests")) | .total_count = 10' \
+jq 'del(.jobs[] | select(.name == "Run Harn conformance tests")) | .total_count = 12' \
   "$successful_jobs" > "$missing_harn_jobs"
 [[ "$(run_proof "$success_response" "$missing_harn_jobs")" == "false" ]] \
   || { echo "merge-group proof accepted missing Harn authority" >&2; exit 1; }
+
+# Strict Clippy is three matrix legs; one green leg is not a lint proof.
+missing_lint_leg_jobs="$tmp_root/missing-lint-leg-jobs.json"
+jq 'del(.jobs[] | select(.name == "Check Rust code (lean LSP features)")) | .total_count = 12' \
+  "$successful_jobs" > "$missing_lint_leg_jobs"
+[[ "$(run_proof "$success_response" "$missing_lint_leg_jobs")" == "false" ]] \
+  || { echo "merge-group proof accepted a missing Clippy leg" >&2; exit 1; }
 
 invalid_contract="$tmp_root/invalid-contract.json"
 printf '%s\n' '{}' > "$invalid_contract"
