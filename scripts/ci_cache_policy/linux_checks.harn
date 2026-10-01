@@ -56,11 +56,21 @@ fn blacksmith_tier_expression() -> string {
  * cancelled security-archive run is recorded at the ceiling that cancelled it,
  * because its true wall is only known to be at least that long.
  */
-const PRODUCER_STEP_BUDGETS: list<{name: string, minutes: int, cold_seconds: int}> = [
+type StepBudget = {name: string, minutes: int, cold_seconds: int}
+
+/** `rust-cli` builds the shared CLI beside the test job. */
+const CLI_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
   {name: "Build portable Harn CLI", minutes: 10, cold_seconds: 435},
+]
+
+/** `rust-check-inputs` builds and runs the workspace test graph. */
+const TEST_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
   {name: "Build security test archive", minutes: 16, cold_seconds: 720},
   {name: "Run Rust workspace tests", minutes: 26, cold_seconds: 496},
 ]
+
+const PRODUCER_STEP_BUDGETS: list<StepBudget> = CLI_PRODUCER_STEP_BUDGETS
+  + TEST_PRODUCER_STEP_BUDGETS
 
 // Owned CI attempts with one compiler and no restored target timed out at
 // 600s and 900s. A separate private-target, one-compiler build completed in
@@ -154,9 +164,9 @@ pub fn producer_cache_save_reserve_minutes() -> int {
  * CLI and security allowances include observed timeouts on shared capacity.
  * This is a hang backstop, not a completed-build or performance claim.
  */
-pub fn producer_owned_ceiling_minutes() -> int {
+fn owned_ceiling_minutes(budgets: list<StepBudget>) -> int {
   let total = PRODUCER_SETUP_OVERHEAD_MINUTES
-  for budget in PRODUCER_STEP_BUDGETS {
+  for budget in budgets {
     total = total
       + if budget.name == "Build portable Harn CLI" {
         PRODUCER_OWNED_CLI_MINUTES
@@ -169,20 +179,46 @@ pub fn producer_owned_ceiling_minutes() -> int {
   return total
 }
 
-pub fn producer_hosted_ceiling_minutes() -> int {
+fn hosted_ceiling_minutes(budgets: list<StepBudget>) -> int {
   let total = PRODUCER_SETUP_OVERHEAD_MINUTES + PRODUCER_CACHE_SAVE_RESERVE_MINUTES
-  for budget in PRODUCER_STEP_BUDGETS {
+  for budget in budgets {
     total = total + budget.minutes
   }
   return total
 }
 
-pub fn producer_timeout_expression() -> string {
+fn timeout_expression(budgets: list<StepBudget>) -> string {
   return producer_rung_expression(
     to_string(PRODUCER_PAID_FUSE_MINUTES),
-    to_string(producer_owned_ceiling_minutes()),
-    to_string(producer_hosted_ceiling_minutes()),
+    to_string(owned_ceiling_minutes(budgets)),
+    to_string(hosted_ceiling_minutes(budgets)),
   )
+}
+
+/** Ceilings of the workspace test producer, `rust-check-inputs`. */
+pub fn producer_owned_ceiling_minutes() -> int {
+  return owned_ceiling_minutes(TEST_PRODUCER_STEP_BUDGETS)
+}
+
+pub fn producer_hosted_ceiling_minutes() -> int {
+  return hosted_ceiling_minutes(TEST_PRODUCER_STEP_BUDGETS)
+}
+
+pub fn producer_timeout_expression() -> string {
+  return timeout_expression(TEST_PRODUCER_STEP_BUDGETS)
+}
+
+/** Ceilings of the shared CLI producer, `rust-cli`. */
+pub fn cli_producer_owned_ceiling_minutes() -> int {
+  return owned_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)
+}
+
+pub fn cli_producer_hosted_ceiling_minutes() -> int {
+  return hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)
+}
+
+pub fn cli_producer_timeout_expression() -> string {
+  return timeout_expression(CLI_PRODUCER_STEP_BUDGETS)
 }
 
 /** Trusted PR producers require a measured capacity decision before dispatch. */
@@ -208,9 +244,13 @@ fn step_named(job: dict, name: string) {
  * is the only bound, one slow step can spend the cache save's reserve, and the
  * reserve becomes a comment rather than a guarantee.
  */
-fn producer_step_budget_errors(job: dict, job_name: string) -> list<string> {
+fn producer_step_budget_errors(
+  job: dict,
+  job_name: string,
+  budgets: list<StepBudget>,
+) -> list<string> {
   let errors: list<string> = []
-  for budget in PRODUCER_STEP_BUDGETS {
+  for budget in budgets {
     const name = budget.name
     const expected = if name == "Build portable Harn CLI" {
       producer_cli_timeout_expression()
@@ -371,6 +411,7 @@ fn persistent_compile_lane_errors(
   runner: string,
   sccache_key: string,
   rust_cache_key: string,
+  budgets: list<StepBudget>,
 ) -> list<string> {
   const job = workflow?.jobs?.[job_name]
   if job == nil {
@@ -395,13 +436,13 @@ fn persistent_compile_lane_errors(
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
-  if trim(to_string(job?.["timeout-minutes"] ?? "")) != producer_timeout_expression() {
+  if trim(to_string(job?.["timeout-minutes"] ?? "")) != timeout_expression(budgets) {
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the ${PRODUCER_PAID_FUSE_MINUTES}-minute paid-runner fuse, the ${producer_owned_ceiling_minutes()}-minute owned ceiling, and the ${producer_hosted_ceiling_minutes()}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+        "ci.yml:${job_name} must keep the ${PRODUCER_PAID_FUSE_MINUTES}-minute paid-runner fuse, the ${owned_ceiling_minutes(budgets)}-minute owned ceiling, and the ${hosted_ceiling_minutes(budgets)}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
       ]
   }
-  errors = errors + producer_step_budget_errors(job, job_name)
+  errors = errors + producer_step_budget_errors(job, job_name, budgets)
   const persistent = matching_steps(job, PERSISTENT_SCCACHE_ACTION)
   if len(persistent) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure persistent sccache exactly once"]
@@ -594,7 +635,7 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
     matrix_keys = matrix_keys + [cache_key]
     const expected_headroom = if cache_key == "workspace-tests" {
       "4294967296"
-    } else if cache_key == "package-audit" {
+    } else if cache_key == "package-audit" || cache_key == "harn-cli" {
       "2147483648"
     } else {
       ""
@@ -708,33 +749,41 @@ fn archived_workspace_test_consumer_errors(workflow: dict, job_name: string) -> 
   return errors
 }
 
+/**
+ * `rust-cli` publishes the shared CLI as its last compile; `rust-check-inputs`
+ * publishes the security archive before the co-located tests, and builds no
+ * CLI of its own, so the two producers never duplicate that build.
+ */
 fn producer_artifact_order_errors(workflow: dict) -> list<string> {
-  const rust_job = workflow?.jobs?.["rust-check-inputs"]
-  const producer_steps = rust_job?.steps ?? []
-  const cli_build_step = step_by_name(producer_steps, "Build portable Harn CLI")
+  let errors: list<string> = []
+  const cli_steps = workflow?.jobs?.["rust-cli"]?.steps ?? []
+  const cli_build_step = step_by_name(cli_steps, "Build portable Harn CLI")
+  const cli_build_index = step_index_by_name(cli_steps, "Build portable Harn CLI")
+  const cli_upload_index = step_index_by_name(cli_steps, "Upload portable Harn CLI")
+  if cli_build_index < 0
+    || cli_upload_index < 0
+    || cli_build_index >= cli_upload_index
+    || !contains(trim(cli_build_step?.run ?? ""), "rust_artifact.sh build-cli") {
+    errors = errors + ["ci.yml:rust-cli must build and then publish the shared Harn CLI"]
+  }
+  const producer_steps = workflow?.jobs?.["rust-check-inputs"]?.steps ?? []
   const security_build_step = step_by_name(producer_steps, "Build security test archive")
-  const cli_build_index = step_index_by_name(producer_steps, "Build portable Harn CLI")
-  const cli_upload_index = step_index_by_name(producer_steps, "Upload portable Harn CLI")
   const security_build_index = step_index_by_name(producer_steps, "Build security test archive")
   const security_upload_index = step_index_by_name(producer_steps, "Upload security test archive")
   const colocated_index = step_index_by_name(producer_steps, "Run Rust workspace tests")
-  if cli_build_index < 0
-    || cli_upload_index < 0
-    || security_build_index < 0
+  if security_build_index < 0
     || security_upload_index < 0
     || colocated_index < 0
-    || cli_build_index >= cli_upload_index
-    || cli_upload_index >= security_build_index
     || security_build_index >= security_upload_index
-    || cli_upload_index >= colocated_index
     || security_upload_index >= colocated_index
-    || !contains(trim(cli_build_step?.run ?? ""), "rust_artifact.sh build-cli")
+    || step_index_by_name(producer_steps, "Build portable Harn CLI") >= 0
     || !contains(trim(security_build_step?.run ?? ""), "rust_artifact.sh build-security") {
-    return [
-      "ci.yml:rust-check-inputs must publish the CLI before building security inputs, then publish security before co-located tests",
-    ]
+    errors = errors
+      + [
+        "ci.yml:rust-check-inputs must publish security before co-located tests and leave the CLI to rust-cli",
+      ]
   }
-  return []
+  return errors
 }
 
 fn artifact_ready_barrier_errors(workflow: dict) -> list<string> {
@@ -1231,10 +1280,19 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
     + rust_lint_lane_errors(workflow)
     + persistent_compile_lane_errors(
       workflow,
+      "rust-cli",
+      BLACKSMITH_8CPU_RUNNER,
+      "harn-cli",
+      "harn-cli",
+      CLI_PRODUCER_STEP_BUDGETS,
+    )
+    + persistent_compile_lane_errors(
+      workflow,
       "rust-check-inputs",
       BLACKSMITH_8CPU_RUNNER,
       "workspace-tests",
       "workspace-tests",
+      TEST_PRODUCER_STEP_BUDGETS,
     )
   const rust_job = workflow?.jobs?.["rust-checks"]
   errors = errors + strict_clippy_entrypoint_errors(rust_job)
@@ -1284,8 +1342,7 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   errors = errors + producer_step_budget_margin_errors()
   for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
     if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0
-      && to_string(job_name)
-        != "rust-check-inputs" {
+      && !["rust-cli", "rust-check-inputs"].contains(to_string(job_name)) {
       errors = errors + ["ci.yml:${job_name} is not an authorized persistent sccache lane"]
     }
   }

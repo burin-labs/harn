@@ -2,6 +2,9 @@ import {
   cache_refresh_trigger_errors,
   cache_refresh_workflow_errors,
   ci_linux_lane_policy_errors,
+  cli_producer_hosted_ceiling_minutes,
+  cli_producer_owned_ceiling_minutes,
+  cli_producer_timeout_expression,
   consumer_canary_errors,
   e2e_elastic_capacity_errors,
   producer_admission_expression,
@@ -166,13 +169,18 @@ fn persistent_lane(
   sccache_key: string,
   rust_cache_key: string,
   write_cache: bool = false,
+  timeout: string = "",
 ) {
   const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
   let lane = {
     "runs-on": producer_runner_expression(runner),
     needs: ["changes", "runner-availability", "rust-producer-capacity"],
     if: producer_admission_expression(),
-    "timeout-minutes": producer_timeout_expression(),
+    "timeout-minutes": if timeout == "" {
+      producer_timeout_expression()
+    } else {
+      timeout
+    },
     env: {HARN_RUNNER_TIER: producer_tier_expression(), SCCACHE_CACHE_SIZE: "15G"},
     steps: [
       {
@@ -256,6 +264,13 @@ fn workflow() {
     "workspace-tests",
     true,
   )
+  const cli_producer = persistent_lane(
+    "blacksmith-8vcpu-ubuntu-2404",
+    "harn-cli",
+    "harn-cli",
+    true,
+    cli_producer_timeout_expression(),
+  )
   const rust_test = {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
     "runs-on": "ubuntu-latest",
@@ -286,10 +301,10 @@ fn workflow() {
     },
     jobs: {
       "package-audit": package_audit,
-      "rust-check-inputs": {
-        ...producer,
-        env: {...producer.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
-        steps: producer.steps
+      "rust-cli": {
+        ...cli_producer,
+        env: {...cli_producer.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
+        steps: cli_producer.steps
           + [
             BUDGET_STEP,
             {
@@ -298,6 +313,14 @@ fn workflow() {
               run: "./scripts/ci/rust_artifact.sh build-cli cli-bundle sha",
             },
             {name: "Upload portable Harn CLI", uses: "actions/upload-artifact@pinned"},
+          ],
+      },
+      "rust-check-inputs": {
+        ...producer,
+        env: {...producer.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
+        steps: producer.steps
+          + [
+            BUDGET_STEP,
             {
               name: "Build security test archive",
               "timeout-minutes": producer_security_timeout_expression(),
@@ -809,16 +832,18 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness,
 @test
 pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task: unknown) {
   const valid = workflow()
-  const producer = valid.jobs["rust-check-inputs"]
+  const cli_producer = valid.jobs["rust-cli"]
+  const upload = cli_producer.steps.find({ step -> step?.name == "Upload portable Harn CLI" })
   const walltime_report = valid.jobs["ci-walltime-report"]
   const invalid = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "rust-check-inputs": {
-        ...producer,
-        steps: producer.steps.filter({ step -> step?.name != "Upload portable Harn CLI" }).to_list()
-          + [producer.steps[4]],
+      // Publishing before the build hands consumers a stale or absent CLI.
+      "rust-cli": {
+        ...cli_producer,
+        steps: [upload]
+          + cli_producer.steps.filter({ step -> step?.name != "Upload portable Harn CLI" }).to_list(),
       },
       "rust-security": {
         ...valid.jobs["rust-security"],
@@ -841,11 +866,7 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task: u
     },
   }
   const errors = ci_linux_lane_policy_errors(invalid)
-  assert(
-    errors.contains(
-      "ci.yml:rust-check-inputs must publish the CLI before building security inputs, then publish security before co-located tests",
-    ),
-  )
+  assert(errors.contains("ci.yml:rust-cli must build and then publish the shared Harn CLI"))
   assert(
     errors.contains(
       "ci.yml:rust-security must consume the exact-commit security archive through its ready barrier",
@@ -1322,20 +1343,25 @@ pipeline test_rejects_a_cache_summary_guard_that_names_one_tier(harness: Harness
 pipeline test_owned_ceiling_accounts_for_build_margins_without_cache_save(harness: Harness) {
   assert_eq(
     producer_owned_ceiling_minutes(),
-    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 18,
-    "the owned ceiling must account for CLI and security margins without a cache-save reserve",
+    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 8,
+    "the owned ceiling must account for the security margin without a cache-save reserve",
+  )
+  assert_eq(
+    cli_producer_owned_ceiling_minutes(),
+    cli_producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 10,
+    "the owned CLI ceiling must account for the CLI margin without a cache-save reserve",
   )
 }
 
 @test
 pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
   const valid = workflow()
-  const producer = valid.jobs["rust-check-inputs"]
+  const producer = valid.jobs["rust-cli"]
   const invalid = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "rust-check-inputs": {
+      "rust-cli": {
         ...producer,
         steps: producer.steps.map(
           { step ->
@@ -1352,13 +1378,15 @@ pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
   assert_eq(ci_linux_lane_policy_errors(valid), [])
   assert(
     ci_linux_lane_policy_errors(invalid).contains(
-      "ci.yml:rust-check-inputs step 'Build portable Harn CLI' must carry its own "
+      "ci.yml:rust-cli step 'Build portable Harn CLI' must carry its own "
         + producer_cli_timeout_expression()
         + " budget so the cache save reserve stays reserved",
     ),
   )
-  assert_eq(producer_hosted_ceiling_minutes(), 70)
-  assert_eq(producer_owned_ceiling_minutes(), 76)
+  assert_eq(producer_hosted_ceiling_minutes(), 60)
+  assert_eq(producer_owned_ceiling_minutes(), 56)
+  assert_eq(cli_producer_hosted_ceiling_minutes(), 28)
+  assert_eq(cli_producer_owned_ceiling_minutes(), 26)
 }
 
 pipeline test_security_wait_uses_the_shared_waiter_budget() {
@@ -1463,7 +1491,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   assert(errors.contains("ci.yml:rust-check-inputs must mirror all three of its runner tiers"))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse, the 76-minute owned ceiling, and the 70-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse, the 56-minute owned ceiling, and the 60-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }
@@ -1778,4 +1806,31 @@ pipeline test_residual_rehearsal_names_the_docs_slice_it_relies_on(
     },
   }
   assert(ci_linux_lane_policy_errors(always).contains(message))
+}
+
+@test
+pipeline test_test_producer_leaves_the_cli_to_its_sibling(harness: Harness, task: unknown) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  const message =
+    "ci.yml:rust-check-inputs must publish security before co-located tests and leave the CLI to rust-cli"
+  assert(!ci_linux_lane_policy_errors(valid).contains(message))
+  // A second CLI build in the test job is the serial cost the split removed.
+  const doubled = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-check-inputs": {
+        ...producer,
+        steps: [
+          {
+            name: "Build portable Harn CLI",
+            run: "./scripts/ci/rust_artifact.sh build-cli cli-bundle sha",
+          },
+        ]
+          + producer.steps,
+      },
+    },
+  }
+  assert(ci_linux_lane_policy_errors(doubled).contains(message))
 }
