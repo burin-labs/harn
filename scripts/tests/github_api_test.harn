@@ -34,6 +34,15 @@ pipeline test_github_api_retries_known_transport_failures(task: unknown) {
   assert_eq(waits, [25])
 }
 
+pipeline test_github_api_retries_a_reset_http2_stream(task: unknown) {
+  assert_eq(
+    github_api_failure_kind(
+      failed("GitHub API request failed: stream error: stream ID 1; CANCEL; received from peer"),
+    ),
+    "transient_transport",
+  )
+}
+
 pipeline test_github_api_fails_closed_after_bounded_transport_retries(task: unknown) {
   let request_count = 0
   const adapters: GitHubApiAdapters = {
@@ -56,6 +65,8 @@ pipeline test_github_api_fails_closed_after_bounded_transport_retries(task: unkn
 
 pipeline test_github_api_does_not_retry_semantic_or_malformed_responses(task: unknown) {
   assert_eq(github_api_failure_kind(failed("gh: Not Found (HTTP 404)")), "command")
+  // A stream error the client raised itself is not a server reset.
+  assert_eq(github_api_failure_kind(failed("stream error: unknown")), "command")
   let request_count = 0
   const adapters: GitHubApiAdapters = {
     request: { _path ->
