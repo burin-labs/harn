@@ -104,6 +104,9 @@ jobs:
           cache-on-failure: true
           cache-bin: false
           cache-workspace-crates: "true"
+          # Also drops any source record a prefix-matched older generation
+          # carried, so this save never inherits a commit it was not built from.
+          reuse-workspace-crates: "true"
           save: "true"
       # A cache miss means the immutable entry for this family is obsolete.
       # Delete it only after restore (so its contents remain available to the
@@ -135,6 +138,11 @@ jobs:
         env:
           CARGO_BUILD_JOBS: "4"
         run: ${{ matrix.warm_script }}
+      # Name the commit this generation was built from, for workspace crate
+      # reuse on restore. Only a warm build that succeeded may claim it.
+      - name: Record the workspace cache source
+        if: success() && steps.rust-cache.outputs.cache-hit != 'true'
+        run: ./scripts/ci/reuse_workspace_crates.sh record "${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}"
       - name: Report cache generation already current
         if: steps.rust-cache.outputs.cache-hit == 'true'
         env:

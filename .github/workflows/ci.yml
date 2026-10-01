@@ -475,6 +475,7 @@ jobs:
           # leaves merge_group recompiling every harn-* crate after an exact hit
           # (#5003).
           cache-workspace-crates: "true"
+          reuse-workspace-crates: "true"
           # Authorize this lane as the package-audit main-branch cache writer.
           # Package-relevant merges are exactly the pushes where this lane runs,
           # so the saved key tracks every lockfile/manifest change. Before this,
@@ -487,6 +488,11 @@ jobs:
         # so their shared feature graph compiles once, then checks every exact
         # publishable archive in one temporary Cargo workspace.
         run: ./scripts/verify_crate_packages.sh
+      # Name the commit this target was built from, for the next restore's
+      # workspace crate reuse. Only a fully successful build may claim it.
+      - name: Record the workspace cache source
+        if: success()
+        run: ./scripts/ci/reuse_workspace_crates.sh record "${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}"
   # A public API break in a published crate needs a breaking fragment with its
   # migration. This proof shares nothing with package verification but its
   # trigger and warm dependency cache, so it runs beside it: in sequence the two
@@ -1149,6 +1155,7 @@ jobs:
           cache-on-failure: true
           cache-bin: false
           cache-workspace-crates: "true"
+          reuse-workspace-crates: "true"
           save: "true"
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
@@ -1231,6 +1238,11 @@ jobs:
       - name: Mark workspace test success
         id: workspace-tests-ok
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
+      # Name the commit this target was built from, for the next restore's
+      # workspace crate reuse. Only a fully successful build may claim it.
+      - name: Record the workspace cache source
+        if: success()
+        run: ./scripts/ci/reuse_workspace_crates.sh record "${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}"
       # Report the compiler cache on every tier, named by nothing it excludes.
       # Guarding this on a single tier is what let the owned pool run for
       # weeks with nobody able to say whether it was compiling warm or cold:
