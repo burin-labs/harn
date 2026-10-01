@@ -11,9 +11,24 @@ fn adapter_notifications() -> Vec<serde_json::Value> {
         .expect("adapter notifications")
 }
 
+fn typed_notifications() -> Vec<serde_json::Value> {
+    let mut notifications = adapter_notifications();
+    // These updates come from session::refresh_advertised_commands,
+    // bridge::send_log and live_clients::write_live_client_operation rather
+    // than AgentEvent, so they are absent from the event-emission fixture.
+    for update in [
+        serde_json::json!({"sessionUpdate": "available_commands_update", "availableCommands": []}),
+        serde_json::json!({"sessionUpdate": "log", "_meta": {"harn": {"level": "info", "message": "fixture log"}}}),
+        serde_json::json!({"sessionUpdate": "live_session_client", "_meta": {"harn": {"action": "attached", "state": null}}}),
+    ] {
+        notifications.push(serde_json::json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fixture-session", "update": update}}));
+    }
+    notifications
+}
+
 #[test]
 fn generated_session_updates_round_trip_the_adapter_fixture() {
-    let notifications = adapter_notifications();
+    let notifications = typed_notifications();
     let kinds: BTreeSet<_> = notifications
         .iter()
         .map(|notification| {
@@ -23,9 +38,12 @@ fn generated_session_updates_round_trip_the_adapter_fixture() {
         })
         .collect();
     assert_eq!(
-        kinds.len(),
-        17,
-        "the producer fixture must exercise all 17 kinds"
+        kinds,
+        harn_serve::adapters::acp::HARN_SESSION_UPDATE_EXTENSIONS
+            .iter()
+            .copied()
+            .collect(),
+        "typed fixtures must exercise every advertised kind"
     );
     for notification in notifications {
         let update = notification["params"]["update"].clone();
@@ -38,6 +56,97 @@ fn generated_session_updates_round_trip_the_adapter_fixture() {
             "typed decoding must preserve every emitted field"
         );
     }
+}
+
+#[test]
+fn generated_session_updates_refuse_each_missing_required_field() {
+    fn required_paths(
+        shape: &serde_json::Value,
+        value: &serde_json::Value,
+        prefix: &str,
+        paths: &mut Vec<String>,
+    ) {
+        let Some(properties) = shape["properties"].as_object() else {
+            return;
+        };
+        for (key, field) in properties {
+            let path = format!("{prefix}/{key}");
+            if shape["required"]
+                .as_array()
+                .is_some_and(|fields| fields.iter().any(|name| name == key))
+            {
+                assert!(value.get(key).is_some(), "fixture lacks {path}");
+                paths.push(path.clone());
+            }
+            if let Some(child) = value.get(key) {
+                required_paths(field, child, &path, paths);
+            }
+        }
+    }
+    let schema: serde_json::Value =
+        serde_json::from_str(&protocol_source().read_text(SOURCE).unwrap()).unwrap();
+    let mut checked = BTreeSet::new();
+    for notification in typed_notifications() {
+        let update = &notification["params"]["update"];
+        let kind = update["sessionUpdate"].as_str().unwrap();
+        let shape = schema["$defs"]
+            .as_object()
+            .unwrap()
+            .values()
+            .find(|shape| shape["properties"]["sessionUpdate"]["const"] == kind)
+            .unwrap();
+        let mut paths = Vec::new();
+        required_paths(shape, update, "", &mut paths);
+        assert!(!paths.is_empty(), "{kind} required-field census is empty");
+        for path in paths {
+            let mut missing = update.clone();
+            let (parent, key) = path.rsplit_once('/').unwrap();
+            assert!(missing
+                .pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(key)
+                .is_some());
+            let error =
+                serde_json::from_value::<generated_rust_binding::ACPTypedSessionUpdate>(missing)
+                    .unwrap_err();
+            let expected = if path == "/sessionUpdate" {
+                "unknown typed session update".to_owned()
+            } else {
+                format!(
+                    "session update {} is required",
+                    path.trim_start_matches('/').replace('/', ".")
+                )
+            };
+            assert_eq!(error.to_string(), expected, "{kind}: {path}");
+            checked.insert((kind.to_owned(), path));
+        }
+    }
+    assert_eq!(
+        checked
+            .iter()
+            .map(|(kind, _)| kind)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        harn_serve::adapters::acp::HARN_SESSION_UPDATE_EXTENSIONS.len()
+    );
+}
+
+#[test]
+fn generated_rust_session_update_dispatch_contains_only_variant_routes() {
+    let output = generate_rust_for_tests();
+    let decoder = output
+        .split("impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {")
+        .nth(1)
+        .unwrap()
+        .split("\n}\n")
+        .next()
+        .unwrap();
+    assert_eq!(decoder.matches("match ").count(), 1);
+    assert_eq!(decoder.matches("validate_session_update(").count(), 1);
+    assert!(!decoder.contains("value.pointer("));
+    assert!(decoder.lines().count() <= SessionUpdatePayloads::load_for_tests().variants.len() + 12);
 }
 
 #[test]
@@ -134,29 +243,72 @@ fn native_decoder_preserves_replay_and_required_nulls_and_rejects_bad_identity()
             "{kind} nullable producer fields"
         );
     }
-    for (kind, field, value) in [
-        ("worker_update", "workerId", serde_json::json!(" \t")),
-        ("worker_update", "event", serde_json::json!("")),
-        ("worker_update", "status", serde_json::json!("")),
-        ("skill_activated", "iteration", serde_json::json!(-1)),
-        ("skill_activated", "skillName", serde_json::json!(" ")),
-        ("stance_transition", "escapeTool", serde_json::json!("")),
+    for (kind, field, value, reason) in [
+        (
+            "worker_update",
+            "workerId",
+            serde_json::json!(" \t"),
+            "must not be blank",
+        ),
+        (
+            "worker_update",
+            "event",
+            serde_json::json!(""),
+            "is too short",
+        ),
+        (
+            "worker_update",
+            "status",
+            serde_json::json!(""),
+            "is too short",
+        ),
+        (
+            "skill_activated",
+            "iteration",
+            serde_json::json!(-1),
+            "is below its minimum",
+        ),
+        (
+            "skill_activated",
+            "skillName",
+            serde_json::json!(" "),
+            "must not be blank",
+        ),
+        (
+            "stance_transition",
+            "escapeTool",
+            serde_json::json!(""),
+            "is too short",
+        ),
+        (
+            "reminder_emitted",
+            "reminder/renderedRole",
+            serde_json::json!("unknown-role"),
+            "has an unknown value",
+        ),
     ] {
         let mut notification = adapter_notifications()
             .into_iter()
             .find(|n| n["params"]["update"]["sessionUpdate"] == kind)
             .unwrap();
-        notification["params"]["update"]["_meta"]["harn"][field] = value;
+        *notification
+            .pointer_mut(&format!("/params/update/_meta/harn/{field}"))
+            .unwrap() = value;
         assert!(
             !validator.is_valid(&notification),
             "schema accepted {kind}.{field}"
         );
-        assert!(
+        assert_eq!(
             serde_json::from_value::<generated_rust_binding::ACPTypedSessionUpdate>(
                 notification["params"]["update"].clone()
             )
-            .is_err(),
-            "decoder accepted {kind}.{field}"
+            .unwrap_err()
+            .to_string(),
+            format!(
+                "session update _meta.harn.{} {reason}",
+                field.replace('/', ".")
+            ),
+            "{kind}.{field} diagnostic"
         );
     }
     let mut stance = adapter_notifications()
@@ -168,11 +320,13 @@ fn native_decoder_preserves_replay_and_required_nulls_and_rejects_bad_identity()
         .unwrap()
         .remove("escapeTool");
     assert!(!validator.is_valid(&stance));
-    assert!(
+    assert_eq!(
         serde_json::from_value::<generated_rust_binding::ACPTypedSessionUpdate>(
             stance["params"]["update"].clone()
         )
-        .is_err()
+        .unwrap_err()
+        .to_string(),
+        "session update _meta.harn.escapeTool is required for this phase"
     );
     stance["params"]["update"]["_meta"]["harn"]["phase"] = "observing".into();
     assert!(
