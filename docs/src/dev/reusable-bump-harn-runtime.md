@@ -210,6 +210,11 @@ The driver package declares the runtime floor it needs in
 of its runtime gets that floor as a diagnostic rather than a missing-capability
 failure part-way through a bump.
 
+Repair preservation also requires the `is_generated_commit` method in the
+target runtime's `LiveBumpRemote` contract. The GitHub driver checks that
+contract before it can refresh or publish a branch. Older runtimes are refused
+rather than silently refreshing without authenticated repair preservation.
+
 ## Security boundary
 
 - **Least privilege, renewable credentials.** The caller passes its App client

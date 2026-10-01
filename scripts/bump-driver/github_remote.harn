@@ -50,7 +50,7 @@ pub type GithubBumpRemoteConfig = {
 
 type GithubRepo = {owner: string, name: string}
 
-/** The workflow can drive a target runtime whose commit request predates repair metadata. */
+/** Older targets can parse the driver and reach its runtime-contract diagnostic. */
 type PublicationMetadata = {expected_branch_oid?: string, repair_commits?: list<string>, ...rest}
 
 type CommitIdentity = {
@@ -181,6 +181,9 @@ fn __publish_worktree(harness: Harness, publication: GithubWorktreeCommitRequest
 
 /** Bind the GitHub connector package to std/bump/live's provider boundary. */
 pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> LiveBumpRemote {
+  if !contains(schema_of(LiveBumpRemote).properties.keys(), "is_generated_commit") {
+    throw "bump-driver: target runtime lacks the authenticated repair identity contract; upgrade Harn before refreshing a consumer branch"
+  }
   const repo = __repo(config.repo)
   const release_repo = __repo(config.release_repo)
   if config.options != nil && config.token != nil {
