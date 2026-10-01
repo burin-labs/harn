@@ -70,13 +70,13 @@ async fn within_limit<F: Future>(label: &str, fut: F, ceiling: Duration) -> F::O
         if let Poll::Ready(output) = fut.as_mut().poll(cx) {
             return Poll::Ready(output);
         }
-        if Pin::new(&mut expired_rx).poll(cx) == Poll::Ready(Ok(())) {
-            panic!(
-                "hang: {label} did not complete within the {ceiling:?} test hang ceiling \
-                 (waited {:?})",
-                started.elapsed()
-            );
-        }
+        assert_ne!(
+            Pin::new(&mut expired_rx).poll(cx),
+            Poll::Ready(Ok(())),
+            "hang: {label} did not complete within the {ceiling:?} test hang ceiling \
+             (waited {:?})",
+            started.elapsed()
+        );
         Poll::Pending
     })
     .await
