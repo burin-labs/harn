@@ -20,12 +20,11 @@
     "value->stdlib": 1,
     "value->vm": 6,
     "vm->agent_sessions": 19,
-    "vm->connectors": 7,
-    "vm->llm": 27,
-    "vm->orchestration": 121,
-    "vm->provider_catalog": 1,
-    "vm->stdlib": 123,
-    "vm->triggers": 11
+    "vm->connectors": 6,
+    "vm->llm": 24,
+    "vm->orchestration": 85,
+    "vm->stdlib": 84,
+    "vm->triggers": 8
   },
   "layers": [
     [
@@ -51,7 +50,8 @@
       "connectors"
     ],
     [
-      "stdlib"
+      "stdlib",
+      "harness_methods"
     ]
   ]
 }
