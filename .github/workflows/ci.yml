@@ -1226,6 +1226,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
+          CARGO_LOG: cargo::core::compiler::fingerprint=info
         run: >-
           set -euo pipefail;
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
