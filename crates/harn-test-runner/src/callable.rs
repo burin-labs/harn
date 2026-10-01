@@ -128,17 +128,8 @@ pub fn prepare_callable_entries(
 
 fn compile_failure(case: &TestCase, error: harn_vm::CompileError) -> TestResult {
     TestResult {
-        name: case.name.clone(),
-        file: case.file.display().to_string(),
-        passed: false,
-        skip_reason: None,
         error: Some(format!("Compile error: {error}")),
-        captured_output: None,
-        timeout: None,
-        duration_ms: 0,
-        phases: None,
-        work: None,
-        timing_spans: Vec::new(),
+        ..TestResult::unmeasured(&case.name, case.file.display().to_string(), false, 0)
     }
 }
 

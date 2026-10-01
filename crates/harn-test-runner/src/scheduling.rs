@@ -94,17 +94,8 @@ where
                     Ok(worker) => worker,
                     Err(error) => {
                         infrastructure_errors.lock().unwrap().push(TestResult {
-                            name: "<worker error>".to_string(),
-                            file: String::new(),
-                            passed: false,
-                            skip_reason: None,
                             error: Some(error),
-                            captured_output: None,
-                            timeout: None,
-                            duration_ms: 0,
-                            phases: None,
-                            work: None,
-                            timing_spans: Vec::new(),
+                            ..TestResult::unmeasured("<worker error>", "", false, 0)
                         });
                         return;
                     }
@@ -370,17 +361,8 @@ mod tests {
             },
             |_| Ok(()),
             |_, case| TestResult {
-                name: case.name.clone(),
-                file: case.file.display().to_string(),
-                passed: false,
-                skip_reason: None,
                 error: Some("deterministic failure".to_string()),
-                captured_output: None,
-                timeout: None,
-                duration_ms: 0,
-                phases: None,
-                work: None,
-                timing_spans: Vec::new(),
+                ..TestResult::unmeasured(&case.name, case.file.display().to_string(), false, 0)
             },
         );
 

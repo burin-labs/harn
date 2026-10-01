@@ -211,6 +211,41 @@ impl AggregateTimings {
 }
 
 impl TestResult {
+    /// Construct a result without an execution timeline or measured VM work.
+    ///
+    /// Use this constructor instead of a struct literal when producing results
+    /// outside the runner. Set diagnostics on the returned result as needed.
+    /// Instrumented producers must set `work` from the stopped VM recorder;
+    /// leaving it absent means unavailable, not measured zero.
+    ///
+    /// ```
+    /// use harn_test_runner::TestResult;
+    ///
+    /// let mut result = TestResult::unmeasured("case", "test_example.harn", false, 0);
+    /// result.error = Some("Discovery failed".into());
+    /// assert!(result.work.is_none());
+    /// ```
+    pub fn unmeasured(
+        name: impl Into<String>,
+        file: impl Into<String>,
+        passed: bool,
+        duration_ms: u64,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            file: file.into(),
+            passed,
+            skip_reason: None,
+            error: None,
+            captured_output: None,
+            timeout: None,
+            duration_ms,
+            phases: None,
+            work: None,
+            timing_spans: Vec::new(),
+        }
+    }
+
     /// Emit a one-line phase breakdown to stderr. Driven by `--diagnose`
     /// / `HARN_TEST_DIAGNOSE=1`. The format is intentionally
     /// machine-readable so downstream eval pipelines can grep it.
