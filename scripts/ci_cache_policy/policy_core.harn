@@ -368,8 +368,12 @@ pub const MAIN_ONLY_RUST_IF =
  * The Windows cross-compile check is the one Windows admission lane: every
  * merge-group candidate, plus Rust-changing main pushes.
  */
-pub const WINDOWS_CROSS_CHECK_IF =
-  "github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
+/** Skips a slow proof family under the sprint fast-CI switch (#7628). */
+pub const SPRINT_FAST_CI_GUARD = "needs.changes.outputs.sprint_fast_ci != 'true'"
+
+pub const WINDOWS_CROSS_CHECK_IF = "(github.event_name == 'merge_group' && "
+  + SPRINT_FAST_CI_GUARD
+  + ") || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
 
 /** `ci-status` requires the cross-check exactly where the job itself must run. */
 pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"

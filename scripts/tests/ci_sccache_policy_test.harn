@@ -395,7 +395,8 @@ fn workflow() {
         "runs-on": "ubuntu-latest",
         "timeout-minutes": 50,
         needs: ["changes"],
-        if: "needs.changes.outputs.rust == 'true'",
+        if:
+          "needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'",
         permissions: {actions: "read", contents: "read"},
         steps: [
           {
@@ -422,7 +423,8 @@ fn workflow() {
         "runs-on": "ubuntu-latest",
         "timeout-minutes": 65,
         needs: ["changes"],
-        if: "needs.changes.outputs.rust == 'true'",
+        if:
+          "needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'",
         steps: [
           {name: "Build tree-sitter grammar for the parse sweep"},
           {name: "Check generated parser is current", run: "make check-tree-sitter-parser"},

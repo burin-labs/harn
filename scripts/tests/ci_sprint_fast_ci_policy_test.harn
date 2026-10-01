@@ -1,0 +1,161 @@
+import { sprint_fast_ci_errors } from "../ci_cache_policy/sprint_fast_ci"
+
+const GUARD = "needs.changes.outputs.sprint_fast_ci != 'true'"
+
+fn gha(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+fn status_command() -> string {
+  return "require_result \"$security_tests_ready_result\" \\\n"
+    + "  \"handoff failed\" \\\n"
+    + "  test \"$RUST\" != \"true\" -o \"$SPRINT_FAST_CI_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$rust_security_result\" \\\n"
+    + "  \"sandbox failed\" \\\n"
+    + "  test \"$RUST\" != \"true\" -o \"$SPRINT_FAST_CI_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$harn_audit_result\" \\\n"
+    + "  \"harn failed\" \\\n"
+    + "  test \"$RUST\" != \"true\" -o \"$SPRINT_FAST_CI_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$source_length_result\" \"lengths failed\" [ \"$RUST\" != \"true\" ]\n"
+}
+
+fn workflows() {
+  return {
+    "ci.yml": {
+      jobs: {
+        changes: {
+          outputs: {sprint_fast_ci: gha("steps.sprint_fast_ci.outputs.active")},
+          steps: [
+            {
+              id: "sprint_fast_ci",
+              env: {
+                SPRINT_FAST_CI: gha("vars.SPRINT_FAST_CI"),
+                EVENT_NAME: gha("github.event_name"),
+              },
+              run:
+                "active=false\nif [ \"$SPRINT_FAST_CI\" = \"true\" ] \\\n  && { [ \"$EVENT_NAME\" = \"pull_request\" ] || [ \"$EVENT_NAME\" = \"merge_group\" ]; }; then\n  active=true\nfi\n",
+            },
+          ],
+        },
+        "harn-audit": {needs: ["changes"], if: "needs.changes.outputs.rust == 'true' && " + GUARD},
+        "security-tests-ready": {
+          needs: ["changes", "rust-check-inputs"],
+          if: "!cancelled() && " + GUARD,
+        },
+        "windows-cross-check": {
+          needs: "changes",
+          if: "(github.event_name == 'merge_group' && " + GUARD + ")",
+        },
+        macos: {
+          needs: ["changes", "macos-plan"],
+          if: "needs.macos-plan.outputs.run_macos == 'true' && " + GUARD,
+        },
+        "ci-status": {
+          steps: [
+            {
+              name: "Verify required CI jobs",
+              env: {
+                SPRINT_FAST_CI_ACTIVE: gha("needs.changes.outputs.sprint_fast_ci"),
+                WINDOWS_CROSS_REQUIRED: gha(
+                  "(github.event_name == 'merge_group' && " + GUARD + ")",
+                ),
+              },
+              run: status_command(),
+            },
+          ],
+        },
+      },
+    },
+    "e2e.yml": {jobs: {e2e: {steps: [{run: "make test-e2e"}]}}},
+  }
+}
+
+fn with_ci_job(base: dict, name: string, job: dict) -> dict {
+  const ci = base["ci.yml"]
+  return {...base, "ci.yml": {...ci, jobs: {...ci.jobs, [name]: job}}}
+}
+
+pipeline test_sprint_fast_ci_policy_accepts_one_owned_switch(harness: Harness, task: unknown) {
+  assert_eq(sprint_fast_ci_errors(workflows()), [])
+}
+
+pipeline test_sprint_fast_ci_policy_refuses_a_family_without_the_gate(
+  harness: Harness,
+  task: unknown,
+) {
+  const base = workflows()
+  const windows = base["ci.yml"].jobs["windows-cross-check"]
+  const ungated = with_ci_job(
+    base,
+    "windows-cross-check",
+    {...windows, if: "github.event_name == 'merge_group'"},
+  )
+  assert_eq(
+    sprint_fast_ci_errors(ungated),
+    ["ci.yml:windows-cross-check must skip under the sprint fast-CI decision"],
+  )
+}
+
+pipeline test_sprint_fast_ci_policy_refuses_an_excuse_beyond_the_families(
+  harness: Harness,
+  task: unknown,
+) {
+  const base = workflows()
+  const status = base["ci.yml"].jobs["ci-status"]
+  const step = status.steps[0]
+  const widened = with_ci_job(
+    base,
+    "ci-status",
+    {
+      ...status,
+      steps: [
+        {
+          ...step,
+          run: step.run.replace(
+            "[ \"$RUST\" != \"true\" ]",
+            "test \"$RUST\" != \"true\" -o \"$SPRINT_FAST_CI_ACTIVE\" = \"true\"",
+          ),
+        },
+      ],
+    },
+  )
+  assert_eq(
+    sprint_fast_ci_errors(widened),
+    ["ci.yml:ci-status may excuse sprint skips only for the sprint fast-CI families"],
+  )
+}
+
+pipeline test_sprint_fast_ci_policy_refuses_a_second_reader(harness: Harness, task: unknown) {
+  const base = workflows()
+  const rogue = {
+    ...base,
+    "e2e.yml": {jobs: {e2e: {if: "vars.SPRINT_FAST_CI != 'true'", steps: []}}},
+  }
+  assert_eq(
+    sprint_fast_ci_errors(rogue),
+    ["e2e.yml:e2e must read the sprint decision from changes, not vars.SPRINT_FAST_CI"],
+  )
+}
+
+pipeline test_sprint_fast_ci_policy_refuses_a_decision_that_covers_main(
+  harness: Harness,
+  task: unknown,
+) {
+  const base = workflows()
+  const changes = base["ci.yml"].jobs.changes
+  const step = changes.steps[0]
+  const covers_push = with_ci_job(
+    base,
+    "changes",
+    {
+      ...changes,
+      steps: [{...step, run: step.run + "[ \"$EVENT_NAME\" = \"push\" ] && active=true\n"}],
+    },
+  )
+  assert_eq(
+    sprint_fast_ci_errors(covers_push),
+    [
+      "ci.yml:changes must own the sprint fast-CI decision: exactly `true`, pull requests and merge groups only",
+    ],
+  )
+}

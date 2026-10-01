@@ -1,0 +1,127 @@
+import "./policy_core.harn"
+
+/**
+ * The sprint fast-CI switch (#7628): with the repository variable
+ * `SPRINT_FAST_CI` exactly `true`, pull requests and merge groups skip the
+ * slow proof families and pushes to main still run them all.
+ *
+ * One owner decides it. The `changes` job turns the variable into the output
+ * `sprint_fast_ci`, and every family and the aggregate read that output. A job
+ * that read the variable itself could disagree with the aggregate about which
+ * events the switch covers, which is how a skip would pass on main.
+ */
+const SPRINT_VARIABLE = "vars.SPRINT_FAST_CI"
+
+const SPRINT_STEP_ID = "sprint_fast_ci"
+
+const SPRINT_EXCUSE = "\"$SPRINT_FAST_CI_ACTIVE\" = \"true\""
+
+/** Jobs that must skip under the switch: the five slow proof families. */
+pub const SPRINT_FAST_CI_JOBS = [
+  "harn-audit",
+  "security-tests-ready",
+  "windows-cross-check",
+  "macos",
+]
+
+/**
+ * The aggregate's result variables whose skip the switch may excuse. Windows
+ * is excused through `WINDOWS_CROSS_REQUIRED`, and macOS skips are excused on
+ * every event already.
+ */
+const SPRINT_EXCUSED_RESULTS = [
+  "security_tests_ready_result",
+  "rust_security_result",
+  "harn_audit_result",
+]
+
+fn gha(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+fn needs_of(job: dict?) -> list<string> {
+  const needs = job?.needs
+  if type_of(needs) == "string" {
+    return [trim(needs)]
+  }
+  return (needs ?? []).map({ value -> trim(to_string(value)) }).to_list()
+}
+
+fn step_with_id(job: dict?, id: string) {
+  for step in job?.steps ?? [] {
+    if trim(to_string(step?.id ?? "")) == id {
+      return step
+    }
+  }
+  return nil
+}
+
+/** The text of one `require_result` call, from its result variable to the next blank line. */
+fn require_call(command: string, result_var: string) -> string {
+  const marker = "require_result \"$" + result_var + "\""
+  const parts = command.split(marker)
+  if len(parts) != 2 {
+    return ""
+  }
+  return parts[1].split("\n\n")[0]
+}
+
+pub fn sprint_fast_ci_errors(workflows: dict) -> list<string> {
+  const ci = workflows["ci.yml"]
+  let errors: list<string> = []
+  const changes = ci?.jobs?.changes
+  const decision = step_with_id(changes, SPRINT_STEP_ID)
+  const decision_run = to_string(decision?.run ?? "")
+  if trim(to_string(changes?.outputs?.sprint_fast_ci ?? ""))
+    != gha("steps.${SPRINT_STEP_ID}.outputs.active")
+    || trim(to_string(decision?.env?.SPRINT_FAST_CI ?? "")) != gha(SPRINT_VARIABLE)
+    || !contains(decision_run, "[ \"$SPRINT_FAST_CI\" = \"true\" ]")
+    || !contains(decision_run, "\"$EVENT_NAME\" = \"pull_request\"")
+    || !contains(decision_run, "\"$EVENT_NAME\" = \"merge_group\"")
+    || contains(decision_run, "push") {
+    errors = errors
+      + [
+        "ci.yml:changes must own the sprint fast-CI decision: exactly `true`, pull requests and merge groups only",
+      ]
+  }
+  for name in SPRINT_FAST_CI_JOBS {
+    const job = ci?.jobs?.[name]
+    if !contains(to_string(job?.if ?? ""), SPRINT_FAST_CI_GUARD)
+      || !needs_of(job).contains("changes") {
+      errors = errors + ["ci.yml:${name} must skip under the sprint fast-CI decision"]
+    }
+  }
+  const status = ci?.jobs?.["ci-status"]
+  const status_step = step_by_name(status?.steps ?? [], "Verify required CI jobs")
+  const command = to_string(status_step?.run ?? "")
+  const env = status_step?.env ?? {}
+  if trim(to_string(env?.SPRINT_FAST_CI_ACTIVE ?? ""))
+    != gha("needs.changes.outputs.sprint_fast_ci")
+    || !contains(to_string(env?.WINDOWS_CROSS_REQUIRED ?? ""), SPRINT_FAST_CI_GUARD) {
+    errors = errors + ["ci.yml:ci-status must read the sprint fast-CI decision from changes"]
+  }
+  for result_var in SPRINT_EXCUSED_RESULTS {
+    if !contains(require_call(command, result_var), SPRINT_EXCUSE) {
+      errors = errors + ["ci.yml:ci-status must excuse a sprint skip of ${result_var}"]
+    }
+  }
+  // Any further excuse would let the switch hide a proof it does not own.
+  if len(command.split(SPRINT_EXCUSE)) - 1 != len(SPRINT_EXCUSED_RESULTS) {
+    errors = errors
+      + ["ci.yml:ci-status may excuse sprint skips only for the sprint fast-CI families"]
+  }
+  for entry in workflows {
+    for job_entry in (entry.value?.jobs ?? {}) {
+      if entry.key == "ci.yml" && job_entry.key == "changes" {
+        continue
+      }
+      if contains(json_stringify(job_entry.value), SPRINT_VARIABLE) {
+        errors = errors
+          + [
+            "${entry.key}:${job_entry.key} must read the sprint decision from changes, not ${SPRINT_VARIABLE}",
+          ]
+      }
+    }
+  }
+  return errors
+}

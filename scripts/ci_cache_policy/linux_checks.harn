@@ -780,7 +780,8 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
       != ARTIFACT_READY_TIMEOUT_MINUTES
     || ready_step?.env?.HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS != nil
     || ready_needs != ["changes"]
-    || trim(ready_job?.if ?? "") != "needs.changes.outputs.rust == 'true'"
+    || trim(ready_job?.if ?? "")
+      != "needs.changes.outputs.rust == 'true' && " + SPRINT_FAST_CI_GUARD
     || trim(ready_job?.permissions?.actions ?? "") != "read"
     || trim(ready_job?.permissions?.contents ?? "")
       != "read"
@@ -808,7 +809,7 @@ fn harn_audit_overlap_errors(workflow: dict) -> list<string> {
   const audit_command = trim(step_by_name(steps, "Run $" + "{{ matrix.step_name }}")?.run ?? "")
   if (audit?.needs ?? []) != ["changes"]
     || trim(audit?.if ?? "")
-      != "needs.changes.outputs.rust == 'true'"
+      != "needs.changes.outputs.rust == 'true' && " + SPRINT_FAST_CI_GUARD
     || trim(to_string(audit?.["timeout-minutes"] ?? ""))
       != HARN_AUDIT_TIMEOUT_MINUTES
     || wait_index < 0
