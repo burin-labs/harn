@@ -37,11 +37,32 @@ readonly PER_PAGE=100
 
 mkdir -p "$destination"
 
+# Every request here is a read, so a failed one is safe to repeat. GitHub
+# occasionally drops a response mid-body (gh reports "unexpected end of JSON
+# input"); three attempts absorb that, and a third failure still fails the job.
+readonly ATTEMPTS=3
+gh_read_to() {
+  local output=$1 path=$2 attempt
+  for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
+    if gh api "$path" > "$output"; then
+      return 0
+    fi
+    if ((attempt < ATTEMPTS)); then
+      echo "GitHub API read of ${path} failed (attempt ${attempt} of ${ATTEMPTS}); retrying." >&2
+      sleep "${FETCH_ARTIFACT_RETRY_SECONDS:-5}"
+    fi
+  done
+  return 1
+}
+page_file="$(mktemp)"
+trap 'rm -f "$page_file"' EXIT
+
 artifact_id=""
 for ((page = 1; page <= MAX_PAGES; page++)); do
   # One request per page. The count and the match both come from it, so the
   # end-of-list test cannot disagree with what was searched.
-  page_json="$(gh api "repos/${GH_REPO}/actions/artifacts?per_page=${PER_PAGE}&page=${page}")"
+  gh_read_to "$page_file" "repos/${GH_REPO}/actions/artifacts?per_page=${PER_PAGE}&page=${page}"
+  page_json="$(< "$page_file")"
   artifact_id="$(jq -r --arg prefix "$prefix" \
     '[.artifacts[]
       | select(.expired == false)
@@ -63,7 +84,7 @@ if [[ -z "$artifact_id" ]]; then
 fi
 
 zip_path="${destination}/artifact.zip"
-gh api "repos/${GH_REPO}/actions/artifacts/${artifact_id}/zip" > "$zip_path"
+gh_read_to "$zip_path" "repos/${GH_REPO}/actions/artifacts/${artifact_id}/zip"
 
 # The download endpoint returns the stored bytes, which are a zip only for an
 # artifact that was archived on upload. An artifact published with
