@@ -268,7 +268,6 @@ impl DispatchCore {
     }
 
     pub async fn dispatch(&self, mut request: CallRequest) -> Result<CallResponse, DispatchError> {
-        // Declared, not omitted; see `dispatch_environment` for why.
         let _environment =
             crate::dispatch_environment::declare(self.config.host_inference_boundary);
         let trace_id = request.trace_id.clone().unwrap_or_default();

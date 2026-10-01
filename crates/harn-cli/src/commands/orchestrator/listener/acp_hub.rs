@@ -215,14 +215,12 @@ impl AcpWebSocketHub {
             .unwrap_or_else(|e| e.into_inner())
             .workers_by_id
             .insert(worker_id.clone(), worker.clone());
-
         let worker_for_output = worker.clone();
         tokio::spawn(async move {
             while let Some(line) = from_acp_rx.recv().await {
                 worker_for_output.handle_output(line).await;
             }
         });
-
         let worker_name = worker_id;
         std::thread::Builder::new()
             .name(format!("harn-acp-ws-{worker_name}"))
