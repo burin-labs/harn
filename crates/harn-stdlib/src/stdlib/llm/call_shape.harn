@@ -68,7 +68,7 @@ const __JSON_SHAPE: ToolCallShape = {
   call_syntax: "a ```tool fenced block wrapping one JSON object with `name` and `args` keys",
   final_answer: "as plain text",
   body_hint:
-    "For a multi-line or code-bearing field (file contents, replacement text, exact-match strings), set its JSON value to `\"<<BODY\"`, put the raw bytes after the JSON object inside the same ```tool fence, and end them with a line that is exactly `BODY`. Nothing in that verbatim body is escaped. Use `\"<<BODY:N\"`, where N is the exact body-line count, only when the body itself contains a line that is exactly `BODY`. Short scalar values stay ordinary JSON strings.",
+    "For a multi-line or code-bearing field (file contents, replacement text, exact-match strings), set its JSON value to `\"<<BODY\"`, put the raw bytes after the JSON object inside the same ```tool fence, and end them with a line that is exactly `BODY`. The line break before `BODY` closes the value and is not part of it, so a value that must end with a newline (a whole file) leaves one empty line before `BODY`. Nothing in that verbatim body is escaped. Use `\"<<BODY:N\"`, where N is the exact body-line count, only when the body itself contains a line that is exactly `BODY`. Short scalar values stay ordinary JSON strings.",
 }
 
 const __TEXT_SHAPE: ToolCallShape = {
@@ -81,7 +81,7 @@ const __TEXT_SHAPE: ToolCallShape = {
   call_syntax: "`<tool_call>name({ ... })</tool_call>`",
   final_answer: "in a `<user_response>` block",
   body_hint:
-    "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
+    "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). The line break before `EOF` closes the value and is not part of it, so a value that must end with a newline (a whole file) leaves one empty line before `EOF`. Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
 }
 
 /**
