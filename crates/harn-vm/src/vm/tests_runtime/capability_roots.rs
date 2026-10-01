@@ -521,13 +521,14 @@ fn a_read_external_root_serves_builtin_reads_and_refuses_builtin_writes() {
         side_effect_level: Some("workspace_write".to_string()),
         ..Default::default()
     };
+    // A JSON string is a valid Harn string literal. Splicing the raw display
+    // form would turn a Windows `\r` separator into a carriage return.
+    let reference_literal = serde_json::to_string(&reference.display().to_string()).unwrap();
     let read_source = format!(
-        r#"pipeline t(harness: Harness, task: unknown) {{ return harness.fs.read_text("{}") }}"#,
-        reference.display()
+        "pipeline t(harness: Harness, task: unknown) {{ return harness.fs.read_text({reference_literal}) }}"
     );
     let write_source = format!(
-        r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.write_text("{}", "x") }}"#,
-        reference.display()
+        r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.write_text({reference_literal}, "x") }}"#
     );
 
     let unrooted = run_harn_with_policy(&read_source, policy.clone());
