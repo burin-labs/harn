@@ -43,7 +43,9 @@ env:
   HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
   HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS: "15"
   HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS: "1800"
-  HARN_EXT_ARTIFACT_PRODUCER_JOB: "Rust workspace tests"
+  # The shared CLI's producer. The Linux sandbox barrier overrides this with
+  # the test job, which produces the security archive.
+  HARN_EXT_ARTIFACT_PRODUCER_JOB: "Build shared Harn CLI"
   # Incremental fights the within-job sccache wrapper. Cross-run reuse is
   # owned by each lane's persistent compiler-object cache. Do not persist a
   # shared target/: independent PR and merge-group builds overlap, and Cargo
@@ -875,6 +877,149 @@ jobs:
           # elastic paid capacity.
           FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
 
+  rust-cli:
+    name: Build shared Harn CLI
+    needs: [changes, runner-availability, rust-producer-capacity]
+    # Forks and non-PR events intentionally skip capacity measurement. Trusted
+    # PRs require its successful decision before dispatch, including hosted
+    # fallbacks; an absent or failed measurement must not start the producer.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.rust == 'true'
+        && (needs.rust-producer-capacity.result == 'success'
+        || github.event_name != 'pull_request'
+        || github.event.pull_request.head.repo.full_name != github.repository) }}
+    # The shared Harn CLI every Harn proof lane waits for. It shares the Rust
+    # producer's runner ladder and capacity decision, and runs beside
+    # `rust-check-inputs` instead of before it: the two builds never shared
+    # compiled units, so in one job the test build waited 230-310s for nothing.
+    # Paid minutes per run are about the same; two paid runners now overlap.
+    #
+    # Hosted ceiling: 6 setup + 10 CLI budget + 12 cache-save reserve = 28.
+    # Owned ceiling: 6 setup + 20 CLI budget = 26.
+    runs-on: >-
+      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
+        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        && 'blacksmith-8vcpu-ubuntu-2404')
+        || (needs.rust-producer-capacity.outputs.route == 'owned'
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+        || 'ubuntu-8core' }}
+    timeout-minutes: >-
+      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
+        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        && 20)
+        || (needs.rust-producer-capacity.outputs.route == 'owned'
+        && 26)
+        || 28 }}
+    # The GitHub-hosted rung remains the authorized main-branch cache writer;
+    # Blacksmith uses sticky sccache and never enters that step, and the owned
+    # self-hosted rung is pull-request-only so it never reaches the write
+    # either. That is the reason the owned rung is scoped to pull requests
+    # rather than to every event: routing main pushes there would retire the
+    # writer, and every later hosted run would pay a cold cache.
+    permissions:
+      contents: read
+      actions: write
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+      SCCACHE_CACHE_SIZE: 15G
+      HARN_RUNNER_TIER: >-
+        ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
+          && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+          && 'blacksmith')
+          || (needs.rust-producer-capacity.outputs.route == 'owned'
+          && 'self-hosted')
+          || 'github-hosted' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/free-disk-space
+      # How many rustc processes this box may start, measured here rather than
+      # typed. A literal is right for the runner someone had in mind and wrong
+      # for every other one: it oversubscribes a small hosted box and leaves a
+      # larger one idle. `scripts/ci/rust_resource_budget.sh` is the single
+      # owner of that arithmetic and refuses by name when it cannot measure.
+      - name: Measure the compile budget
+        id: resource-budget
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          # `runner.environment` reports a vendor VM and one of our own boxes
+          # identically, and the two answer the census question differently: a
+          # vendor VM runs this job alone, an owned box shares its cores with
+          # every listener on it. The tier this job already declares is the
+          # honest source, and an owned rung added to the ladder has to declare
+          # itself there before it can reach this budget.
+          RUNNER_ENVIRONMENT: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'self-hosted' || 'github-hosted' }}
+          HARN_BUDGET_PROFILE: producer
+      - name: Install mold linker
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: mold
+          check-command: mold
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/sccache
+        if: env.HARN_RUNNER_TIER == 'blacksmith'
+        with:
+          cache-key: harn-cli
+          sticky: "true"
+      # Every tier gets an explicit answer, because a guard that names only
+      # the tiers it knows turns a new tier into a silent skip: the first
+      # self-hosted run would compile cold, report success, and say nothing.
+      # Blacksmith has its sticky sccache above. The owned pool and hosted
+      # runners both attempt an environment-compatible restore; differing
+      # toolchains and environment keys can still require a cold build.
+      # Only the hosted rung ever
+      # writes it: `save` is restore-only off `main`, and the owned rung is
+      # pull-request-only, so the authorized main-branch writer is untouched.
+      - uses: ./.github/actions/rust-cache
+        if: env.HARN_RUNNER_TIER != 'blacksmith'
+        continue-on-error: true
+        with:
+          shared-key: harn-cli
+          cache-on-failure: true
+          cache-bin: false
+          cache-workspace-crates: "true"
+          save: "true"
+      # Read the counters before the first compile, so the summary below can
+      # report what this job did rather than what the machine has done since
+      # its cache server last started.
+      - name: Record the sccache baseline
+        run: ./scripts/ci/sccache_baseline.sh
+      - name: Build portable Harn CLI
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 20 || 10 }}
+        env:
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
+        run: >-
+          ./scripts/ci/rust_artifact.sh build-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$GITHUB_SHA"
+      # upload-artifact v4 artifacts are immutable and REST-visible as soon as
+      # this step completes. Publish the execution inputs before the producer
+      # runs tests so free hosted consumers can overlap that test phase. The
+      # producer remains independently required and fail-closed in ci-status.
+      - name: Upload portable Harn CLI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}/harn-cli.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      # Report the compiler cache on every tier, named by nothing it excludes.
+      # Guarding this on a single tier is what let the owned pool run for
+      # weeks with nobody able to say whether it was compiling warm or cold:
+      # the rung that skips the summary produces no counters, and no counters
+      # reads exactly like a healthy cache. The script names an absent sccache
+      # rather than reporting a measured zero, and it leaves a
+      # host-supervised server running instead of stopping one other jobs are
+      # still using.
+      - name: Summarize and stop sccache
+        if: always()
+        run: ./scripts/ci/finalize_sccache.sh
+
+
   rust-check-inputs:
     name: Rust workspace tests
     needs: [changes, runner-availability, rust-producer-capacity]
@@ -891,8 +1036,13 @@ jobs:
     # every paid run has a hard 20-minute/$0.32 fuse, and Blacksmith never saves
     # a cache.
     #
+    # The shared CLI is built by `rust-cli`, a sibling job on the same ladder
+    # that starts at the same time. The two builds never shared compiled units
+    # (the test graph enables extra harn-vm features), so in one job they ran in
+    # sequence for nothing: 230-310s of CLI before 283-372s of test build.
+    #
     # The hosted ceiling is owned by the workload rather than chosen as a round
-    # number: it is the sum of the hosted step budgets below (10 + 16 + 26), plus
+    # number: it is the sum of the hosted step budgets below (16 + 26), plus
     # six minutes of setup and cache restore, plus a twelve-minute reserve for
     # this job's main-branch cache save. The save is a post step, so before the
     # reserve existed it ran inside whatever margin the tests happened to leave;
@@ -904,7 +1054,7 @@ jobs:
     # SLO. scripts/ci_cache_policy/linux_checks.harn owns the arithmetic.
     #
     # The owned self-hosted rung is the same arithmetic minus the cache-save
-    # reserve, with bounded cold retries: 6 setup + 20 + 24 + 26 = 76. It is a
+    # reserve, with bounded cold retries: 6 setup + 24 + 26 = 56. It is a
     # hang backstop, not a claim about host core count or improved performance.
     runs-on: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
@@ -918,8 +1068,8 @@ jobs:
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 20)
         || (needs.rust-producer-capacity.outputs.route == 'owned'
-        && 76)
-        || 70 }}
+        && 56)
+        || 60 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
     # Blacksmith uses sticky sccache and never enters that step, and the owned
     # self-hosted rung is pull-request-only so it never reaches the write
@@ -1009,27 +1159,6 @@ jobs:
         uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: nextest@0.9.132
-      - name: Build portable Harn CLI
-        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 20 || 10 }}
-        env:
-          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
-        run: >-
-          ./scripts/ci/rust_artifact.sh build-cli
-          "$RUNNER_TEMP/harn-cli.tar.zst"
-          "$GITHUB_SHA"
-      # upload-artifact v4 artifacts are immutable and REST-visible as soon as
-      # this step completes. Publish the execution inputs before the producer
-      # runs tests so free hosted consumers can overlap that test phase. The
-      # producer remains independently required and fail-closed in ci-status.
-      - name: Upload portable Harn CLI
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: harn-cli.tar.zst
-          path: ${{ runner.temp }}/harn-cli.tar.zst
-          archive: false
-          if-no-files-found: error
-          retention-days: 1
-      # Harn consumers start while the workspace test graph compiles once.
       # Only security binaries enter this archive; the following workspace
       # tests reuse the same profile and unified features without rebuilding.
       - name: Build security test archive
@@ -1162,6 +1291,7 @@ jobs:
       - name: Wait for Linux security tests
         env:
           GH_TOKEN: ${{ github.token }}
+          HARN_EXT_ARTIFACT_PRODUCER_JOB: Rust workspace tests
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
@@ -2501,6 +2631,7 @@ jobs:
         release-residual-audit,
         rust-checks,
         rust-producer-capacity,
+        rust-cli,
         rust-check-inputs,
         rust-artifacts-ready,
         security-tests-ready,
@@ -2667,6 +2798,11 @@ jobs:
             echo "::error::The Rust producer runner capacity decision did not complete."
             exit 1
           fi
+
+          rust_cli_result="${{ needs['rust-cli'].result }}"
+          echo "Shared Harn CLI build: $rust_cli_result"
+          require_result "$rust_cli_result" \
+            "Shared Harn CLI build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           rust_check_inputs_result="${{ needs['rust-check-inputs'].result }}"
           workspace_tests_ok="${{ needs['rust-check-inputs'].outputs.workspace_tests_ok }}"
