@@ -382,6 +382,26 @@ fn __missing_native_tool_evidence(candidate: dict, tool_evidence: dict?) -> bool
   )
 }
 
+/**
+ * A retirement's old value is the row's own flag, which the catalog already
+ * knows; only the replacement is the notice's to supply, and it must name a
+ * row the catalog can route to.
+ */
+fn __resolve_retirement(candidate: dict, current: unknown, catalog: dict) -> Result<dict, string> {
+  if candidate.kind != "retirement" {
+    return Ok(candidate)
+  }
+  let resolved = candidate + {old_value: current}
+  if __nonempty(candidate?.replacement) {
+    const replacement = regex_replace(r"[.\s]+$", "", trim(candidate.replacement))
+    if len(__model_rows(catalog, candidate.provider, replacement)) != 1 {
+      return Err("replacement must be exactly one catalog model id")
+    }
+    resolved = resolved + {replacement: replacement}
+  }
+  return Ok(resolved)
+}
+
 pub fn plan_notice(
   harness: Harness,
   notice_raw: dict,
@@ -429,7 +449,7 @@ pub fn plan_notice(
   if extraction?.classification != "candidate" || extraction?.candidate == nil {
     return {receipt: __base_receipt(harness, notice, "rejected", "malformed extraction result")}
   }
-  const candidate = extraction.candidate
+  let candidate = extraction.candidate
   const candidate_error = __candidate_common_error(notice, candidate)
     ?? __candidate_variant_error(candidate)
   if candidate_error != nil {
@@ -506,6 +526,14 @@ pub fn plan_notice(
     }
   }
   const current = __current_value(candidate, providers[0], models[0])
+  const resolved = __resolve_retirement(candidate, current, catalog)
+  if is_err(resolved) {
+    return {
+      receipt: __base_receipt(harness, notice, "rejected", unwrap_err(resolved))
+        + {model_id: candidate.model_id, change_kind: candidate.kind, evidence: candidate.evidence},
+    }
+  }
+  candidate = unwrap(resolved)
   const current_promotion = if candidate.kind == "promotion" {
     __promotion_by_id(current, candidate.promotion_id)
   } else {
@@ -698,6 +726,11 @@ fn __table_bounds(lines: list<string>, header: string) -> Result<dict, string> {
     }
     cursor = cursor + 1
   }
+  // Blank lines and comments before the next header belong to that header,
+  // so a field appended at `end` stays with this table's own fields.
+  while end > start + 1 && (trim(lines[end - 1]) == "" || starts_with(trim(lines[end - 1]), "#")) {
+    end = end - 1
+  }
   return Ok({start: start, end: end})
 }
 
@@ -816,38 +849,41 @@ fn __apply_retirement(
   bounds: dict,
   candidate: dict,
 ) -> Result<list<string>, string> {
-  let updated = lines
-  let insertion = bounds.end
-  const deprecated = __optional_field_line(lines, bounds, "deprecated")
-  if is_err(deprecated) {
-    return Err(unwrap_err(deprecated))
-  }
-  if unwrap(deprecated) != nil {
-    updated = __replace_line(
-      updated,
-      unwrap(deprecated) ?? 0,
-      "deprecated = " + to_string(candidate.new_value),
-    )
-  } else {
-    updated = __insert_lines(updated, insertion, ["deprecated = " + to_string(candidate.new_value)])
-    insertion = insertion + 1
-  }
-  let note = "Retires " + candidate.effective_date + " per " + candidate.evidence + "."
-  if candidate?.replacement != nil && trim(candidate.replacement) != "" {
+  const has_replacement = candidate?.replacement != nil && trim(candidate.replacement) != ""
+  const evidence = regex_replace(r"[.\s]+$", "", candidate.evidence)
+  let note = "Retires " + candidate.effective_date + " per " + evidence + "."
+  if has_replacement {
     note = note + " Use " + candidate.replacement + "."
   }
-  const existing_note = __optional_field_line(lines, bounds, "deprecation_note")
-  if is_err(existing_note) {
-    return Err(unwrap_err(existing_note))
+  let fields: list<{name: string, value: string}> = [
+    {name: "deprecated", value: to_string(candidate.new_value)},
+    {name: "deprecation_note", value: json_stringify(note)},
+  ]
+  // The retirement date and replacement are typed catalog fields; the note
+  // alone would leave them readable only as prose.
+  if candidate.new_value {
+    fields = fields + [{name: "sunset_date", value: json_stringify(candidate.effective_date)}]
+    if has_replacement {
+      fields = fields
+        + [{name: "superseded_by", value: json_stringify(trim(candidate.replacement))}]
+    }
   }
-  if unwrap(existing_note) != nil {
-    updated = __replace_line(
-      updated,
-      unwrap(existing_note) ?? 0,
-      "deprecation_note = " + json_stringify(note),
-    )
-  } else {
-    updated = __insert_lines(updated, insertion, ["deprecation_note = " + json_stringify(note)])
+  // Insertions land at the table end, after every existing field line, so
+  // line indices found in `lines` stay valid in `updated`.
+  let updated = lines
+  let insertion = bounds.end
+  for field in fields {
+    const existing = __optional_field_line(lines, bounds, field.name)
+    if is_err(existing) {
+      return Err(unwrap_err(existing))
+    }
+    const line = field.name + " = " + field.value
+    if unwrap(existing) != nil {
+      updated = __replace_line(updated, unwrap(existing) ?? 0, line)
+    } else {
+      updated = __insert_lines(updated, insertion, [line])
+      insertion = insertion + 1
+    }
   }
   return Ok(updated)
 }
@@ -945,6 +981,9 @@ one explicit price, temporary promotion, retirement, endpoint, or capability cha
 model_id only from the catalog rows below, using the old value and model name to disambiguate.
 For a price change, match the stated old price to that row's current field; do not select
 a different row merely because its current price equals the proposed new price.
+For a retirement, effective_date is the date requests to the model stop working, not the
+date the deprecation was announced. When the notice states more than one retirement date,
+use the earliest. Write every date as a calendar date, YYYY-MM-DD, with no time of day.
 If no row matches unambiguously, do not invent an id; return "uncertain" with the ambiguity
 as the reason. An actual addition must be explicitly described as a new model by the notice.
 Return "irrelevant" only when no catalog change is stated. Never infer missing identifiers
