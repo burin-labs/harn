@@ -111,6 +111,6 @@ runs:
     - name: Reuse unchanged workspace crates
       if: inputs.reuse-workspace-crates == 'true' && inputs.cache-workspace-crates == 'true'
       shell: bash
-      run: >-
-        ./scripts/ci/reuse_workspace_crates.sh restore
-        "${{ inputs.target-dir != '' && inputs.target-dir || env.CARGO_TARGET_DIR || format('{0}/target', github.workspace) }}"
+      env:
+        REUSE_TARGET_DIR: ${{ inputs.target-dir != '' && inputs.target-dir || env.CARGO_TARGET_DIR || format('{0}/target', github.workspace) }}
+      run: ./scripts/ci/reuse_workspace_crates.sh restore "$REUSE_TARGET_DIR"
