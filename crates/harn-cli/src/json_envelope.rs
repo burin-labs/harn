@@ -376,7 +376,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "test --json-out",
             schema_version: crate::test_report::USER_TEST_REPORT_SCHEMA_VERSION,
             description:
-                "User-test report with typed timeout, per-case and aggregate phases, module attribution, and duration distribution.",
+                "User-test report with counted per-case VM work, typed timeout, per-case and aggregate phases, module attribution, and duration distribution.",
             schema_json: None,
         },
         SchemaEntry {

@@ -30,6 +30,9 @@ pub struct TestResult {
     /// errors have no execution timeline and leave this absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phases: Option<PhaseTimings>,
+    /// Counted VM work through case teardown, or null if no VM was constructed.
+    /// A measured zero is distinct from unavailable work.
+    pub work: Option<harn_vm::VmWork>,
     /// Script-owned `std/timing` spans closed while this case executed.
     /// These are the receipt-level attribution boundary for sub-operations
     /// inside an otherwise monolithic test case.

@@ -476,6 +476,9 @@ impl Vm {
                 Some(op) => op,
                 None => return Err(VmError::InvalidInstruction(op_byte)),
             };
+            if let Some(recorder) = &self.work_recorder {
+                recorder.record_step();
+            }
             if let Some(recorder) = self.flight_recorder.as_ref() {
                 recorder.record_instruction(
                     &self.runtime_context.task_id,
@@ -745,6 +748,11 @@ impl crate::vm::Vm {
         let op = frame.chunk.code[op_offset];
         frame.ip += 1;
 
+        if let Some(recorder) = &self.work_recorder {
+            if Op::from_byte(op).is_some() {
+                recorder.record_step();
+            }
+        }
         if let (Some(recorder), Some(decoded)) = (self.flight_recorder.as_ref(), Op::from_byte(op))
         {
             recorder.record_instruction(

@@ -429,6 +429,7 @@ pub struct Vm {
     pub(crate) module_provenance: crate::module_artifact::ModuleProvenance,
     /// Optional timing recorder shared by this VM execution tree.
     pub(crate) module_phase_recorder: Option<super::ModulePhaseRecorder>,
+    pub(crate) work_recorder: Option<super::VmWorkRecorder>,
     /// Successful module loads staged by an isolated graph transaction.
     /// `None` records immediately; `Some` commits the count with the graph.
     pub(crate) staged_module_load_count: Option<usize>,
@@ -622,6 +623,7 @@ impl VmBaseline {
             prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: self.module_provenance,
             module_phase_recorder: None,
+            work_recorder: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::clone(&self.source_cache),
@@ -899,6 +901,7 @@ impl Vm {
             prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: crate::module_artifact::ModuleProvenance::User,
             module_phase_recorder: None,
+            work_recorder: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(BTreeMap::new()),
@@ -1186,6 +1189,7 @@ impl Vm {
             prepared_module_validation: self.prepared_module_validation.clone(),
             module_provenance: self.module_provenance,
             module_phase_recorder: self.module_phase_recorder.clone(),
+            work_recorder: self.work_recorder.clone(),
             staged_module_load_count: None,
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
             source_cache: Arc::clone(&self.source_cache),

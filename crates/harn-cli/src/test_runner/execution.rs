@@ -250,6 +250,7 @@ async fn execute_compiled(
             .expect("fresh test VM accepts explicit trusted host-dispatch authority");
     }
     let module_phase_recorder = vm.enable_module_phase_timing();
+    let work_recorder = vm.enable_work_recording();
     let result = local
         .run_until(async {
             let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
@@ -439,6 +440,7 @@ async fn execute_compiled(
             timeout,
             duration_ms,
             phases: Some(phases),
+            work: Some(work_recorder.snapshot()),
             timing_spans,
         },
         value,
@@ -466,5 +468,6 @@ fn compile_failure(
             ..PhaseTimings::default()
         }),
         timing_spans: Vec::new(),
+        work: None,
     }
 }

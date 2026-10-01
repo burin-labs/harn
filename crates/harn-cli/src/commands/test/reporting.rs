@@ -166,6 +166,7 @@ pub(super) fn user_test_report_from_summary(
             duration_ms: result.duration_ms,
             timeout: result.timeout,
             phases: result.phases,
+            work: result.work,
             timing_spans: result.timing_spans.clone(),
             message: result.skip_reason.clone().or_else(|| result.error.clone()),
             captured_output: result.captured_output.clone(),
@@ -481,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn user_report_conversion_pins_v4_execution_metrics() {
+    fn user_report_conversion_pins_v5_execution_metrics() {
         let modules = harn_vm::ModulePhaseStats::default();
         let phases = PhaseTimings {
             execute_ms: 30,
@@ -503,6 +504,7 @@ mod tests {
                     }),
                     duration_ms: 30,
                     phases: Some(phases),
+                    work: Some(harn_vm::VmWork { vm_steps: 12 }),
                     timing_spans: Vec::new(),
                 },
                 TestResult {
@@ -515,6 +517,7 @@ mod tests {
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
+                    work: None,
                     timing_spans: Vec::new(),
                 },
             ],
@@ -538,7 +541,9 @@ mod tests {
             serde_json::to_value(user_test_report_from_summary(Path::new("/suite"), &summary))
                 .expect("report serializes");
 
-        assert_eq!(value["schemaVersion"], 4);
+        assert_eq!(value["schemaVersion"], 5);
+        assert_eq!(value["cases"][0]["work"]["vm_steps"], 12);
+        assert!(value["cases"][1].get("work").unwrap().is_null());
         assert_eq!(value["timing"]["sample_count"], 1);
         assert_eq!(value["aggregate"]["modules"]["modules_loaded"], 0);
         assert_eq!(value["cases"][0]["timeout"]["phase"], "execute");

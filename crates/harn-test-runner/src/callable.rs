@@ -137,6 +137,7 @@ fn compile_failure(case: &TestCase, error: harn_vm::CompileError) -> TestResult 
         timeout: None,
         duration_ms: 0,
         phases: None,
+        work: None,
         timing_spans: Vec::new(),
     }
 }

@@ -115,12 +115,26 @@ The aggregate receipt exposes `test_file_compile_ms`, `test_files_compiled`,
 and `test_entries_compiled` so compile-once behavior is mechanically visible.
 Cold module compilation overlaps the suite compile phase; module instantiation
 and initialization remain attributed to the test that executes them. User JSON
-report schema v4 carries the same distribution, typed timeout metadata,
-per-case phases, and named `std/timing` spans. Conformance JSON schema v3 uses the same typed distribution
-owner. Module compile/load values overlap compile, setup, and execution and
+report schema v5 carries the same distribution, typed timeout metadata,
+per-case phases, and named `std/timing` spans. Conformance JSON schema v3 uses
+the same typed distribution owner. Module compile/load values overlap compile, setup, and execution and
 must not be added to total wall time.
 
-Timing-aware shards consume a complete, passing schema-v4 user-test receipt
+Each case also reports `work: {"vm_steps": N}` alongside `phases`.
+The VM counts each decoded bytecode instruction dispatched, including failing
+instructions, imported code, case fixtures, and child VMs. Recording starts
+at VM construction and ends after case teardown. Shared suite compilation and
+successful file-scoped fixture execution aren't charged to individual cases.
+Cases that never construct a VM report `work: null`; a measured zero remains
+`{"vm_steps": 0}`. Native work inside builtins isn't counted.
+
+Identical instruction sequences produce identical counts regardless of host
+load or compilation-cache state. Compare counts using the same Harn build;
+compiler changes can alter the instruction sequence. Timeouts, racing detached
+tasks, and nondeterministic inputs can change how many instructions run.
+The counter doesn't replace wall-clock budgets for blocked I/O or native work.
+
+Timing-aware shards consume a complete, passing schema-v5 user-test receipt
 from an unsharded run. `--timing-environment` stamps the environment that owns
 the measurement; a later `--timing-baseline` run refuses a different stamp,
 an older report schema, a partial shard receipt, or a deleted or renamed case.

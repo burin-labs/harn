@@ -103,6 +103,7 @@ where
                             timeout: None,
                             duration_ms: 0,
                             phases: None,
+                            work: None,
                             timing_spans: Vec::new(),
                         });
                         return;
@@ -373,6 +374,7 @@ mod tests {
                 timeout: None,
                 duration_ms: 0,
                 phases: None,
+                work: None,
                 timing_spans: Vec::new(),
             },
         );
